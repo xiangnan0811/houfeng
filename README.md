@@ -28,12 +28,4 @@ The following files are the source of truth for the V1 baseline and must remain 
 - Scope stays: single-user, monolith center, systemd agent fleet
 - If implementation diverges from design, report the gap before changing behavior
 
-## Planned repository layout
-
-- `cmd/houfeng-center`
-- `cmd/houfeng-agent`
-- `internal/center`
-- `agent`
-- `db/migrations`
-- `web`
-- `docs/design/v1-baseline`
+当前唯一冻结入口是 `docs/design/v1-baseline/`，实现结构以后续代码落地为准。
