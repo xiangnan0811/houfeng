@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Obsidian Core - Fleet Control</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "inverse-on-surface": "#313030",
+                        "error-container": "#93000a",
+                        "primary": "#44d8f1",
+                        "on-tertiary": "#00390a",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "on-primary-fixed": "#001f25",
+                        "inverse-surface": "#e5e2e1",
+                        "primary-container": "#00bcd4",
+                        "on-secondary-container": "#b7b5b4",
+                        "outline": "#869396",
+                        "surface-container": "#20201f",
+                        "tertiary": "#78dc77",
+                        "on-surface-variant": "#bbc9cc",
+                        "outline-variant": "#3c494c",
+                        "surface-bright": "#393939",
+                        "on-surface": "#e5e2e1",
+                        "secondary": "#c8c6c5",
+                        "primary-fixed-dim": "#44d8f1",
+                        "on-primary-container": "#004650",
+                        "on-primary": "#00363e",
+                        "error": "#ffb4ab",
+                        "on-error-container": "#ffdad6",
+                        "on-tertiary-fixed": "#002204",
+                        "tertiary-fixed": "#94f990",
+                        "on-secondary-fixed": "#1b1c1c",
+                        "on-primary-fixed-variant": "#004e59",
+                        "surface-tint": "#44d8f1",
+                        "surface-container-lowest": "#0e0e0e",
+                        "primary-fixed": "#a1efff",
+                        "surface-container-highest": "#353535",
+                        "on-tertiary-fixed-variant": "#005313",
+                        "surface-variant": "#353535",
+                        "surface-container-high": "#2a2a2a",
+                        "on-tertiary-container": "#004b10",
+                        "on-secondary": "#303030",
+                        "secondary-fixed": "#e4e2e1",
+                        "surface-dim": "#131313",
+                        "surface": "#131313",
+                        "on-error": "#690005",
+                        "tertiary-container": "#5dc05f",
+                        "background": "#131313",
+                        "secondary-container": "#474746",
+                        "tertiary-fixed-dim": "#78dc77",
+                        "on-background": "#e5e2e1",
+                        "inverse-primary": "#006876",
+                        "surface-container-low": "#1c1b1b",
+                        "on-secondary-fixed-variant": "#474746"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter", "sans-serif"],
+                        "display": ["Inter", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Inter", "sans-serif"],
+                        "mono-data": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; letter-spacing: -0.01em; }
+        .font-mono-data { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface h-screen overflow-hidden flex">
+<!-- SideNavBar -->
+<nav class="fixed left-0 top-0 h-full w-16 flex flex-col items-center py-4 z-50 bg-[#1c1b1b] shadow-[1px_0_0_0_rgba(60,73,76,0.1)]">
+<div class="mb-8">
+<span class="font-black text-[#e5e2e1] tracking-tighter text-sm">O.C</span>
+</div>
+<div class="flex flex-col items-center gap-6 w-full">
+<!-- Active: 集群概览 -->
+<button class="flex flex-col items-center justify-center w-12 h-12 text-[#44d8f1] bg-[#353535] rounded-sm scale-95 active:scale-90 transition-all">
+<span class="material-symbols-outlined text-xl mb-1" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+<span class="font-['Inter'] text-[10px] font-medium tracking-tight">集群概览</span>
+</button>
+<button class="flex flex-col items-center justify-center w-12 h-12 text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#2a2a2a] rounded-sm transition-colors duration-150">
+<span class="material-symbols-outlined text-xl mb-1">dns</span>
+<span class="font-['Inter'] text-[10px] font-medium tracking-tight">节点</span>
+</button>
+<button class="flex flex-col items-center justify-center w-12 h-12 text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#2a2a2a] rounded-sm transition-colors duration-150">
+<span class="material-symbols-outlined text-xl mb-1">target</span>
+<span class="font-['Inter'] text-[10px] font-medium tracking-tight">目标</span>
+</button>
+<button class="flex flex-col items-center justify-center w-12 h-12 text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#2a2a2a] rounded-sm transition-colors duration-150">
+<span class="material-symbols-outlined text-xl mb-1">notification_important</span>
+<span class="font-['Inter'] text-[10px] font-medium tracking-tight">事件</span>
+</button>
+<button class="flex flex-col items-center justify-center w-12 h-12 text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#2a2a2a] rounded-sm transition-colors duration-150">
+<span class="material-symbols-outlined text-xl mb-1">settings</span>
+<span class="font-['Inter'] text-[10px] font-medium tracking-tight">设置</span>
+</button>
+</div>
+</nav>
+<!-- Main Wrapper -->
+<div class="flex flex-col flex-1 ml-16 h-full">
+<!-- TopAppBar -->
+<header class="fixed top-0 left-16 right-0 h-12 z-40 bg-[#131313]/80 backdrop-blur-md border-b border-[#3c494c]/20 flex justify-between items-center px-6 w-[calc(100%-4rem)]">
+<div class="flex items-center gap-6">
+<span class="text-lg font-bold text-[#e5e2e1] uppercase tracking-widest">Obsidian Core</span>
+<div class="h-4 w-px bg-outline-variant/30"></div>
+<span class="text-sm font-semibold text-on-surface">系统架构基准</span>
+<div class="flex gap-4 ml-4">
+<span class="text-[#44d8f1] border-b-2 border-[#44d8f1] pb-1 font-['Inter'] text-xs uppercase tracking-widest cursor-pointer transition-all">Fleet Control</span>
+<span class="text-[#e5e2e1]/60 hover:text-[#44d8f1] pb-1 font-['Inter'] text-xs uppercase tracking-widest cursor-pointer transition-all">Telemetry</span>
+<span class="text-[#e5e2e1]/60 hover:text-[#44d8f1] pb-1 font-['Inter'] text-xs uppercase tracking-widest cursor-pointer transition-all">Security</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-3 mr-4 text-xs font-mono-data text-on-surface-variant">
+<span class="text-tertiary">ENV: PRODUCTION</span>
+<span class="text-outline-variant">|</span>
+<span>LATENCY: 12ms</span>
+</div>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-outline text-sm">search</span>
+<input class="bg-surface-container-lowest border-none pl-8 pr-3 py-1 text-xs font-mono-data text-on-surface focus:ring-0 focus:border-l-2 focus:border-l-primary w-48 transition-all" placeholder="搜索资源..." type="text"/>
+</div>
+<div class="flex gap-2 text-on-surface-variant">
+<button class="hover:text-[#44d8f1] hover:bg-[#2a2a2a]/50 p-1 rounded transition-all"><span class="material-symbols-outlined text-lg">terminal</span></button>
+<button class="hover:text-[#44d8f1] hover:bg-[#2a2a2a]/50 p-1 rounded transition-all relative">
+<span class="material-symbols-outlined text-lg">notifications</span>
+<span class="absolute top-1 right-1 w-1.5 h-1.5 bg-error rounded-full"></span>
+</button>
+<button class="hover:text-[#44d8f1] hover:bg-[#2a2a2a]/50 p-1 rounded transition-all"><span class="material-symbols-outlined text-lg">help_outline</span></button>
+</div>
+<button class="bg-error/20 text-error px-3 py-1 text-xs font-semibold rounded hover:bg-error/30 transition-colors border border-error/30">紧急制动</button>
+<div class="w-7 h-7 rounded bg-surface-container-highest border border-outline-variant/30 flex items-center justify-center overflow-hidden">
+<span class="material-symbols-outlined text-sm">person</span>
+</div>
+</div>
+</header>
+<!-- Canvas -->
+<main class="flex-1 mt-12 p-6 overflow-y-auto overflow-x-hidden bg-surface">
+<div class="max-w-[1600px] mx-auto space-y-6">
+<!-- 1. Page Summary Strip -->
+<section class="grid grid-cols-4 gap-4">
+<div class="bg-surface-container-low p-4 rounded-lg flex flex-col justify-between h-24 border border-outline-variant/10">
+<div class="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">全局状态</div>
+<div class="flex items-end justify-between">
+<span class="text-2xl font-bold text-tertiary">健康</span>
+<span class="material-symbols-outlined text-tertiary/50" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-4 rounded-lg flex flex-col justify-between h-24 border border-outline-variant/10">
+<div class="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">活跃节点</div>
+<div class="flex items-end justify-between">
+<span class="text-2xl font-bold text-on-surface font-mono-data">42</span>
+<span class="text-xs text-tertiary font-mono-data">+2</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-4 rounded-lg flex flex-col justify-between h-24 border border-outline-variant/10">
+<div class="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">连接目标</div>
+<div class="flex items-end justify-between">
+<span class="text-2xl font-bold text-on-surface font-mono-data">128</span>
+<span class="text-xs text-outline font-mono-data">-</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-4 rounded-lg flex flex-col justify-between h-24 border border-outline-variant/10">
+<div class="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">系统负载</div>
+<div class="flex items-end justify-between">
+<span class="text-2xl font-bold text-primary font-mono-data">34%</span>
+<div class="w-16 h-1 bg-surface-container-highest rounded overflow-hidden mb-2">
+<div class="h-full bg-primary w-[34%]"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Bento Grid Layout for Content -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- 2. Current Issues (Left Column) -->
+<section class="lg:col-span-1 bg-surface-container-low rounded-lg p-5 border border-outline-variant/10 flex flex-col">
+<h2 class="text-sm font-semibold text-on-surface mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-base">warning</span> 当前异常
+                        </h2>
+<div class="space-y-3 flex-1">
+<!-- Alert Card -->
+<div class="bg-surface-container p-3 rounded border border-error/20 relative overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-error"></div>
+<div class="flex justify-between items-start mb-2">
+<span class="text-xs font-mono-data text-error bg-error/10 px-1.5 py-0.5 rounded">ERR_NODE_TIMEOUT</span>
+<span class="text-[10px] text-on-surface-variant font-mono-data">2m ago</span>
+</div>
+<div class="text-sm text-on-surface mb-1">节点失去响应</div>
+<div class="text-xs text-on-surface-variant font-mono-data">host-alpha-09 (10.0.4.55)</div>
+</div>
+<!-- Warning Card -->
+<div class="bg-surface-container p-3 rounded border border-yellow-500/20 relative overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-yellow-500"></div>
+<div class="flex justify-between items-start mb-2">
+<span class="text-xs font-mono-data text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded">WARN_HIGH_LATENCY</span>
+<span class="text-[10px] text-on-surface-variant font-mono-data">15m ago</span>
+</div>
+<div class="text-sm text-on-surface mb-1">区域网络延迟过高</div>
+<div class="text-xs text-on-surface-variant font-mono-data">region-us-east-1 (&gt;250ms)</div>
+</div>
+</div>
+</section>
+<!-- 3. Trends / Topography (Center/Right Column) -->
+<section class="lg:col-span-2 bg-surface-container-low rounded-lg p-5 border border-outline-variant/10 flex flex-col">
+<div class="flex justify-between items-center mb-4">
+<h2 class="text-sm font-semibold text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-base">hub</span> 系统拓扑图
+                            </h2>
+<div class="flex gap-2">
+<button class="text-xs px-2 py-1 bg-surface-container text-on-surface rounded border border-outline-variant/20 hover:bg-surface-container-high">实时</button>
+<button class="text-xs px-2 py-1 bg-transparent text-outline rounded border border-transparent hover:text-on-surface">24h</button>
+</div>
+</div>
+<div class="flex-1 bg-surface-container-lowest rounded border border-outline-variant/10 min-h-[300px] flex items-center justify-center relative overflow-hidden">
+<!-- Visual Placeholder for Chart/Topology -->
+<div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(68,216,241,0.05)_0%,transparent_70%)]"></div>
+<!-- Fake Graph Nodes -->
+<div class="relative w-full h-full">
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-primary/10 border-2 border-primary rounded-full flex items-center justify-center z-10 shadow-[0_0_20px_rgba(68,216,241,0.2)]">
+<span class="material-symbols-outlined text-primary">dns</span>
+</div>
+<!-- Connection Lines (SVG) -->
+<svg class="absolute inset-0 w-full h-full" style="z-index: 0;">
+<line stroke="#3c494c" stroke-dasharray="4" stroke-width="1" x1="50%" x2="25%" y1="50%" y2="25%"></line>
+<line stroke="#3c494c" stroke-width="1" x1="50%" x2="75%" y1="50%" y2="25%"></line>
+<line stroke="#3c494c" stroke-width="1" x1="50%" x2="25%" y1="50%" y2="75%"></line>
+<line stroke="#3c494c" stroke-width="1" x1="50%" x2="75%" y1="50%" y2="75%"></line>
+</svg>
+<div class="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-surface-container border border-outline-variant rounded-full flex items-center justify-center"></div>
+<div class="absolute top-1/4 left-3/4 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-surface-container border border-outline-variant rounded-full flex items-center justify-center"></div>
+<div class="absolute top-3/4 left-1/4 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-surface-container border border-outline-variant rounded-full flex items-center justify-center"></div>
+<div class="absolute top-3/4 left-3/4 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-surface-container border border-error/50 rounded-full flex items-center justify-center">
+<div class="w-2 h-2 bg-error rounded-full"></div>
+</div>
+</div>
+<div class="absolute bottom-4 right-4 bg-surface-container-high/80 backdrop-blur text-xs font-mono-data text-on-surface-variant p-2 rounded border border-outline-variant/20">
+                                NET_TRAFFIC: 1.2 GB/s
+                            </div>
+</div>
+</section>
+</div>
+<!-- 4. History / Events -->
+<section class="bg-surface-container-low rounded-lg p-5 border border-outline-variant/10">
+<h2 class="text-sm font-semibold text-on-surface mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-base">history</span> 系统日志
+                    </h2>
+<div class="space-y-1">
+<!-- Header Row -->
+<div class="grid grid-cols-12 gap-4 px-3 py-2 text-xs font-semibold text-outline uppercase tracking-wider border-b border-outline-variant/20 mb-2">
+<div class="col-span-2">时间 (UTC)</div>
+<div class="col-span-2">级别</div>
+<div class="col-span-2">实体 ID</div>
+<div class="col-span-6">详细信息</div>
+</div>
+<!-- Data Rows -->
+<div class="grid grid-cols-12 gap-4 px-3 py-2 text-xs bg-surface-container rounded hover:bg-surface-container-high transition-colors items-center">
+<div class="col-span-2 font-mono-data text-on-surface-variant">14:32:01</div>
+<div class="col-span-2"><span class="text-tertiary bg-tertiary/10 px-2 py-0.5 rounded font-mono-data">INFO</span></div>
+<div class="col-span-2 font-mono-data text-on-surface">cfg-77x9a</div>
+<div class="col-span-6 text-on-surface-variant truncate">配置已成功推送到 12 个节点</div>
+</div>
+<div class="grid grid-cols-12 gap-4 px-3 py-2 text-xs bg-surface-container-low rounded hover:bg-surface-container-high transition-colors items-center">
+<div class="col-span-2 font-mono-data text-on-surface-variant">14:28:45</div>
+<div class="col-span-2"><span class="text-yellow-500 bg-yellow-500/10 px-2 py-0.5 rounded font-mono-data">WARN</span></div>
+<div class="col-span-2 font-mono-data text-on-surface">auth-svc-02</div>
+<div class="col-span-6 text-on-surface-variant truncate">身份验证服务响应时间超过阈值 (400ms)</div>
+</div>
+<div class="grid grid-cols-12 gap-4 px-3 py-2 text-xs bg-surface-container rounded hover:bg-surface-container-high transition-colors items-center">
+<div class="col-span-2 font-mono-data text-on-surface-variant">14:15:22</div>
+<div class="col-span-2"><span class="text-tertiary bg-tertiary/10 px-2 py-0.5 rounded font-mono-data">INFO</span></div>
+<div class="col-span-2 font-mono-data text-on-surface">sys-core</div>
+<div class="col-span-6 text-on-surface-variant truncate">例行系统快照完成 (v2.1.4)</div>
+</div>
+</div>
+</section>
+<!-- 5. Danger Zone -->
+<section class="mt-8 border border-error/20 bg-error/5 rounded-lg p-5">
+<h2 class="text-sm font-semibold text-error mb-2 flex items-center gap-2">
+<span class="material-symbols-outlined text-base">dangerous</span> 危险区域
+                    </h2>
+<p class="text-xs text-on-surface-variant mb-4">执行以下操作可能导致服务中断或数据丢失。请在执行前确认您的权限和操作意图。</p>
+<div class="flex gap-4">
+<button class="px-4 py-2 bg-transparent text-error border border-error/50 rounded text-sm font-semibold hover:bg-error/10 transition-colors">
+                            停用全局访问
+                        </button>
+<button class="px-4 py-2 bg-error text-white rounded text-sm font-semibold hover:bg-error/90 transition-colors">
+                            重置系统
+                        </button>
+</div>
+</section>
+</div>
+</main>
+</div>
+</body></html>

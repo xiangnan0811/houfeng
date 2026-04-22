@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Obsidian Core - Node Onboarding</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed-variant": "#474746",
+                        "surface-tint": "#44d8f1",
+                        "surface-container-highest": "#353535",
+                        "inverse-on-surface": "#313030",
+                        "on-tertiary-container": "#004b10",
+                        "on-secondary-fixed": "#1b1c1c",
+                        "on-primary": "#00363e",
+                        "primary-fixed-dim": "#44d8f1",
+                        "on-secondary": "#303030",
+                        "surface": "#131313",
+                        "on-primary-fixed-variant": "#004e59",
+                        "surface-container": "#20201f",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "on-tertiary": "#00390a",
+                        "surface-container-high": "#2a2a2a",
+                        "on-error-container": "#ffdad6",
+                        "on-primary-container": "#004650",
+                        "background": "#131313",
+                        "tertiary-fixed": "#94f990",
+                        "primary-container": "#00bcd4",
+                        "surface-dim": "#131313",
+                        "secondary-container": "#474746",
+                        "surface-variant": "#353535",
+                        "tertiary-fixed-dim": "#78dc77",
+                        "outline": "#869396",
+                        "on-surface": "#e5e2e1",
+                        "error": "#ffb4ab",
+                        "secondary": "#c8c6c5",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-error": "#690005",
+                        "error-container": "#93000a",
+                        "inverse-primary": "#006876",
+                        "on-surface-variant": "#bbc9cc",
+                        "primary-fixed": "#a1efff",
+                        "on-tertiary-fixed": "#002204",
+                        "primary": "#44d8f1",
+                        "on-secondary-container": "#b7b5b4",
+                        "surface-bright": "#393939",
+                        "tertiary": "#78dc77",
+                        "outline-variant": "#3c494c",
+                        "on-tertiary-fixed-variant": "#005313",
+                        "surface-container-low": "#1c1b1b",
+                        "inverse-surface": "#e5e2e1",
+                        "on-primary-fixed": "#001f25",
+                        "on-background": "#e5e2e1",
+                        "secondary-fixed": "#e4e2e1",
+                        "tertiary-container": "#5dc05f"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "display": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: theme('colors.background'); color: theme('colors.on-background'); font-family: theme('fontFamily.body'); letter-spacing: -0.01em; }
+        .glass-panel { background: rgba(53, 53, 53, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- SideNavBar (Shared Component) -->
+<aside class="hidden md:flex flex-col h-screen py-4 border-r border-[#3c494c]/20 bg-[#131313] w-64 rounded-none docked left-0 z-20 shrink-0">
+<div class="px-6 mb-8 flex flex-col gap-1">
+<div class="flex items-center gap-3 mb-4">
+<div class="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center border border-outline-variant/20">
+<span class="material-symbols-outlined text-primary text-sm" data-icon="memory" data-weight="fill" style="font-variation-settings: 'FILL' 1;">memory</span>
+</div>
+<div class="flex flex-col">
+<span class="text-[#44d8f1] font-bold tracking-tighter text-sm uppercase">OBSIDIAN_CORE</span>
+<span class="text-on-surface-variant text-[10px] uppercase font-mono tracking-wider">V2.0.4_STABLE</span>
+</div>
+</div>
+<button class="w-full bg-primary-container hover:bg-primary-container/90 text-on-primary-container font-mono text-xs font-medium uppercase py-2 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+                PROVISION_NODE
+            </button>
+</div>
+<nav class="flex-1 px-4 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#20201f] transition-all duration-150 font-mono text-xs font-medium uppercase" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="dashboard">dashboard</span>
+                DASHBOARD
+            </a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded bg-[#353535] text-[#44d8f1] shadow-[0_0_15px_rgba(0,188,212,0.15)] font-mono text-xs font-medium uppercase transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="developer_board">developer_board</span>
+                NODES
+            </a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#20201f] transition-all duration-150 font-mono text-xs font-medium uppercase" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="dns">dns</span>
+                FLEET
+            </a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#20201f] transition-all duration-150 font-mono text-xs font-medium uppercase" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="security">security</span>
+                SECURITY
+            </a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#20201f] transition-all duration-150 font-mono text-xs font-medium uppercase" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="terminal">terminal</span>
+                LOGS
+            </a>
+</nav>
+<div class="px-6 mt-auto">
+<div class="flex items-center gap-3 py-3 border-t border-outline-variant/20">
+<img alt="System Core" class="w-8 h-8 rounded-full border border-outline-variant/50" data-alt="Abstract digital avatar representing an AI system core, geometric shapes, glowing cyan lines on dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDe8p-ISaf8Z8QpKSLobzOeBNwvBm4e4Sh0_sv6zPFHuVmsmnLotbtx-ZTYc6nC4WQwiCqdSVMSYPPc0h0tqiSnS71QJwxpgUtJUuH1HwD0ydodns74-tCLE1PmD0kQW7EJIywi-6raYPXDphu8byUQ3Jd8Fztifge1eOOQcFmsIyAFhPbA2WyN9e5xqepUmc5gjE_5rSqe3gsLvrMVX2G918qIaYWBxUd9D8Iv6Ti2jghl3gUGLERCuXkAq7fdYcGst20ZpyW5_sb-"/>
+<div class="flex flex-col">
+<span class="text-xs font-medium text-on-surface">SYS_ADMIN</span>
+<span class="text-[10px] text-on-surface-variant font-mono">ID: 0x8F9A</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen overflow-y-auto bg-surface relative">
+<!-- TopNavBar (Shared Component - Mobile/Tablet Fallback & Top Context) -->
+<header class="flex justify-between items-center w-full px-6 h-14 bg-[#353535]/70 backdrop-blur-xl docked full-width top-0 border-b border-[#3c494c]/20 z-10 sticky md:hidden">
+<div class="font-black tracking-widest text-[#e5e2e1] text-lg uppercase font-mono">
+                MONOLITH_CONTROL
+            </div>
+<div class="flex items-center gap-4 text-[#e5e2e1]/60">
+<button class="hover:bg-[#353535] transition-colors p-1.5 rounded">
+<span class="material-symbols-outlined" data-icon="sensors">sensors</span>
+</button>
+<button class="hover:bg-[#353535] transition-colors p-1.5 rounded">
+<span class="material-symbols-outlined" data-icon="lan">lan</span>
+</button>
+<img alt="User Profile" class="w-7 h-7 rounded-full border border-outline-variant/50" data-alt="Professional headshot of a female engineer in dark ambient lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC4zYoMQICLGzYYPEFWFecPWDTAU9iwb5vBLV8wXNCLFfWBJg0D82JgSfgdZI3ValBMByHJAkg9CFNnztqIxKvYT46KzDo68Ck_MMRaaicBaH1RI-9iVsoy2S5_Nm8YzZIHo9BS7nHeRdiaTqf3NJGqLP7-OGDzv_nqrYdqU1F4xPxuqy_NkK4bDxzrBvYdoItXQOSIJtGPSVfSJq8fWmlt-xDw9OQa0AAleKH7eomSFy64q7GN5c8HHXx9Svi3nIBlqi43fSaA5uJr"/>
+</div>
+</header>
+<!-- Page Header Context -->
+<div class="px-8 py-6 border-b border-outline-variant/20 flex flex-col sm:flex-row sm:items-end justify-between gap-4 sticky top-0 md:top-0 bg-surface/90 backdrop-blur-md z-10">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="text-on-surface-variant font-mono text-xs uppercase tracking-widest">Node Provisioning</span>
+<span class="material-symbols-outlined text-on-surface-variant text-sm" data-icon="chevron_right">chevron_right</span>
+<span class="text-primary font-mono text-xs uppercase tracking-widest">Binding Verification</span>
+</div>
+<h1 class="text-2xl font-bold tracking-tight text-on-surface">AWS-TYO-EDGE-01</h1>
+<div class="flex items-center gap-4 mt-2">
+<span class="flex items-center gap-1.5 text-sm text-on-surface-variant font-mono">
+<span class="material-symbols-outlined text-sm" data-icon="location_on">location_on</span>
+                        Region: Tokyo (ap-northeast-1)
+                    </span>
+<span class="flex items-center gap-1.5 text-sm font-mono border border-outline-variant/20 px-2 py-0.5 rounded bg-surface-container-highest">
+<span class="w-2 h-2 rounded-full bg-outline"></span>
+                        Status: PENDING
+                    </span>
+</div>
+</div>
+<div class="flex gap-3">
+<button class="px-4 py-2 rounded-md font-mono text-xs uppercase font-medium border border-outline-variant/20 text-on-surface hover:bg-surface-container transition-colors">
+                    Cancel
+                </button>
+</div>
+</div>
+<div class="p-8 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8">
+<!-- Left Column: Workflow & Identity -->
+<div class="lg:col-span-4 flex flex-col gap-6">
+<!-- Deployment Workflow -->
+<div class="bg-surface-container-low rounded-lg p-6 border border-outline-variant/10">
+<h2 class="text-sm font-mono uppercase tracking-wider text-on-surface-variant mb-6">Deployment Sequence</h2>
+<div class="relative">
+<div class="absolute left-[11px] top-2 bottom-6 w-px bg-outline-variant/30"></div>
+<div class="flex gap-4 mb-6 relative">
+<div class="w-6 h-6 rounded-full bg-tertiary/20 border border-tertiary flex items-center justify-center shrink-0 z-10">
+<span class="material-symbols-outlined text-[14px] text-tertiary" data-icon="check">check</span>
+</div>
+<div class="pt-0.5">
+<p class="text-sm font-medium text-on-surface">Resource Allocation</p>
+<p class="text-xs text-on-surface-variant font-mono mt-1">Instance id-08f9a2b booted</p>
+</div>
+</div>
+<div class="flex gap-4 mb-6 relative">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest border-2 border-primary flex items-center justify-center shrink-0 z-10">
+<div class="w-2 h-2 bg-primary rounded-full"></div>
+</div>
+<div class="pt-0.5">
+<p class="text-sm font-medium text-primary">Identity Binding</p>
+<p class="text-xs text-on-surface-variant font-mono mt-1">Awaiting key verification</p>
+</div>
+</div>
+<div class="flex gap-4 mb-6 relative">
+<div class="w-6 h-6 rounded-full bg-surface-container border border-outline-variant/50 flex items-center justify-center shrink-0 z-10">
+<span class="text-[10px] font-mono text-outline">3</span>
+</div>
+<div class="pt-0.5">
+<p class="text-sm font-medium text-outline">Config Injection</p>
+<p class="text-xs text-outline/50 font-mono mt-1">Pending binding</p>
+</div>
+</div>
+<div class="flex gap-4 relative">
+<div class="w-6 h-6 rounded-full bg-surface-container border border-outline-variant/50 flex items-center justify-center shrink-0 z-10">
+<span class="text-[10px] font-mono text-outline">4</span>
+</div>
+<div class="pt-0.5">
+<p class="text-sm font-medium text-outline">Service Mesh Join</p>
+<p class="text-xs text-outline/50 font-mono mt-1">Pending config</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Token Enrollment -->
+<div class="bg-surface-container-low rounded-lg p-6 border border-outline-variant/10">
+<div class="flex items-center justify-between mb-4">
+<h2 class="text-sm font-mono uppercase tracking-wider text-on-surface-variant">Initialization Token</h2>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="vpn_key">vpn_key</span>
+</div>
+<p class="text-xs text-on-surface-variant mb-4 leading-relaxed">
+                        Execute this payload on the target machine to initiate the binding process. This token expires in <span class="text-primary font-mono">04:59</span>.
+                    </p>
+<div class="bg-surface-container-lowest rounded border border-outline-variant/20 relative group">
+<pre class="p-4 text-xs font-mono text-on-surface overflow-x-auto whitespace-pre-wrap break-all leading-tight">curl -sL https://core.obsidian.net/init | bash -s -- \
+--token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWI... \
+--node-name=AWS-TYO-EDGE-01 \
+--env=production</pre>
+<button class="absolute top-2 right-2 p-1.5 bg-surface-container hover:bg-surface-variant rounded border border-outline-variant/30 text-on-surface-variant transition-colors opacity-0 group-hover:opacity-100 flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]" data-icon="content_copy">content_copy</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Right Column: Conflict Resolution -->
+<div class="lg:col-span-8 flex flex-col gap-6">
+<!-- Critical Alert Box -->
+<div class="bg-error-container/10 border border-error/30 rounded-lg overflow-hidden flex flex-col">
+<div class="bg-error-container/20 px-6 py-4 flex items-center gap-3 border-b border-error/20">
+<span class="material-symbols-outlined text-error" data-icon="warning" data-weight="fill" style="font-variation-settings: 'FILL' 1;">warning</span>
+<h2 class="text-error font-bold tracking-wide uppercase text-sm">BIND_CONFLICT_DETECTED</h2>
+</div>
+<div class="p-6">
+<p class="text-sm text-on-surface mb-6 leading-relaxed">
+                            The incoming initialization request provides a hardware fingerprint that does not match the historically bound identity for <span class="font-mono text-error">AWS-TYO-EDGE-01</span>. This usually indicates a reprovisioned instance, but could signify a spoofing attempt.
+                        </p>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+<!-- Current Binding -->
+<div class="bg-surface-container rounded p-4 border border-outline-variant/20">
+<div class="flex justify-between items-center mb-3">
+<span class="text-xs font-mono text-on-surface-variant uppercase">Current Binding</span>
+<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-variant text-on-surface-variant border border-outline-variant/20">LAST SEEN: 2h AGO</span>
+</div>
+<div class="space-y-2 font-mono text-xs">
+<div class="flex justify-between border-b border-outline-variant/10 pb-1">
+<span class="text-outline">MAC Address</span>
+<span class="text-on-surface">02:42:ac:11:00:02</span>
+</div>
+<div class="flex justify-between border-b border-outline-variant/10 pb-1">
+<span class="text-outline">Board Serial</span>
+<span class="text-on-surface">BRD-9982-AXP</span>
+</div>
+<div class="flex justify-between pb-1">
+<span class="text-outline">OS UUID</span>
+<span class="text-on-surface">a1b2c3d4-e5f6-7890</span>
+</div>
+</div>
+</div>
+<!-- New Attempt -->
+<div class="bg-error-container/5 rounded p-4 border border-error/20 relative">
+<div class="absolute -left-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-surface border border-error/30 flex items-center justify-center md:hidden">
+<span class="material-symbols-outlined text-[12px] text-error" data-icon="close">close</span>
+</div>
+<div class="flex justify-between items-center mb-3">
+<span class="text-xs font-mono text-error uppercase">New Fingerprint Attempt</span>
+<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-error/10 text-error border border-error/20">LIVE REQUEST</span>
+</div>
+<div class="space-y-2 font-mono text-xs">
+<div class="flex justify-between border-b border-error/10 pb-1">
+<span class="text-outline">MAC Address</span>
+<span class="text-error">02:42:ac:11:00:05</span>
+</div>
+<div class="flex justify-between border-b border-error/10 pb-1">
+<span class="text-outline">Board Serial</span>
+<span class="text-error">BRD-1024-XQZ</span>
+</div>
+<div class="flex justify-between pb-1">
+<span class="text-outline">OS UUID</span>
+<span class="text-error">f0e1d2c3-b4a5-6789</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Action Bar -->
+<div class="flex flex-wrap items-center justify-end gap-4 pt-4 border-t border-outline-variant/20">
+<button class="px-5 py-2.5 rounded-md font-mono text-xs uppercase font-medium bg-error hover:bg-error/90 text-on-error transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="delete_forever">delete_forever</span>
+                                Reset Binding
+                            </button>
+<button class="px-5 py-2.5 rounded-md font-mono text-xs uppercase font-medium border border-primary/50 text-primary hover:bg-surface-container-highest transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="block">block</span>
+                                Reject Fingerprint
+                            </button>
+<button class="px-5 py-2.5 rounded-md font-mono text-xs uppercase font-medium bg-primary-container hover:bg-primary-container/90 text-on-primary-container transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="verified_user">verified_user</span>
+                                Confirm Rebind
+                            </button>
+</div>
+</div>
+</div>
+<!-- Audit Log Preview -->
+<div class="bg-surface-container-low rounded-lg p-6 border border-outline-variant/10">
+<h2 class="text-sm font-mono uppercase tracking-wider text-on-surface-variant mb-4">Recent Node Activity</h2>
+<div class="space-y-1">
+<div class="flex items-center justify-between py-2 border-b border-outline-variant/10 text-xs font-mono">
+<div class="flex items-center gap-3">
+<span class="text-outline">10:42:15 UTC</span>
+<span class="text-error">WARN</span>
+<span class="text-on-surface">Binding conflict detected on init handshake</span>
+</div>
+<span class="text-outline/50">SYS_AUTH</span>
+</div>
+<div class="flex items-center justify-between py-2 border-b border-outline-variant/10 text-xs font-mono">
+<div class="flex items-center gap-3">
+<span class="text-outline">10:41:02 UTC</span>
+<span class="text-primary">INFO</span>
+<span class="text-on-surface">Init token generated by SYS_ADMIN</span>
+</div>
+<span class="text-outline/50">API_GW</span>
+</div>
+<div class="flex items-center justify-between py-2 text-xs font-mono opacity-50">
+<div class="flex items-center gap-3">
+<span class="text-outline">08:15:00 UTC</span>
+<span class="text-outline">INFO</span>
+<span class="text-on-surface">Node disconnected gracefully (SIGTERM)</span>
+</div>
+<span class="text-outline/50">NODE_AGENT</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

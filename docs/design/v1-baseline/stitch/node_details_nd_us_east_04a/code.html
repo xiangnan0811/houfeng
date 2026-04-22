@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>节点详情: nd-us-east-04a - FLEET_CONTROL_V1</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "surface-tint": "#44d8f1",
+                        "surface-container-highest": "#353535",
+                        "on-secondary-fixed-variant": "#474746",
+                        "on-tertiary-container": "#004b10",
+                        "on-secondary-fixed": "#1b1c1c",
+                        "inverse-on-surface": "#313030",
+                        "primary-fixed-dim": "#44d8f1",
+                        "on-secondary": "#303030",
+                        "on-primary": "#00363e",
+                        "surface": "#131313",
+                        "on-primary-fixed-variant": "#004e59",
+                        "on-primary-container": "#004650",
+                        "surface-container-high": "#2a2a2a",
+                        "on-error-container": "#ffdad6",
+                        "surface-container": "#20201f",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "on-tertiary": "#00390a",
+                        "tertiary-fixed": "#94f990",
+                        "background": "#131313",
+                        "tertiary-fixed-dim": "#78dc77",
+                        "surface-variant": "#353535",
+                        "surface-dim": "#131313",
+                        "secondary-container": "#474746",
+                        "primary-container": "#00bcd4",
+                        "error": "#ffb4ab",
+                        "on-surface": "#e5e2e1",
+                        "outline": "#869396",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-error": "#690005",
+                        "error-container": "#93000a",
+                        "secondary": "#c8c6c5",
+                        "primary-fixed": "#a1efff",
+                        "on-tertiary-fixed": "#002204",
+                        "on-surface-variant": "#bbc9cc",
+                        "inverse-primary": "#006876",
+                        "surface-bright": "#393939",
+                        "primary": "#44d8f1",
+                        "on-secondary-container": "#b7b5b4",
+                        "tertiary": "#78dc77",
+                        "outline-variant": "#3c494c",
+                        "on-tertiary-fixed-variant": "#005313",
+                        "on-primary-fixed": "#001f25",
+                        "inverse-surface": "#e5e2e1",
+                        "surface-container-low": "#1c1b1b",
+                        "on-background": "#e5e2e1",
+                        "tertiary-container": "#5dc05f",
+                        "secondary-fixed": "#e4e2e1"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter", "sans-serif"],
+                        "display": ["Inter", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["JetBrains Mono", "monospace"]
+                    },
+                    letterSpacing: {
+                        "tight": "-0.01em",
+                        "tighter": "-0.02em",
+                        "widest": "0.1em"
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; letter-spacing: -0.01em; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .glass-panel { background: rgba(53, 53, 53, 0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+        .ghost-border { border: 1px solid rgba(60, 73, 76, 0.2); }
+    </style>
+</head>
+<body class="bg-surface text-on-surface min-h-screen flex selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar (Responsive Web Header) -->
+<header class="hidden md:flex fixed top-0 left-0 w-full z-50 items-center justify-between px-6 h-14 bg-[#131313] docked full-width border-b border-[#3c494c]/20 flat no shadows font-mono text-sm tracking-tight text-[#44d8f1]">
+<div class="flex items-center gap-6">
+<div class="text-lg font-bold tracking-tighter text-[#e5e2e1]">FLEET_CONTROL_V1</div>
+<nav class="flex gap-6 h-14 items-center">
+<a class="text-[#e5e2e1]/60 hover:text-[#e5e2e1] transition-colors h-full flex items-center" href="#">集群概述</a>
+<a class="text-[#44d8f1] border-b-2 border-[#44d8f1] pb-1 h-full flex items-center" href="#">节点管理</a>
+<a class="text-[#e5e2e1]/60 hover:text-[#e5e2e1] transition-colors h-full flex items-center" href="#">实时链路</a>
+<a class="text-[#e5e2e1]/60 hover:text-[#e5e2e1] transition-colors h-full flex items-center" href="#">安全审计</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-primary-container text-on-primary-container px-4 py-1.5 rounded-md hover:bg-[#353535] transition-all scale-95 duration-100 ease-in-out text-xs">部署新节点</button>
+<div class="flex gap-3 text-[#e5e2e1]/60">
+<button class="hover:text-[#e5e2e1] transition-colors"><span class="material-symbols-outlined text-[20px]">notifications</span></button>
+<button class="hover:text-[#e5e2e1] transition-colors"><span class="material-symbols-outlined text-[20px]">settings</span></button>
+<button class="hover:text-[#e5e2e1] transition-colors"><span class="material-symbols-outlined text-[20px]">terminal</span></button>
+</div>
+<img alt="Administrator Avatar" class="w-8 h-8 rounded-full border border-outline-variant/20 ml-2" data-alt="Close up portrait of a professional system administrator in a dark server room setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDpbZ0wSaNEZ6bvVmDAgQBcmxwecd9yOkPHcVT-1emRwtqa3j0IhzY29gl-slfjOJ1F4xBZWszPM50bNoIBDdkU58kNTb3aPfVqx0ua3pWMal2DLL-lFjGINQYSxKaH4PPbIqxjNpwirQxyJJBHNqdgvbjhJm8ZpI1YMXSCovg0N9GUAOw0N1KtThCH-D2A2BgsWdAN2xH2UAYp1F1ZWaeV93stG-TQXXi7-2xNE0IXj2LNFHE8YDmnikdF2pM5cNt8izNUNCrjFLKl"/>
+</div>
+</header>
+<!-- SideNavBar (Sidebar) -->
+<aside class="hidden md:flex flex-col fixed left-0 top-0 h-full w-64 pt-14 z-40 bg-[#1c1b1b] docked border-r border-[#3c494c]/20 background shift to surface_container_low flat no shadows font-mono text-xs uppercase tracking-widest text-[#44d8f1]">
+<div class="p-6 pb-4 border-b border-[#3c494c]/20">
+<div class="flex items-center gap-3 mb-1">
+<img alt="System Operator" class="w-10 h-10 rounded-full" data-alt="Portrait of a male system operator looking focused in a low-light tech environment" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDbAAWOYbQ1wAG4uJkpZ1i4X9zaAraWzTYUWrtKATbtMk718-J_we3Fvo9BFuEfrKTWRLPHHBjONPXcY23ztfFKK-wH-xALKlP4W60Sg4kjk1RhDjRZR4_0wOhzFqPREg-iVTooofKfwzgGIBZBWtkUb70Yhnp5ZA2lEzS_4TVsr6pNHLYBANdML6gBrDgcm3sCnl93gRQ_KkkgBmSRMuCbShYtQ6KWMIY6G5YQIFkimlPY2tTncvBLyJ_28MBA703nj1_Y3kh9mehw"/>
+<div>
+<div class="text-[#e5e2e1] font-bold tracking-tight">NODE_ADMIN</div>
+<div class="text-[#e5e2e1]/60 text-[10px]">Level 4 Access</div>
+</div>
+</div>
+</div>
+<div class="p-4">
+<button class="w-full bg-[#353535] text-[#e5e2e1] py-2 rounded-md hover:bg-primary-container hover:text-on-primary-container transition-colors duration-150 flex items-center justify-center gap-2 mb-2">
+<span class="material-symbols-outlined text-[16px]">play_arrow</span> 执行脚本
+            </button>
+</div>
+<nav class="flex-1 flex flex-col gap-1 px-2 overflow-y-auto">
+<a class="flex items-center gap-3 text-[#e5e2e1]/40 py-3 px-4 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-colors duration-150 rounded-md" href="#"><span class="material-symbols-outlined">dashboard</span>控制面板</a>
+<a class="flex items-center gap-3 bg-[#2a2a2a] text-[#44d8f1] border-l-4 border-[#44d8f1] py-3 px-4 rounded-r-md" href="#"><span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">dns</span>节点详情</a>
+<a class="flex items-center gap-3 text-[#e5e2e1]/40 py-3 px-4 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-colors duration-150 rounded-md" href="#"><span class="material-symbols-outlined">hub</span>网络拓扑</a>
+<a class="flex items-center gap-3 text-[#e5e2e1]/40 py-3 px-4 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-colors duration-150 rounded-md" href="#"><span class="material-symbols-outlined">memory</span>资源负载</a>
+<a class="flex items-center gap-3 text-[#e5e2e1]/40 py-3 px-4 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-colors duration-150 rounded-md" href="#"><span class="material-symbols-outlined">shield</span>安全策略</a>
+<a class="flex items-center gap-3 text-[#e5e2e1]/40 py-3 px-4 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-colors duration-150 rounded-md" href="#"><span class="material-symbols-outlined">terminal</span>系统日志</a>
+</nav>
+<div class="mt-auto p-4 border-t border-[#3c494c]/20 flex flex-col gap-1">
+<a class="flex items-center gap-3 text-[#e5e2e1]/40 py-2 px-2 hover:text-[#e5e2e1] transition-colors duration-150 rounded-md" href="#"><span class="material-symbols-outlined text-[18px]">help</span>帮助中心</a>
+<a class="flex items-center gap-3 text-[#e5e2e1]/40 py-2 px-2 hover:text-[#e5e2e1] transition-colors duration-150 rounded-md" href="#"><span class="material-symbols-outlined text-[18px]">logout</span>退出登录</a>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="flex-1 md:ml-64 md:pt-14 p-6 overflow-y-auto">
+<!-- Header Section -->
+<div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8 bg-surface-container-low p-6 rounded-lg border-l-2 border-error">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<h1 class="text-xl font-bold tracking-tight text-on-surface">节点详情: nd-us-east-04a</h1>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-error text-white">CRITICAL</span>
+</div>
+<div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm font-mono text-on-surface-variant">
+<div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[16px] text-outline">cloud</span> AWS</div>
+<div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[16px] text-outline">location_on</span> US-East (N. Virginia)</div>
+<div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[16px] text-outline">check_circle</span> 状态: <span class="text-tertiary">ACTIVE</span></div>
+<div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[16px] text-outline">visibility</span> 监控: <span class="text-primary">ON</span></div>
+<div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[16px] text-outline">favorite</span> 心跳: 2m ago</div>
+</div>
+</div>
+<div class="flex gap-3">
+<button class="bg-surface-container-highest text-primary hover:bg-surface-variant transition-colors px-4 py-2 rounded-md font-mono text-xs flex items-center gap-2 border border-outline-variant/20">
+<span class="material-symbols-outlined text-[16px]">build</span> 进入维护
+                </button>
+<button class="bg-surface-container-highest text-primary hover:bg-surface-variant transition-colors px-4 py-2 rounded-md font-mono text-xs flex items-center gap-2 border border-outline-variant/20">
+<span class="material-symbols-outlined text-[16px]">pause_circle</span> 暂停监控
+                </button>
+<button class="bg-surface-container-highest text-primary hover:bg-surface-variant transition-colors px-4 py-2 rounded-md font-mono text-xs flex items-center gap-2 border border-outline-variant/20">
+<span class="material-symbols-outlined text-[16px]">label</span> 编辑标签
+                </button>
+</div>
+</div>
+<!-- Density Grid Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+<!-- Summary Grid (Dense Cards) - Spans 8 cols -->
+<div class="lg:col-span-8 grid grid-cols-2 md:grid-cols-3 gap-4">
+<!-- CPU -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20 relative overflow-hidden">
+<div class="text-outline text-xs mb-1 font-medium">CPU Usage</div>
+<div class="text-2xl font-mono text-error font-bold">98.2%</div>
+<div class="absolute bottom-0 left-0 h-1 bg-error w-[98%]"></div>
+</div>
+<!-- Load Avg -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20">
+<div class="text-outline text-xs mb-1 font-medium">Load Avg (1/5/15)</div>
+<div class="text-lg font-mono text-on-surface">12.4 / 10.2 / 8.5</div>
+</div>
+<!-- Memory -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20 relative overflow-hidden">
+<div class="text-outline text-xs mb-1 font-medium">Memory (Used/Total)</div>
+<div class="text-xl font-mono text-[#ffb300]">28.4 / 32 GB</div>
+<div class="absolute bottom-0 left-0 h-1 bg-[#ffb300] w-[88%]"></div>
+</div>
+<!-- Swap -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20">
+<div class="text-outline text-xs mb-1 font-medium">Swap Usage</div>
+<div class="text-lg font-mono text-on-surface">0.0%</div>
+</div>
+<!-- Disk -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20 relative overflow-hidden">
+<div class="text-outline text-xs mb-1 font-medium">Disk (/)</div>
+<div class="text-xl font-mono text-on-surface">45%</div>
+<div class="absolute bottom-0 left-0 h-1 bg-primary w-[45%]"></div>
+</div>
+<!-- Inode -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20">
+<div class="text-outline text-xs mb-1 font-medium">Inode Usage</div>
+<div class="text-lg font-mono text-on-surface">12%</div>
+</div>
+<!-- IOWait -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20">
+<div class="text-outline text-xs mb-1 font-medium">IOWait</div>
+<div class="text-xl font-mono text-error font-bold">15.4%</div>
+</div>
+<!-- Steal -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20">
+<div class="text-outline text-xs mb-1 font-medium">Steal Time</div>
+<div class="text-lg font-mono text-on-surface">0.2%</div>
+</div>
+<!-- Network -->
+<div class="bg-surface-container p-4 rounded-lg border border-outline-variant/20 col-span-2 md:col-span-1">
+<div class="text-outline text-xs mb-1 font-medium">Network (In/Out)</div>
+<div class="text-lg font-mono text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">arrow_downward</span> 45Mb/s
+                        <span class="material-symbols-outlined text-[16px] ml-2">arrow_upward</span> 12Mb/s
+                    </div>
+</div>
+</div>
+<!-- Incidents & Workload - Spans 4 cols -->
+<div class="lg:col-span-4 flex flex-col gap-6">
+<!-- Incidents Panel -->
+<div class="bg-surface-container-high p-5 rounded-lg border border-error/30 h-full">
+<div class="flex items-center gap-2 mb-4 text-error border-b border-error/20 pb-2">
+<span class="material-symbols-outlined">warning</span>
+<h2 class="font-bold text-sm tracking-tight">当前活跃事件 (Active Incidents)</h2>
+</div>
+<ul class="space-y-3 font-mono text-xs">
+<li class="bg-error-container/20 p-3 rounded border-l-2 border-error flex flex-col gap-1">
+<span class="text-error font-bold">CRIT: CPU threshold exceeded (98%)</span>
+<span class="text-on-surface-variant text-[10px]">Duration: 15m 22s | Threshold: &gt; 90%</span>
+</li>
+<li class="bg-amber-900/20 p-3 rounded border-l-2 border-[#ffb300] flex flex-col gap-1">
+<span class="text-[#ffb300] font-bold">WARN: High I/O latency detected</span>
+<span class="text-on-surface-variant text-[10px]">Device: /dev/xvda | Latency: 450ms</span>
+</li>
+</ul>
+</div>
+<!-- Workload Summary -->
+<div class="bg-surface-container-low p-5 rounded-lg border border-outline-variant/20">
+<h2 class="font-bold text-sm tracking-tight text-on-surface mb-3">探测任务概览 (Workloads)</h2>
+<div class="flex justify-between items-center bg-surface-container p-3 rounded">
+<div class="text-center">
+<div class="text-outline text-[10px] uppercase font-mono">Targets</div>
+<div class="text-xl font-mono text-primary">42</div>
+</div>
+<div class="w-px h-8 bg-outline-variant/30"></div>
+<div class="text-center">
+<div class="text-outline text-[10px] uppercase font-mono">Items</div>
+<div class="text-xl font-mono text-tertiary">128</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Section: Trends & Events -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+<!-- Trend Area (Spans 2) -->
+<div class="lg:col-span-2 bg-surface-container-lowest p-5 rounded-lg border border-outline-variant/20">
+<div class="flex justify-between items-center mb-4">
+<h2 class="font-bold text-sm tracking-tight text-on-surface">性能趋势 (Performance Trends - 24h)</h2>
+<div class="flex gap-2">
+<button class="px-2 py-1 text-[10px] font-mono bg-surface-container rounded text-outline hover:text-primary">1H</button>
+<button class="px-2 py-1 text-[10px] font-mono bg-surface-container-highest rounded text-primary">24H</button>
+<button class="px-2 py-1 text-[10px] font-mono bg-surface-container rounded text-outline hover:text-primary">7D</button>
+</div>
+</div>
+<!-- Mock Chart Area - CPU -->
+<div class="mb-6">
+<div class="text-xs text-outline mb-2 font-mono flex justify-between"><span>CPU Usage %</span> <span class="text-error">Peak: 98.2%</span></div>
+<div class="h-24 w-full bg-surface-container rounded relative overflow-hidden flex items-end px-1 gap-[2px]">
+<!-- Decorative bars to simulate density -->
+<div class="w-full h-full absolute inset-0 opacity-20" style="background-image: linear-gradient(to top, rgba(68, 216, 241, 0.2), transparent); border-bottom: 1px solid #44d8f1;"></div>
+<!-- Highlighting the critical end -->
+<div class="w-1/4 h-full absolute right-0 top-0 opacity-30" style="background-image: linear-gradient(to top, rgba(255, 180, 171, 0.5), transparent); border-bottom: 2px solid #ffb4ab;"></div>
+<div class="h-[30%] w-1 bg-primary/40 rounded-t-sm z-10"></div><div class="h-[35%] w-1 bg-primary/40 rounded-t-sm z-10"></div><div class="h-[32%] w-1 bg-primary/40 rounded-t-sm z-10"></div><div class="h-[40%] w-1 bg-primary/40 rounded-t-sm z-10"></div>
+<div class="h-[45%] w-1 bg-primary/50 rounded-t-sm z-10"></div><div class="h-[42%] w-1 bg-primary/50 rounded-t-sm z-10"></div><div class="h-[50%] w-1 bg-primary/50 rounded-t-sm z-10"></div>
+<div class="h-[55%] w-1 bg-primary/60 rounded-t-sm z-10"></div><div class="h-[60%] w-1 bg-primary/60 rounded-t-sm z-10"></div>
+<div class="h-[80%] w-1 bg-[#ffb300]/80 rounded-t-sm z-10 ml-auto"></div><div class="h-[85%] w-1 bg-[#ffb300]/80 rounded-t-sm z-10"></div>
+<div class="h-[95%] w-1 bg-error rounded-t-sm z-10"></div><div class="h-[98%] w-1 bg-error rounded-t-sm z-10"></div><div class="h-[98%] w-1 bg-error rounded-t-sm z-10"></div>
+</div>
+</div>
+<!-- Mock Chart Area - Memory -->
+<div>
+<div class="text-xs text-outline mb-2 font-mono flex justify-between"><span>Memory Usage GB</span> <span class="text-[#ffb300]">Avg: 26.4GB</span></div>
+<div class="h-24 w-full bg-surface-container rounded relative overflow-hidden flex items-end px-1 gap-[2px]">
+<div class="w-full h-full absolute inset-0 opacity-10" style="background-image: linear-gradient(to top, rgba(120, 220, 119, 0.2), transparent); border-bottom: 1px solid #78dc77;"></div>
+<div class="h-[70%] w-1 bg-tertiary/40 rounded-t-sm z-10"></div><div class="h-[71%] w-1 bg-tertiary/40 rounded-t-sm z-10"></div><div class="h-[70%] w-1 bg-tertiary/40 rounded-t-sm z-10"></div><div class="h-[75%] w-1 bg-tertiary/40 rounded-t-sm z-10"></div>
+<div class="h-[76%] w-1 bg-tertiary/50 rounded-t-sm z-10"></div><div class="h-[75%] w-1 bg-tertiary/50 rounded-t-sm z-10"></div><div class="h-[78%] w-1 bg-tertiary/50 rounded-t-sm z-10"></div>
+<div class="h-[82%] w-1 bg-[#ffb300]/60 rounded-t-sm z-10 ml-auto"></div><div class="h-[84%] w-1 bg-[#ffb300]/60 rounded-t-sm z-10"></div>
+<div class="h-[86%] w-1 bg-[#ffb300]/80 rounded-t-sm z-10"></div><div class="h-[88%] w-1 bg-[#ffb300]/80 rounded-t-sm z-10"></div><div class="h-[88%] w-1 bg-[#ffb300]/80 rounded-t-sm z-10"></div>
+</div>
+</div>
+</div>
+<!-- Events Panel -->
+<div class="bg-surface-container-low p-5 rounded-lg border border-outline-variant/20 flex flex-col h-full">
+<h2 class="font-bold text-sm tracking-tight text-on-surface mb-4 border-b border-outline-variant/20 pb-2">最近事件日志 (Recent Events)</h2>
+<div class="flex-1 overflow-y-auto space-y-3 font-mono text-[11px]">
+<div class="flex gap-3 items-start">
+<div class="text-outline whitespace-nowrap">10:42:01</div>
+<div class="text-error">Triggered [CRITICAL] Alert: CPU &gt; 95% for 5m</div>
+</div>
+<div class="flex gap-3 items-start">
+<div class="text-outline whitespace-nowrap">10:40:00</div>
+<div class="text-on-surface-variant">Heartbeat OK. Latency 42ms.</div>
+</div>
+<div class="flex gap-3 items-start">
+<div class="text-outline whitespace-nowrap">10:35:00</div>
+<div class="text-on-surface-variant">Heartbeat OK. Latency 45ms.</div>
+</div>
+<div class="flex gap-3 items-start">
+<div class="text-outline whitespace-nowrap">10:32:15</div>
+<div class="text-[#ffb300]">Triggered [WARN] Alert: IOWait &gt; 10%</div>
+</div>
+<div class="flex gap-3 items-start">
+<div class="text-outline whitespace-nowrap">09:15:22</div>
+<div class="text-primary">Config updated: sync_interval set to 30s</div>
+</div>
+<div class="flex gap-3 items-start opacity-60">
+<div class="text-outline whitespace-nowrap">08:00:00</div>
+<div class="text-on-surface-variant">Daily maintenance scan completed.</div>
+</div>
+</div>
+<button class="w-full mt-4 py-2 border border-outline-variant/30 rounded text-primary hover:bg-surface-container-highest transition-colors font-mono text-xs">View Full Logs</button>
+</div>
+</div>
+</main>
+</body></html>

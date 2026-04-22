@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OBSIDIAN_CORE - Dashboard</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed-variant": "#474746",
+                        "surface-tint": "#44d8f1",
+                        "surface-container-highest": "#353535",
+                        "inverse-on-surface": "#313030",
+                        "on-tertiary-container": "#004b10",
+                        "on-secondary-fixed": "#1b1c1c",
+                        "on-primary": "#00363e",
+                        "primary-fixed-dim": "#44d8f1",
+                        "on-secondary": "#303030",
+                        "surface": "#131313",
+                        "on-primary-fixed-variant": "#004e59",
+                        "surface-container": "#20201f",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "on-tertiary": "#00390a",
+                        "surface-container-high": "#2a2a2a",
+                        "on-error-container": "#ffdad6",
+                        "on-primary-container": "#004650",
+                        "background": "#131313",
+                        "tertiary-fixed": "#94f990",
+                        "primary-container": "#00bcd4",
+                        "surface-dim": "#131313",
+                        "secondary-container": "#474746",
+                        "surface-variant": "#353535",
+                        "tertiary-fixed-dim": "#78dc77",
+                        "outline": "#869396",
+                        "on-surface": "#e5e2e1",
+                        "error": "#ffb4ab",
+                        "secondary": "#c8c6c5",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-error": "#690005",
+                        "error-container": "#93000a",
+                        "inverse-primary": "#006876",
+                        "on-surface-variant": "#bbc9cc",
+                        "primary-fixed": "#a1efff",
+                        "on-tertiary-fixed": "#002204",
+                        "primary": "#44d8f1",
+                        "on-secondary-container": "#b7b5b4",
+                        "surface-bright": "#393939",
+                        "tertiary": "#78dc77",
+                        "outline-variant": "#3c494c",
+                        "on-tertiary-fixed-variant": "#005313",
+                        "surface-container-low": "#1c1b1b",
+                        "inverse-surface": "#e5e2e1",
+                        "on-primary-fixed": "#001f25",
+                        "on-background": "#e5e2e1",
+                        "secondary-fixed": "#e4e2e1",
+                        "tertiary-container": "#5dc05f"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter", "sans-serif"],
+                        "display": ["Inter", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; letter-spacing: -0.01em; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        /* Ambient Glow utilities */
+        .glow-primary { box-shadow: 0 0 15px rgba(68, 216, 241, 0.15); }
+        .glow-error { box-shadow: 0 0 15px rgba(255, 180, 171, 0.15); }
+        /* Scrollbar styling for terminal feel */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #131313; }
+        ::-webkit-scrollbar-thumb { background: #353535; }
+        ::-webkit-scrollbar-thumb:hover { background: #474746; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface h-screen flex overflow-hidden selection:bg-primary/30 selection:text-primary-fixed">
+<!-- SideNavBar Component -->
+<nav class="bg-[#131313] flex flex-col h-screen py-4 border-r border-[#3c494c]/20 docked left-0 w-64 rounded-none z-20 flex-shrink-0">
+<!-- Header -->
+<div class="px-6 mb-8 flex items-center gap-3">
+<div class="w-8 h-8 bg-surface-container-highest rounded-DEFAULT flex items-center justify-center overflow-hidden border border-outline-variant/20">
+<img alt="System Core" class="w-full h-full object-cover opacity-80 mix-blend-screen" data-alt="abstract dark cyberpunk server core with cyan glowing circuitry" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBXyvXU5HNvWR-uTgecatdojjPuSPn8gVwq9IHLzW6XxltlZKeBsBpjhjvfo7HW01DCT6i8dbky3yni4GFQZro33NZwsRvUBBQf6so856lHaxpAWDg4WoK3vY36dc0oDQWtEEaXuf8FuzmSS0u0Qd74aysWv3a9_wA9FUcl7ibK4syvZzSufDXPLM6V3aLPqrnzI2FzNnXS9tENbCty5lQziYVybbTuqOdTRaNXmzW7QeO-ShWuIm7fiad4iByCWknCtm7QMWA9VTp8"/>
+</div>
+<div>
+<div class="text-[#44d8f1] font-bold tracking-tighter text-sm">OBSIDIAN_CORE</div>
+<div class="font-mono text-[10px] text-on-surface-variant uppercase tracking-widest mt-0.5">V2.0.4_STABLE</div>
+</div>
+</div>
+<!-- Navigation Tabs -->
+<div class="flex-1 px-3 space-y-1">
+<!-- Active Tab: DASHBOARD -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-DEFAULT bg-[#353535] text-[#44d8f1] shadow-[0_0_15px_rgba(0,188,212,0.15)] opacity-80 scale-95 font-mono text-xs font-medium uppercase transition-all duration-150" href="#">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+<span>DASHBOARD</span>
+</a>
+<!-- Inactive Tabs -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-DEFAULT text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#20201f] transition-all duration-150 font-mono text-xs font-medium uppercase" href="#">
+<span class="material-symbols-outlined text-[18px]">developer_board</span>
+<span>NODES</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-DEFAULT text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#20201f] transition-all duration-150 font-mono text-xs font-medium uppercase" href="#">
+<span class="material-symbols-outlined text-[18px]">dns</span>
+<span>FLEET</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-DEFAULT text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#20201f] transition-all duration-150 font-mono text-xs font-medium uppercase" href="#">
+<span class="material-symbols-outlined text-[18px]">security</span>
+<span>SECURITY</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-DEFAULT text-[#e5e2e1]/40 hover:text-[#e5e2e1] hover:bg-[#20201f] transition-all duration-150 font-mono text-xs font-medium uppercase" href="#">
+<span class="material-symbols-outlined text-[18px]">terminal</span>
+<span>LOGS</span>
+</a>
+</div>
+<!-- CTA -->
+<div class="px-6 mt-auto pb-4">
+<button class="w-full flex items-center justify-center gap-2 bg-primary-container/10 border border-primary/30 text-primary hover:bg-primary-container hover:text-on-primary-container transition-colors py-2 rounded-DEFAULT font-mono text-xs uppercase tracking-wider">
+<span class="material-symbols-outlined text-[16px]">add</span>
+                PROVISION_NODE
+            </button>
+</div>
+</nav>
+<!-- Main Content Area Wrapper -->
+<div class="flex-1 flex flex-col min-w-0 bg-surface">
+<!-- TopNavBar Component -->
+<header class="bg-[#353535]/70 backdrop-blur-xl docked full-width top-0 border-b border-[#3c494c]/20 flat no shadows flex justify-between items-center w-full px-6 h-14 z-10">
+<div class="flex items-center gap-4">
+<div class="font-black tracking-widest text-[#e5e2e1] text-lg">MONOLITH_CONTROL</div>
+</div>
+<div class="flex items-center gap-4">
+<!-- Trailing Actions -->
+<button class="text-[#e5e2e1]/60 hover:bg-[#353535] transition-colors p-1.5 rounded-DEFAULT">
+<span class="material-symbols-outlined text-[20px]">sensors</span>
+</button>
+<button class="text-[#e5e2e1]/60 hover:bg-[#353535] transition-colors p-1.5 rounded-DEFAULT">
+<span class="material-symbols-outlined text-[20px]">lan</span>
+</button>
+<div class="h-4 w-px bg-outline-variant/30 mx-2"></div>
+<!-- Profile Indicator -->
+<button class="flex items-center gap-2 hover:bg-[#353535] p-1 pr-3 rounded-DEFAULT transition-colors">
+<div class="w-6 h-6 rounded-DEFAULT bg-surface-container-high border border-outline-variant/20 overflow-hidden">
+<img alt="User Profile" class="w-full h-full object-cover" data-alt="abstract tech texture with code snippets and dark glass reflections" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBQiro8OJ7Incw8XX2T3tR47Ihw-Klkg_dvDVHqVlcCdtyfFGfmFa2ZfPLi-XucKj4GS3OnRXyq0Q_C1aSowzb0Dq_xy-D-ekmqY8v-ispNO5dfJhX-FCD-AaW77hiL7ga4HPyBPTOVyrV1FtYodtleQJ3x8oT4M0FM6c7lHfq2rKLMXpegUjP5hjPYmvjF_MC67dvwE-nTEfzN_-3whNBIXIZhgqAoqYHJIvCOQEGDww15ddGJlRu0CaayfrrTxFvjbqtKMPCl_VZY"/>
+</div>
+<span class="font-mono text-xs text-on-surface-variant">ROOT_ADMIN</span>
+</button>
+</div>
+</header>
+<!-- Main Dashboard Canvas -->
+<main class="flex-1 overflow-y-auto p-6 space-y-6">
+<!-- Top Row: Status Cards Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+<!-- Global Health -->
+<div class="bg-surface-container-low p-4 rounded-DEFAULT border border-outline-variant/10 relative overflow-hidden group">
+<div class="flex justify-between items-start mb-2">
+<div class="font-mono text-xs text-on-surface-variant uppercase tracking-wider">Global Health</div>
+<span class="material-symbols-outlined text-tertiary text-[18px]">favorite</span>
+</div>
+<div class="font-mono text-2xl text-on-surface tracking-tight">99.98%</div>
+<!-- Sparkline Placeholder -->
+<div class="absolute bottom-0 left-0 w-full h-8 opacity-20">
+<svg class="w-full h-full stroke-tertiary fill-none stroke-[2px]" preserveaspectratio="none" viewbox="0 0 100 20">
+<path d="M0,10 L10,12 L20,8 L30,15 L40,5 L50,10 L60,18 L70,8 L80,12 L90,4 L100,10"></path>
+</svg>
+</div>
+</div>
+<!-- Active Nodes -->
+<div class="bg-surface-container-low p-4 rounded-DEFAULT border border-outline-variant/10 relative overflow-hidden group">
+<div class="flex justify-between items-start mb-2">
+<div class="font-mono text-xs text-on-surface-variant uppercase tracking-wider">Active Nodes</div>
+<span class="material-symbols-outlined text-primary text-[18px]">hub</span>
+</div>
+<div class="font-mono text-2xl text-on-surface tracking-tight">1,204 <span class="text-xs text-primary ml-1">+12</span></div>
+<!-- Sparkline Placeholder -->
+<div class="absolute bottom-0 left-0 w-full h-8 opacity-20">
+<svg class="w-full h-full stroke-primary fill-none stroke-[2px]" preserveaspectratio="none" viewbox="0 0 100 20">
+<path d="M0,15 L10,14 L20,16 L30,12 L40,14 L50,8 L60,10 L70,5 L80,7 L90,2 L100,4"></path>
+</svg>
+</div>
+</div>
+<!-- Connection Targets -->
+<div class="bg-surface-container-low p-4 rounded-DEFAULT border border-outline-variant/10 relative overflow-hidden group">
+<div class="flex justify-between items-start mb-2">
+<div class="font-mono text-xs text-on-surface-variant uppercase tracking-wider">Connections</div>
+<span class="material-symbols-outlined text-secondary text-[18px]">sync_alt</span>
+</div>
+<div class="font-mono text-2xl text-on-surface tracking-tight">45.2k <span class="text-xs text-secondary ml-1">/sec</span></div>
+<!-- Sparkline Placeholder -->
+<div class="absolute bottom-0 left-0 w-full h-8 opacity-20">
+<svg class="w-full h-full stroke-secondary fill-none stroke-[2px]" preserveaspectratio="none" viewbox="0 0 100 20">
+<path d="M0,10 L20,12 L40,9 L60,11 L80,10 L100,10"></path>
+</svg>
+</div>
+</div>
+<!-- System Load -->
+<div class="bg-surface-container-low p-4 rounded-DEFAULT border border-outline-variant/10 relative overflow-hidden group">
+<div class="flex justify-between items-start mb-2">
+<div class="font-mono text-xs text-on-surface-variant uppercase tracking-wider">System Load</div>
+<span class="material-symbols-outlined text-[#ffb300] text-[18px]">speed</span>
+</div>
+<div class="font-mono text-2xl text-[#ffb300] tracking-tight">78.4%</div>
+<!-- Sparkline Placeholder -->
+<div class="absolute bottom-0 left-0 w-full h-8 opacity-30">
+<svg class="w-full h-full stroke-[#ffb300] fill-none stroke-[2px]" preserveaspectratio="none" viewbox="0 0 100 20">
+<path d="M0,18 L10,15 L20,12 L30,14 L40,8 L50,5 L60,2 L70,4 L80,2 L90,5 L100,3"></path>
+</svg>
+</div>
+</div>
+</div>
+<!-- Main Split: Topology & Anomalies -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- System Topology (Central Map) -->
+<div class="lg:col-span-2 bg-surface-container-lowest border border-outline-variant/10 rounded-DEFAULT flex flex-col overflow-hidden h-[400px]">
+<div class="p-4 border-b border-outline-variant/10 bg-surface-container-low flex justify-between items-center">
+<div class="font-mono text-xs text-on-surface-variant uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">map</span>
+                            Global Topology
+                        </div>
+<div class="flex gap-2">
+<button class="bg-surface text-on-surface-variant px-2 py-1 rounded-DEFAULT font-mono text-[10px] border border-outline-variant/20 hover:text-primary transition-colors">LIVE</button>
+<button class="bg-surface-container text-on-surface-variant px-2 py-1 rounded-DEFAULT font-mono text-[10px] border border-outline-variant/20 hover:text-primary transition-colors">24H</button>
+</div>
+</div>
+<div class="flex-1 relative bg-[#0a0a0a] overflow-hidden">
+<!-- Abstract Map Visualization Placeholder -->
+<div class="absolute inset-0 opacity-40 mix-blend-screen" data-alt="abstract dark global network map with thin neon cyan connections and data nodes on black background" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDD86JPT4rvoyGUSmSbwnU_eqf58F13ECTa9X1-0hHICt0Y0OMOqj-PGpjpTW-p8tsSTpAdqa0xGEsFdMIiAaWQ4wV4HAPCMpiy0cUjYNFrCcWrXXygiRV261diPXtGogsQTnBNNoqged3vIcarv6L4y3tc4camRdf1BMyYehJx_YAcQFE60xzTuCe_y_b25anZmCKuvG2S2EvPiZdHDiazblUOMd69sU44876PBdRRFVckH3ArgOaNeAZjtY6oTVu6YHQ2UiCt1c21'); background-size: cover; background-position: center;">
+</div>
+<!-- Overlay Nodes (CSS positioned for demo) -->
+<div class="absolute top-[30%] left-[20%] w-2 h-2 bg-primary rounded-full glow-primary animate-pulse"></div>
+<div class="absolute top-[50%] left-[40%] w-3 h-3 bg-tertiary rounded-full shadow-[0_0_10px_rgba(120,220,119,0.5)]"></div>
+<div class="absolute top-[40%] left-[70%] w-2 h-2 bg-[#ffb300] rounded-full shadow-[0_0_10px_rgba(255,179,0,0.5)] animate-pulse"></div>
+<div class="absolute top-[60%] left-[80%] w-4 h-4 bg-error rounded-full glow-error animate-bounce"></div>
+<!-- Telemetry Overlay -->
+<div class="absolute bottom-4 left-4 bg-surface-container-highest/80 backdrop-blur-md border border-outline-variant/20 p-3 rounded-DEFAULT">
+<div class="font-mono text-[10px] text-on-surface-variant mb-1">SELECTED_NODE: EU_WEST_01</div>
+<div class="font-mono text-xs text-primary">LATENCY: 12ms</div>
+<div class="font-mono text-xs text-tertiary">STATUS: OPTIMAL</div>
+</div>
+</div>
+</div>
+<!-- Current Anomalies -->
+<div class="bg-surface-container-low border border-outline-variant/10 rounded-DEFAULT flex flex-col h-[400px]">
+<div class="p-4 border-b border-outline-variant/10 flex justify-between items-center">
+<div class="font-mono text-xs text-error uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">warning</span>
+                            Anomalies detected
+                        </div>
+<div class="font-mono text-xs bg-error-container text-error px-2 py-0.5 rounded-DEFAULT">3 ACTIVE</div>
+</div>
+<div class="flex-1 overflow-y-auto p-2 space-y-2">
+<!-- Alert Item 1 (Critical) -->
+<div class="bg-error-container/20 border-l-2 border-error p-3 rounded-r-DEFAULT hover:bg-error-container/30 transition-colors cursor-pointer">
+<div class="flex justify-between items-start mb-1">
+<span class="font-mono text-xs text-error font-bold">CRIT_LOAD_SPIKE</span>
+<span class="font-mono text-[10px] text-on-surface-variant">02:14:05 UTC</span>
+</div>
+<div class="font-mono text-[11px] text-on-surface-variant leading-relaxed">Node AP_SOUTHEAST_3 reporting CPU load &gt; 95% for sustained 5m window.</div>
+</div>
+<!-- Alert Item 2 (Warning) -->
+<div class="bg-[#ffb300]/10 border-l-2 border-[#ffb300] p-3 rounded-r-DEFAULT hover:bg-[#ffb300]/20 transition-colors cursor-pointer">
+<div class="flex justify-between items-start mb-1">
+<span class="font-mono text-xs text-[#ffb300] font-bold">WARN_SYNC_DELAY</span>
+<span class="font-mono text-[10px] text-on-surface-variant">02:10:22 UTC</span>
+</div>
+<div class="font-mono text-[11px] text-on-surface-variant leading-relaxed">Database replica cluster US_EAST lag exceeding 500ms threshold.</div>
+</div>
+<!-- Alert Item 3 (Warning) -->
+<div class="bg-[#ffb300]/10 border-l-2 border-[#ffb300] p-3 rounded-r-DEFAULT hover:bg-[#ffb300]/20 transition-colors cursor-pointer">
+<div class="flex justify-between items-start mb-1">
+<span class="font-mono text-xs text-[#ffb300] font-bold">AUTH_FAIL_RATE</span>
+<span class="font-mono text-[10px] text-on-surface-variant">01:45:00 UTC</span>
+</div>
+<div class="font-mono text-[11px] text-on-surface-variant leading-relaxed">Elevated 401 response rate detected on gateway ingress tier.</div>
+</div>
+</div>
+</div>
+</div>
+<!-- System Logs Table -->
+<div class="bg-surface-container border border-outline-variant/10 rounded-DEFAULT flex flex-col">
+<div class="p-4 border-b border-outline-variant/10 bg-surface-container-low flex justify-between items-center">
+<div class="font-mono text-xs text-on-surface-variant uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">list_alt</span>
+                        Live Event Stream
+                    </div>
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 bg-tertiary rounded-full animate-pulse"></div>
+<span class="font-mono text-[10px] text-tertiary">STREAMING</span>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse font-mono text-[11px] whitespace-nowrap">
+<thead>
+<tr class="text-on-surface-variant bg-surface-container-low">
+<th class="p-3 font-normal">TIMESTAMP</th>
+<th class="p-3 font-normal">LEVEL</th>
+<th class="p-3 font-normal">SOURCE_ID</th>
+<th class="p-3 font-normal w-full">PAYLOAD</th>
+</tr>
+</thead>
+<tbody>
+<!-- Row alternating logic via nth-child simulation using classes -->
+<tr class="bg-surface-container hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-on-surface-variant">2023-10-27T02:15:30Z</td>
+<td class="p-3"><span class="text-tertiary bg-on-tertiary-container/15 px-2 py-0.5 rounded-sm">INFO</span></td>
+<td class="p-3 text-primary">svc_mesh_proxy_04</td>
+<td class="p-3 text-on-surface">Connection established. Handshake verified.</td>
+</tr>
+<tr class="bg-surface-container-low hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-on-surface-variant">2023-10-27T02:15:28Z</td>
+<td class="p-3"><span class="text-[#ffb300] bg-[#ffb300]/10 px-2 py-0.5 rounded-sm">WARN</span></td>
+<td class="p-3 text-primary">db_cluster_primary</td>
+<td class="p-3 text-on-surface">Query execution time exceeded 100ms warning threshold.</td>
+</tr>
+<tr class="bg-surface-container hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-on-surface-variant">2023-10-27T02:15:25Z</td>
+<td class="p-3"><span class="text-tertiary bg-on-tertiary-container/15 px-2 py-0.5 rounded-sm">INFO</span></td>
+<td class="p-3 text-primary">auth_service_v2</td>
+<td class="p-3 text-on-surface">Token refresh successful for client UUID: 8f7e-4b2a</td>
+</tr>
+<tr class="bg-surface-container-low hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-on-surface-variant">2023-10-27T02:15:21Z</td>
+<td class="p-3"><span class="text-error bg-error-container/20 px-2 py-0.5 rounded-sm">ERR</span></td>
+<td class="p-3 text-primary">node_worker_pool_9</td>
+<td class="p-3 text-error">SIGTERM received. Graceful shutdown failed. Force killing.</td>
+</tr>
+<tr class="bg-surface-container hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-on-surface-variant">2023-10-27T02:15:15Z</td>
+<td class="p-3"><span class="text-tertiary bg-on-tertiary-container/15 px-2 py-0.5 rounded-sm">INFO</span></td>
+<td class="p-3 text-primary">system_scheduler</td>
+<td class="p-3 text-on-surface">Cron job [backup_daily] completed in 45s.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Danger Zone -->
+<div class="mt-8 border border-outline-variant/20 bg-surface-container-lowest rounded-DEFAULT overflow-hidden">
+<div class="p-4 border-b border-outline-variant/20 bg-error-container/5 flex items-center gap-2">
+<span class="material-symbols-outlined text-error text-[18px]">gpp_bad</span>
+<span class="font-mono text-xs text-error uppercase tracking-widest font-bold">DANGER ZONE</span>
+</div>
+<div class="p-6 flex flex-col sm:flex-row gap-6 items-center justify-between bg-surface-container">
+<div class="max-w-xl">
+<h4 class="text-on-surface font-semibold text-sm mb-1">System Override Protocols</h4>
+<p class="text-on-surface-variant text-xs leading-relaxed">Executing these commands will forcefully interrupt active connections and may result in partial data loss. These actions bypass standard graceful degradation protocols.</p>
+</div>
+<div class="flex gap-3 shrink-0">
+<button class="bg-surface-container border border-error/30 text-error hover:bg-error-container/20 px-4 py-2 rounded-DEFAULT font-mono text-xs uppercase tracking-wider transition-colors">
+                            RESTART_SERVICES
+                        </button>
+<button class="bg-error text-on-error hover:bg-error/90 px-4 py-2 rounded-DEFAULT font-mono text-xs uppercase tracking-wider font-bold transition-colors shadow-[0_0_15px_rgba(255,180,171,0.2)]">
+                            EMERGENCY_HALT
+                        </button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

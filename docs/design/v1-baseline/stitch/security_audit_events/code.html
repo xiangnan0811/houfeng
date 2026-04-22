@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Obsidian Core - Security Audit</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-highest": "#353535",
+                      "secondary-fixed-dim": "#c8c6c5",
+                      "on-primary-container": "#004650",
+                      "on-surface": "#e5e2e1",
+                      "secondary-container": "#474746",
+                      "on-primary": "#00363e",
+                      "on-tertiary-fixed": "#002204",
+                      "tertiary-fixed-dim": "#78dc77",
+                      "secondary-fixed": "#e4e2e1",
+                      "inverse-on-surface": "#313030",
+                      "outline-variant": "#3c494c",
+                      "on-secondary-fixed-variant": "#474746",
+                      "surface-variant": "#353535",
+                      "error": "#ffb4ab",
+                      "tertiary-fixed": "#94f990",
+                      "on-error": "#690005",
+                      "background": "#131313",
+                      "tertiary-container": "#5dc05f",
+                      "on-background": "#e5e2e1",
+                      "primary-fixed-dim": "#44d8f1",
+                      "on-tertiary-container": "#004b10",
+                      "on-tertiary": "#00390a",
+                      "error-container": "#93000a",
+                      "surface-container-low": "#1c1b1b",
+                      "secondary": "#c8c6c5",
+                      "surface-tint": "#44d8f1",
+                      "inverse-primary": "#006876",
+                      "on-primary-fixed": "#001f25",
+                      "surface": "#131313",
+                      "surface-container-high": "#2a2a2a",
+                      "surface-bright": "#393939",
+                      "primary": "#44d8f1",
+                      "surface-container-lowest": "#0e0e0e",
+                      "on-secondary-container": "#b7b5b4",
+                      "on-primary-fixed-variant": "#004e59",
+                      "outline": "#869396",
+                      "surface-dim": "#131313",
+                      "inverse-surface": "#e5e2e1",
+                      "on-surface-variant": "#bbc9cc",
+                      "on-secondary-fixed": "#1b1c1c",
+                      "tertiary": "#78dc77",
+                      "surface-container": "#20201f",
+                      "primary-container": "#00bcd4",
+                      "on-error-container": "#ffdad6",
+                      "primary-fixed": "#a1efff",
+                      "on-tertiary-fixed-variant": "#005313",
+                      "on-secondary": "#303030",
+                      "warning": "#ffb300",
+                      "warning-container": "rgba(255, 179, 0, 0.1)"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "fontFamily": {
+                      "headline": ["Inter", "sans-serif"],
+                      "display": ["Inter", "sans-serif"],
+                      "body": ["Inter", "sans-serif"],
+                      "label": ["Inter", "sans-serif"],
+                      "mono": ["JetBrains Mono", "monospace"]
+              }
+            }
+          }
+        }
+      </script>
+<style>
+        body { background-color: #131313; color: #e5e2e1; }
+        .glass-panel { background: rgba(53, 53, 53, 0.7); backdrop-filter: blur(12px); }
+        .ghost-border { border: 1px solid rgba(60, 73, 76, 0.2); }
+    </style>
+</head>
+<body class="font-body antialiased flex bg-surface">
+<!-- SideNavBar -->
+<nav class="bg-[#131313] text-[#44d8f1] font-mono text-[11px] uppercase tracking-tighter docked h-full w-64 left-0 border-r border-[#3c494c]/10 flat no shadows fixed top-0 flex flex-col z-40">
+<div class="p-6 border-b border-[#3c494c]/10">
+<div class="text-xs font-black tracking-widest text-[#e5e2e1] uppercase mb-4">OBSIDIAN CORE</div>
+<div class="text-secondary mb-1">ENV: PRODUCTION</div>
+<div class="text-secondary-fixed-dim">REGION: US-EAST-1</div>
+</div>
+<div class="flex-1 py-4 flex flex-col gap-1">
+<a class="text-[#938f8f] flex items-center px-4 py-3 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined mr-3 text-[18px]">dashboard</span>
+                Dashboard
+            </a>
+<a class="text-[#938f8f] flex items-center px-4 py-3 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined mr-3 text-[18px]">developer_board</span>
+                Nodes
+            </a>
+<a class="text-[#938f8f] flex items-center px-4 py-3 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined mr-3 text-[18px]">dns</span>
+                Fleet
+            </a>
+<a class="text-[#44d8f1] bg-[#2a2a2a] border-l-2 border-[#44d8f1] flex items-center px-4 py-3 transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined mr-3 text-[18px]">security</span>
+                Security
+            </a>
+<a class="text-[#938f8f] flex items-center px-4 py-3 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined mr-3 text-[18px]">terminal</span>
+                Logs
+            </a>
+</div>
+<div class="p-4 border-t border-[#3c494c]/10">
+<button class="w-full bg-primary-container text-on-primary-container py-2 rounded-md font-mono text-[11px] font-bold tracking-tight uppercase hover:bg-primary transition-colors">
+                DEPLOY NEW NODE
+            </button>
+</div>
+<div class="pb-4 flex flex-col gap-1">
+<a class="text-[#938f8f] flex items-center px-4 py-2 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined mr-3 text-[16px]">description</span>
+                Documentation
+            </a>
+<a class="text-[#938f8f] flex items-center px-4 py-2 hover:bg-[#20201f] hover:text-[#e5e2e1] transition-all duration-150 ease-in-out" href="#">
+<span class="material-symbols-outlined mr-3 text-[16px]">contact_support</span>
+                Terminal Support
+            </a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<div class="ml-64 flex-1 flex flex-col min-h-screen">
+<!-- TopNavBar -->
+<header class="bg-[#131313] text-[#44d8f1] font-mono text-xs tracking-tight docked full-width top-0 h-12 border-b border-[#3c494c]/20 flat no shadows flex justify-between items-center w-full px-6 sticky z-50">
+<div class="flex items-center gap-4">
+<span class="text-sm font-black tracking-widest text-[#e5e2e1] uppercase hidden md:block">OBSIDIAN CORE</span>
+</div>
+<div class="flex items-center gap-6">
+<div class="text-secondary-fixed-dim">LATENCY: 12ms | LOAD: 0.42</div>
+<div class="flex gap-4">
+<button class="hover:text-primary transition-colors hover:bg-[#353535] p-1 rounded-full"><span class="material-symbols-outlined text-[18px]">notifications</span></button>
+<button class="hover:text-primary transition-colors hover:bg-[#353535] p-1 rounded-full"><span class="material-symbols-outlined text-[18px]">settings</span></button>
+</div>
+<img alt="Operator Profile" class="w-6 h-6 rounded-full ghost-border grayscale object-cover" data-alt="professional portrait of system operator in dark room with subtle cyan lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAAIqYyJdfJSYvexXYjUwqQnaVR3a__tgxUsyWi60Nn90kls0CcrcKPGOQHL9A8tkf2ukTjUSAUv-Uv4KBlatOPyIfH1Lrf_iBRJjzTdnLkgYabvEfiFhuoOJ_2F0LxAZQ02b31XnTuadibZtQ8EDExk1lFZCnDGXKLANr-o5Ko2YDWlC76gvzdKCHCyVtPO5RC2fQKu72sanoqFMjj-8ejMh10CABevMkhl2nFXdANclHXoKtnJbc_jYY_l7lD6BYWfz2pPo6d5kUE"/>
+</div>
+</header>
+<!-- Canvas -->
+<main class="flex-1 p-8 bg-surface-container-low flex flex-col gap-6">
+<div class="flex justify-between items-end mb-2">
+<div>
+<h1 class="font-headline text-2xl font-bold tracking-tight text-on-surface">Security Operations Center</h1>
+<p class="font-mono text-sm text-on-surface-variant mt-1">SYS_AUDIT_LOG // ACTIVE THREAT MONITORING</p>
+</div>
+<div class="flex gap-2">
+<button class="bg-surface-container-highest text-primary font-mono text-xs px-4 py-2 rounded-DEFAULT ghost-border hover:bg-surface-variant transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">download</span> EXPORT AUDIT
+                    </button>
+<button class="bg-error-container text-error font-mono text-xs px-4 py-2 rounded-DEFAULT border border-error/30 hover:bg-error hover:text-on-error transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">emergency</span> LOCKDOWN PROTOCOL
+                    </button>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-12 gap-6 h-full">
+<!-- Left Column: Critical Alerts & Status -->
+<div class="col-span-12 lg:col-span-4 flex flex-col gap-6">
+<!-- Global Security Status -->
+<div class="bg-surface-container p-6 rounded-lg ghost-border">
+<h2 class="font-mono text-xs text-on-surface-variant uppercase tracking-widest mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">policy</span> Global Posture
+                        </h2>
+<div class="flex items-center gap-4 mb-6">
+<div class="w-16 h-16 rounded-full border-4 border-warning flex items-center justify-center text-warning bg-warning-container">
+<span class="material-symbols-outlined text-3xl">warning</span>
+</div>
+<div>
+<div class="font-headline text-xl font-bold text-warning">ELEVATED</div>
+<div class="font-mono text-xs text-secondary-fixed-dim">THREAT LEVEL: DEFCON 3</div>
+</div>
+</div>
+<div class="space-y-3">
+<div class="flex justify-between font-mono text-xs border-b border-outline-variant/20 pb-2">
+<span class="text-on-surface-variant">Active Intrusions</span>
+<span class="text-error font-bold">02</span>
+</div>
+<div class="flex justify-between font-mono text-xs border-b border-outline-variant/20 pb-2">
+<span class="text-on-surface-variant">Blocked IPs (24h)</span>
+<span class="text-on-surface">1,402</span>
+</div>
+<div class="flex justify-between font-mono text-xs">
+<span class="text-on-surface-variant">Failed Auth Attempts</span>
+<span class="text-warning">84</span>
+</div>
+</div>
+</div>
+<!-- Critical Alerts -->
+<div class="bg-surface-container p-6 rounded-lg ghost-border flex-1">
+<h2 class="font-mono text-xs text-on-surface-variant uppercase tracking-widest mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">crisis_alert</span> Critical Alerts
+                        </h2>
+<div class="flex flex-col gap-3">
+<div class="bg-error border border-error/50 p-3 rounded-DEFAULT flex gap-3">
+<span class="material-symbols-outlined text-white text-[20px] mt-0.5">gpp_bad</span>
+<div>
+<div class="font-mono text-xs font-bold text-white mb-1">UNAUTHORIZED SSH ACCESS</div>
+<div class="font-mono text-[10px] text-white/80">NODE: api-gateway-04</div>
+<div class="font-mono text-[10px] text-white/60 mt-1">IP: 192.168.1.104 | 2m ago</div>
+</div>
+</div>
+<div class="bg-warning-container border border-warning/20 p-3 rounded-DEFAULT flex gap-3">
+<span class="material-symbols-outlined text-warning text-[20px] mt-0.5">key_off</span>
+<div>
+<div class="font-mono text-xs font-bold text-warning mb-1">MULTIPLE FAILED LOGINS</div>
+<div class="font-mono text-[10px] text-warning/80">USER: admin_service_account</div>
+<div class="font-mono text-[10px] text-warning/60 mt-1">15 attempts | 12m ago</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Access Logs & Certificates -->
+<div class="col-span-12 lg:col-span-8 flex flex-col gap-6">
+<!-- Certificate Tracker -->
+<div class="bg-surface-container p-6 rounded-lg ghost-border">
+<h2 class="font-mono text-xs text-on-surface-variant uppercase tracking-widest mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">workspace_premium</span> TLS Certificate Status
+                        </h2>
+<div class="grid grid-cols-3 gap-4">
+<div class="bg-surface-container-lowest p-4 rounded-DEFAULT ghost-border flex flex-col">
+<span class="font-mono text-[10px] text-secondary mb-1">wildcard.obsidian.core</span>
+<div class="font-headline text-lg text-tertiary mb-2">Valid</div>
+<span class="font-mono text-[10px] text-on-surface-variant mt-auto">Exp: 2024-11-05 (184d)</span>
+</div>
+<div class="bg-surface-container-lowest p-4 rounded-DEFAULT border border-warning/30 flex flex-col">
+<span class="font-mono text-[10px] text-secondary mb-1">api.internal.svc</span>
+<div class="font-headline text-lg text-warning mb-2">Expiring Soon</div>
+<span class="font-mono text-[10px] text-warning mt-auto">Exp: 2024-05-20 (14d)</span>
+</div>
+<div class="bg-surface-container-lowest p-4 rounded-DEFAULT border border-error/50 flex flex-col">
+<span class="font-mono text-[10px] text-secondary mb-1">legacy-auth-db</span>
+<div class="font-headline text-lg text-error mb-2">EXPIRED</div>
+<span class="font-mono text-[10px] text-error mt-auto">Exp: 2024-05-01 (-5d)</span>
+</div>
+</div>
+</div>
+<!-- Access Control Log -->
+<div class="bg-surface-container rounded-lg ghost-border flex-1 flex flex-col">
+<div class="p-6 border-b border-outline-variant/20 flex justify-between items-center">
+<h2 class="font-mono text-xs text-on-surface-variant uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">list_alt</span> Access Control Log
+                            </h2>
+<div class="flex gap-2">
+<input class="bg-surface-container-lowest border-l-2 border-primary border-t-0 border-r-0 border-b-0 font-mono text-xs text-on-surface px-3 py-1 focus:ring-0 w-48" placeholder="FILTER LOGS..." type="text"/>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low font-mono text-[10px] text-on-surface-variant uppercase">
+<th class="p-3 font-normal">Timestamp</th>
+<th class="p-3 font-normal">Event</th>
+<th class="p-3 font-normal">Identity</th>
+<th class="p-3 font-normal">Source IP</th>
+<th class="p-3 font-normal">Status</th>
+</tr>
+</thead>
+<tbody class="font-mono text-xs">
+<tr class="bg-surface-container hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-secondary-fixed-dim border-b border-surface-container-low">2024-05-06 14:22:01</td>
+<td class="p-3 text-on-surface border-b border-surface-container-low">SSH_LOGIN</td>
+<td class="p-3 text-primary border-b border-surface-container-low">sysadmin</td>
+<td class="p-3 text-secondary border-b border-surface-container-low">10.0.1.45</td>
+<td class="p-3 border-b border-surface-container-low">
+<span class="bg-on-tertiary-container/15 text-tertiary px-2 py-0.5 rounded-sm text-[10px] ghost-border">SUCCESS</span>
+</td>
+</tr>
+<tr class="bg-surface-container-low hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-secondary-fixed-dim border-b border-surface-container-low">2024-05-06 14:18:44</td>
+<td class="p-3 text-on-surface border-b border-surface-container-low">API_KEY_GEN</td>
+<td class="p-3 text-primary border-b border-surface-container-low">dev_pipeline</td>
+<td class="p-3 text-secondary border-b border-surface-container-low">192.168.1.10</td>
+<td class="p-3 border-b border-surface-container-low">
+<span class="bg-on-tertiary-container/15 text-tertiary px-2 py-0.5 rounded-sm text-[10px] ghost-border">SUCCESS</span>
+</td>
+</tr>
+<tr class="bg-surface-container hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-secondary-fixed-dim border-b border-surface-container-low">2024-05-06 14:15:12</td>
+<td class="p-3 text-on-surface border-b border-surface-container-low">SUDO_ELEVATION</td>
+<td class="p-3 text-primary border-b border-surface-container-low">db_admin</td>
+<td class="p-3 text-secondary border-b border-surface-container-low">10.0.2.11</td>
+<td class="p-3 border-b border-surface-container-low">
+<span class="bg-error-container/20 text-error px-2 py-0.5 rounded-sm text-[10px] border border-error/20">DENIED</span>
+</td>
+</tr>
+<tr class="bg-surface-container-low hover:bg-surface-container-highest transition-colors">
+<td class="p-3 text-secondary-fixed-dim">2024-05-06 14:10:05</td>
+<td class="p-3 text-on-surface">OAUTH_LOGIN</td>
+<td class="p-3 text-primary">analyst_01</td>
+<td class="p-3 text-secondary">203.0.113.42</td>
+<td class="p-3">
+<span class="bg-on-tertiary-container/15 text-tertiary px-2 py-0.5 rounded-sm text-[10px] ghost-border">SUCCESS</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

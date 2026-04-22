@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OBSIDIAN CORE - Global Logs Explorer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-highest": "#353535",
+                    "secondary-fixed-dim": "#c8c6c5",
+                    "on-primary-container": "#004650",
+                    "on-surface": "#e5e2e1",
+                    "secondary-container": "#474746",
+                    "on-primary": "#00363e",
+                    "on-tertiary-fixed": "#002204",
+                    "tertiary-fixed-dim": "#78dc77",
+                    "secondary-fixed": "#e4e2e1",
+                    "inverse-on-surface": "#313030",
+                    "outline-variant": "#3c494c",
+                    "on-secondary-fixed-variant": "#474746",
+                    "surface-variant": "#353535",
+                    "error": "#ffb4ab",
+                    "tertiary-fixed": "#94f990",
+                    "on-error": "#690005",
+                    "background": "#131313",
+                    "tertiary-container": "#5dc05f",
+                    "on-background": "#e5e2e1",
+                    "primary-fixed-dim": "#44d8f1",
+                    "on-tertiary-container": "#004b10",
+                    "on-tertiary": "#00390a",
+                    "error-container": "#93000a",
+                    "surface-container-low": "#1c1b1b",
+                    "secondary": "#c8c6c5",
+                    "surface-tint": "#44d8f1",
+                    "inverse-primary": "#006876",
+                    "on-primary-fixed": "#001f25",
+                    "surface": "#131313",
+                    "surface-container-high": "#2a2a2a",
+                    "surface-bright": "#393939",
+                    "primary": "#44d8f1",
+                    "surface-container-lowest": "#0e0e0e",
+                    "on-secondary-container": "#b7b5b4",
+                    "on-primary-fixed-variant": "#004e59",
+                    "outline": "#869396",
+                    "surface-dim": "#131313",
+                    "inverse-surface": "#e5e2e1",
+                    "on-surface-variant": "#bbc9cc",
+                    "on-secondary-fixed": "#1b1c1c",
+                    "tertiary": "#78dc77",
+                    "surface-container": "#20201f",
+                    "primary-container": "#00bcd4",
+                    "on-error-container": "#ffdad6",
+                    "primary-fixed": "#a1efff",
+                    "on-tertiary-fixed-variant": "#005313",
+                    "on-secondary": "#303030"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "fontFamily": {
+                    "headline": ["Inter", "sans-serif"],
+                    "display": ["Inter", "sans-serif"],
+                    "body": ["Inter", "sans-serif"],
+                    "label": ["Inter", "sans-serif"],
+                    "mono": ["JetBrains Mono", "monospace"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #131313; color: #e5e2e1; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .material-symbols-outlined.fill { font-variation-settings: 'FILL' 1; }
+        
+        /* Custom scrollbar for terminal feel */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0e0e0e; }
+        ::-webkit-scrollbar-thumb { background: #353535; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #474746; }
+    </style>
+</head>
+<body class="bg-background text-on-surface h-screen flex overflow-hidden selection:bg-primary-container selection:text-on-primary-container">
+<!-- SideNavBar (Shared Component) -->
+<nav class="hidden md:flex bg-[#131313] dark:bg-[#131313] docked h-full w-64 left-0 bg-[#1c1b1b] border-r border-[#3c494c]/10 flat no shadows fixed left-0 top-0 h-screen flex flex-col z-40 transition-all duration-150 ease-in-out">
+<!-- Header -->
+<div class="px-6 py-6 flex flex-col gap-1 border-b border-outline-variant/10">
+<h1 class="hidden">OBSIDIAN CORE</h1>
+<div class="text-on-surface font-semibold text-sm tracking-wide">ENV: PRODUCTION</div>
+<div class="font-mono text-[11px] uppercase tracking-tighter text-on-surface-variant">REGION: US-EAST-1</div>
+</div>
+<!-- Navigation Links -->
+<div class="flex-1 overflow-y-auto py-4 flex flex-col gap-1 px-2">
+<a class="text-[#938f8f] flex items-center px-4 py-3 hover:bg-[#20201f] hover:text-[#e5e2e1] rounded group" href="#">
+<span class="material-symbols-outlined mr-3 text-lg opacity-70 group-hover:opacity-100 transition-opacity">dashboard</span>
+<span class="font-mono text-[11px] uppercase tracking-tighter">Dashboard</span>
+</a>
+<a class="text-[#938f8f] flex items-center px-4 py-3 hover:bg-[#20201f] hover:text-[#e5e2e1] rounded group" href="#">
+<span class="material-symbols-outlined mr-3 text-lg opacity-70 group-hover:opacity-100 transition-opacity">developer_board</span>
+<span class="font-mono text-[11px] uppercase tracking-tighter">Nodes</span>
+</a>
+<a class="text-[#938f8f] flex items-center px-4 py-3 hover:bg-[#20201f] hover:text-[#e5e2e1] rounded group" href="#">
+<span class="material-symbols-outlined mr-3 text-lg opacity-70 group-hover:opacity-100 transition-opacity">dns</span>
+<span class="font-mono text-[11px] uppercase tracking-tighter">Fleet</span>
+</a>
+<a class="text-[#938f8f] flex items-center px-4 py-3 hover:bg-[#20201f] hover:text-[#e5e2e1] rounded group" href="#">
+<span class="material-symbols-outlined mr-3 text-lg opacity-70 group-hover:opacity-100 transition-opacity">security</span>
+<span class="font-mono text-[11px] uppercase tracking-tighter">Security</span>
+</a>
+<!-- ACTIVE STATE LOGIC APPLIED HERE -->
+<a class="text-[#44d8f1] bg-[#2a2a2a] border-l-2 border-[#44d8f1] flex items-center px-4 py-3 rounded-r" href="#">
+<span class="material-symbols-outlined mr-3 text-lg">terminal</span>
+<span class="font-mono text-[11px] uppercase tracking-tighter font-bold">Logs</span>
+</a>
+</div>
+<!-- Footer Actions -->
+<div class="p-4 border-t border-outline-variant/10 flex flex-col gap-2">
+<button class="w-full bg-primary-container text-on-primary-container py-2 px-4 rounded-md font-mono text-xs font-bold hover:bg-primary-fixed transition-colors">
+                DEPLOY NEW NODE
+            </button>
+<a class="text-[#938f8f] flex items-center px-4 py-2 hover:bg-[#20201f] hover:text-[#e5e2e1] rounded mt-2" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">description</span>
+<span class="font-mono text-[11px] uppercase tracking-tighter">Documentation</span>
+</a>
+<a class="text-[#938f8f] flex items-center px-4 py-2 hover:bg-[#20201f] hover:text-[#e5e2e1] rounded" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">contact_support</span>
+<span class="font-mono text-[11px] uppercase tracking-tighter">Terminal Support</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<div class="flex-1 flex flex-col ml-0 md:ml-64 relative bg-surface">
+<!-- TopNavBar (Shared Component) -->
+<header class="bg-[#131313] dark:bg-[#131313] text-[#44d8f1] dark:text-[#44d8f1] font-mono text-xs tracking-tight docked full-width top-0 h-12 bg-[#1c1b1b] border-b border-[#3c494c]/20 flat no shadows flex justify-between items-center w-full px-6 sticky top-0 z-50">
+<div class="flex items-center gap-4">
+<span class="text-sm font-black tracking-widest text-[#e5e2e1] uppercase">OBSIDIAN CORE</span>
+</div>
+<div class="flex items-center gap-6">
+<div class="hidden md:flex items-center bg-surface-container-lowest rounded px-3 py-1.5 border-l-2 border-transparent focus-within:border-primary transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant text-sm mr-2">search</span>
+<input class="bg-transparent border-none p-0 text-xs font-mono text-on-surface focus:ring-0 w-48 placeholder-on-surface-variant/50" placeholder="Global search..." type="text"/>
+</div>
+<span class="text-on-surface-variant opacity-80 hidden lg:inline">LATENCY: 12ms | LOAD: 0.42</span>
+<div class="flex items-center gap-4">
+<button class="text-[#938f8f] hover:text-[#44d8f1] hover:bg-[#353535] transition-colors p-1.5 rounded-full Active: opacity-80 duration-100">
+<span class="material-symbols-outlined text-lg">notifications</span>
+</button>
+<button class="text-[#938f8f] hover:text-[#44d8f1] hover:bg-[#353535] transition-colors p-1.5 rounded-full Active: opacity-80 duration-100">
+<span class="material-symbols-outlined text-lg">settings</span>
+</button>
+<img alt="Operator Profile" class="w-7 h-7 rounded-full border border-outline-variant/30 object-cover" data-alt="close up headshot of female operator in dark technical environment" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDND33Tg8NY4g4qmCyXoS2Xg-ok0jNNi5K70HSkv-xfyRiXdMyeffUm6Z9YkQx6BX5be5Um432xo5yOcK9ZTXjU9fh14AzrbPnUnuq0GOyiiBzvLVgQ1kvdc3dBzTJcmd9KOrOnokeX1-IMXSTq3VbkDjQDRrTBXz096qSkZxLmMVCLEUFgRDaw_tPjmjEV7w18c4Td1BT3k0yiZYAYksiKLDxeOQT7rnM2ffaxg3Qs5v6awLWlDFcN-irfecYgmeDUR0VDhN0lJ6BL"/>
+</div>
+</div>
+</header>
+<!-- Canvas -->
+<main class="flex-1 flex flex-col p-4 md:p-6 overflow-hidden gap-4">
+<!-- Tooling Bar (Filters & Search) -->
+<div class="bg-surface-container-low p-3 rounded-lg flex flex-col sm:flex-row gap-4 items-center justify-between shrink-0 border border-outline-variant/10">
+<div class="flex-1 w-full relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+<input class="w-full bg-surface-container-lowest border-none pl-10 pr-4 py-2 font-mono text-sm text-on-surface focus:ring-0 focus:border-l-2 focus:border-primary border-l-2 border-transparent transition-all rounded" placeholder="Search logs (e.g. error_code:500 container_id:x8f9)..." type="text"/>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<!-- Date Picker Mock -->
+<button class="bg-surface-container flex items-center gap-2 px-3 py-2 rounded border border-outline-variant/20 hover:bg-surface-container-high transition-colors font-mono text-xs">
+<span class="material-symbols-outlined text-[16px] text-primary">calendar_month</span>
+<span>Last 15 Minutes</span>
+<span class="material-symbols-outlined text-[16px]">arrow_drop_down</span>
+</button>
+<div class="w-px h-6 bg-outline-variant/30 mx-2"></div>
+<!-- Level Filters -->
+<div class="flex gap-1 bg-surface-container-lowest p-1 rounded border border-outline-variant/10">
+<button class="px-3 py-1 font-mono text-[10px] uppercase font-bold rounded bg-surface-container-highest text-on-surface border border-outline-variant/20">ALL</button>
+<button class="px-3 py-1 font-mono text-[10px] uppercase font-bold rounded text-tertiary hover:bg-tertiary-container/10 transition-colors">INFO</button>
+<button class="px-3 py-1 font-mono text-[10px] uppercase font-bold rounded text-[#ffb300] hover:bg-[#ffb300]/10 transition-colors">WARN</button>
+<button class="px-3 py-1 font-mono text-[10px] uppercase font-bold rounded text-error hover:bg-error-container/20 transition-colors">CRIT</button>
+</div>
+</div>
+</div>
+<!-- Terminal Output Area -->
+<div class="flex-1 bg-surface-container-lowest rounded-lg border border-outline-variant/20 overflow-hidden flex flex-col relative shadow-[inset_0_0_20px_rgba(0,0,0,0.5)]">
+<!-- Terminal Header -->
+<div class="bg-surface-container-low px-4 py-2 flex items-center justify-between border-b border-outline-variant/10 shrink-0">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-sm">terminal</span>
+<span class="font-mono text-xs text-on-surface-variant">live_stream_tail -f /var/log/obsidian/*.log</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></div>
+<span class="font-mono text-[10px] text-tertiary">STREAMING</span>
+</div>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-sm">pause_circle</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-sm">download</span>
+</button>
+</div>
+</div>
+<!-- Log Lines -->
+<div class="flex-1 overflow-y-auto p-4 font-mono text-[13px] leading-relaxed tracking-tight" style="letter-spacing: -0.02em;">
+<div class="flex gap-4 hover:bg-surface-container py-1 px-2 rounded -mx-2 transition-colors">
+<span class="text-on-surface-variant/50 w-24 shrink-0 text-right">14:02:41.001</span>
+<span class="text-tertiary w-10 shrink-0 font-bold">INFO</span>
+<span class="text-on-surface-variant/70 w-32 shrink-0 truncate">[core-auth-node]</span>
+<span class="text-on-surface break-all">Authentication successful for user UUID <span class="text-primary">8f7d-4b2a-9c1e</span>. Session token generated.</span>
+</div>
+<div class="flex gap-4 hover:bg-surface-container py-1 px-2 rounded -mx-2 transition-colors">
+<span class="text-on-surface-variant/50 w-24 shrink-0 text-right">14:02:41.154</span>
+<span class="text-tertiary w-10 shrink-0 font-bold">INFO</span>
+<span class="text-on-surface-variant/70 w-32 shrink-0 truncate">[db-shard-03]</span>
+<span class="text-on-surface break-all">Query execution completed in <span class="text-tertiary">12ms</span>. Rows returned: 42.</span>
+</div>
+<div class="flex gap-4 bg-[#ffb300]/5 hover:bg-[#ffb300]/10 py-1 px-2 rounded -mx-2 transition-colors border-l-2 border-[#ffb300] ml-[-10px] pl-[10px]">
+<span class="text-on-surface-variant/50 w-24 shrink-0 text-right">14:02:42.890</span>
+<span class="text-[#ffb300] w-10 shrink-0 font-bold">WARN</span>
+<span class="text-on-surface-variant/70 w-32 shrink-0 truncate">[cache-layer-1]</span>
+<span class="text-[#ffb300] break-all">Memory usage approaching threshold (85%). Eviction policy triggered for keyspace 'sessions_stale'.</span>
+</div>
+<div class="flex gap-4 hover:bg-surface-container py-1 px-2 rounded -mx-2 transition-colors">
+<span class="text-on-surface-variant/50 w-24 shrink-0 text-right">14:02:43.012</span>
+<span class="text-tertiary w-10 shrink-0 font-bold">INFO</span>
+<span class="text-on-surface-variant/70 w-32 shrink-0 truncate">[api-gateway]</span>
+<span class="text-on-surface break-all">Incoming request GET /api/v2/fleet/status from <span class="text-secondary-fixed-dim">192.168.1.104</span>.</span>
+</div>
+<div class="flex gap-4 bg-error-container/20 hover:bg-error-container/30 py-1 px-2 rounded -mx-2 transition-colors border-l-2 border-error ml-[-10px] pl-[10px]">
+<span class="text-on-surface-variant/50 w-24 shrink-0 text-right">14:02:44.500</span>
+<span class="text-error w-10 shrink-0 font-bold">CRIT</span>
+<span class="text-on-surface-variant/70 w-32 shrink-0 truncate">[worker-pool-B]</span>
+<span class="text-error break-all">FATAL ERROR: Connection to primary database lost. Attempting reconnect (1/5)...</span>
+</div>
+<!-- Stack Trace block for CRIT -->
+<div class="ml-[180px] mt-1 mb-3 text-error/80 bg-surface-container-lowest p-2 rounded border border-error/20 font-mono text-[11px]">
+<pre><code>at DatabaseManager.connect (/app/core/db/manager.js:142:15)
+at async WorkerNode.initialize (/app/core/worker.js:45:9)
+at processTicksAndRejections (node:internal/process/task_queues:96:5)
+Caused by: Error: ETIMEDOUT 10.0.4.55:5432</code></pre>
+</div>
+<div class="flex gap-4 hover:bg-surface-container py-1 px-2 rounded -mx-2 transition-colors">
+<span class="text-on-surface-variant/50 w-24 shrink-0 text-right">14:02:45.002</span>
+<span class="text-tertiary w-10 shrink-0 font-bold">INFO</span>
+<span class="text-on-surface-variant/70 w-32 shrink-0 truncate">[metrics-agent]</span>
+<span class="text-on-surface break-all">Flushing telemetry data payload (2.4MB) to ingest endpoint.</span>
+</div>
+<div class="flex gap-4 hover:bg-surface-container py-1 px-2 rounded -mx-2 transition-colors">
+<span class="text-on-surface-variant/50 w-24 shrink-0 text-right">14:02:45.100</span>
+<span class="text-tertiary w-10 shrink-0 font-bold">INFO</span>
+<span class="text-on-surface-variant/70 w-32 shrink-0 truncate">[core-auth-node]</span>
+<span class="text-on-surface break-all">Authentication successful for user UUID <span class="text-primary">1a2b-3c4d-5e6f</span>.</span>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

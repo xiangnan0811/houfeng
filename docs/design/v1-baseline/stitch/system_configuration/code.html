@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Obsidian Core - System Configuration</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#353535",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "on-primary-container": "#004650",
+                        "on-surface": "#e5e2e1",
+                        "secondary-container": "#474746",
+                        "on-primary": "#00363e",
+                        "on-tertiary-fixed": "#002204",
+                        "tertiary-fixed-dim": "#78dc77",
+                        "secondary-fixed": "#e4e2e1",
+                        "inverse-on-surface": "#313030",
+                        "outline-variant": "#3c494c",
+                        "on-secondary-fixed-variant": "#474746",
+                        "surface-variant": "#353535",
+                        "error": "#ffb4ab",
+                        "tertiary-fixed": "#94f990",
+                        "on-error": "#690005",
+                        "background": "#131313",
+                        "tertiary-container": "#5dc05f",
+                        "on-background": "#e5e2e1",
+                        "primary-fixed-dim": "#44d8f1",
+                        "on-tertiary-container": "#004b10",
+                        "on-tertiary": "#00390a",
+                        "error-container": "#93000a",
+                        "surface-container-low": "#1c1b1b",
+                        "secondary": "#c8c6c5",
+                        "surface-tint": "#44d8f1",
+                        "inverse-primary": "#006876",
+                        "on-primary-fixed": "#001f25",
+                        "surface": "#131313",
+                        "surface-container-high": "#2a2a2a",
+                        "surface-bright": "#393939",
+                        "primary": "#44d8f1",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-secondary-container": "#b7b5b4",
+                        "on-primary-fixed-variant": "#004e59",
+                        "outline": "#869396",
+                        "surface-dim": "#131313",
+                        "inverse-surface": "#e5e2e1",
+                        "on-surface-variant": "#bbc9cc",
+                        "on-secondary-fixed": "#1b1c1c",
+                        "tertiary": "#78dc77",
+                        "surface-container": "#20201f",
+                        "primary-container": "#00bcd4",
+                        "on-error-container": "#ffdad6",
+                        "primary-fixed": "#a1efff",
+                        "on-tertiary-fixed-variant": "#005313",
+                        "on-secondary": "#303030"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "display": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["Roboto Mono"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; letter-spacing: -0.01em; }
+        .font-mono { font-family: 'Roboto Mono', monospace; }
+        
+        /* Custom Terminal Inputs */
+        .terminal-input:focus {
+            border-left: 2px solid #44d8f1 !important;
+            outline: none;
+            box-shadow: none;
+        }
+        
+        /* Glassmorphism */
+        .glass-panel {
+            background-color: rgba(53, 53, 53, 0.7);
+            backdrop-filter: blur(12px);
+        }
+        
+        /* Toggle Switch Override */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #00bcd4;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #00bcd4;
+        }
+        
+        /* Hide scrollbar for clean monolithic look */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #131313;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3c494c;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface h-screen overflow-hidden flex font-body">
+<!-- SideNavBar (Suppressed due to Settings Intent) -->
+<!-- Navigation shell is suppressed as per The "Semantic Shell" Mandate for Task-Focused screens (Settings) -->
+<!-- Main Content Canvas -->
+<main class="flex-1 flex flex-col h-full overflow-hidden bg-background">
+<!-- Top Header Anchor (Replacing TopNavBar for Focused View) -->
+<header class="flex justify-between items-center w-full px-8 py-6 sticky top-0 z-50 bg-background border-b border-outline-variant/20">
+<div class="flex items-center gap-4">
+<a class="text-secondary hover:text-primary transition-colors flex items-center gap-2 text-sm font-mono tracking-tight" href="#">
+<span class="material-symbols-outlined text-[18px]">arrow_back</span>
+                    BACK TO FLEET
+                </a>
+<div class="h-4 w-px bg-outline-variant/50"></div>
+<div>
+<h1 class="text-xl font-bold tracking-tight text-on-surface">System Configuration</h1>
+<p class="text-xs font-mono text-on-surface-variant mt-1">NODE: OBS-CORE-PRI-01</p>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="text-xs font-mono text-tertiary flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-tertiary shadow-[0_0_8px_rgba(120,220,119,0.5)]"></span>
+                    SYNCED
+                </div>
+<button class="bg-primary-container text-on-primary-container px-4 py-2 rounded-lg font-medium text-sm hover:bg-primary transition-colors focus:outline-none flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">save</span>
+                    Save Changes
+                </button>
+</div>
+</header>
+<!-- Scrollable Settings Canvas -->
+<div class="flex-1 overflow-y-auto p-8">
+<div class="max-w-4xl mx-auto space-y-12">
+<!-- General Settings Block -->
+<section class="bg-surface-container-low rounded-xl p-8 border border-outline-variant/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+<div class="mb-6 flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">settings</span>
+<h2 class="text-lg font-semibold tracking-tight">General Operations</h2>
+</div>
+<div class="space-y-6">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Input -->
+<div class="space-y-2">
+<label class="block text-sm font-medium text-on-surface-variant">Cluster Name</label>
+<input class="w-full bg-surface-container-lowest border-0 text-on-surface font-mono text-sm px-4 py-3 rounded-md terminal-input focus:ring-0 placeholder-secondary-fixed-dim" placeholder="Enter cluster identifier" type="text" value="OBSIDIAN_ALPHA_US"/>
+</div>
+<!-- Select (Terminal Style) -->
+<div class="space-y-2">
+<label class="block text-sm font-medium text-on-surface-variant">Default Log Level</label>
+<div class="relative">
+<select class="appearance-none w-full bg-surface-container-lowest border-0 text-on-surface font-mono text-sm px-4 py-3 rounded-md terminal-input focus:ring-0">
+<option value="DEBUG">DEBUG (Verbose)</option>
+<option selected="" value="INFO">INFO (Standard)</option>
+<option value="WARN">WARN (Minimal)</option>
+<option value="ERROR">ERROR (Critical Only)</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-3 text-on-surface-variant pointer-events-none">arrow_drop_down</span>
+</div>
+</div>
+</div>
+<!-- Toggle -->
+<div class="flex items-center justify-between p-4 bg-surface-container rounded-lg border border-outline-variant/10">
+<div>
+<h3 class="text-sm font-medium text-on-surface">Auto-Scaling Triggers</h3>
+<p class="text-xs text-on-surface-variant mt-1 max-w-sm">Automatically provision secondary nodes when CPU load exceeds 85% for more than 5 minutes.</p>
+</div>
+<div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-surface-container-lowest border-2 border-outline-variant appearance-none cursor-pointer z-10 transition-transform duration-200 ease-in-out transform translate-x-6" id="scaling_toggle" name="toggle" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-primary-container cursor-pointer transition-colors duration-200" for="scaling_toggle"></label>
+</div>
+</div>
+</div>
+</section>
+<!-- API Keys Bento Block -->
+<section class="bg-surface-container-low rounded-xl p-8 border border-outline-variant/10">
+<div class="flex justify-between items-end mb-6">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">key</span>
+<h2 class="text-lg font-semibold tracking-tight">Authentication Keys</h2>
+</div>
+<button class="text-xs font-mono text-primary hover:text-primary-fixed-dim transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">add</span>
+                            GENERATE NEW
+                        </button>
+</div>
+<div class="space-y-4">
+<!-- Key Row 1 -->
+<div class="flex flex-col md:flex-row md:items-center justify-between p-4 bg-surface-container rounded-lg border border-outline-variant/20 hover:bg-surface-container-highest transition-colors">
+<div class="mb-4 md:mb-0">
+<div class="flex items-center gap-2 mb-1">
+<span class="text-sm font-semibold">Production Ingress API</span>
+<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-on-tertiary-container/15 text-tertiary border border-outline-variant/20">ACTIVE</span>
+</div>
+<p class="text-xs font-mono text-on-surface-variant">Last used: 2 mins ago • IP: 192.168.1.104</p>
+</div>
+<div class="flex items-center gap-3">
+<div class="bg-surface-container-lowest px-3 py-2 rounded flex items-center gap-3 border-l-2 border-primary">
+<span class="font-mono text-xs text-on-surface tracking-wider">obs_live_********************</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[16px]">content_copy</span>
+</button>
+</div>
+<button class="text-on-surface-variant hover:text-error transition-colors p-2">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+</div>
+</div>
+<!-- Key Row 2 (Revoked) -->
+<div class="flex flex-col md:flex-row md:items-center justify-between p-4 bg-surface rounded-lg border border-outline-variant/20 opacity-60">
+<div class="mb-4 md:mb-0">
+<div class="flex items-center gap-2 mb-1">
+<span class="text-sm font-medium">Staging Integration</span>
+<span class="px-2 py-0.5 rounded text-[10px] font-mono border border-outline-variant/20 text-on-surface-variant">REVOKED</span>
+</div>
+<p class="text-xs font-mono text-on-surface-variant">Revoked: 2023-10-24 14:32 UTC</p>
+</div>
+<div class="flex items-center gap-3">
+<div class="bg-surface-container-lowest px-3 py-2 rounded flex items-center gap-3">
+<span class="font-mono text-xs text-on-surface-variant tracking-wider">obs_test_********************</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Environment Variables Grid -->
+<section class="bg-surface-container-low rounded-xl p-8 border border-outline-variant/10">
+<div class="mb-6 flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">data_object</span>
+<h2 class="text-lg font-semibold tracking-tight">Environment Variables</h2>
+</div>
+<div class="bg-surface-container rounded-lg overflow-hidden border border-outline-variant/20">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-high border-b border-outline-variant/20">
+<th class="py-3 px-4 text-xs font-mono text-on-surface-variant font-normal">VARIABLE KEY</th>
+<th class="py-3 px-4 text-xs font-mono text-on-surface-variant font-normal">VALUE</th>
+<th class="py-3 px-4 w-12"></th>
+</tr>
+</thead>
+<tbody class="font-mono text-sm">
+<tr class="border-b border-outline-variant/10 hover:bg-surface-container-highest transition-colors">
+<td class="py-3 px-4 text-primary">DB_CONNECTION_STRING</td>
+<td class="py-3 px-4 text-on-surface">postgres://obsidian:***@prod-db.internal:5432</td>
+<td class="py-3 px-4 text-right">
+<button class="text-on-surface-variant hover:text-on-surface"><span class="material-symbols-outlined text-[16px]">edit</span></button>
+</td>
+</tr>
+<tr class="border-b border-outline-variant/10 hover:bg-surface-container-highest transition-colors bg-surface-container-low">
+<td class="py-3 px-4 text-primary">MAX_WORKER_THREADS</td>
+<td class="py-3 px-4 text-on-surface">64</td>
+<td class="py-3 px-4 text-right">
+<button class="text-on-surface-variant hover:text-on-surface"><span class="material-symbols-outlined text-[16px]">edit</span></button>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-highest transition-colors">
+<td class="py-3 px-4 text-primary">TELEMETRY_ENDPOINT</td>
+<td class="py-3 px-4 text-on-surface">https://metrics.obsidian.internal/v2</td>
+<td class="py-3 px-4 text-right">
+<button class="text-on-surface-variant hover:text-on-surface"><span class="material-symbols-outlined text-[16px]">edit</span></button>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="p-3 bg-surface-container-high border-t border-outline-variant/20 text-center">
+<button class="text-xs font-mono text-primary hover:text-primary-fixed-dim transition-colors inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">add</span> ADD VARIABLE
+                            </button>
+</div>
+</div>
+</section>
+<!-- Danger Zone -->
+<section class="bg-error-container/10 rounded-xl p-8 border border-error/20 mt-12">
+<div class="mb-4 flex items-center gap-3">
+<span class="material-symbols-outlined text-error">warning</span>
+<h2 class="text-lg font-semibold tracking-tight text-error">Danger Zone</h2>
+</div>
+<div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+<div>
+<h3 class="text-sm font-medium text-on-surface">Purge Node Cache</h3>
+<p class="text-xs text-on-surface-variant mt-1">Force clearing all temporary memory. May cause a temporary latency spike during rebuild.</p>
+</div>
+<button class="bg-transparent border border-error text-error px-4 py-2 rounded-lg font-medium text-sm hover:bg-error hover:text-on-error transition-colors whitespace-nowrap">
+                            PURGE CACHE
+                        </button>
+</div>
+</section>
+<div class="h-24"></div> <!-- Bottom Spacer -->
+</div>
+</div>
+</main>
+</body></html>

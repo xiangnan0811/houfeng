@@ -1,0 +1,55 @@
+# Node
+web/node_modules/
+web/dist/
+web/coverage/
+
+# Go
+backend/houfeng
+backend/server
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+backend/backups/
+
+# Env
+.env
+backend/.env
+web/.env
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+
+# ai
+.omc/
+.omx/
+.claude/
+.codex/
+.gemini/
+.agent/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.superpowers/
+
+# git worktrees
+.worktrees/
+
+# temp
+tmp/
+
+# docs
+docs/superpowers/
+
+# deploy
+deploy/certs/
+deploy-kit/
+
+# local build artifacts
+backend/.env.production
+web/*.tsbuildinfo
+
+# swaggo generated files (docs.go is committed; json/yaml are regenerated)
+backend/internal/api/docs/swagger.json
+backend/internal/api/docs/swagger.yaml
