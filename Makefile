@@ -4,6 +4,7 @@ NPM ?= npm
 CENTER_BIN := ./bin/houfeng-center
 AGENT_BIN := ./bin/houfeng-agent
 GO_PACKAGES := $(shell $(GO) list ./... 2>/dev/null)
+GO_VERIFY_PATTERNS := ./agent/... ./cmd/... ./db/... ./internal/...
 
 .PHONY: fmt-go test-go vet-go build-center build-agent verify-go verify-web verify
 
@@ -12,7 +13,7 @@ fmt-go:
 		echo '$(GO) not found' >&2; \
 		exit 1; \
 	fi; \
-	packages="$$($(GO) list ./...)" || exit $$?; \
+	packages="$$($(GO) list $(GO_VERIFY_PATTERNS))" || exit $$?; \
 	if [ -z "$$packages" ]; then \
 		echo 'no Go packages yet'; \
 	else \
@@ -24,7 +25,7 @@ test-go:
 		echo '$(GO) not found' >&2; \
 		exit 1; \
 	fi; \
-	packages="$$($(GO) list ./...)" || exit $$?; \
+	packages="$$($(GO) list $(GO_VERIFY_PATTERNS))" || exit $$?; \
 	if [ -z "$$packages" ]; then \
 		echo 'no Go packages yet'; \
 	else \
@@ -36,7 +37,7 @@ vet-go:
 		echo '$(GO) not found' >&2; \
 		exit 1; \
 	fi; \
-	packages="$$($(GO) list ./...)" || exit $$?; \
+	packages="$$($(GO) list $(GO_VERIFY_PATTERNS))" || exit $$?; \
 	if [ -z "$$packages" ]; then \
 		echo 'no Go packages yet'; \
 	else \
