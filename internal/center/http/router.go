@@ -1,7 +1,7 @@
-package centerhttp
+package http
 
 import (
-	"net/http"
+	stdhttp "net/http"
 
 	"houfeng/internal/center/http/handlers"
 )
@@ -11,8 +11,11 @@ type RouterOptions struct {
 	WebDistDir string
 }
 
-func New(opts RouterOptions) http.Handler {
-	mux := http.NewServeMux()
+func New(opts RouterOptions) stdhttp.Handler {
+	mux := stdhttp.NewServeMux()
 	mux.Handle("/api/healthz", handlers.Healthz(opts.Version))
+	if opts.WebDistDir != "" {
+		mux.Handle("/", handlers.SPA(opts.WebDistDir))
+	}
 	return mux
 }

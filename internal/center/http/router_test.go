@@ -1,4 +1,4 @@
-package centerhttp_test
+package http_test
 
 import (
 	"encoding/json"
