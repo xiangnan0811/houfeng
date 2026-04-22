@@ -1,30 +1,28 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
-type NavigationItem = {
-  to: string
-  label: string
-  end?: boolean
-}
-
-const navigationItems: NavigationItem[] = [
-  { to: '/', label: '集群概览', end: true },
-  { to: '/nodes', label: '节点' },
-  { to: '/targets', label: '目标' },
-  { to: '/events', label: '事件' },
-  { to: '/settings', label: '设置' },
-]
+import {
+  PRIMARY_NAV_ITEMS,
+  PRODUCT_FULL_NAME_ZH,
+  PRODUCT_NAME_EN,
+  PRODUCT_NAME_ZH,
+} from '../metadata'
 
 export function AppShell() {
+  useEffect(() => {
+    document.title = PRODUCT_FULL_NAME_ZH
+  }, [])
+
   return (
     <div className="app-shell">
       <aside className="app-shell__sidebar">
         <div className="app-shell__brand">
-          <p className="app-shell__brand-mark">候风</p>
-          <p className="app-shell__brand-name">Houfeng Fleet Control Plane</p>
+          <p className="app-shell__brand-mark">{PRODUCT_NAME_ZH}</p>
+          <p className="app-shell__brand-name">{PRODUCT_FULL_NAME_ZH}</p>
         </div>
 
         <nav className="app-shell__nav" aria-label="主导航">
-          {navigationItems.map((item) => (
+          {PRIMARY_NAV_ITEMS.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -42,8 +40,8 @@ export function AppShell() {
       <div className="app-shell__main">
         <header className="app-shell__header">
           <div>
-            <p className="app-shell__eyebrow">控制平面</p>
-            <h1 className="app-shell__title">Houfeng Fleet Control Plane</h1>
+            <p className="app-shell__eyebrow">{PRODUCT_NAME_EN}</p>
+            <h1 className="app-shell__title">{PRODUCT_FULL_NAME_ZH}</h1>
           </div>
         </header>
 
