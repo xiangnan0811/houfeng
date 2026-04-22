@@ -59,13 +59,13 @@ build-agent:
 		$(GO) build -o $(AGENT_BIN) ./cmd/houfeng-agent; \
 	fi
 
-verify-go: fmt-go test-go vet-go
+verify-go: fmt-go vet-go test-go
 
 verify-web:
-	@if [ ! -f web/package.json ]; then \
-		echo 'web workspace not initialized yet'; \
+	@if [ -f web/package.json ]; then \
+		cd web && $(NPM) ci && $(NPM) run test -- --run && $(NPM) run build; \
 	else \
-		$(NPM) --prefix web run verify; \
+		echo 'web workspace not initialized yet'; \
 	fi
 
 verify: verify-go verify-web
