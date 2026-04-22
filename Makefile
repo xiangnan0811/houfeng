@@ -68,4 +68,5 @@ verify-web:
 		echo 'web workspace not initialized yet'; \
 	fi
 
-verify: verify-go verify-web
+verify:
+	./scripts/verify.sh
