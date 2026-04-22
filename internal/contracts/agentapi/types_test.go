@@ -46,3 +46,19 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 		t.Fatalf("Fingerprint = %q, want %q", roundTrip.Heartbeats[0].Fingerprint, "fp-001")
 	}
 }
+
+func TestSyncRequestOmitsEmptyHeartbeats(t *testing.T) {
+	payload, err := json.Marshal(agentapi.SyncRequest{NodeID: "nd-local-01"})
+	if err != nil {
+		t.Fatalf("marshal sync request: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if _, ok := got["heartbeats"]; ok {
+		t.Fatalf("payload unexpectedly included heartbeats: %s", payload)
+	}
+}

@@ -23,7 +23,7 @@ type NodeHeartbeat struct {
 
 type SyncRequest struct {
 	NodeID     string          `json:"node_id"`
-	Heartbeats []NodeHeartbeat `json:"heartbeats"`
+	Heartbeats []NodeHeartbeat `json:"heartbeats,omitempty"`
 }
 
 type SyncResponse struct {

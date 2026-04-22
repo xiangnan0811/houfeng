@@ -27,18 +27,18 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-func (c *Client) Enroll(ctx context.Context, request agentapi.EnrollmentRequest) (agentapi.EnrollmentResponse, error) {
-	var response agentapi.EnrollmentResponse
-	if err := c.postJSON(ctx, "/api/agent/enroll", request, &response); err != nil {
-		return agentapi.EnrollmentResponse{}, err
+func (c *Client) Enroll(ctx context.Context, request agentapi.EnrollmentRequest) (*agentapi.EnrollmentResponse, error) {
+	response := &agentapi.EnrollmentResponse{}
+	if err := c.postJSON(ctx, "/api/agent/enroll", request, response); err != nil {
+		return nil, err
 	}
 	return response, nil
 }
 
-func (c *Client) Sync(ctx context.Context, request agentapi.SyncRequest) (agentapi.SyncResponse, error) {
-	var response agentapi.SyncResponse
-	if err := c.postJSON(ctx, "/api/agent/sync", request, &response); err != nil {
-		return agentapi.SyncResponse{}, err
+func (c *Client) Sync(ctx context.Context, request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+	response := &agentapi.SyncResponse{}
+	if err := c.postJSON(ctx, "/api/agent/sync", request, response); err != nil {
+		return nil, err
 	}
 	return response, nil
 }
