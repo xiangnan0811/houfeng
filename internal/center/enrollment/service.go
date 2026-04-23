@@ -18,7 +18,7 @@ type Repository interface {
 	FindNodeByEnrollmentToken(context.Context, string) (nodes.Record, error)
 	GetNode(context.Context, string) (nodes.Record, error)
 	UpdateBindingState(context.Context, BindingUpdate) (nodes.Record, error)
-	RecordAcceptedHeartbeat(context.Context, HeartbeatWrite) error
+	RecordAcceptedHeartbeats(context.Context, []HeartbeatWrite) error
 }
 
 type Service struct {
@@ -83,20 +83,18 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 		return ErrBindingNotAccepted
 	}
 
+	receivedAt := time.Now().UTC()
+	writes := make([]HeartbeatWrite, 0, len(input.Heartbeats))
 	for _, heartbeat := range input.Heartbeats {
-		write := HeartbeatWrite{
+		writes = append(writes, HeartbeatWrite{
 			NodeID:       input.NodeID,
 			ObservedAt:   heartbeat.ObservedAt,
-			ReceivedAt:   time.Now().UTC(),
+			ReceivedAt:   receivedAt,
 			AgentVersion: heartbeat.AgentVersion,
 			Fingerprint:  heartbeat.Fingerprint,
 			SyncBatchID:  heartbeat.SyncBatchID,
-		}
-
-		if err := s.repo.RecordAcceptedHeartbeat(ctx, write); err != nil {
-			return err
-		}
+		})
 	}
 
-	return nil
+	return s.repo.RecordAcceptedHeartbeats(ctx, writes)
 }

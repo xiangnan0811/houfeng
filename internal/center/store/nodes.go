@@ -241,62 +241,95 @@ func (r *PostgresNodeRepository) UpdateBindingState(ctx context.Context, update 
 	return record, nil
 }
 
-func (r *PostgresNodeRepository) RecordAcceptedHeartbeat(ctx context.Context, write enrollment.HeartbeatWrite) error {
+func (r *PostgresNodeRepository) RecordAcceptedHeartbeats(ctx context.Context, writes []enrollment.HeartbeatWrite) error {
+	if len(writes) == 0 {
+		return nil
+	}
+
+	nodeID := writes[0].NodeID
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("begin heartbeat transaction for node %q: %w", write.NodeID, err)
+		return fmt.Errorf("begin heartbeat transaction for node %q: %w", nodeID, err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
 
-	if _, err := scanNode(tx.QueryRow(ctx, `
+	var bindingStatus string
+	if err := tx.QueryRow(ctx, `
+		select binding_status
+		from nodes
+		where node_id = $1
+		for update`,
+		nodeID,
+	).Scan(&bindingStatus); errors.Is(err, pgx.ErrNoRows) {
+		return nodes.ErrNodeNotFound
+	} else if err != nil {
+		return fmt.Errorf("query heartbeat state for node %q: %w", nodeID, err)
+	}
+	if bindingStatus != nodes.BindingBound {
+		return enrollment.ErrBindingNotAccepted
+	}
+
+	lastHeartbeatAt := writes[0].ObservedAt
+	lastSyncAt := writes[0].ReceivedAt
+	for _, write := range writes {
+		if _, err := tx.Exec(ctx, `
+			insert into node_heartbeats (
+				node_id,
+				observed_at,
+				received_at,
+				agent_version,
+				fingerprint,
+				sync_batch_id,
+				is_backfilled
+			) values (
+				$1,
+				$2,
+				$3,
+				$4,
+				$5,
+				$6,
+				$7
+			)`,
+			write.NodeID,
+			write.ObservedAt,
+			write.ReceivedAt,
+			write.AgentVersion,
+			write.Fingerprint,
+			write.SyncBatchID,
+			write.IsBackfilled,
+		); err != nil {
+			return fmt.Errorf("record heartbeat for node %q: %w", write.NodeID, err)
+		}
+
+		if write.ObservedAt.After(lastHeartbeatAt) {
+			lastHeartbeatAt = write.ObservedAt
+		}
+		if write.ReceivedAt.After(lastSyncAt) {
+			lastSyncAt = write.ReceivedAt
+		}
+	}
+
+	tag, err := tx.Exec(ctx, `
 		update nodes
 		set last_heartbeat_at = greatest(coalesce(last_heartbeat_at, $2), $2),
 			last_sync_at = greatest(coalesce(last_sync_at, $3), $3),
 			updated_at = now()
-		where node_id = $1
-		returning `+nodeSelectColumns,
-		write.NodeID,
-		write.ObservedAt,
-		write.ReceivedAt,
-	)); errors.Is(err, pgx.ErrNoRows) {
-		return nodes.ErrNodeNotFound
-	} else if err != nil {
-		return fmt.Errorf("touch heartbeat state for node %q: %w", write.NodeID, err)
+		where node_id = $1`,
+		nodeID,
+		lastHeartbeatAt,
+		lastSyncAt,
+	)
+	if err != nil {
+		return fmt.Errorf("touch heartbeat state for node %q: %w", nodeID, err)
 	}
-
-	if _, err := tx.Exec(ctx, `
-		insert into node_heartbeats (
-			node_id,
-			observed_at,
-			received_at,
-			agent_version,
-			fingerprint,
-			sync_batch_id,
-			is_backfilled
-		) values (
-			$1,
-			$2,
-			$3,
-			$4,
-			$5,
-			$6,
-			$7
-		)`,
-		write.NodeID,
-		write.ObservedAt,
-		write.ReceivedAt,
-		write.AgentVersion,
-		write.Fingerprint,
-		write.SyncBatchID,
-		write.IsBackfilled,
-	); err != nil {
-		return fmt.Errorf("record heartbeat for node %q: %w", write.NodeID, err)
+	if tag.RowsAffected() == 0 {
+		return nodes.ErrNodeNotFound
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit heartbeat transaction for node %q: %w", write.NodeID, err)
+		return fmt.Errorf("commit heartbeat transaction for node %q: %w", nodeID, err)
 	}
 	return nil
 }

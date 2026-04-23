@@ -160,8 +160,8 @@ func TestRecordHeartbeatRejectsPendingBinding(t *testing.T) {
 	if len(repo.heartbeatGetNodeCalls) != 1 {
 		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
 	}
-	if len(repo.acceptedHeartbeatWrites) != 0 {
-		t.Fatalf("acceptedHeartbeatWrites = %d, want 0", len(repo.acceptedHeartbeatWrites))
+	if len(repo.acceptedHeartbeatBatches) != 0 {
+		t.Fatalf("acceptedHeartbeatBatches = %d, want 0", len(repo.acceptedHeartbeatBatches))
 	}
 }
 
@@ -192,8 +192,8 @@ func TestRecordHeartbeatRejectsUnboundBindingWithoutSideEffects(t *testing.T) {
 	if len(repo.heartbeatGetNodeCalls) != 1 {
 		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
 	}
-	if len(repo.acceptedHeartbeatWrites) != 0 {
-		t.Fatalf("acceptedHeartbeatWrites = %d, want 0", len(repo.acceptedHeartbeatWrites))
+	if len(repo.acceptedHeartbeatBatches) != 0 {
+		t.Fatalf("acceptedHeartbeatBatches = %d, want 0", len(repo.acceptedHeartbeatBatches))
 	}
 }
 
@@ -201,6 +201,7 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 	t.Parallel()
 
 	observedAt := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
+	secondObservedAt := observedAt.Add(2 * time.Minute)
 	repo := &fakeRepository{
 		heartbeatNode: nodes.Record{
 			NodeID:        "nd_791",
@@ -211,12 +212,20 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 
 	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
 		NodeID: "nd_791",
-		Heartbeats: []HeartbeatPayload{{
-			ObservedAt:   observedAt,
-			AgentVersion: "v1.0.1",
-			Fingerprint:  "fp-3",
-			SyncBatchID:  "sync_789",
-		}},
+		Heartbeats: []HeartbeatPayload{
+			{
+				ObservedAt:   observedAt,
+				AgentVersion: "v1.0.1",
+				Fingerprint:  "fp-3",
+				SyncBatchID:  "sync_789",
+			},
+			{
+				ObservedAt:   secondObservedAt,
+				AgentVersion: "v1.0.2",
+				Fingerprint:  "fp-3",
+				SyncBatchID:  "sync_789",
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("RecordHeartbeatSync() error = %v", err)
@@ -225,11 +234,17 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 	if len(repo.heartbeatGetNodeCalls) != 1 {
 		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
 	}
-	if len(repo.acceptedHeartbeatWrites) != 1 {
-		t.Fatalf("acceptedHeartbeatWrites = %d, want 1", len(repo.acceptedHeartbeatWrites))
+	if len(repo.acceptedHeartbeatBatches) != 1 {
+		t.Fatalf("acceptedHeartbeatBatches = %d, want 1", len(repo.acceptedHeartbeatBatches))
 	}
-	if repo.acceptedHeartbeatWrites[0].SyncBatchID != "sync_789" {
-		t.Fatalf("acceptedHeartbeatWrites[0].SyncBatchID = %q, want %q", repo.acceptedHeartbeatWrites[0].SyncBatchID, "sync_789")
+	if len(repo.acceptedHeartbeatBatches[0]) != 2 {
+		t.Fatalf("acceptedHeartbeatBatches[0] len = %d, want 2", len(repo.acceptedHeartbeatBatches[0]))
+	}
+	if repo.acceptedHeartbeatBatches[0][0].SyncBatchID != "sync_789" {
+		t.Fatalf("acceptedHeartbeatBatches[0][0].SyncBatchID = %q, want %q", repo.acceptedHeartbeatBatches[0][0].SyncBatchID, "sync_789")
+	}
+	if repo.acceptedHeartbeatBatches[0][1].ObservedAt != secondObservedAt {
+		t.Fatalf("acceptedHeartbeatBatches[0][1].ObservedAt = %s, want %s", repo.acceptedHeartbeatBatches[0][1].ObservedAt.Format(time.RFC3339), secondObservedAt.Format(time.RFC3339))
 	}
 }
 
@@ -249,8 +264,8 @@ type fakeRepository struct {
 	heartbeatNode         nodes.Record
 	heartbeatNodeErr      error
 
-	acceptedHeartbeatWrites []HeartbeatWrite
-	recordAcceptedErr       error
+	acceptedHeartbeatBatches [][]HeartbeatWrite
+	recordAcceptedErr        error
 }
 
 func (f *fakeRepository) IssueEnrollmentToken(_ context.Context, nodeID string) (string, error) {
@@ -297,7 +312,8 @@ func (f *fakeRepository) GetNode(_ context.Context, nodeID string) (nodes.Record
 	return f.heartbeatNode, nil
 }
 
-func (f *fakeRepository) RecordAcceptedHeartbeat(_ context.Context, write HeartbeatWrite) error {
-	f.acceptedHeartbeatWrites = append(f.acceptedHeartbeatWrites, write)
+func (f *fakeRepository) RecordAcceptedHeartbeats(_ context.Context, writes []HeartbeatWrite) error {
+	batch := append([]HeartbeatWrite(nil), writes...)
+	f.acceptedHeartbeatBatches = append(f.acceptedHeartbeatBatches, batch)
 	return f.recordAcceptedErr
 }
