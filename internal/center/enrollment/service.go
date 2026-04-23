@@ -86,6 +86,9 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 	receivedAt := time.Now().UTC()
 	writes := make([]HeartbeatWrite, 0, len(input.Heartbeats))
 	for _, heartbeat := range input.Heartbeats {
+		if heartbeat.Fingerprint != record.BindingFingerprint {
+			return ErrBindingNotAccepted
+		}
 		writes = append(writes, HeartbeatWrite{
 			NodeID:       input.NodeID,
 			ObservedAt:   heartbeat.ObservedAt,

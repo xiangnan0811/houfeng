@@ -197,6 +197,73 @@ func TestRecordHeartbeatRejectsUnboundBindingWithoutSideEffects(t *testing.T) {
 	}
 }
 
+func TestRecordHeartbeatRejectsMismatchedFingerprint(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepository{
+		heartbeatNode: nodes.Record{
+			NodeID:             "nd_792",
+			BindingStatus:      nodes.BindingBound,
+			BindingFingerprint: "fp-expected",
+		},
+	}
+	service := NewService(repo)
+
+	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
+		NodeID: "nd_792",
+		Heartbeats: []HeartbeatPayload{{
+			ObservedAt:   time.Date(2026, 4, 23, 11, 45, 0, 0, time.UTC),
+			AgentVersion: "v1.0.0",
+			Fingerprint:  "fp-actual",
+			SyncBatchID:  "sync_457",
+		}},
+	})
+	if !errors.Is(err, ErrBindingNotAccepted) {
+		t.Fatalf("RecordHeartbeatSync() error = %v, want ErrBindingNotAccepted", err)
+	}
+}
+
+func TestRecordHeartbeatRejectsMismatchedFingerprintWithoutSideEffects(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepository{
+		heartbeatNode: nodes.Record{
+			NodeID:             "nd_793",
+			BindingStatus:      nodes.BindingBound,
+			BindingFingerprint: "fp-expected",
+		},
+	}
+	service := NewService(repo)
+
+	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
+		NodeID: "nd_793",
+		Heartbeats: []HeartbeatPayload{
+			{
+				ObservedAt:   time.Date(2026, 4, 23, 11, 46, 0, 0, time.UTC),
+				AgentVersion: "v1.0.0",
+				Fingerprint:  "fp-expected",
+				SyncBatchID:  "sync_458",
+			},
+			{
+				ObservedAt:   time.Date(2026, 4, 23, 11, 47, 0, 0, time.UTC),
+				AgentVersion: "v1.0.0",
+				Fingerprint:  "fp-actual",
+				SyncBatchID:  "sync_458",
+			},
+		},
+	})
+	if !errors.Is(err, ErrBindingNotAccepted) {
+		t.Fatalf("RecordHeartbeatSync() error = %v, want ErrBindingNotAccepted", err)
+	}
+
+	if len(repo.heartbeatGetNodeCalls) != 1 {
+		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
+	}
+	if len(repo.acceptedHeartbeatBatches) != 0 {
+		t.Fatalf("acceptedHeartbeatBatches = %d, want 0", len(repo.acceptedHeartbeatBatches))
+	}
+}
+
 func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 	t.Parallel()
 
@@ -204,8 +271,9 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 	secondObservedAt := observedAt.Add(2 * time.Minute)
 	repo := &fakeRepository{
 		heartbeatNode: nodes.Record{
-			NodeID:        "nd_791",
-			BindingStatus: nodes.BindingBound,
+			NodeID:             "nd_791",
+			BindingStatus:      nodes.BindingBound,
+			BindingFingerprint: "fp-3",
 		},
 	}
 	service := NewService(repo)
