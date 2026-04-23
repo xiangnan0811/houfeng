@@ -35,7 +35,7 @@ func AgentEnroll(svc AgentEnrollmentService) http.Handler {
 		})
 		if err != nil {
 			switch {
-			case errors.Is(err, nodes.ErrNodeNotFound):
+			case errors.Is(err, enrollment.ErrInvalidEnrollmentToken):
 				writeAgentAPIError(w, http.StatusUnauthorized, agentapi.ErrorCodeInvalidEnrollmentToken, "invalid enrollment token")
 			default:
 				writeAgentAPIError(w, http.StatusInternalServerError, agentapi.ErrorCodeInternalError, "internal server error")

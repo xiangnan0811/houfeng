@@ -11,7 +11,6 @@ import (
 
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/http/handlers"
-	"houfeng/internal/center/nodes"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -84,7 +83,7 @@ func TestAgentEnrollHandlerReturnsBindingStatus(t *testing.T) {
 func TestAgentEnrollHandlerReturnsInvalidEnrollmentTokenError(t *testing.T) {
 	t.Parallel()
 
-	svc := &fakeAgentEnrollmentService{enrollErr: nodes.ErrNodeNotFound}
+	svc := &fakeAgentEnrollmentService{enrollErr: enrollment.ErrInvalidEnrollmentToken}
 
 	handler := handlers.AgentEnroll(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(`{"token":"missing-token","fingerprint":"fp-001"}`))
