@@ -144,3 +144,30 @@ func (f *fakeNodeRepository) GetNode(context.Context, string) (nodes.Record, err
 func (f *fakeNodeRepository) CreateNode(context.Context, nodes.CreateInput) (nodes.Record, error) {
 	return f.createNodeResult, nil
 }
+
+func TestRouterKeepsProbeItemsSubtreeOutOfTargetItemHandler(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		TargetItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "item"
+			w.WriteHeader(http.StatusOK)
+		}),
+		TargetProbeItemsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "probe-items"
+			w.WriteHeader(http.StatusNotFound)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/targets/tg_001/probe-items/pb_001", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+	if called != "probe-items" {
+		t.Fatalf("expected probe items subtree handler, got %q", called)
+	}
+}

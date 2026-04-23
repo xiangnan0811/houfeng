@@ -111,16 +111,16 @@ func TestCreateProbeItemHandlerReturnsCreatedRecord(t *testing.T) {
 			ProbeItemID:    "pb_001",
 			ProbeKind:      "http",
 			Enabled:        true,
-			FrequencyTier:  "standard",
+			FrequencyTier:  "1m",
 			TimeoutSeconds: 5,
-			Config:         json.RawMessage(`{"scheme":"https","path":"/healthz"}`),
+			Config:         json.RawMessage(`{"scheme":"https","path":"/healthz","method":"GET"}`),
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		},
 	}
 
 	handler := handlers.TargetProbeItems(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/probe-items", strings.NewReader(`{"probe_kind":"http","enabled":true,"frequency_tier":"standard","timeout_seconds":5,"config":{"scheme":"https","path":"/healthz"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/probe-items", strings.NewReader(`{"probe_kind":"http","enabled":true,"frequency_tier":"1m","timeout_seconds":5,"config":{"scheme":"https","path":"/healthz","method":"GET"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -137,5 +137,64 @@ func TestCreateProbeItemHandlerReturnsCreatedRecord(t *testing.T) {
 
 	if body.ProbeItemID != "pb_001" {
 		t.Fatalf("expected probe_item_id %q, got %q", "pb_001", body.ProbeItemID)
+	}
+}
+
+func TestCreateProbeItemHandlerRejectsInvalidProbeKind(t *testing.T) {
+	repo := &fakeTargetRepository{}
+
+	handler := handlers.TargetProbeItems(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/probe-items", strings.NewReader(`{"probe_kind":"icmp","enabled":true,"frequency_tier":"1m","timeout_seconds":5,"config":{"port":443}}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+func TestCreateProbeItemHandlerRejectsInvalidFrequencyTierOrMissingKindConfig(t *testing.T) {
+	t.Run("invalid frequency tier", func(t *testing.T) {
+		repo := &fakeTargetRepository{}
+		handler := handlers.TargetProbeItems(repo)
+		req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/probe-items", strings.NewReader(`{"probe_kind":"tcp","enabled":true,"frequency_tier":"30s","timeout_seconds":5,"config":{"port":443}}`))
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+		}
+	})
+
+	t.Run("missing kind specific config", func(t *testing.T) {
+		repo := &fakeTargetRepository{}
+		handler := handlers.TargetProbeItems(repo)
+		req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/probe-items", strings.NewReader(`{"probe_kind":"http","enabled":true,"frequency_tier":"1m","timeout_seconds":5,"config":{"scheme":"https","path":"/healthz"}}`))
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+		}
+	})
+}
+
+func TestTargetProbeItemsHandlerRejectsDeeperPaths(t *testing.T) {
+	repo := &fakeTargetRepository{}
+
+	handler := handlers.TargetProbeItems(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/targets/tg_001/probe-items/pb_001", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
 	}
 }

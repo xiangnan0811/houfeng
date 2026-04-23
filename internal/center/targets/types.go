@@ -16,6 +16,15 @@ const (
 	RunStatusPaused      = "暂停"
 	RunStatusArchived    = "已归档"
 
+	ProbeKindTCP  = "tcp"
+	ProbeKindHTTP = "http"
+	ProbeKindTLS  = "tls"
+
+	FrequencyTier1m  = "1m"
+	FrequencyTier5m  = "5m"
+	FrequencyTier15m = "15m"
+	FrequencyTier6h  = "6h"
+
 	HealthNormal = "正常"
 )
 
@@ -31,6 +40,19 @@ var allowedRunStatuses = map[string]struct{}{
 	RunStatusMaintenance: {},
 	RunStatusPaused:      {},
 	RunStatusArchived:    {},
+}
+
+var allowedProbeKinds = map[string]struct{}{
+	ProbeKindTCP:  {},
+	ProbeKindHTTP: {},
+	ProbeKindTLS:  {},
+}
+
+var allowedFrequencyTiers = map[string]struct{}{
+	FrequencyTier1m:  {},
+	FrequencyTier5m:  {},
+	FrequencyTier15m: {},
+	FrequencyTier6h:  {},
 }
 
 type TargetRecord struct {
@@ -98,5 +120,15 @@ func IsValidTargetType(targetType string) bool {
 
 func IsValidRunStatus(status string) bool {
 	_, ok := allowedRunStatuses[status]
+	return ok
+}
+
+func IsValidProbeKind(kind string) bool {
+	_, ok := allowedProbeKinds[kind]
+	return ok
+}
+
+func IsValidFrequencyTier(tier string) bool {
+	_, ok := allowedFrequencyTiers[tier]
 	return ok
 }

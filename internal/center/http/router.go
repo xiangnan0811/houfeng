@@ -31,24 +31,59 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil {
 		mux.Handle("/api/targets/", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-			trimmedPath := strings.TrimSuffix(r.URL.Path, "/")
-			if strings.HasSuffix(trimmedPath, "/probe-items") {
+			targetID, subtree := targetSubtreePath(r.URL.Path)
+			if targetID == "" {
+				stdhttp.NotFound(w, r)
+				return
+			}
+
+			switch subtree {
+			case targetSubtreeItem:
+				if opts.TargetItemHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.TargetItemHandler.ServeHTTP(w, r)
+			case targetSubtreeProbeItems:
 				if opts.TargetProbeItemsHandler == nil {
 					stdhttp.NotFound(w, r)
 					return
 				}
 				opts.TargetProbeItemsHandler.ServeHTTP(w, r)
-				return
-			}
-			if opts.TargetItemHandler == nil {
+			default:
 				stdhttp.NotFound(w, r)
-				return
 			}
-			opts.TargetItemHandler.ServeHTTP(w, r)
 		}))
 	}
 	if opts.WebDistDir != "" {
 		mux.Handle("/", handlers.SPA(opts.WebDistDir))
 	}
 	return mux
+}
+
+type targetSubtree string
+
+const (
+	targetSubtreeUnknown    targetSubtree = ""
+	targetSubtreeItem       targetSubtree = "item"
+	targetSubtreeProbeItems targetSubtree = "probe-items"
+)
+
+func targetSubtreePath(path string) (targetID string, subtree targetSubtree) {
+	relative := strings.Trim(strings.TrimPrefix(path, "/api/targets/"), "/")
+	if relative == "" {
+		return "", targetSubtreeUnknown
+	}
+
+	segments := strings.Split(relative, "/")
+	if len(segments) == 0 || segments[0] == "" {
+		return "", targetSubtreeUnknown
+	}
+	if len(segments) == 1 {
+		return segments[0], targetSubtreeItem
+	}
+	if segments[1] == "probe-items" {
+		return segments[0], targetSubtreeProbeItems
+	}
+	return segments[0], targetSubtreeUnknown
 }

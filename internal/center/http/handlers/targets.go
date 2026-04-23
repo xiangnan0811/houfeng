@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -73,9 +74,13 @@ func TargetItem(repo targets.Repository) http.Handler {
 
 func TargetProbeItems(repo targets.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		targetID := targetIDFromProbePath(r.URL.Path)
+		targetID, isCollection := targetProbePath(r.URL.Path)
 		if targetID == "" {
 			writeError(w, http.StatusNotFound, "target not found")
+			return
+		}
+		if !isCollection {
+			writeError(w, http.StatusNotFound, "probe item not found")
 			return
 		}
 
@@ -146,23 +151,52 @@ func normalizeCreateProbeItemInput(input targets.CreateProbeItemInput) targets.C
 }
 
 func isValidCreateProbeItemInput(input targets.CreateProbeItemInput) bool {
-	if input.ProbeKind == "" || input.FrequencyTier == "" || input.TimeoutSeconds <= 0 {
+	if !targets.IsValidProbeKind(input.ProbeKind) || !targets.IsValidFrequencyTier(input.FrequencyTier) || input.TimeoutSeconds <= 0 {
 		return false
 	}
-	return len(input.Config) > 0
+	return hasValidProbeConfig(input.ProbeKind, input.Config)
 }
 
-func targetIDFromProbePath(path string) string {
-	suffix := strings.TrimPrefix(path, "/api/targets/")
-	suffix = strings.Trim(suffix, "/")
-	if suffix == "" || !strings.HasSuffix(suffix, "/probe-items") {
-		return ""
+func hasValidProbeConfig(probeKind string, raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
 	}
 
-	targetID := strings.TrimSuffix(suffix, "/probe-items")
-	targetID = strings.Trim(targetID, "/")
-	if targetID == "" || strings.Contains(targetID, "/") {
-		return ""
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return false
 	}
-	return targetID
+	if config == nil {
+		return false
+	}
+
+	switch probeKind {
+	case targets.ProbeKindTCP, targets.ProbeKindTLS:
+		return hasRequiredConfigFields(config, "port")
+	case targets.ProbeKindHTTP:
+		return hasRequiredConfigFields(config, "scheme", "path", "method")
+	default:
+		return false
+	}
+}
+
+func hasRequiredConfigFields(config map[string]json.RawMessage, fields ...string) bool {
+	for _, field := range fields {
+		value, ok := config[field]
+		if !ok || len(value) == 0 || string(value) == "null" {
+			return false
+		}
+	}
+	return true
+}
+
+func targetProbePath(path string) (targetID string, isCollection bool) {
+	segments := strings.Split(strings.Trim(strings.TrimPrefix(path, "/api/targets/"), "/"), "/")
+	if len(segments) < 2 || segments[0] == "" || segments[1] != "probe-items" {
+		return "", false
+	}
+	if len(segments) == 2 {
+		return segments[0], true
+	}
+	return segments[0], false
 }
