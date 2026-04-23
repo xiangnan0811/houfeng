@@ -241,8 +241,32 @@ func (r *PostgresNodeRepository) UpdateBindingState(ctx context.Context, update 
 	return record, nil
 }
 
-func (r *PostgresNodeRepository) RecordHeartbeat(ctx context.Context, write enrollment.HeartbeatWrite) error {
-	if _, err := r.db.Exec(ctx, `
+func (r *PostgresNodeRepository) RecordAcceptedHeartbeat(ctx context.Context, write enrollment.HeartbeatWrite) error {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin heartbeat transaction for node %q: %w", write.NodeID, err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if _, err := scanNode(tx.QueryRow(ctx, `
+		update nodes
+		set last_heartbeat_at = greatest(coalesce(last_heartbeat_at, $2), $2),
+			last_sync_at = greatest(coalesce(last_sync_at, $3), $3),
+			updated_at = now()
+		where node_id = $1
+		returning `+nodeSelectColumns,
+		write.NodeID,
+		write.ObservedAt,
+		write.ReceivedAt,
+	)); errors.Is(err, pgx.ErrNoRows) {
+		return nodes.ErrNodeNotFound
+	} else if err != nil {
+		return fmt.Errorf("touch heartbeat state for node %q: %w", write.NodeID, err)
+	}
+
+	if _, err := tx.Exec(ctx, `
 		insert into node_heartbeats (
 			node_id,
 			observed_at,
@@ -270,26 +294,9 @@ func (r *PostgresNodeRepository) RecordHeartbeat(ctx context.Context, write enro
 	); err != nil {
 		return fmt.Errorf("record heartbeat for node %q: %w", write.NodeID, err)
 	}
-	return nil
-}
 
-func (r *PostgresNodeRepository) TouchHeartbeatState(ctx context.Context, write enrollment.HeartbeatWrite) (nodes.Record, error) {
-	record, err := scanNode(r.db.QueryRow(ctx, `
-		update nodes
-		set last_heartbeat_at = greatest(coalesce(last_heartbeat_at, $2), $2),
-			last_sync_at = greatest(coalesce(last_sync_at, $3), $3),
-			updated_at = now()
-		where node_id = $1
-		returning `+nodeSelectColumns,
-		write.NodeID,
-		write.ObservedAt,
-		write.ReceivedAt,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nodes.Record{}, nodes.ErrNodeNotFound
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit heartbeat transaction for node %q: %w", write.NodeID, err)
 	}
-	if err != nil {
-		return nodes.Record{}, fmt.Errorf("touch heartbeat state for node %q: %w", write.NodeID, err)
-	}
-	return record, nil
+	return nil
 }

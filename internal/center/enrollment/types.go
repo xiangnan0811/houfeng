@@ -3,9 +3,8 @@ package enrollment
 import "time"
 
 type EnrollInput struct {
-	Token        string
-	Fingerprint  string
-	AgentVersion string
+	Token       string
+	Fingerprint string
 }
 
 type EnrollResult struct {

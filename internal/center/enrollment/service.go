@@ -8,15 +8,17 @@ import (
 	"houfeng/internal/center/nodes"
 )
 
-var ErrBindingNotAccepted = errors.New("binding not accepted")
+var (
+	ErrBindingNotAccepted     = errors.New("binding not accepted")
+	ErrInvalidEnrollmentToken = errors.New("invalid enrollment token")
+)
 
 type Repository interface {
 	IssueEnrollmentToken(context.Context, string) (string, error)
 	FindNodeByEnrollmentToken(context.Context, string) (nodes.Record, error)
 	GetNode(context.Context, string) (nodes.Record, error)
 	UpdateBindingState(context.Context, BindingUpdate) (nodes.Record, error)
-	RecordHeartbeat(context.Context, HeartbeatWrite) error
-	TouchHeartbeatState(context.Context, HeartbeatWrite) (nodes.Record, error)
+	RecordAcceptedHeartbeat(context.Context, HeartbeatWrite) error
 }
 
 type Service struct {
@@ -34,6 +36,9 @@ func (s *Service) IssueNodeEnrollmentToken(ctx context.Context, nodeID string) (
 func (s *Service) EnrollNode(ctx context.Context, input EnrollInput) (EnrollResult, error) {
 	record, err := s.repo.FindNodeByEnrollmentToken(ctx, input.Token)
 	if err != nil {
+		if errors.Is(err, nodes.ErrNodeNotFound) {
+			return EnrollResult{}, ErrInvalidEnrollmentToken
+		}
 		return EnrollResult{}, err
 	}
 
@@ -88,10 +93,7 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 			SyncBatchID:  heartbeat.SyncBatchID,
 		}
 
-		if _, err := s.repo.TouchHeartbeatState(ctx, write); err != nil {
-			return err
-		}
-		if err := s.repo.RecordHeartbeat(ctx, write); err != nil {
+		if err := s.repo.RecordAcceptedHeartbeat(ctx, write); err != nil {
 			return err
 		}
 	}

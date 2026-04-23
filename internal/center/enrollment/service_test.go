@@ -44,9 +44,8 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 	service := NewService(repo)
 
 	result, err := service.EnrollNode(context.Background(), EnrollInput{
-		Token:        "plain-token",
-		Fingerprint:  "fp-new",
-		AgentVersion: "v1.0.0",
+		Token:       "plain-token",
+		Fingerprint: "fp-new",
 	})
 	if err != nil {
 		t.Fatalf("EnrollNode() error = %v", err)
@@ -90,9 +89,8 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 	service := NewService(repo)
 
 	result, err := service.EnrollNode(context.Background(), EnrollInput{
-		Token:        "plain-token",
-		Fingerprint:  "fp-new",
-		AgentVersion: "v1.0.0",
+		Token:       "plain-token",
+		Fingerprint: "fp-new",
 	})
 	if err != nil {
 		t.Fatalf("EnrollNode() error = %v", err)
@@ -115,6 +113,20 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 		BindingStatus: nodes.BindingPendingConfirmation,
 	}) {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestEnrollNodeReturnsInvalidEnrollmentToken(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(&fakeRepository{nodeByToken: map[string]nodes.Record{}})
+
+	_, err := service.EnrollNode(context.Background(), EnrollInput{
+		Token:       "missing-token",
+		Fingerprint: "fp-new",
+	})
+	if !errors.Is(err, ErrInvalidEnrollmentToken) {
+		t.Fatalf("EnrollNode() error = %v, want ErrInvalidEnrollmentToken", err)
 	}
 }
 
@@ -148,11 +160,8 @@ func TestRecordHeartbeatRejectsPendingBinding(t *testing.T) {
 	if len(repo.heartbeatGetNodeCalls) != 1 {
 		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
 	}
-	if len(repo.heartbeatTouches) != 0 {
-		t.Fatalf("heartbeatTouches = %d, want 0", len(repo.heartbeatTouches))
-	}
-	if len(repo.heartbeatWrites) != 0 {
-		t.Fatalf("heartbeatWrites = %d, want 0", len(repo.heartbeatWrites))
+	if len(repo.acceptedHeartbeatWrites) != 0 {
+		t.Fatalf("acceptedHeartbeatWrites = %d, want 0", len(repo.acceptedHeartbeatWrites))
 	}
 }
 
@@ -183,15 +192,12 @@ func TestRecordHeartbeatRejectsUnboundBindingWithoutSideEffects(t *testing.T) {
 	if len(repo.heartbeatGetNodeCalls) != 1 {
 		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
 	}
-	if len(repo.heartbeatTouches) != 0 {
-		t.Fatalf("heartbeatTouches = %d, want 0", len(repo.heartbeatTouches))
-	}
-	if len(repo.heartbeatWrites) != 0 {
-		t.Fatalf("heartbeatWrites = %d, want 0", len(repo.heartbeatWrites))
+	if len(repo.acceptedHeartbeatWrites) != 0 {
+		t.Fatalf("acceptedHeartbeatWrites = %d, want 0", len(repo.acceptedHeartbeatWrites))
 	}
 }
 
-func TestRecordHeartbeatWritesOnlyAfterAcceptedBinding(t *testing.T) {
+func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 	t.Parallel()
 
 	observedAt := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
@@ -219,17 +225,11 @@ func TestRecordHeartbeatWritesOnlyAfterAcceptedBinding(t *testing.T) {
 	if len(repo.heartbeatGetNodeCalls) != 1 {
 		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
 	}
-	if len(repo.heartbeatTouches) != 1 {
-		t.Fatalf("heartbeatTouches = %d, want 1", len(repo.heartbeatTouches))
+	if len(repo.acceptedHeartbeatWrites) != 1 {
+		t.Fatalf("acceptedHeartbeatWrites = %d, want 1", len(repo.acceptedHeartbeatWrites))
 	}
-	if len(repo.heartbeatWrites) != 1 {
-		t.Fatalf("heartbeatWrites = %d, want 1", len(repo.heartbeatWrites))
-	}
-	if repo.heartbeatTouches[0].SyncBatchID != "sync_789" {
-		t.Fatalf("heartbeatTouches[0].SyncBatchID = %q, want %q", repo.heartbeatTouches[0].SyncBatchID, "sync_789")
-	}
-	if repo.heartbeatWrites[0].SyncBatchID != "sync_789" {
-		t.Fatalf("heartbeatWrites[0].SyncBatchID = %q, want %q", repo.heartbeatWrites[0].SyncBatchID, "sync_789")
+	if repo.acceptedHeartbeatWrites[0].SyncBatchID != "sync_789" {
+		t.Fatalf("acceptedHeartbeatWrites[0].SyncBatchID = %q, want %q", repo.acceptedHeartbeatWrites[0].SyncBatchID, "sync_789")
 	}
 }
 
@@ -245,15 +245,12 @@ type fakeRepository struct {
 	updateResult   nodes.Record
 	updateErr      error
 
-	heartbeatWrites []HeartbeatWrite
-	recordErr       error
-
 	heartbeatGetNodeCalls []string
 	heartbeatNode         nodes.Record
 	heartbeatNodeErr      error
 
-	heartbeatTouches []HeartbeatWrite
-	touchErr         error
+	acceptedHeartbeatWrites []HeartbeatWrite
+	recordAcceptedErr       error
 }
 
 func (f *fakeRepository) IssueEnrollmentToken(_ context.Context, nodeID string) (string, error) {
@@ -292,11 +289,6 @@ func (f *fakeRepository) UpdateBindingState(_ context.Context, update BindingUpd
 	return record, nil
 }
 
-func (f *fakeRepository) RecordHeartbeat(_ context.Context, write HeartbeatWrite) error {
-	f.heartbeatWrites = append(f.heartbeatWrites, write)
-	return f.recordErr
-}
-
 func (f *fakeRepository) GetNode(_ context.Context, nodeID string) (nodes.Record, error) {
 	f.heartbeatGetNodeCalls = append(f.heartbeatGetNodeCalls, nodeID)
 	if f.heartbeatNodeErr != nil {
@@ -305,10 +297,7 @@ func (f *fakeRepository) GetNode(_ context.Context, nodeID string) (nodes.Record
 	return f.heartbeatNode, nil
 }
 
-func (f *fakeRepository) TouchHeartbeatState(_ context.Context, write HeartbeatWrite) (nodes.Record, error) {
-	f.heartbeatTouches = append(f.heartbeatTouches, write)
-	if f.touchErr != nil {
-		return nodes.Record{}, f.touchErr
-	}
-	return f.heartbeatNode, nil
+func (f *fakeRepository) RecordAcceptedHeartbeat(_ context.Context, write HeartbeatWrite) error {
+	f.acceptedHeartbeatWrites = append(f.acceptedHeartbeatWrites, write)
+	return f.recordAcceptedErr
 }
