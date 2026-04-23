@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -103,8 +102,9 @@ func TargetProbeItems(repo targets.Repository) http.Handler {
 				return
 			}
 
-			input = normalizeCreateProbeItemInput(input)
-			if !isValidCreateProbeItemInput(input) {
+			var err error
+			input, err = targets.ValidateCreateProbeItemInput(input)
+			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
@@ -138,54 +138,11 @@ func isValidCreateTargetInput(input targets.CreateTargetInput) bool {
 	if input.Name == "" || input.TargetType == "" || input.Host == "" || input.RunStatus == "" {
 		return false
 	}
+	if len(input.ExecutionNodeLabels) == 0 {
+		return false
+	}
 	if !targets.IsValidTargetType(input.TargetType) || !targets.IsValidRunStatus(input.RunStatus) {
 		return false
-	}
-	return true
-}
-
-func normalizeCreateProbeItemInput(input targets.CreateProbeItemInput) targets.CreateProbeItemInput {
-	input.ProbeKind = strings.TrimSpace(input.ProbeKind)
-	input.FrequencyTier = strings.TrimSpace(input.FrequencyTier)
-	return input
-}
-
-func isValidCreateProbeItemInput(input targets.CreateProbeItemInput) bool {
-	if !targets.IsValidProbeKind(input.ProbeKind) || !targets.IsValidFrequencyTier(input.FrequencyTier) || input.TimeoutSeconds <= 0 {
-		return false
-	}
-	return hasValidProbeConfig(input.ProbeKind, input.Config)
-}
-
-func hasValidProbeConfig(probeKind string, raw json.RawMessage) bool {
-	if len(raw) == 0 {
-		return false
-	}
-
-	var config map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &config); err != nil {
-		return false
-	}
-	if config == nil {
-		return false
-	}
-
-	switch probeKind {
-	case targets.ProbeKindTCP, targets.ProbeKindTLS:
-		return hasRequiredConfigFields(config, "port")
-	case targets.ProbeKindHTTP:
-		return hasRequiredConfigFields(config, "scheme", "path", "method")
-	default:
-		return false
-	}
-}
-
-func hasRequiredConfigFields(config map[string]json.RawMessage, fields ...string) bool {
-	for _, field := range fields {
-		value, ok := config[field]
-		if !ok || len(value) == 0 || string(value) == "null" {
-			return false
-		}
 	}
 	return true
 }

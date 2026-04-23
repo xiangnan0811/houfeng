@@ -9,7 +9,7 @@ import (
 	"testing/fstest"
 )
 
-func TestNamesIncludesInitialSchema(t *testing.T) {
+func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	names, err := Names()
 	if err != nil {
 		t.Fatalf("Names() error = %v", err)
@@ -21,6 +21,9 @@ func TestNamesIncludesInitialSchema(t *testing.T) {
 
 	if names[0] != "0001_initial_schema.sql" {
 		t.Fatalf("first migration = %q, want %q", names[0], "0001_initial_schema.sql")
+	}
+	if names[1] != "0002_normalize_status_defaults.sql" {
+		t.Fatalf("second migration = %q, want %q", names[1], "0002_normalize_status_defaults.sql")
 	}
 }
 
