@@ -16,6 +16,17 @@ const (
 	agentVersion    = "dev"
 )
 
+type EnrollmentNotBoundError struct {
+	BindingStatus string
+}
+
+func (e *EnrollmentNotBoundError) Error() string {
+	if e.BindingStatus == "" {
+		return "enrollment binding_status is not bound"
+	}
+	return fmt.Sprintf("enrollment binding_status is %q, want %q", e.BindingStatus, agentapi.BindingStatusBound)
+}
+
 type Client interface {
 	Enroll(context.Context, agentapi.EnrollmentRequest) (*agentapi.EnrollmentResponse, error)
 	Sync(context.Context, agentapi.SyncRequest) (*agentapi.SyncResponse, error)
@@ -85,16 +96,17 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 
 	enrollment, err := r.client.Enroll(ctx, agentapi.EnrollmentRequest{
-		NodeName:     r.cfg.NodeName,
-		Token:        token,
-		Fingerprint:  fingerprint,
-		AgentVersion: agentVersion,
+		Token:       token,
+		Fingerprint: fingerprint,
 	})
 	if err != nil {
 		return fmt.Errorf("enroll agent: %w", err)
 	}
 
 	r.logger.Info("agent enrolled", "node_name", r.cfg.NodeName, "node_id", enrollment.NodeID, "status", enrollment.Status, "binding_status", enrollment.BindingStatus)
+	if enrollment.BindingStatus != agentapi.BindingStatusBound {
+		return fmt.Errorf("enroll agent: %w", &EnrollmentNotBoundError{BindingStatus: enrollment.BindingStatus})
+	}
 
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()

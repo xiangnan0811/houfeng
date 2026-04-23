@@ -62,6 +62,36 @@ func TestErrorResponseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEnrollmentRequestOmitsDeprecatedTransportFields(t *testing.T) {
+	original := agentapi.EnrollmentRequest{
+		Token:       "plain-token",
+		Fingerprint: "fp-001",
+	}
+
+	payload, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal enrollment request: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if got["token"] != "plain-token" {
+		t.Fatalf("token = %v, want %q", got["token"], "plain-token")
+	}
+	if got["fingerprint"] != "fp-001" {
+		t.Fatalf("fingerprint = %v, want %q", got["fingerprint"], "fp-001")
+	}
+	if _, ok := got["node_name"]; ok {
+		t.Fatalf("payload unexpectedly included node_name: %s", payload)
+	}
+	if _, ok := got["agent_version"]; ok {
+		t.Fatalf("payload unexpectedly included agent_version: %s", payload)
+	}
+}
+
 func TestSyncRequestRoundTrip(t *testing.T) {
 	observedAt, err := time.Parse(time.RFC3339, "2026-04-22T12:00:00Z")
 	if err != nil {

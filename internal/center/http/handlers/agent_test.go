@@ -47,7 +47,7 @@ func TestAgentEnrollHandlerReturnsBindingStatus(t *testing.T) {
 	}
 
 	handler := handlers.AgentEnroll(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(`{"node_name":"nd-local-01","token":"plain-token","fingerprint":"fp-001","agent_version":"dev"}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(`{"token":"plain-token","fingerprint":"fp-001"}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 

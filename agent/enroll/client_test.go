@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,6 +19,26 @@ func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 		if r.URL.Path != agentapi.EnrollPath {
 			t.Fatalf("path = %q, want %q", r.URL.Path, agentapi.EnrollPath)
 		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		if payload["token"] != "plain-token" {
+			t.Fatalf("token = %v, want %q", payload["token"], "plain-token")
+		}
+		if payload["fingerprint"] != "fp-001" {
+			t.Fatalf("fingerprint = %v, want %q", payload["fingerprint"], "fp-001")
+		}
+		if _, ok := payload["node_name"]; ok {
+			t.Fatalf("request unexpectedly included node_name: %s", body)
+		}
+		if _, ok := payload["agent_version"]; ok {
+			t.Fatalf("request unexpectedly included agent_version: %s", body)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(agentapi.EnrollmentResponse{
 			NodeID:        "nd-local-01",
@@ -28,7 +49,10 @@ func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 	defer ts.Close()
 
 	client := enroll.NewClient(ts.URL)
-	response, err := client.Enroll(context.Background(), agentapi.EnrollmentRequest{NodeName: "nd-local-01"})
+	response, err := client.Enroll(context.Background(), agentapi.EnrollmentRequest{
+		Token:       "plain-token",
+		Fingerprint: "fp-001",
+	})
 	if err != nil {
 		t.Fatalf("Enroll() error = %v", err)
 	}
@@ -58,7 +82,10 @@ func TestClientEnrollReturnsRemoteErrorWithCode(t *testing.T) {
 	defer ts.Close()
 
 	client := enroll.NewClient(ts.URL)
-	_, err := client.Enroll(context.Background(), agentapi.EnrollmentRequest{NodeName: "nd-local-01"})
+	_, err := client.Enroll(context.Background(), agentapi.EnrollmentRequest{
+		Token:       "plain-token",
+		Fingerprint: "fp-001",
+	})
 	if err == nil {
 		t.Fatal("Enroll() error = nil, want non-nil")
 	}

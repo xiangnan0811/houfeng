@@ -18,10 +18,8 @@ const (
 )
 
 type EnrollmentRequest struct {
-	NodeName     string `json:"node_name"`
-	Token        string `json:"token"`
-	Fingerprint  string `json:"fingerprint"`
-	AgentVersion string `json:"agent_version"`
+	Token       string `json:"token"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 type EnrollmentResponse struct {

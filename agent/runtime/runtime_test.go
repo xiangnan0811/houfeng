@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ type fakeClient struct {
 	enrollCalls      int
 	syncCalls        int
 	syncBeforeEnroll bool
+	enrollResponse   agentapi.EnrollmentResponse
 
 	lastEnroll agentapi.EnrollmentRequest
 	lastSync   agentapi.SyncRequest
@@ -22,7 +24,17 @@ type fakeClient struct {
 func (f *fakeClient) Enroll(_ context.Context, request agentapi.EnrollmentRequest) (*agentapi.EnrollmentResponse, error) {
 	f.enrollCalls++
 	f.lastEnroll = request
-	return &agentapi.EnrollmentResponse{NodeID: "node-123", Status: "accepted"}, nil
+	response := f.enrollResponse
+	if response.NodeID == "" {
+		response.NodeID = "node-123"
+	}
+	if response.Status == "" {
+		response.Status = "accepted"
+	}
+	if response.BindingStatus == "" {
+		response.BindingStatus = agentapi.BindingStatusBound
+	}
+	return &response, nil
 }
 
 func (f *fakeClient) Sync(_ context.Context, request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
@@ -81,5 +93,42 @@ func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
 	}
 	if client.lastSync.Heartbeats[0].Fingerprint != "fp-001" {
 		t.Fatalf("Sync fingerprint = %q, want %q", client.lastSync.Heartbeats[0].Fingerprint, "fp-001")
+	}
+	if client.lastSync.Heartbeats[0].AgentVersion != "dev" {
+		t.Fatalf("Sync agent_version = %q, want %q", client.lastSync.Heartbeats[0].AgentVersion, "dev")
+	}
+}
+
+func TestRuntimeReturnsEnrollmentNotBoundErrorWithoutStartingSyncLoop(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token", NodeName: "nd-local-01"}
+	client := &fakeClient{
+		enrollResponse: agentapi.EnrollmentResponse{
+			NodeID:        "node-123",
+			Status:        "accepted",
+			BindingStatus: agentapi.BindingStatusPendingConfirmation,
+		},
+	}
+	rt := agentruntime.NewWithDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	err := rt.Run(ctx)
+	if err == nil {
+		t.Fatal("Run() error = nil, want non-nil")
+	}
+
+	var enrollmentErr *agentruntime.EnrollmentNotBoundError
+	if !errors.As(err, &enrollmentErr) {
+		t.Fatalf("Run() error = %T, want *runtime.EnrollmentNotBoundError", err)
+	}
+	if enrollmentErr.BindingStatus != agentapi.BindingStatusPendingConfirmation {
+		t.Fatalf("BindingStatus = %q, want %q", enrollmentErr.BindingStatus, agentapi.BindingStatusPendingConfirmation)
+	}
+	if client.enrollCalls != 1 {
+		t.Fatalf("Enroll() calls = %d, want %d", client.enrollCalls, 1)
+	}
+	if client.syncCalls != 0 {
+		t.Fatalf("Sync() calls = %d, want %d", client.syncCalls, 0)
 	}
 }
