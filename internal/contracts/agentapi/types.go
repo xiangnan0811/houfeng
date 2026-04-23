@@ -10,8 +10,9 @@ type EnrollmentRequest struct {
 }
 
 type EnrollmentResponse struct {
-	NodeID string `json:"node_id"`
-	Status string `json:"status"`
+	NodeID        string `json:"node_id"`
+	Status        string `json:"status"`
+	BindingStatus string `json:"binding_status"`
 }
 
 type NodeHeartbeat struct {
