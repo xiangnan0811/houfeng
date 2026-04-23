@@ -47,9 +47,11 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		return nil, nil, fmt.Errorf("apply migrations: %w", err)
 	}
 
+	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
 	router := deps.newRouter(centerhttp.RouterOptions{
 		Version:    version,
 		WebDistDir: cfg.WebDistDir,
+		Nodes:      nodeRepo,
 	})
 
 	return deps.newApp(cfg.HTTPAddr, router), db.Close, nil
