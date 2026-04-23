@@ -9,6 +9,7 @@ import (
 
 	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/config"
+	"houfeng/internal/center/enrollment"
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/store"
@@ -50,6 +51,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 
 	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
+	enrollmentSvc := enrollment.NewService(nodeRepo)
 	router := deps.newRouter(centerhttp.RouterOptions{
 		Version:                  version,
 		WebDistDir:               cfg.WebDistDir,
@@ -58,6 +60,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		TargetsCollectionHandler: handlers.TargetsCollection(targetRepo),
 		TargetItemHandler:        handlers.TargetItem(targetRepo),
 		TargetProbeItemsHandler:  handlers.TargetProbeItems(targetRepo),
+		AgentEnrollHandler:       handlers.AgentEnroll(enrollmentSvc),
+		AgentSyncHandler:         handlers.AgentSync(enrollmentSvc),
 	})
 
 	return deps.newApp(cfg.HTTPAddr, router), db.Close, nil

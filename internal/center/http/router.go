@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/contracts/agentapi"
 )
 
 type RouterOptions struct {
@@ -15,6 +16,8 @@ type RouterOptions struct {
 	TargetsCollectionHandler stdhttp.Handler
 	TargetItemHandler        stdhttp.Handler
 	TargetProbeItemsHandler  stdhttp.Handler
+	AgentEnrollHandler       stdhttp.Handler
+	AgentSyncHandler         stdhttp.Handler
 }
 
 func New(opts RouterOptions) stdhttp.Handler {
@@ -28,6 +31,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.TargetsCollectionHandler != nil {
 		mux.Handle("/api/targets", opts.TargetsCollectionHandler)
+	}
+	if opts.AgentEnrollHandler != nil {
+		mux.Handle(agentapi.EnrollPath, opts.AgentEnrollHandler)
+	}
+	if opts.AgentSyncHandler != nil {
+		mux.Handle(agentapi.SyncPath, opts.AgentSyncHandler)
 	}
 	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil {
 		mux.Handle("/api/targets/", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {

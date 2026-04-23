@@ -158,6 +158,12 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.TargetProbeItemsHandler == nil {
 		t.Fatal("router target probe items handler = nil, want non-nil")
 	}
+	if gotOpts.AgentEnrollHandler == nil {
+		t.Fatal("router agent enroll handler = nil, want non-nil")
+	}
+	if gotOpts.AgentSyncHandler == nil {
+		t.Fatal("router agent sync handler = nil, want non-nil")
+	}
 	if gotAddr != cfg.HTTPAddr {
 		t.Fatalf("app addr = %q, want %q", gotAddr, cfg.HTTPAddr)
 	}

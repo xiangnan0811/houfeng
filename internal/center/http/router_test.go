@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,6 +144,64 @@ func (f *fakeNodeRepository) GetNode(context.Context, string) (nodes.Record, err
 
 func (f *fakeNodeRepository) CreateNode(context.Context, nodes.CreateInput) (nodes.Record, error) {
 	return f.createNodeResult, nil
+}
+
+func TestRouterDispatchesAgentEndpointsBeforeSPAFallback(t *testing.T) {
+	t.Run("enroll", func(t *testing.T) {
+		var called bool
+		handler := centerhttp.New(centerhttp.RouterOptions{
+			Version:    "dev",
+			WebDistDir: "testdata/web",
+			AgentEnrollHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"status":"accepted"}`))
+			}),
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/api/agent/enroll", nil)
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+		}
+		if !called {
+			t.Fatal("agent enroll handler was not called")
+		}
+		if strings.TrimSpace(recorder.Body.String()) == spaShell {
+			t.Fatalf("expected agent API response, got SPA fallback body %q", recorder.Body.String())
+		}
+	})
+
+	t.Run("sync", func(t *testing.T) {
+		var called bool
+		handler := centerhttp.New(centerhttp.RouterOptions{
+			Version:    "dev",
+			WebDistDir: "testdata/web",
+			AgentSyncHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"status":"accepted"}`))
+			}),
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/api/agent/sync", nil)
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+		}
+		if !called {
+			t.Fatal("agent sync handler was not called")
+		}
+		if strings.TrimSpace(recorder.Body.String()) == spaShell {
+			t.Fatalf("expected agent API response, got SPA fallback body %q", recorder.Body.String())
+		}
+	})
 }
 
 func TestRouterKeepsProbeItemsSubtreeOutOfTargetItemHandler(t *testing.T) {
