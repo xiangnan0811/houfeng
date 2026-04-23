@@ -266,7 +266,6 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		update nodes
 		set binding_status = $2,
 			binding_fingerprint = $3,
-			last_sync_at = now(),
 			updated_at = now()
 		where node_id = $1
 		returning `+nodeSelectColumns,

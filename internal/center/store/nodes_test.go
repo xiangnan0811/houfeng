@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"houfeng/internal/center/nodes"
@@ -63,4 +65,44 @@ func TestResolveEnrollmentBindingTransition(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApplyEnrollmentDoesNotAdvanceLastSyncAt(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("nodes.go")
+	if err != nil {
+		t.Fatalf("ReadFile(nodes.go) error = %v", err)
+	}
+
+	applyEnrollment := sourceBetween(t, string(source), "func (r *PostgresNodeRepository) ApplyEnrollment", "func (r *PostgresNodeRepository) RecordAcceptedHeartbeats")
+	if strings.Contains(applyEnrollment, "last_sync_at") {
+		t.Fatalf("ApplyEnrollment() unexpectedly updates last_sync_at:\n%s", applyEnrollment)
+	}
+	if !strings.Contains(applyEnrollment, "binding_status = $2") {
+		t.Fatal("ApplyEnrollment() source no longer contains the enrollment binding update")
+	}
+
+	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresNodeRepository) RecordAcceptedHeartbeats", "")
+	if !strings.Contains(heartbeatPath, "last_sync_at = greatest(coalesce(last_sync_at, $3), $3)") {
+		t.Fatal("RecordAcceptedHeartbeats() should remain the path that advances last_sync_at")
+	}
+}
+
+func sourceBetween(t *testing.T, source, start, end string) string {
+	t.Helper()
+
+	startIndex := strings.Index(source, start)
+	if startIndex == -1 {
+		t.Fatalf("source missing start marker %q", start)
+	}
+	section := source[startIndex:]
+	if end == "" {
+		return section
+	}
+	endIndex := strings.Index(section, end)
+	if endIndex == -1 {
+		t.Fatalf("source missing end marker %q", end)
+	}
+	return section[:endIndex]
 }
