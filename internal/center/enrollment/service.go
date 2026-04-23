@@ -13,6 +13,7 @@ var ErrBindingNotAccepted = errors.New("binding not accepted")
 type Repository interface {
 	IssueEnrollmentToken(context.Context, string) (string, error)
 	FindNodeByEnrollmentToken(context.Context, string) (nodes.Record, error)
+	GetNode(context.Context, string) (nodes.Record, error)
 	UpdateBindingState(context.Context, BindingUpdate) (nodes.Record, error)
 	RecordHeartbeat(context.Context, HeartbeatWrite) error
 	TouchHeartbeatState(context.Context, HeartbeatWrite) (nodes.Record, error)
@@ -65,11 +66,18 @@ func (s *Service) EnrollNode(ctx context.Context, input EnrollInput) (EnrollResu
 	return EnrollResult{
 		NodeID:        record.NodeID,
 		BindingStatus: record.BindingStatus,
-		Status:        "ok",
 	}, nil
 }
 
 func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) error {
+	record, err := s.repo.GetNode(ctx, input.NodeID)
+	if err != nil {
+		return err
+	}
+	if record.BindingStatus != nodes.BindingBound {
+		return ErrBindingNotAccepted
+	}
+
 	for _, heartbeat := range input.Heartbeats {
 		write := HeartbeatWrite{
 			NodeID:       input.NodeID,
@@ -80,12 +88,8 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 			SyncBatchID:  heartbeat.SyncBatchID,
 		}
 
-		record, err := s.repo.TouchHeartbeatState(ctx, write)
-		if err != nil {
+		if _, err := s.repo.TouchHeartbeatState(ctx, write); err != nil {
 			return err
-		}
-		if record.BindingStatus != nodes.BindingBound {
-			return ErrBindingNotAccepted
 		}
 		if err := s.repo.RecordHeartbeat(ctx, write); err != nil {
 			return err

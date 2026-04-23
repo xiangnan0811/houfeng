@@ -3,27 +3,26 @@ package enrollment
 import "time"
 
 type EnrollInput struct {
-	Token        string `json:"token"`
-	Fingerprint  string `json:"fingerprint"`
-	AgentVersion string `json:"agent_version"`
+	Token        string
+	Fingerprint  string
+	AgentVersion string
 }
 
 type EnrollResult struct {
-	NodeID        string `json:"node_id"`
-	BindingStatus string `json:"binding_status"`
-	Status        string `json:"status"`
+	NodeID        string
+	BindingStatus string
 }
 
 type HeartbeatPayload struct {
-	ObservedAt   time.Time `json:"observed_at"`
-	AgentVersion string    `json:"agent_version"`
-	Fingerprint  string    `json:"fingerprint"`
-	SyncBatchID  string    `json:"sync_batch_id"`
+	ObservedAt   time.Time
+	AgentVersion string
+	Fingerprint  string
+	SyncBatchID  string
 }
 
 type SyncInput struct {
-	NodeID     string             `json:"node_id"`
-	Heartbeats []HeartbeatPayload `json:"heartbeats"`
+	NodeID     string
+	Heartbeats []HeartbeatPayload
 }
 
 type BindingUpdate struct {

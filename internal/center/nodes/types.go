@@ -40,7 +40,7 @@ type Record struct {
 	MonitoringStatus           string     `json:"monitoring_status"`
 	BindingStatus              string     `json:"binding_status"`
 	EnrollmentTokenHash        string     `json:"-"`
-	BindingFingerprint         string     `json:"binding_fingerprint,omitempty"`
+	BindingFingerprint         string     `json:"-"`
 	Labels                     []string   `json:"labels"`
 	Note                       string     `json:"note"`
 	CurrentHealthStatus        string     `json:"current_health_status"`

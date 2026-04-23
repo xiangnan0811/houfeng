@@ -70,7 +70,6 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 	if result != (EnrollResult{
 		NodeID:        "nd_123",
 		BindingStatus: nodes.BindingBound,
-		Status:        "ok",
 	}) {
 		t.Fatalf("result = %#v", result)
 	}
@@ -114,7 +113,6 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 	if result != (EnrollResult{
 		NodeID:        "nd_456",
 		BindingStatus: nodes.BindingPendingConfirmation,
-		Status:        "ok",
 	}) {
 		t.Fatalf("result = %#v", result)
 	}
@@ -125,7 +123,7 @@ func TestRecordHeartbeatRejectsPendingBinding(t *testing.T) {
 
 	observedAt := time.Date(2026, 4, 23, 11, 0, 0, 0, time.UTC)
 	repo := &fakeRepository{
-		touchedNode: nodes.Record{
+		heartbeatNode: nodes.Record{
 			NodeID:        "nd_789",
 			BindingStatus: nodes.BindingPendingConfirmation,
 		},
@@ -147,14 +145,91 @@ func TestRecordHeartbeatRejectsPendingBinding(t *testing.T) {
 		t.Fatalf("RecordHeartbeatSync() error = %v, want ErrBindingNotAccepted", err)
 	}
 
-	if len(repo.heartbeatTouches) != 1 {
-		t.Fatalf("heartbeatTouches = %d, want 1", len(repo.heartbeatTouches))
+	if len(repo.heartbeatGetNodeCalls) != 1 {
+		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
 	}
-	if repo.heartbeatTouches[0].SyncBatchID != "sync_123" {
-		t.Fatalf("heartbeatTouches[0].SyncBatchID = %q, want %q", repo.heartbeatTouches[0].SyncBatchID, "sync_123")
+	if len(repo.heartbeatTouches) != 0 {
+		t.Fatalf("heartbeatTouches = %d, want 0", len(repo.heartbeatTouches))
 	}
 	if len(repo.heartbeatWrites) != 0 {
 		t.Fatalf("heartbeatWrites = %d, want 0", len(repo.heartbeatWrites))
+	}
+}
+
+func TestRecordHeartbeatRejectsUnboundBindingWithoutSideEffects(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepository{
+		heartbeatNode: nodes.Record{
+			NodeID:        "nd_790",
+			BindingStatus: nodes.BindingUnbound,
+		},
+	}
+	service := NewService(repo)
+
+	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
+		NodeID: "nd_790",
+		Heartbeats: []HeartbeatPayload{{
+			ObservedAt:   time.Date(2026, 4, 23, 11, 30, 0, 0, time.UTC),
+			AgentVersion: "v1.0.0",
+			Fingerprint:  "fp-2",
+			SyncBatchID:  "sync_456",
+		}},
+	})
+	if !errors.Is(err, ErrBindingNotAccepted) {
+		t.Fatalf("RecordHeartbeatSync() error = %v, want ErrBindingNotAccepted", err)
+	}
+
+	if len(repo.heartbeatGetNodeCalls) != 1 {
+		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
+	}
+	if len(repo.heartbeatTouches) != 0 {
+		t.Fatalf("heartbeatTouches = %d, want 0", len(repo.heartbeatTouches))
+	}
+	if len(repo.heartbeatWrites) != 0 {
+		t.Fatalf("heartbeatWrites = %d, want 0", len(repo.heartbeatWrites))
+	}
+}
+
+func TestRecordHeartbeatWritesOnlyAfterAcceptedBinding(t *testing.T) {
+	t.Parallel()
+
+	observedAt := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{
+		heartbeatNode: nodes.Record{
+			NodeID:        "nd_791",
+			BindingStatus: nodes.BindingBound,
+		},
+	}
+	service := NewService(repo)
+
+	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
+		NodeID: "nd_791",
+		Heartbeats: []HeartbeatPayload{{
+			ObservedAt:   observedAt,
+			AgentVersion: "v1.0.1",
+			Fingerprint:  "fp-3",
+			SyncBatchID:  "sync_789",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("RecordHeartbeatSync() error = %v", err)
+	}
+
+	if len(repo.heartbeatGetNodeCalls) != 1 {
+		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
+	}
+	if len(repo.heartbeatTouches) != 1 {
+		t.Fatalf("heartbeatTouches = %d, want 1", len(repo.heartbeatTouches))
+	}
+	if len(repo.heartbeatWrites) != 1 {
+		t.Fatalf("heartbeatWrites = %d, want 1", len(repo.heartbeatWrites))
+	}
+	if repo.heartbeatTouches[0].SyncBatchID != "sync_789" {
+		t.Fatalf("heartbeatTouches[0].SyncBatchID = %q, want %q", repo.heartbeatTouches[0].SyncBatchID, "sync_789")
+	}
+	if repo.heartbeatWrites[0].SyncBatchID != "sync_789" {
+		t.Fatalf("heartbeatWrites[0].SyncBatchID = %q, want %q", repo.heartbeatWrites[0].SyncBatchID, "sync_789")
 	}
 }
 
@@ -173,8 +248,11 @@ type fakeRepository struct {
 	heartbeatWrites []HeartbeatWrite
 	recordErr       error
 
+	heartbeatGetNodeCalls []string
+	heartbeatNode         nodes.Record
+	heartbeatNodeErr      error
+
 	heartbeatTouches []HeartbeatWrite
-	touchedNode      nodes.Record
 	touchErr         error
 }
 
@@ -219,10 +297,18 @@ func (f *fakeRepository) RecordHeartbeat(_ context.Context, write HeartbeatWrite
 	return f.recordErr
 }
 
+func (f *fakeRepository) GetNode(_ context.Context, nodeID string) (nodes.Record, error) {
+	f.heartbeatGetNodeCalls = append(f.heartbeatGetNodeCalls, nodeID)
+	if f.heartbeatNodeErr != nil {
+		return nodes.Record{}, f.heartbeatNodeErr
+	}
+	return f.heartbeatNode, nil
+}
+
 func (f *fakeRepository) TouchHeartbeatState(_ context.Context, write HeartbeatWrite) (nodes.Record, error) {
 	f.heartbeatTouches = append(f.heartbeatTouches, write)
 	if f.touchErr != nil {
 		return nodes.Record{}, f.touchErr
 	}
-	return f.touchedNode, nil
+	return f.heartbeatNode, nil
 }
