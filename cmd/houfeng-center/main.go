@@ -6,11 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/config"
-	centerhttp "houfeng/internal/center/http"
-	"houfeng/internal/center/store"
-	"houfeng/internal/center/store/migrate"
 )
 
 var version = "dev"
@@ -24,23 +20,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	db, err := store.OpenPostgres(ctx, cfg.DatabaseURL)
+	app, cleanup, err := bootstrapCenter(ctx, cfg, version, bootstrapDeps{})
 	if err != nil {
-		log.Fatalf("open postgres: %v", err)
+		log.Fatalf("bootstrap center: %v", err)
 	}
-	defer db.Close()
+	defer cleanup()
 
-	if err := migrate.Apply(ctx, db); err != nil {
-		log.Fatalf("apply migrations: %v", err)
-	}
-
-	router := centerhttp.New(centerhttp.RouterOptions{
-		Version:    version,
-		WebDistDir: cfg.WebDistDir,
-		DB:         db,
-	})
-
-	if err := centerapp.New(cfg.HTTPAddr, router).Run(ctx); err != nil {
+	if err := app.Run(ctx); err != nil {
 		log.Fatalf("run center app: %v", err)
 	}
 }
