@@ -8,7 +8,9 @@ import (
 	"syscall"
 
 	agentconfig "houfeng/agent/config"
+	"houfeng/agent/fingerprint"
 	agentruntime "houfeng/agent/runtime"
+	"houfeng/agent/token"
 )
 
 func main() {
@@ -22,8 +24,9 @@ func main() {
 	defer stop()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	runtime := agentruntime.New(cfg, logger, token.FileSource{Path: cfg.TokenFile}, fingerprint.Provider{})
 
-	if err := agentruntime.New(cfg, logger).Run(ctx); err != nil {
+	if err := runtime.Run(ctx); err != nil {
 		logger.Error("run agent runtime", "error", err)
 		os.Exit(1)
 	}
