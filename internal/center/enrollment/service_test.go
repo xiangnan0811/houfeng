@@ -33,7 +33,6 @@ func TestIssueEnrollmentTokenReturnsToken(t *testing.T) {
 func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 	t.Parallel()
 
-	syncedAt := time.Date(2026, 4, 23, 10, 0, 0, 0, time.UTC)
 	repo := &fakeRepository{
 		nodeByToken: map[string]nodes.Record{
 			"plain-token": {
@@ -45,9 +44,9 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 	service := NewService(repo)
 
 	result, err := service.EnrollNode(context.Background(), EnrollInput{
-		EnrollmentToken: "plain-token",
-		Fingerprint:     "fp-new",
-		SyncedAt:        syncedAt,
+		Token:        "plain-token",
+		Fingerprint:  "fp-new",
+		AgentVersion: "v1.0.0",
 	})
 	if err != nil {
 		t.Fatalf("EnrollNode() error = %v", err)
@@ -67,9 +66,6 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 	if update.BindingFingerprint != "fp-new" {
 		t.Fatalf("update.BindingFingerprint = %q, want %q", update.BindingFingerprint, "fp-new")
 	}
-	if !update.SyncedAt.Equal(syncedAt) {
-		t.Fatalf("update.SyncedAt = %v, want %v", update.SyncedAt, syncedAt)
-	}
 
 	if result != (EnrollResult{
 		NodeID:        "nd_123",
@@ -83,7 +79,6 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 	t.Parallel()
 
-	syncedAt := time.Date(2026, 4, 23, 10, 30, 0, 0, time.UTC)
 	repo := &fakeRepository{
 		nodeByToken: map[string]nodes.Record{
 			"plain-token": {
@@ -96,9 +91,9 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 	service := NewService(repo)
 
 	result, err := service.EnrollNode(context.Background(), EnrollInput{
-		EnrollmentToken: "plain-token",
-		Fingerprint:     "fp-new",
-		SyncedAt:        syncedAt,
+		Token:        "plain-token",
+		Fingerprint:  "fp-new",
+		AgentVersion: "v1.0.0",
 	})
 	if err != nil {
 		t.Fatalf("EnrollNode() error = %v", err)
@@ -115,9 +110,6 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 	if update.BindingFingerprint != "fp-old" {
 		t.Fatalf("update.BindingFingerprint = %q, want %q", update.BindingFingerprint, "fp-old")
 	}
-	if !update.SyncedAt.Equal(syncedAt) {
-		t.Fatalf("update.SyncedAt = %v, want %v", update.SyncedAt, syncedAt)
-	}
 
 	if result != (EnrollResult{
 		NodeID:        "nd_456",
@@ -132,7 +124,6 @@ func TestRecordHeartbeatRejectsPendingBinding(t *testing.T) {
 	t.Parallel()
 
 	observedAt := time.Date(2026, 4, 23, 11, 0, 0, 0, time.UTC)
-	receivedAt := time.Date(2026, 4, 23, 11, 0, 5, 0, time.UTC)
 	repo := &fakeRepository{
 		touchedNode: nodes.Record{
 			NodeID:        "nd_789",
@@ -142,14 +133,13 @@ func TestRecordHeartbeatRejectsPendingBinding(t *testing.T) {
 	service := NewService(repo)
 
 	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
-		NodeID:      "nd_789",
-		SyncBatchID: "sync_123",
+		NodeID: "nd_789",
 		Heartbeats: []HeartbeatPayload{
 			{
 				ObservedAt:   observedAt,
-				ReceivedAt:   receivedAt,
 				AgentVersion: "v1.0.0",
 				Fingerprint:  "fp-1",
+				SyncBatchID:  "sync_123",
 			},
 		},
 	})
@@ -159,6 +149,9 @@ func TestRecordHeartbeatRejectsPendingBinding(t *testing.T) {
 
 	if len(repo.heartbeatTouches) != 1 {
 		t.Fatalf("heartbeatTouches = %d, want 1", len(repo.heartbeatTouches))
+	}
+	if repo.heartbeatTouches[0].SyncBatchID != "sync_123" {
+		t.Fatalf("heartbeatTouches[0].SyncBatchID = %q, want %q", repo.heartbeatTouches[0].SyncBatchID, "sync_123")
 	}
 	if len(repo.heartbeatWrites) != 0 {
 		t.Fatalf("heartbeatWrites = %d, want 0", len(repo.heartbeatWrites))

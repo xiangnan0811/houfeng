@@ -224,14 +224,13 @@ func (r *PostgresNodeRepository) UpdateBindingState(ctx context.Context, update 
 		update nodes
 		set binding_status = $2,
 			binding_fingerprint = $3,
-			last_sync_at = $4,
+			last_sync_at = now(),
 			updated_at = now()
 		where node_id = $1
 		returning `+nodeSelectColumns,
 		update.NodeID,
 		update.BindingStatus,
 		update.BindingFingerprint,
-		update.SyncedAt,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nodes.Record{}, nodes.ErrNodeNotFound

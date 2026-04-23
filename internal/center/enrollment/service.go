@@ -3,6 +3,7 @@ package enrollment
 import (
 	"context"
 	"errors"
+	"time"
 
 	"houfeng/internal/center/nodes"
 )
@@ -30,7 +31,7 @@ func (s *Service) IssueNodeEnrollmentToken(ctx context.Context, nodeID string) (
 }
 
 func (s *Service) EnrollNode(ctx context.Context, input EnrollInput) (EnrollResult, error) {
-	record, err := s.repo.FindNodeByEnrollmentToken(ctx, input.EnrollmentToken)
+	record, err := s.repo.FindNodeByEnrollmentToken(ctx, input.Token)
 	if err != nil {
 		return EnrollResult{}, err
 	}
@@ -39,7 +40,6 @@ func (s *Service) EnrollNode(ctx context.Context, input EnrollInput) (EnrollResu
 		NodeID:             record.NodeID,
 		BindingStatus:      record.BindingStatus,
 		BindingFingerprint: record.BindingFingerprint,
-		SyncedAt:           input.SyncedAt,
 	}
 
 	switch record.BindingStatus {
@@ -74,11 +74,10 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 		write := HeartbeatWrite{
 			NodeID:       input.NodeID,
 			ObservedAt:   heartbeat.ObservedAt,
-			ReceivedAt:   heartbeat.ReceivedAt,
+			ReceivedAt:   time.Now().UTC(),
 			AgentVersion: heartbeat.AgentVersion,
 			Fingerprint:  heartbeat.Fingerprint,
-			SyncBatchID:  input.SyncBatchID,
-			IsBackfilled: heartbeat.IsBackfilled,
+			SyncBatchID:  heartbeat.SyncBatchID,
 		}
 
 		record, err := s.repo.TouchHeartbeatState(ctx, write)
