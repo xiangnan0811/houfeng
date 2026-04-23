@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -15,6 +16,8 @@ const (
 	defaultInterval = 30 * time.Second
 	agentVersion    = "dev"
 )
+
+var ErrMissingSyncToken = errors.New("enrollment bound response missing sync token")
 
 type EnrollmentNotBoundError struct {
 	BindingStatus string
@@ -107,6 +110,9 @@ func (r *Runtime) Run(ctx context.Context) error {
 	if enrollment.BindingStatus != agentapi.BindingStatusBound {
 		return fmt.Errorf("enroll agent: %w", &EnrollmentNotBoundError{BindingStatus: enrollment.BindingStatus})
 	}
+	if enrollment.SyncToken == "" {
+		return fmt.Errorf("enroll agent: %w", ErrMissingSyncToken)
+	}
 
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -118,7 +124,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 		case tick := <-ticker.C:
 			observedAt := tick.UTC()
 			_, err := r.client.Sync(ctx, agentapi.SyncRequest{
-				NodeID: enrollment.NodeID,
+				NodeID:    enrollment.NodeID,
+				SyncToken: enrollment.SyncToken,
 				Heartbeats: []agentapi.NodeHeartbeat{{
 					ObservedAt:   observedAt,
 					AgentVersion: agentVersion,

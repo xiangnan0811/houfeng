@@ -30,7 +30,7 @@ func TestIssueEnrollmentTokenReturnsToken(t *testing.T) {
 	}
 }
 
-func TestEnrollNodeBindsUnboundNode(t *testing.T) {
+func TestEnrollNodeBindsUnboundNodeAndIssuesSyncToken(t *testing.T) {
 	t.Parallel()
 
 	repo := &fakeRepository{
@@ -41,6 +41,7 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 				BindingFingerprint: "fp-new",
 			},
 		},
+		issuedSyncToken: "sync-token-001",
 	}
 	service := NewService(repo)
 
@@ -58,16 +59,23 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 	if repo.enrollmentCalls[0] != (EnrollInput{Token: "plain-token", Fingerprint: "fp-new"}) {
 		t.Fatalf("enrollmentCalls[0] = %#v", repo.enrollmentCalls[0])
 	}
+	if repo.issuedSyncNodeIDs != nil && len(repo.issuedSyncNodeIDs) != 1 {
+		t.Fatalf("issuedSyncNodeIDs len = %d, want 1", len(repo.issuedSyncNodeIDs))
+	}
+	if repo.issuedSyncNodeIDs[0] != "nd_123" {
+		t.Fatalf("issuedSyncNodeIDs[0] = %q, want %q", repo.issuedSyncNodeIDs[0], "nd_123")
+	}
 
 	if result != (EnrollResult{
 		NodeID:        "nd_123",
 		BindingStatus: nodes.BindingBound,
+		SyncToken:     "sync-token-001",
 	}) {
 		t.Fatalf("result = %#v", result)
 	}
 }
 
-func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
+func TestEnrollNodeMarksConflictForNewFingerprintWithoutIssuingSyncToken(t *testing.T) {
 	t.Parallel()
 
 	repo := &fakeRepository{
@@ -94,6 +102,9 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 	}
 	if repo.enrollmentCalls[0] != (EnrollInput{Token: "plain-token", Fingerprint: "fp-new"}) {
 		t.Fatalf("enrollmentCalls[0] = %#v", repo.enrollmentCalls[0])
+	}
+	if len(repo.issuedSyncNodeIDs) != 0 {
+		t.Fatalf("issuedSyncNodeIDs len = %d, want 0", len(repo.issuedSyncNodeIDs))
 	}
 
 	if result != (EnrollResult{
@@ -128,6 +139,7 @@ func TestEnrollNodeUsesSingleAtomicRepositoryCall(t *testing.T) {
 				BindingStatus: nodes.BindingBound,
 			},
 		},
+		issuedSyncToken: "sync-token-atomic",
 	}
 	service := NewService(repo)
 
@@ -154,7 +166,8 @@ func TestRecordHeartbeatRejectsPendingBinding(t *testing.T) {
 	service := NewService(repo)
 
 	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
-		NodeID: "nd_789",
+		NodeID:    "nd_789",
+		SyncToken: "sync-token-001",
 		Heartbeats: []HeartbeatPayload{
 			{
 				ObservedAt:   observedAt,
@@ -188,7 +201,8 @@ func TestRecordHeartbeatRejectsUnboundBindingWithoutSideEffects(t *testing.T) {
 	service := NewService(repo)
 
 	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
-		NodeID: "nd_790",
+		NodeID:    "nd_790",
+		SyncToken: "sync-token-001",
 		Heartbeats: []HeartbeatPayload{{
 			ObservedAt:   time.Date(2026, 4, 23, 11, 30, 0, 0, time.UTC),
 			AgentVersion: "v1.0.0",
@@ -208,6 +222,37 @@ func TestRecordHeartbeatRejectsUnboundBindingWithoutSideEffects(t *testing.T) {
 	}
 }
 
+func TestRecordHeartbeatRejectsInvalidSyncToken(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepository{
+		heartbeatNode: nodes.Record{
+			NodeID:             "nd_791",
+			BindingStatus:      nodes.BindingBound,
+			BindingFingerprint: "fp-expected",
+			SyncTokenHash:      hashSyncToken("good-token"),
+		},
+	}
+	service := NewService(repo)
+
+	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
+		NodeID:    "nd_791",
+		SyncToken: "bad-token",
+		Heartbeats: []HeartbeatPayload{{
+			ObservedAt:   time.Date(2026, 4, 23, 11, 45, 0, 0, time.UTC),
+			AgentVersion: "v1.0.0",
+			Fingerprint:  "fp-expected",
+			SyncBatchID:  "sync_457",
+		}},
+	})
+	if !errors.Is(err, ErrInvalidSyncToken) {
+		t.Fatalf("RecordHeartbeatSync() error = %v, want ErrInvalidSyncToken", err)
+	}
+	if len(repo.acceptedHeartbeatBatches) != 0 {
+		t.Fatalf("acceptedHeartbeatBatches = %d, want 0", len(repo.acceptedHeartbeatBatches))
+	}
+}
+
 func TestRecordHeartbeatRejectsMismatchedFingerprint(t *testing.T) {
 	t.Parallel()
 
@@ -216,12 +261,14 @@ func TestRecordHeartbeatRejectsMismatchedFingerprint(t *testing.T) {
 			NodeID:             "nd_792",
 			BindingStatus:      nodes.BindingBound,
 			BindingFingerprint: "fp-expected",
+			SyncTokenHash:      hashSyncToken("good-token"),
 		},
 	}
 	service := NewService(repo)
 
 	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
-		NodeID: "nd_792",
+		NodeID:    "nd_792",
+		SyncToken: "good-token",
 		Heartbeats: []HeartbeatPayload{{
 			ObservedAt:   time.Date(2026, 4, 23, 11, 45, 0, 0, time.UTC),
 			AgentVersion: "v1.0.0",
@@ -242,12 +289,14 @@ func TestRecordHeartbeatRejectsMismatchedFingerprintWithoutSideEffects(t *testin
 			NodeID:             "nd_793",
 			BindingStatus:      nodes.BindingBound,
 			BindingFingerprint: "fp-expected",
+			SyncTokenHash:      hashSyncToken("good-token"),
 		},
 	}
 	service := NewService(repo)
 
 	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
-		NodeID: "nd_793",
+		NodeID:    "nd_793",
+		SyncToken: "good-token",
 		Heartbeats: []HeartbeatPayload{
 			{
 				ObservedAt:   time.Date(2026, 4, 23, 11, 46, 0, 0, time.UTC),
@@ -282,15 +331,17 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 	secondObservedAt := observedAt.Add(2 * time.Minute)
 	repo := &fakeRepository{
 		heartbeatNode: nodes.Record{
-			NodeID:             "nd_791",
+			NodeID:             "nd_794",
 			BindingStatus:      nodes.BindingBound,
 			BindingFingerprint: "fp-3",
+			SyncTokenHash:      hashSyncToken("good-token"),
 		},
 	}
 	service := NewService(repo)
 
 	err := service.RecordHeartbeatSync(context.Background(), SyncInput{
-		NodeID: "nd_791",
+		NodeID:    "nd_794",
+		SyncToken: "good-token",
 		Heartbeats: []HeartbeatPayload{
 			{
 				ObservedAt:   observedAt,
@@ -313,6 +364,12 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 	if len(repo.heartbeatGetNodeCalls) != 1 {
 		t.Fatalf("heartbeatGetNodeCalls = %d, want 1", len(repo.heartbeatGetNodeCalls))
 	}
+	if len(repo.recordAcceptedSyncTokens) != 1 {
+		t.Fatalf("recordAcceptedSyncTokens = %d, want 1", len(repo.recordAcceptedSyncTokens))
+	}
+	if repo.recordAcceptedSyncTokens[0] != "good-token" {
+		t.Fatalf("recordAcceptedSyncTokens[0] = %q, want %q", repo.recordAcceptedSyncTokens[0], "good-token")
+	}
 	if len(repo.acceptedHeartbeatBatches) != 1 {
 		t.Fatalf("acceptedHeartbeatBatches = %d, want 1", len(repo.acceptedHeartbeatBatches))
 	}
@@ -332,6 +389,10 @@ type fakeRepository struct {
 	issuedNodeID string
 	issueErr     error
 
+	issuedSyncToken   string
+	issuedSyncNodeIDs []string
+	issueSyncErr      error
+
 	enrollmentResultByToken map[string]nodes.Record
 	enrollmentCalls         []EnrollInput
 	enrollErr               error
@@ -340,6 +401,7 @@ type fakeRepository struct {
 	heartbeatNode         nodes.Record
 	heartbeatNodeErr      error
 
+	recordAcceptedSyncTokens []string
 	acceptedHeartbeatBatches [][]HeartbeatWrite
 	recordAcceptedErr        error
 }
@@ -350,6 +412,14 @@ func (f *fakeRepository) IssueEnrollmentToken(_ context.Context, nodeID string) 
 		return "", f.issueErr
 	}
 	return f.issuedToken, nil
+}
+
+func (f *fakeRepository) IssueSyncToken(_ context.Context, nodeID string) (string, error) {
+	f.issuedSyncNodeIDs = append(f.issuedSyncNodeIDs, nodeID)
+	if f.issueSyncErr != nil {
+		return "", f.issueSyncErr
+	}
+	return f.issuedSyncToken, nil
 }
 
 func (f *fakeRepository) ApplyEnrollment(_ context.Context, input EnrollInput) (nodes.Record, error) {
@@ -372,7 +442,8 @@ func (f *fakeRepository) GetNode(_ context.Context, nodeID string) (nodes.Record
 	return f.heartbeatNode, nil
 }
 
-func (f *fakeRepository) RecordAcceptedHeartbeats(_ context.Context, writes []HeartbeatWrite) error {
+func (f *fakeRepository) RecordAcceptedHeartbeats(_ context.Context, syncToken string, writes []HeartbeatWrite) error {
+	f.recordAcceptedSyncTokens = append(f.recordAcceptedSyncTokens, syncToken)
 	batch := append([]HeartbeatWrite(nil), writes...)
 	f.acceptedHeartbeatBatches = append(f.acceptedHeartbeatBatches, batch)
 	return f.recordAcceptedErr

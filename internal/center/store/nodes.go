@@ -33,6 +33,7 @@ const nodeSelectColumns = `
 	monitoring_status,
 	binding_status,
 	coalesce(enrollment_token_hash, ''),
+	coalesce(sync_token_hash, ''),
 	coalesce(binding_fingerprint, ''),
 	labels,
 	note,
@@ -63,6 +64,7 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 		&record.MonitoringStatus,
 		&record.BindingStatus,
 		&record.EnrollmentTokenHash,
+		&record.SyncTokenHash,
 		&record.BindingFingerprint,
 		&record.Labels,
 		&record.Note,
@@ -79,9 +81,17 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 	return record, nil
 }
 
-func hashEnrollmentToken(token string) string {
+func hashOpaqueToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+func hashEnrollmentToken(token string) string {
+	return hashOpaqueToken(token)
+}
+
+func hashSyncToken(token string) string {
+	return hashOpaqueToken(token)
 }
 
 func (r *PostgresNodeRepository) ListNodes(ctx context.Context) ([]nodes.Record, error) {
@@ -203,6 +213,30 @@ func (r *PostgresNodeRepository) IssueEnrollmentToken(ctx context.Context, nodeI
 	return token, nil
 }
 
+func (r *PostgresNodeRepository) IssueSyncToken(ctx context.Context, nodeID string) (string, error) {
+	token, err := ids.New("sync")
+	if err != nil {
+		return "", fmt.Errorf("generate sync token: %w", err)
+	}
+
+	tag, err := r.db.Exec(ctx, `
+		update nodes
+		set sync_token_hash = $2,
+			updated_at = now()
+		where node_id = $1`,
+		nodeID,
+		hashSyncToken(token),
+	)
+	if err != nil {
+		return "", fmt.Errorf("issue sync token for node %q: %w", nodeID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", nodes.ErrNodeNotFound
+	}
+
+	return token, nil
+}
+
 func (r *PostgresNodeRepository) FindNodeByEnrollmentToken(ctx context.Context, token string) (nodes.Record, error) {
 	record, err := scanNode(r.db.QueryRow(ctx, `
 		select `+nodeSelectColumns+`
@@ -285,7 +319,7 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 	return record, nil
 }
 
-func (r *PostgresNodeRepository) RecordAcceptedHeartbeats(ctx context.Context, writes []enrollment.HeartbeatWrite) error {
+func (r *PostgresNodeRepository) RecordAcceptedHeartbeats(ctx context.Context, syncToken string, writes []enrollment.HeartbeatWrite) error {
 	if len(writes) == 0 {
 		return nil
 	}
@@ -299,14 +333,20 @@ func (r *PostgresNodeRepository) RecordAcceptedHeartbeats(ctx context.Context, w
 		_ = tx.Rollback(ctx)
 	}()
 
-	var bindingStatus string
+	var (
+		bindingStatus       string
+		bindingFingerprint  string
+		storedSyncTokenHash string
+	)
 	if err := tx.QueryRow(ctx, `
-		select binding_status
+		select binding_status,
+			coalesce(binding_fingerprint, ''),
+			coalesce(sync_token_hash, '')
 		from nodes
 		where node_id = $1
 		for update`,
 		nodeID,
-	).Scan(&bindingStatus); errors.Is(err, pgx.ErrNoRows) {
+	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash); errors.Is(err, pgx.ErrNoRows) {
 		return nodes.ErrNodeNotFound
 	} else if err != nil {
 		return fmt.Errorf("query heartbeat state for node %q: %w", nodeID, err)
@@ -314,10 +354,16 @@ func (r *PostgresNodeRepository) RecordAcceptedHeartbeats(ctx context.Context, w
 	if bindingStatus != nodes.BindingBound {
 		return enrollment.ErrBindingNotAccepted
 	}
+	if storedSyncTokenHash == "" || storedSyncTokenHash != hashSyncToken(syncToken) {
+		return enrollment.ErrInvalidSyncToken
+	}
 
 	lastHeartbeatAt := writes[0].ObservedAt
 	lastSyncAt := writes[0].ReceivedAt
 	for _, write := range writes {
+		if write.Fingerprint != bindingFingerprint {
+			return enrollment.ErrBindingNotAccepted
+		}
 		if _, err := tx.Exec(ctx, `
 			insert into node_heartbeats (
 				node_id,

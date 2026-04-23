@@ -12,6 +12,7 @@ const (
 	ErrorCodeInvalidRequest         = "invalid_request"
 	ErrorCodeInvalidJSON            = "invalid_json"
 	ErrorCodeInvalidEnrollmentToken = "invalid_enrollment_token"
+	ErrorCodeInvalidSyncToken       = "invalid_sync_token"
 	ErrorCodeBindingNotAccepted     = "binding_not_accepted"
 	ErrorCodeMethodNotAllowed       = "method_not_allowed"
 	ErrorCodeNodeNotFound           = "node_not_found"
@@ -27,6 +28,7 @@ type EnrollmentResponse struct {
 	NodeID        string `json:"node_id"`
 	Status        string `json:"status"`
 	BindingStatus string `json:"binding_status"`
+	SyncToken     string `json:"sync_token,omitempty"`
 }
 
 type ErrorResponse struct {
@@ -43,6 +45,7 @@ type NodeHeartbeat struct {
 
 type SyncRequest struct {
 	NodeID     string          `json:"node_id"`
+	SyncToken  string          `json:"sync_token"`
 	Heartbeats []NodeHeartbeat `json:"heartbeats,omitempty"`
 }
 

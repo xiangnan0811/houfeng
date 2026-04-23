@@ -51,6 +51,7 @@ func AgentEnroll(svc AgentEnrollmentService) http.Handler {
 			NodeID:        result.NodeID,
 			BindingStatus: result.BindingStatus,
 			Status:        "accepted",
+			SyncToken:     result.SyncToken,
 		})
 	})
 }
@@ -84,9 +85,12 @@ func AgentSync(svc AgentEnrollmentService) http.Handler {
 
 		if err := svc.RecordHeartbeatSync(r.Context(), enrollment.SyncInput{
 			NodeID:     req.NodeID,
+			SyncToken:  req.SyncToken,
 			Heartbeats: heartbeats,
 		}); err != nil {
 			switch {
+			case errors.Is(err, enrollment.ErrInvalidSyncToken):
+				writeAgentAPIError(w, http.StatusUnauthorized, agentapi.ErrorCodeInvalidSyncToken, "invalid sync token")
 			case errors.Is(err, enrollment.ErrBindingNotAccepted):
 				writeAgentAPIError(w, http.StatusConflict, agentapi.ErrorCodeBindingNotAccepted, "binding not accepted")
 			case errors.Is(err, nodes.ErrNodeNotFound):
@@ -113,7 +117,7 @@ func isValidEnrollmentRequest(req agentapi.EnrollmentRequest) bool {
 }
 
 func isValidSyncRequest(req agentapi.SyncRequest) bool {
-	if req.NodeID == "" || len(req.Heartbeats) == 0 {
+	if req.NodeID == "" || req.SyncToken == "" || len(req.Heartbeats) == 0 {
 		return false
 	}
 

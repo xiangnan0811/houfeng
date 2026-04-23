@@ -13,6 +13,7 @@ func TestEnrollmentResponseRoundTrip(t *testing.T) {
 		NodeID:        "nd-local-01",
 		BindingStatus: agentapi.BindingStatusPendingConfirmation,
 		Status:        "accepted",
+		SyncToken:     "sync-token-001",
 	}
 
 	payload, err := json.Marshal(original)
@@ -36,12 +37,31 @@ func TestEnrollmentResponseRoundTrip(t *testing.T) {
 	if roundTrip.Status != "accepted" {
 		t.Fatalf("Status = %q, want %q", roundTrip.Status, "accepted")
 	}
+	if roundTrip.SyncToken != "sync-token-001" {
+		t.Fatalf("SyncToken = %q, want %q", roundTrip.SyncToken, "sync-token-001")
+	}
+}
+
+func TestEnrollmentResponseOmitsEmptySyncToken(t *testing.T) {
+	payload, err := json.Marshal(agentapi.EnrollmentResponse{NodeID: "nd-local-01", Status: "accepted"})
+	if err != nil {
+		t.Fatalf("marshal enrollment response: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("unmarshal enrollment response payload: %v", err)
+	}
+
+	if _, ok := got["sync_token"]; ok {
+		t.Fatalf("payload unexpectedly included sync_token: %s", payload)
+	}
 }
 
 func TestErrorResponseRoundTrip(t *testing.T) {
 	original := agentapi.ErrorResponse{
-		Code:    agentapi.ErrorCodeInvalidEnrollmentToken,
-		Message: "invalid enrollment token",
+		Code:    agentapi.ErrorCodeInvalidSyncToken,
+		Message: "invalid sync token",
 	}
 
 	payload, err := json.Marshal(original)
@@ -54,11 +74,11 @@ func TestErrorResponseRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal error response: %v", err)
 	}
 
-	if roundTrip.Code != agentapi.ErrorCodeInvalidEnrollmentToken {
-		t.Fatalf("Code = %q, want %q", roundTrip.Code, agentapi.ErrorCodeInvalidEnrollmentToken)
+	if roundTrip.Code != agentapi.ErrorCodeInvalidSyncToken {
+		t.Fatalf("Code = %q, want %q", roundTrip.Code, agentapi.ErrorCodeInvalidSyncToken)
 	}
-	if roundTrip.Message != "invalid enrollment token" {
-		t.Fatalf("Message = %q, want %q", roundTrip.Message, "invalid enrollment token")
+	if roundTrip.Message != "invalid sync token" {
+		t.Fatalf("Message = %q, want %q", roundTrip.Message, "invalid sync token")
 	}
 }
 
@@ -99,7 +119,8 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 	}
 
 	original := agentapi.SyncRequest{
-		NodeID: "nd-local-01",
+		NodeID:    "nd-local-01",
+		SyncToken: "sync-token-001",
 		Heartbeats: []agentapi.NodeHeartbeat{{
 			ObservedAt:   observedAt,
 			AgentVersion: "dev",
@@ -121,6 +142,9 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 	if roundTrip.NodeID != "nd-local-01" {
 		t.Fatalf("NodeID = %q, want %q", roundTrip.NodeID, "nd-local-01")
 	}
+	if roundTrip.SyncToken != "sync-token-001" {
+		t.Fatalf("SyncToken = %q, want %q", roundTrip.SyncToken, "sync-token-001")
+	}
 
 	if len(roundTrip.Heartbeats) != 1 {
 		t.Fatalf("len(Heartbeats) = %d, want %d", len(roundTrip.Heartbeats), 1)
@@ -132,7 +156,7 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 }
 
 func TestSyncRequestOmitsEmptyHeartbeats(t *testing.T) {
-	payload, err := json.Marshal(agentapi.SyncRequest{NodeID: "nd-local-01"})
+	payload, err := json.Marshal(agentapi.SyncRequest{NodeID: "nd-local-01", SyncToken: "sync-token-001"})
 	if err != nil {
 		t.Fatalf("marshal sync request: %v", err)
 	}
@@ -142,6 +166,9 @@ func TestSyncRequestOmitsEmptyHeartbeats(t *testing.T) {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 
+	if got["sync_token"] != "sync-token-001" {
+		t.Fatalf("sync_token = %v, want %q", got["sync_token"], "sync-token-001")
+	}
 	if _, ok := got["heartbeats"]; ok {
 		t.Fatalf("payload unexpectedly included heartbeats: %s", payload)
 	}

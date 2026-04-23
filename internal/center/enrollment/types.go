@@ -10,6 +10,7 @@ type EnrollInput struct {
 type EnrollResult struct {
 	NodeID        string
 	BindingStatus string
+	SyncToken     string
 }
 
 type HeartbeatPayload struct {
@@ -21,6 +22,7 @@ type HeartbeatPayload struct {
 
 type SyncInput struct {
 	NodeID     string
+	SyncToken  string
 	Heartbeats []HeartbeatPayload
 }
 

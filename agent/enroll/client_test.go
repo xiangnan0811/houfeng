@@ -44,6 +44,7 @@ func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 			NodeID:        "nd-local-01",
 			BindingStatus: agentapi.BindingStatusPendingConfirmation,
 			Status:        "accepted",
+			SyncToken:     "sync-token-001",
 		})
 	}))
 	defer ts.Close()
@@ -64,6 +65,9 @@ func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 	}
 	if response.BindingStatus != agentapi.BindingStatusPendingConfirmation {
 		t.Fatalf("BindingStatus = %q, want %q", response.BindingStatus, agentapi.BindingStatusPendingConfirmation)
+	}
+	if response.SyncToken != "sync-token-001" {
+		t.Fatalf("SyncToken = %q, want %q", response.SyncToken, "sync-token-001")
 	}
 }
 
@@ -121,7 +125,7 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 	defer ts.Close()
 
 	client := enroll.NewClient(ts.URL)
-	response, err := client.Sync(context.Background(), agentapi.SyncRequest{NodeID: "nd-local-01"})
+	response, err := client.Sync(context.Background(), agentapi.SyncRequest{NodeID: "nd-local-01", SyncToken: "sync-token-001"})
 	if err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}

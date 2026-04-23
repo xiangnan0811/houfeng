@@ -2,6 +2,8 @@ package enrollment
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -11,13 +13,15 @@ import (
 var (
 	ErrBindingNotAccepted     = errors.New("binding not accepted")
 	ErrInvalidEnrollmentToken = errors.New("invalid enrollment token")
+	ErrInvalidSyncToken       = errors.New("invalid sync token")
 )
 
 type Repository interface {
 	IssueEnrollmentToken(context.Context, string) (string, error)
+	IssueSyncToken(context.Context, string) (string, error)
 	ApplyEnrollment(context.Context, EnrollInput) (nodes.Record, error)
 	GetNode(context.Context, string) (nodes.Record, error)
-	RecordAcceptedHeartbeats(context.Context, []HeartbeatWrite) error
+	RecordAcceptedHeartbeats(context.Context, string, []HeartbeatWrite) error
 }
 
 type Service struct {
@@ -26,6 +30,11 @@ type Service struct {
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
+}
+
+func hashSyncToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *Service) IssueNodeEnrollmentToken(ctx context.Context, nodeID string) (string, error) {
@@ -41,19 +50,36 @@ func (s *Service) EnrollNode(ctx context.Context, input EnrollInput) (EnrollResu
 		return EnrollResult{}, err
 	}
 
-	return EnrollResult{
+	result := EnrollResult{
 		NodeID:        record.NodeID,
 		BindingStatus: record.BindingStatus,
-	}, nil
+	}
+	if record.BindingStatus != nodes.BindingBound {
+		return result, nil
+	}
+
+	syncToken, err := s.repo.IssueSyncToken(ctx, record.NodeID)
+	if err != nil {
+		return EnrollResult{}, err
+	}
+	result.SyncToken = syncToken
+	return result, nil
 }
 
 func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) error {
+	if input.SyncToken == "" {
+		return ErrInvalidSyncToken
+	}
+
 	record, err := s.repo.GetNode(ctx, input.NodeID)
 	if err != nil {
 		return err
 	}
 	if record.BindingStatus != nodes.BindingBound {
 		return ErrBindingNotAccepted
+	}
+	if record.SyncTokenHash == "" || record.SyncTokenHash != hashSyncToken(input.SyncToken) {
+		return ErrInvalidSyncToken
 	}
 
 	receivedAt := time.Now().UTC()
@@ -72,5 +98,5 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 		})
 	}
 
-	return s.repo.RecordAcceptedHeartbeats(ctx, writes)
+	return s.repo.RecordAcceptedHeartbeats(ctx, input.SyncToken, writes)
 }

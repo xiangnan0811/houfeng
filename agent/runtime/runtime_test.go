@@ -12,10 +12,11 @@ import (
 )
 
 type fakeClient struct {
-	enrollCalls      int
-	syncCalls        int
-	syncBeforeEnroll bool
-	enrollResponse   agentapi.EnrollmentResponse
+	enrollCalls         int
+	syncCalls           int
+	syncBeforeEnroll    bool
+	enrollResponse      agentapi.EnrollmentResponse
+	forceEmptySyncToken bool
 
 	lastEnroll agentapi.EnrollmentRequest
 	lastSync   agentapi.SyncRequest
@@ -33,6 +34,9 @@ func (f *fakeClient) Enroll(_ context.Context, request agentapi.EnrollmentReques
 	}
 	if response.BindingStatus == "" {
 		response.BindingStatus = agentapi.BindingStatusBound
+	}
+	if !f.forceEmptySyncToken && response.SyncToken == "" && response.BindingStatus == agentapi.BindingStatusBound {
+		response.SyncToken = "sync-token-001"
 	}
 	return &response, nil
 }
@@ -88,6 +92,9 @@ func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
 	if client.lastSync.NodeID != "node-123" {
 		t.Fatalf("Sync node_id = %q, want %q", client.lastSync.NodeID, "node-123")
 	}
+	if client.lastSync.SyncToken != "sync-token-001" {
+		t.Fatalf("Sync sync_token = %q, want %q", client.lastSync.SyncToken, "sync-token-001")
+	}
 	if len(client.lastSync.Heartbeats) == 0 {
 		t.Fatal("Sync heartbeats = 0, want > 0")
 	}
@@ -130,5 +137,30 @@ func TestRuntimeReturnsEnrollmentNotBoundErrorWithoutStartingSyncLoop(t *testing
 	}
 	if client.syncCalls != 0 {
 		t.Fatalf("Sync() calls = %d, want %d", client.syncCalls, 0)
+	}
+}
+
+func TestRuntimeReturnsMissingSyncTokenErrorForBoundEnrollment(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{
+		forceEmptySyncToken: true,
+		enrollResponse: agentapi.EnrollmentResponse{
+			NodeID:        "node-123",
+			Status:        "accepted",
+			BindingStatus: agentapi.BindingStatusBound,
+			SyncToken:     "",
+		},
+	}
+	rt := agentruntime.NewWithDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
+
+	err := rt.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run() error = nil, want non-nil")
+	}
+	if err.Error() != "enroll agent: enrollment bound response missing sync token" {
+		t.Fatalf("Run() error = %q, want %q", err.Error(), "enroll agent: enrollment bound response missing sync token")
+	}
+	if client.syncCalls != 0 {
+		t.Fatalf("Sync() calls = %d, want 0", client.syncCalls)
 	}
 }

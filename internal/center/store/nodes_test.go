@@ -89,6 +89,26 @@ func TestApplyEnrollmentDoesNotAdvanceLastSyncAt(t *testing.T) {
 	}
 }
 
+func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("nodes.go")
+	if err != nil {
+		t.Fatalf("ReadFile(nodes.go) error = %v", err)
+	}
+
+	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresNodeRepository) RecordAcceptedHeartbeats", "")
+	if !strings.Contains(heartbeatPath, "coalesce(sync_token_hash, '')") {
+		t.Fatal("RecordAcceptedHeartbeats() should load sync_token_hash inside the heartbeat transaction")
+	}
+	if !strings.Contains(heartbeatPath, "storedSyncTokenHash != hashSyncToken(syncToken)") {
+		t.Fatal("RecordAcceptedHeartbeats() should reject mismatched sync token hashes")
+	}
+	if !strings.Contains(heartbeatPath, "write.Fingerprint != bindingFingerprint") {
+		t.Fatal("RecordAcceptedHeartbeats() should continue validating fingerprint within the transaction")
+	}
+}
+
 func sourceBetween(t *testing.T, source, start, end string) string {
 	t.Helper()
 
