@@ -34,10 +34,11 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 	t.Parallel()
 
 	repo := &fakeRepository{
-		nodeByToken: map[string]nodes.Record{
+		enrollmentResultByToken: map[string]nodes.Record{
 			"plain-token": {
-				NodeID:        "nd_123",
-				BindingStatus: nodes.BindingUnbound,
+				NodeID:             "nd_123",
+				BindingStatus:      nodes.BindingBound,
+				BindingFingerprint: "fp-new",
 			},
 		},
 	}
@@ -51,19 +52,11 @@ func TestEnrollNodeBindsUnboundNode(t *testing.T) {
 		t.Fatalf("EnrollNode() error = %v", err)
 	}
 
-	if len(repo.bindingUpdates) != 1 {
-		t.Fatalf("bindingUpdates = %d, want 1", len(repo.bindingUpdates))
+	if len(repo.enrollmentCalls) != 1 {
+		t.Fatalf("enrollmentCalls = %d, want 1", len(repo.enrollmentCalls))
 	}
-
-	update := repo.bindingUpdates[0]
-	if update.NodeID != "nd_123" {
-		t.Fatalf("update.NodeID = %q, want %q", update.NodeID, "nd_123")
-	}
-	if update.BindingStatus != nodes.BindingBound {
-		t.Fatalf("update.BindingStatus = %q, want %q", update.BindingStatus, nodes.BindingBound)
-	}
-	if update.BindingFingerprint != "fp-new" {
-		t.Fatalf("update.BindingFingerprint = %q, want %q", update.BindingFingerprint, "fp-new")
+	if repo.enrollmentCalls[0] != (EnrollInput{Token: "plain-token", Fingerprint: "fp-new"}) {
+		t.Fatalf("enrollmentCalls[0] = %#v", repo.enrollmentCalls[0])
 	}
 
 	if result != (EnrollResult{
@@ -78,10 +71,10 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 	t.Parallel()
 
 	repo := &fakeRepository{
-		nodeByToken: map[string]nodes.Record{
+		enrollmentResultByToken: map[string]nodes.Record{
 			"plain-token": {
 				NodeID:             "nd_456",
-				BindingStatus:      nodes.BindingBound,
+				BindingStatus:      nodes.BindingPendingConfirmation,
 				BindingFingerprint: "fp-old",
 			},
 		},
@@ -96,16 +89,11 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 		t.Fatalf("EnrollNode() error = %v", err)
 	}
 
-	if len(repo.bindingUpdates) != 1 {
-		t.Fatalf("bindingUpdates = %d, want 1", len(repo.bindingUpdates))
+	if len(repo.enrollmentCalls) != 1 {
+		t.Fatalf("enrollmentCalls = %d, want 1", len(repo.enrollmentCalls))
 	}
-
-	update := repo.bindingUpdates[0]
-	if update.BindingStatus != nodes.BindingPendingConfirmation {
-		t.Fatalf("update.BindingStatus = %q, want %q", update.BindingStatus, nodes.BindingPendingConfirmation)
-	}
-	if update.BindingFingerprint != "fp-old" {
-		t.Fatalf("update.BindingFingerprint = %q, want %q", update.BindingFingerprint, "fp-old")
+	if repo.enrollmentCalls[0] != (EnrollInput{Token: "plain-token", Fingerprint: "fp-new"}) {
+		t.Fatalf("enrollmentCalls[0] = %#v", repo.enrollmentCalls[0])
 	}
 
 	if result != (EnrollResult{
@@ -119,7 +107,7 @@ func TestEnrollNodeMarksConflictForNewFingerprint(t *testing.T) {
 func TestEnrollNodeReturnsInvalidEnrollmentToken(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(&fakeRepository{nodeByToken: map[string]nodes.Record{}})
+	service := NewService(&fakeRepository{enrollmentResultByToken: map[string]nodes.Record{}})
 
 	_, err := service.EnrollNode(context.Background(), EnrollInput{
 		Token:       "missing-token",
@@ -127,6 +115,29 @@ func TestEnrollNodeReturnsInvalidEnrollmentToken(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidEnrollmentToken) {
 		t.Fatalf("EnrollNode() error = %v, want ErrInvalidEnrollmentToken", err)
+	}
+}
+
+func TestEnrollNodeUsesSingleAtomicRepositoryCall(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepository{
+		enrollmentResultByToken: map[string]nodes.Record{
+			"token-1": {
+				NodeID:        "nd_atomic",
+				BindingStatus: nodes.BindingBound,
+			},
+		},
+	}
+	service := NewService(repo)
+
+	_, err := service.EnrollNode(context.Background(), EnrollInput{Token: "token-1", Fingerprint: "fp-atomic"})
+	if err != nil {
+		t.Fatalf("EnrollNode() error = %v", err)
+	}
+
+	if len(repo.enrollmentCalls) != 1 {
+		t.Fatalf("enrollmentCalls = %d, want 1", len(repo.enrollmentCalls))
 	}
 }
 
@@ -321,12 +332,9 @@ type fakeRepository struct {
 	issuedNodeID string
 	issueErr     error
 
-	nodeByToken map[string]nodes.Record
-	findErr     error
-
-	bindingUpdates []BindingUpdate
-	updateResult   nodes.Record
-	updateErr      error
+	enrollmentResultByToken map[string]nodes.Record
+	enrollmentCalls         []EnrollInput
+	enrollErr               error
 
 	heartbeatGetNodeCalls []string
 	heartbeatNode         nodes.Record
@@ -344,30 +352,14 @@ func (f *fakeRepository) IssueEnrollmentToken(_ context.Context, nodeID string) 
 	return f.issuedToken, nil
 }
 
-func (f *fakeRepository) FindNodeByEnrollmentToken(_ context.Context, token string) (nodes.Record, error) {
-	if f.findErr != nil {
-		return nodes.Record{}, f.findErr
+func (f *fakeRepository) ApplyEnrollment(_ context.Context, input EnrollInput) (nodes.Record, error) {
+	f.enrollmentCalls = append(f.enrollmentCalls, input)
+	if f.enrollErr != nil {
+		return nodes.Record{}, f.enrollErr
 	}
-	record, ok := f.nodeByToken[token]
+	record, ok := f.enrollmentResultByToken[input.Token]
 	if !ok {
 		return nodes.Record{}, nodes.ErrNodeNotFound
-	}
-	return record, nil
-}
-
-func (f *fakeRepository) UpdateBindingState(_ context.Context, update BindingUpdate) (nodes.Record, error) {
-	f.bindingUpdates = append(f.bindingUpdates, update)
-	if f.updateErr != nil {
-		return nodes.Record{}, f.updateErr
-	}
-	if f.updateResult.NodeID != "" {
-		return f.updateResult, nil
-	}
-
-	record := nodes.Record{
-		NodeID:             update.NodeID,
-		BindingStatus:      update.BindingStatus,
-		BindingFingerprint: update.BindingFingerprint,
 	}
 	return record, nil
 }

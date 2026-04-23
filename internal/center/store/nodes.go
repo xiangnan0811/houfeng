@@ -219,8 +219,50 @@ func (r *PostgresNodeRepository) FindNodeByEnrollmentToken(ctx context.Context, 
 	return record, nil
 }
 
-func (r *PostgresNodeRepository) UpdateBindingState(ctx context.Context, update enrollment.BindingUpdate) (nodes.Record, error) {
-	record, err := scanNode(r.db.QueryRow(ctx, `
+func resolveEnrollmentBindingTransition(currentStatus, currentFingerprint, newFingerprint string) (string, string) {
+	switch currentStatus {
+	case nodes.BindingUnbound:
+		return nodes.BindingBound, newFingerprint
+	case nodes.BindingBound:
+		if currentFingerprint == newFingerprint {
+			return nodes.BindingBound, currentFingerprint
+		}
+		return nodes.BindingPendingConfirmation, currentFingerprint
+	default:
+		return currentStatus, currentFingerprint
+	}
+}
+
+func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enrollment.EnrollInput) (nodes.Record, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin enrollment transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	var (
+		nodeID             string
+		bindingStatus      string
+		bindingFingerprint string
+	)
+	if err := tx.QueryRow(ctx, `
+		select node_id,
+			binding_status,
+			coalesce(binding_fingerprint, '')
+		from nodes
+		where enrollment_token_hash = $1
+		for update`,
+		hashEnrollmentToken(input.Token),
+	).Scan(&nodeID, &bindingStatus, &bindingFingerprint); errors.Is(err, pgx.ErrNoRows) {
+		return nodes.Record{}, nodes.ErrNodeNotFound
+	} else if err != nil {
+		return nodes.Record{}, fmt.Errorf("query node by enrollment token for update: %w", err)
+	}
+
+	nextBindingStatus, nextBindingFingerprint := resolveEnrollmentBindingTransition(bindingStatus, bindingFingerprint, input.Fingerprint)
+	record, err := scanNode(tx.QueryRow(ctx, `
 		update nodes
 		set binding_status = $2,
 			binding_fingerprint = $3,
@@ -228,15 +270,18 @@ func (r *PostgresNodeRepository) UpdateBindingState(ctx context.Context, update 
 			updated_at = now()
 		where node_id = $1
 		returning `+nodeSelectColumns,
-		update.NodeID,
-		update.BindingStatus,
-		update.BindingFingerprint,
+		nodeID,
+		nextBindingStatus,
+		nextBindingFingerprint,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nodes.Record{}, nodes.ErrNodeNotFound
 	}
 	if err != nil {
-		return nodes.Record{}, fmt.Errorf("update binding state for node %q: %w", update.NodeID, err)
+		return nodes.Record{}, fmt.Errorf("update enrollment binding state for node %q: %w", nodeID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit enrollment transaction for node %q: %w", nodeID, err)
 	}
 	return record, nil
 }

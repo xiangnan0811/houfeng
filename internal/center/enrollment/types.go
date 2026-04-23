@@ -24,12 +24,6 @@ type SyncInput struct {
 	Heartbeats []HeartbeatPayload
 }
 
-type BindingUpdate struct {
-	NodeID             string
-	BindingStatus      string
-	BindingFingerprint string
-}
-
 type HeartbeatWrite struct {
 	NodeID       string
 	ObservedAt   time.Time
