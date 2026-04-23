@@ -9,6 +9,7 @@ const (
 )
 
 const (
+	ErrorCodeInvalidRequest         = "invalid_request"
 	ErrorCodeInvalidJSON            = "invalid_json"
 	ErrorCodeInvalidEnrollmentToken = "invalid_enrollment_token"
 	ErrorCodeBindingNotAccepted     = "binding_not_accepted"

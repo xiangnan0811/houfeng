@@ -99,6 +99,25 @@ func TestAgentEnrollHandlerReturnsInvalidEnrollmentTokenError(t *testing.T) {
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidEnrollmentToken, "invalid enrollment token")
 }
 
+func TestAgentEnrollHandlerRejectsEmptyFingerprint(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentEnrollmentService{}
+
+	handler := handlers.AgentEnroll(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(`{"token":"plain-token","fingerprint":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+}
+
 func TestAgentEnrollHandlerReturnsMethodNotAllowedError(t *testing.T) {
 	t.Parallel()
 
@@ -170,7 +189,7 @@ func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 	svc := &fakeAgentEnrollmentService{syncErr: enrollment.ErrBindingNotAccepted}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","heartbeats":[]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -181,6 +200,57 @@ func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 	}
 
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeBindingNotAccepted, "binding not accepted")
+}
+
+func TestAgentSyncHandlerRejectsEmptyNodeID(t *testing.T) {
+	t.Parallel()
+
+	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+}
+
+func TestAgentSyncHandlerRejectsHeartbeatMissingSyncBatchID(t *testing.T) {
+	t.Parallel()
+
+	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":""}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+}
+
+func TestAgentSyncHandlerRejectsHeartbeatWithZeroObservedAt(t *testing.T) {
+	t.Parallel()
+
+	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","heartbeats":[{"observed_at":"0001-01-01T00:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
 }
 
 func TestAgentSyncHandlerReturnsMethodNotAllowedError(t *testing.T) {

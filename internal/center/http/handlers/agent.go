@@ -28,6 +28,10 @@ func AgentEnroll(svc AgentEnrollmentService) http.Handler {
 			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidJSON, "invalid json")
 			return
 		}
+		if !isValidEnrollmentRequest(req) {
+			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
+			return
+		}
 
 		result, err := svc.EnrollNode(r.Context(), enrollment.EnrollInput{
 			Token:       req.Token,
@@ -61,6 +65,10 @@ func AgentSync(svc AgentEnrollmentService) http.Handler {
 		var req agentapi.SyncRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidJSON, "invalid json")
+			return
+		}
+		if !isValidSyncRequest(req) {
+			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
 			return
 		}
 
@@ -98,4 +106,22 @@ func AgentSync(svc AgentEnrollmentService) http.Handler {
 
 func writeAgentAPIError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, agentapi.ErrorResponse{Code: code, Message: message})
+}
+
+func isValidEnrollmentRequest(req agentapi.EnrollmentRequest) bool {
+	return req.Token != "" && req.Fingerprint != ""
+}
+
+func isValidSyncRequest(req agentapi.SyncRequest) bool {
+	if req.NodeID == "" || len(req.Heartbeats) == 0 {
+		return false
+	}
+
+	for _, heartbeat := range req.Heartbeats {
+		if heartbeat.ObservedAt.IsZero() || heartbeat.AgentVersion == "" || heartbeat.Fingerprint == "" || heartbeat.SyncBatchID == "" {
+			return false
+		}
+	}
+
+	return true
 }
