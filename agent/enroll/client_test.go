@@ -14,11 +14,15 @@ import (
 
 func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/agent/enroll" {
-			t.Fatalf("path = %q, want %q", r.URL.Path, "/api/agent/enroll")
+		if r.URL.Path != agentapi.EnrollPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, agentapi.EnrollPath)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(agentapi.EnrollmentResponse{NodeID: "nd-local-01", Status: "accepted"})
+		_ = json.NewEncoder(w).Encode(agentapi.EnrollmentResponse{
+			NodeID:        "nd-local-01",
+			BindingStatus: agentapi.BindingStatusPendingConfirmation,
+			Status:        "accepted",
+		})
 	}))
 	defer ts.Close()
 
@@ -33,6 +37,9 @@ func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 	if response.NodeID != "nd-local-01" {
 		t.Fatalf("NodeID = %q, want %q", response.NodeID, "nd-local-01")
 	}
+	if response.BindingStatus != agentapi.BindingStatusPendingConfirmation {
+		t.Fatalf("BindingStatus = %q, want %q", response.BindingStatus, agentapi.BindingStatusPendingConfirmation)
+	}
 }
 
 func TestClientSyncReturnsDecodedPointer(t *testing.T) {
@@ -42,8 +49,8 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/agent/sync" {
-			t.Fatalf("path = %q, want %q", r.URL.Path, "/api/agent/sync")
+		if r.URL.Path != agentapi.SyncPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, agentapi.SyncPath)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(agentapi.SyncResponse{AcceptedAt: acceptedAt, Status: "ok"})

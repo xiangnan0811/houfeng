@@ -2,6 +2,12 @@ package agentapi
 
 import "time"
 
+const (
+	BindingStatusUnbound             = "未绑定"
+	BindingStatusBound               = "已绑定"
+	BindingStatusPendingConfirmation = "指纹变更待确认"
+)
+
 type EnrollmentRequest struct {
 	NodeName     string `json:"node_name"`
 	Token        string `json:"token"`

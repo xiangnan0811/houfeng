@@ -29,7 +29,7 @@ func NewClient(baseURL string) *Client {
 
 func (c *Client) Enroll(ctx context.Context, request agentapi.EnrollmentRequest) (*agentapi.EnrollmentResponse, error) {
 	response := &agentapi.EnrollmentResponse{}
-	if err := c.postJSON(ctx, "/api/agent/enroll", request, response); err != nil {
+	if err := c.postJSON(ctx, agentapi.EnrollPath, request, response); err != nil {
 		return nil, err
 	}
 	return response, nil
@@ -37,7 +37,7 @@ func (c *Client) Enroll(ctx context.Context, request agentapi.EnrollmentRequest)
 
 func (c *Client) Sync(ctx context.Context, request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
 	response := &agentapi.SyncResponse{}
-	if err := c.postJSON(ctx, "/api/agent/sync", request, response); err != nil {
+	if err := c.postJSON(ctx, agentapi.SyncPath, request, response); err != nil {
 		return nil, err
 	}
 	return response, nil

@@ -8,6 +8,36 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
+func TestEnrollmentResponseRoundTrip(t *testing.T) {
+	original := agentapi.EnrollmentResponse{
+		NodeID:        "nd-local-01",
+		BindingStatus: agentapi.BindingStatusPendingConfirmation,
+		Status:        "accepted",
+	}
+
+	payload, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal enrollment response: %v", err)
+	}
+
+	var roundTrip agentapi.EnrollmentResponse
+	if err := json.Unmarshal(payload, &roundTrip); err != nil {
+		t.Fatalf("unmarshal enrollment response: %v", err)
+	}
+
+	if roundTrip.NodeID != "nd-local-01" {
+		t.Fatalf("NodeID = %q, want %q", roundTrip.NodeID, "nd-local-01")
+	}
+
+	if roundTrip.BindingStatus != agentapi.BindingStatusPendingConfirmation {
+		t.Fatalf("BindingStatus = %q, want %q", roundTrip.BindingStatus, agentapi.BindingStatusPendingConfirmation)
+	}
+
+	if roundTrip.Status != "accepted" {
+		t.Fatalf("Status = %q, want %q", roundTrip.Status, "accepted")
+	}
+}
+
 func TestSyncRequestRoundTrip(t *testing.T) {
 	observedAt, err := time.Parse(time.RFC3339, "2026-04-22T12:00:00Z")
 	if err != nil {
