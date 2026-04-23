@@ -5,20 +5,17 @@ import (
 	"errors"
 	"net/http"
 	"time"
-
-	"houfeng/internal/center/config"
-	centerhttp "houfeng/internal/center/http"
 )
 
 type App struct {
 	server *http.Server
 }
 
-func New(cfg config.CenterConfig, version string) *App {
+func New(addr string, handler http.Handler) *App {
 	return &App{
 		server: &http.Server{
-			Addr:    cfg.HTTPAddr,
-			Handler: centerhttp.New(centerhttp.RouterOptions{Version: version, WebDistDir: cfg.WebDistDir}),
+			Addr:    addr,
+			Handler: handler,
 		},
 	}
 }

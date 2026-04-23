@@ -8,6 +8,9 @@ import (
 
 	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/config"
+	centerhttp "houfeng/internal/center/http"
+	"houfeng/internal/center/store"
+	"houfeng/internal/center/store/migrate"
 )
 
 var version = "dev"
@@ -21,7 +24,23 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := centerapp.New(cfg, version).Run(ctx); err != nil {
+	db, err := store.OpenPostgres(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("open postgres: %v", err)
+	}
+	defer db.Close()
+
+	if err := migrate.Apply(ctx, db); err != nil {
+		log.Fatalf("apply migrations: %v", err)
+	}
+
+	router := centerhttp.New(centerhttp.RouterOptions{
+		Version:    version,
+		WebDistDir: cfg.WebDistDir,
+		DB:         db,
+	})
+
+	if err := centerapp.New(cfg.HTTPAddr, router).Run(ctx); err != nil {
 		log.Fatalf("run center app: %v", err)
 	}
 }

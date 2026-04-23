@@ -12,8 +12,9 @@ const (
 )
 
 type CenterConfig struct {
-	HTTPAddr   string
-	WebDistDir string
+	HTTPAddr    string
+	WebDistDir  string
+	DatabaseURL string
 }
 
 func LoadCenterConfig() (CenterConfig, error) {
@@ -27,9 +28,15 @@ func LoadCenterConfig() (CenterConfig, error) {
 		return CenterConfig{}, err
 	}
 
+	databaseURL, err := requiredEnv("HOUFENG_DATABASE_URL")
+	if err != nil {
+		return CenterConfig{}, err
+	}
+
 	return CenterConfig{
-		HTTPAddr:   httpAddr,
-		WebDistDir: webDistDir,
+		HTTPAddr:    httpAddr,
+		WebDistDir:  webDistDir,
+		DatabaseURL: databaseURL,
 	}, nil
 }
 
@@ -38,8 +45,16 @@ func envOrDefault(key, fallback string) (string, error) {
 	if !ok {
 		value = fallback
 	}
+	return nonEmptyEnvValue(key, value)
+}
 
-	if strings.TrimSpace(value) == "" {
+func requiredEnv(key string) (string, error) {
+	return nonEmptyEnvValue(key, os.Getenv(key))
+}
+
+func nonEmptyEnvValue(key, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return "", fmt.Errorf("%s must not be empty", key)
 	}
 
