@@ -13,9 +13,11 @@ const (
 	LifecycleNoRenewal         = "不续费"
 	LifecycleRetired           = "已退役"
 
-	MonitoringEnabled = "启用"
-	BindingUnbound    = "未绑定"
-	HealthNormal      = "正常"
+	MonitoringEnabled          = "启用"
+	BindingUnbound             = "未绑定"
+	BindingBound               = "已绑定"
+	BindingPendingConfirmation = "指纹变更待确认"
+	HealthNormal               = "正常"
 )
 
 var ErrNodeNotFound = errors.New("node not found")
@@ -37,6 +39,8 @@ type Record struct {
 	LifecycleStatus            string     `json:"lifecycle_status"`
 	MonitoringStatus           string     `json:"monitoring_status"`
 	BindingStatus              string     `json:"binding_status"`
+	EnrollmentTokenHash        string     `json:"-"`
+	BindingFingerprint         string     `json:"binding_fingerprint,omitempty"`
 	Labels                     []string   `json:"labels"`
 	Note                       string     `json:"note"`
 	CurrentHealthStatus        string     `json:"current_health_status"`

@@ -2,12 +2,15 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/nodes"
 )
@@ -29,6 +32,8 @@ const nodeSelectColumns = `
 	lifecycle_status,
 	monitoring_status,
 	binding_status,
+	coalesce(enrollment_token_hash, ''),
+	coalesce(binding_fingerprint, ''),
 	labels,
 	note,
 	current_health_status,
@@ -44,6 +49,7 @@ type nodeScanner interface {
 }
 
 var _ nodes.Repository = (*PostgresNodeRepository)(nil)
+var _ enrollment.Repository = (*PostgresNodeRepository)(nil)
 
 func scanNode(row nodeScanner) (nodes.Record, error) {
 	var record nodes.Record
@@ -56,6 +62,8 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 		&record.LifecycleStatus,
 		&record.MonitoringStatus,
 		&record.BindingStatus,
+		&record.EnrollmentTokenHash,
+		&record.BindingFingerprint,
 		&record.Labels,
 		&record.Note,
 		&record.CurrentHealthStatus,
@@ -69,6 +77,11 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 		return nodes.Record{}, err
 	}
 	return record, nil
+}
+
+func hashEnrollmentToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func (r *PostgresNodeRepository) ListNodes(ctx context.Context) ([]nodes.Record, error) {
@@ -162,6 +175,122 @@ func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input nodes.Cre
 	))
 	if err != nil {
 		return nodes.Record{}, fmt.Errorf("create node: %w", err)
+	}
+	return record, nil
+}
+
+func (r *PostgresNodeRepository) IssueEnrollmentToken(ctx context.Context, nodeID string) (string, error) {
+	token, err := ids.New("enroll")
+	if err != nil {
+		return "", fmt.Errorf("generate enrollment token: %w", err)
+	}
+
+	tag, err := r.db.Exec(ctx, `
+		update nodes
+		set enrollment_token_hash = $2,
+			updated_at = now()
+		where node_id = $1`,
+		nodeID,
+		hashEnrollmentToken(token),
+	)
+	if err != nil {
+		return "", fmt.Errorf("issue enrollment token for node %q: %w", nodeID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", nodes.ErrNodeNotFound
+	}
+
+	return token, nil
+}
+
+func (r *PostgresNodeRepository) FindNodeByEnrollmentToken(ctx context.Context, token string) (nodes.Record, error) {
+	record, err := scanNode(r.db.QueryRow(ctx, `
+		select `+nodeSelectColumns+`
+		from nodes
+		where enrollment_token_hash = $1`,
+		hashEnrollmentToken(token),
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nodes.Record{}, nodes.ErrNodeNotFound
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("query node by enrollment token: %w", err)
+	}
+	return record, nil
+}
+
+func (r *PostgresNodeRepository) UpdateBindingState(ctx context.Context, update enrollment.BindingUpdate) (nodes.Record, error) {
+	record, err := scanNode(r.db.QueryRow(ctx, `
+		update nodes
+		set binding_status = $2,
+			binding_fingerprint = $3,
+			last_sync_at = $4,
+			updated_at = now()
+		where node_id = $1
+		returning `+nodeSelectColumns,
+		update.NodeID,
+		update.BindingStatus,
+		update.BindingFingerprint,
+		update.SyncedAt,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nodes.Record{}, nodes.ErrNodeNotFound
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("update binding state for node %q: %w", update.NodeID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresNodeRepository) RecordHeartbeat(ctx context.Context, write enrollment.HeartbeatWrite) error {
+	if _, err := r.db.Exec(ctx, `
+		insert into node_heartbeats (
+			node_id,
+			observed_at,
+			received_at,
+			agent_version,
+			fingerprint,
+			sync_batch_id,
+			is_backfilled
+		) values (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			$6,
+			$7
+		)`,
+		write.NodeID,
+		write.ObservedAt,
+		write.ReceivedAt,
+		write.AgentVersion,
+		write.Fingerprint,
+		write.SyncBatchID,
+		write.IsBackfilled,
+	); err != nil {
+		return fmt.Errorf("record heartbeat for node %q: %w", write.NodeID, err)
+	}
+	return nil
+}
+
+func (r *PostgresNodeRepository) TouchHeartbeatState(ctx context.Context, write enrollment.HeartbeatWrite) (nodes.Record, error) {
+	record, err := scanNode(r.db.QueryRow(ctx, `
+		update nodes
+		set last_heartbeat_at = greatest(coalesce(last_heartbeat_at, $2), $2),
+			last_sync_at = greatest(coalesce(last_sync_at, $3), $3),
+			updated_at = now()
+		where node_id = $1
+		returning `+nodeSelectColumns,
+		write.NodeID,
+		write.ObservedAt,
+		write.ReceivedAt,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nodes.Record{}, nodes.ErrNodeNotFound
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("touch heartbeat state for node %q: %w", write.NodeID, err)
 	}
 	return record, nil
 }
