@@ -99,6 +99,22 @@ func TestAgentEnrollHandlerReturnsInvalidEnrollmentTokenError(t *testing.T) {
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidEnrollmentToken, "invalid enrollment token")
 }
 
+func TestAgentEnrollHandlerReturnsMethodNotAllowedError(t *testing.T) {
+	t.Parallel()
+
+	handler := handlers.AgentEnroll(&fakeAgentEnrollmentService{})
+	req := httptest.NewRequest(http.MethodGet, agentapi.EnrollPath, nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
+}
+
 func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	t.Parallel()
 
@@ -165,6 +181,22 @@ func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 	}
 
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeBindingNotAccepted, "binding not accepted")
+}
+
+func TestAgentSyncHandlerReturnsMethodNotAllowedError(t *testing.T) {
+	t.Parallel()
+
+	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	req := httptest.NewRequest(http.MethodGet, agentapi.SyncPath, nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
 }
 
 func assertErrorResponse(t *testing.T, recorder *httptest.ResponseRecorder, wantCode, wantMessage string) {

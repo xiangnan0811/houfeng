@@ -12,6 +12,7 @@ const (
 	ErrorCodeInvalidJSON            = "invalid_json"
 	ErrorCodeInvalidEnrollmentToken = "invalid_enrollment_token"
 	ErrorCodeBindingNotAccepted     = "binding_not_accepted"
+	ErrorCodeMethodNotAllowed       = "method_not_allowed"
 	ErrorCodeNodeNotFound           = "node_not_found"
 	ErrorCodeInternalError          = "internal_error"
 )

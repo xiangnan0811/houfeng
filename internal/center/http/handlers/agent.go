@@ -19,7 +19,7 @@ type AgentEnrollmentService interface {
 func AgentEnroll(svc AgentEnrollmentService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			writeAgentAPIError(w, http.StatusMethodNotAllowed, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
 			return
 		}
 
@@ -54,7 +54,7 @@ func AgentEnroll(svc AgentEnrollmentService) http.Handler {
 func AgentSync(svc AgentEnrollmentService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			writeAgentAPIError(w, http.StatusMethodNotAllowed, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
 			return
 		}
 
