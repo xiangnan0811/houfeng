@@ -10,6 +10,7 @@ import (
 	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/config"
 	centerhttp "houfeng/internal/center/http"
+	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
 )
@@ -49,9 +50,10 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 
 	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
 	router := deps.newRouter(centerhttp.RouterOptions{
-		Version:    version,
-		WebDistDir: cfg.WebDistDir,
-		Nodes:      nodeRepo,
+		Version:                version,
+		WebDistDir:             cfg.WebDistDir,
+		NodesCollectionHandler: handlers.NodesCollection(nodeRepo),
+		NodeItemHandler:        handlers.NodeItem(nodeRepo),
 	})
 
 	return deps.newApp(cfg.HTTPAddr, router), db.Close, nil

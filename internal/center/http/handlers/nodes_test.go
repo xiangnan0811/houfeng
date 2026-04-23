@@ -11,34 +11,34 @@ import (
 	"time"
 
 	"houfeng/internal/center/http/handlers"
-	"houfeng/internal/center/store"
+	"houfeng/internal/center/nodes"
 )
 
 type fakeNodeRepository struct {
-	listNodesResult  []store.NodeRecord
+	listNodesResult  []nodes.Record
 	listNodesErr     error
-	getNodeResult    store.NodeRecord
+	getNodeResult    nodes.Record
 	getNodeErr       error
-	createNodeResult store.NodeRecord
+	createNodeResult nodes.Record
 	createNodeErr    error
-	createNodeInput  store.CreateNodeInput
+	createNodeInput  nodes.CreateInput
 }
 
-func (f *fakeNodeRepository) ListNodes(context.Context) ([]store.NodeRecord, error) {
+func (f *fakeNodeRepository) ListNodes(context.Context) ([]nodes.Record, error) {
 	return f.listNodesResult, f.listNodesErr
 }
 
-func (f *fakeNodeRepository) GetNode(context.Context, string) (store.NodeRecord, error) {
+func (f *fakeNodeRepository) GetNode(context.Context, string) (nodes.Record, error) {
 	if f.getNodeErr != nil {
-		return store.NodeRecord{}, f.getNodeErr
+		return nodes.Record{}, f.getNodeErr
 	}
 	return f.getNodeResult, nil
 }
 
-func (f *fakeNodeRepository) CreateNode(_ context.Context, input store.CreateNodeInput) (store.NodeRecord, error) {
+func (f *fakeNodeRepository) CreateNode(_ context.Context, input nodes.CreateInput) (nodes.Record, error) {
 	f.createNodeInput = input
 	if f.createNodeErr != nil {
-		return store.NodeRecord{}, f.createNodeErr
+		return nodes.Record{}, f.createNodeErr
 	}
 	return f.createNodeResult, nil
 }
@@ -46,7 +46,7 @@ func (f *fakeNodeRepository) CreateNode(_ context.Context, input store.CreateNod
 func TestListNodesHandlerReturnsJSON(t *testing.T) {
 	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
 	repo := &fakeNodeRepository{
-		listNodesResult: []store.NodeRecord{{
+		listNodesResult: []nodes.Record{{
 			NodeID:              "nd_001",
 			DisplayName:         "Tokyo Edge",
 			Region:              "ap-northeast-1",
@@ -71,7 +71,7 @@ func TestListNodesHandlerReturnsJSON(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
 
-	var body []store.NodeRecord
+	var body []nodes.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestListNodesHandlerReturnsJSON(t *testing.T) {
 func TestCreateNodeHandlerReturnsCreatedRecord(t *testing.T) {
 	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
 	repo := &fakeNodeRepository{
-		createNodeResult: store.NodeRecord{
+		createNodeResult: nodes.Record{
 			NodeID:              "nd_001",
 			DisplayName:         "Tokyo Edge",
 			Region:              "ap-northeast-1",
@@ -117,7 +117,7 @@ func TestCreateNodeHandlerReturnsCreatedRecord(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, recorder.Code)
 	}
 
-	var body store.NodeRecord
+	var body nodes.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
@@ -130,8 +130,32 @@ func TestCreateNodeHandlerReturnsCreatedRecord(t *testing.T) {
 	}
 }
 
+func TestCreateNodeHandlerRejectsInvalidLifecycleStatus(t *testing.T) {
+	repo := &fakeNodeRepository{}
+
+	handler := handlers.NodesCollection(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes", strings.NewReader(`{"display_name":"Tokyo Edge","region":"ap-northeast-1","city":"Tokyo","provider":"Vultr","lifecycle_status":"未知状态"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+
+	if body["error"] != "invalid input" {
+		t.Fatalf("expected error %q, got %q", "invalid input", body["error"])
+	}
+}
+
 func TestNodeItemReturnsNotFound(t *testing.T) {
-	repo := &fakeNodeRepository{getNodeErr: store.ErrNodeNotFound}
+	repo := &fakeNodeRepository{getNodeErr: nodes.ErrNodeNotFound}
 
 	handler := handlers.NodeItem(repo)
 	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_missing", nil)
@@ -148,7 +172,7 @@ func TestNodeItemReturnsNotFound(t *testing.T) {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
 
-	if !errors.Is(repo.getNodeErr, store.ErrNodeNotFound) {
+	if !errors.Is(repo.getNodeErr, nodes.ErrNodeNotFound) {
 		t.Fatalf("expected fake repo error to match ErrNodeNotFound")
 	}
 	if body["error"] != "node not found" {

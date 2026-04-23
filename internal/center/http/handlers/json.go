@@ -1,17 +1,22 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 )
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(value); err != nil {
+		http.Error(w, fmt.Sprintf("encode json: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		http.Error(w, fmt.Sprintf("encode json: %v", err), http.StatusInternalServerError)
-	}
+	_, _ = w.Write(body.Bytes())
 }
 
 func decodeJSON(r *http.Request, dst any) error {

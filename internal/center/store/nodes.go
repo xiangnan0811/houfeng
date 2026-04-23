@@ -4,51 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/nodes"
 )
-
-var ErrNodeNotFound = errors.New("node not found")
-
-type NodeRecord struct {
-	NodeID                     string     `json:"node_id"`
-	DisplayName                string     `json:"display_name"`
-	Region                     string     `json:"region"`
-	City                       string     `json:"city"`
-	Provider                   string     `json:"provider"`
-	LifecycleStatus            string     `json:"lifecycle_status"`
-	MonitoringStatus           string     `json:"monitoring_status"`
-	BindingStatus              string     `json:"binding_status"`
-	Labels                     []string   `json:"labels"`
-	Note                       string     `json:"note"`
-	CurrentHealthStatus        string     `json:"current_health_status"`
-	LastHeartbeatAt            *time.Time `json:"last_heartbeat_at,omitempty"`
-	LastSyncAt                 *time.Time `json:"last_sync_at,omitempty"`
-	CurrentActiveIncidentCount int        `json:"current_active_incident_count"`
-	CurrentPrimaryIssueSummary string     `json:"current_primary_issue_summary"`
-	CreatedAt                  time.Time  `json:"created_at"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
-}
-
-type CreateNodeInput struct {
-	DisplayName     string   `json:"display_name"`
-	Region          string   `json:"region"`
-	City            string   `json:"city"`
-	Provider        string   `json:"provider"`
-	LifecycleStatus string   `json:"lifecycle_status"`
-	Labels          []string `json:"labels"`
-	Note            string   `json:"note"`
-}
-
-type NodeRepository interface {
-	ListNodes(context.Context) ([]NodeRecord, error)
-	GetNode(context.Context, string) (NodeRecord, error)
-	CreateNode(context.Context, CreateNodeInput) (NodeRecord, error)
-}
 
 type PostgresNodeRepository struct {
 	db *pgxpool.Pool
@@ -81,8 +43,10 @@ type nodeScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanNode(row nodeScanner) (NodeRecord, error) {
-	var record NodeRecord
+var _ nodes.Repository = (*PostgresNodeRepository)(nil)
+
+func scanNode(row nodeScanner) (nodes.Record, error) {
+	var record nodes.Record
 	if err := row.Scan(
 		&record.NodeID,
 		&record.DisplayName,
@@ -102,12 +66,12 @@ func scanNode(row nodeScanner) (NodeRecord, error) {
 		&record.CreatedAt,
 		&record.UpdatedAt,
 	); err != nil {
-		return NodeRecord{}, err
+		return nodes.Record{}, err
 	}
 	return record, nil
 }
 
-func (r *PostgresNodeRepository) ListNodes(ctx context.Context) ([]NodeRecord, error) {
+func (r *PostgresNodeRepository) ListNodes(ctx context.Context) ([]nodes.Record, error) {
 	rows, err := r.db.Query(ctx, `
 		select `+nodeSelectColumns+`
 		from nodes
@@ -117,40 +81,40 @@ func (r *PostgresNodeRepository) ListNodes(ctx context.Context) ([]NodeRecord, e
 	}
 	defer rows.Close()
 
-	nodes := make([]NodeRecord, 0)
+	records := make([]nodes.Record, 0)
 	for rows.Next() {
 		record, err := scanNode(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan node: %w", err)
 		}
-		nodes = append(nodes, record)
+		records = append(records, record)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate nodes: %w", err)
 	}
 
-	return nodes, nil
+	return records, nil
 }
 
-func (r *PostgresNodeRepository) GetNode(ctx context.Context, nodeID string) (NodeRecord, error) {
+func (r *PostgresNodeRepository) GetNode(ctx context.Context, nodeID string) (nodes.Record, error) {
 	record, err := scanNode(r.db.QueryRow(ctx, `
 		select `+nodeSelectColumns+`
 		from nodes
 		where node_id = $1`, nodeID))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return NodeRecord{}, ErrNodeNotFound
+		return nodes.Record{}, nodes.ErrNodeNotFound
 	}
 	if err != nil {
-		return NodeRecord{}, fmt.Errorf("query node %q: %w", nodeID, err)
+		return nodes.Record{}, fmt.Errorf("query node %q: %w", nodeID, err)
 	}
 	return record, nil
 }
 
-func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input CreateNodeInput) (NodeRecord, error) {
+func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input nodes.CreateInput) (nodes.Record, error) {
 	nodeID, err := ids.New("nd")
 	if err != nil {
-		return NodeRecord{}, fmt.Errorf("generate node id: %w", err)
+		return nodes.Record{}, fmt.Errorf("generate node id: %w", err)
 	}
 
 	record, err := scanNode(r.db.QueryRow(ctx, `
@@ -175,11 +139,11 @@ func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input CreateNod
 			$4,
 			$5,
 			$6,
-			'enabled',
-			'unbound',
 			$7,
 			$8,
-			'normal',
+			$9,
+			$10,
+			$11,
 			0,
 			''
 		)
@@ -190,11 +154,14 @@ func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input CreateNod
 		input.City,
 		input.Provider,
 		input.LifecycleStatus,
+		nodes.MonitoringEnabled,
+		nodes.BindingUnbound,
 		input.Labels,
 		input.Note,
+		nodes.HealthNormal,
 	))
 	if err != nil {
-		return NodeRecord{}, fmt.Errorf("create node: %w", err)
+		return nodes.Record{}, fmt.Errorf("create node: %w", err)
 	}
 	return record, nil
 }

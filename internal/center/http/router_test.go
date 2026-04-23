@@ -11,7 +11,8 @@ import (
 	"time"
 
 	centerhttp "houfeng/internal/center/http"
-	"houfeng/internal/center/store"
+	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/nodes"
 )
 
 func TestRouterHealthz(t *testing.T) {
@@ -57,22 +58,27 @@ func TestRouterPrefersNodesAPIOverSPAFallback(t *testing.T) {
 	}
 
 	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
-	handler := centerhttp.New(centerhttp.RouterOptions{
-		Version:    "dev",
-		WebDistDir: dir,
-		Nodes: &fakeNodeRepository{listNodesResult: []store.NodeRecord{{
+	repo := &fakeNodeRepository{
+		listNodesResult: []nodes.Record{{
 			NodeID:              "nd_001",
 			DisplayName:         "Tokyo Edge",
 			Region:              "ap-northeast-1",
 			City:                "Tokyo",
 			Provider:            "Vultr",
-			LifecycleStatus:     "待接入",
-			MonitoringStatus:    "启用",
-			BindingStatus:       "未绑定",
-			CurrentHealthStatus: "正常",
+			LifecycleStatus:     nodes.LifecyclePendingEnrollment,
+			MonitoringStatus:    nodes.MonitoringEnabled,
+			BindingStatus:       nodes.BindingUnbound,
+			CurrentHealthStatus: nodes.HealthNormal,
 			CreatedAt:           now,
 			UpdatedAt:           now,
-		}}},
+		}},
+	}
+
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:                "dev",
+		WebDistDir:             dir,
+		NodesCollectionHandler: handlers.NodesCollection(repo),
+		NodeItemHandler:        handlers.NodeItem(repo),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
@@ -84,7 +90,7 @@ func TestRouterPrefersNodesAPIOverSPAFallback(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
 
-	var body []store.NodeRecord
+	var body []nodes.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
@@ -95,19 +101,19 @@ func TestRouterPrefersNodesAPIOverSPAFallback(t *testing.T) {
 }
 
 type fakeNodeRepository struct {
-	listNodesResult  []store.NodeRecord
-	getNodeResult    store.NodeRecord
-	createNodeResult store.NodeRecord
+	listNodesResult  []nodes.Record
+	getNodeResult    nodes.Record
+	createNodeResult nodes.Record
 }
 
-func (f *fakeNodeRepository) ListNodes(context.Context) ([]store.NodeRecord, error) {
+func (f *fakeNodeRepository) ListNodes(context.Context) ([]nodes.Record, error) {
 	return f.listNodesResult, nil
 }
 
-func (f *fakeNodeRepository) GetNode(context.Context, string) (store.NodeRecord, error) {
+func (f *fakeNodeRepository) GetNode(context.Context, string) (nodes.Record, error) {
 	return f.getNodeResult, nil
 }
 
-func (f *fakeNodeRepository) CreateNode(context.Context, store.CreateNodeInput) (store.NodeRecord, error) {
+func (f *fakeNodeRepository) CreateNode(context.Context, nodes.CreateInput) (nodes.Record, error) {
 	return f.createNodeResult, nil
 }

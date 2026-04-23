@@ -143,8 +143,11 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.WebDistDir != cfg.WebDistDir {
 		t.Fatalf("router webDistDir = %q, want %q", gotOpts.WebDistDir, cfg.WebDistDir)
 	}
-	if gotOpts.Nodes == nil {
-		t.Fatal("router nodes repo = nil, want non-nil")
+	if gotOpts.NodesCollectionHandler == nil {
+		t.Fatal("router nodes collection handler = nil, want non-nil")
+	}
+	if gotOpts.NodeItemHandler == nil {
+		t.Fatal("router node item handler = nil, want non-nil")
 	}
 	if gotAddr != cfg.HTTPAddr {
 		t.Fatalf("app addr = %q, want %q", gotAddr, cfg.HTTPAddr)
