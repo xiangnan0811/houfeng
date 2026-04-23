@@ -149,6 +149,15 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.NodeItemHandler == nil {
 		t.Fatal("router node item handler = nil, want non-nil")
 	}
+	if gotOpts.TargetsCollectionHandler == nil {
+		t.Fatal("router targets collection handler = nil, want non-nil")
+	}
+	if gotOpts.TargetItemHandler == nil {
+		t.Fatal("router target item handler = nil, want non-nil")
+	}
+	if gotOpts.TargetProbeItemsHandler == nil {
+		t.Fatal("router target probe items handler = nil, want non-nil")
+	}
 	if gotAddr != cfg.HTTPAddr {
 		t.Fatalf("app addr = %q, want %q", gotAddr, cfg.HTTPAddr)
 	}

@@ -100,6 +100,33 @@ func TestRouterPrefersNodesAPIOverSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterDispatchesTargetProbeItemsAPI(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		TargetItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "item"
+			w.WriteHeader(http.StatusOK)
+		}),
+		TargetProbeItemsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "probe-items"
+			w.WriteHeader(http.StatusCreated)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/probe-items", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, recorder.Code)
+	}
+	if called != "probe-items" {
+		t.Fatalf("expected probe items handler, got %q", called)
+	}
+}
+
 type fakeNodeRepository struct {
 	listNodesResult  []nodes.Record
 	getNodeResult    nodes.Record

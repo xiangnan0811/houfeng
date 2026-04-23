@@ -49,11 +49,15 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	}
 
 	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
+	targetRepo := store.NewPostgresTargetRepository(db.Pool())
 	router := deps.newRouter(centerhttp.RouterOptions{
-		Version:                version,
-		WebDistDir:             cfg.WebDistDir,
-		NodesCollectionHandler: handlers.NodesCollection(nodeRepo),
-		NodeItemHandler:        handlers.NodeItem(nodeRepo),
+		Version:                  version,
+		WebDistDir:               cfg.WebDistDir,
+		NodesCollectionHandler:   handlers.NodesCollection(nodeRepo),
+		NodeItemHandler:          handlers.NodeItem(nodeRepo),
+		TargetsCollectionHandler: handlers.TargetsCollection(targetRepo),
+		TargetItemHandler:        handlers.TargetItem(targetRepo),
+		TargetProbeItemsHandler:  handlers.TargetProbeItems(targetRepo),
 	})
 
 	return deps.newApp(cfg.HTTPAddr, router), db.Close, nil
