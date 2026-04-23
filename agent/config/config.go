@@ -9,7 +9,6 @@ import (
 type AgentConfig struct {
 	ServerURL string
 	TokenFile string
-	NodeName  string
 }
 
 func LoadAgentConfig() (AgentConfig, error) {
@@ -23,15 +22,9 @@ func LoadAgentConfig() (AgentConfig, error) {
 		return AgentConfig{}, err
 	}
 
-	nodeName, err := requiredEnv("HOUFENG_AGENT_NODE_NAME")
-	if err != nil {
-		return AgentConfig{}, err
-	}
-
 	return AgentConfig{
 		ServerURL: serverURL,
 		TokenFile: tokenFile,
-		NodeName:  nodeName,
 	}, nil
 }
 

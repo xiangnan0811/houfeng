@@ -82,8 +82,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return fmt.Errorf("runtime fingerprint source is nil")
 	}
 
-	r.logger.Info("agent runtime started", "node_name", r.cfg.NodeName, "server_url", r.cfg.ServerURL)
-	defer r.logger.Info("agent runtime stopped", "node_name", r.cfg.NodeName)
+	r.logger.Info("agent runtime started", "server_url", r.cfg.ServerURL)
+	defer r.logger.Info("agent runtime stopped", "server_url", r.cfg.ServerURL)
 
 	token, err := r.tokenSource.Token(ctx)
 	if err != nil {
@@ -103,7 +103,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return fmt.Errorf("enroll agent: %w", err)
 	}
 
-	r.logger.Info("agent enrolled", "node_name", r.cfg.NodeName, "node_id", enrollment.NodeID, "status", enrollment.Status, "binding_status", enrollment.BindingStatus)
+	r.logger.Info("agent enrolled", "node_id", enrollment.NodeID, "status", enrollment.Status, "binding_status", enrollment.BindingStatus)
 	if enrollment.BindingStatus != agentapi.BindingStatusBound {
 		return fmt.Errorf("enroll agent: %w", &EnrollmentNotBoundError{BindingStatus: enrollment.BindingStatus})
 	}

@@ -59,7 +59,7 @@ func (staticFingerprint) Fingerprint(context.Context) (string, error) {
 }
 
 func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
-	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token", NodeName: "nd-local-01"}
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{}
 	rt := agentruntime.NewWithDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
 
@@ -100,7 +100,7 @@ func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
 }
 
 func TestRuntimeReturnsEnrollmentNotBoundErrorWithoutStartingSyncLoop(t *testing.T) {
-	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token", NodeName: "nd-local-01"}
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
 		enrollResponse: agentapi.EnrollmentResponse{
 			NodeID:        "node-123",
