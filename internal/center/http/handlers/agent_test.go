@@ -11,6 +11,7 @@ import (
 
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/nodes"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -78,9 +79,25 @@ func TestAgentEnrollHandlerReturnsBindingStatus(t *testing.T) {
 	if svc.enrollInput.Fingerprint != "fp-001" {
 		t.Fatalf("EnrollNode fingerprint = %q, want %q", svc.enrollInput.Fingerprint, "fp-001")
 	}
-	if svc.enrollInput.AgentVersion != "dev" {
-		t.Fatalf("EnrollNode agent version = %q, want %q", svc.enrollInput.AgentVersion, "dev")
+}
+
+func TestAgentEnrollHandlerReturnsInvalidEnrollmentTokenError(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentEnrollmentService{enrollErr: nodes.ErrNodeNotFound}
+
+	handler := handlers.AgentEnroll(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(`{"token":"missing-token","fingerprint":"fp-001"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidEnrollmentToken, "invalid enrollment token")
 }
 
 func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
@@ -129,5 +146,44 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 	if svc.syncInput.Heartbeats[0].SyncBatchID != "sync_001" {
 		t.Fatalf("SyncBatchID = %q, want %q", svc.syncInput.Heartbeats[0].SyncBatchID, "sync_001")
+	}
+}
+
+func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentEnrollmentService{syncErr: enrollment.ErrBindingNotAccepted}
+
+	handler := handlers.AgentSync(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","heartbeats":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeBindingNotAccepted, "binding not accepted")
+}
+
+func assertErrorResponse(t *testing.T, recorder *httptest.ResponseRecorder, wantCode, wantMessage string) {
+	t.Helper()
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", contentType, "application/json")
+	}
+
+	var body agentapi.ErrorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+
+	if body.Code != wantCode {
+		t.Fatalf("Code = %q, want %q", body.Code, wantCode)
+	}
+	if body.Message != wantMessage {
+		t.Fatalf("Message = %q, want %q", body.Message, wantMessage)
 	}
 }

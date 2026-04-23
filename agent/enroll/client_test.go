@@ -3,6 +3,7 @@ package enroll_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,6 +40,41 @@ func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 	}
 	if response.BindingStatus != agentapi.BindingStatusPendingConfirmation {
 		t.Fatalf("BindingStatus = %q, want %q", response.BindingStatus, agentapi.BindingStatusPendingConfirmation)
+	}
+}
+
+func TestClientEnrollReturnsRemoteErrorWithCode(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentapi.EnrollPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, agentapi.EnrollPath)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(agentapi.ErrorResponse{
+			Code:    agentapi.ErrorCodeInvalidEnrollmentToken,
+			Message: "invalid enrollment token",
+		})
+	}))
+	defer ts.Close()
+
+	client := enroll.NewClient(ts.URL)
+	_, err := client.Enroll(context.Background(), agentapi.EnrollmentRequest{NodeName: "nd-local-01"})
+	if err == nil {
+		t.Fatal("Enroll() error = nil, want non-nil")
+	}
+
+	var remoteErr *enroll.RemoteError
+	if !errors.As(err, &remoteErr) {
+		t.Fatalf("Enroll() error = %T, want *enroll.RemoteError", err)
+	}
+	if remoteErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("StatusCode = %d, want %d", remoteErr.StatusCode, http.StatusUnauthorized)
+	}
+	if remoteErr.Code != agentapi.ErrorCodeInvalidEnrollmentToken {
+		t.Fatalf("Code = %q, want %q", remoteErr.Code, agentapi.ErrorCodeInvalidEnrollmentToken)
+	}
+	if remoteErr.Message != "invalid enrollment token" {
+		t.Fatalf("Message = %q, want %q", remoteErr.Message, "invalid enrollment token")
 	}
 }
 

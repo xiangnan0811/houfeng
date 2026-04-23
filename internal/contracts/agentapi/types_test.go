@@ -38,6 +38,30 @@ func TestEnrollmentResponseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestErrorResponseRoundTrip(t *testing.T) {
+	original := agentapi.ErrorResponse{
+		Code:    agentapi.ErrorCodeInvalidEnrollmentToken,
+		Message: "invalid enrollment token",
+	}
+
+	payload, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal error response: %v", err)
+	}
+
+	var roundTrip agentapi.ErrorResponse
+	if err := json.Unmarshal(payload, &roundTrip); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+
+	if roundTrip.Code != agentapi.ErrorCodeInvalidEnrollmentToken {
+		t.Fatalf("Code = %q, want %q", roundTrip.Code, agentapi.ErrorCodeInvalidEnrollmentToken)
+	}
+	if roundTrip.Message != "invalid enrollment token" {
+		t.Fatalf("Message = %q, want %q", roundTrip.Message, "invalid enrollment token")
+	}
+}
+
 func TestSyncRequestRoundTrip(t *testing.T) {
 	observedAt, err := time.Parse(time.RFC3339, "2026-04-22T12:00:00Z")
 	if err != nil {

@@ -8,6 +8,14 @@ const (
 	BindingStatusPendingConfirmation = "指纹变更待确认"
 )
 
+const (
+	ErrorCodeInvalidJSON            = "invalid_json"
+	ErrorCodeInvalidEnrollmentToken = "invalid_enrollment_token"
+	ErrorCodeBindingNotAccepted     = "binding_not_accepted"
+	ErrorCodeNodeNotFound           = "node_not_found"
+	ErrorCodeInternalError          = "internal_error"
+)
+
 type EnrollmentRequest struct {
 	NodeName     string `json:"node_name"`
 	Token        string `json:"token"`
@@ -19,6 +27,11 @@ type EnrollmentResponse struct {
 	NodeID        string `json:"node_id"`
 	Status        string `json:"status"`
 	BindingStatus string `json:"binding_status"`
+}
+
+type ErrorResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 type NodeHeartbeat struct {

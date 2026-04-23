@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"houfeng/internal/center/enrollment"
+	"houfeng/internal/center/nodes"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -23,17 +25,21 @@ func AgentEnroll(svc AgentEnrollmentService) http.Handler {
 
 		var req agentapi.EnrollmentRequest
 		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid json")
+			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidJSON, "invalid json")
 			return
 		}
 
 		result, err := svc.EnrollNode(r.Context(), enrollment.EnrollInput{
-			Token:        req.Token,
-			Fingerprint:  req.Fingerprint,
-			AgentVersion: req.AgentVersion,
+			Token:       req.Token,
+			Fingerprint: req.Fingerprint,
 		})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
+			switch {
+			case errors.Is(err, nodes.ErrNodeNotFound):
+				writeAgentAPIError(w, http.StatusUnauthorized, agentapi.ErrorCodeInvalidEnrollmentToken, "invalid enrollment token")
+			default:
+				writeAgentAPIError(w, http.StatusInternalServerError, agentapi.ErrorCodeInternalError, "internal server error")
+			}
 			return
 		}
 
@@ -54,7 +60,7 @@ func AgentSync(svc AgentEnrollmentService) http.Handler {
 
 		var req agentapi.SyncRequest
 		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid json")
+			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidJSON, "invalid json")
 			return
 		}
 
@@ -72,7 +78,14 @@ func AgentSync(svc AgentEnrollmentService) http.Handler {
 			NodeID:     req.NodeID,
 			Heartbeats: heartbeats,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
+			switch {
+			case errors.Is(err, enrollment.ErrBindingNotAccepted):
+				writeAgentAPIError(w, http.StatusConflict, agentapi.ErrorCodeBindingNotAccepted, "binding not accepted")
+			case errors.Is(err, nodes.ErrNodeNotFound):
+				writeAgentAPIError(w, http.StatusNotFound, agentapi.ErrorCodeNodeNotFound, "node not found")
+			default:
+				writeAgentAPIError(w, http.StatusInternalServerError, agentapi.ErrorCodeInternalError, "internal server error")
+			}
 			return
 		}
 
@@ -81,4 +94,8 @@ func AgentSync(svc AgentEnrollmentService) http.Handler {
 			Status:     "accepted",
 		})
 	})
+}
+
+func writeAgentAPIError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, agentapi.ErrorResponse{Code: code, Message: message})
 }

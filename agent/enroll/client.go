@@ -18,6 +18,23 @@ type Client struct {
 	httpClient *http.Client
 }
 
+type RemoteError struct {
+	StatusCode int
+	Code       string
+	Message    string
+}
+
+func (e *RemoteError) Error() string {
+	parts := []string{fmt.Sprintf("remote error status %d", e.StatusCode)}
+	if e.Code != "" {
+		parts = append(parts, fmt.Sprintf("code=%s", e.Code))
+	}
+	if e.Message != "" {
+		parts = append(parts, fmt.Sprintf("message=%s", e.Message))
+	}
+	return strings.Join(parts, " ")
+}
+
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -67,12 +84,7 @@ func (c *Client) postJSON(ctx context.Context, path string, requestBody any, res
 			return fmt.Errorf("request failed with status %d; read body: %w", resp.StatusCode, readErr)
 		}
 
-		message := strings.TrimSpace(string(body))
-		if message == "" {
-			return fmt.Errorf("request failed with status %d", resp.StatusCode)
-		}
-
-		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, message)
+		return decodeRemoteError(resp.StatusCode, body)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(responseBody); err != nil {
@@ -80,4 +92,25 @@ func (c *Client) postJSON(ctx context.Context, path string, requestBody any, res
 	}
 
 	return nil
+}
+
+func decodeRemoteError(statusCode int, body []byte) error {
+	var response agentapi.ErrorResponse
+	if err := json.Unmarshal(body, &response); err == nil && (response.Code != "" || response.Message != "") {
+		return &RemoteError{
+			StatusCode: statusCode,
+			Code:       response.Code,
+			Message:    response.Message,
+		}
+	}
+
+	message := strings.TrimSpace(string(body))
+	if message == "" {
+		message = http.StatusText(statusCode)
+	}
+
+	return &RemoteError{
+		StatusCode: statusCode,
+		Message:    message,
+	}
 }
