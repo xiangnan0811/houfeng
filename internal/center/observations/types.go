@@ -3,8 +3,11 @@ package observations
 import "time"
 
 type HostSampleWrite struct {
+	NodeID               string
 	ObservedAt           time.Time
 	ReceivedAt           time.Time
+	AgentVersion         string
+	Fingerprint          string
 	CPUUsagePct          float64
 	Load1                float64
 	Load5                float64
@@ -28,11 +31,14 @@ type HostSampleWrite struct {
 }
 
 type ProbeObservationWrite struct {
+	NodeID             string
 	TargetID           string
 	ProbeItemID        string
 	ProbeKind          string
 	ObservedAt         time.Time
 	ReceivedAt         time.Time
+	AgentVersion       string
+	Fingerprint        string
 	ResultKind         string
 	LatencyMS          *int
 	HTTPStatus         *int
@@ -42,6 +48,11 @@ type ProbeObservationWrite struct {
 	MaintenanceContext bool
 	IsBackfilled       bool
 	SyncBatchID        string
+}
+
+type ProbeMetadata struct {
+	TargetID  string
+	ProbeKind string
 }
 
 type BatchWrite struct {

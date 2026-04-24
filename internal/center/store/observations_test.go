@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
 	"houfeng/internal/center/observations"
@@ -22,5 +24,25 @@ func TestPostgresObservationRepositoryRecordBatchReturnsNilForEmptyBatch(t *test
 	repo := &PostgresObservationRepository{}
 	if err := repo.RecordBatch(context.Background(), observations.BatchWrite{NodeID: "nd_001"}); err != nil {
 		t.Fatalf("RecordBatch() error = %v", err)
+	}
+}
+
+func TestRecordBatchUsesPerFactNodeIDsInsteadOfBatchNodeID(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("observations.go")
+	if err != nil {
+		t.Fatalf("ReadFile(observations.go) error = %v", err)
+	}
+
+	text := string(source)
+	if strings.Contains(text, "batch.NodeID,") {
+		t.Fatalf("RecordBatch() should not write node_id from batch.NodeID:\n%s", text)
+	}
+	if !strings.Contains(text, "sample.NodeID,") {
+		t.Fatal("RecordBatch() should write host_samples.node_id from sample.NodeID")
+	}
+	if !strings.Contains(text, "observation.NodeID,") {
+		t.Fatal("RecordBatch() should write probe_observations.node_id from observation.NodeID")
 	}
 }

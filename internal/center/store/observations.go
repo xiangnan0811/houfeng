@@ -62,7 +62,7 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 			) values (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
 			)`,
-			batch.NodeID,
+			sample.NodeID,
 			sample.ObservedAt,
 			sample.ReceivedAt,
 			sample.CPUUsagePct,
@@ -110,15 +110,15 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 			) values (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 			)`,
-			batch.NodeID,
+			observation.NodeID,
 			observation.TargetID,
 			observation.ProbeItemID,
 			observation.ObservedAt,
 			observation.ReceivedAt,
 			observation.ResultKind,
-			observation.LatencyMS,
-			observation.HTTPStatus,
-			observation.TLSExpiryDays,
+			derefInt(observation.LatencyMS),
+			derefInt(observation.HTTPStatus),
+			derefInt(observation.TLSExpiryDays),
 			observation.ErrorCode,
 			observation.ErrorSummary,
 			observation.MaintenanceContext,
@@ -134,4 +134,11 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 	}
 
 	return nil
+}
+
+func derefInt(value *int) any {
+	if value == nil {
+		return nil
+	}
+	return *value
 }

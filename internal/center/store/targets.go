@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/observations"
 	"houfeng/internal/center/targets"
 )
 
@@ -55,6 +56,7 @@ type targetScanner interface {
 }
 
 var _ targets.Repository = (*PostgresTargetRepository)(nil)
+var _ observations.ProbeMetadataRepository = (*PostgresTargetRepository)(nil)
 
 func scanTarget(row targetScanner) (targets.TargetRecord, error) {
 	var record targets.TargetRecord
@@ -220,6 +222,20 @@ func (r *PostgresTargetRepository) ListProbeItems(ctx context.Context, targetID 
 	}
 
 	return records, nil
+}
+
+func (r *PostgresTargetRepository) GetProbeMetadata(ctx context.Context, probeItemID string) (observations.ProbeMetadata, error) {
+	var metadata observations.ProbeMetadata
+	if err := r.db.QueryRow(ctx, `
+		select target_id, probe_kind
+		from probe_items
+		where probe_item_id = $1`, probeItemID).Scan(&metadata.TargetID, &metadata.ProbeKind); errors.Is(err, pgx.ErrNoRows) {
+		return observations.ProbeMetadata{}, observations.ErrProbeMetadataNotFound
+	} else if err != nil {
+		return observations.ProbeMetadata{}, fmt.Errorf("query probe metadata %q: %w", probeItemID, err)
+	}
+
+	return metadata, nil
 }
 
 func (r *PostgresTargetRepository) CreateProbeItem(ctx context.Context, targetID string, input targets.CreateProbeItemInput) (targets.ProbeItemRecord, error) {

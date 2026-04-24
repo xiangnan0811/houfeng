@@ -11,6 +11,7 @@ import (
 
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/observations"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -21,6 +22,9 @@ type fakeAgentEnrollmentService struct {
 
 	syncErr   error
 	syncInput enrollment.SyncInput
+
+	ingestErr   error
+	ingestBatch observations.BatchWrite
 }
 
 func (f *fakeAgentEnrollmentService) EnrollNode(_ context.Context, input enrollment.EnrollInput) (enrollment.EnrollResult, error) {
@@ -34,6 +38,11 @@ func (f *fakeAgentEnrollmentService) EnrollNode(_ context.Context, input enrollm
 func (f *fakeAgentEnrollmentService) RecordHeartbeatSync(_ context.Context, input enrollment.SyncInput) error {
 	f.syncInput = input
 	return f.syncErr
+}
+
+func (f *fakeAgentEnrollmentService) IngestObservations(_ context.Context, batch observations.BatchWrite) error {
+	f.ingestBatch = batch
+	return f.ingestErr
 }
 
 func TestAgentEnrollHandlerReturnsBindingStatus(t *testing.T) {
@@ -188,6 +197,90 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	if svc.syncInput.Heartbeats[0].SyncBatchID != "sync_001" {
 		t.Fatalf("SyncBatchID = %q, want %q", svc.syncInput.Heartbeats[0].SyncBatchID, "sync_001")
 	}
+}
+
+func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
+	t.Parallel()
+
+	observedAt := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
+	svc := &fakeAgentEnrollmentService{}
+
+	handler := handlers.AgentSync(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+		"node_id":"nd_001",
+		"sync_token":"sync-token-001",
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","cpu_usage_pct":12.5,"load_1":0.2,"load_5":0.3,"load_15":0.4,"mem_used_pct":55.5,"mem_available_bytes":1024,"swap_used_pct":1.5,"disk_used_pct":45.5,"inode_used_pct":5.5,"net_in_bytes_per_sec":120,"net_out_bytes_per_sec":220,"cpu_iowait_pct":0.5,"cpu_steal_pct":0.1,"disk_read_bytes_per_sec":320,"disk_write_bytes_per_sec":420,"disk_busy_pct":3.5,"uptime_seconds":3600}],
+		"probe_observations":[{"target_id":"tg_001","probe_item_id":"pb_001","probe_kind":"http","observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","result_kind":"success","latency_ms":83,"http_status":200}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if svc.ingestBatch.NodeID != "nd_001" {
+		t.Fatalf("ingestBatch.NodeID = %q, want %q", svc.ingestBatch.NodeID, "nd_001")
+	}
+	if len(svc.ingestBatch.HostSamples) != 1 {
+		t.Fatalf("len(ingestBatch.HostSamples) = %d, want 1", len(svc.ingestBatch.HostSamples))
+	}
+	if len(svc.ingestBatch.ProbeObservations) != 1 {
+		t.Fatalf("len(ingestBatch.ProbeObservations) = %d, want 1", len(svc.ingestBatch.ProbeObservations))
+	}
+	if svc.ingestBatch.HostSamples[0].NodeID != "nd_001" {
+		t.Fatalf("HostSamples[0].NodeID = %q, want %q", svc.ingestBatch.HostSamples[0].NodeID, "nd_001")
+	}
+	if svc.ingestBatch.HostSamples[0].ObservedAt != observedAt {
+		t.Fatalf("HostSamples[0].ObservedAt = %s, want %s", svc.ingestBatch.HostSamples[0].ObservedAt.Format(time.RFC3339), observedAt.Format(time.RFC3339))
+	}
+	if svc.ingestBatch.HostSamples[0].ReceivedAt.IsZero() {
+		t.Fatal("HostSamples[0].ReceivedAt is zero, want non-zero")
+	}
+	if svc.ingestBatch.ProbeObservations[0].TargetID != "tg_001" {
+		t.Fatalf("ProbeObservations[0].TargetID = %q, want %q", svc.ingestBatch.ProbeObservations[0].TargetID, "tg_001")
+	}
+	if svc.ingestBatch.ProbeObservations[0].ProbeItemID != "pb_001" {
+		t.Fatalf("ProbeObservations[0].ProbeItemID = %q, want %q", svc.ingestBatch.ProbeObservations[0].ProbeItemID, "pb_001")
+	}
+	if svc.ingestBatch.ProbeObservations[0].ProbeKind != "http" {
+		t.Fatalf("ProbeObservations[0].ProbeKind = %q, want %q", svc.ingestBatch.ProbeObservations[0].ProbeKind, "http")
+	}
+	if svc.ingestBatch.ProbeObservations[0].LatencyMS == nil || *svc.ingestBatch.ProbeObservations[0].LatencyMS != 83 {
+		t.Fatalf("ProbeObservations[0].LatencyMS = %v, want 83", svc.ingestBatch.ProbeObservations[0].LatencyMS)
+	}
+	if svc.ingestBatch.ProbeObservations[0].HTTPStatus == nil || *svc.ingestBatch.ProbeObservations[0].HTTPStatus != 200 {
+		t.Fatalf("ProbeObservations[0].HTTPStatus = %v, want 200", svc.ingestBatch.ProbeObservations[0].HTTPStatus)
+	}
+	if svc.ingestBatch.ProbeObservations[0].ReceivedAt.IsZero() {
+		t.Fatal("ProbeObservations[0].ReceivedAt is zero, want non-zero")
+	}
+}
+
+func TestAgentSyncHandlerDoesNotReturn200WhenObservationIngestFails(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentEnrollmentService{ingestErr: observations.ErrInvalidProbeObservation}
+
+	handler := handlers.AgentSync(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+		"node_id":"nd_001",
+		"sync_token":"sync-token-001",
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"probe_observations":[{"target_id":"tg_bad","probe_item_id":"pb_001","probe_kind":"http","observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","result_kind":"success","latency_ms":83,"http_status":200}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
 }
 
 func TestAgentSyncHandlerReturnsInvalidSyncTokenError(t *testing.T) {

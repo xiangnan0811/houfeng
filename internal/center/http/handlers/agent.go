@@ -8,15 +8,20 @@ import (
 
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/observations"
 	"houfeng/internal/contracts/agentapi"
 )
 
-type AgentEnrollmentService interface {
+type AgentEnrollService interface {
 	EnrollNode(ctx context.Context, input enrollment.EnrollInput) (enrollment.EnrollResult, error)
-	RecordHeartbeatSync(ctx context.Context, input enrollment.SyncInput) error
 }
 
-func AgentEnroll(svc AgentEnrollmentService) http.Handler {
+type AgentSyncService interface {
+	RecordHeartbeatSync(ctx context.Context, input enrollment.SyncInput) error
+	IngestObservations(ctx context.Context, batch observations.BatchWrite) error
+}
+
+func AgentEnroll(svc AgentEnrollService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeAgentAPIError(w, http.StatusMethodNotAllowed, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
@@ -56,7 +61,7 @@ func AgentEnroll(svc AgentEnrollmentService) http.Handler {
 	})
 }
 
-func AgentSync(svc AgentEnrollmentService) http.Handler {
+func AgentSync(svc AgentSyncService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeAgentAPIError(w, http.StatusMethodNotAllowed, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
@@ -101,6 +106,18 @@ func AgentSync(svc AgentEnrollmentService) http.Handler {
 			return
 		}
 
+		if batch, ok := observationBatchFromSyncRequest(req); ok {
+			if err := svc.IngestObservations(r.Context(), batch); err != nil {
+				switch {
+				case errors.Is(err, observations.ErrInvalidProbeObservation):
+					writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
+				default:
+					writeAgentAPIError(w, http.StatusInternalServerError, agentapi.ErrorCodeInternalError, "internal server error")
+				}
+				return
+			}
+		}
+
 		writeJSON(w, http.StatusOK, agentapi.SyncResponse{
 			AcceptedAt: time.Now().UTC(),
 			Status:     "accepted",
@@ -127,5 +144,86 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 		}
 	}
 
+	for _, sample := range req.HostSamples {
+		if sample.ObservedAt.IsZero() || sample.AgentVersion == "" || sample.Fingerprint == "" || sample.SyncBatchID == "" {
+			return false
+		}
+	}
+
+	for _, observation := range req.ProbeObservations {
+		if observation.TargetID == "" || observation.ProbeItemID == "" || observation.ProbeKind == "" ||
+			observation.ObservedAt.IsZero() || observation.AgentVersion == "" || observation.Fingerprint == "" ||
+			observation.SyncBatchID == "" || observation.ResultKind == "" {
+			return false
+		}
+	}
+
 	return true
+}
+
+func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.BatchWrite, bool) {
+	if len(req.HostSamples) == 0 && len(req.ProbeObservations) == 0 {
+		return observations.BatchWrite{}, false
+	}
+
+	receivedAt := time.Now().UTC()
+	batch := observations.BatchWrite{
+		NodeID:            req.NodeID,
+		HostSamples:       make([]observations.HostSampleWrite, 0, len(req.HostSamples)),
+		ProbeObservations: make([]observations.ProbeObservationWrite, 0, len(req.ProbeObservations)),
+	}
+
+	for _, sample := range req.HostSamples {
+		batch.HostSamples = append(batch.HostSamples, observations.HostSampleWrite{
+			NodeID:               req.NodeID,
+			ObservedAt:           sample.ObservedAt,
+			ReceivedAt:           receivedAt,
+			AgentVersion:         sample.AgentVersion,
+			Fingerprint:          sample.Fingerprint,
+			CPUUsagePct:          sample.CPUUsagePct,
+			Load1:                sample.Load1,
+			Load5:                sample.Load5,
+			Load15:               sample.Load15,
+			MemUsedPct:           sample.MemUsedPct,
+			MemAvailableBytes:    sample.MemAvailableBytes,
+			SwapUsedPct:          sample.SwapUsedPct,
+			DiskUsedPct:          sample.DiskUsedPct,
+			InodeUsedPct:         sample.InodeUsedPct,
+			NetInBytesPerSec:     sample.NetInBytesPerSec,
+			NetOutBytesPerSec:    sample.NetOutBytesPerSec,
+			CPUIOWaitPct:         sample.CPUIOWaitPct,
+			CPUStealPct:          sample.CPUStealPct,
+			DiskReadBytesPerSec:  sample.DiskReadBytesPerSec,
+			DiskWriteBytesPerSec: sample.DiskWriteBytesPerSec,
+			DiskBusyPct:          sample.DiskBusyPct,
+			UptimeSeconds:        sample.UptimeSeconds,
+			MaintenanceContext:   sample.MaintenanceContext,
+			IsBackfilled:         sample.IsBackfilled,
+			SyncBatchID:          sample.SyncBatchID,
+		})
+	}
+
+	for _, observation := range req.ProbeObservations {
+		batch.ProbeObservations = append(batch.ProbeObservations, observations.ProbeObservationWrite{
+			NodeID:             req.NodeID,
+			TargetID:           observation.TargetID,
+			ProbeItemID:        observation.ProbeItemID,
+			ProbeKind:          observation.ProbeKind,
+			ObservedAt:         observation.ObservedAt,
+			ReceivedAt:         receivedAt,
+			AgentVersion:       observation.AgentVersion,
+			Fingerprint:        observation.Fingerprint,
+			ResultKind:         observation.ResultKind,
+			LatencyMS:          observation.LatencyMS,
+			HTTPStatus:         observation.HTTPStatus,
+			TLSExpiryDays:      observation.TLSExpiryDays,
+			ErrorCode:          observation.ErrorCode,
+			ErrorSummary:       observation.ErrorSummary,
+			MaintenanceContext: observation.MaintenanceContext,
+			IsBackfilled:       observation.IsBackfilled,
+			SyncBatchID:        observation.SyncBatchID,
+		})
+	}
+
+	return batch, true
 }
