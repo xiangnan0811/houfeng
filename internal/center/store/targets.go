@@ -225,17 +225,7 @@ func (r *PostgresTargetRepository) ListProbeItems(ctx context.Context, targetID 
 }
 
 func (r *PostgresTargetRepository) GetProbeMetadata(ctx context.Context, probeItemID string) (observations.ProbeMetadata, error) {
-	var metadata observations.ProbeMetadata
-	if err := r.db.QueryRow(ctx, `
-		select target_id, probe_kind
-		from probe_items
-		where probe_item_id = $1`, probeItemID).Scan(&metadata.TargetID, &metadata.ProbeKind); errors.Is(err, pgx.ErrNoRows) {
-		return observations.ProbeMetadata{}, observations.ErrProbeMetadataNotFound
-	} else if err != nil {
-		return observations.ProbeMetadata{}, fmt.Errorf("query probe metadata %q: %w", probeItemID, err)
-	}
-
-	return metadata, nil
+	return getProbeMetadata(ctx, r.db, probeItemID)
 }
 
 func (r *PostgresTargetRepository) CreateProbeItem(ctx context.Context, targetID string, input targets.CreateProbeItemInput) (targets.ProbeItemRecord, error) {

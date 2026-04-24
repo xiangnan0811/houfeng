@@ -9,6 +9,7 @@ import (
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/nodes"
 	"houfeng/internal/center/observations"
+	"houfeng/internal/center/syncing"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -17,8 +18,7 @@ type AgentEnrollService interface {
 }
 
 type AgentSyncService interface {
-	RecordHeartbeatSync(ctx context.Context, input enrollment.SyncInput) error
-	IngestObservations(ctx context.Context, batch observations.BatchWrite) error
+	SyncBatch(ctx context.Context, batch syncing.Batch) error
 }
 
 func AgentEnroll(svc AgentEnrollService) http.Handler {
@@ -78,44 +78,20 @@ func AgentSync(svc AgentSyncService) http.Handler {
 			return
 		}
 
-		heartbeats := make([]enrollment.HeartbeatPayload, 0, len(req.Heartbeats))
-		for _, heartbeat := range req.Heartbeats {
-			heartbeats = append(heartbeats, enrollment.HeartbeatPayload{
-				ObservedAt:   heartbeat.ObservedAt,
-				AgentVersion: heartbeat.AgentVersion,
-				Fingerprint:  heartbeat.Fingerprint,
-				SyncBatchID:  heartbeat.SyncBatchID,
-			})
-		}
-
-		if err := svc.RecordHeartbeatSync(r.Context(), enrollment.SyncInput{
-			NodeID:     req.NodeID,
-			SyncToken:  req.SyncToken,
-			Heartbeats: heartbeats,
-		}); err != nil {
+		if err := svc.SyncBatch(r.Context(), syncBatchFromRequest(req)); err != nil {
 			switch {
-			case errors.Is(err, enrollment.ErrInvalidSyncToken):
+			case errors.Is(err, syncing.ErrInvalidSyncToken):
 				writeAgentAPIError(w, http.StatusUnauthorized, agentapi.ErrorCodeInvalidSyncToken, "invalid sync token")
-			case errors.Is(err, enrollment.ErrBindingNotAccepted):
+			case errors.Is(err, syncing.ErrBindingNotAccepted):
 				writeAgentAPIError(w, http.StatusConflict, agentapi.ErrorCodeBindingNotAccepted, "binding not accepted")
 			case errors.Is(err, nodes.ErrNodeNotFound):
 				writeAgentAPIError(w, http.StatusNotFound, agentapi.ErrorCodeNodeNotFound, "node not found")
+			case errors.Is(err, observations.ErrInvalidProbeObservation):
+				writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
 			default:
 				writeAgentAPIError(w, http.StatusInternalServerError, agentapi.ErrorCodeInternalError, "internal server error")
 			}
 			return
-		}
-
-		if batch, ok := observationBatchFromSyncRequest(req); ok {
-			if err := svc.IngestObservations(r.Context(), batch); err != nil {
-				switch {
-				case errors.Is(err, observations.ErrInvalidProbeObservation):
-					writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
-				default:
-					writeAgentAPIError(w, http.StatusInternalServerError, agentapi.ErrorCodeInternalError, "internal server error")
-				}
-				return
-			}
 		}
 
 		writeJSON(w, http.StatusOK, agentapi.SyncResponse{
@@ -166,7 +142,6 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 		return observations.BatchWrite{}, false
 	}
 
-	receivedAt := time.Now().UTC()
 	batch := observations.BatchWrite{
 		NodeID:            req.NodeID,
 		HostSamples:       make([]observations.HostSampleWrite, 0, len(req.HostSamples)),
@@ -177,7 +152,6 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 		batch.HostSamples = append(batch.HostSamples, observations.HostSampleWrite{
 			NodeID:               req.NodeID,
 			ObservedAt:           sample.ObservedAt,
-			ReceivedAt:           receivedAt,
 			AgentVersion:         sample.AgentVersion,
 			Fingerprint:          sample.Fingerprint,
 			CPUUsagePct:          sample.CPUUsagePct,
@@ -210,7 +184,6 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 			ProbeItemID:        observation.ProbeItemID,
 			ProbeKind:          observation.ProbeKind,
 			ObservedAt:         observation.ObservedAt,
-			ReceivedAt:         receivedAt,
 			AgentVersion:       observation.AgentVersion,
 			Fingerprint:        observation.Fingerprint,
 			ResultKind:         observation.ResultKind,
@@ -226,4 +199,27 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 	}
 
 	return batch, true
+}
+
+func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
+	heartbeats := make([]syncing.HeartbeatPayload, 0, len(req.Heartbeats))
+	for _, heartbeat := range req.Heartbeats {
+		heartbeats = append(heartbeats, syncing.HeartbeatPayload{
+			ObservedAt:   heartbeat.ObservedAt,
+			AgentVersion: heartbeat.AgentVersion,
+			Fingerprint:  heartbeat.Fingerprint,
+			SyncBatchID:  heartbeat.SyncBatchID,
+		})
+	}
+
+	batch := syncing.Batch{
+		NodeID:     req.NodeID,
+		SyncToken:  req.SyncToken,
+		Heartbeats: heartbeats,
+	}
+	if observationBatch, ok := observationBatchFromSyncRequest(req); ok {
+		batch.Observations = observationBatch
+	}
+
+	return batch
 }

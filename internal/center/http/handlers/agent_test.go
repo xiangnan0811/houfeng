@@ -12,6 +12,7 @@ import (
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/observations"
+	"houfeng/internal/center/syncing"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -19,12 +20,6 @@ type fakeAgentEnrollmentService struct {
 	enrollResult enrollment.EnrollResult
 	enrollErr    error
 	enrollInput  enrollment.EnrollInput
-
-	syncErr   error
-	syncInput enrollment.SyncInput
-
-	ingestErr   error
-	ingestBatch observations.BatchWrite
 }
 
 func (f *fakeAgentEnrollmentService) EnrollNode(_ context.Context, input enrollment.EnrollInput) (enrollment.EnrollResult, error) {
@@ -35,14 +30,14 @@ func (f *fakeAgentEnrollmentService) EnrollNode(_ context.Context, input enrollm
 	return f.enrollResult, nil
 }
 
-func (f *fakeAgentEnrollmentService) RecordHeartbeatSync(_ context.Context, input enrollment.SyncInput) error {
-	f.syncInput = input
-	return f.syncErr
+type fakeAgentSyncService struct {
+	syncErr   error
+	syncBatch syncing.Batch
 }
 
-func (f *fakeAgentEnrollmentService) IngestObservations(_ context.Context, batch observations.BatchWrite) error {
-	f.ingestBatch = batch
-	return f.ingestErr
+func (f *fakeAgentSyncService) SyncBatch(_ context.Context, batch syncing.Batch) error {
+	f.syncBatch = batch
+	return f.syncErr
 }
 
 func TestAgentEnrollHandlerReturnsBindingStatus(t *testing.T) {
@@ -151,7 +146,7 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	t.Parallel()
 
 	observedAt := time.Date(2026, time.April, 23, 8, 30, 0, 0, time.UTC)
-	svc := &fakeAgentEnrollmentService{}
+	svc := &fakeAgentSyncService{}
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
@@ -176,26 +171,26 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 		t.Fatalf("Status = %q, want %q", body.Status, "accepted")
 	}
 
-	if svc.syncInput.NodeID != "nd_001" {
-		t.Fatalf("RecordHeartbeatSync nodeID = %q, want %q", svc.syncInput.NodeID, "nd_001")
+	if svc.syncBatch.NodeID != "nd_001" {
+		t.Fatalf("SyncBatch nodeID = %q, want %q", svc.syncBatch.NodeID, "nd_001")
 	}
-	if svc.syncInput.SyncToken != "sync-token-001" {
-		t.Fatalf("RecordHeartbeatSync syncToken = %q, want %q", svc.syncInput.SyncToken, "sync-token-001")
+	if svc.syncBatch.SyncToken != "sync-token-001" {
+		t.Fatalf("SyncBatch syncToken = %q, want %q", svc.syncBatch.SyncToken, "sync-token-001")
 	}
-	if len(svc.syncInput.Heartbeats) != 1 {
-		t.Fatalf("RecordHeartbeatSync heartbeats = %d, want 1", len(svc.syncInput.Heartbeats))
+	if len(svc.syncBatch.Heartbeats) != 1 {
+		t.Fatalf("SyncBatch heartbeats = %d, want 1", len(svc.syncBatch.Heartbeats))
 	}
-	if svc.syncInput.Heartbeats[0].ObservedAt != observedAt {
-		t.Fatalf("ObservedAt = %s, want %s", svc.syncInput.Heartbeats[0].ObservedAt.Format(time.RFC3339), observedAt.Format(time.RFC3339))
+	if svc.syncBatch.Heartbeats[0].ObservedAt != observedAt {
+		t.Fatalf("ObservedAt = %s, want %s", svc.syncBatch.Heartbeats[0].ObservedAt.Format(time.RFC3339), observedAt.Format(time.RFC3339))
 	}
-	if svc.syncInput.Heartbeats[0].AgentVersion != "dev" {
-		t.Fatalf("AgentVersion = %q, want %q", svc.syncInput.Heartbeats[0].AgentVersion, "dev")
+	if svc.syncBatch.Heartbeats[0].AgentVersion != "dev" {
+		t.Fatalf("AgentVersion = %q, want %q", svc.syncBatch.Heartbeats[0].AgentVersion, "dev")
 	}
-	if svc.syncInput.Heartbeats[0].Fingerprint != "fp-001" {
-		t.Fatalf("Fingerprint = %q, want %q", svc.syncInput.Heartbeats[0].Fingerprint, "fp-001")
+	if svc.syncBatch.Heartbeats[0].Fingerprint != "fp-001" {
+		t.Fatalf("Fingerprint = %q, want %q", svc.syncBatch.Heartbeats[0].Fingerprint, "fp-001")
 	}
-	if svc.syncInput.Heartbeats[0].SyncBatchID != "sync_001" {
-		t.Fatalf("SyncBatchID = %q, want %q", svc.syncInput.Heartbeats[0].SyncBatchID, "sync_001")
+	if svc.syncBatch.Heartbeats[0].SyncBatchID != "sync_001" {
+		t.Fatalf("SyncBatchID = %q, want %q", svc.syncBatch.Heartbeats[0].SyncBatchID, "sync_001")
 	}
 }
 
@@ -203,7 +198,7 @@ func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
 	t.Parallel()
 
 	observedAt := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
-	svc := &fakeAgentEnrollmentService{}
+	svc := &fakeAgentSyncService{}
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
@@ -221,48 +216,60 @@ func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
-	if svc.ingestBatch.NodeID != "nd_001" {
-		t.Fatalf("ingestBatch.NodeID = %q, want %q", svc.ingestBatch.NodeID, "nd_001")
+	if svc.syncBatch.Observations.NodeID != "nd_001" {
+		t.Fatalf("syncBatch.Observations.NodeID = %q, want %q", svc.syncBatch.Observations.NodeID, "nd_001")
 	}
-	if len(svc.ingestBatch.HostSamples) != 1 {
-		t.Fatalf("len(ingestBatch.HostSamples) = %d, want 1", len(svc.ingestBatch.HostSamples))
+	if len(svc.syncBatch.Observations.HostSamples) != 1 {
+		t.Fatalf("len(syncBatch.Observations.HostSamples) = %d, want 1", len(svc.syncBatch.Observations.HostSamples))
 	}
-	if len(svc.ingestBatch.ProbeObservations) != 1 {
-		t.Fatalf("len(ingestBatch.ProbeObservations) = %d, want 1", len(svc.ingestBatch.ProbeObservations))
+	if len(svc.syncBatch.Observations.ProbeObservations) != 1 {
+		t.Fatalf("len(syncBatch.Observations.ProbeObservations) = %d, want 1", len(svc.syncBatch.Observations.ProbeObservations))
 	}
-	if svc.ingestBatch.HostSamples[0].NodeID != "nd_001" {
-		t.Fatalf("HostSamples[0].NodeID = %q, want %q", svc.ingestBatch.HostSamples[0].NodeID, "nd_001")
+	if svc.syncBatch.Observations.HostSamples[0].NodeID != "nd_001" {
+		t.Fatalf("HostSamples[0].NodeID = %q, want %q", svc.syncBatch.Observations.HostSamples[0].NodeID, "nd_001")
 	}
-	if svc.ingestBatch.HostSamples[0].ObservedAt != observedAt {
-		t.Fatalf("HostSamples[0].ObservedAt = %s, want %s", svc.ingestBatch.HostSamples[0].ObservedAt.Format(time.RFC3339), observedAt.Format(time.RFC3339))
+	if svc.syncBatch.Observations.HostSamples[0].ObservedAt != observedAt {
+		t.Fatalf("HostSamples[0].ObservedAt = %s, want %s", svc.syncBatch.Observations.HostSamples[0].ObservedAt.Format(time.RFC3339), observedAt.Format(time.RFC3339))
 	}
-	if svc.ingestBatch.HostSamples[0].ReceivedAt.IsZero() {
-		t.Fatal("HostSamples[0].ReceivedAt is zero, want non-zero")
+	if svc.syncBatch.Observations.HostSamples[0].AgentVersion != "dev" {
+		t.Fatalf("HostSamples[0].AgentVersion = %q, want %q", svc.syncBatch.Observations.HostSamples[0].AgentVersion, "dev")
 	}
-	if svc.ingestBatch.ProbeObservations[0].TargetID != "tg_001" {
-		t.Fatalf("ProbeObservations[0].TargetID = %q, want %q", svc.ingestBatch.ProbeObservations[0].TargetID, "tg_001")
+	if svc.syncBatch.Observations.HostSamples[0].Fingerprint != "fp-001" {
+		t.Fatalf("HostSamples[0].Fingerprint = %q, want %q", svc.syncBatch.Observations.HostSamples[0].Fingerprint, "fp-001")
 	}
-	if svc.ingestBatch.ProbeObservations[0].ProbeItemID != "pb_001" {
-		t.Fatalf("ProbeObservations[0].ProbeItemID = %q, want %q", svc.ingestBatch.ProbeObservations[0].ProbeItemID, "pb_001")
+	if !svc.syncBatch.Observations.HostSamples[0].ReceivedAt.IsZero() {
+		t.Fatal("HostSamples[0].ReceivedAt should remain zero in handler DTO")
 	}
-	if svc.ingestBatch.ProbeObservations[0].ProbeKind != "http" {
-		t.Fatalf("ProbeObservations[0].ProbeKind = %q, want %q", svc.ingestBatch.ProbeObservations[0].ProbeKind, "http")
+	if svc.syncBatch.Observations.ProbeObservations[0].TargetID != "tg_001" {
+		t.Fatalf("ProbeObservations[0].TargetID = %q, want %q", svc.syncBatch.Observations.ProbeObservations[0].TargetID, "tg_001")
 	}
-	if svc.ingestBatch.ProbeObservations[0].LatencyMS == nil || *svc.ingestBatch.ProbeObservations[0].LatencyMS != 83 {
-		t.Fatalf("ProbeObservations[0].LatencyMS = %v, want 83", svc.ingestBatch.ProbeObservations[0].LatencyMS)
+	if svc.syncBatch.Observations.ProbeObservations[0].ProbeItemID != "pb_001" {
+		t.Fatalf("ProbeObservations[0].ProbeItemID = %q, want %q", svc.syncBatch.Observations.ProbeObservations[0].ProbeItemID, "pb_001")
 	}
-	if svc.ingestBatch.ProbeObservations[0].HTTPStatus == nil || *svc.ingestBatch.ProbeObservations[0].HTTPStatus != 200 {
-		t.Fatalf("ProbeObservations[0].HTTPStatus = %v, want 200", svc.ingestBatch.ProbeObservations[0].HTTPStatus)
+	if svc.syncBatch.Observations.ProbeObservations[0].ProbeKind != "http" {
+		t.Fatalf("ProbeObservations[0].ProbeKind = %q, want %q", svc.syncBatch.Observations.ProbeObservations[0].ProbeKind, "http")
 	}
-	if svc.ingestBatch.ProbeObservations[0].ReceivedAt.IsZero() {
-		t.Fatal("ProbeObservations[0].ReceivedAt is zero, want non-zero")
+	if svc.syncBatch.Observations.ProbeObservations[0].AgentVersion != "dev" {
+		t.Fatalf("ProbeObservations[0].AgentVersion = %q, want %q", svc.syncBatch.Observations.ProbeObservations[0].AgentVersion, "dev")
+	}
+	if svc.syncBatch.Observations.ProbeObservations[0].Fingerprint != "fp-001" {
+		t.Fatalf("ProbeObservations[0].Fingerprint = %q, want %q", svc.syncBatch.Observations.ProbeObservations[0].Fingerprint, "fp-001")
+	}
+	if svc.syncBatch.Observations.ProbeObservations[0].LatencyMS == nil || *svc.syncBatch.Observations.ProbeObservations[0].LatencyMS != 83 {
+		t.Fatalf("ProbeObservations[0].LatencyMS = %v, want 83", svc.syncBatch.Observations.ProbeObservations[0].LatencyMS)
+	}
+	if svc.syncBatch.Observations.ProbeObservations[0].HTTPStatus == nil || *svc.syncBatch.Observations.ProbeObservations[0].HTTPStatus != 200 {
+		t.Fatalf("ProbeObservations[0].HTTPStatus = %v, want 200", svc.syncBatch.Observations.ProbeObservations[0].HTTPStatus)
+	}
+	if !svc.syncBatch.Observations.ProbeObservations[0].ReceivedAt.IsZero() {
+		t.Fatal("ProbeObservations[0].ReceivedAt should remain zero in handler DTO")
 	}
 }
 
 func TestAgentSyncHandlerDoesNotReturn200WhenObservationIngestFails(t *testing.T) {
 	t.Parallel()
 
-	svc := &fakeAgentEnrollmentService{ingestErr: observations.ErrInvalidProbeObservation}
+	svc := &fakeAgentSyncService{syncErr: observations.ErrInvalidProbeObservation}
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
@@ -286,7 +293,7 @@ func TestAgentSyncHandlerDoesNotReturn200WhenObservationIngestFails(t *testing.T
 func TestAgentSyncHandlerReturnsInvalidSyncTokenError(t *testing.T) {
 	t.Parallel()
 
-	svc := &fakeAgentEnrollmentService{syncErr: enrollment.ErrInvalidSyncToken}
+	svc := &fakeAgentSyncService{syncErr: syncing.ErrInvalidSyncToken}
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"bad-token","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
@@ -305,7 +312,7 @@ func TestAgentSyncHandlerReturnsInvalidSyncTokenError(t *testing.T) {
 func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 	t.Parallel()
 
-	svc := &fakeAgentEnrollmentService{syncErr: enrollment.ErrBindingNotAccepted}
+	svc := &fakeAgentSyncService{syncErr: syncing.ErrBindingNotAccepted}
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
@@ -324,7 +331,7 @@ func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 func TestAgentSyncHandlerRejectsEmptyNodeID(t *testing.T) {
 	t.Parallel()
 
-	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	handler := handlers.AgentSync(&fakeAgentSyncService{})
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -341,7 +348,7 @@ func TestAgentSyncHandlerRejectsEmptyNodeID(t *testing.T) {
 func TestAgentSyncHandlerRejectsEmptySyncToken(t *testing.T) {
 	t.Parallel()
 
-	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	handler := handlers.AgentSync(&fakeAgentSyncService{})
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -358,7 +365,7 @@ func TestAgentSyncHandlerRejectsEmptySyncToken(t *testing.T) {
 func TestAgentSyncHandlerRejectsHeartbeatMissingSyncBatchID(t *testing.T) {
 	t.Parallel()
 
-	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	handler := handlers.AgentSync(&fakeAgentSyncService{})
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":""}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -375,7 +382,7 @@ func TestAgentSyncHandlerRejectsHeartbeatMissingSyncBatchID(t *testing.T) {
 func TestAgentSyncHandlerRejectsHeartbeatWithZeroObservedAt(t *testing.T) {
 	t.Parallel()
 
-	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	handler := handlers.AgentSync(&fakeAgentSyncService{})
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"0001-01-01T00:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -392,7 +399,7 @@ func TestAgentSyncHandlerRejectsHeartbeatWithZeroObservedAt(t *testing.T) {
 func TestAgentSyncHandlerReturnsMethodNotAllowedError(t *testing.T) {
 	t.Parallel()
 
-	handler := handlers.AgentSync(&fakeAgentEnrollmentService{})
+	handler := handlers.AgentSync(&fakeAgentSyncService{})
 	req := httptest.NewRequest(http.MethodGet, agentapi.SyncPath, nil)
 	recorder := httptest.NewRecorder()
 

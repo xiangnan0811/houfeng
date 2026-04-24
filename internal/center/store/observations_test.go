@@ -46,3 +46,26 @@ func TestRecordBatchUsesPerFactNodeIDsInsteadOfBatchNodeID(t *testing.T) {
 		t.Fatal("RecordBatch() should write probe_observations.node_id from observation.NodeID")
 	}
 }
+
+func TestRecordBatchPersistsObservationProvenanceColumns(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("observations.go")
+	if err != nil {
+		t.Fatalf("ReadFile(observations.go) error = %v", err)
+	}
+
+	text := string(source)
+	for _, want := range []string{
+		"agent_version,",
+		"fingerprint,",
+		"sample.AgentVersion,",
+		"sample.Fingerprint,",
+		"observation.AgentVersion,",
+		"observation.Fingerprint,",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("RecordBatch() source missing %q", want)
+		}
+	}
+}

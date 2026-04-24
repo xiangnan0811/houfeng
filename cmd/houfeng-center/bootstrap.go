@@ -12,9 +12,9 @@ import (
 	"houfeng/internal/center/enrollment"
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
-	"houfeng/internal/center/observations"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
+	"houfeng/internal/center/syncing"
 )
 
 type appRunner interface {
@@ -37,19 +37,6 @@ type pgxPostgresDB struct {
 	pool *pgxpool.Pool
 }
 
-type agentSyncService struct {
-	heartbeatSync enrollmentHeartbeatSyncService
-	observations  observationIngestionService
-}
-
-type enrollmentHeartbeatSyncService interface {
-	RecordHeartbeatSync(context.Context, enrollment.SyncInput) error
-}
-
-type observationIngestionService interface {
-	Ingest(context.Context, observations.BatchWrite) error
-}
-
 func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version string, deps bootstrapDeps) (appRunner, func(), error) {
 	deps = deps.withDefaults()
 
@@ -65,9 +52,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 
 	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
-	observationRepo := store.NewPostgresObservationRepository(db.Pool())
 	enrollmentSvc := enrollment.NewService(nodeRepo)
-	observationSvc := observations.NewService(observationRepo, targetRepo)
+	syncSvc := syncing.NewService(store.NewPostgresSyncRepository(db.Pool()))
 	router := deps.newRouter(centerhttp.RouterOptions{
 		Version:                  version,
 		WebDistDir:               cfg.WebDistDir,
@@ -77,10 +63,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		TargetItemHandler:        handlers.TargetItem(targetRepo),
 		TargetProbeItemsHandler:  handlers.TargetProbeItems(targetRepo),
 		AgentEnrollHandler:       handlers.AgentEnroll(enrollmentSvc),
-		AgentSyncHandler: handlers.AgentSync(agentSyncService{
-			heartbeatSync: enrollmentSvc,
-			observations:  observationSvc,
-		}),
+		AgentSyncHandler:         handlers.AgentSync(syncSvc),
 	})
 
 	return deps.newApp(cfg.HTTPAddr, router), db.Close, nil
@@ -118,12 +101,4 @@ func (p pgxPostgresDB) Close() {
 
 func (p pgxPostgresDB) Pool() *pgxpool.Pool {
 	return p.pool
-}
-
-func (s agentSyncService) RecordHeartbeatSync(ctx context.Context, input enrollment.SyncInput) error {
-	return s.heartbeatSync.RecordHeartbeatSync(ctx, input)
-}
-
-func (s agentSyncService) IngestObservations(ctx context.Context, batch observations.BatchWrite) error {
-	return s.observations.Ingest(ctx, batch)
 }

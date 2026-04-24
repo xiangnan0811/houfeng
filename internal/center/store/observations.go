@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/observations"
@@ -33,12 +34,30 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 		_ = tx.Rollback(ctx)
 	}()
 
+	if err := recordObservationBatch(ctx, tx, batch); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit observation batch tx: %w", err)
+	}
+
+	return nil
+}
+
+type sqlExec interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func recordObservationBatch(ctx context.Context, exec sqlExec, batch observations.BatchWrite) error {
 	for _, sample := range batch.HostSamples {
-		if _, err := tx.Exec(ctx, `
+		if _, err := exec.Exec(ctx, `
 			insert into host_samples (
 				node_id,
 				observed_at,
 				received_at,
+				agent_version,
+				fingerprint,
 				cpu_usage_pct,
 				load_1,
 				load_5,
@@ -60,11 +79,13 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 				is_backfilled,
 				sync_batch_id
 			) values (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
 			)`,
 			sample.NodeID,
 			sample.ObservedAt,
 			sample.ReceivedAt,
+			sample.AgentVersion,
+			sample.Fingerprint,
 			sample.CPUUsagePct,
 			sample.Load1,
 			sample.Load5,
@@ -91,13 +112,15 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 	}
 
 	for _, observation := range batch.ProbeObservations {
-		if _, err := tx.Exec(ctx, `
+		if _, err := exec.Exec(ctx, `
 			insert into probe_observations (
 				node_id,
 				target_id,
 				probe_item_id,
 				observed_at,
 				received_at,
+				agent_version,
+				fingerprint,
 				result_kind,
 				latency_ms,
 				http_status,
@@ -108,13 +131,15 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 				is_backfilled,
 				sync_batch_id
 			) values (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 			)`,
 			observation.NodeID,
 			observation.TargetID,
 			observation.ProbeItemID,
 			observation.ObservedAt,
 			observation.ReceivedAt,
+			observation.AgentVersion,
+			observation.Fingerprint,
 			observation.ResultKind,
 			derefInt(observation.LatencyMS),
 			derefInt(observation.HTTPStatus),
@@ -127,10 +152,6 @@ func (r *PostgresObservationRepository) RecordBatch(ctx context.Context, batch o
 		); err != nil {
 			return fmt.Errorf("insert probe observation: %w", err)
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit observation batch tx: %w", err)
 	}
 
 	return nil
