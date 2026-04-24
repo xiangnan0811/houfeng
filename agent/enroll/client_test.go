@@ -120,7 +120,22 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 			t.Fatalf("path = %q, want %q", r.URL.Path, agentapi.SyncPath)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(agentapi.SyncResponse{AcceptedAt: acceptedAt, Status: "ok"})
+		_ = json.NewEncoder(w).Encode(agentapi.SyncResponse{
+			AcceptedAt: acceptedAt,
+			Status:     "ok",
+			Plan: &agentapi.SyncPlan{
+				HostSampleFrequencyTier: agentapi.FrequencyTier5m,
+				ProbeAssignments: []agentapi.ProbeAssignment{{
+					TargetID:       "tg_001",
+					TargetHost:     "api.example.test",
+					ProbeItemID:    "pb_001",
+					ProbeKind:      agentapi.ProbeKindHTTP,
+					FrequencyTier:  agentapi.FrequencyTier1m,
+					TimeoutSeconds: 5,
+					Config:         json.RawMessage(`{"path":"/healthz","method":"GET","expected_status_range":[200,299]}`),
+				}},
+			},
+		})
 	}))
 	defer ts.Close()
 
@@ -134,5 +149,14 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 	}
 	if response.Status != "ok" {
 		t.Fatalf("Status = %q, want %q", response.Status, "ok")
+	}
+	if response.Plan == nil {
+		t.Fatal("Plan = nil, want non-nil")
+	}
+	if response.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier5m {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", response.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier5m)
+	}
+	if len(response.Plan.ProbeAssignments) != 1 {
+		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(response.Plan.ProbeAssignments))
 	}
 }
