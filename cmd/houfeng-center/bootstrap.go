@@ -52,18 +52,21 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 
 	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
+	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
 	enrollmentSvc := enrollment.NewService(nodeRepo)
 	syncSvc := syncing.NewService(store.NewPostgresSyncRepository(db.Pool()))
 	router := deps.newRouter(centerhttp.RouterOptions{
-		Version:                  version,
-		WebDistDir:               cfg.WebDistDir,
-		NodesCollectionHandler:   handlers.NodesCollection(nodeRepo),
-		NodeItemHandler:          handlers.NodeItem(nodeRepo),
-		TargetsCollectionHandler: handlers.TargetsCollection(targetRepo),
-		TargetItemHandler:        handlers.TargetItem(targetRepo),
-		TargetProbeItemsHandler:  handlers.TargetProbeItems(targetRepo),
-		AgentEnrollHandler:       handlers.AgentEnroll(enrollmentSvc),
-		AgentSyncHandler:         handlers.AgentSync(syncSvc),
+		Version:                   version,
+		WebDistDir:                cfg.WebDistDir,
+		NodesCollectionHandler:    handlers.NodesCollection(nodeRepo),
+		NodeItemHandler:           handlers.NodeItem(nodeRepo),
+		NodeRuntimeFactsHandler:   handlers.NodeRuntimeFacts(runtimeFactsRepo),
+		TargetsCollectionHandler:  handlers.TargetsCollection(targetRepo),
+		TargetItemHandler:         handlers.TargetItem(targetRepo),
+		TargetProbeItemsHandler:   handlers.TargetProbeItems(targetRepo),
+		TargetRuntimeFactsHandler: handlers.TargetRuntimeFacts(runtimeFactsRepo),
+		AgentEnrollHandler:        handlers.AgentEnroll(enrollmentSvc),
+		AgentSyncHandler:          handlers.AgentSync(syncSvc),
 	})
 
 	return deps.newApp(cfg.HTTPAddr, router), db.Close, nil

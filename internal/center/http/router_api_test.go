@@ -125,3 +125,69 @@ func TestRouterDoesNotFallBackToSPAForUnknownTargetSubtree(t *testing.T) {
 		t.Fatalf("expected target subtree 404 body, got SPA fallback body %q", string(body))
 	}
 }
+
+func TestRouterKeepsNodeRuntimeFactsOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		NodeRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"node_id":"nd_001","latest_host_sample":null}`))
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	body, err := io.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
+	if strings.TrimSpace(string(body)) == spaShell {
+		t.Fatalf("expected API response, got SPA fallback body %q", string(body))
+	}
+
+	if !strings.Contains(string(body), `"node_id":"nd_001"`) {
+		t.Fatalf("expected node runtime facts payload, got %q", string(body))
+	}
+}
+
+func TestRouterKeepsTargetRuntimeFactsOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		TargetRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"target_id":"tg_001","latest_probe_observations":[]}`))
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/targets/tg_001/runtime-facts", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	body, err := io.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
+	if strings.TrimSpace(string(body)) == spaShell {
+		t.Fatalf("expected API response, got SPA fallback body %q", string(body))
+	}
+
+	if !strings.Contains(string(body), `"target_id":"tg_001"`) {
+		t.Fatalf("expected target runtime facts payload, got %q", string(body))
+	}
+}

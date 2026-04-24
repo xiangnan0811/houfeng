@@ -52,7 +52,7 @@ func NodeItem(repo nodes.Repository) http.Handler {
 
 		nodeID := strings.TrimPrefix(r.URL.Path, "/api/nodes/")
 		nodeID = strings.Trim(nodeID, "/")
-		if nodeID == "" {
+		if nodeID == "" || strings.Contains(nodeID, "/") {
 			writeError(w, http.StatusNotFound, "node not found")
 			return
 		}

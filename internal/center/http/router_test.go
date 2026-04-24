@@ -230,3 +230,61 @@ func TestRouterKeepsProbeItemsSubtreeOutOfTargetItemHandler(t *testing.T) {
 		t.Fatalf("expected probe items subtree handler, got %q", called)
 	}
 }
+
+func TestRouterDispatchesNodeRuntimeFactsAPI(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		NodeItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "item"
+			w.WriteHeader(http.StatusOK)
+		}),
+		NodeRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "runtime-facts"
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if called != "runtime-facts" {
+		t.Fatalf("expected runtime facts handler, got %q", called)
+	}
+}
+
+func TestRouterDispatchesTargetRuntimeFactsAPI(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		TargetItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "item"
+			w.WriteHeader(http.StatusOK)
+		}),
+		TargetProbeItemsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "probe-items"
+			w.WriteHeader(http.StatusOK)
+		}),
+		TargetRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "runtime-facts"
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/targets/tg_001/runtime-facts", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if called != "runtime-facts" {
+		t.Fatalf("expected runtime facts handler, got %q", called)
+	}
+}

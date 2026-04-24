@@ -179,3 +179,17 @@ func TestNodeItemReturnsNotFound(t *testing.T) {
 		t.Fatalf("expected error %q, got %q", "node not found", body["error"])
 	}
 }
+
+func TestNodeItemRejectsDeeperPaths(t *testing.T) {
+	repo := &fakeNodeRepository{}
+
+	handler := handlers.NodeItem(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+}
