@@ -71,7 +71,7 @@ type HostSamplePayload struct {
 	InodeUsedPct         float64   `json:"inode_used_pct"`
 	NetInBytesPerSec     int64     `json:"net_in_bytes_per_sec"`
 	NetOutBytesPerSec    int64     `json:"net_out_bytes_per_sec"`
-	CPUIowaitPct         float64   `json:"cpu_iowait_pct"`
+	CPUIOWaitPct         float64   `json:"cpu_iowait_pct"`
 	CPUStealPct          float64   `json:"cpu_steal_pct"`
 	DiskReadBytesPerSec  int64     `json:"disk_read_bytes_per_sec"`
 	DiskWriteBytesPerSec int64     `json:"disk_write_bytes_per_sec"`
@@ -93,9 +93,9 @@ type ProbeObservationPayload struct {
 	// plus http_status for HTTP probes and tls_expiry_days for TLS probes. Failures
 	// should carry error_code and error_summary. probe_kind remains tcp/http/tls.
 	ResultKind         string `json:"result_kind"`
-	LatencyMS          *int   `json:"latency_ms,omitempty"`
-	HTTPStatus         *int   `json:"http_status,omitempty"`
-	TLSExpiryDays      *int   `json:"tls_expiry_days,omitempty"`
+	LatencyMS          int    `json:"latency_ms,omitempty"`
+	HTTPStatus         int    `json:"http_status,omitempty"`
+	TLSExpiryDays      int    `json:"tls_expiry_days,omitempty"`
 	ErrorCode          string `json:"error_code,omitempty"`
 	ErrorSummary       string `json:"error_summary,omitempty"`
 	MaintenanceContext bool   `json:"maintenance_context,omitempty"`

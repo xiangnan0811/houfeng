@@ -14,10 +14,6 @@ func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 		t.Fatalf("parse observedAt: %v", err)
 	}
 
-	latencyMS := 83
-	httpStatus := 200
-	tlsExpiryDays := 30
-
 	original := agentapi.SyncRequest{
 		NodeID:    "nd_001",
 		SyncToken: "sync-token",
@@ -43,7 +39,7 @@ func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 			InodeUsedPct:         44.8,
 			NetInBytesPerSec:     1200,
 			NetOutBytesPerSec:    2400,
-			CPUIowaitPct:         1.2,
+			CPUIOWaitPct:         1.2,
 			CPUStealPct:          0.4,
 			DiskReadBytesPerSec:  800,
 			DiskWriteBytesPerSec: 1600,
@@ -60,9 +56,9 @@ func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 			Fingerprint:   "fp_001",
 			SyncBatchID:   "batch_001",
 			ResultKind:    agentapi.ProbeResultSuccess,
-			LatencyMS:     &latencyMS,
-			HTTPStatus:    &httpStatus,
-			TLSExpiryDays: &tlsExpiryDays,
+			LatencyMS:     83,
+			HTTPStatus:    200,
+			TLSExpiryDays: 30,
 		}},
 	}
 
@@ -117,9 +113,6 @@ func TestProbeObservationPayloadRoundTripPreservesSuccessSemantics(t *testing.T)
 		t.Fatalf("parse observedAt: %v", err)
 	}
 
-	latencyMS := 83
-	httpStatus := 200
-
 	original := agentapi.ProbeObservationPayload{
 		TargetID:     "tg_001",
 		ProbeItemID:  "pi_001",
@@ -129,8 +122,8 @@ func TestProbeObservationPayloadRoundTripPreservesSuccessSemantics(t *testing.T)
 		Fingerprint:  "fp_001",
 		SyncBatchID:  "batch_001",
 		ResultKind:   agentapi.ProbeResultSuccess,
-		LatencyMS:    &latencyMS,
-		HTTPStatus:   &httpStatus,
+		LatencyMS:    83,
+		HTTPStatus:   200,
 	}
 
 	payload, err := json.Marshal(original)
