@@ -2,6 +2,7 @@ package syncing
 
 import (
 	"context"
+	"errors"
 
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/observations"
@@ -10,6 +11,7 @@ import (
 var (
 	ErrBindingNotAccepted = enrollment.ErrBindingNotAccepted
 	ErrInvalidSyncToken   = enrollment.ErrInvalidSyncToken
+	ErrHeartbeatRequired  = errors.New("heartbeat carrier required for sync batch")
 )
 
 type HeartbeatPayload = enrollment.HeartbeatPayload

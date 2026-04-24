@@ -38,7 +38,11 @@ var _ syncing.Repository = (*PostgresSyncRepository)(nil)
 
 func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.Batch) error {
 	if len(batch.Heartbeats) == 0 {
-		return nil
+		if len(batch.Observations.HostSamples) == 0 && len(batch.Observations.ProbeObservations) == 0 {
+			return nil
+		}
+
+		return syncing.ErrHeartbeatRequired
 	}
 
 	tx, err := r.beginTx(ctx, pgx.TxOptions{})

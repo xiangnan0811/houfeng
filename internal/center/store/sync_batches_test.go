@@ -116,6 +116,34 @@ func TestPostgresSyncRepositoryRejectsInvalidProbeObservationSemanticsBeforeWrit
 	}
 }
 
+func TestPostgresSyncRepositoryRejectsObservationBatchWithoutHeartbeatCarrier(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	batch := testSyncBatch()
+	batch.Heartbeats = nil
+
+	err := repo.ApplyBatch(context.Background(), batch)
+	if !errors.Is(err, syncing.ErrHeartbeatRequired) {
+		t.Fatalf("ApplyBatch() error = %v, want ErrHeartbeatRequired", err)
+	}
+	if tx.commitCalls != 0 {
+		t.Fatalf("commitCalls = %d, want 0", tx.commitCalls)
+	}
+	if tx.rollbackCalls != 0 {
+		t.Fatalf("rollbackCalls = %d, want 0", tx.rollbackCalls)
+	}
+	if len(tx.execSQL) != 0 {
+		t.Fatalf("len(execSQL) = %d, want 0", len(tx.execSQL))
+	}
+}
+
 func testSyncBatch() syncing.Batch {
 	observedAt := time.Date(2026, time.April, 24, 8, 0, 0, 0, time.UTC)
 	return syncing.Batch{
