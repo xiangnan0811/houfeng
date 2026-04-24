@@ -1,6 +1,9 @@
 package agentapi
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	BindingStatusUnbound             = "未绑定"
@@ -35,6 +38,13 @@ const (
 	ProbeErrorConnect      = "connect"
 	ProbeErrorHTTPStatus   = "http_status"
 	ProbeErrorTLSHandshake = "tls_handshake"
+)
+
+const (
+	FrequencyTier1m  = "1m"
+	FrequencyTier5m  = "5m"
+	FrequencyTier15m = "15m"
+	FrequencyTier6h  = "6h"
 )
 
 type EnrollmentRequest struct {
@@ -118,7 +128,26 @@ type SyncRequest struct {
 	ProbeObservations []ProbeObservationPayload `json:"probe_observations,omitempty"`
 }
 
+type ProbeAssignment struct {
+	TargetID   string `json:"target_id"`
+	TargetHost string `json:"target_host"`
+	// TargetBasePort stays non-omitempty so nil encodes as explicit JSON null.
+	TargetBasePort     *int            `json:"target_base_port"`
+	MaintenanceContext bool            `json:"maintenance_context"`
+	ProbeItemID        string          `json:"probe_item_id"`
+	ProbeKind          string          `json:"probe_kind"`
+	FrequencyTier      string          `json:"frequency_tier"`
+	TimeoutSeconds     int             `json:"timeout_seconds"`
+	Config             json.RawMessage `json:"config"`
+}
+
+type SyncPlan struct {
+	HostSampleFrequencyTier string            `json:"host_sample_frequency_tier"`
+	ProbeAssignments        []ProbeAssignment `json:"probe_assignments,omitempty"`
+}
+
 type SyncResponse struct {
 	AcceptedAt time.Time `json:"accepted_at"`
 	Status     string    `json:"status"`
+	Plan       *SyncPlan `json:"plan,omitempty"`
 }
