@@ -125,6 +125,10 @@ func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncin
 
 func validateProbeObservations(ctx context.Context, tx syncBatchTx, writes []observations.ProbeObservationWrite) error {
 	for _, observation := range writes {
+		if err := observations.ValidateProbeObservation(observation); err != nil {
+			return err
+		}
+
 		metadata, err := getProbeMetadata(ctx, tx, observation.ProbeItemID)
 		if err != nil {
 			if errors.Is(err, observations.ErrProbeMetadataNotFound) {

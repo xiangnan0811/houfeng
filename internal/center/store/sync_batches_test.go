@@ -83,6 +83,39 @@ func TestPostgresSyncRepositoryRejectsProbeMetadataMismatchBeforeWritingBatch(t 
 	}
 }
 
+func TestPostgresSyncRepositoryRejectsInvalidProbeObservationSemanticsBeforeWritingBatch(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		nodeBindingStatus:     agentapi.BindingStatusBound,
+		nodeFingerprint:       "fp-001",
+		nodeSyncTokenHash:     hashSyncToken("sync-token-001"),
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	batch := testSyncBatch()
+	batch.Observations.ProbeObservations[0].ResultKind = "maybe"
+
+	err := repo.ApplyBatch(context.Background(), batch)
+	if !errors.Is(err, observations.ErrInvalidProbeObservation) {
+		t.Fatalf("ApplyBatch() error = %v, want ErrInvalidProbeObservation", err)
+	}
+	if tx.commitCalls != 0 {
+		t.Fatalf("commitCalls = %d, want 0", tx.commitCalls)
+	}
+	if tx.rollbackCalls == 0 {
+		t.Fatal("rollbackCalls = 0, want rollback on invalid probe observation semantics")
+	}
+	if containsSQL(tx.execSQL, "insert into node_heartbeats") {
+		t.Fatal("invalid probe observation semantics should fail before writing heartbeats")
+	}
+}
+
 func testSyncBatch() syncing.Batch {
 	observedAt := time.Date(2026, time.April, 24, 8, 0, 0, 0, time.UTC)
 	return syncing.Batch{

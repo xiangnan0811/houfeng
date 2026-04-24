@@ -178,3 +178,138 @@ func TestIngestRejectsProbeObservationKindMismatch(t *testing.T) {
 		t.Fatalf("len(repo.calls) = %d, want 0", len(repo.calls))
 	}
 }
+
+func TestIngestRejectsUnknownProbeResultKind(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepo{
+		probeMetadataByID: map[string]ProbeMetadata{
+			"pb_001": {
+				TargetID:  "tg_001",
+				ProbeKind: "http",
+			},
+		},
+	}
+	service := NewService(repo, repo)
+
+	err := service.Ingest(context.Background(), BatchWrite{
+		ProbeObservations: []ProbeObservationWrite{{
+			ProbeItemID: "pb_001",
+			TargetID:    "tg_001",
+			ProbeKind:   "http",
+			ResultKind:  "maybe",
+		}},
+	})
+	if !errors.Is(err, ErrInvalidProbeObservation) {
+		t.Fatalf("Ingest() error = %v, want ErrInvalidProbeObservation", err)
+	}
+	if len(repo.calls) != 0 {
+		t.Fatalf("len(repo.calls) = %d, want 0", len(repo.calls))
+	}
+}
+
+func TestIngestRejectsFailureObservationWithoutErrorCode(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepo{
+		probeMetadataByID: map[string]ProbeMetadata{
+			"pb_001": {
+				TargetID:  "tg_001",
+				ProbeKind: "http",
+			},
+		},
+	}
+	service := NewService(repo, repo)
+
+	err := service.Ingest(context.Background(), BatchWrite{
+		ProbeObservations: []ProbeObservationWrite{{
+			ProbeItemID:  "pb_001",
+			TargetID:     "tg_001",
+			ProbeKind:    "http",
+			ResultKind:   "failure",
+			ErrorSummary: "timeout talking to upstream",
+		}},
+	})
+	if !errors.Is(err, ErrInvalidProbeObservation) {
+		t.Fatalf("Ingest() error = %v, want ErrInvalidProbeObservation", err)
+	}
+	if len(repo.calls) != 0 {
+		t.Fatalf("len(repo.calls) = %d, want 0", len(repo.calls))
+	}
+}
+
+func TestIngestRejectsHTTPObservationWithTLSExpiryDays(t *testing.T) {
+	t.Parallel()
+
+	tlsExpiryDays := 30
+	repo := &fakeRepo{
+		probeMetadataByID: map[string]ProbeMetadata{
+			"pb_001": {
+				TargetID:  "tg_001",
+				ProbeKind: "http",
+			},
+		},
+	}
+	service := NewService(repo, repo)
+
+	err := service.Ingest(context.Background(), BatchWrite{
+		ProbeObservations: []ProbeObservationWrite{{
+			ProbeItemID:   "pb_001",
+			TargetID:      "tg_001",
+			ProbeKind:     "http",
+			ResultKind:    "success",
+			TLSExpiryDays: &tlsExpiryDays,
+		}},
+	})
+	if !errors.Is(err, ErrInvalidProbeObservation) {
+		t.Fatalf("Ingest() error = %v, want ErrInvalidProbeObservation", err)
+	}
+	if len(repo.calls) != 0 {
+		t.Fatalf("len(repo.calls) = %d, want 0", len(repo.calls))
+	}
+}
+
+func TestIngestAcceptsValidSuccessAndFailureProbeObservations(t *testing.T) {
+	t.Parallel()
+
+	httpStatus := 200
+	repo := &fakeRepo{
+		probeMetadataByID: map[string]ProbeMetadata{
+			"pb_http": {
+				TargetID:  "tg_http",
+				ProbeKind: "http",
+			},
+			"pb_tls": {
+				TargetID:  "tg_tls",
+				ProbeKind: "tls",
+			},
+		},
+	}
+	service := NewService(repo, repo)
+
+	err := service.Ingest(context.Background(), BatchWrite{
+		ProbeObservations: []ProbeObservationWrite{
+			{
+				ProbeItemID: "pb_http",
+				TargetID:    "tg_http",
+				ProbeKind:   "http",
+				ResultKind:  "success",
+				HTTPStatus:  &httpStatus,
+			},
+			{
+				ProbeItemID:  "pb_tls",
+				TargetID:     "tg_tls",
+				ProbeKind:    "tls",
+				ResultKind:   "failure",
+				ErrorCode:    "tls_handshake",
+				ErrorSummary: "certificate handshake failed",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Ingest() error = %v", err)
+	}
+	if len(repo.calls) != 1 {
+		t.Fatalf("len(repo.calls) = %d, want 1", len(repo.calls))
+	}
+}

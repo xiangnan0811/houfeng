@@ -39,6 +39,10 @@ func (s *Service) Ingest(ctx context.Context, batch BatchWrite) error {
 }
 
 func (s *Service) validateProbeObservation(ctx context.Context, observation ProbeObservationWrite) error {
+	if err := ValidateProbeObservation(observation); err != nil {
+		return err
+	}
+
 	if s.probeMetadata == nil {
 		return fmt.Errorf("%w: probe metadata lookup unavailable", ErrInvalidProbeObservation)
 	}
