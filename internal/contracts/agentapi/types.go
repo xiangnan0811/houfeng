@@ -19,6 +19,18 @@ const (
 	ErrorCodeInternalError          = "internal_error"
 )
 
+const (
+	ProbeResultSuccess = "success"
+	ProbeResultFailure = "failure"
+)
+
+const (
+	ProbeErrorTimeout      = "timeout"
+	ProbeErrorConnect      = "connect"
+	ProbeErrorHTTPStatus   = "http_status"
+	ProbeErrorTLSHandshake = "tls_handshake"
+)
+
 type EnrollmentRequest struct {
 	Token       string `json:"token"`
 	Fingerprint string `json:"fingerprint"`
@@ -70,22 +82,28 @@ type HostSamplePayload struct {
 }
 
 type ProbeObservationPayload struct {
-	TargetID           string    `json:"target_id"`
-	ProbeItemID        string    `json:"probe_item_id"`
-	ObservedAt         time.Time `json:"observed_at"`
-	AgentVersion       string    `json:"agent_version"`
-	Fingerprint        string    `json:"fingerprint"`
-	SyncBatchID        string    `json:"sync_batch_id"`
-	ResultKind         string    `json:"result_kind"`
-	LatencyMS          *int      `json:"latency_ms,omitempty"`
-	HTTPStatus         *int      `json:"http_status,omitempty"`
-	TLSExpiryDays      *int      `json:"tls_expiry_days,omitempty"`
-	ErrorCode          string    `json:"error_code,omitempty"`
-	ErrorSummary       string    `json:"error_summary,omitempty"`
-	MaintenanceContext bool      `json:"maintenance_context,omitempty"`
-	IsBackfilled       bool      `json:"is_backfilled,omitempty"`
+	TargetID     string    `json:"target_id"`
+	ProbeItemID  string    `json:"probe_item_id"`
+	ProbeKind    string    `json:"probe_kind"`
+	ObservedAt   time.Time `json:"observed_at"`
+	AgentVersion string    `json:"agent_version"`
+	Fingerprint  string    `json:"fingerprint"`
+	SyncBatchID  string    `json:"sync_batch_id"`
+	// ResultKind is "success" or "failure". Success observations may carry latency_ms,
+	// plus http_status for HTTP probes and tls_expiry_days for TLS probes. Failures
+	// should carry error_code and error_summary. probe_kind remains tcp/http/tls.
+	ResultKind         string `json:"result_kind"`
+	LatencyMS          *int   `json:"latency_ms,omitempty"`
+	HTTPStatus         *int   `json:"http_status,omitempty"`
+	TLSExpiryDays      *int   `json:"tls_expiry_days,omitempty"`
+	ErrorCode          string `json:"error_code,omitempty"`
+	ErrorSummary       string `json:"error_summary,omitempty"`
+	MaintenanceContext bool   `json:"maintenance_context,omitempty"`
+	IsBackfilled       bool   `json:"is_backfilled,omitempty"`
 }
 
+// SyncRequest keeps heartbeat sync as the canonical carrier; host_samples and
+// probe_observations are optional adjunct facts attached to the same sync batch.
 type SyncRequest struct {
 	NodeID            string                    `json:"node_id"`
 	SyncToken         string                    `json:"sync_token"`
