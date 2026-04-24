@@ -8,6 +8,10 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
+func intPtr(v int) *int {
+	return &v
+}
+
 func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 	observedAt, err := time.Parse(time.RFC3339, "2026-04-24T10:00:00Z")
 	if err != nil {
@@ -50,15 +54,15 @@ func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 		ProbeObservations: []agentapi.ProbeObservationPayload{{
 			TargetID:      "tg_001",
 			ProbeItemID:   "pi_001",
-			ProbeKind:     "http",
+			ProbeKind:     agentapi.ProbeKindHTTP,
 			ObservedAt:    observedAt,
 			AgentVersion:  "v1.2.3",
 			Fingerprint:   "fp_001",
 			SyncBatchID:   "batch_001",
 			ResultKind:    agentapi.ProbeResultSuccess,
-			LatencyMS:     83,
-			HTTPStatus:    200,
-			TLSExpiryDays: 30,
+			LatencyMS:     intPtr(83),
+			HTTPStatus:    intPtr(200),
+			TLSExpiryDays: intPtr(30),
 		}},
 	}
 
@@ -116,14 +120,14 @@ func TestProbeObservationPayloadRoundTripPreservesSuccessSemantics(t *testing.T)
 	original := agentapi.ProbeObservationPayload{
 		TargetID:     "tg_001",
 		ProbeItemID:  "pi_001",
-		ProbeKind:    "http",
+		ProbeKind:    agentapi.ProbeKindHTTP,
 		ObservedAt:   observedAt,
 		AgentVersion: "v1.2.3",
 		Fingerprint:  "fp_001",
 		SyncBatchID:  "batch_001",
 		ResultKind:   agentapi.ProbeResultSuccess,
-		LatencyMS:    83,
-		HTTPStatus:   200,
+		LatencyMS:    intPtr(83),
+		HTTPStatus:   intPtr(200),
 	}
 
 	payload, err := json.Marshal(original)
@@ -136,11 +140,86 @@ func TestProbeObservationPayloadRoundTripPreservesSuccessSemantics(t *testing.T)
 		t.Fatalf("unmarshal probe observation: %v", err)
 	}
 
-	if roundTrip.ProbeKind != "http" {
-		t.Fatalf("ProbeKind = %q, want %q", roundTrip.ProbeKind, "http")
+	if roundTrip.ProbeKind != agentapi.ProbeKindHTTP {
+		t.Fatalf("ProbeKind = %q, want %q", roundTrip.ProbeKind, agentapi.ProbeKindHTTP)
 	}
 	if roundTrip.ResultKind != agentapi.ProbeResultSuccess {
 		t.Fatalf("ResultKind = %q, want %q", roundTrip.ResultKind, agentapi.ProbeResultSuccess)
+	}
+}
+
+func TestProbeObservationPayloadRoundTripDistinguishesZeroTLSExpiryFromMissing(t *testing.T) {
+	observedAt, err := time.Parse(time.RFC3339, "2026-04-24T10:07:00Z")
+	if err != nil {
+		t.Fatalf("parse observedAt: %v", err)
+	}
+
+	withZero := agentapi.ProbeObservationPayload{
+		TargetID:      "tg_001",
+		ProbeItemID:   "pi_001",
+		ProbeKind:     agentapi.ProbeKindTLS,
+		ObservedAt:    observedAt,
+		AgentVersion:  "v1.2.3",
+		Fingerprint:   "fp_001",
+		SyncBatchID:   "batch_001",
+		ResultKind:    agentapi.ProbeResultSuccess,
+		TLSExpiryDays: intPtr(0),
+	}
+
+	payloadWithZero, err := json.Marshal(withZero)
+	if err != nil {
+		t.Fatalf("marshal probe observation with zero tls expiry: %v", err)
+	}
+
+	var zeroFields map[string]any
+	if err := json.Unmarshal(payloadWithZero, &zeroFields); err != nil {
+		t.Fatalf("unmarshal payload with zero tls expiry into map: %v", err)
+	}
+	if got, ok := zeroFields["tls_expiry_days"]; !ok || got.(float64) != 0 {
+		t.Fatalf("tls_expiry_days = %#v, present=%v, want present zero", got, ok)
+	}
+
+	var roundTripWithZero agentapi.ProbeObservationPayload
+	if err := json.Unmarshal(payloadWithZero, &roundTripWithZero); err != nil {
+		t.Fatalf("unmarshal payload with zero tls expiry: %v", err)
+	}
+	if roundTripWithZero.TLSExpiryDays == nil {
+		t.Fatalf("TLSExpiryDays = nil, want pointer to zero")
+	}
+	if *roundTripWithZero.TLSExpiryDays != 0 {
+		t.Fatalf("*TLSExpiryDays = %d, want 0", *roundTripWithZero.TLSExpiryDays)
+	}
+
+	missing := agentapi.ProbeObservationPayload{
+		TargetID:     "tg_001",
+		ProbeItemID:  "pi_001",
+		ProbeKind:    agentapi.ProbeKindTLS,
+		ObservedAt:   observedAt,
+		AgentVersion: "v1.2.3",
+		Fingerprint:  "fp_001",
+		SyncBatchID:  "batch_001",
+		ResultKind:   agentapi.ProbeResultSuccess,
+	}
+
+	payloadMissing, err := json.Marshal(missing)
+	if err != nil {
+		t.Fatalf("marshal probe observation without tls expiry: %v", err)
+	}
+
+	var missingFields map[string]any
+	if err := json.Unmarshal(payloadMissing, &missingFields); err != nil {
+		t.Fatalf("unmarshal payload without tls expiry into map: %v", err)
+	}
+	if _, ok := missingFields["tls_expiry_days"]; ok {
+		t.Fatalf("tls_expiry_days unexpectedly present in missing payload: %s", payloadMissing)
+	}
+
+	var roundTripMissing agentapi.ProbeObservationPayload
+	if err := json.Unmarshal(payloadMissing, &roundTripMissing); err != nil {
+		t.Fatalf("unmarshal payload without tls expiry: %v", err)
+	}
+	if roundTripMissing.TLSExpiryDays != nil {
+		t.Fatalf("TLSExpiryDays = %v, want nil", *roundTripMissing.TLSExpiryDays)
 	}
 }
 
@@ -153,7 +232,7 @@ func TestProbeObservationPayloadRoundTripPreservesFailureErrorCode(t *testing.T)
 	original := agentapi.ProbeObservationPayload{
 		TargetID:     "tg_001",
 		ProbeItemID:  "pi_001",
-		ProbeKind:    "tcp",
+		ProbeKind:    agentapi.ProbeKindTCP,
 		ObservedAt:   observedAt,
 		AgentVersion: "v1.2.3",
 		Fingerprint:  "fp_001",

@@ -25,6 +25,12 @@ const (
 )
 
 const (
+	ProbeKindTCP  = "tcp"
+	ProbeKindHTTP = "http"
+	ProbeKindTLS  = "tls"
+)
+
+const (
 	ProbeErrorTimeout      = "timeout"
 	ProbeErrorConnect      = "connect"
 	ProbeErrorHTTPStatus   = "http_status"
@@ -93,9 +99,9 @@ type ProbeObservationPayload struct {
 	// plus http_status for HTTP probes and tls_expiry_days for TLS probes. Failures
 	// should carry error_code and error_summary. probe_kind remains tcp/http/tls.
 	ResultKind         string `json:"result_kind"`
-	LatencyMS          int    `json:"latency_ms,omitempty"`
-	HTTPStatus         int    `json:"http_status,omitempty"`
-	TLSExpiryDays      int    `json:"tls_expiry_days,omitempty"`
+	LatencyMS          *int   `json:"latency_ms,omitempty"`
+	HTTPStatus         *int   `json:"http_status,omitempty"`
+	TLSExpiryDays      *int   `json:"tls_expiry_days,omitempty"`
 	ErrorCode          string `json:"error_code,omitempty"`
 	ErrorSummary       string `json:"error_summary,omitempty"`
 	MaintenanceContext bool   `json:"maintenance_context,omitempty"`
