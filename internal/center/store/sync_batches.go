@@ -18,6 +18,7 @@ import (
 type syncBatchTx interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 	Commit(context.Context) error
 	Rollback(context.Context) error
 }
@@ -36,18 +37,18 @@ func NewPostgresSyncRepository(db *pgxpool.Pool) *PostgresSyncRepository {
 
 var _ syncing.Repository = (*PostgresSyncRepository)(nil)
 
-func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.Batch) error {
+func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.Batch) (syncing.Result, error) {
 	if len(batch.Heartbeats) == 0 {
 		if len(batch.Observations.HostSamples) == 0 && len(batch.Observations.ProbeObservations) == 0 {
-			return nil
+			return syncing.Result{}, nil
 		}
 
-		return syncing.ErrHeartbeatRequired
+		return syncing.Result{}, syncing.ErrHeartbeatRequired
 	}
 
 	tx, err := r.beginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("begin sync batch transaction for node %q: %w", batch.NodeID, err)
+		return syncing.Result{}, fmt.Errorf("begin sync batch transaction for node %q: %w", batch.NodeID, err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
@@ -55,31 +56,38 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 
 	bindingFingerprint, err := validateAcceptedSyncBatch(ctx, tx, batch)
 	if err != nil {
-		return err
+		return syncing.Result{}, err
 	}
 
 	receivedAt := time.Now().UTC()
 	observationBatch := batchWithReceivedAt(batch.Observations, receivedAt)
 	if err := validateProbeObservations(ctx, tx, observationBatch.ProbeObservations); err != nil {
-		return err
+		return syncing.Result{}, err
 	}
 
 	lastHeartbeatAt, err := recordHeartbeatBatch(ctx, tx, batch.NodeID, bindingFingerprint, receivedAt, batch.Heartbeats)
 	if err != nil {
-		return err
+		return syncing.Result{}, err
 	}
 	if err := recordObservationBatch(ctx, tx, observationBatch); err != nil {
-		return err
+		return syncing.Result{}, err
 	}
 	if err := advanceNodeSyncState(ctx, tx, batch.NodeID, lastHeartbeatAt, receivedAt); err != nil {
-		return err
+		return syncing.Result{}, err
+	}
+	plan, err := buildSyncPlan(ctx, tx, batch.NodeID)
+	if err != nil {
+		return syncing.Result{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit sync batch transaction for node %q: %w", batch.NodeID, err)
+		return syncing.Result{}, fmt.Errorf("commit sync batch transaction for node %q: %w", batch.NodeID, err)
 	}
 
-	return nil
+	return syncing.Result{
+		AcceptedAt: receivedAt,
+		Plan:       plan,
+	}, nil
 }
 
 func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (string, error) {

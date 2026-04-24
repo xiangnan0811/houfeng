@@ -3,7 +3,9 @@ package syncing
 import (
 	"context"
 	"errors"
+	"time"
 
+	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/observations"
 )
@@ -23,8 +25,13 @@ type Batch struct {
 	Observations observations.BatchWrite
 }
 
+type Result struct {
+	AcceptedAt time.Time
+	Plan       agentplan.SyncPlan
+}
+
 type Repository interface {
-	ApplyBatch(context.Context, Batch) error
+	ApplyBatch(context.Context, Batch) (Result, error)
 }
 
 type Service struct {
@@ -35,6 +42,6 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) SyncBatch(ctx context.Context, batch Batch) error {
+func (s *Service) SyncBatch(ctx context.Context, batch Batch) (Result, error) {
 	return s.repo.ApplyBatch(ctx, batch)
 }

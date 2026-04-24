@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/observations"
@@ -31,13 +32,14 @@ func (f *fakeAgentEnrollmentService) EnrollNode(_ context.Context, input enrollm
 }
 
 type fakeAgentSyncService struct {
-	syncErr   error
-	syncBatch syncing.Batch
+	syncErr    error
+	syncBatch  syncing.Batch
+	syncResult syncing.Result
 }
 
-func (f *fakeAgentSyncService) SyncBatch(_ context.Context, batch syncing.Batch) error {
+func (f *fakeAgentSyncService) SyncBatch(_ context.Context, batch syncing.Batch) (syncing.Result, error) {
 	f.syncBatch = batch
-	return f.syncErr
+	return f.syncResult, f.syncErr
 }
 
 func TestAgentEnrollHandlerReturnsBindingStatus(t *testing.T) {
@@ -146,7 +148,25 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	t.Parallel()
 
 	observedAt := time.Date(2026, time.April, 23, 8, 30, 0, 0, time.UTC)
-	svc := &fakeAgentSyncService{}
+	acceptedAt := time.Date(2026, time.April, 23, 8, 30, 5, 0, time.UTC)
+	svc := &fakeAgentSyncService{
+		syncResult: syncing.Result{
+			AcceptedAt: acceptedAt,
+			Plan: agentplan.SyncPlan{
+				HostSampleFrequencyTier: agentapi.FrequencyTier5m,
+				ProbeAssignments: []agentplan.ProbeAssignment{{
+					TargetID:           "tg_001",
+					TargetHost:         "api.example.test",
+					MaintenanceContext: false,
+					ProbeItemID:        "pb_001",
+					ProbeKind:          agentapi.ProbeKindHTTP,
+					FrequencyTier:      agentapi.FrequencyTier1m,
+					TimeoutSeconds:     5,
+					Config:             json.RawMessage(`{"path":"/healthz"}`),
+				}},
+			},
+		},
+	}
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
@@ -164,11 +184,23 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
-	if body.AcceptedAt.IsZero() {
-		t.Fatal("AcceptedAt is zero, want non-zero")
+	if body.AcceptedAt != acceptedAt {
+		t.Fatalf("AcceptedAt = %s, want %s", body.AcceptedAt.Format(time.RFC3339), acceptedAt.Format(time.RFC3339))
 	}
 	if body.Status != "accepted" {
 		t.Fatalf("Status = %q, want %q", body.Status, "accepted")
+	}
+	if body.Plan == nil {
+		t.Fatal("Plan = nil, want non-nil")
+	}
+	if body.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier5m {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", body.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier5m)
+	}
+	if len(body.Plan.ProbeAssignments) != 1 {
+		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(body.Plan.ProbeAssignments))
+	}
+	if body.Plan.ProbeAssignments[0].TargetID != "tg_001" {
+		t.Fatalf("TargetID = %q, want %q", body.Plan.ProbeAssignments[0].TargetID, "tg_001")
 	}
 
 	if svc.syncBatch.NodeID != "nd_001" {

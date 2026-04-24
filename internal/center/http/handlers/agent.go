@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 
+	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/nodes"
 	"houfeng/internal/center/observations"
@@ -18,7 +18,7 @@ type AgentEnrollService interface {
 }
 
 type AgentSyncService interface {
-	SyncBatch(ctx context.Context, batch syncing.Batch) error
+	SyncBatch(ctx context.Context, batch syncing.Batch) (syncing.Result, error)
 }
 
 func AgentEnroll(svc AgentEnrollService) http.Handler {
@@ -78,7 +78,8 @@ func AgentSync(svc AgentSyncService) http.Handler {
 			return
 		}
 
-		if err := svc.SyncBatch(r.Context(), syncBatchFromRequest(req)); err != nil {
+		result, err := svc.SyncBatch(r.Context(), syncBatchFromRequest(req))
+		if err != nil {
 			switch {
 			case errors.Is(err, syncing.ErrInvalidSyncToken):
 				writeAgentAPIError(w, http.StatusUnauthorized, agentapi.ErrorCodeInvalidSyncToken, "invalid sync token")
@@ -95,8 +96,9 @@ func AgentSync(svc AgentSyncService) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, agentapi.SyncResponse{
-			AcceptedAt: time.Now().UTC(),
+			AcceptedAt: result.AcceptedAt,
 			Status:     "accepted",
+			Plan:       syncPlanToAPI(result.Plan),
 		})
 	})
 }
@@ -222,4 +224,25 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 	}
 
 	return batch
+}
+
+func syncPlanToAPI(plan agentplan.SyncPlan) *agentapi.SyncPlan {
+	assignments := make([]agentapi.ProbeAssignment, 0, len(plan.ProbeAssignments))
+	for _, assignment := range plan.ProbeAssignments {
+		assignments = append(assignments, agentapi.ProbeAssignment{
+			TargetID:           assignment.TargetID,
+			TargetHost:         assignment.TargetHost,
+			TargetBasePort:     assignment.TargetBasePort,
+			MaintenanceContext: assignment.MaintenanceContext,
+			ProbeItemID:        assignment.ProbeItemID,
+			ProbeKind:          assignment.ProbeKind,
+			FrequencyTier:      assignment.FrequencyTier,
+			TimeoutSeconds:     assignment.TimeoutSeconds,
+			Config:             append([]byte(nil), assignment.Config...),
+		})
+	}
+	return &agentapi.SyncPlan{
+		HostSampleFrequencyTier: plan.HostSampleFrequencyTier,
+		ProbeAssignments:        assignments,
+	}
 }
