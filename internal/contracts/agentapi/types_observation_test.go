@@ -146,6 +146,109 @@ func TestProbeObservationPayloadRoundTripPreservesSuccessSemantics(t *testing.T)
 	if roundTrip.ResultKind != agentapi.ProbeResultSuccess {
 		t.Fatalf("ResultKind = %q, want %q", roundTrip.ResultKind, agentapi.ProbeResultSuccess)
 	}
+	if roundTrip.LatencyMS == nil {
+		t.Fatalf("LatencyMS = nil, want non-nil")
+	}
+	if *roundTrip.LatencyMS != 83 {
+		t.Fatalf("*LatencyMS = %d, want 83", *roundTrip.LatencyMS)
+	}
+	if roundTrip.HTTPStatus == nil {
+		t.Fatalf("HTTPStatus = nil, want non-nil")
+	}
+	if *roundTrip.HTTPStatus != 200 {
+		t.Fatalf("*HTTPStatus = %d, want 200", *roundTrip.HTTPStatus)
+	}
+}
+
+func TestProbeObservationPayloadRoundTripDistinguishesZeroLatencyAndHTTPStatusFromMissing(t *testing.T) {
+	observedAt, err := time.Parse(time.RFC3339, "2026-04-24T10:06:00Z")
+	if err != nil {
+		t.Fatalf("parse observedAt: %v", err)
+	}
+
+	withZero := agentapi.ProbeObservationPayload{
+		TargetID:     "tg_001",
+		ProbeItemID:  "pi_001",
+		ProbeKind:    agentapi.ProbeKindHTTP,
+		ObservedAt:   observedAt,
+		AgentVersion: "v1.2.3",
+		Fingerprint:  "fp_001",
+		SyncBatchID:  "batch_001",
+		ResultKind:   agentapi.ProbeResultSuccess,
+		LatencyMS:    intPtr(0),
+		HTTPStatus:   intPtr(0),
+	}
+
+	payloadWithZero, err := json.Marshal(withZero)
+	if err != nil {
+		t.Fatalf("marshal probe observation with zero latency/http status: %v", err)
+	}
+
+	var zeroFields map[string]any
+	if err := json.Unmarshal(payloadWithZero, &zeroFields); err != nil {
+		t.Fatalf("unmarshal payload with zero latency/http status into map: %v", err)
+	}
+	if got, ok := zeroFields["latency_ms"]; !ok || got.(float64) != 0 {
+		t.Fatalf("latency_ms = %#v, present=%v, want present zero", got, ok)
+	}
+	if got, ok := zeroFields["http_status"]; !ok || got.(float64) != 0 {
+		t.Fatalf("http_status = %#v, present=%v, want present zero", got, ok)
+	}
+
+	var roundTripWithZero agentapi.ProbeObservationPayload
+	if err := json.Unmarshal(payloadWithZero, &roundTripWithZero); err != nil {
+		t.Fatalf("unmarshal payload with zero latency/http status: %v", err)
+	}
+	if roundTripWithZero.LatencyMS == nil {
+		t.Fatalf("LatencyMS = nil, want pointer to zero")
+	}
+	if *roundTripWithZero.LatencyMS != 0 {
+		t.Fatalf("*LatencyMS = %d, want 0", *roundTripWithZero.LatencyMS)
+	}
+	if roundTripWithZero.HTTPStatus == nil {
+		t.Fatalf("HTTPStatus = nil, want pointer to zero")
+	}
+	if *roundTripWithZero.HTTPStatus != 0 {
+		t.Fatalf("*HTTPStatus = %d, want 0", *roundTripWithZero.HTTPStatus)
+	}
+
+	missing := agentapi.ProbeObservationPayload{
+		TargetID:     "tg_001",
+		ProbeItemID:  "pi_001",
+		ProbeKind:    agentapi.ProbeKindHTTP,
+		ObservedAt:   observedAt,
+		AgentVersion: "v1.2.3",
+		Fingerprint:  "fp_001",
+		SyncBatchID:  "batch_001",
+		ResultKind:   agentapi.ProbeResultSuccess,
+	}
+
+	payloadMissing, err := json.Marshal(missing)
+	if err != nil {
+		t.Fatalf("marshal probe observation without latency/http status: %v", err)
+	}
+
+	var missingFields map[string]any
+	if err := json.Unmarshal(payloadMissing, &missingFields); err != nil {
+		t.Fatalf("unmarshal payload without latency/http status into map: %v", err)
+	}
+	if _, ok := missingFields["latency_ms"]; ok {
+		t.Fatalf("latency_ms unexpectedly present in missing payload: %s", payloadMissing)
+	}
+	if _, ok := missingFields["http_status"]; ok {
+		t.Fatalf("http_status unexpectedly present in missing payload: %s", payloadMissing)
+	}
+
+	var roundTripMissing agentapi.ProbeObservationPayload
+	if err := json.Unmarshal(payloadMissing, &roundTripMissing); err != nil {
+		t.Fatalf("unmarshal payload without latency/http status: %v", err)
+	}
+	if roundTripMissing.LatencyMS != nil {
+		t.Fatalf("LatencyMS = %v, want nil", *roundTripMissing.LatencyMS)
+	}
+	if roundTripMissing.HTTPStatus != nil {
+		t.Fatalf("HTTPStatus = %v, want nil", *roundTripMissing.HTTPStatus)
+	}
 }
 
 func TestProbeObservationPayloadRoundTripDistinguishesZeroTLSExpiryFromMissing(t *testing.T) {
