@@ -318,7 +318,52 @@ func parseDiskStats(raw []byte) (uint64, uint64, uint64, error) {
 }
 
 func skipDiskDevice(device string) bool {
-	return strings.HasPrefix(device, "loop") || strings.HasPrefix(device, "ram") || strings.HasPrefix(device, "fd") || strings.HasPrefix(device, "dm-") || strings.HasPrefix(device, "md")
+	if strings.HasPrefix(device, "loop") || strings.HasPrefix(device, "ram") || strings.HasPrefix(device, "fd") || strings.HasPrefix(device, "dm-") || strings.HasPrefix(device, "md") {
+		return true
+	}
+	if isPartitionDevice(device) {
+		return true
+	}
+	return false
+}
+
+func isPartitionDevice(device string) bool {
+	if strings.HasPrefix(device, "nvme") || strings.HasPrefix(device, "mmcblk") {
+		if index := strings.LastIndex(device, "p"); index != -1 && index < len(device)-1 {
+			return hasOnlyDigits(device[index+1:])
+		}
+		return false
+	}
+	for _, prefix := range []string{"sd", "hd", "vd", "xvd"} {
+		if strings.HasPrefix(device, prefix) {
+			return hasTrailingDigits(device)
+		}
+	}
+	return false
+}
+
+func hasTrailingDigits(value string) bool {
+	start := len(value)
+	for start > 0 {
+		ch := value[start-1]
+		if ch < '0' || ch > '9' {
+			break
+		}
+		start--
+	}
+	return start < len(value)
+}
+
+func hasOnlyDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func deriveUsagePercents(stats FilesystemStats) (float64, float64) {
