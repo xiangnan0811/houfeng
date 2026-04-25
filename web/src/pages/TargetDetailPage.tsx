@@ -2,11 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { DetailSection } from '../components/DetailSection'
+import { EventList } from '../components/EventList'
+import { IncidentList } from '../components/IncidentList'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
   getTarget,
   getTargetRuntimeFacts,
+  listEvents,
+  listIncidents,
   listTargetProbeItems,
 } from '../lib/api'
 import {
@@ -16,52 +20,58 @@ import {
   formatLatency,
 } from '../lib/format'
 import type {
+  ActiveIncidentRecord,
   ProbeItemRecord,
   ProbeObservation,
+  StateChangeEventRecord,
   TargetRecord,
   TargetRuntimeFacts,
 } from '../lib/types'
 
 type State = {
-  loading: boolean
+  requestedTargetId: string | null
   error: string | null
   target: TargetRecord | null
   probeItems: ProbeItemRecord[]
   runtimeFacts: TargetRuntimeFacts | null
+  incidents: ActiveIncidentRecord[]
+  events: StateChangeEventRecord[]
 }
 
 export function TargetDetailPage() {
   const { targetId } = useParams()
   const [state, setState] = useState<State>({
-    loading: true,
+    requestedTargetId: null,
     error: null,
     target: null,
     probeItems: [],
     runtimeFacts: null,
+    incidents: [],
+    events: [],
   })
 
   useEffect(() => {
     let cancelled = false
-    if (!targetId) {
-      setState({
-        loading: false,
-        error: '目标不存在',
-        target: null,
-        probeItems: [],
-        runtimeFacts: null,
-      })
-      return
-    }
+    if (!targetId) return
 
-    setState((current) => ({ ...current, loading: true, error: null }))
     Promise.all([
       getTarget(targetId),
       listTargetProbeItems(targetId),
       getTargetRuntimeFacts(targetId),
+      listIncidents({ object_type: 'target', object_id: targetId }),
+      listEvents({ object_type: 'target', object_id: targetId }),
     ])
-      .then(([target, probeItems, runtimeFacts]) => {
+      .then(([target, probeItems, runtimeFacts, incidents, events]) => {
         if (cancelled) return
-        setState({ loading: false, error: null, target, probeItems, runtimeFacts })
+        setState({
+          requestedTargetId: targetId,
+          error: null,
+          target,
+          probeItems,
+          runtimeFacts,
+          incidents,
+          events,
+        })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -72,11 +82,13 @@ export function TargetDetailPage() {
               ? error.message
               : '加载目标详情失败'
         setState({
-          loading: false,
+          requestedTargetId: targetId,
           error: message,
           target: null,
           probeItems: [],
           runtimeFacts: null,
+          incidents: [],
+          events: [],
         })
       })
 
@@ -95,24 +107,30 @@ export function TargetDetailPage() {
     return map
   }, [state.runtimeFacts])
 
-  if (state.loading) {
+  const missingTargetId = !targetId
+  const isCurrentTarget = state.requestedTargetId === targetId
+  const error = isCurrentTarget ? state.error : null
+  const target = isCurrentTarget ? state.target : null
+  const probeItems = isCurrentTarget ? state.probeItems : []
+  const incidents = isCurrentTarget ? state.incidents : []
+  const events = isCurrentTarget ? state.events : []
+
+  if (!missingTargetId && !isCurrentTarget) {
     return <section className="page-panel">正在加载目标详情…</section>
   }
 
-  if (state.error || !state.target) {
+  if (missingTargetId || error || !target) {
     return (
       <section className="page-panel">
         <p className="page-panel__eyebrow">Target Detail</p>
         <h2 className="page-panel__title">目标详情不可用</h2>
-        <p className="page-panel__description">{state.error ?? '未找到目标'}</p>
+        <p className="page-panel__description">{error ?? '未找到目标'}</p>
         <Link className="text-link" to="/targets">
           返回目标列表
         </Link>
       </section>
     )
   }
-
-  const target = state.target
 
   return (
     <div className="page-stack">
@@ -157,7 +175,7 @@ export function TargetDetailPage() {
         </article>
         <article className="summary-card">
           <p className="summary-card__label">ProbeItem 数量</p>
-          <p className="summary-card__value">{state.probeItems.length}</p>
+          <p className="summary-card__value">{probeItems.length}</p>
         </article>
         <article className="summary-card">
           <p className="summary-card__label">当前主问题</p>
@@ -168,14 +186,14 @@ export function TargetDetailPage() {
       </div>
 
       <DetailSection eyebrow="Probe Items" title="ProbeItem 列表">
-        {state.probeItems.length === 0 ? (
+        {probeItems.length === 0 ? (
           <div className="empty-state">
             <h3>当前还没有 ProbeItem</h3>
             <p>当前还没有 ProbeItem，请为该入口添加至少一种观测方式。</p>
           </div>
         ) : (
           <div className="probe-list">
-            {state.probeItems.map((probeItem) => {
+            {probeItems.map((probeItem) => {
               const observations = observationsByProbe.get(probeItem.probe_item_id) ?? []
               return (
                 <article key={probeItem.probe_item_id} className="probe-card">
@@ -255,17 +273,12 @@ export function TargetDetailPage() {
         )}
       </DetailSection>
 
-      <DetailSection eyebrow="Reserved" title="趋势与事件">
-        <div className="placeholder-stack">
-          <div className="placeholder-card">
-            <h3>趋势视图</h3>
-            <p>当前切片只接入最新原始观测结果，趋势图将在后续切片补齐。</p>
-          </div>
-          <div className="placeholder-card">
-            <h3>事件流</h3>
-            <p>事件与 incident 仍由后续切片接入，这里先保留版位。</p>
-          </div>
-        </div>
+      <DetailSection eyebrow="Incidents" title="当前活跃异常">
+        <IncidentList incidents={incidents} />
+      </DetailSection>
+
+      <DetailSection eyebrow="Events" title="最近相关事件">
+        <EventList events={events} />
       </DetailSection>
     </div>
   )

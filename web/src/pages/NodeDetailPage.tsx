@@ -2,8 +2,16 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { DetailSection } from '../components/DetailSection'
+import { EventList } from '../components/EventList'
+import { IncidentList } from '../components/IncidentList'
 import { StatusBadge } from '../components/StatusBadge'
-import { ApiError, getNode, getNodeRuntimeFacts } from '../lib/api'
+import {
+  ApiError,
+  getNode,
+  getNodeRuntimeFacts,
+  listEvents,
+  listIncidents,
+} from '../lib/api'
 import {
   formatBytes,
   formatBytesPerSecond,
@@ -13,36 +21,53 @@ import {
   formatPercent,
   formatUptime,
 } from '../lib/format'
-import type { NodeRecord, NodeRuntimeFacts } from '../lib/types'
+import type {
+  ActiveIncidentRecord,
+  NodeRecord,
+  NodeRuntimeFacts,
+  StateChangeEventRecord,
+} from '../lib/types'
 
 type State = {
-  loading: boolean
+  requestedNodeId: string | null
   error: string | null
   node: NodeRecord | null
   runtimeFacts: NodeRuntimeFacts | null
+  incidents: ActiveIncidentRecord[]
+  events: StateChangeEventRecord[]
 }
 
 export function NodeDetailPage() {
   const { nodeId } = useParams()
   const [state, setState] = useState<State>({
-    loading: true,
+    requestedNodeId: null,
     error: null,
     node: null,
     runtimeFacts: null,
+    incidents: [],
+    events: [],
   })
 
   useEffect(() => {
     let cancelled = false
-    if (!nodeId) {
-      setState({ loading: false, error: '节点不存在', node: null, runtimeFacts: null })
-      return
-    }
+    if (!nodeId) return
 
-    setState((current) => ({ ...current, loading: true, error: null }))
-    Promise.all([getNode(nodeId), getNodeRuntimeFacts(nodeId)])
-      .then(([node, runtimeFacts]) => {
+    Promise.all([
+      getNode(nodeId),
+      getNodeRuntimeFacts(nodeId),
+      listIncidents({ object_type: 'node', object_id: nodeId }),
+      listEvents({ object_type: 'node', object_id: nodeId }),
+    ])
+      .then(([node, runtimeFacts, incidents, events]) => {
         if (cancelled) return
-        setState({ loading: false, error: null, node, runtimeFacts })
+        setState({
+          requestedNodeId: nodeId,
+          error: null,
+          node,
+          runtimeFacts,
+          incidents,
+          events,
+        })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -52,7 +77,14 @@ export function NodeDetailPage() {
             : error instanceof Error
               ? error.message
               : '加载节点详情失败'
-        setState({ loading: false, error: message, node: null, runtimeFacts: null })
+        setState({
+          requestedNodeId: nodeId,
+          error: message,
+          node: null,
+          runtimeFacts: null,
+          incidents: [],
+          events: [],
+        })
       })
 
     return () => {
@@ -60,16 +92,24 @@ export function NodeDetailPage() {
     }
   }, [nodeId])
 
-  if (state.loading) {
+  const missingNodeId = !nodeId
+  const isCurrentNode = state.requestedNodeId === nodeId
+  const error = isCurrentNode ? state.error : null
+  const node = isCurrentNode ? state.node : null
+  const runtimeFacts = isCurrentNode ? state.runtimeFacts : null
+  const incidents = isCurrentNode ? state.incidents : []
+  const events = isCurrentNode ? state.events : []
+
+  if (!missingNodeId && !isCurrentNode) {
     return <section className="page-panel">正在加载节点详情…</section>
   }
 
-  if (state.error || !state.node) {
+  if (missingNodeId || error || !node) {
     return (
       <section className="page-panel">
         <p className="page-panel__eyebrow">Node Detail</p>
         <h2 className="page-panel__title">节点详情不可用</h2>
-        <p className="page-panel__description">{state.error ?? '未找到节点'}</p>
+        <p className="page-panel__description">{error ?? '未找到节点'}</p>
         <Link className="text-link" to="/nodes">
           返回节点列表
         </Link>
@@ -77,8 +117,7 @@ export function NodeDetailPage() {
     )
   }
 
-  const node = state.node
-  const sample = state.runtimeFacts?.latest_host_sample ?? null
+  const sample = runtimeFacts?.latest_host_sample ?? null
 
   return (
     <div className="page-stack">
@@ -232,17 +271,12 @@ export function NodeDetailPage() {
         )}
       </DetailSection>
 
-      <DetailSection eyebrow="Reserved" title="当前异常与事件流">
-        <div className="placeholder-stack">
-          <div className="placeholder-card">
-            <h3>活跃异常</h3>
-            <p>将在 incidents / events 切片接入后替换为真实内容。</p>
-          </div>
-          <div className="placeholder-card">
-            <h3>事件流</h3>
-            <p>当前仅保留版位，避免客户端伪造事件历史。</p>
-          </div>
-        </div>
+      <DetailSection eyebrow="Incidents" title="当前活跃异常">
+        <IncidentList incidents={incidents} />
+      </DetailSection>
+
+      <DetailSection eyebrow="Events" title="最近相关事件">
+        <EventList events={events} />
       </DetailSection>
     </div>
   )
