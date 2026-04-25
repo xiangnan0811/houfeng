@@ -123,6 +123,23 @@ func TestEvaluateNodeResourcePressureUsesLoadAndLowAvailableMemoryForSeverity(t 
 	}
 }
 
+func TestEvaluateNodeResourcePressureIgnoresSuppressedHistoryForActiveEvidence(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	samples := []NodeResourceSample{
+		{ObservedAt: now, CPUUsagePct: 91, MemUsedPct: 93, NormalizedLoad5: 1.9, MemAvailableBytes: 700 * 1024 * 1024},
+		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 92, MemUsedPct: 94, NormalizedLoad5: 1.95, MemAvailableBytes: 650 * 1024 * 1024, MaintenanceContext: true},
+		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 90, MemUsedPct: 92, NormalizedLoad5: 1.85, MemAvailableBytes: 620 * 1024 * 1024, MaintenanceContext: true},
+	}
+
+	result := EvaluateNodeResourcePressure(nil, "nd_001", samples)
+	if result.Transition != TransitionNoop {
+		t.Fatalf("Transition = %q, want %q when only suppressed history spans the active window", result.Transition, TransitionNoop)
+	}
+	if result.Current != nil {
+		t.Fatalf("Current = %#v, want nil when only one unsuppressed sample exists", result.Current)
+	}
+}
+
 func TestEvaluateTargetProbeFailureThresholdsAndRecovery(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 10, 0, 0, 0, time.UTC)
 	httpFailures := []runtimefacts.ProbeObservation{
@@ -185,6 +202,23 @@ func TestEvaluateTargetProbeFailureThresholdsAndRecovery(t *testing.T) {
 	httpMultiProbe := EvaluateTargetProbeFailure(nil, "tg_001", httpMultiProbeFailures)
 	if httpMultiProbe.Current == nil || httpMultiProbe.Current.Severity != SeverityCritical {
 		t.Fatalf("Current = %#v, want critical multi-probe http incident", httpMultiProbe.Current)
+	}
+}
+
+func TestEvaluateTargetProbeFailureIgnoresSuppressedHistoryForActiveEvidence(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 0, 0, 0, time.UTC)
+	recent := []runtimefacts.ProbeObservation{
+		{ObservedAt: now, ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
+		{ObservedAt: now.Add(-time.Minute), ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", MaintenanceContext: true},
+		{ObservedAt: now.Add(-2 * time.Minute), ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", MaintenanceContext: true},
+	}
+
+	result := EvaluateTargetProbeFailure(nil, "tg_001", recent)
+	if result.Transition != TransitionNoop {
+		t.Fatalf("Transition = %q, want %q when only suppressed history reaches the failure threshold", result.Transition, TransitionNoop)
+	}
+	if result.Current != nil {
+		t.Fatalf("Current = %#v, want nil when only one unsuppressed failure exists", result.Current)
 	}
 }
 

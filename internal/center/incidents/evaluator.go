@@ -59,8 +59,9 @@ func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, sampl
 	suppressed := samples[0].MaintenanceContext || samples[0].IsBackfilled
 
 	referenceTime := samples[0].ObservedAt
-	window15 := nodeResourceSamplesWithin(samples, referenceTime, 15*time.Minute)
-	window30 := nodeResourceSamplesWithin(samples, referenceTime, 30*time.Minute)
+	activeSamples := unsuppressedNodeResourceSamples(samples)
+	window15 := nodeResourceSamplesWithin(activeSamples, referenceTime, 15*time.Minute)
+	window30 := nodeResourceSamplesWithin(activeSamples, referenceTime, 30*time.Minute)
 	severity, summary, active := resourcePressureSeverity(window15, window30)
 	if !active {
 		recoveryWindow := 15 * time.Minute
@@ -89,8 +90,8 @@ func EvaluateTargetProbeFailure(previous *IncidentRecord, targetID string, recen
 	}
 	suppressed := recent[0].MaintenanceContext || recent[0].IsBackfilled
 
-	failureCount := consecutiveResults(recent, agentapi.ProbeResultFailure)
-	failureWindow := leadingFailureObservations(recent)
+	failureWindow := leadingUnsuppressedFailureObservations(recent)
+	failureCount := len(failureWindow)
 	successCount := consecutiveResults(recent, agentapi.ProbeResultSuccess)
 	if previous != nil && successCount >= 2 {
 		result := recoverIfNeeded(previous, recent[0].ObservedAt, "探针已连续成功恢复")
@@ -387,9 +388,12 @@ func consecutiveResults(observations []runtimefacts.ProbeObservation, want strin
 	return count
 }
 
-func leadingFailureObservations(observations []runtimefacts.ProbeObservation) []runtimefacts.ProbeObservation {
+func leadingUnsuppressedFailureObservations(observations []runtimefacts.ProbeObservation) []runtimefacts.ProbeObservation {
 	window := make([]runtimefacts.ProbeObservation, 0, len(observations))
 	for _, observation := range observations {
+		if observation.MaintenanceContext || observation.IsBackfilled {
+			break
+		}
 		if observation.ResultKind != agentapi.ProbeResultFailure {
 			break
 		}
@@ -420,8 +424,15 @@ func uniqueNonEmptyProbeItemCount(observations []runtimefacts.ProbeObservation) 
 	return len(seen)
 }
 
-func shouldSkipHostSample(sample *runtimefacts.HostSample) bool {
-	return sample == nil || sample.MaintenanceContext || sample.IsBackfilled
+func unsuppressedNodeResourceSamples(samples []NodeResourceSample) []NodeResourceSample {
+	filtered := make([]NodeResourceSample, 0, len(samples))
+	for _, sample := range samples {
+		if sample.MaintenanceContext || sample.IsBackfilled {
+			continue
+		}
+		filtered = append(filtered, sample)
+	}
+	return filtered
 }
 
 func normalizeHostSamples(samples []runtimefacts.HostSample) []runtimefacts.HostSample {
