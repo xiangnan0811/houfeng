@@ -23,14 +23,14 @@ type incidentStoreTx interface {
 }
 
 type ActiveIncidentListItem struct {
-	IncidentID      string
-	IncidentClass   incidents.IncidentClass
-	ObjectType      incidents.ObjectType
-	ObjectID        string
-	Severity        incidents.Severity
-	StartedAt       time.Time
-	LastEvaluatedAt time.Time
-	SourceSummary   string
+	IncidentID      string                  `json:"incident_id"`
+	IncidentClass   incidents.IncidentClass `json:"incident_class"`
+	ObjectType      incidents.ObjectType    `json:"object_type"`
+	ObjectID        string                  `json:"object_id"`
+	Severity        incidents.Severity      `json:"severity"`
+	StartedAt       time.Time               `json:"started_at"`
+	LastEvaluatedAt time.Time               `json:"last_evaluated_at"`
+	SourceSummary   string                  `json:"source_summary"`
 }
 
 type IncidentsFilter struct {

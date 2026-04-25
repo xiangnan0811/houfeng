@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,26 @@ func TestIncidentsHandlerReturnsListWithFilters(t *testing.T) {
 	}
 	if len(body) != 1 || body[0].IncidentID != "inc_001" {
 		t.Fatalf("body = %#v, want one incident", body)
+	}
+	responseBody := recorder.Body.String()
+	for _, want := range []string{
+		`"incident_id":`,
+		`"incident_class":`,
+		`"object_type":`,
+		`"object_id":`,
+		`"severity":`,
+		`"started_at":`,
+		`"last_evaluated_at":`,
+		`"source_summary":`,
+	} {
+		if !strings.Contains(responseBody, want) {
+			t.Fatalf("response body = %q, want snake_case field %s", responseBody, want)
+		}
+	}
+	for _, unwanted := range []string{`"IncidentID":`, `"IncidentClass":`, `"ObjectType":`, `"ObjectID":`, `"Severity":`, `"StartedAt":`, `"LastEvaluatedAt":`, `"SourceSummary":`} {
+		if strings.Contains(responseBody, unwanted) {
+			t.Fatalf("response body = %q, unexpectedly contains Go field name %s", responseBody, unwanted)
+		}
 	}
 }
 
