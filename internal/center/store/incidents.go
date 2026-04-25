@@ -57,6 +57,22 @@ func (r *PostgresIncidentRepository) ApplyIncidentMutation(ctx context.Context, 
 	return nil
 }
 
+func (r *PostgresIncidentRepository) AppendNotificationRecords(ctx context.Context, notifications []incidents.NotificationRecordWrite) error {
+	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin notification append tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := insertNotificationRecords(ctx, tx, notifications); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit notification append tx: %w", err)
+	}
+	return nil
+}
+
 func replaceActiveIncidents(ctx context.Context, tx incidentStoreTx, mutation incidents.IncidentMutation) error {
 	if _, err := tx.Exec(ctx, `
 		delete from active_incidents

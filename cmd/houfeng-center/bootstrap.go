@@ -68,6 +68,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	}
 	incidentSvc := incidentservice.NewService(
 		nodeRepo,
+		targetRepo,
 		snapshotReader,
 		incidentRepo,
 		notifier,

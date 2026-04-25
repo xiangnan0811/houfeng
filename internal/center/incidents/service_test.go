@@ -11,6 +11,7 @@ import (
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/syncing"
+	"houfeng/internal/center/targets"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -24,6 +25,12 @@ func (f *fakeNodeRepo) GetNode(context.Context, string) (nodes.Record, error) {
 }
 func (f *fakeNodeRepo) ListNodes(context.Context) ([]nodes.Record, error) {
 	return f.listNodesResult, nil
+}
+
+type fakeTargetRepo struct{ listTargetsResult []targets.TargetRecord }
+
+func (f *fakeTargetRepo) ListTargets(context.Context) ([]targets.TargetRecord, error) {
+	return f.listTargetsResult, nil
 }
 
 type fakeSnapshotReader struct {
@@ -42,10 +49,18 @@ func (f *fakeSnapshotReader) ListRecentProbeObservations(_ context.Context, targ
 	return append([]runtimefacts.ProbeObservation(nil), f.probeObs[targetID]...), nil
 }
 
-type fakeMutationWriter struct{ mutations []IncidentMutation }
+type fakeMutationWriter struct {
+	mutations     []IncidentMutation
+	notifications [][]NotificationRecordWrite
+}
 
 func (f *fakeMutationWriter) ApplyIncidentMutation(_ context.Context, mutation IncidentMutation) error {
 	f.mutations = append(f.mutations, mutation)
+	return nil
+}
+
+func (f *fakeMutationWriter) AppendNotificationRecords(_ context.Context, records []NotificationRecordWrite) error {
+	f.notifications = append(f.notifications, records)
 	return nil
 }
 
@@ -62,6 +77,7 @@ func (f *fakeNotifier) Send(_ context.Context, summary string) error {
 func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		activeByObject: map[string][]IncidentRecord{},
 		hostSamples: map[string][]runtimefacts.HostSample{
@@ -69,27 +85,29 @@ func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) 
 		},
 		probeObs: map[string][]runtimefacts.ProbeObservation{
 			"tg_001": {
-				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
-				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
-				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
+				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
+				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
 			},
 		},
 	}
 	writer := &fakeMutationWriter{}
 	notifier := &fakeNotifier{}
-	service := NewService(nodeRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	service.AfterSuccessfulSync(context.Background(), syncing.Batch{
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
 		NodeID:       "nd_001",
 		Observations: storeProbeBatch("tg_001"),
-	}, syncing.Result{AcceptedAt: now})
+	}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
 
 	if len(writer.mutations) != 2 {
 		t.Fatalf("len(mutations) = %d, want 2", len(writer.mutations))
 	}
-	if len(writer.mutations[0].Active) == 0 && len(writer.mutations[1].Active) == 0 {
-		t.Fatalf("mutations = %#v, want incident writes", writer.mutations)
+	if len(writer.notifications) == 0 {
+		t.Fatal("notifications were not recorded")
 	}
 	if len(notifier.messages) == 0 {
 		t.Fatal("notifier.messages = 0, want at least one notification")
@@ -99,38 +117,42 @@ func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) 
 func TestServiceAfterSuccessfulSyncSuppressesNotificationsWithoutNotifier(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now})
-	if len(writer.mutations) != 1 || len(writer.mutations[0].Notifications) != 1 {
-		t.Fatalf("mutations = %#v, want suppressed notification record", writer.mutations)
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
-	if writer.mutations[0].Notifications[0].DeliveryStatus != DeliveryStatusSuppressed {
-		t.Fatalf("DeliveryStatus = %q, want %q", writer.mutations[0].Notifications[0].DeliveryStatus, DeliveryStatusSuppressed)
+	if len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 {
+		t.Fatalf("notifications = %#v, want suppressed notification record", writer.notifications)
+	}
+	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSuppressed {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSuppressed)
 	}
 }
 
 func TestServiceRecordsFailedNotificationDelivery(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
 	notifier := &fakeNotifier{err: errors.New("send failed")}
-	service := NewService(nodeRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
-	if writer.mutations[0].Notifications[0].DeliveryStatus != DeliveryStatusFailed {
-		t.Fatalf("DeliveryStatus = %q, want %q", writer.mutations[0].Notifications[0].DeliveryStatus, DeliveryStatusFailed)
+	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusFailed {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusFailed)
 	}
 }
 
@@ -138,9 +160,10 @@ func TestServiceEvaluateStaleNodesCreatesHeartbeatIncident(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	stale := now.Add(-3 * time.Minute)
 	nodeRepo := &fakeNodeRepo{listNodesResult: []nodes.Record{{NodeID: "nd_001", LastHeartbeatAt: &stale}}}
+	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, snapshots, writer, nil, slog.Default(), time.Minute, time.Minute)
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), time.Minute, time.Minute)
 
 	if err := service.EvaluateStaleNodes(context.Background(), now); err != nil {
 		t.Fatalf("EvaluateStaleNodes() error = %v", err)
@@ -156,6 +179,7 @@ func TestServiceEvaluateStaleNodesCreatesHeartbeatIncident(t *testing.T) {
 func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		hostSamples: map[string][]runtimefacts.HostSample{
 			"nd_001": {
@@ -166,12 +190,11 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now})
-	if len(writer.mutations) != 1 {
-		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	found := false
 	for _, incident := range writer.mutations[0].Active {
@@ -185,9 +208,10 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 	}
 }
 
-func TestServiceSkippedEvaluationPreservesPriorIncidentWithoutNotification(t *testing.T) {
+func TestServiceSkippedEvaluationClosesPriorIncidentWithoutNotification(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		activeByObject: map[string][]IncidentRecord{
 			"node:nd_001": {{
@@ -207,7 +231,7 @@ func TestServiceSkippedEvaluationPreservesPriorIncidentWithoutNotification(t *te
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
@@ -216,14 +240,100 @@ func TestServiceSkippedEvaluationPreservesPriorIncidentWithoutNotification(t *te
 	if len(writer.mutations) != 1 {
 		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
 	}
-	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].IncidentClass != IncidentNodeDiskPressure {
-		t.Fatalf("Active = %#v, want prior incident preserved on skipped maintenance evaluation", writer.mutations[0].Active)
+	if len(writer.mutations[0].Active) != 0 {
+		t.Fatalf("Active = %#v, want incident cleared on skipped maintenance evaluation", writer.mutations[0].Active)
 	}
-	if len(writer.mutations[0].Notifications) != 0 {
-		t.Fatalf("Notifications = %#v, want none on skipped maintenance evaluation", writer.mutations[0].Notifications)
+	if len(writer.notifications) != 0 {
+		t.Fatalf("Notifications = %#v, want none on skipped maintenance evaluation", writer.notifications)
 	}
-	if len(writer.mutations[0].Events) != 0 {
-		t.Fatalf("Events = %#v, want no events on skipped maintenance evaluation", writer.mutations[0].Events)
+	if len(writer.mutations[0].Events) != 1 || writer.mutations[0].Events[0].EventType != EventIncidentRecovered {
+		t.Fatalf("Events = %#v, want silent recovery event on skipped maintenance evaluation", writer.mutations[0].Events)
+	}
+}
+
+func TestServiceDoesNotRecoverTargetProbeFailureUntilAllSeriesRecover(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	previous := IncidentRecord{
+		IncidentID:      "inc_target_tg_001_target_probe_failure",
+		ObjectType:      ObjectTypeTarget,
+		ObjectID:        "tg_001",
+		IncidentClass:   IncidentTargetProbeFailure,
+		Severity:        SeverityAlert,
+		StartedAt:       now.Add(-time.Hour),
+		LastEvaluatedAt: now.Add(-time.Minute),
+		Status:          IncidentStatusActive,
+		SourceSummary:   "HTTP 探针连续失败 3 次",
+	}
+	snapshots := &fakeSnapshotReader{
+		activeByObject: map[string][]IncidentRecord{
+			"target:tg_001": {previous},
+		},
+		probeObs: map[string][]runtimefacts.ProbeObservation{
+			"tg_001": {
+				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess},
+				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure},
+				{ObservedAt: now.Add(-3 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure},
+			},
+		},
+	}
+	writer := &fakeMutationWriter{}
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
+		NodeID:       "nd_001",
+		Observations: storeProbeBatch("tg_001"),
+	}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+
+	if len(writer.mutations) < 2 {
+		t.Fatalf("mutations = %#v, want node and target mutations", writer.mutations)
+	}
+	targetMutation := writer.mutations[1]
+	if len(targetMutation.Active) != 1 || targetMutation.Active[0].IncidentClass != IncidentTargetProbeFailure {
+		t.Fatalf("target mutation = %#v, want target probe failure to remain active", targetMutation)
+	}
+}
+
+func TestServiceEvaluatesTLSExpiryFromTLSOnlySeries(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	expiry := 2
+	snapshots := &fakeSnapshotReader{
+		probeObs: map[string][]runtimefacts.ProbeObservation{
+			"tg_001": {
+				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindTLS, ProbeItemID: "pb_tls", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, TLSExpiryDays: &expiry},
+			},
+		},
+	}
+	writer := &fakeMutationWriter{}
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
+		NodeID:       "nd_001",
+		Observations: storeProbeBatch("tg_001"),
+	}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if len(writer.mutations) < 2 {
+		t.Fatalf("mutations = %#v, want target mutation", writer.mutations)
+	}
+	targetMutation := writer.mutations[1]
+	found := false
+	for _, incident := range targetMutation.Active {
+		if incident.IncidentClass == IncidentTargetTLSExpiry && incident.Severity == SeverityCritical {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("target mutation = %#v, want TLS expiry incident from TLS-only series", targetMutation)
 	}
 }
 

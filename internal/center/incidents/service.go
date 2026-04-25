@@ -13,6 +13,8 @@ import (
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/syncing"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/contracts/agentapi"
 )
 
 const defaultHeartbeatInterval = 30 * time.Second
@@ -20,6 +22,10 @@ const defaultHeartbeatInterval = 30 * time.Second
 type NodeRepository interface {
 	GetNode(context.Context, string) (nodes.Record, error)
 	ListNodes(context.Context) ([]nodes.Record, error)
+}
+
+type TargetRepository interface {
+	ListTargets(context.Context) ([]targets.TargetRecord, error)
 }
 
 type SnapshotReader interface {
@@ -30,6 +36,7 @@ type SnapshotReader interface {
 
 type MutationWriter interface {
 	ApplyIncidentMutation(context.Context, IncidentMutation) error
+	AppendNotificationRecords(context.Context, []NotificationRecordWrite) error
 }
 
 type Notifier interface {
@@ -38,6 +45,7 @@ type Notifier interface {
 
 type Service struct {
 	nodes             NodeRepository
+	targets           TargetRepository
 	snapshots         SnapshotReader
 	writer            MutationWriter
 	notifier          Notifier
@@ -47,7 +55,7 @@ type Service struct {
 	sweepInterval     time.Duration
 }
 
-func NewService(nodesRepo NodeRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
+func NewService(nodesRepo NodeRepository, targetsRepo TargetRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -59,6 +67,7 @@ func NewService(nodesRepo NodeRepository, snapshots SnapshotReader, writer Mutat
 	}
 	return &Service{
 		nodes:             nodesRepo,
+		targets:           targetsRepo,
 		snapshots:         snapshots,
 		writer:            writer,
 		notifier:          notifier,
@@ -75,11 +84,11 @@ func (s *Service) AfterSuccessfulSync(ctx context.Context, batch syncing.Batch, 
 		now = s.now()
 	}
 	if err := s.evaluateNode(ctx, batch.NodeID, now); err != nil {
-		return fmt.Errorf("evaluate node incidents after sync for %q: %w", batch.NodeID, err)
+		s.logger.Error("evaluate node incidents after sync failed", "node_id", batch.NodeID, "error", err)
 	}
 	for _, targetID := range uniqueTargetIDs(batch.Observations.ProbeObservations) {
 		if err := s.evaluateTarget(ctx, targetID, now); err != nil {
-			return fmt.Errorf("evaluate target incidents after sync for %q: %w", targetID, err)
+			s.logger.Error("evaluate target incidents after sync failed", "target_id", targetID, "error", err)
 		}
 	}
 	return nil
@@ -94,11 +103,30 @@ func (s *Service) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case tick := <-ticker.C:
-			if err := s.EvaluateStaleNodes(ctx, tick.UTC()); err != nil {
+			if err := s.EvaluatePeriodicState(ctx, tick.UTC()); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func (s *Service) EvaluatePeriodicState(ctx context.Context, now time.Time) error {
+	if err := s.EvaluateStaleNodes(ctx, now); err != nil {
+		return err
+	}
+	if s.targets == nil {
+		return nil
+	}
+	targetRecords, err := s.targets.ListTargets(ctx)
+	if err != nil {
+		return fmt.Errorf("list targets for periodic sweep: %w", err)
+	}
+	for _, target := range targetRecords {
+		if err := s.evaluateTarget(ctx, target.TargetID, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) EvaluateStaleNodes(ctx context.Context, now time.Time) error {
@@ -120,12 +148,11 @@ func (s *Service) evaluateNodeHeartbeatOnly(ctx context.Context, record nodes.Re
 		return fmt.Errorf("list previous node incidents for %q: %w", record.NodeID, err)
 	}
 	previousByClass := incidentsByClass(previous)
-	result := EvaluateNodeHeartbeatMissing(previousByClass[IncidentNodeHeartbeatMissing], record.NodeID, now, record.LastHeartbeatAt, s.heartbeatInterval)
-	mutation, err := s.buildMutation(ctx, ObjectTypeNode, record.NodeID, previous, []classEvaluation{{class: IncidentNodeHeartbeatMissing, result: result}})
-	if err != nil {
-		return err
-	}
-	return s.writer.ApplyIncidentMutation(ctx, mutation)
+	evaluations := []classEvaluation{{
+		class:  IncidentNodeHeartbeatMissing,
+		result: EvaluateNodeHeartbeatMissing(previousByClass[IncidentNodeHeartbeatMissing], record.NodeID, now, record.LastHeartbeatAt, s.heartbeatInterval),
+	}}
+	return s.applyEvaluations(ctx, ObjectTypeNode, record.NodeID, previous, evaluations, now)
 }
 
 func (s *Service) evaluateNode(ctx context.Context, nodeID string, now time.Time) error {
@@ -171,11 +198,7 @@ func (s *Service) evaluateNode(ctx context.Context, nodeID string, now time.Time
 		)
 	}
 
-	mutation, err := s.buildMutation(ctx, ObjectTypeNode, nodeID, previous, evaluations)
-	if err != nil {
-		return err
-	}
-	return s.writer.ApplyIncidentMutation(ctx, mutation)
+	return s.applyEvaluations(ctx, ObjectTypeNode, nodeID, previous, evaluations, now)
 }
 
 func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.Time) error {
@@ -190,14 +213,18 @@ func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.
 	}
 
 	evaluations := []classEvaluation{
-		{class: IncidentTargetProbeFailure, result: EvaluateTargetProbeFailure(previousByClass[IncidentTargetProbeFailure], targetID, observations)},
-		{class: IncidentTargetTLSExpiry, result: EvaluateTargetTLSExpiry(previousByClass[IncidentTargetTLSExpiry], targetID, observations)},
+		{class: IncidentTargetProbeFailure, result: evaluateTargetProbeFailureAcrossSeries(previousByClass[IncidentTargetProbeFailure], targetID, observations)},
+		{class: IncidentTargetTLSExpiry, result: evaluateTargetTLSExpiryAcrossSeries(previousByClass[IncidentTargetTLSExpiry], targetID, observations)},
 	}
-	mutation, err := s.buildMutation(ctx, ObjectTypeTarget, targetID, previous, evaluations)
-	if err != nil {
+	return s.applyEvaluations(ctx, ObjectTypeTarget, targetID, previous, evaluations, now)
+}
+
+func (s *Service) applyEvaluations(ctx context.Context, objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation, now time.Time) error {
+	mutation := buildMutation(objectType, objectID, previous, evaluations, now)
+	if err := s.writer.ApplyIncidentMutation(ctx, mutation); err != nil {
 		return err
 	}
-	return s.writer.ApplyIncidentMutation(ctx, mutation)
+	return s.appendNotificationRecords(ctx, objectType, objectID, evaluations)
 }
 
 type classEvaluation struct {
@@ -205,7 +232,7 @@ type classEvaluation struct {
 	result EvaluationResult
 }
 
-func (s *Service) buildMutation(ctx context.Context, objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation) (IncidentMutation, error) {
+func buildMutation(objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation, now time.Time) IncidentMutation {
 	activeByClass := incidentsByClass(previous)
 	mutation := IncidentMutation{
 		ObjectType:    objectType,
@@ -220,7 +247,19 @@ func (s *Service) buildMutation(ctx context.Context, objectType ObjectType, obje
 		case TransitionRecovered:
 			delete(activeByClass, evaluation.class)
 		case TransitionSkipped:
-			// Preserve prior incident state during maintenance/backfill short-circuit.
+			if previousIncident, ok := activeByClass[evaluation.class]; ok {
+				delete(activeByClass, evaluation.class)
+				mutation.Events = append(mutation.Events, StateChangeEventRecord{
+					IncidentID:    previousIncident.IncidentID,
+					IncidentClass: previousIncident.IncidentClass,
+					ObjectType:    objectType,
+					ObjectID:      objectID,
+					EventType:     EventIncidentRecovered,
+					Severity:      previousIncident.Severity,
+					Summary:       "维护或补传 observation 使该异常退出活跃集合",
+					CreatedAt:     now,
+				})
+			}
 		default:
 			if evaluation.result.Current != nil {
 				activeByClass[evaluation.class] = evaluation.result.Current
@@ -228,13 +267,6 @@ func (s *Service) buildMutation(ctx context.Context, objectType ObjectType, obje
 		}
 		if evaluation.result.Event != nil {
 			mutation.Events = append(mutation.Events, *evaluation.result.Event)
-		}
-		if evaluation.result.Notification != nil {
-			record, err := s.dispatchNotification(ctx, objectType, objectID, evaluation)
-			if err != nil {
-				return IncidentMutation{}, err
-			}
-			mutation.Notifications = append(mutation.Notifications, record)
 		}
 	}
 
@@ -244,39 +276,49 @@ func (s *Service) buildMutation(ctx context.Context, objectType ObjectType, obje
 	sort.Slice(mutation.Active, func(i, j int) bool {
 		return mutation.Active[i].IncidentClass < mutation.Active[j].IncidentClass
 	})
-	return mutation, nil
+	return mutation
 }
 
-func (s *Service) dispatchNotification(ctx context.Context, objectType ObjectType, objectID string, evaluation classEvaluation) (NotificationRecordWrite, error) {
-	decision := evaluation.result.Notification
-	incidentID := ""
-	if evaluation.result.Current != nil {
-		incidentID = evaluation.result.Current.IncidentID
-	}
-	if incidentID == "" && evaluation.result.Event != nil {
-		incidentID = evaluation.result.Event.IncidentID
-	}
-	status := DeliveryStatusSuppressed
-	var sentAt *time.Time
-	if decision.ShouldSend && s.notifier != nil {
-		if err := s.notifier.Send(ctx, decision.Summary); err != nil {
-			s.logger.Error("send incident notification failed", "object_type", objectType, "object_id", objectID, "error", err)
-			status = DeliveryStatusFailed
-		} else {
-			status = DeliveryStatusSent
-			now := s.now()
-			sentAt = &now
+func (s *Service) appendNotificationRecords(ctx context.Context, objectType ObjectType, objectID string, evaluations []classEvaluation) error {
+	records := make([]NotificationRecordWrite, 0)
+	for _, evaluation := range evaluations {
+		if evaluation.result.Notification == nil {
+			continue
 		}
+		record := NotificationRecordWrite{
+			IncidentID:     incidentIdentity(evaluation),
+			ObjectType:     objectType,
+			ObjectID:       objectID,
+			Channel:        evaluation.result.Notification.Channel,
+			DeliveryStatus: DeliveryStatusSuppressed,
+			Summary:        evaluation.result.Notification.Summary,
+		}
+		if evaluation.result.Notification.ShouldSend && s.notifier != nil {
+			if err := s.notifier.Send(ctx, evaluation.result.Notification.Summary); err != nil {
+				s.logger.Error("send incident notification failed", "object_type", objectType, "object_id", objectID, "error", err)
+				record.DeliveryStatus = DeliveryStatusFailed
+			} else {
+				record.DeliveryStatus = DeliveryStatusSent
+				now := s.now()
+				record.SentAt = &now
+			}
+		}
+		records = append(records, record)
 	}
-	return NotificationRecordWrite{
-		IncidentID:     incidentID,
-		ObjectType:     objectType,
-		ObjectID:       objectID,
-		Channel:        decision.Channel,
-		DeliveryStatus: status,
-		Summary:        decision.Summary,
-		SentAt:         sentAt,
-	}, nil
+	if len(records) == 0 {
+		return nil
+	}
+	return s.writer.AppendNotificationRecords(ctx, records)
+}
+
+func incidentIdentity(evaluation classEvaluation) string {
+	if evaluation.result.Current != nil {
+		return evaluation.result.Current.IncidentID
+	}
+	if evaluation.result.Event != nil {
+		return evaluation.result.Event.IncidentID
+	}
+	return ""
 }
 
 func incidentsByClass(records []IncidentRecord) map[IncidentClass]*IncidentRecord {
@@ -302,6 +344,123 @@ func uniqueTargetIDs(items []observations.ProbeObservationWrite) []string {
 	}
 	sort.Strings(targetIDs)
 	return targetIDs
+}
+
+func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID string, observations []runtimefacts.ProbeObservation) EvaluationResult {
+	grouped := groupProbeSeries(observations)
+	activeResults := make([]EvaluationResult, 0)
+	recoveryEligibleCount := 0
+	latestObservedAt := time.Time{}
+	tcpNodes := map[string]struct{}{}
+	httpProbeItems := map[string]struct{}{}
+
+	for _, series := range grouped {
+		result := EvaluateTargetProbeFailure(nil, targetID, series)
+		if len(series) > 0 && series[0].ObservedAt.After(latestObservedAt) {
+			latestObservedAt = series[0].ObservedAt
+		}
+		if result.Current != nil {
+			activeResults = append(activeResults, result)
+			if series[0].ProbeKind == agentapi.ProbeKindTCP && series[0].NodeID != "" {
+				tcpNodes[series[0].NodeID] = struct{}{}
+			}
+			if series[0].ProbeKind == agentapi.ProbeKindHTTP && series[0].ProbeItemID != "" {
+				httpProbeItems[series[0].ProbeItemID] = struct{}{}
+			}
+		}
+		if consecutiveResults(series, agentapi.ProbeResultSuccess) >= 2 {
+			recoveryEligibleCount++
+		}
+	}
+
+	if len(activeResults) == 0 {
+		if previous != nil && recoveryEligibleCount == len(grouped) && len(grouped) > 0 {
+			return recoverIfNeeded(previous, latestObservedAt, "探针已连续成功恢复")
+		}
+		return noop(previous)
+	}
+
+	severity := activeResults[0].Current.Severity
+	summary := activeResults[0].Current.SourceSummary
+	for _, result := range activeResults[1:] {
+		if severityRank(result.Current.Severity) > severityRank(severity) {
+			severity = result.Current.Severity
+			summary = result.Current.SourceSummary
+		}
+	}
+	if len(tcpNodes) >= 2 {
+		severity = SeverityCritical
+		summary = "TCP 探针在多个执行节点上持续失败"
+	}
+	if len(httpProbeItems) >= 2 {
+		severity = SeverityCritical
+		summary = "HTTP 多个 ProbeItem 同时异常"
+	}
+	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetProbeFailure, severity, latestObservedAt, summary)
+}
+
+func evaluateTargetTLSExpiryAcrossSeries(previous *IncidentRecord, targetID string, observations []runtimefacts.ProbeObservation) EvaluationResult {
+	tlsObservations := make([]runtimefacts.ProbeObservation, 0)
+	for _, observation := range observations {
+		if observation.ProbeKind == agentapi.ProbeKindTLS {
+			tlsObservations = append(tlsObservations, observation)
+		}
+	}
+	if len(tlsObservations) == 0 {
+		return noop(previous)
+	}
+	grouped := groupProbeSeries(tlsObservations)
+	activeResults := make([]EvaluationResult, 0)
+	recoveryEligibleCount := 0
+	latestObservedAt := time.Time{}
+
+	for _, series := range grouped {
+		result := EvaluateTargetTLSExpiry(nil, targetID, series)
+		if len(series) > 0 && series[0].ObservedAt.After(latestObservedAt) {
+			latestObservedAt = series[0].ObservedAt
+		}
+		if result.Current != nil {
+			activeResults = append(activeResults, result)
+		}
+		if len(series) > 0 && series[0].TLSExpiryDays != nil && *series[0].TLSExpiryDays > 30 {
+			recoveryEligibleCount++
+		}
+	}
+
+	if len(activeResults) == 0 {
+		if previous != nil && recoveryEligibleCount == len(grouped) && len(grouped) > 0 {
+			return recoverIfNeeded(previous, latestObservedAt, "TLS 到期风险解除")
+		}
+		return noop(previous)
+	}
+
+	severity := activeResults[0].Current.Severity
+	summary := activeResults[0].Current.SourceSummary
+	for _, result := range activeResults[1:] {
+		if severityRank(result.Current.Severity) > severityRank(severity) {
+			severity = result.Current.Severity
+			summary = result.Current.SourceSummary
+		}
+	}
+	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetTLSExpiry, severity, latestObservedAt, summary)
+}
+
+func groupProbeSeries(observations []runtimefacts.ProbeObservation) [][]runtimefacts.ProbeObservation {
+	grouped := map[string][]runtimefacts.ProbeObservation{}
+	keys := make([]string, 0)
+	for _, observation := range normalizeProbeObservations(observations) {
+		key := observation.ProbeItemID + "|" + observation.NodeID
+		if _, ok := grouped[key]; !ok {
+			keys = append(keys, key)
+		}
+		grouped[key] = append(grouped[key], observation)
+	}
+	sort.Strings(keys)
+	out := make([][]runtimefacts.ProbeObservation, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, normalizeProbeObservations(grouped[key]))
+	}
+	return out
 }
 
 type PostgresSnapshotReader struct {
