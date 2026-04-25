@@ -57,6 +57,24 @@ type DashboardOverview struct {
 	RecentEvents           []StateChangeEventRecord
 }
 
+type NotificationRecordWrite struct {
+	IncidentID     string
+	ObjectType     ObjectType
+	ObjectID       string
+	Channel        string
+	DeliveryStatus DeliveryStatus
+	Summary        string
+	SentAt         *time.Time
+}
+
+type IncidentMutation struct {
+	ObjectType    ObjectType
+	ObjectID      string
+	Active        []IncidentRecord
+	Events        []StateChangeEventRecord
+	Notifications []NotificationRecordWrite
+}
+
 type NodeResourceSample struct {
 	ObservedAt         time.Time
 	CPUUsagePct        float64

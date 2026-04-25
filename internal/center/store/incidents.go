@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -13,24 +12,6 @@ import (
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/incidents"
 )
-
-type NotificationRecordWrite struct {
-	IncidentID     string
-	ObjectType     incidents.ObjectType
-	ObjectID       string
-	Channel        string
-	DeliveryStatus incidents.DeliveryStatus
-	Summary        string
-	SentAt         *time.Time
-}
-
-type IncidentMutation struct {
-	ObjectType    incidents.ObjectType
-	ObjectID      string
-	Active        []incidents.IncidentRecord
-	Events        []incidents.StateChangeEventRecord
-	Notifications []NotificationRecordWrite
-}
 
 type incidentStoreTx interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
@@ -51,7 +32,7 @@ func NewPostgresIncidentRepository(db *pgxpool.Pool) *PostgresIncidentRepository
 	}
 }
 
-func (r *PostgresIncidentRepository) ApplyIncidentMutation(ctx context.Context, mutation IncidentMutation) error {
+func (r *PostgresIncidentRepository) ApplyIncidentMutation(ctx context.Context, mutation incidents.IncidentMutation) error {
 	tx, err := r.beginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin incident mutation tx: %w", err)
@@ -76,7 +57,7 @@ func (r *PostgresIncidentRepository) ApplyIncidentMutation(ctx context.Context, 
 	return nil
 }
 
-func replaceActiveIncidents(ctx context.Context, tx incidentStoreTx, mutation IncidentMutation) error {
+func replaceActiveIncidents(ctx context.Context, tx incidentStoreTx, mutation incidents.IncidentMutation) error {
 	if _, err := tx.Exec(ctx, `
 		delete from active_incidents
 		where object_type = $1 and object_id = $2`,
@@ -154,7 +135,7 @@ func insertStateChangeEvents(ctx context.Context, tx incidentStoreTx, events []i
 	return nil
 }
 
-func insertNotificationRecords(ctx context.Context, tx incidentStoreTx, notifications []NotificationRecordWrite) error {
+func insertNotificationRecords(ctx context.Context, tx incidentStoreTx, notifications []incidents.NotificationRecordWrite) error {
 	for _, notification := range notifications {
 		notificationID, err := ids.New("notif")
 		if err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/config"
 	centerhttp "houfeng/internal/center/http"
 )
@@ -32,7 +33,7 @@ func TestBootstrapCenterReturnsOpenPostgresError(t *testing.T) {
 			calledRouter = true
 			return http.NewServeMux()
 		},
-		newApp: func(string, http.Handler) appRunner {
+		newApp: func(string, http.Handler, centerapp.Worker) appRunner {
 			calledApp = true
 			return fakeApp{}
 		},
@@ -75,7 +76,7 @@ func TestBootstrapCenterClosesDBOnMigrationFailure(t *testing.T) {
 			calledRouter = true
 			return http.NewServeMux()
 		},
-		newApp: func(string, http.Handler) appRunner {
+		newApp: func(string, http.Handler, centerapp.Worker) appRunner {
 			calledApp = true
 			return fakeApp{}
 		},
@@ -122,9 +123,12 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 			gotOpts = opts
 			return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 		},
-		newApp: func(addr string, handler http.Handler) appRunner {
+		newApp: func(addr string, handler http.Handler, worker centerapp.Worker) appRunner {
 			gotAddr = addr
 			gotHandler = handler
+			if worker == nil {
+				t.Fatal("worker = nil, want incident background worker")
+			}
 			return app
 		},
 	})

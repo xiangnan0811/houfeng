@@ -21,7 +21,7 @@ func TestPostgresIncidentRepositoryAppliesMutationAndProjectsNodeSummary(t *test
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	sentAt := now.Add(time.Second)
 
-	err := repo.ApplyIncidentMutation(context.Background(), IncidentMutation{
+	err := repo.ApplyIncidentMutation(context.Background(), incidents.IncidentMutation{
 		ObjectType: incidents.ObjectTypeNode,
 		ObjectID:   "nd_001",
 		Active: []incidents.IncidentRecord{{
@@ -45,7 +45,7 @@ func TestPostgresIncidentRepositoryAppliesMutationAndProjectsNodeSummary(t *test
 			Summary:       "磁盘使用率 92.0%",
 			CreatedAt:     now,
 		}},
-		Notifications: []NotificationRecordWrite{{
+		Notifications: []incidents.NotificationRecordWrite{{
 			IncidentID:     "inc_node_nd_001_node_disk_pressure",
 			ObjectType:     incidents.ObjectTypeNode,
 			ObjectID:       "nd_001",
@@ -72,7 +72,7 @@ func TestPostgresIncidentRepositoryProjectsNormalSummaryWhenActiveSetIsEmpty(t *
 	tx := &fakeIncidentTx{summarySeverity: string(incidents.SeverityNormal)}
 	repo := &PostgresIncidentRepository{beginTx: func(context.Context, pgx.TxOptions) (incidentStoreTx, error) { return tx, nil }}
 
-	err := repo.ApplyIncidentMutation(context.Background(), IncidentMutation{
+	err := repo.ApplyIncidentMutation(context.Background(), incidents.IncidentMutation{
 		ObjectType: incidents.ObjectTypeTarget,
 		ObjectID:   "tg_001",
 	})
@@ -91,7 +91,7 @@ func TestPostgresIncidentRepositoryFailsWhenObjectSummaryUpdateTouchesNoRows(t *
 	repo := &PostgresIncidentRepository{beginTx: func(context.Context, pgx.TxOptions) (incidentStoreTx, error) { return tx, nil }}
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 
-	err := repo.ApplyIncidentMutation(context.Background(), IncidentMutation{
+	err := repo.ApplyIncidentMutation(context.Background(), incidents.IncidentMutation{
 		ObjectType: incidents.ObjectTypeNode,
 		ObjectID:   "nd_missing",
 		Active: []incidents.IncidentRecord{{

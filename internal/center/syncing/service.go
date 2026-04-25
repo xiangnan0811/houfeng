@@ -30,18 +30,34 @@ type Result struct {
 	Plan       agentplan.SyncPlan
 }
 
+type PostSyncProcessor interface {
+	AfterSuccessfulSync(context.Context, Batch, Result)
+}
+
 type Repository interface {
 	ApplyBatch(context.Context, Batch) (Result, error)
 }
 
 type Service struct {
-	repo Repository
+	repo     Repository
+	postSync PostSyncProcessor
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo Repository, postSync ...PostSyncProcessor) *Service {
+	service := &Service{repo: repo}
+	if len(postSync) > 0 {
+		service.postSync = postSync[0]
+	}
+	return service
 }
 
 func (s *Service) SyncBatch(ctx context.Context, batch Batch) (Result, error) {
-	return s.repo.ApplyBatch(ctx, batch)
+	result, err := s.repo.ApplyBatch(ctx, batch)
+	if err != nil {
+		return Result{}, err
+	}
+	if s.postSync != nil {
+		s.postSync.AfterSuccessfulSync(ctx, batch, result)
+	}
+	return result, nil
 }

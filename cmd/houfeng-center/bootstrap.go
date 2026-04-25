@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -12,6 +14,8 @@ import (
 	"houfeng/internal/center/enrollment"
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
+	incidentservice "houfeng/internal/center/incidents"
+	"houfeng/internal/center/notify"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
 	"houfeng/internal/center/syncing"
@@ -30,7 +34,7 @@ type bootstrapDeps struct {
 	openPostgres    func(context.Context, string) (postgresDB, error)
 	applyMigrations func(context.Context, postgresDB) error
 	newRouter       func(centerhttp.RouterOptions) http.Handler
-	newApp          func(string, http.Handler) appRunner
+	newApp          func(string, http.Handler, centerapp.Worker) appRunner
 }
 
 type pgxPostgresDB struct {
@@ -53,9 +57,24 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
+	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
+	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
 	enrollmentSvc := enrollment.NewService(nodeRepo)
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
-	syncSvc := syncing.NewService(syncRepo)
+	var notifier incidentservice.Notifier
+	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+		notifier = notify.NewTelegramNotifier(cfg.TelegramBotToken, cfg.TelegramChatID)
+	}
+	incidentSvc := incidentservice.NewService(
+		nodeRepo,
+		snapshotReader,
+		incidentRepo,
+		notifier,
+		slog.Default(),
+		30*time.Second,
+		cfg.IncidentSweepInterval,
+	)
+	syncSvc := syncing.NewService(syncRepo, incidentSvc)
 	router := deps.newRouter(centerhttp.RouterOptions{
 		Version:                   version,
 		WebDistDir:                cfg.WebDistDir,
@@ -70,7 +89,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AgentSyncHandler:          handlers.AgentSync(syncSvc),
 	})
 
-	return deps.newApp(cfg.HTTPAddr, router), db.Close, nil
+	return deps.newApp(cfg.HTTPAddr, router, incidentSvc), db.Close, nil
 }
 
 func (d bootstrapDeps) withDefaults() bootstrapDeps {
@@ -92,8 +111,8 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 		d.newRouter = centerhttp.New
 	}
 	if d.newApp == nil {
-		d.newApp = func(addr string, handler http.Handler) appRunner {
-			return centerapp.New(addr, handler)
+		d.newApp = func(addr string, handler http.Handler, worker centerapp.Worker) appRunner {
+			return centerapp.New(addr, handler, worker)
 		}
 	}
 	return d
