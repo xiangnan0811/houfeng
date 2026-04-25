@@ -106,3 +106,62 @@ export type TargetRuntimeFacts = {
   target_id: string
   latest_probe_observations: ProbeObservation[]
 }
+
+export type ObservabilityObjectType = 'node' | 'target'
+
+export type IncidentSeverity = '正常' | '关注' | '告警' | '严重'
+
+export type StateChangeEventType =
+  | 'incident_started'
+  | 'incident_escalated'
+  | 'incident_recovered'
+
+export type StateChangeEventRecord = {
+  event_id?: string
+  incident_id: string
+  incident_class: string
+  object_type: ObservabilityObjectType
+  object_id: string
+  event_type: StateChangeEventType
+  severity: IncidentSeverity | ''
+  summary: string
+  created_at: string
+}
+
+export type DashboardOverview = {
+  abnormal_node_count: number
+  abnormal_target_count: number
+  severe_node_count: number
+  severe_target_count: number
+  maintenance_node_count: number
+  maintenance_target_count: number
+  recent_new_incident_count: number
+  recent_recovery_count: number
+  recent_events: StateChangeEventRecord[]
+}
+
+export type ActiveIncidentRecord = {
+  incident_id: string
+  incident_class: string
+  object_type: ObservabilityObjectType
+  object_id: string
+  severity: IncidentSeverity
+  started_at: string
+  last_evaluated_at: string
+  source_summary: string
+}
+
+export type EventListFilter = {
+  object_type?: ObservabilityObjectType | ''
+  object_id?: string
+  severity?: IncidentSeverity | ''
+  event_type?: StateChangeEventType | ''
+  limit?: number
+}
+
+export type IncidentListFilter = {
+  object_type?: ObservabilityObjectType | ''
+  object_id?: string
+  severity?: IncidentSeverity | ''
+  limit?: number
+}

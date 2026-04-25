@@ -1,7 +1,12 @@
 import type {
+  ActiveIncidentRecord,
+  DashboardOverview,
+  EventListFilter,
+  IncidentListFilter,
   NodeRecord,
   NodeRuntimeFacts,
   ProbeItemRecord,
+  StateChangeEventRecord,
   TargetRecord,
   TargetRuntimeFacts,
 } from './types'
@@ -39,6 +44,24 @@ async function requestJSON<T>(path: string): Promise<T> {
   return (await response.json()) as T
 }
 
+function withQuery(
+  path: string,
+  filter?: Record<string, string | number | null | undefined>,
+): string {
+  if (!filter) return path
+
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(filter)) {
+    if (value == null) continue
+    const normalized = typeof value === 'string' ? value.trim() : String(value)
+    if (!normalized) continue
+    query.set(key, normalized)
+  }
+
+  const suffix = query.toString()
+  return suffix ? `${path}?${suffix}` : path
+}
+
 export function listNodes() {
   return requestJSON<NodeRecord[]>('/api/nodes')
 }
@@ -65,4 +88,16 @@ export function listTargetProbeItems(targetId: string) {
 
 export function getTargetRuntimeFacts(targetId: string) {
   return requestJSON<TargetRuntimeFacts>(`/api/targets/${targetId}/runtime-facts`)
+}
+
+export function getDashboard() {
+  return requestJSON<DashboardOverview>('/api/dashboard')
+}
+
+export function listEvents(filter?: EventListFilter) {
+  return requestJSON<StateChangeEventRecord[]>(withQuery('/api/events', filter))
+}
+
+export function listIncidents(filter?: IncidentListFilter) {
+  return requestJSON<ActiveIncidentRecord[]>(withQuery('/api/incidents', filter))
 }
