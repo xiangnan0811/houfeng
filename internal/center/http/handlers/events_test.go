@@ -49,12 +49,23 @@ func TestEventsHandlerReturnsListWithFilters(t *testing.T) {
 	if repo.filter.ObjectType != incidents.ObjectTypeNode || repo.filter.ObjectID != "nd_001" || repo.filter.EventType != incidents.EventIncidentStarted || repo.filter.Limit != 25 {
 		t.Fatalf("filter = %#v, want parsed filters", repo.filter)
 	}
-	var body []store.EventListItem
+	var body []map[string]any
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if len(body) != 1 || body[0].EventID != "evt_001" {
+	if len(body) != 1 {
 		t.Fatalf("body = %#v, want one event", body)
+	}
+	for _, key := range []string{"event_id", "incident_id", "incident_class", "object_type", "object_id", "event_type", "severity", "summary", "created_at"} {
+		if _, ok := body[0][key]; !ok {
+			t.Fatalf("event = %#v, want key %q", body[0], key)
+		}
+	}
+	if _, ok := body[0]["EventID"]; ok {
+		t.Fatalf("event = %#v, want snake_case keys only", body[0])
+	}
+	if body[0]["event_id"] != "evt_001" {
+		t.Fatalf("event = %#v, want event_id=evt_001", body[0])
 	}
 }
 

@@ -51,12 +51,31 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	if repo.limit != 5 {
 		t.Fatalf("limit = %d, want 5", repo.limit)
 	}
-	var body incidents.DashboardOverview
+	var body map[string]any
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body.AbnormalNodeCount != 2 || len(body.RecentEvents) != 1 {
-		t.Fatalf("body = %#v, want populated overview", body)
+	if body["abnormal_node_count"] != float64(2) {
+		t.Fatalf("body = %#v, want abnormal_node_count=2", body)
+	}
+	if _, ok := body["AbnormalNodeCount"]; ok {
+		t.Fatalf("body = %#v, want snake_case keys only", body)
+	}
+	recentEvents, ok := body["recent_events"].([]any)
+	if !ok || len(recentEvents) != 1 {
+		t.Fatalf("body = %#v, want one recent event", body)
+	}
+	event, ok := recentEvents[0].(map[string]any)
+	if !ok {
+		t.Fatalf("recentEvents[0] = %#v, want object", recentEvents[0])
+	}
+	for _, key := range []string{"incident_id", "incident_class", "object_type", "object_id", "event_type", "severity", "summary", "created_at"} {
+		if _, ok := event[key]; !ok {
+			t.Fatalf("event = %#v, want key %q", event, key)
+		}
+	}
+	if _, ok := event["IncidentID"]; ok {
+		t.Fatalf("event = %#v, want snake_case nested keys only", event)
 	}
 }
 

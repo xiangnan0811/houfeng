@@ -14,15 +14,15 @@ import (
 )
 
 type EventListItem struct {
-	EventID       string
-	IncidentID    string
-	IncidentClass incidents.IncidentClass
-	ObjectType    incidents.ObjectType
-	ObjectID      string
-	EventType     incidents.EventType
-	Severity      incidents.Severity
-	Summary       string
-	CreatedAt     time.Time
+	EventID       string                  `json:"event_id"`
+	IncidentID    string                  `json:"incident_id"`
+	IncidentClass incidents.IncidentClass `json:"incident_class"`
+	ObjectType    incidents.ObjectType    `json:"object_type"`
+	ObjectID      string                  `json:"object_id"`
+	EventType     incidents.EventType     `json:"event_type"`
+	Severity      incidents.Severity      `json:"severity"`
+	Summary       string                  `json:"summary"`
+	CreatedAt     time.Time               `json:"created_at"`
 }
 
 type EventsFilter struct {

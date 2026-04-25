@@ -27,14 +27,14 @@ type IncidentRecord struct {
 }
 
 type StateChangeEventRecord struct {
-	IncidentID    string
-	IncidentClass IncidentClass
-	ObjectType    ObjectType
-	ObjectID      string
-	EventType     EventType
-	Severity      Severity
-	Summary       string
-	CreatedAt     time.Time
+	IncidentID    string        `json:"incident_id"`
+	IncidentClass IncidentClass `json:"incident_class"`
+	ObjectType    ObjectType    `json:"object_type"`
+	ObjectID      string        `json:"object_id"`
+	EventType     EventType     `json:"event_type"`
+	Severity      Severity      `json:"severity"`
+	Summary       string        `json:"summary"`
+	CreatedAt     time.Time     `json:"created_at"`
 }
 
 type NotificationDecision struct {
@@ -46,15 +46,15 @@ type NotificationDecision struct {
 }
 
 type DashboardOverview struct {
-	AbnormalNodeCount      int
-	AbnormalTargetCount    int
-	SevereNodeCount        int
-	SevereTargetCount      int
-	MaintenanceNodeCount   int
-	MaintenanceTargetCount int
-	RecentNewIncidentCount int
-	RecentRecoveryCount    int
-	RecentEvents           []StateChangeEventRecord
+	AbnormalNodeCount      int                      `json:"abnormal_node_count"`
+	AbnormalTargetCount    int                      `json:"abnormal_target_count"`
+	SevereNodeCount        int                      `json:"severe_node_count"`
+	SevereTargetCount      int                      `json:"severe_target_count"`
+	MaintenanceNodeCount   int                      `json:"maintenance_node_count"`
+	MaintenanceTargetCount int                      `json:"maintenance_target_count"`
+	RecentNewIncidentCount int                      `json:"recent_new_incident_count"`
+	RecentRecoveryCount    int                      `json:"recent_recovery_count"`
+	RecentEvents           []StateChangeEventRecord `json:"recent_events"`
 }
 
 type NotificationRecordWrite struct {
