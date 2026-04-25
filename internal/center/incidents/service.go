@@ -69,19 +69,20 @@ func NewService(nodesRepo NodeRepository, snapshots SnapshotReader, writer Mutat
 	}
 }
 
-func (s *Service) AfterSuccessfulSync(ctx context.Context, batch syncing.Batch, result syncing.Result) {
+func (s *Service) AfterSuccessfulSync(ctx context.Context, batch syncing.Batch, result syncing.Result) error {
 	now := result.AcceptedAt
 	if now.IsZero() {
 		now = s.now()
 	}
 	if err := s.evaluateNode(ctx, batch.NodeID, now); err != nil {
-		s.logger.Error("evaluate node incidents after sync failed", "node_id", batch.NodeID, "error", err)
+		return fmt.Errorf("evaluate node incidents after sync for %q: %w", batch.NodeID, err)
 	}
 	for _, targetID := range uniqueTargetIDs(batch.Observations.ProbeObservations) {
 		if err := s.evaluateTarget(ctx, targetID, now); err != nil {
-			s.logger.Error("evaluate target incidents after sync failed", "target_id", targetID, "error", err)
+			return fmt.Errorf("evaluate target incidents after sync for %q: %w", targetID, err)
 		}
 	}
+	return nil
 }
 
 func (s *Service) Run(ctx context.Context) error {
@@ -219,19 +220,7 @@ func (s *Service) buildMutation(ctx context.Context, objectType ObjectType, obje
 		case TransitionRecovered:
 			delete(activeByClass, evaluation.class)
 		case TransitionSkipped:
-			if previousIncident, ok := activeByClass[evaluation.class]; ok {
-				delete(activeByClass, evaluation.class)
-				mutation.Events = append(mutation.Events, StateChangeEventRecord{
-					IncidentID:    previousIncident.IncidentID,
-					IncidentClass: previousIncident.IncidentClass,
-					ObjectType:    objectType,
-					ObjectID:      objectID,
-					EventType:     EventIncidentRecovered,
-					Severity:      previousIncident.Severity,
-					Summary:       "维护或补传 observation 使该异常退出活跃集合",
-					CreatedAt:     s.now(),
-				})
-			}
+			// Preserve prior incident state during maintenance/backfill short-circuit.
 		default:
 			if evaluation.result.Current != nil {
 				activeByClass[evaluation.class] = evaluation.result.Current
@@ -272,6 +261,7 @@ func (s *Service) dispatchNotification(ctx context.Context, objectType ObjectTyp
 	if decision.ShouldSend && s.notifier != nil {
 		if err := s.notifier.Send(ctx, decision.Summary); err != nil {
 			s.logger.Error("send incident notification failed", "object_type", objectType, "object_id", objectID, "error", err)
+			status = DeliveryStatusFailed
 		} else {
 			status = DeliveryStatusSent
 			now := s.now()

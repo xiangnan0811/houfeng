@@ -2,6 +2,7 @@ package incidents
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -114,6 +115,25 @@ func TestServiceAfterSuccessfulSyncSuppressesNotificationsWithoutNotifier(t *tes
 	}
 }
 
+func TestServiceRecordsFailedNotificationDelivery(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	snapshots := &fakeSnapshotReader{
+		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+	}
+	writer := &fakeMutationWriter{}
+	notifier := &fakeNotifier{err: errors.New("send failed")}
+	service := NewService(nodeRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if writer.mutations[0].Notifications[0].DeliveryStatus != DeliveryStatusFailed {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.mutations[0].Notifications[0].DeliveryStatus, DeliveryStatusFailed)
+	}
+}
+
 func TestServiceEvaluateStaleNodesCreatesHeartbeatIncident(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	stale := now.Add(-3 * time.Minute)
@@ -165,7 +185,7 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 	}
 }
 
-func TestServiceSkippedEvaluationClosesPriorIncidentWithoutNotification(t *testing.T) {
+func TestServiceSkippedEvaluationPreservesPriorIncidentWithoutNotification(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
 	snapshots := &fakeSnapshotReader{
@@ -190,18 +210,20 @@ func TestServiceSkippedEvaluationClosesPriorIncidentWithoutNotification(t *testi
 	service := NewService(nodeRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now})
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
 	if len(writer.mutations) != 1 {
 		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
 	}
-	if len(writer.mutations[0].Active) != 0 {
-		t.Fatalf("Active = %#v, want incident cleared on skipped maintenance evaluation", writer.mutations[0].Active)
+	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].IncidentClass != IncidentNodeDiskPressure {
+		t.Fatalf("Active = %#v, want prior incident preserved on skipped maintenance evaluation", writer.mutations[0].Active)
 	}
 	if len(writer.mutations[0].Notifications) != 0 {
 		t.Fatalf("Notifications = %#v, want none on skipped maintenance evaluation", writer.mutations[0].Notifications)
 	}
-	if len(writer.mutations[0].Events) != 1 || writer.mutations[0].Events[0].EventType != EventIncidentRecovered {
-		t.Fatalf("Events = %#v, want silent recovery event for skipped maintenance evaluation", writer.mutations[0].Events)
+	if len(writer.mutations[0].Events) != 0 {
+		t.Fatalf("Events = %#v, want no events on skipped maintenance evaluation", writer.mutations[0].Events)
 	}
 }
 

@@ -31,7 +31,7 @@ type Result struct {
 }
 
 type PostSyncProcessor interface {
-	AfterSuccessfulSync(context.Context, Batch, Result)
+	AfterSuccessfulSync(context.Context, Batch, Result) error
 }
 
 type Repository interface {
@@ -57,7 +57,9 @@ func (s *Service) SyncBatch(ctx context.Context, batch Batch) (Result, error) {
 		return Result{}, err
 	}
 	if s.postSync != nil {
-		s.postSync.AfterSuccessfulSync(ctx, batch, result)
+		if err := s.postSync.AfterSuccessfulSync(ctx, batch, result); err != nil {
+			return Result{}, err
+		}
 	}
 	return result, nil
 }

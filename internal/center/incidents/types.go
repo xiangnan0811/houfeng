@@ -133,6 +133,7 @@ const (
 const (
 	DeliveryStatusSent       DeliveryStatus = "sent"
 	DeliveryStatusSuppressed DeliveryStatus = "suppressed"
+	DeliveryStatusFailed     DeliveryStatus = "failed"
 )
 
 const (
