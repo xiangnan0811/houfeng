@@ -107,9 +107,13 @@ func TestRouterKeepsDashboardAndEventsOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[]`))
 		}),
+		IncidentsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		}),
 	})
 
-	for _, path := range []string{"/api/dashboard", "/api/events"} {
+	for _, path := range []string{"/api/dashboard", "/api/events", "/api/incidents"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 

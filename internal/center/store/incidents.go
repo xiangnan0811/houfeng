@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -20,8 +22,27 @@ type incidentStoreTx interface {
 	Rollback(context.Context) error
 }
 
+type ActiveIncidentListItem struct {
+	IncidentID      string
+	IncidentClass   incidents.IncidentClass
+	ObjectType      incidents.ObjectType
+	ObjectID        string
+	Severity        incidents.Severity
+	StartedAt       time.Time
+	LastEvaluatedAt time.Time
+	SourceSummary   string
+}
+
+type IncidentsFilter struct {
+	ObjectType incidents.ObjectType
+	ObjectID   string
+	Severity   incidents.Severity
+	Limit      int
+}
+
 type PostgresIncidentRepository struct {
 	beginTx func(context.Context, pgx.TxOptions) (incidentStoreTx, error)
+	query   func(context.Context, string, ...any) (pgx.Rows, error)
 }
 
 func NewPostgresIncidentRepository(db *pgxpool.Pool) *PostgresIncidentRepository {
@@ -29,7 +50,73 @@ func NewPostgresIncidentRepository(db *pgxpool.Pool) *PostgresIncidentRepository
 		beginTx: func(ctx context.Context, options pgx.TxOptions) (incidentStoreTx, error) {
 			return db.BeginTx(ctx, options)
 		},
+		query: db.Query,
 	}
+}
+
+func (r *PostgresIncidentRepository) ListActiveIncidents(ctx context.Context, filter IncidentsFilter) ([]ActiveIncidentListItem, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	args := []any{}
+	conditions := []string{}
+	if filter.ObjectType != "" {
+		args = append(args, string(filter.ObjectType))
+		conditions = append(conditions, fmt.Sprintf("object_type = $%d", len(args)))
+	}
+	if filter.ObjectID != "" {
+		args = append(args, filter.ObjectID)
+		conditions = append(conditions, fmt.Sprintf("object_id = $%d", len(args)))
+	}
+	if filter.Severity != "" {
+		args = append(args, string(filter.Severity))
+		conditions = append(conditions, fmt.Sprintf("severity = $%d", len(args)))
+	}
+	args = append(args, limit)
+	limitArg := len(args)
+
+	query := `
+		select incident_id, incident_class, object_type, object_id, severity, started_at, last_evaluated_at, source_summary
+		from active_incidents`
+	if len(conditions) > 0 {
+		query += " where " + strings.Join(conditions, " and ")
+	}
+	query += fmt.Sprintf(` order by case severity
+			when '严重' then 3
+			when '告警' then 2
+			when '关注' then 1
+			else 0
+		end desc, started_at desc, incident_id asc limit $%d`, limitArg)
+
+	rows, err := r.query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query active incidents list: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]ActiveIncidentListItem, 0)
+	for rows.Next() {
+		var record ActiveIncidentListItem
+		if err := rows.Scan(
+			&record.IncidentID,
+			&record.IncidentClass,
+			&record.ObjectType,
+			&record.ObjectID,
+			&record.Severity,
+			&record.StartedAt,
+			&record.LastEvaluatedAt,
+			&record.SourceSummary,
+		); err != nil {
+			return nil, fmt.Errorf("scan active incidents list row: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active incidents list: %w", err)
+	}
+	return records, nil
 }
 
 func (r *PostgresIncidentRepository) ApplyIncidentMutation(ctx context.Context, mutation incidents.IncidentMutation) error {

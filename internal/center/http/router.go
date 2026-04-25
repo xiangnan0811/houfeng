@@ -13,6 +13,7 @@ type RouterOptions struct {
 	WebDistDir                string
 	DashboardHandler          stdhttp.Handler
 	EventsHandler             stdhttp.Handler
+	IncidentsHandler          stdhttp.Handler
 	NodesCollectionHandler    stdhttp.Handler
 	NodeItemHandler           stdhttp.Handler
 	NodeRuntimeFactsHandler   stdhttp.Handler
@@ -32,6 +33,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.EventsHandler != nil {
 		mux.Handle("/api/events", opts.EventsHandler)
+	}
+	if opts.IncidentsHandler != nil {
+		mux.Handle("/api/incidents", opts.IncidentsHandler)
 	}
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", opts.NodesCollectionHandler)

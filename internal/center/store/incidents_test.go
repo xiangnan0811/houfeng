@@ -11,6 +11,149 @@ import (
 	"houfeng/internal/center/incidents"
 )
 
+func TestPostgresIncidentRepositoryListActiveIncidentsUsesDefaultLimit(t *testing.T) {
+	var (
+		capturedSQL  string
+		capturedArgs []any
+	)
+	repo := &PostgresIncidentRepository{query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+		capturedSQL = sql
+		capturedArgs = args
+		return &fakeDashboardRows{}, nil
+	}}
+
+	_, err := repo.ListActiveIncidents(context.Background(), IncidentsFilter{})
+	if err != nil {
+		t.Fatalf("ListActiveIncidents() error = %v", err)
+	}
+	if !containsSQL([]string{capturedSQL}, "from active_incidents") {
+		t.Fatalf("capturedSQL = %q, want active incidents query", capturedSQL)
+	}
+	if !containsSQL([]string{capturedSQL}, "order by case severity") {
+		t.Fatalf("capturedSQL = %q, want severity ordering", capturedSQL)
+	}
+	if !containsSQL([]string{capturedSQL}, "started_at desc") || !containsSQL([]string{capturedSQL}, "incident_id asc") {
+		t.Fatalf("capturedSQL = %q, want stable ordering", capturedSQL)
+	}
+	if len(capturedArgs) != 1 || capturedArgs[0] != 50 {
+		t.Fatalf("capturedArgs = %#v, want default limit 50", capturedArgs)
+	}
+}
+
+func TestPostgresIncidentRepositoryListActiveIncidentsBuildsOptionalFilters(t *testing.T) {
+	testCases := []struct {
+		name      string
+		filter    IncidentsFilter
+		wantParts []string
+		wantArgs  []any
+	}{
+		{
+			name:      "object type",
+			filter:    IncidentsFilter{ObjectType: incidents.ObjectTypeNode, Limit: 25},
+			wantParts: []string{"object_type = $1"},
+			wantArgs:  []any{string(incidents.ObjectTypeNode), 25},
+		},
+		{
+			name:      "object id",
+			filter:    IncidentsFilter{ObjectID: "nd_001", Limit: 25},
+			wantParts: []string{"object_id = $1"},
+			wantArgs:  []any{"nd_001", 25},
+		},
+		{
+			name:      "severity",
+			filter:    IncidentsFilter{Severity: incidents.SeverityAlert, Limit: 25},
+			wantParts: []string{"severity = $1"},
+			wantArgs:  []any{string(incidents.SeverityAlert), 25},
+		},
+		{
+			name:   "combined filters",
+			filter: IncidentsFilter{ObjectType: incidents.ObjectTypeTarget, ObjectID: "tg_001", Severity: incidents.SeverityCritical, Limit: 25},
+			wantParts: []string{
+				"object_type = $1",
+				"object_id = $2",
+				"severity = $3",
+			},
+			wantArgs: []any{string(incidents.ObjectTypeTarget), "tg_001", string(incidents.SeverityCritical), 25},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				capturedSQL  string
+				capturedArgs []any
+			)
+			repo := &PostgresIncidentRepository{query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+				capturedSQL = sql
+				capturedArgs = args
+				return &fakeDashboardRows{}, nil
+			}}
+
+			_, err := repo.ListActiveIncidents(context.Background(), tc.filter)
+			if err != nil {
+				t.Fatalf("ListActiveIncidents() error = %v", err)
+			}
+			for _, want := range tc.wantParts {
+				if !containsSQL([]string{capturedSQL}, want) {
+					t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
+				}
+			}
+			if len(capturedArgs) != len(tc.wantArgs) {
+				t.Fatalf("capturedArgs = %#v, want %#v", capturedArgs, tc.wantArgs)
+			}
+			for i := range tc.wantArgs {
+				if capturedArgs[i] != tc.wantArgs[i] {
+					t.Fatalf("capturedArgs[%d] = %#v, want %#v (all args %#v)", i, capturedArgs[i], tc.wantArgs[i], capturedArgs)
+				}
+			}
+		})
+	}
+}
+
+func TestPostgresIncidentRepositoryListActiveIncidentsScansRows(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+	repo := &PostgresIncidentRepository{query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+		return &fakeDashboardRows{rows: []fakeDashboardScan{
+			{scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "inc_002"
+				*(dest[1].(*incidents.IncidentClass)) = incidents.IncidentTargetProbeFailure
+				*(dest[2].(*incidents.ObjectType)) = incidents.ObjectTypeTarget
+				*(dest[3].(*string)) = "tg_001"
+				*(dest[4].(*incidents.Severity)) = incidents.SeverityCritical
+				*(dest[5].(*time.Time)) = now
+				*(dest[6].(*time.Time)) = now.Add(2 * time.Minute)
+				*(dest[7].(*string)) = "HTTP 500"
+				return nil
+			}},
+			{scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "inc_001"
+				*(dest[1].(*incidents.IncidentClass)) = incidents.IncidentNodeDiskPressure
+				*(dest[2].(*incidents.ObjectType)) = incidents.ObjectTypeNode
+				*(dest[3].(*string)) = "nd_001"
+				*(dest[4].(*incidents.Severity)) = incidents.SeverityAlert
+				*(dest[5].(*time.Time)) = now.Add(-time.Minute)
+				*(dest[6].(*time.Time)) = now
+				*(dest[7].(*string)) = "磁盘使用率 92.0%"
+				return nil
+			}},
+		}}, nil
+	}}
+
+	records, err := repo.ListActiveIncidents(context.Background(), IncidentsFilter{Limit: 2})
+	if err != nil {
+		t.Fatalf("ListActiveIncidents() error = %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("len(records) = %d, want 2", len(records))
+	}
+	if records[0].IncidentID != "inc_002" || records[0].SourceSummary != "HTTP 500" {
+		t.Fatalf("records[0] = %#v, want first row decoded", records[0])
+	}
+	if records[1].IncidentID != "inc_001" || records[1].ObjectID != "nd_001" {
+		t.Fatalf("records[1] = %#v, want second row decoded", records[1])
+	}
+}
+
 func TestPostgresIncidentRepositoryAppliesMutationAndProjectsNodeSummary(t *testing.T) {
 	tx := &fakeIncidentTx{
 		summaryCount:    2,

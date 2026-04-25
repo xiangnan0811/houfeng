@@ -82,6 +82,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		WebDistDir:                cfg.WebDistDir,
 		DashboardHandler:          handlers.Dashboard(dashboardRepo),
 		EventsHandler:             handlers.Events(dashboardRepo),
+		IncidentsHandler:          handlers.Incidents(incidentRepo),
 		NodesCollectionHandler:    handlers.NodesCollection(nodeRepo),
 		NodeItemHandler:           handlers.NodeItem(nodeRepo),
 		NodeRuntimeFactsHandler:   handlers.NodeRuntimeFacts(runtimeFactsRepo),

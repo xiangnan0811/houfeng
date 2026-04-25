@@ -153,6 +153,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.EventsHandler == nil {
 		t.Fatal("router events handler = nil, want non-nil")
 	}
+	if gotOpts.IncidentsHandler == nil {
+		t.Fatal("router incidents handler = nil, want non-nil")
+	}
 	if gotOpts.NodesCollectionHandler == nil {
 		t.Fatal("router nodes collection handler = nil, want non-nil")
 	}
