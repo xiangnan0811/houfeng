@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { TargetDetailPage } from './TargetDetailPage'
@@ -11,6 +11,31 @@ function mockJSONResponse(body: unknown, status = 200) {
     json: async () => body,
     text: async () => JSON.stringify(body),
   } as Response
+}
+
+function deferredResponse() {
+  let resolve!: (response: Response) => void
+  let reject!: (error?: unknown) => void
+  const promise = new Promise<Response>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function TargetDetailTestHarness() {
+  const navigate = useNavigate()
+
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/targets/tg_002')}>
+        switch target
+      </button>
+      <Routes>
+        <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+      </Routes>
+    </>
+  )
 }
 
 describe('TargetDetailPage', () => {
@@ -212,5 +237,313 @@ describe('TargetDetailPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('当前没有活跃异常')).toBeInTheDocument()
     expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument()
+  })
+
+  it('keeps target details visible when incidents and events fail to load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_003',
+            name: 'Payments',
+            target_type: 'service',
+            host: 'pay.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: ['core'],
+            note: '',
+            current_health_status: '告警',
+            current_active_incident_count: 1,
+            last_success_at: '2026-04-24T09:00:00Z',
+            last_failure_at: '2026-04-24T09:04:00Z',
+            current_primary_issue_summary: 'HTTP 探测失败',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              probe_item_id: 'pb_003',
+              target_id: 'tg_003',
+              probe_kind: 'http',
+              enabled: true,
+              frequency_tier: '1m',
+              timeout_seconds: 5,
+              config: { path: '/healthz', method: 'GET' },
+              created_at: '2026-04-20T00:00:00Z',
+              updated_at: '2026-04-24T09:05:00Z',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_003',
+            latest_probe_observations: [
+              {
+                node_id: 'nd_003',
+                target_id: 'tg_003',
+                probe_item_id: 'pb_003',
+                probe_kind: 'http',
+                observed_at: '2026-04-24T09:05:00Z',
+                received_at: '2026-04-24T09:05:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-003',
+                result_kind: 'failure',
+                latency_ms: 1200,
+                http_status: 503,
+                tls_expiry_days: null,
+                error_summary: 'origin timeout',
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-003',
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({ error: 'incidents unavailable' }, 503),
+        )
+        .mockResolvedValueOnce(mockJSONResponse({ error: 'events unavailable' }, 503)),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_003']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Payments' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
+    expect(screen.getByText('origin timeout')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
+    expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
+    expect(screen.getByText('events unavailable')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: '目标详情不可用' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the new route core data without stale activity while route-specific requests are still in flight', async () => {
+    const tg001Target = deferredResponse()
+    const tg001ProbeItems = deferredResponse()
+    const tg001Runtime = deferredResponse()
+    const tg001Incidents = deferredResponse()
+    const tg001Events = deferredResponse()
+    const tg002Target = deferredResponse()
+    const tg002ProbeItems = deferredResponse()
+    const tg002Runtime = deferredResponse()
+    const tg002Incidents = deferredResponse()
+    const tg002Events = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementationOnce(() => tg001Target.promise)
+        .mockImplementationOnce(() => tg001ProbeItems.promise)
+        .mockImplementationOnce(() => tg001Runtime.promise)
+        .mockImplementationOnce(() => tg001Incidents.promise)
+        .mockImplementationOnce(() => tg001Events.promise)
+        .mockImplementationOnce(() => tg002Target.promise)
+        .mockImplementationOnce(() => tg002ProbeItems.promise)
+        .mockImplementationOnce(() => tg002Runtime.promise)
+        .mockImplementationOnce(() => tg002Incidents.promise)
+        .mockImplementationOnce(() => tg002Events.promise),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <TargetDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(10))
+
+    tg002Target.resolve(
+      mockJSONResponse({
+        target_id: 'tg_002',
+        name: 'Cache',
+        target_type: 'service',
+        host: 'cache.example.com',
+        execution_node_labels: ['edge'],
+        run_status: '启用',
+        labels: ['infra'],
+        note: '',
+        current_health_status: '正常',
+        current_active_incident_count: 0,
+        last_success_at: '2026-04-24T10:00:00Z',
+        last_failure_at: '2026-04-24T08:00:00Z',
+        current_primary_issue_summary: '',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T10:05:00Z',
+      }),
+    )
+    tg002ProbeItems.resolve(
+      mockJSONResponse([
+        {
+          probe_item_id: 'pb_002',
+          target_id: 'tg_002',
+          probe_kind: 'tcp',
+          enabled: true,
+          frequency_tier: '5m',
+          timeout_seconds: 3,
+          config: { port: 6379 },
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T10:05:00Z',
+        },
+      ]),
+    )
+    tg002Runtime.resolve(
+      mockJSONResponse({
+        target_id: 'tg_002',
+        latest_probe_observations: [
+          {
+            node_id: 'nd_002',
+            target_id: 'tg_002',
+            probe_item_id: 'pb_002',
+            probe_kind: 'tcp',
+            observed_at: '2026-04-24T10:05:00Z',
+            received_at: '2026-04-24T10:05:01Z',
+            agent_version: 'dev',
+            fingerprint: 'fp-002',
+            result_kind: 'success',
+            latency_ms: 32,
+            http_status: null,
+            tls_expiry_days: null,
+            maintenance_context: false,
+            is_backfilled: false,
+            sync_batch_id: 'sync-002',
+          },
+        ],
+      }),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
+    )
+    expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
+    expect(screen.getByText('正在加载活跃异常…')).toBeInTheDocument()
+    expect(screen.getByText('正在加载相关事件…')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Blog' })).not.toBeInTheDocument()
+
+    tg001Target.resolve(
+      mockJSONResponse({
+        target_id: 'tg_001',
+        name: 'Blog',
+        target_type: 'service',
+        host: 'blog.example.com',
+        base_port: 443,
+        execution_node_labels: ['edge'],
+        run_status: '启用',
+        labels: ['public'],
+        note: '',
+        current_health_status: '严重',
+        current_active_incident_count: 1,
+        last_success_at: '2026-04-24T09:00:00Z',
+        last_failure_at: '2026-04-24T09:04:00Z',
+        current_primary_issue_summary: '旧目标异常',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T09:05:00Z',
+      }),
+    )
+    tg001ProbeItems.resolve(
+      mockJSONResponse([
+        {
+          probe_item_id: 'pb_old',
+          target_id: 'tg_001',
+          probe_kind: 'http',
+          enabled: true,
+          frequency_tier: '1m',
+          timeout_seconds: 5,
+          config: { path: '/old' },
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        },
+      ]),
+    )
+    tg001Runtime.resolve(
+      mockJSONResponse({
+        target_id: 'tg_001',
+        latest_probe_observations: [],
+      }),
+    )
+    tg001Incidents.resolve(
+      mockJSONResponse([
+        {
+          incident_id: 'inc_old',
+          incident_class: 'target_probe_failure',
+          object_type: 'target',
+          object_id: 'tg_001',
+          severity: '严重',
+          started_at: '2026-04-24T09:00:00Z',
+          last_evaluated_at: '2026-04-24T09:05:00Z',
+          source_summary: '旧目标异常摘要',
+        },
+      ]),
+    )
+    tg001Events.resolve(
+      mockJSONResponse([
+        {
+          event_id: 'evt_old',
+          incident_id: 'inc_old',
+          incident_class: 'target_probe_failure',
+          object_type: 'target',
+          object_id: 'tg_001',
+          event_type: 'incident_started',
+          severity: '严重',
+          summary: '旧目标事件',
+          created_at: '2026-04-24T09:05:00Z',
+        },
+      ]),
+    )
+
+    tg002Incidents.resolve(
+      mockJSONResponse([
+        {
+          incident_id: 'inc_new',
+          incident_class: 'target_probe_failure',
+          object_type: 'target',
+          object_id: 'tg_002',
+          severity: '关注',
+          started_at: '2026-04-24T10:00:00Z',
+          last_evaluated_at: '2026-04-24T10:05:00Z',
+          source_summary: '新目标异常摘要',
+        },
+      ]),
+    )
+    tg002Events.resolve(
+      mockJSONResponse([
+        {
+          event_id: 'evt_new',
+          incident_id: 'inc_new',
+          incident_class: 'target_probe_failure',
+          object_type: 'target',
+          object_id: 'tg_002',
+          event_type: 'incident_started',
+          severity: '关注',
+          summary: '新目标事件',
+          created_at: '2026-04-24T10:05:00Z',
+        },
+      ]),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('新目标异常摘要')).toBeInTheDocument(),
+    )
+    expect(screen.getByText('新目标事件')).toBeInTheDocument()
+    expect(screen.queryByText('旧目标异常摘要')).not.toBeInTheDocument()
+    expect(screen.queryByText('旧目标事件')).not.toBeInTheDocument()
   })
 })

@@ -34,8 +34,17 @@ type State = {
   target: TargetRecord | null
   probeItems: ProbeItemRecord[]
   runtimeFacts: TargetRuntimeFacts | null
+  requestedActivityTargetId: string | null
   incidents: ActiveIncidentRecord[]
+  incidentsError: string | null
   events: StateChangeEventRecord[]
+  eventsError: string | null
+}
+
+function describeError(error: unknown, fallback: string) {
+  if (error instanceof ApiError) return error.message
+  if (error instanceof Error) return error.message
+  return fallback
 }
 
 export function TargetDetailPage() {
@@ -46,8 +55,11 @@ export function TargetDetailPage() {
     target: null,
     probeItems: [],
     runtimeFacts: null,
+    requestedActivityTargetId: null,
     incidents: [],
+    incidentsError: null,
     events: [],
+    eventsError: null,
   })
 
   useEffect(() => {
@@ -58,39 +70,64 @@ export function TargetDetailPage() {
       getTarget(targetId),
       listTargetProbeItems(targetId),
       getTargetRuntimeFacts(targetId),
-      listIncidents({ object_type: 'target', object_id: targetId }),
-      listEvents({ object_type: 'target', object_id: targetId }),
     ])
-      .then(([target, probeItems, runtimeFacts, incidents, events]) => {
+      .then(([target, probeItems, runtimeFacts]) => {
         if (cancelled) return
-        setState({
+        setState((current) => ({
+          ...current,
           requestedTargetId: targetId,
           error: null,
           target,
           probeItems,
           runtimeFacts,
-          incidents,
-          events,
-        })
+        }))
       })
       .catch((error: unknown) => {
         if (cancelled) return
         const message =
           error instanceof ApiError && error.status === 404
             ? '目标不存在'
-            : error instanceof Error
-              ? error.message
-              : '加载目标详情失败'
-        setState({
+            : describeError(error, '加载目标详情失败')
+        setState((current) => ({
+          ...current,
           requestedTargetId: targetId,
           error: message,
           target: null,
           probeItems: [],
           runtimeFacts: null,
-          incidents: [],
-          events: [],
-        })
+        }))
       })
+
+    return () => {
+      cancelled = true
+    }
+  }, [targetId])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!targetId) return
+
+    Promise.allSettled([
+      listIncidents({ object_type: 'target', object_id: targetId }),
+      listEvents({ object_type: 'target', object_id: targetId }),
+    ]).then(([incidentsResult, eventsResult]) => {
+      if (cancelled) return
+      setState((current) => ({
+        ...current,
+        requestedActivityTargetId: targetId,
+        incidents:
+          incidentsResult.status === 'fulfilled' ? incidentsResult.value : [],
+        incidentsError:
+          incidentsResult.status === 'fulfilled'
+            ? null
+            : describeError(incidentsResult.reason, '加载活跃异常失败'),
+        events: eventsResult.status === 'fulfilled' ? eventsResult.value : [],
+        eventsError:
+          eventsResult.status === 'fulfilled'
+            ? null
+            : describeError(eventsResult.reason, '加载相关事件失败'),
+      }))
+    })
 
     return () => {
       cancelled = true
@@ -109,11 +146,14 @@ export function TargetDetailPage() {
 
   const missingTargetId = !targetId
   const isCurrentTarget = state.requestedTargetId === targetId
+  const hasCurrentActivity = state.requestedActivityTargetId === targetId
   const error = isCurrentTarget ? state.error : null
   const target = isCurrentTarget ? state.target : null
   const probeItems = isCurrentTarget ? state.probeItems : []
-  const incidents = isCurrentTarget ? state.incidents : []
-  const events = isCurrentTarget ? state.events : []
+  const incidents = hasCurrentActivity ? state.incidents : []
+  const incidentsError = hasCurrentActivity ? state.incidentsError : null
+  const events = hasCurrentActivity ? state.events : []
+  const eventsError = hasCurrentActivity ? state.eventsError : null
 
   if (!missingTargetId && !isCurrentTarget) {
     return <section className="page-panel">正在加载目标详情…</section>
@@ -274,11 +314,35 @@ export function TargetDetailPage() {
       </DetailSection>
 
       <DetailSection eyebrow="Incidents" title="当前活跃异常">
-        <IncidentList incidents={incidents} />
+        {!hasCurrentActivity ? (
+          <div className="empty-state">
+            <h3>正在加载活跃异常…</h3>
+            <p>等待目标相关的 incident 读模型返回最新结果。</p>
+          </div>
+        ) : incidentsError ? (
+          <div className="empty-state">
+            <h3>活跃异常暂不可用</h3>
+            <p>{incidentsError}</p>
+          </div>
+        ) : (
+          <IncidentList incidents={incidents} />
+        )}
       </DetailSection>
 
       <DetailSection eyebrow="Events" title="最近相关事件">
-        <EventList events={events} />
+        {!hasCurrentActivity ? (
+          <div className="empty-state">
+            <h3>正在加载相关事件…</h3>
+            <p>等待目标相关的事件流返回最新记录。</p>
+          </div>
+        ) : eventsError ? (
+          <div className="empty-state">
+            <h3>相关事件暂不可用</h3>
+            <p>{eventsError}</p>
+          </div>
+        ) : (
+          <EventList events={events} />
+        )}
       </DetailSection>
     </div>
   )

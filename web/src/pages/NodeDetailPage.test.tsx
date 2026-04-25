@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { NodeDetailPage } from './NodeDetailPage'
@@ -11,6 +11,31 @@ function mockJSONResponse(body: unknown, status = 200) {
     json: async () => body,
     text: async () => JSON.stringify(body),
   } as Response
+}
+
+function deferredResponse() {
+  let resolve!: (response: Response) => void
+  let reject!: (error?: unknown) => void
+  const promise = new Promise<Response>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function NodeDetailTestHarness() {
+  const navigate = useNavigate()
+
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/nodes/nd_002')}>
+        switch node
+      </button>
+      <Routes>
+        <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+      </Routes>
+    </>
+  )
 }
 
 describe('NodeDetailPage', () => {
@@ -204,5 +229,287 @@ describe('NodeDetailPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('当前没有活跃异常')).toBeInTheDocument()
     expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument()
+  })
+
+  it('keeps node details visible when incidents and events fail to load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_003',
+            display_name: 'Singapore Edge',
+            region: 'ap-southeast-1',
+            city: 'Singapore',
+            provider: 'AWS',
+            lifecycle_status: '在用',
+            monitoring_status: '启用',
+            binding_status: '已绑定',
+            labels: ['sea'],
+            note: '',
+            current_health_status: '关注',
+            last_heartbeat_at: '2026-04-24T09:00:00Z',
+            last_sync_at: '2026-04-24T09:05:00Z',
+            current_active_incident_count: 1,
+            current_primary_issue_summary: '磁盘使用率偏高',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_003',
+            latest_host_sample: {
+              node_id: 'nd_003',
+              observed_at: '2026-04-24T09:05:00Z',
+              received_at: '2026-04-24T09:05:02Z',
+              agent_version: 'dev',
+              fingerprint: 'fp-003',
+              cpu_usage_pct: 18,
+              load_1: 0.8,
+              load_5: 0.6,
+              load_15: 0.5,
+              mem_used_pct: 71,
+              mem_available_bytes: 1073741824,
+              swap_used_pct: 2,
+              disk_used_pct: 88,
+              inode_used_pct: 23,
+              net_in_bytes_per_sec: 2048,
+              net_out_bytes_per_sec: 1024,
+              cpu_iowait_pct: 1.1,
+              cpu_steal_pct: 0.2,
+              disk_read_bytes_per_sec: 4096,
+              disk_write_bytes_per_sec: 8192,
+              disk_busy_pct: 15,
+              uptime_seconds: 10800,
+              maintenance_context: false,
+              is_backfilled: false,
+              sync_batch_id: 'sync-003',
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({ error: 'incidents unavailable' }, 503),
+        )
+        .mockResolvedValueOnce(mockJSONResponse({ error: 'events unavailable' }, 503)),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_003']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { name: 'Singapore Edge' }),
+      ).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('当前主机指标')).toBeInTheDocument()
+    expect(screen.getByText('18.0%')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
+    expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
+    expect(screen.getByText('events unavailable')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: '节点详情不可用' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the new route core data without stale activity while route-specific requests are still in flight', async () => {
+    const nd001Node = deferredResponse()
+    const nd001Runtime = deferredResponse()
+    const nd001Incidents = deferredResponse()
+    const nd001Events = deferredResponse()
+    const nd002Node = deferredResponse()
+    const nd002Runtime = deferredResponse()
+    const nd002Incidents = deferredResponse()
+    const nd002Events = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementationOnce(() => nd001Node.promise)
+        .mockImplementationOnce(() => nd001Runtime.promise)
+        .mockImplementationOnce(() => nd001Incidents.promise)
+        .mockImplementationOnce(() => nd001Events.promise)
+        .mockImplementationOnce(() => nd002Node.promise)
+        .mockImplementationOnce(() => nd002Runtime.promise)
+        .mockImplementationOnce(() => nd002Incidents.promise)
+        .mockImplementationOnce(() => nd002Events.promise),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <NodeDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'switch node' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(8))
+
+    nd002Node.resolve(
+      mockJSONResponse({
+        node_id: 'nd_002',
+        display_name: 'Seoul Edge',
+        region: 'ap-northeast-2',
+        city: 'Seoul',
+        provider: 'Hetzner',
+        lifecycle_status: '在用',
+        monitoring_status: '启用',
+        binding_status: '已绑定',
+        labels: ['kr'],
+        note: '',
+        current_health_status: '正常',
+        last_heartbeat_at: '2026-04-24T10:00:00Z',
+        last_sync_at: '2026-04-24T10:05:00Z',
+        current_active_incident_count: 0,
+        current_primary_issue_summary: '',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T10:05:00Z',
+      }),
+    )
+    nd002Runtime.resolve(
+      mockJSONResponse({
+        node_id: 'nd_002',
+        latest_host_sample: {
+          node_id: 'nd_002',
+          observed_at: '2026-04-24T10:05:00Z',
+          received_at: '2026-04-24T10:05:02Z',
+          agent_version: 'dev',
+          fingerprint: 'fp-002',
+          cpu_usage_pct: 9,
+          load_1: 0.2,
+          load_5: 0.2,
+          load_15: 0.2,
+          mem_used_pct: 54,
+          mem_available_bytes: 3221225472,
+          swap_used_pct: 0,
+          disk_used_pct: 40,
+          inode_used_pct: 8,
+          net_in_bytes_per_sec: 1024,
+          net_out_bytes_per_sec: 2048,
+          cpu_iowait_pct: 0.2,
+          cpu_steal_pct: 0.1,
+          disk_read_bytes_per_sec: 1024,
+          disk_write_bytes_per_sec: 2048,
+          disk_busy_pct: 2,
+          uptime_seconds: 3600,
+          maintenance_context: false,
+          is_backfilled: false,
+          sync_batch_id: 'sync-002',
+        },
+      }),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+    expect(screen.getByText('当前主机指标')).toBeInTheDocument()
+    expect(screen.getByText('正在加载活跃异常…')).toBeInTheDocument()
+    expect(screen.getByText('正在加载相关事件…')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'Tokyo Edge' }),
+    ).not.toBeInTheDocument()
+
+    nd001Node.resolve(
+      mockJSONResponse({
+        node_id: 'nd_001',
+        display_name: 'Tokyo Edge',
+        region: 'ap-northeast-1',
+        city: 'Tokyo',
+        provider: 'Vultr',
+        lifecycle_status: '在用',
+        monitoring_status: '启用',
+        binding_status: '已绑定',
+        labels: ['jp'],
+        note: '',
+        current_health_status: '告警',
+        last_heartbeat_at: '2026-04-24T09:00:00Z',
+        last_sync_at: '2026-04-24T09:05:00Z',
+        current_active_incident_count: 1,
+        current_primary_issue_summary: '旧节点异常',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T09:05:00Z',
+      }),
+    )
+    nd001Runtime.resolve(
+      mockJSONResponse({
+        node_id: 'nd_001',
+        latest_host_sample: null,
+      }),
+    )
+    nd001Incidents.resolve(
+      mockJSONResponse([
+        {
+          incident_id: 'inc_old',
+          incident_class: 'node_disk_pressure',
+          object_type: 'node',
+          object_id: 'nd_001',
+          severity: '严重',
+          started_at: '2026-04-24T09:00:00Z',
+          last_evaluated_at: '2026-04-24T09:05:00Z',
+          source_summary: '旧节点异常摘要',
+        },
+      ]),
+    )
+    nd001Events.resolve(
+      mockJSONResponse([
+        {
+          event_id: 'evt_old',
+          incident_id: 'inc_old',
+          incident_class: 'node_disk_pressure',
+          object_type: 'node',
+          object_id: 'nd_001',
+          event_type: 'incident_started',
+          severity: '严重',
+          summary: '旧节点事件',
+          created_at: '2026-04-24T09:05:00Z',
+        },
+      ]),
+    )
+
+    nd002Incidents.resolve(
+      mockJSONResponse([
+        {
+          incident_id: 'inc_new',
+          incident_class: 'node_resource_pressure',
+          object_type: 'node',
+          object_id: 'nd_002',
+          severity: '关注',
+          started_at: '2026-04-24T10:00:00Z',
+          last_evaluated_at: '2026-04-24T10:05:00Z',
+          source_summary: '新节点异常摘要',
+        },
+      ]),
+    )
+    nd002Events.resolve(
+      mockJSONResponse([
+        {
+          event_id: 'evt_new',
+          incident_id: 'inc_new',
+          incident_class: 'node_resource_pressure',
+          object_type: 'node',
+          object_id: 'nd_002',
+          event_type: 'incident_started',
+          severity: '关注',
+          summary: '新节点事件',
+          created_at: '2026-04-24T10:05:00Z',
+        },
+      ]),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('新节点异常摘要')).toBeInTheDocument(),
+    )
+    expect(screen.getByText('新节点事件')).toBeInTheDocument()
+    expect(screen.queryByText('旧节点异常摘要')).not.toBeInTheDocument()
+    expect(screen.queryByText('旧节点事件')).not.toBeInTheDocument()
   })
 })

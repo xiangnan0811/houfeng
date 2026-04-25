@@ -33,8 +33,17 @@ type State = {
   error: string | null
   node: NodeRecord | null
   runtimeFacts: NodeRuntimeFacts | null
+  requestedActivityNodeId: string | null
   incidents: ActiveIncidentRecord[]
+  incidentsError: string | null
   events: StateChangeEventRecord[]
+  eventsError: string | null
+}
+
+function describeError(error: unknown, fallback: string) {
+  if (error instanceof ApiError) return error.message
+  if (error instanceof Error) return error.message
+  return fallback
 }
 
 export function NodeDetailPage() {
@@ -44,48 +53,73 @@ export function NodeDetailPage() {
     error: null,
     node: null,
     runtimeFacts: null,
+    requestedActivityNodeId: null,
     incidents: [],
+    incidentsError: null,
     events: [],
+    eventsError: null,
   })
 
   useEffect(() => {
     let cancelled = false
     if (!nodeId) return
 
-    Promise.all([
-      getNode(nodeId),
-      getNodeRuntimeFacts(nodeId),
-      listIncidents({ object_type: 'node', object_id: nodeId }),
-      listEvents({ object_type: 'node', object_id: nodeId }),
-    ])
-      .then(([node, runtimeFacts, incidents, events]) => {
+    Promise.all([getNode(nodeId), getNodeRuntimeFacts(nodeId)])
+      .then(([node, runtimeFacts]) => {
         if (cancelled) return
-        setState({
+        setState((current) => ({
+          ...current,
           requestedNodeId: nodeId,
           error: null,
           node,
           runtimeFacts,
-          incidents,
-          events,
-        })
+        }))
       })
       .catch((error: unknown) => {
         if (cancelled) return
         const message =
           error instanceof ApiError && error.status === 404
             ? '节点不存在'
-            : error instanceof Error
-              ? error.message
-              : '加载节点详情失败'
-        setState({
+            : describeError(error, '加载节点详情失败')
+        setState((current) => ({
+          ...current,
           requestedNodeId: nodeId,
           error: message,
           node: null,
           runtimeFacts: null,
-          incidents: [],
-          events: [],
-        })
+        }))
       })
+
+    return () => {
+      cancelled = true
+    }
+  }, [nodeId])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!nodeId) return
+
+    Promise.allSettled([
+      listIncidents({ object_type: 'node', object_id: nodeId }),
+      listEvents({ object_type: 'node', object_id: nodeId }),
+    ]).then(([incidentsResult, eventsResult]) => {
+      if (cancelled) return
+      setState((current) => ({
+        ...current,
+        requestedActivityNodeId: nodeId,
+        incidents:
+          incidentsResult.status === 'fulfilled' ? incidentsResult.value : [],
+        incidentsError:
+          incidentsResult.status === 'fulfilled'
+            ? null
+            : describeError(incidentsResult.reason, '加载活跃异常失败'),
+        events: eventsResult.status === 'fulfilled' ? eventsResult.value : [],
+        eventsError:
+          eventsResult.status === 'fulfilled'
+            ? null
+            : describeError(eventsResult.reason, '加载相关事件失败'),
+      }))
+    })
 
     return () => {
       cancelled = true
@@ -94,11 +128,14 @@ export function NodeDetailPage() {
 
   const missingNodeId = !nodeId
   const isCurrentNode = state.requestedNodeId === nodeId
+  const hasCurrentActivity = state.requestedActivityNodeId === nodeId
   const error = isCurrentNode ? state.error : null
   const node = isCurrentNode ? state.node : null
   const runtimeFacts = isCurrentNode ? state.runtimeFacts : null
-  const incidents = isCurrentNode ? state.incidents : []
-  const events = isCurrentNode ? state.events : []
+  const incidents = hasCurrentActivity ? state.incidents : []
+  const incidentsError = hasCurrentActivity ? state.incidentsError : null
+  const events = hasCurrentActivity ? state.events : []
+  const eventsError = hasCurrentActivity ? state.eventsError : null
 
   if (!missingNodeId && !isCurrentNode) {
     return <section className="page-panel">正在加载节点详情…</section>
@@ -272,11 +309,35 @@ export function NodeDetailPage() {
       </DetailSection>
 
       <DetailSection eyebrow="Incidents" title="当前活跃异常">
-        <IncidentList incidents={incidents} />
+        {!hasCurrentActivity ? (
+          <div className="empty-state">
+            <h3>正在加载活跃异常…</h3>
+            <p>等待节点相关的 incident 读模型返回最新结果。</p>
+          </div>
+        ) : incidentsError ? (
+          <div className="empty-state">
+            <h3>活跃异常暂不可用</h3>
+            <p>{incidentsError}</p>
+          </div>
+        ) : (
+          <IncidentList incidents={incidents} />
+        )}
       </DetailSection>
 
       <DetailSection eyebrow="Events" title="最近相关事件">
-        <EventList events={events} />
+        {!hasCurrentActivity ? (
+          <div className="empty-state">
+            <h3>正在加载相关事件…</h3>
+            <p>等待节点相关的事件流返回最新记录。</p>
+          </div>
+        ) : eventsError ? (
+          <div className="empty-state">
+            <h3>相关事件暂不可用</h3>
+            <p>{eventsError}</p>
+          </div>
+        ) : (
+          <EventList events={events} />
+        )}
       </DetailSection>
     </div>
   )
