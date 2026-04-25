@@ -61,6 +61,9 @@ export function DashboardPage() {
   }
 
   const overview = state.overview
+  const abnormalTotal = overview.abnormal_node_count + overview.abnormal_target_count
+  const severeTotal = overview.severe_node_count + overview.severe_target_count
+  const maintenanceTotal = overview.maintenance_node_count + overview.maintenance_target_count
 
   return (
     <div className="page-stack">
@@ -73,8 +76,9 @@ export function DashboardPage() {
       </section>
 
       <div className="summary-grid">
-        <SummaryCard label="异常节点" value={overview.abnormal_node_count} />
-        <SummaryCard label="异常目标" value={overview.abnormal_target_count} />
+        <SummaryCard label="异常对象总数" value={abnormalTotal} />
+        <SummaryCard label="严重对象总数" value={severeTotal} />
+        <SummaryCard label="维护对象总数" value={maintenanceTotal} />
         <SummaryCard label="新增异常" value={overview.recent_new_incident_count} />
         <SummaryCard label="恢复事件" value={overview.recent_recovery_count} />
       </div>

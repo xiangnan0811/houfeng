@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
@@ -12,12 +12,18 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
+function expectSummaryCard(label: string, value: string) {
+  const card = screen.getByText(label).closest('.summary-card')
+  expect(card).not.toBeNull()
+  expect(within(card as HTMLElement).getByText(value)).toBeInTheDocument()
+}
+
 describe('DashboardPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('renders loading then overview counts and recent events from /api/dashboard', async () => {
+  it('renders loading then aggregate overview counts and recent events from /api/dashboard', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -55,10 +61,11 @@ describe('DashboardPage', () => {
       expect(screen.getByRole('heading', { name: '集群概览' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('异常节点')).toBeInTheDocument()
-    expect(screen.getByText('异常目标')).toBeInTheDocument()
-    expect(screen.getByText('新增异常')).toBeInTheDocument()
-    expect(screen.getByText('恢复事件')).toBeInTheDocument()
+    expectSummaryCard('异常对象总数', '5')
+    expectSummaryCard('严重对象总数', '3')
+    expectSummaryCard('维护对象总数', '1')
+    expectSummaryCard('新增异常', '4')
+    expectSummaryCard('恢复事件', '1')
     expect(screen.getByText('异常节点概览')).toBeInTheDocument()
     expect(screen.getByText('异常目标概览')).toBeInTheDocument()
     expect(screen.getByText('最近事件')).toBeInTheDocument()
