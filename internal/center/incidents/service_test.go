@@ -208,7 +208,7 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 	}
 }
 
-func TestServiceSkippedEvaluationClosesPriorIncidentWithoutNotification(t *testing.T) {
+func TestServiceSkippedEvaluationPreservesPriorIncidentDuringMaintenance(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
@@ -240,14 +240,64 @@ func TestServiceSkippedEvaluationClosesPriorIncidentWithoutNotification(t *testi
 	if len(writer.mutations) != 1 {
 		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
 	}
-	if len(writer.mutations[0].Active) != 0 {
-		t.Fatalf("Active = %#v, want incident cleared on skipped maintenance evaluation", writer.mutations[0].Active)
+	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].IncidentClass != IncidentNodeDiskPressure {
+		t.Fatalf("Active = %#v, want prior incident preserved on skipped maintenance evaluation", writer.mutations[0].Active)
 	}
 	if len(writer.notifications) != 0 {
 		t.Fatalf("Notifications = %#v, want none on skipped maintenance evaluation", writer.notifications)
 	}
+	if len(writer.mutations[0].Events) != 0 {
+		t.Fatalf("Events = %#v, want none on skipped maintenance evaluation", writer.mutations[0].Events)
+	}
+}
+
+func TestServiceMaintenanceRecoveryClosesIncidentSilently(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		activeByObject: map[string][]IncidentRecord{
+			"node:nd_001": {{
+				IncidentID:      "inc_node_nd_001_node_disk_pressure",
+				ObjectType:      ObjectTypeNode,
+				ObjectID:        "nd_001",
+				IncidentClass:   IncidentNodeDiskPressure,
+				Severity:        SeverityAlert,
+				StartedAt:       now.Add(-time.Hour),
+				LastEvaluatedAt: now.Add(-time.Minute),
+				Status:          IncidentStatusActive,
+				SourceSummary:   "磁盘使用率 92.0%",
+			}},
+		},
+		hostSamples: map[string][]runtimefacts.HostSample{
+			"nd_001": {{ObservedAt: now, DiskUsedPct: 40, MaintenanceContext: true}},
+		},
+	}
+	writer := &fakeMutationWriter{}
+	notifier := &fakeNotifier{}
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if len(writer.mutations) != 1 {
+		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
+	}
+	if len(writer.mutations[0].Active) != 0 {
+		t.Fatalf("Active = %#v, want recovered incident removed from active set", writer.mutations[0].Active)
+	}
 	if len(writer.mutations[0].Events) != 1 || writer.mutations[0].Events[0].EventType != EventIncidentRecovered {
-		t.Fatalf("Events = %#v, want silent recovery event on skipped maintenance evaluation", writer.mutations[0].Events)
+		t.Fatalf("Events = %#v, want recovered event", writer.mutations[0].Events)
+	}
+	if len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 {
+		t.Fatalf("notifications = %#v, want one suppressed recovery record", writer.notifications)
+	}
+	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSuppressed {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSuppressed)
+	}
+	if len(notifier.messages) != 0 {
+		t.Fatalf("notifier.messages = %#v, want no Telegram send during maintenance recovery", notifier.messages)
 	}
 }
 
@@ -334,6 +384,87 @@ func TestServiceEvaluatesTLSExpiryFromTLSOnlySeries(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("target mutation = %#v, want TLS expiry incident from TLS-only series", targetMutation)
+	}
+}
+
+func TestServiceMaintenanceTargetRecoveriesAreSilent(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	expirySafeDays := 45
+	snapshots := &fakeSnapshotReader{
+		activeByObject: map[string][]IncidentRecord{
+			"target:tg_probe": {{
+				IncidentID:      "inc_target_tg_probe_target_probe_failure",
+				ObjectType:      ObjectTypeTarget,
+				ObjectID:        "tg_probe",
+				IncidentClass:   IncidentTargetProbeFailure,
+				Severity:        SeverityAlert,
+				StartedAt:       now.Add(-time.Hour),
+				LastEvaluatedAt: now.Add(-time.Minute),
+				Status:          IncidentStatusActive,
+				SourceSummary:   "HTTP 探针连续失败 3 次",
+			}},
+			"target:tg_tls": {{
+				IncidentID:      "inc_target_tg_tls_target_tls_expiry",
+				ObjectType:      ObjectTypeTarget,
+				ObjectID:        "tg_tls",
+				IncidentClass:   IncidentTargetTLSExpiry,
+				Severity:        SeverityAlert,
+				StartedAt:       now.Add(-2 * time.Hour),
+				LastEvaluatedAt: now.Add(-time.Minute),
+				Status:          IncidentStatusActive,
+				SourceSummary:   "TLS 证书剩余 14 天",
+			}},
+		},
+		probeObs: map[string][]runtimefacts.ProbeObservation{
+			"tg_probe": {
+				{ObservedAt: now, TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
+				{ObservedAt: now, TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
+			},
+			"tg_tls": {
+				{ObservedAt: now, TargetID: "tg_tls", ProbeKind: agentapi.ProbeKindTLS, ProbeItemID: "pb_tls_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, TLSExpiryDays: &expirySafeDays, IsBackfilled: true},
+			},
+		},
+	}
+	writer := &fakeMutationWriter{}
+	notifier := &fakeNotifier{}
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
+
+	if err := service.evaluateTarget(context.Background(), "tg_probe", now); err != nil {
+		t.Fatalf("evaluateTarget(tg_probe) error = %v", err)
+	}
+	if err := service.evaluateTarget(context.Background(), "tg_tls", now); err != nil {
+		t.Fatalf("evaluateTarget(tg_tls) error = %v", err)
+	}
+
+	if len(writer.mutations) != 2 {
+		t.Fatalf("len(mutations) = %d, want 2", len(writer.mutations))
+	}
+	for _, mutation := range writer.mutations {
+		if len(mutation.Active) != 0 {
+			t.Fatalf("mutation.Active = %#v, want recovered incidents removed", mutation.Active)
+		}
+		if len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentRecovered {
+			t.Fatalf("mutation.Events = %#v, want recovered event", mutation.Events)
+		}
+	}
+	if len(writer.notifications) != 2 {
+		t.Fatalf("notifications = %#v, want two suppressed recovery batches", writer.notifications)
+	}
+	for _, batch := range writer.notifications {
+		if len(batch) != 1 {
+			t.Fatalf("notification batch = %#v, want one record", batch)
+		}
+		if batch[0].DeliveryStatus != DeliveryStatusSuppressed {
+			t.Fatalf("DeliveryStatus = %q, want %q", batch[0].DeliveryStatus, DeliveryStatusSuppressed)
+		}
+	}
+	if len(notifier.messages) != 0 {
+		t.Fatalf("notifier.messages = %#v, want no Telegram sends for maintenance/backfill recoveries", notifier.messages)
 	}
 }
 

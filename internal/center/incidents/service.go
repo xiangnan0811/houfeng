@@ -220,7 +220,7 @@ func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.
 }
 
 func (s *Service) applyEvaluations(ctx context.Context, objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation, now time.Time) error {
-	mutation := buildMutation(objectType, objectID, previous, evaluations, now)
+	mutation := buildMutation(objectType, objectID, previous, evaluations)
 	if err := s.writer.ApplyIncidentMutation(ctx, mutation); err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ type classEvaluation struct {
 	result EvaluationResult
 }
 
-func buildMutation(objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation, now time.Time) IncidentMutation {
+func buildMutation(objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation) IncidentMutation {
 	activeByClass := incidentsByClass(previous)
 	mutation := IncidentMutation{
 		ObjectType:    objectType,
@@ -247,19 +247,6 @@ func buildMutation(objectType ObjectType, objectID string, previous []IncidentRe
 		case TransitionRecovered:
 			delete(activeByClass, evaluation.class)
 		case TransitionSkipped:
-			if previousIncident, ok := activeByClass[evaluation.class]; ok {
-				delete(activeByClass, evaluation.class)
-				mutation.Events = append(mutation.Events, StateChangeEventRecord{
-					IncidentID:    previousIncident.IncidentID,
-					IncidentClass: previousIncident.IncidentClass,
-					ObjectType:    objectType,
-					ObjectID:      objectID,
-					EventType:     EventIncidentRecovered,
-					Severity:      previousIncident.Severity,
-					Summary:       "维护或补传 observation 使该异常退出活跃集合",
-					CreatedAt:     now,
-				})
-			}
 		default:
 			if evaluation.result.Current != nil {
 				activeByClass[evaluation.class] = evaluation.result.Current
@@ -350,6 +337,7 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 	grouped := groupProbeSeries(observations)
 	activeResults := make([]EvaluationResult, 0)
 	recoveryEligibleCount := 0
+	recoverySuppressed := false
 	latestObservedAt := time.Time{}
 	tcpNodes := map[string]struct{}{}
 	httpProbeItems := map[string]struct{}{}
@@ -370,12 +358,19 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 		}
 		if consecutiveResults(series, agentapi.ProbeResultSuccess) >= 2 {
 			recoveryEligibleCount++
+			if observationSeriesSuppressed(series) {
+				recoverySuppressed = true
+			}
 		}
 	}
 
 	if len(activeResults) == 0 {
 		if previous != nil && recoveryEligibleCount == len(grouped) && len(grouped) > 0 {
-			return recoverIfNeeded(previous, latestObservedAt, "探针已连续成功恢复")
+			result := recoverIfNeeded(previous, latestObservedAt, "探针已连续成功恢复")
+			if recoverySuppressed {
+				return suppressNotification(result)
+			}
+			return result
 		}
 		return noop(previous)
 	}
@@ -412,6 +407,7 @@ func evaluateTargetTLSExpiryAcrossSeries(previous *IncidentRecord, targetID stri
 	grouped := groupProbeSeries(tlsObservations)
 	activeResults := make([]EvaluationResult, 0)
 	recoveryEligibleCount := 0
+	recoverySuppressed := false
 	latestObservedAt := time.Time{}
 
 	for _, series := range grouped {
@@ -424,12 +420,19 @@ func evaluateTargetTLSExpiryAcrossSeries(previous *IncidentRecord, targetID stri
 		}
 		if len(series) > 0 && series[0].TLSExpiryDays != nil && *series[0].TLSExpiryDays > 30 {
 			recoveryEligibleCount++
+			if observationSeriesSuppressed(series) {
+				recoverySuppressed = true
+			}
 		}
 	}
 
 	if len(activeResults) == 0 {
 		if previous != nil && recoveryEligibleCount == len(grouped) && len(grouped) > 0 {
-			return recoverIfNeeded(previous, latestObservedAt, "TLS 到期风险解除")
+			result := recoverIfNeeded(previous, latestObservedAt, "TLS 到期风险解除")
+			if recoverySuppressed {
+				return suppressNotification(result)
+			}
+			return result
 		}
 		return noop(previous)
 	}
@@ -461,6 +464,13 @@ func groupProbeSeries(observations []runtimefacts.ProbeObservation) [][]runtimef
 		out = append(out, normalizeProbeObservations(grouped[key]))
 	}
 	return out
+}
+
+func observationSeriesSuppressed(series []runtimefacts.ProbeObservation) bool {
+	if len(series) == 0 {
+		return false
+	}
+	return series[0].MaintenanceContext || series[0].IsBackfilled
 }
 
 type PostgresSnapshotReader struct {

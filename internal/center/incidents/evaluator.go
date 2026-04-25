@@ -22,27 +22,33 @@ func EvaluateNodeHeartbeatMissing(previous *IncidentRecord, nodeID string, now t
 }
 
 func EvaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample) EvaluationResult {
-	if shouldSkipHostSample(sample) {
+	if sample == nil {
+		return noop(previous)
+	}
+	suppressed := sample.MaintenanceContext || sample.IsBackfilled
+	if suppressed {
+		result := evaluateNodeDiskPressure(previous, nodeID, sample)
+		if result.Transition == TransitionRecovered {
+			return suppressNotification(result)
+		}
 		return skip(previous)
 	}
-	severity, active := fastThresholdSeverity(sample.DiskUsedPct, 85, 92, 97)
-	if !active {
-		return recoverIfNeeded(previous, sample.ObservedAt, "磁盘使用率恢复到安全区间")
-	}
-	summary := fmt.Sprintf("磁盘使用率 %.1f%%", sample.DiskUsedPct)
-	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeDiskPressure, severity, sample.ObservedAt, summary)
+	return evaluateNodeDiskPressure(previous, nodeID, sample)
 }
 
 func EvaluateNodeInodePressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample) EvaluationResult {
-	if shouldSkipHostSample(sample) {
+	if sample == nil {
+		return noop(previous)
+	}
+	suppressed := sample.MaintenanceContext || sample.IsBackfilled
+	if suppressed {
+		result := evaluateNodeInodePressure(previous, nodeID, sample)
+		if result.Transition == TransitionRecovered {
+			return suppressNotification(result)
+		}
 		return skip(previous)
 	}
-	severity, active := fastThresholdSeverity(sample.InodeUsedPct, 80, 90, 95)
-	if !active {
-		return recoverIfNeeded(previous, sample.ObservedAt, "inode 使用率恢复到安全区间")
-	}
-	summary := fmt.Sprintf("inode 使用率 %.1f%%", sample.InodeUsedPct)
-	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeInodePressure, severity, sample.ObservedAt, summary)
+	return evaluateNodeInodePressure(previous, nodeID, sample)
 }
 
 func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, samples []NodeResourceSample) EvaluationResult {
@@ -50,9 +56,7 @@ func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, sampl
 	if len(samples) == 0 {
 		return noop(previous)
 	}
-	if samples[0].MaintenanceContext || samples[0].IsBackfilled {
-		return skip(previous)
-	}
+	suppressed := samples[0].MaintenanceContext || samples[0].IsBackfilled
 
 	referenceTime := samples[0].ObservedAt
 	window15 := nodeResourceSamplesWithin(samples, referenceTime, 15*time.Minute)
@@ -66,7 +70,14 @@ func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, sampl
 		if previous != nil && !spansNodeResourceWindow(nodeResourceSamplesWithin(samples, referenceTime, recoveryWindow), recoveryWindow) {
 			return noop(previous)
 		}
-		return recoverIfNeeded(previous, referenceTime, "资源压力恢复到安全区间")
+		result := recoverIfNeeded(previous, referenceTime, "资源压力恢复到安全区间")
+		if suppressed {
+			return suppressNotification(result)
+		}
+		return result
+	}
+	if suppressed {
+		return skip(previous)
 	}
 	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeResourcePressure, severity, referenceTime, summary)
 }
@@ -76,19 +87,24 @@ func EvaluateTargetProbeFailure(previous *IncidentRecord, targetID string, recen
 	if len(recent) == 0 {
 		return noop(previous)
 	}
-	if recent[0].MaintenanceContext || recent[0].IsBackfilled {
-		return skip(previous)
-	}
+	suppressed := recent[0].MaintenanceContext || recent[0].IsBackfilled
 
 	failureCount := consecutiveResults(recent, agentapi.ProbeResultFailure)
 	failureWindow := leadingFailureObservations(recent)
 	successCount := consecutiveResults(recent, agentapi.ProbeResultSuccess)
 	if previous != nil && successCount >= 2 {
-		return recoverIfNeeded(previous, recent[0].ObservedAt, "探针已连续成功恢复")
+		result := recoverIfNeeded(previous, recent[0].ObservedAt, "探针已连续成功恢复")
+		if suppressed {
+			return suppressNotification(result)
+		}
+		return result
 	}
 	severity, active := probeFailureSeverity(failureWindow)
 	if !active {
 		return noop(previous)
+	}
+	if suppressed {
+		return skip(previous)
 	}
 	summary := fmt.Sprintf("%s 探针连续失败 %d 次", recent[0].ProbeKind, failureCount)
 	if recent[0].ErrorSummary != "" {
@@ -102,15 +118,20 @@ func EvaluateTargetTLSExpiry(previous *IncidentRecord, targetID string, recent [
 	if len(recent) == 0 {
 		return noop(previous)
 	}
-	if recent[0].MaintenanceContext || recent[0].IsBackfilled {
-		return skip(previous)
-	}
+	suppressed := recent[0].MaintenanceContext || recent[0].IsBackfilled
 	if recent[0].TLSExpiryDays == nil {
 		return noop(previous)
 	}
 	severity, active := tlsExpirySeverity(*recent[0].TLSExpiryDays)
 	if !active {
-		return recoverIfNeeded(previous, recent[0].ObservedAt, "TLS 到期风险解除")
+		result := recoverIfNeeded(previous, recent[0].ObservedAt, "TLS 到期风险解除")
+		if suppressed {
+			return suppressNotification(result)
+		}
+		return result
+	}
+	if suppressed {
+		return skip(previous)
 	}
 	summary := fmt.Sprintf("TLS 证书剩余 %d 天", *recent[0].TLSExpiryDays)
 	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetTLSExpiry, severity, recent[0].ObservedAt, summary)
@@ -122,6 +143,38 @@ func noop(previous *IncidentRecord) EvaluationResult {
 
 func skip(previous *IncidentRecord) EvaluationResult {
 	return EvaluationResult{Transition: TransitionSkipped}
+}
+
+func suppressNotification(result EvaluationResult) EvaluationResult {
+	if result.Notification == nil {
+		return result
+	}
+	result.Notification = &NotificationDecision{
+		ShouldSend: false,
+		Channel:    result.Notification.Channel,
+		Reason:     result.Notification.Reason,
+		Severity:   result.Notification.Severity,
+		Summary:    result.Notification.Summary,
+	}
+	return result
+}
+
+func evaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample) EvaluationResult {
+	severity, active := fastThresholdSeverity(sample.DiskUsedPct, 85, 92, 97)
+	if !active {
+		return recoverIfNeeded(previous, sample.ObservedAt, "磁盘使用率恢复到安全区间")
+	}
+	summary := fmt.Sprintf("磁盘使用率 %.1f%%", sample.DiskUsedPct)
+	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeDiskPressure, severity, sample.ObservedAt, summary)
+}
+
+func evaluateNodeInodePressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample) EvaluationResult {
+	severity, active := fastThresholdSeverity(sample.InodeUsedPct, 80, 90, 95)
+	if !active {
+		return recoverIfNeeded(previous, sample.ObservedAt, "inode 使用率恢复到安全区间")
+	}
+	summary := fmt.Sprintf("inode 使用率 %.1f%%", sample.InodeUsedPct)
+	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeInodePressure, severity, sample.ObservedAt, summary)
 }
 
 func recoverIfNeeded(previous *IncidentRecord, when time.Time, summary string) EvaluationResult {

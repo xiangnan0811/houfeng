@@ -219,27 +219,66 @@ func TestEvaluateTargetTLSExpiryThresholds(t *testing.T) {
 	}
 }
 
-func TestMaintenanceAndBackfillShortCircuitIncidentEvaluation(t *testing.T) {
+func TestMaintenanceAndBackfillSuppressesStartsButAllowsSilentRecovery(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 10, 0, 0, 0, time.UTC)
-	previous := &IncidentRecord{ObjectType: ObjectTypeNode, ObjectID: "nd_001", IncidentClass: IncidentNodeDiskPressure, Severity: SeverityAlert, LastEvaluatedAt: now}
-	result := EvaluateNodeDiskPressure(previous, "nd_001", &runtimefacts.HostSample{ObservedAt: now, DiskUsedPct: 99, MaintenanceContext: true})
-	if result.Transition != TransitionSkipped {
-		t.Fatalf("Transition = %q, want %q", result.Transition, TransitionSkipped)
-	}
-	if result.Notification != nil {
-		t.Fatalf("Notification = %#v, want nil", result.Notification)
-	}
-	if result.Current != nil {
-		t.Fatalf("Current = %#v, want nil on maintenance short-circuit", result.Current)
+	previous := &IncidentRecord{
+		IncidentID:      "inc_node_nd_001_node_disk_pressure",
+		ObjectType:      ObjectTypeNode,
+		ObjectID:        "nd_001",
+		IncidentClass:   IncidentNodeDiskPressure,
+		Severity:        SeverityAlert,
+		LastEvaluatedAt: now,
 	}
 
-	failureCount := []runtimefacts.ProbeObservation{{ObservedAt: now, ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultFailure, IsBackfilled: true}}
-	probe := EvaluateTargetProbeFailure(nil, "tg_001", failureCount)
-	if probe.Transition != TransitionSkipped {
-		t.Fatalf("Transition = %q, want %q", probe.Transition, TransitionSkipped)
+	skipped := EvaluateNodeDiskPressure(previous, "nd_001", &runtimefacts.HostSample{ObservedAt: now, DiskUsedPct: 99, MaintenanceContext: true})
+	if skipped.Transition != TransitionSkipped {
+		t.Fatalf("Transition = %q, want %q", skipped.Transition, TransitionSkipped)
 	}
-	if probe.Current != nil {
-		t.Fatalf("Current = %#v, want nil on backfill short-circuit", probe.Current)
+	if skipped.Notification != nil {
+		t.Fatalf("Notification = %#v, want nil", skipped.Notification)
+	}
+	if skipped.Current != nil {
+		t.Fatalf("Current = %#v, want nil on maintenance short-circuit", skipped.Current)
+	}
+
+	recovered := EvaluateNodeDiskPressure(previous, "nd_001", &runtimefacts.HostSample{ObservedAt: now.Add(time.Minute), DiskUsedPct: 40, MaintenanceContext: true})
+	if recovered.Transition != TransitionRecovered {
+		t.Fatalf("Transition = %q, want %q", recovered.Transition, TransitionRecovered)
+	}
+	if recovered.Event == nil || recovered.Event.EventType != EventIncidentRecovered {
+		t.Fatalf("Event = %#v, want recovered event", recovered.Event)
+	}
+	if recovered.Notification == nil {
+		t.Fatal("Notification = nil, want suppressed recovery notification")
+	}
+	if recovered.Notification.ShouldSend {
+		t.Fatalf("Notification.ShouldSend = %v, want false for maintenance recovery", recovered.Notification.ShouldSend)
+	}
+
+	probePrevious := &IncidentRecord{
+		IncidentID:      "inc_target_tg_001_target_probe_failure",
+		ObjectType:      ObjectTypeTarget,
+		ObjectID:        "tg_001",
+		IncidentClass:   IncidentTargetProbeFailure,
+		Severity:        SeverityAlert,
+		LastEvaluatedAt: now,
+	}
+	backfilledRecovery := []runtimefacts.ProbeObservation{
+		{ObservedAt: now.Add(2 * time.Minute), ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, IsBackfilled: true},
+		{ObservedAt: now.Add(time.Minute), ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, IsBackfilled: true},
+	}
+	probe := EvaluateTargetProbeFailure(probePrevious, "tg_001", backfilledRecovery)
+	if probe.Transition != TransitionRecovered {
+		t.Fatalf("Transition = %q, want %q", probe.Transition, TransitionRecovered)
+	}
+	if probe.Event == nil || probe.Event.EventType != EventIncidentRecovered {
+		t.Fatalf("Event = %#v, want recovered event", probe.Event)
+	}
+	if probe.Notification == nil {
+		t.Fatal("Notification = nil, want suppressed recovery notification")
+	}
+	if probe.Notification.ShouldSend {
+		t.Fatalf("Notification.ShouldSend = %v, want false for backfill recovery", probe.Notification.ShouldSend)
 	}
 }
 
