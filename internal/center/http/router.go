@@ -11,6 +11,8 @@ import (
 type RouterOptions struct {
 	Version                   string
 	WebDistDir                string
+	DashboardHandler          stdhttp.Handler
+	EventsHandler             stdhttp.Handler
 	NodesCollectionHandler    stdhttp.Handler
 	NodeItemHandler           stdhttp.Handler
 	NodeRuntimeFactsHandler   stdhttp.Handler
@@ -25,6 +27,12 @@ type RouterOptions struct {
 func New(opts RouterOptions) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
 	mux.Handle("/api/healthz", handlers.Healthz(opts.Version))
+	if opts.DashboardHandler != nil {
+		mux.Handle("/api/dashboard", opts.DashboardHandler)
+	}
+	if opts.EventsHandler != nil {
+		mux.Handle("/api/events", opts.EventsHandler)
+	}
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", opts.NodesCollectionHandler)
 	}

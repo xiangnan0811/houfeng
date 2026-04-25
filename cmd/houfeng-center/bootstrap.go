@@ -58,6 +58,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
+	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
 	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
 	enrollmentSvc := enrollment.NewService(nodeRepo)
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
@@ -78,6 +79,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	router := deps.newRouter(centerhttp.RouterOptions{
 		Version:                   version,
 		WebDistDir:                cfg.WebDistDir,
+		DashboardHandler:          handlers.Dashboard(dashboardRepo),
+		EventsHandler:             handlers.Events(dashboardRepo),
 		NodesCollectionHandler:    handlers.NodesCollection(nodeRepo),
 		NodeItemHandler:           handlers.NodeItem(nodeRepo),
 		NodeRuntimeFactsHandler:   handlers.NodeRuntimeFacts(runtimeFactsRepo),

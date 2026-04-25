@@ -147,6 +147,12 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.WebDistDir != cfg.WebDistDir {
 		t.Fatalf("router webDistDir = %q, want %q", gotOpts.WebDistDir, cfg.WebDistDir)
 	}
+	if gotOpts.DashboardHandler == nil {
+		t.Fatal("router dashboard handler = nil, want non-nil")
+	}
+	if gotOpts.EventsHandler == nil {
+		t.Fatal("router events handler = nil, want non-nil")
+	}
 	if gotOpts.NodesCollectionHandler == nil {
 		t.Fatal("router nodes collection handler = nil, want non-nil")
 	}

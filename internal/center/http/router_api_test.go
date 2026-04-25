@@ -95,6 +95,35 @@ func TestRouterDoesNotFallBackToSPAForUnknownAPIPath(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsDashboardAndEventsOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		DashboardHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"abnormal_node_count":1}`))
+		}),
+		EventsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		}),
+	})
+
+	for _, path := range []string{"/api/dashboard", "/api/events"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusOK)
+		}
+		if strings.TrimSpace(recorder.Body.String()) == spaShell {
+			t.Fatalf("%s returned SPA fallback body %q", path, recorder.Body.String())
+		}
+	}
+}
+
 func TestRouterDoesNotFallBackToSPAForUnknownTargetSubtree(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
