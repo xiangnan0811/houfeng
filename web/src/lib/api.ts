@@ -3,6 +3,8 @@ import type {
   DashboardOverview,
   EventListFilter,
   IncidentListFilter,
+  NodeEnrollmentTokenIssue,
+  NodeOnboardingState,
   NodeRecord,
   NodeRuntimeFacts,
   ProbeItemRecord,
@@ -21,10 +23,11 @@ export class ApiError extends Error {
   }
 }
 
-async function requestJSON<T>(path: string): Promise<T> {
+async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { Accept: 'application/json' },
     cache: 'no-store',
+    ...init,
   })
 
   if (!response.ok) {
@@ -42,6 +45,10 @@ async function requestJSON<T>(path: string): Promise<T> {
   }
 
   return (await response.json()) as T
+}
+
+function postJSON<T>(path: string): Promise<T> {
+  return requestJSON<T>(path, { method: 'POST' })
 }
 
 function withQuery(
@@ -72,6 +79,26 @@ export function getNode(nodeId: string) {
 
 export function getNodeRuntimeFacts(nodeId: string) {
   return requestJSON<NodeRuntimeFacts>(`/api/nodes/${nodeId}/runtime-facts`)
+}
+
+export function getNodeOnboarding(nodeId: string) {
+  return requestJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/onboarding`)
+}
+
+export function issueNodeEnrollmentToken(nodeId: string) {
+  return postJSON<NodeEnrollmentTokenIssue>(`/api/nodes/${nodeId}/enrollment-token`)
+}
+
+export function confirmNodeRebind(nodeId: string) {
+  return postJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/binding/confirm-rebind`)
+}
+
+export function rejectPendingNodeBinding(nodeId: string) {
+  return postJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/binding/reject-pending`)
+}
+
+export function resetNodeBinding(nodeId: string) {
+  return postJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/binding/reset`)
 }
 
 export function listTargets() {

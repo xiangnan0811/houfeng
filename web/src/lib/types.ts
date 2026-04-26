@@ -18,6 +18,32 @@ export type NodeRecord = {
   updated_at: string
 }
 
+export type OnboardingPhase =
+  | '未开始接入'
+  | '已绑定，等待稳定观测'
+  | '接入完成'
+  | '绑定冲突待处理'
+
+export type PendingBindingMetadata = {
+  fingerprint: string
+  first_seen_at?: string
+  last_seen_at?: string
+  attempt_count: number
+}
+
+export type NodeEnrollmentTokenIssue = {
+  token: string
+  issued_at: string
+}
+
+export type NodeOnboardingState = NodeRecord & {
+  phase: OnboardingPhase
+  has_host_sample: boolean
+  has_accepted_observation: boolean
+  enrollment_token_issued_at?: string
+  pending_binding?: PendingBindingMetadata
+}
+
 export type HostSample = {
   node_id: string
   observed_at: string
