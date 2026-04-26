@@ -119,9 +119,12 @@ const (
 )
 
 const (
-	EventIncidentStarted   EventType = "incident_started"
-	EventIncidentEscalated EventType = "incident_escalated"
-	EventIncidentRecovered EventType = "incident_recovered"
+	EventIncidentStarted            EventType = "incident_started"
+	EventIncidentEscalated          EventType = "incident_escalated"
+	EventIncidentRecovered          EventType = "incident_recovered"
+	EventNodeBindingRebindConfirmed EventType = "node_binding_rebind_confirmed"
+	EventNodeBindingPendingRejected EventType = "node_binding_pending_rejected"
+	EventNodeBindingReset           EventType = "node_binding_reset"
 )
 
 const (

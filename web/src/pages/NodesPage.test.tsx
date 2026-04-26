@@ -65,6 +65,7 @@ describe('NodesPage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
+    expect(screen.queryByLabelText('生命周期状态')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
     fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })
     fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
@@ -90,9 +91,9 @@ describe('NodesPage', () => {
         region: 'ap-northeast-1',
         city: 'Tokyo',
         provider: 'Vultr',
-        lifecycle_status: '待接入',
         labels: [],
         note: '',
+        lifecycle_status: '待接入',
       }),
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/enrollment-token', {

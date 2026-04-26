@@ -430,15 +430,6 @@ describe('NodeOnboardingPage', () => {
             binding_status: '已绑定',
             phase: '已绑定，等待稳定观测',
             current_binding_fingerprint_summary: 'sha256:p…567890',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          createOnboardingState({
-            binding_status: '已绑定',
-            phase: '已绑定，等待稳定观测',
-            current_binding_fingerprint_summary: 'sha256:p…567890',
             updated_at: '2026-04-26T09:20:00Z',
           }),
         ),
@@ -463,9 +454,53 @@ describe('NodeOnboardingPage', () => {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/onboarding', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the successful binding result visible without treating refresh as a failure', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          createOnboardingState(
+            {
+              binding_status: '指纹变更待确认',
+              phase: '绑定冲突待处理',
+              current_binding_fingerprint_summary: 'sha256:c…abcdef',
+            },
+            {
+              fingerprint: 'sha256:pendabcdef1234567890',
+              first_seen_at: '2026-04-26T09:15:00Z',
+              last_seen_at: '2026-04-26T09:18:00Z',
+              attempt_count: 4,
+            },
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          createOnboardingState({
+            binding_status: '已绑定',
+            phase: '已绑定，等待稳定观测',
+            current_binding_fingerprint_summary: 'sha256:p…567890',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderOnboardingPage()
+
+    const conflictCard = await screen.findByRole('article', {
+      name: '高优先级：绑定冲突待处理',
     })
+
+    fireEvent.click(within(conflictCard).getByRole('button', { name: 'confirm rebind' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('已完成指纹绑定，等待稳定观测')).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

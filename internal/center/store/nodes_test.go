@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/nodes"
 )
 
@@ -316,8 +317,13 @@ func TestNodeOnboardingGetStateScopesEvidenceToActiveFingerprint(t *testing.T) {
 func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing.T) {
 	t.Parallel()
 
-	var gotSQL string
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	var (
+		gotSQL    string
+		execSQL   string
+		execArgs  []any
+		committed bool
+	)
+	tx := &fakeNodeTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
 			if len(args) != 1 || args[0] != "nd_002" {
@@ -332,6 +338,18 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 				return nil
 			}}
 		},
+		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			execSQL = sql
+			execArgs = append([]any(nil), args...)
+			return pgconn.NewCommandTag("INSERT 1"), nil
+		},
+		commit: func(context.Context) error {
+			committed = true
+			return nil
+		},
+	}
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
 	}}
 
 	record, err := repo.ConfirmNodeRebind(context.Background(), "nd_002")
@@ -359,6 +377,27 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 		if !strings.Contains(gotSQL, snippet) {
 			t.Fatalf("ConfirmNodeRebind() SQL missing %q", snippet)
 		}
+	}
+	if !strings.Contains(execSQL, "insert into state_change_events") {
+		t.Fatalf("ConfirmNodeRebind() event SQL = %q, want state_change_events insert", execSQL)
+	}
+	if len(execArgs) != 8 {
+		t.Fatalf("len(execArgs) = %d, want 8", len(execArgs))
+	}
+	if execArgs[1] != string(incidents.ObjectTypeNode) {
+		t.Fatalf("event object_type = %#v, want %q", execArgs[1], incidents.ObjectTypeNode)
+	}
+	if execArgs[2] != "nd_002" {
+		t.Fatalf("event object_id = %#v, want %q", execArgs[2], "nd_002")
+	}
+	if execArgs[3] != string(incidents.EventNodeBindingRebindConfirmed) {
+		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventNodeBindingRebindConfirmed)
+	}
+	if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, "确认") {
+		t.Fatalf("event summary = %#v, want confirm wording", execArgs[5])
+	}
+	if !committed {
+		t.Fatal("transaction was not committed")
 	}
 }
 
@@ -415,8 +454,13 @@ func TestBindingConfirmRebindReturnsNodeNotFoundWhenNodeIsMissing(t *testing.T) 
 func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testing.T) {
 	t.Parallel()
 
-	var gotSQL string
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	var (
+		gotSQL    string
+		execSQL   string
+		execArgs  []any
+		committed bool
+	)
+	tx := &fakeNodeTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
 			return fakeNodeRow{scan: func(dest ...any) error {
@@ -429,6 +473,18 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 				return nil
 			}}
 		},
+		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			execSQL = sql
+			execArgs = append([]any(nil), args...)
+			return pgconn.NewCommandTag("INSERT 1"), nil
+		},
+		commit: func(context.Context) error {
+			committed = true
+			return nil
+		},
+	}
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
 	}}
 
 	record, err := repo.RejectPendingFingerprint(context.Background(), "nd_003")
@@ -449,6 +505,18 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 		if !strings.Contains(gotSQL, snippet) {
 			t.Fatalf("RejectPendingFingerprint() SQL missing %q", snippet)
 		}
+	}
+	if !strings.Contains(execSQL, "insert into state_change_events") {
+		t.Fatalf("RejectPendingFingerprint() event SQL = %q, want state_change_events insert", execSQL)
+	}
+	if execArgs[3] != string(incidents.EventNodeBindingPendingRejected) {
+		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventNodeBindingPendingRejected)
+	}
+	if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, "拒绝") {
+		t.Fatalf("event summary = %#v, want reject wording", execArgs[5])
+	}
+	if !committed {
+		t.Fatal("transaction was not committed")
 	}
 }
 
@@ -505,8 +573,13 @@ func TestBindingRejectPendingReturnsNodeNotFoundWhenNodeIsMissing(t *testing.T) 
 func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 	t.Parallel()
 
-	var gotSQL string
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	var (
+		gotSQL    string
+		execSQL   string
+		execArgs  []any
+		committed bool
+	)
+	tx := &fakeNodeTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
 			return fakeNodeRow{scan: func(dest ...any) error {
@@ -517,6 +590,18 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 				return nil
 			}}
 		},
+		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			execSQL = sql
+			execArgs = append([]any(nil), args...)
+			return pgconn.NewCommandTag("INSERT 1"), nil
+		},
+		commit: func(context.Context) error {
+			committed = true
+			return nil
+		},
+	}
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
 	}}
 
 	record, err := repo.ResetNodeBinding(context.Background(), "nd_004")
@@ -539,6 +624,18 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 		if !strings.Contains(gotSQL, snippet) {
 			t.Fatalf("ResetNodeBinding() SQL missing %q", snippet)
 		}
+	}
+	if !strings.Contains(execSQL, "insert into state_change_events") {
+		t.Fatalf("ResetNodeBinding() event SQL = %q, want state_change_events insert", execSQL)
+	}
+	if execArgs[3] != string(incidents.EventNodeBindingReset) {
+		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventNodeBindingReset)
+	}
+	if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, "重置") {
+		t.Fatalf("event summary = %#v, want reset wording", execArgs[5])
+	}
+	if !committed {
+		t.Fatal("transaction was not committed")
 	}
 }
 
@@ -632,7 +729,10 @@ func (f fakeNodeDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.C
 
 func (f fakeNodeDB) BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error) {
 	if f.beginTx == nil {
-		return nil, nil
+		return &fakeNodeTx{
+			queryRow: f.queryRow,
+			exec:     f.exec,
+		}, nil
 	}
 	return f.beginTx(ctx, txOptions)
 }
@@ -644,6 +744,49 @@ type fakeNodeRow struct {
 func (r fakeNodeRow) Scan(dest ...any) error {
 	return r.scan(dest...)
 }
+
+type fakeNodeTx struct {
+	queryRow func(context.Context, string, ...any) pgx.Row
+	exec     func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	commit   func(context.Context) error
+	rollback func(context.Context) error
+}
+
+func (f *fakeNodeTx) Begin(context.Context) (pgx.Tx, error) { return f, nil }
+func (f *fakeNodeTx) Commit(ctx context.Context) error {
+	if f.commit != nil {
+		return f.commit(ctx)
+	}
+	return nil
+}
+func (f *fakeNodeTx) Rollback(ctx context.Context) error {
+	if f.rollback != nil {
+		return f.rollback(ctx)
+	}
+	return nil
+}
+func (f *fakeNodeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (f *fakeNodeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
+func (f *fakeNodeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+func (f *fakeNodeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	return nil, nil
+}
+func (f *fakeNodeTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if f.exec != nil {
+		return f.exec(ctx, sql, args...)
+	}
+	return pgconn.NewCommandTag("INSERT 1"), nil
+}
+func (f *fakeNodeTx) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
+func (f *fakeNodeTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if f.queryRow != nil {
+		return f.queryRow(ctx, sql, args...)
+	}
+	return fakeNodeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+}
+func (f *fakeNodeTx) Conn() *pgx.Conn { return nil }
 
 func scanNodeRecordDestinations(dest []any, record nodes.Record) {
 	*(dest[0].(*string)) = record.NodeID

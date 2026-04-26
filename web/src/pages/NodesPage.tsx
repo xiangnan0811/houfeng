@@ -12,7 +12,6 @@ type CreateNodeInput = {
   region: string
   city: string
   provider: string
-  lifecycle_status: string
   labels: string[]
   note: string
 }
@@ -22,7 +21,6 @@ const initialCreateForm: CreateNodeInput = {
   region: '',
   city: '',
   provider: '',
-  lifecycle_status: '待接入',
   labels: [],
   note: '',
 }
@@ -41,7 +39,10 @@ async function createNode(input: CreateNodeInput) {
       'Content-Type': 'application/json',
     },
     cache: 'no-store',
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      ...input,
+      lifecycle_status: '待接入',
+    }),
   })
 
   if (!response.ok) {
@@ -238,18 +239,7 @@ export function NodesPage() {
             </p>
             <p>
               <label>
-                生命周期状态
-                <select
-                  name="lifecycle_status"
-                  value={createForm.lifecycle_status}
-                  onChange={(event) => updateField('lifecycle_status', event.target.value)}
-                >
-                  <option value="待接入">待接入</option>
-                  <option value="在用">在用</option>
-                  <option value="观察中">观察中</option>
-                  <option value="不续费">不续费</option>
-                  <option value="已退役">已退役</option>
-                </select>
+                生命周期状态固定为待接入
               </label>
             </p>
             <p>

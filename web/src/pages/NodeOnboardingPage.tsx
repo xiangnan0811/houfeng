@@ -211,9 +211,8 @@ export function NodeOnboardingPage() {
     })
 
     try {
-      await request(nodeId)
-      const refreshed = await getNodeOnboarding(nodeId)
-      applyOnboardingState(nodeId, refreshed)
+      const nextOnboarding = await request(nodeId)
+      applyOnboardingState(nodeId, nextOnboarding)
       setConflictState({
         action: null,
         error: null,

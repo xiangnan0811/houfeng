@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/nodes"
 )
 
@@ -347,8 +349,61 @@ func (r *PostgresNodeRepository) nodeExists(ctx context.Context, nodeID string) 
 	return exists, nil
 }
 
+func insertNodeBindingEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	record nodes.Record,
+	eventType incidents.EventType,
+	summary string,
+) error {
+	eventID, err := ids.New("evt")
+	if err != nil {
+		return fmt.Errorf("generate binding event id: %w", err)
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"binding_status": record.BindingStatus,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal binding event payload: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		insert into state_change_events (
+			event_id,
+			object_type,
+			object_id,
+			event_type,
+			severity,
+			summary,
+			payload,
+			created_at
+		) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+		eventID,
+		string(incidents.ObjectTypeNode),
+		record.NodeID,
+		string(eventType),
+		"",
+		summary,
+		payload,
+		time.Now().UTC(),
+	); err != nil {
+		return fmt.Errorf("insert binding event for node %q: %w", record.NodeID, err)
+	}
+
+	return nil
+}
+
 func (r *PostgresNodeRepository) ConfirmNodeRebind(ctx context.Context, nodeID string) (nodes.Record, error) {
-	record, err := scanNode(r.db.QueryRow(ctx, `
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin confirm node rebind transaction for %q: %w", nodeID, err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	record, err := scanNode(tx.QueryRow(ctx, `
 		update nodes
 		set binding_status = '已绑定',
 			binding_fingerprint = pending_binding_fingerprint,
@@ -379,11 +434,33 @@ func (r *PostgresNodeRepository) ConfirmNodeRebind(ctx context.Context, nodeID s
 	if err != nil {
 		return nodes.Record{}, fmt.Errorf("confirm node rebind for %q: %w", nodeID, err)
 	}
+
+	if err := insertNodeBindingEvent(
+		ctx,
+		tx,
+		record,
+		incidents.EventNodeBindingRebindConfirmed,
+		"节点已确认新的绑定指纹并等待重新建立稳定观测",
+	); err != nil {
+		return nodes.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit confirm node rebind for %q: %w", nodeID, err)
+	}
+
 	return record, nil
 }
 
 func (r *PostgresNodeRepository) RejectPendingFingerprint(ctx context.Context, nodeID string) (nodes.Record, error) {
-	record, err := scanNode(r.db.QueryRow(ctx, `
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin reject pending fingerprint transaction for %q: %w", nodeID, err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	record, err := scanNode(tx.QueryRow(ctx, `
 		update nodes
 		set binding_status = '已绑定',
 			pending_binding_fingerprint = null,
@@ -410,11 +487,33 @@ func (r *PostgresNodeRepository) RejectPendingFingerprint(ctx context.Context, n
 	if err != nil {
 		return nodes.Record{}, fmt.Errorf("reject pending fingerprint for node %q: %w", nodeID, err)
 	}
+
+	if err := insertNodeBindingEvent(
+		ctx,
+		tx,
+		record,
+		incidents.EventNodeBindingPendingRejected,
+		"节点已拒绝待确认指纹并保留当前绑定",
+	); err != nil {
+		return nodes.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit reject pending fingerprint for node %q: %w", nodeID, err)
+	}
+
 	return record, nil
 }
 
 func (r *PostgresNodeRepository) ResetNodeBinding(ctx context.Context, nodeID string) (nodes.Record, error) {
-	record, err := scanNode(r.db.QueryRow(ctx, `
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin reset node binding transaction for %q: %w", nodeID, err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	record, err := scanNode(tx.QueryRow(ctx, `
 		update nodes
 		set binding_status = '未绑定',
 			binding_fingerprint = '',
@@ -436,6 +535,20 @@ func (r *PostgresNodeRepository) ResetNodeBinding(ctx context.Context, nodeID st
 	if err != nil {
 		return nodes.Record{}, fmt.Errorf("reset node binding for %q: %w", nodeID, err)
 	}
+
+	if err := insertNodeBindingEvent(
+		ctx,
+		tx,
+		record,
+		incidents.EventNodeBindingReset,
+		"节点已重置绑定并等待重新接入",
+	); err != nil {
+		return nodes.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit reset node binding for %q: %w", nodeID, err)
+	}
+
 	return record, nil
 }
 
