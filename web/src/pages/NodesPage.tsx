@@ -81,6 +81,13 @@ export function NodesPage() {
   const [labelInput, setLabelInput] = useState('')
   const [createForm, setCreateForm] = useState<CreateNodeInput>(initialCreateForm)
 
+  function resetCreateFlow() {
+    setRetryNode(null)
+    setCreateError(null)
+    setLabelInput('')
+    setCreateForm(initialCreateForm)
+  }
+
   useEffect(() => {
     let cancelled = false
     listNodes()
@@ -108,10 +115,8 @@ export function NodesPage() {
     try {
       const issue = await issueNodeEnrollmentToken(node.node_id)
       setOnboardingTokenCache(node.node_id, issue)
-      setRetryNode(null)
       setCreateOpen(false)
-      setLabelInput('')
-      setCreateForm(initialCreateForm)
+      resetCreateFlow()
       navigate(`/nodes/${node.node_id}/onboarding`)
     } catch (issueError) {
       setRetryNode(node)
@@ -178,7 +183,17 @@ export function NodesPage() {
             当前以“当前问题优先、最近运行事实次之”的冻结 V1 层级展示节点状态。
           </p>
         </div>
-        <button type="button" onClick={() => setCreateOpen((current) => !current)}>
+        <button
+          type="button"
+          onClick={() =>
+            setCreateOpen((current) => {
+              if (current) {
+                resetCreateFlow()
+              }
+              return !current
+            })
+          }
+        >
           新建节点
         </button>
       </header>

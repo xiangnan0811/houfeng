@@ -223,4 +223,104 @@ describe('NodesPage', () => {
     expect(screen.queryByText('onboarding workspace')).not.toBeInTheDocument()
     expect(getOnboardingTokenCache('nd_001')).toBeNull()
   })
+
+  it('closing and reopening the drawer clears retryNode so a fresh create flow can start', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_001',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '待接入',
+          monitoring_status: '启用',
+          binding_status: '未绑定',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-26T09:00:00Z',
+          updated_at: '2026-04-26T09:00:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'token service unavailable' }, 503))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_002',
+          display_name: 'Seoul Edge',
+          region: 'ap-northeast-2',
+          city: 'Seoul',
+          provider: 'AWS',
+          lifecycle_status: '待接入',
+          monitoring_status: '启用',
+          binding_status: '未绑定',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-26T09:10:00Z',
+          updated_at: '2026-04-26T09:10:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          token: 'enroll_seoul_001',
+          issued_at: '2026-04-26T09:11:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+          <Route path="/nodes/:nodeId/onboarding" element={<div>onboarding workspace</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '新建节点' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
+    fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })
+    fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
+    fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'Vultr' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建并生成 Token' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('节点已创建，但生成接入 Token 失败：token service unavailable')).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
+
+    expect(screen.getByRole('button', { name: '创建并生成 Token' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试生成 Token' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Seoul Edge' } })
+    fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-2' } })
+    fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Seoul' } })
+    fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'AWS' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建并生成 Token' }))
+
+    await waitFor(() => expect(screen.getByText('onboarding workspace')).toBeInTheDocument())
+
+    const createCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => url === '/api/nodes' && (init as RequestInit | undefined)?.method === 'POST',
+    )
+    expect(createCalls).toHaveLength(2)
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_002/enrollment-token', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
 })

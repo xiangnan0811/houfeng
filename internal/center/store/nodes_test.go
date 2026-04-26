@@ -78,6 +78,23 @@ func TestBindingTransitionRefreshesPendingAttemptMetadata(t *testing.T) {
 	}
 }
 
+func TestBindingTransitionStartsNewBindingEpochOnInitialBind(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 26, 7, 45, 0, 0, time.UTC)
+
+	record := resolveEnrollmentBindingTransition(nodes.Record{
+		BindingStatus: nodes.BindingUnbound,
+	}, "fp-new", now)
+
+	if record.BindingStatus != nodes.BindingBound {
+		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, nodes.BindingBound)
+	}
+	if record.BindingEpochStartedAt == nil || !record.BindingEpochStartedAt.Equal(now) {
+		t.Fatalf("BindingEpochStartedAt = %v, want %s", record.BindingEpochStartedAt, now.Format(time.RFC3339))
+	}
+}
+
 func TestNodeOnboardingPhaseDerivation(t *testing.T) {
 	t.Parallel()
 
@@ -157,6 +174,19 @@ func TestNodeOnboardingMigrationAddsPersistenceColumns(t *testing.T) {
 	}
 }
 
+func TestNodeBindingEpochMigrationAddsBoundaryColumn(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0005_add_node_binding_epoch.sql"))
+	if err != nil {
+		t.Fatalf("ReadFile(binding epoch migration) error = %v", err)
+	}
+
+	if !strings.Contains(string(source), "add column if not exists binding_epoch_started_at timestamptz") {
+		t.Fatal("binding epoch migration missing binding_epoch_started_at column")
+	}
+}
+
 func TestNodeOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testing.T) {
 	t.Parallel()
 
@@ -224,6 +254,7 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 					MonitoringStatus:           nodes.MonitoringEnabled,
 					BindingStatus:              nodes.BindingPendingConfirmation,
 					BindingFingerprint:         activeFingerprint,
+					BindingEpochStartedAt:      &issuedAt,
 					PendingBindingFingerprint:  "fp-pending",
 					PendingBindingFirstSeenAt:  &firstSeenAt,
 					PendingBindingLastSeenAt:   &lastSeenAt,
@@ -232,8 +263,8 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 					CurrentHealthStatus:        nodes.HealthNormal,
 					LastHeartbeatAt:            &heartbeatAt,
 				})
-				*(dest[25].(*bool)) = true
-				*(dest[26].(*bool)) = false
+				*(dest[26].(*bool)) = true
+				*(dest[27].(*bool)) = false
 				return nil
 			}}
 		},
@@ -276,23 +307,25 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 	}
 }
 
-func TestNodeOnboardingGetStateScopesEvidenceToActiveFingerprint(t *testing.T) {
+func TestNodeOnboardingGetStateScopesEvidenceToCurrentBindingGeneration(t *testing.T) {
 	t.Parallel()
 
 	staleHeartbeatAt := time.Date(2026, time.April, 26, 6, 0, 0, 0, time.UTC)
+	bindingEpochStartedAt := time.Date(2026, time.April, 26, 9, 0, 0, 0, time.UTC)
 	var gotSQL string
 	repo := &PostgresNodeRepository{db: fakeNodeDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
 			return fakeNodeRow{scan: func(dest ...any) error {
 				scanNodeRecordDestinations(dest, nodes.Record{
-					NodeID:             "nd_rebind",
-					BindingStatus:      nodes.BindingBound,
-					BindingFingerprint: "fp-current",
-					LastHeartbeatAt:    &staleHeartbeatAt,
+					NodeID:                "nd_rebind",
+					BindingStatus:         nodes.BindingBound,
+					BindingFingerprint:    "fp-current",
+					BindingEpochStartedAt: &bindingEpochStartedAt,
+					LastHeartbeatAt:       &staleHeartbeatAt,
 				})
-				*(dest[25].(*bool)) = false
 				*(dest[26].(*bool)) = false
+				*(dest[27].(*bool)) = false
 				return nil
 			}}
 		},
@@ -309,8 +342,14 @@ func TestNodeOnboardingGetStateScopesEvidenceToActiveFingerprint(t *testing.T) {
 	if !strings.Contains(gotSQL, "hs.fingerprint = nodes.binding_fingerprint") {
 		t.Fatalf("GetNodeOnboarding() SQL = %q, want host sample fingerprint scope", gotSQL)
 	}
+	if !strings.Contains(gotSQL, "hs.received_at >= nodes.binding_epoch_started_at") {
+		t.Fatalf("GetNodeOnboarding() SQL = %q, want host sample binding epoch scope", gotSQL)
+	}
 	if !strings.Contains(gotSQL, "po.fingerprint = nodes.binding_fingerprint") {
 		t.Fatalf("GetNodeOnboarding() SQL = %q, want probe observation fingerprint scope", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "po.received_at >= nodes.binding_epoch_started_at") {
+		t.Fatalf("GetNodeOnboarding() SQL = %q, want probe observation binding epoch scope", gotSQL)
 	}
 }
 
@@ -365,6 +404,7 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 	}
 	for _, snippet := range []string{
 		"binding_fingerprint = pending_binding_fingerprint",
+		"binding_epoch_started_at = now()",
 		"binding_status = '已绑定'",
 		"binding_status = '指纹变更待确认'",
 		"coalesce(pending_binding_fingerprint, '') <> ''",
@@ -615,6 +655,7 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 	for _, snippet := range []string{
 		"binding_status = '未绑定'",
 		"binding_fingerprint = ''",
+		"binding_epoch_started_at = null",
 		"pending_binding_fingerprint = null",
 		"pending_binding_attempt_count = 0",
 		"sync_token_hash = ''",
@@ -653,6 +694,9 @@ func TestApplyEnrollmentDoesNotAdvanceLastSyncAt(t *testing.T) {
 	}
 	if !strings.Contains(applyEnrollment, "binding_status = $2") {
 		t.Fatal("ApplyEnrollment() source no longer contains the enrollment binding update")
+	}
+	if !strings.Contains(applyEnrollment, "binding_epoch_started_at = $4") {
+		t.Fatal("ApplyEnrollment() should persist binding_epoch_started_at with the current trust generation")
 	}
 
 	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresNodeRepository) RecordAcceptedHeartbeats", "")
@@ -801,19 +845,20 @@ func scanNodeRecordDestinations(dest []any, record nodes.Record) {
 	*(dest[9].(**time.Time)) = cloneTimePtr(record.EnrollmentTokenIssuedAt)
 	*(dest[10].(*string)) = record.SyncTokenHash
 	*(dest[11].(*string)) = record.BindingFingerprint
-	*(dest[12].(*string)) = record.PendingBindingFingerprint
-	*(dest[13].(**time.Time)) = cloneTimePtr(record.PendingBindingFirstSeenAt)
-	*(dest[14].(**time.Time)) = cloneTimePtr(record.PendingBindingLastSeenAt)
-	*(dest[15].(*int)) = record.PendingBindingAttemptCount
-	*(dest[16].(*[]string)) = append([]string(nil), record.Labels...)
-	*(dest[17].(*string)) = record.Note
-	*(dest[18].(*string)) = record.CurrentHealthStatus
-	*(dest[19].(**time.Time)) = cloneTimePtr(record.LastHeartbeatAt)
-	*(dest[20].(**time.Time)) = cloneTimePtr(record.LastSyncAt)
-	*(dest[21].(*int)) = record.CurrentActiveIncidentCount
-	*(dest[22].(*string)) = record.CurrentPrimaryIssueSummary
-	*(dest[23].(*time.Time)) = record.CreatedAt
-	*(dest[24].(*time.Time)) = record.UpdatedAt
+	*(dest[12].(**time.Time)) = cloneTimePtr(record.BindingEpochStartedAt)
+	*(dest[13].(*string)) = record.PendingBindingFingerprint
+	*(dest[14].(**time.Time)) = cloneTimePtr(record.PendingBindingFirstSeenAt)
+	*(dest[15].(**time.Time)) = cloneTimePtr(record.PendingBindingLastSeenAt)
+	*(dest[16].(*int)) = record.PendingBindingAttemptCount
+	*(dest[17].(*[]string)) = append([]string(nil), record.Labels...)
+	*(dest[18].(*string)) = record.Note
+	*(dest[19].(*string)) = record.CurrentHealthStatus
+	*(dest[20].(**time.Time)) = cloneTimePtr(record.LastHeartbeatAt)
+	*(dest[21].(**time.Time)) = cloneTimePtr(record.LastSyncAt)
+	*(dest[22].(*int)) = record.CurrentActiveIncidentCount
+	*(dest[23].(*string)) = record.CurrentPrimaryIssueSummary
+	*(dest[24].(*time.Time)) = record.CreatedAt
+	*(dest[25].(*time.Time)) = record.UpdatedAt
 }
 
 func cloneTimePtr(value *time.Time) *time.Time {

@@ -49,6 +49,7 @@ type Record struct {
 	EnrollmentTokenIssuedAt    *time.Time `json:"-"`
 	SyncTokenHash              string     `json:"-"`
 	BindingFingerprint         string     `json:"-"`
+	BindingEpochStartedAt      *time.Time `json:"-"`
 	PendingBindingFingerprint  string     `json:"-"`
 	PendingBindingFirstSeenAt  *time.Time `json:"-"`
 	PendingBindingLastSeenAt   *time.Time `json:"-"`

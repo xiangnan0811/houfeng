@@ -47,6 +47,7 @@ const nodeSelectColumns = `
 	enrollment_token_issued_at,
 	coalesce(sync_token_hash, ''),
 	coalesce(binding_fingerprint, ''),
+	binding_epoch_started_at,
 	coalesce(pending_binding_fingerprint, ''),
 	pending_binding_first_seen_at,
 	pending_binding_last_seen_at,
@@ -84,6 +85,7 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 		&record.EnrollmentTokenIssuedAt,
 		&record.SyncTokenHash,
 		&record.BindingFingerprint,
+		&record.BindingEpochStartedAt,
 		&record.PendingBindingFingerprint,
 		&record.PendingBindingFirstSeenAt,
 		&record.PendingBindingLastSeenAt,
@@ -122,6 +124,7 @@ func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
 		&record.EnrollmentTokenIssuedAt,
 		&record.SyncTokenHash,
 		&record.BindingFingerprint,
+		&record.BindingEpochStartedAt,
 		&record.PendingBindingFingerprint,
 		&record.PendingBindingFirstSeenAt,
 		&record.PendingBindingLastSeenAt,
@@ -312,14 +315,18 @@ func (r *PostgresNodeRepository) GetNodeOnboarding(ctx context.Context, nodeID s
 				from host_samples hs
 				where hs.node_id = nodes.node_id
 					and nodes.binding_fingerprint <> ''
+					and nodes.binding_epoch_started_at is not null
 					and hs.fingerprint = nodes.binding_fingerprint
+					and hs.received_at >= nodes.binding_epoch_started_at
 			),
 			exists (
 				select 1
 				from probe_observations po
 				where po.node_id = nodes.node_id
 					and nodes.binding_fingerprint <> ''
+					and nodes.binding_epoch_started_at is not null
 					and po.fingerprint = nodes.binding_fingerprint
+					and po.received_at >= nodes.binding_epoch_started_at
 			)
 		from nodes
 		where node_id = $1`,
@@ -407,6 +414,7 @@ func (r *PostgresNodeRepository) ConfirmNodeRebind(ctx context.Context, nodeID s
 		update nodes
 		set binding_status = '已绑定',
 			binding_fingerprint = pending_binding_fingerprint,
+			binding_epoch_started_at = now(),
 			pending_binding_fingerprint = null,
 			pending_binding_first_seen_at = null,
 			pending_binding_last_seen_at = null,
@@ -517,6 +525,7 @@ func (r *PostgresNodeRepository) ResetNodeBinding(ctx context.Context, nodeID st
 		update nodes
 		set binding_status = '未绑定',
 			binding_fingerprint = '',
+			binding_epoch_started_at = null,
 			pending_binding_fingerprint = null,
 			pending_binding_first_seen_at = null,
 			pending_binding_last_seen_at = null,
@@ -605,6 +614,7 @@ func resolveEnrollmentBindingTransition(record nodes.Record, newFingerprint stri
 	case nodes.BindingUnbound:
 		next.BindingStatus = nodes.BindingBound
 		next.BindingFingerprint = newFingerprint
+		next.BindingEpochStartedAt = &now
 		clearPendingBinding(&next)
 		return next
 	case nodes.BindingBound:
@@ -659,6 +669,7 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		nodeID                     string
 		bindingStatus              string
 		bindingFingerprint         string
+		bindingEpochStartedAt      *time.Time
 		pendingBindingFingerprint  string
 		pendingBindingFirstSeenAt  *time.Time
 		pendingBindingLastSeenAt   *time.Time
@@ -668,6 +679,7 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		select node_id,
 			binding_status,
 			coalesce(binding_fingerprint, ''),
+			binding_epoch_started_at,
 			coalesce(pending_binding_fingerprint, ''),
 			pending_binding_first_seen_at,
 			pending_binding_last_seen_at,
@@ -680,6 +692,7 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		&nodeID,
 		&bindingStatus,
 		&bindingFingerprint,
+		&bindingEpochStartedAt,
 		&pendingBindingFingerprint,
 		&pendingBindingFirstSeenAt,
 		&pendingBindingLastSeenAt,
@@ -693,6 +706,7 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 	next := resolveEnrollmentBindingTransition(nodes.Record{
 		BindingStatus:              bindingStatus,
 		BindingFingerprint:         bindingFingerprint,
+		BindingEpochStartedAt:      bindingEpochStartedAt,
 		PendingBindingFingerprint:  pendingBindingFingerprint,
 		PendingBindingFirstSeenAt:  pendingBindingFirstSeenAt,
 		PendingBindingLastSeenAt:   pendingBindingLastSeenAt,
@@ -702,16 +716,18 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		update nodes
 		set binding_status = $2,
 			binding_fingerprint = $3,
-			pending_binding_fingerprint = $4,
-			pending_binding_first_seen_at = $5,
-			pending_binding_last_seen_at = $6,
-			pending_binding_attempt_count = $7,
+			binding_epoch_started_at = $4,
+			pending_binding_fingerprint = $5,
+			pending_binding_first_seen_at = $6,
+			pending_binding_last_seen_at = $7,
+			pending_binding_attempt_count = $8,
 			updated_at = now()
 		where node_id = $1
 		returning `+nodeSelectColumns,
 		nodeID,
 		next.BindingStatus,
 		next.BindingFingerprint,
+		next.BindingEpochStartedAt,
 		nullableText(next.PendingBindingFingerprint),
 		next.PendingBindingFirstSeenAt,
 		next.PendingBindingLastSeenAt,
