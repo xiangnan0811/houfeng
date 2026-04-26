@@ -3,7 +3,11 @@ import { useEffect, useState } from 'react'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { ApiError, listEvents } from '../lib/api'
-import type { EventListFilter, StateChangeEventType } from '../lib/types'
+import {
+  STATE_CHANGE_EVENT_TYPE_LABELS,
+  type EventListFilter,
+  type StateChangeEventType,
+} from '../lib/types'
 
 type FilterState = {
   object_type: '' | 'node' | 'target'
@@ -24,6 +28,10 @@ const DEFAULT_FILTERS: FilterState = {
   event_type: '',
   limit: '50',
 }
+
+const EVENT_TYPE_OPTIONS = Object.entries(STATE_CHANGE_EVENT_TYPE_LABELS) as Array<
+  [StateChangeEventType, string]
+>
 
 function buildFilterQuery(filters: FilterState): EventListFilter {
   return {
@@ -136,12 +144,11 @@ export function EventsPage() {
                 }
               >
                 <option value="">全部</option>
-                <option value="incident_started">异常开始</option>
-                <option value="incident_escalated">异常升级</option>
-                <option value="incident_recovered">异常恢复</option>
-                <option value="node_binding_rebind_confirmed">确认重新绑定</option>
-                <option value="node_binding_pending_rejected">拒绝待确认指纹</option>
-                <option value="node_binding_reset">绑定已重置</option>
+                {EVENT_TYPE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </label>
 

@@ -145,6 +145,35 @@ export type StateChangeEventType =
   | 'node_binding_rebind_confirmed'
   | 'node_binding_pending_rejected'
   | 'node_binding_reset'
+  | 'node_monitoring_maintenance_entered'
+  | 'node_monitoring_maintenance_exited'
+  | 'node_monitoring_paused'
+  | 'node_monitoring_resumed'
+  | 'target_maintenance_entered'
+  | 'target_maintenance_exited'
+  | 'target_paused'
+  | 'target_resumed'
+  | 'target_archived'
+  | 'target_restored_to_paused'
+
+export const STATE_CHANGE_EVENT_TYPE_LABELS: Record<StateChangeEventType, string> = {
+  incident_started: '异常开始',
+  incident_escalated: '异常升级',
+  incident_recovered: '异常恢复',
+  node_binding_rebind_confirmed: '确认重新绑定',
+  node_binding_pending_rejected: '拒绝待确认指纹',
+  node_binding_reset: '绑定已重置',
+  node_monitoring_maintenance_entered: '节点进入维护',
+  node_monitoring_maintenance_exited: '节点退出维护',
+  node_monitoring_paused: '节点暂停监控',
+  node_monitoring_resumed: '节点恢复监控',
+  target_maintenance_entered: '目标进入维护',
+  target_maintenance_exited: '目标退出维护',
+  target_paused: '目标已暂停',
+  target_resumed: '目标已恢复',
+  target_archived: '目标已归档',
+  target_restored_to_paused: '目标已恢复为暂停',
+}
 
 export type StateChangeEventRecord = {
   event_id?: string

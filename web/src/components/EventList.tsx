@@ -1,5 +1,5 @@
 import { formatDateTime } from '../lib/format'
-import type { StateChangeEventRecord } from '../lib/types'
+import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../lib/types'
 
 import { StatusBadge } from './StatusBadge'
 
@@ -10,15 +10,6 @@ const INCIDENT_CLASS_LABELS: Record<string, string> = {
   node_resource_pressure: '节点资源压力',
   target_probe_failure: '目标探测失败',
   target_tls_expiry: '目标 TLS 即将过期',
-}
-
-const EVENT_TYPE_LABELS: Record<string, string> = {
-  incident_started: '异常开始',
-  incident_escalated: '异常升级',
-  incident_recovered: '异常恢复',
-  node_binding_rebind_confirmed: '确认重新绑定',
-  node_binding_pending_rejected: '拒绝待确认指纹',
-  node_binding_reset: '绑定已重置',
 }
 
 const OBJECT_TYPE_LABELS = {
@@ -37,7 +28,7 @@ function incidentClassLabel(value: string) {
 }
 
 function eventTypeLabel(value: StateChangeEventRecord['event_type']) {
-  return EVENT_TYPE_LABELS[value] ?? value
+  return STATE_CHANGE_EVENT_TYPE_LABELS[value] ?? value
 }
 
 function objectTypeLabel(value: StateChangeEventRecord['object_type']) {

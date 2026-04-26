@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { EventsPage } from './EventsPage'
@@ -101,6 +101,68 @@ describe('EventsPage', () => {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
       }),
+    )
+  })
+
+  it('offers runtime-control event filters and submits them', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EventsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+    )
+
+    const eventTypeSelect = screen.getByLabelText('事件类型')
+
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '节点进入维护' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '节点退出维护' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '节点暂停监控' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '节点恢复监控' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '目标进入维护' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '目标退出维护' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '目标已暂停' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '目标已恢复' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '目标已归档' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '目标已恢复为暂停' }),
+    ).toBeInTheDocument()
+
+    fireEvent.change(eventTypeSelect, {
+      target: { value: 'target_restored_to_paused' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        '/api/events?event_type=target_restored_to_paused&limit=50',
+        {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        },
+      ),
     )
   })
 
