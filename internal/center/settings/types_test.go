@@ -3,6 +3,7 @@ package settings
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"houfeng/internal/center/targets"
@@ -137,6 +138,96 @@ func TestSettingsValidateRejectsInvalidOverrideScope(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidSettings) {
 		t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+	}
+}
+
+func TestSettingsValidateRejectsDuplicateNodeLabelOverrides(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.OverrideRules = OverrideRules{
+		NodeLabels: []NodeLabelOverrideRule{
+			{
+				Label: " core ",
+				Overrides: SettingsOverrideFields{
+					HostSampleFrequencyTier: stringPtr("1m"),
+				},
+			},
+			{
+				Label: "core",
+				Overrides: SettingsOverrideFields{
+					HostSampleFrequencyTier: stringPtr("5m"),
+				},
+			},
+		},
+	}
+
+	_, err := Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("Validate() error = %v, want duplicate selector error", err)
+	}
+}
+
+func TestSettingsValidateRejectsDuplicateTargetTypeOverrides(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.OverrideRules = OverrideRules{
+		TargetTypes: []TargetTypeOverrideRule{
+			{
+				TargetType: targets.TargetTypeService,
+				Overrides: SettingsOverrideFields{
+					HostSampleFrequencyTier: stringPtr("1m"),
+				},
+			},
+			{
+				TargetType: " " + targets.TargetTypeService + " ",
+				Overrides: SettingsOverrideFields{
+					HostSampleFrequencyTier: stringPtr("5m"),
+				},
+			},
+		},
+	}
+
+	_, err := Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("Validate() error = %v, want duplicate selector error", err)
+	}
+}
+
+func TestSettingsValidateRejectsDuplicateTargetLabelOverrides(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.OverrideRules = OverrideRules{
+		TargetLabels: []TargetLabelOverrideRule{
+			{
+				Label: " edge ",
+				Overrides: SettingsOverrideFields{
+					HostSampleFrequencyTier: stringPtr("1m"),
+				},
+			},
+			{
+				Label: "edge",
+				Overrides: SettingsOverrideFields{
+					HostSampleFrequencyTier: stringPtr("5m"),
+				},
+			},
+		},
+	}
+
+	_, err := Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("Validate() error = %v, want duplicate selector error", err)
 	}
 }
 

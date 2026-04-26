@@ -197,11 +197,16 @@ func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
 	if input.NodeLabels == nil {
 		input.NodeLabels = []NodeLabelOverrideRule{}
 	}
+	seenNodeLabels := make(map[string]struct{}, len(input.NodeLabels))
 	for i := range input.NodeLabels {
 		label := strings.TrimSpace(input.NodeLabels[i].Label)
 		if label == "" {
 			return OverrideRules{}, invalidSettings("node label override label is required")
 		}
+		if _, ok := seenNodeLabels[label]; ok {
+			return OverrideRules{}, invalidSettings("duplicate node label override selector")
+		}
+		seenNodeLabels[label] = struct{}{}
 		overrides, err := validateSettingsOverrideFields(input.NodeLabels[i].Overrides)
 		if err != nil {
 			return OverrideRules{}, err
@@ -213,11 +218,16 @@ func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
 	if input.TargetTypes == nil {
 		input.TargetTypes = []TargetTypeOverrideRule{}
 	}
+	seenTargetTypes := make(map[string]struct{}, len(input.TargetTypes))
 	for i := range input.TargetTypes {
 		targetType := strings.TrimSpace(input.TargetTypes[i].TargetType)
 		if !targets.IsValidTargetType(targetType) {
 			return OverrideRules{}, invalidSettings("target type override target type is invalid")
 		}
+		if _, ok := seenTargetTypes[targetType]; ok {
+			return OverrideRules{}, invalidSettings("duplicate target type override selector")
+		}
+		seenTargetTypes[targetType] = struct{}{}
 		overrides, err := validateSettingsOverrideFields(input.TargetTypes[i].Overrides)
 		if err != nil {
 			return OverrideRules{}, err
@@ -229,11 +239,16 @@ func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
 	if input.TargetLabels == nil {
 		input.TargetLabels = []TargetLabelOverrideRule{}
 	}
+	seenTargetLabels := make(map[string]struct{}, len(input.TargetLabels))
 	for i := range input.TargetLabels {
 		label := strings.TrimSpace(input.TargetLabels[i].Label)
 		if label == "" {
 			return OverrideRules{}, invalidSettings("target label override label is required")
 		}
+		if _, ok := seenTargetLabels[label]; ok {
+			return OverrideRules{}, invalidSettings("duplicate target label override selector")
+		}
+		seenTargetLabels[label] = struct{}{}
 		overrides, err := validateSettingsOverrideFields(input.TargetLabels[i].Overrides)
 		if err != nil {
 			return OverrideRules{}, err
