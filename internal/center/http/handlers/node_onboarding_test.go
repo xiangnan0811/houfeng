@@ -234,6 +234,23 @@ func TestNodeBindingConfirmRebindHandlerReturnsConflictForInvalidTransition(t *t
 	assertAdminError(t, recorder, "invalid binding transition")
 }
 
+func TestNodeOnboardingConfirmRebindReturnsNotFoundForMissingNode(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeNodeOnboardingRepository{confirmNodeRebindErr: nodes.ErrNodeNotFound}
+
+	handler := handlers.NodeBindingConfirmRebind(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_missing/binding/confirm-rebind", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+	assertAdminError(t, recorder, "node not found")
+}
+
 func TestNodeBindingRejectPendingHandlerReturnsUpdatedState(t *testing.T) {
 	t.Parallel()
 
@@ -260,6 +277,23 @@ func TestNodeBindingRejectPendingHandlerReturnsUpdatedState(t *testing.T) {
 	if repo.rejectPendingFingerprintNodeID != "nd_003" {
 		t.Fatalf("RejectPendingFingerprint nodeID = %q, want %q", repo.rejectPendingFingerprintNodeID, "nd_003")
 	}
+}
+
+func TestNodeOnboardingRejectPendingReturnsNotFoundForMissingNode(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeNodeOnboardingRepository{rejectPendingFingerprintErr: nodes.ErrNodeNotFound}
+
+	handler := handlers.NodeBindingRejectPending(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_missing/binding/reject-pending", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+	assertAdminError(t, recorder, "node not found")
 }
 
 func TestNodeBindingResetHandlerReturnsUpdatedState(t *testing.T) {

@@ -361,10 +361,18 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 func TestBindingConfirmRebindRejectsRetryWithoutPendingFingerprint(t *testing.T) {
 	t.Parallel()
 
+	callCount := 0
 	repo := &PostgresNodeRepository{db: fakeNodeDB{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			callCount++
+			if callCount == 1 {
+				return fakeNodeRow{scan: func(dest ...any) error {
+					return pgx.ErrNoRows
+				}}
+			}
 			return fakeNodeRow{scan: func(dest ...any) error {
-				return pgx.ErrNoRows
+				*(dest[0].(*bool)) = true
+				return nil
 			}}
 		},
 	}}
@@ -372,6 +380,31 @@ func TestBindingConfirmRebindRejectsRetryWithoutPendingFingerprint(t *testing.T)
 	_, err := repo.ConfirmNodeRebind(context.Background(), "nd_retry")
 	if !errors.Is(err, nodes.ErrInvalidBindingTransition) {
 		t.Fatalf("ConfirmNodeRebind() error = %v, want ErrInvalidBindingTransition", err)
+	}
+}
+
+func TestBindingConfirmRebindReturnsNodeNotFoundWhenNodeIsMissing(t *testing.T) {
+	t.Parallel()
+
+	callCount := 0
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			callCount++
+			if callCount == 1 {
+				return fakeNodeRow{scan: func(dest ...any) error {
+					return pgx.ErrNoRows
+				}}
+			}
+			return fakeNodeRow{scan: func(dest ...any) error {
+				*(dest[0].(*bool)) = false
+				return nil
+			}}
+		},
+	}}
+
+	_, err := repo.ConfirmNodeRebind(context.Background(), "nd_missing")
+	if !errors.Is(err, nodes.ErrNodeNotFound) {
+		t.Fatalf("ConfirmNodeRebind() error = %v, want ErrNodeNotFound", err)
 	}
 }
 
@@ -418,10 +451,18 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 func TestBindingRejectPendingRejectsWhenNoPendingFingerprintExists(t *testing.T) {
 	t.Parallel()
 
+	callCount := 0
 	repo := &PostgresNodeRepository{db: fakeNodeDB{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			callCount++
+			if callCount == 1 {
+				return fakeNodeRow{scan: func(dest ...any) error {
+					return pgx.ErrNoRows
+				}}
+			}
 			return fakeNodeRow{scan: func(dest ...any) error {
-				return pgx.ErrNoRows
+				*(dest[0].(*bool)) = true
+				return nil
 			}}
 		},
 	}}
@@ -429,6 +470,31 @@ func TestBindingRejectPendingRejectsWhenNoPendingFingerprintExists(t *testing.T)
 	_, err := repo.RejectPendingFingerprint(context.Background(), "nd_retry")
 	if !errors.Is(err, nodes.ErrInvalidBindingTransition) {
 		t.Fatalf("RejectPendingFingerprint() error = %v, want ErrInvalidBindingTransition", err)
+	}
+}
+
+func TestBindingRejectPendingReturnsNodeNotFoundWhenNodeIsMissing(t *testing.T) {
+	t.Parallel()
+
+	callCount := 0
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			callCount++
+			if callCount == 1 {
+				return fakeNodeRow{scan: func(dest ...any) error {
+					return pgx.ErrNoRows
+				}}
+			}
+			return fakeNodeRow{scan: func(dest ...any) error {
+				*(dest[0].(*bool)) = false
+				return nil
+			}}
+		},
+	}}
+
+	_, err := repo.RejectPendingFingerprint(context.Background(), "nd_missing")
+	if !errors.Is(err, nodes.ErrNodeNotFound) {
+		t.Fatalf("RejectPendingFingerprint() error = %v, want ErrNodeNotFound", err)
 	}
 }
 

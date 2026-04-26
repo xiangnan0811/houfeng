@@ -331,6 +331,21 @@ func (r *PostgresNodeRepository) GetNodeOnboarding(ctx context.Context, nodeID s
 	return state, nil
 }
 
+func (r *PostgresNodeRepository) nodeExists(ctx context.Context, nodeID string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRow(ctx, `
+		select exists (
+			select 1
+			from nodes
+			where node_id = $1
+		)`,
+		nodeID,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check node %q existence: %w", nodeID, err)
+	}
+	return exists, nil
+}
+
 func (r *PostgresNodeRepository) ConfirmNodeRebind(ctx context.Context, nodeID string) (nodes.Record, error) {
 	record, err := scanNode(r.db.QueryRow(ctx, `
 		update nodes
@@ -351,6 +366,13 @@ func (r *PostgresNodeRepository) ConfirmNodeRebind(ctx context.Context, nodeID s
 		nodeID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := r.nodeExists(ctx, nodeID)
+		if existsErr != nil {
+			return nodes.Record{}, fmt.Errorf("confirm node rebind for %q: %w", nodeID, existsErr)
+		}
+		if !exists {
+			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
+		}
 		return nodes.Record{}, fmt.Errorf("%w: confirm rebind requires pending fingerprint for node %q", nodes.ErrInvalidBindingTransition, nodeID)
 	}
 	if err != nil {
@@ -375,6 +397,13 @@ func (r *PostgresNodeRepository) RejectPendingFingerprint(ctx context.Context, n
 		nodeID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := r.nodeExists(ctx, nodeID)
+		if existsErr != nil {
+			return nodes.Record{}, fmt.Errorf("reject pending fingerprint for node %q: %w", nodeID, existsErr)
+		}
+		if !exists {
+			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
+		}
 		return nodes.Record{}, fmt.Errorf("%w: reject pending fingerprint requires pending fingerprint for node %q", nodes.ErrInvalidBindingTransition, nodeID)
 	}
 	if err != nil {
