@@ -145,19 +145,18 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 func qualifiedNodeSelectColumns(alias string) string {
 	parts := make([]string, 0, len(nodeSelectColumnNames))
 	for _, column := range nodeSelectColumnNames {
-		base := column
-		if idx := strings.Index(column, "("); idx != -1 {
-			open := strings.Index(column, "(")
-			close := strings.Index(column, ",")
-			if open != -1 && close != -1 && close > open+1 {
-				base = strings.TrimSpace(column[open+1 : close])
-			}
+		switch column {
+		case "coalesce(enrollment_token_hash, '')":
+			parts = append(parts, "coalesce("+alias+".enrollment_token_hash, '')")
+		case "coalesce(sync_token_hash, '')":
+			parts = append(parts, "coalesce("+alias+".sync_token_hash, '')")
+		case "coalesce(binding_fingerprint, '')":
+			parts = append(parts, "coalesce("+alias+".binding_fingerprint, '')")
+		case "coalesce(pending_binding_fingerprint, '')":
+			parts = append(parts, "coalesce("+alias+".pending_binding_fingerprint, '')")
+		default:
+			parts = append(parts, alias+"."+column)
 		}
-		if base == "labels" || base == "note" || base == "current_active_incident_count" || base == "created_at" || base == "updated_at" || strings.Contains(base, "_") {
-			parts = append(parts, alias+"."+base)
-			continue
-		}
-		parts = append(parts, alias+"."+base)
 	}
 	return strings.Join(parts, ",\n\t\t")
 }

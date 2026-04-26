@@ -912,6 +912,50 @@ func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	}
 }
 
+func TestNodeRuntimeControlResumePreservesNullSafeSelectColumns(t *testing.T) {
+	t.Parallel()
+
+	var gotSQL string
+	tx := &fakeNodeTx{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			gotSQL = sql
+			if len(args) != 1 || args[0] != "nd_resume_nulls" {
+				t.Fatalf("QueryRow args = %#v, want node id %q", args, "nd_resume_nulls")
+			}
+			return fakeNodeRow{scan: func(dest ...any) error {
+				for _, snippet := range []string{
+					"coalesce(updated.enrollment_token_hash, '')",
+					"coalesce(updated.sync_token_hash, '')",
+					"coalesce(updated.binding_fingerprint, '')",
+					"coalesce(updated.pending_binding_fingerprint, '')",
+				} {
+					if !strings.Contains(gotSQL, snippet) {
+						return errors.New("missing null-safe qualified select columns")
+					}
+				}
+				scanNodeRecordDestinations(dest, nodes.Record{NodeID: "nd_resume_nulls", MonitoringStatus: nodes.MonitoringEnabled})
+				*(dest[26].(*string)) = nodeMonitoringStatusMaintenance
+				return nil
+			}}
+		},
+		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("INSERT 1"), nil
+		},
+	}
+	repo := &PostgresNodeRepository{db: fakeNodeDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+
+	record, err := repo.ResumeNodeMonitoring(context.Background(), "nd_resume_nulls")
+	if err != nil {
+		t.Fatalf("ResumeNodeMonitoring() error = %v", err)
+	}
+	if record.NodeID != "nd_resume_nulls" {
+		t.Fatalf("NodeID = %q, want %q", record.NodeID, "nd_resume_nulls")
+	}
+	if record.EnrollmentTokenHash != "" || record.SyncTokenHash != "" || record.BindingFingerprint != "" || record.PendingBindingFingerprint != "" {
+		t.Fatalf("expected empty coalesced token/binding strings, got %#v", record)
+	}
+}
+
 func TestNodeRuntimeControlRejectsInvalidTransition(t *testing.T) {
 	t.Parallel()
 
