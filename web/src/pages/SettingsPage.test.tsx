@@ -1,0 +1,206 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { SettingsPage } from './SettingsPage'
+
+function mockJSONResponse(body: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as Response
+}
+
+const settingsResponseBody = {
+  telegram: {
+    chat_id: 'chat-id',
+    token_present: true,
+    token_masked_summary: '****************oken',
+    runtime_apply_active: false,
+  },
+  host_sample_frequency_tier: '5m',
+  probe_frequency_defaults: {
+    tcp: '5m',
+    http: '1m',
+    tls: '15m',
+  },
+  incident_defaults: {
+    heartbeat_interval_seconds: 30,
+    stale_threshold_intervals: 3,
+    sweep_interval_seconds: 60,
+    notify_on_started: true,
+    notify_on_escalated: true,
+    notify_on_recovered: true,
+  },
+  override_rules: {
+    node_labels: [
+      {
+        label: 'edge',
+        overrides: {
+          host_sample_frequency_tier: '1m',
+          probe_frequency_defaults: { http: '1m' },
+        },
+      },
+    ],
+    target_types: [
+      {
+        target_type: 'service',
+        overrides: {
+          incident_defaults: { stale_threshold_intervals: 4 },
+        },
+      },
+    ],
+    target_labels: [
+      {
+        label: 'external',
+        overrides: {
+          probe_frequency_defaults: { tls: '15m' },
+        },
+      },
+    ],
+  },
+  retention_policy: {
+    raw_layer_days: 7,
+    aggregate_layer_days: 30,
+    event_layer_days: 90,
+    notification_layer_days: 180,
+  },
+}
+
+describe('SettingsPage', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('loads persisted settings into the required sections and keeps Telegram and retention copy truthful', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)),
+    )
+
+    render(<SettingsPage />)
+
+    expect(screen.getByText('正在加载设置…')).toBeInTheDocument()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+
+    expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '默认频率档位' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '全局默认规则' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '少量覆盖规则' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '数据保留策略' })).toBeInTheDocument()
+
+    expect(screen.getByLabelText('Telegram Chat ID')).toHaveValue('chat-id')
+    expect(screen.getByLabelText('当前节点主机样本频率')).toHaveValue('5m')
+    expect((screen.getByLabelText('节点标签覆盖规则 JSON') as HTMLTextAreaElement).value).toContain(
+      '"label": "edge"',
+    )
+
+    expect(screen.getByText('已配置 Telegram Bot Token：****************oken')).toBeInTheDocument()
+    expect(screen.queryByText('bot-token')).not.toBeInTheDocument()
+    expect(
+      screen.getByText('当前仅保存 Telegram 持久化配置，尚未自动应用到正在运行的通知进程。'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('当前仅保存保留策略，尚未自动执行清理或聚合任务。'),
+    ).toBeInTheDocument()
+  })
+
+  it('saves updated settings with a replacement Telegram token and refreshed defaults', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          ...settingsResponseBody,
+          telegram: {
+            ...settingsResponseBody.telegram,
+            token_masked_summary: '***************oken',
+          },
+          host_sample_frequency_tier: '1m',
+          retention_policy: {
+            ...settingsResponseBody.retention_policy,
+            raw_layer_days: 14,
+          },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SettingsPage />)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('新的 Telegram Bot Token'), {
+      target: { value: 'replacement-token' },
+    })
+    fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
+      target: { value: '1m' },
+    })
+    fireEvent.change(screen.getByLabelText('原始层保留天数'), {
+      target: { value: '14' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(screen.getByText('设置已保存。')).toBeInTheDocument())
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/settings')
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: 'PUT',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      telegram: {
+        bot_token: 'replacement-token',
+        chat_id: 'chat-id',
+      },
+      host_sample_frequency_tier: '1m',
+      probe_frequency_defaults: {
+        tcp: '5m',
+        http: '1m',
+        tls: '15m',
+      },
+      incident_defaults: {
+        heartbeat_interval_seconds: 30,
+        stale_threshold_intervals: 3,
+        sweep_interval_seconds: 60,
+        notify_on_started: true,
+        notify_on_escalated: true,
+        notify_on_recovered: true,
+      },
+      override_rules: settingsResponseBody.override_rules,
+      retention_policy: {
+        raw_layer_days: 14,
+        aggregate_layer_days: 30,
+        event_layer_days: 90,
+        notification_layer_days: 180,
+      },
+    })
+  })
+
+  it('shows an inline validation error when a persisted Telegram token exists but no replacement token is provided for save', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SettingsPage />)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
+      target: { value: '1m' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    expect(
+      screen.getByText('当前已配置 Telegram Bot Token；保存前请重新输入 Token，或同时清空 Chat ID 以关闭通知。'),
+    ).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
