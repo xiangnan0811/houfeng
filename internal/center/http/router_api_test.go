@@ -45,6 +45,39 @@ func TestRouterKeepsAPINodesOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsSettingsOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		SettingsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"host_sample_frequency_tier":"5m"}`))
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	body, err := io.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
+	if strings.TrimSpace(string(body)) == spaShell {
+		t.Fatalf("expected API response, got SPA fallback body %q", string(body))
+	}
+
+	if !strings.Contains(string(body), `"host_sample_frequency_tier":"5m"`) {
+		t.Fatalf("expected settings payload, got %q", string(body))
+	}
+}
+
 func TestRouterStillFallsBackForWebPath(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",

@@ -14,6 +14,7 @@ type RouterOptions struct {
 	DashboardHandler                stdhttp.Handler
 	EventsHandler                   stdhttp.Handler
 	IncidentsHandler                stdhttp.Handler
+	SettingsHandler                 stdhttp.Handler
 	NodesCollectionHandler          stdhttp.Handler
 	NodeItemHandler                 stdhttp.Handler
 	NodeRuntimeFactsHandler         stdhttp.Handler
@@ -43,6 +44,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.IncidentsHandler != nil {
 		mux.Handle("/api/incidents", opts.IncidentsHandler)
+	}
+	if opts.SettingsHandler != nil {
+		mux.Handle("/api/settings", opts.SettingsHandler)
 	}
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", opts.NodesCollectionHandler)
