@@ -99,11 +99,10 @@ function buildFormState(settings: SettingsRecord): FormState {
 
 function parsePositiveInteger(value: string, label: string) {
   const normalized = value.trim()
-  const parsed = Number.parseInt(normalized, 10)
-  if (!normalized || !Number.isInteger(parsed) || parsed <= 0) {
+  if (!/^[1-9]\d*$/.test(normalized)) {
     throw new Error(`${label}必须为正整数。`)
   }
-  return parsed
+  return Number.parseInt(normalized, 10)
 }
 
 function parseOverrideRuleArray<T>(value: string, label: string): T[] {
@@ -118,24 +117,89 @@ function parseOverrideRuleArray<T>(value: string, label: string): T[] {
   }
 }
 
-function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): SettingsUpdateInput {
+type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram'> & {
+  telegram: {
+    chat_id: string
+    bot_token?: string
+  }
+}
+
+function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): SettingsUpdateDraft {
   const botToken = form.telegramBotToken.trim()
   const chatId = form.telegramChatId.trim()
   const hasPersistedToken = currentSettings.telegram.token_present
+  const chatChanged = chatId != currentSettings.telegram.chat_id
+  const replacementTokenProvided = botToken != ''
 
-  if (!botToken && chatId && hasPersistedToken) {
-    throw new Error(
-      '当前已配置 Telegram Bot Token；保存前请重新输入 Token，或同时清空 Chat ID 以关闭通知。',
-    )
+  if (hasPersistedToken) {
+    if (!replacementTokenProvided && chatChanged && chatId != '') {
+      throw new Error(
+        '修改 Telegram 配置时，请同时明确提供新的 Bot Token，或同时清空 Token 与 Chat ID 以关闭通知。',
+      )
+    }
+    if (!replacementTokenProvided && !chatChanged) {
+      return {
+        telegram: { chat_id: chatId },
+        host_sample_frequency_tier: form.hostSampleFrequencyTier,
+        probe_frequency_defaults: {
+          tcp: form.probeFrequencyDefaults.tcp,
+          http: form.probeFrequencyDefaults.http,
+          tls: form.probeFrequencyDefaults.tls,
+        },
+        incident_defaults: {
+          heartbeat_interval_seconds: parsePositiveInteger(
+            form.incidentDefaults.heartbeatIntervalSeconds,
+            '心跳间隔秒数',
+          ),
+          stale_threshold_intervals: parsePositiveInteger(
+            form.incidentDefaults.staleThresholdIntervals,
+            '失联判定阈值',
+          ),
+          sweep_interval_seconds: parsePositiveInteger(
+            form.incidentDefaults.sweepIntervalSeconds,
+            '扫描间隔秒数',
+          ),
+          notify_on_started: form.incidentDefaults.notifyOnStarted,
+          notify_on_escalated: form.incidentDefaults.notifyOnEscalated,
+          notify_on_recovered: form.incidentDefaults.notifyOnRecovered,
+        },
+        override_rules: {
+          node_labels: parseOverrideRuleArray<NodeLabelOverrideRule>(
+            form.nodeLabelOverridesText,
+            '节点标签覆盖规则',
+          ),
+          target_types: parseOverrideRuleArray<TargetTypeOverrideRule>(
+            form.targetTypeOverridesText,
+            '目标类型覆盖规则',
+          ),
+          target_labels: parseOverrideRuleArray<TargetLabelOverrideRule>(
+            form.targetLabelOverridesText,
+            '目标标签覆盖规则',
+          ),
+        },
+        retention_policy: {
+          raw_layer_days: parsePositiveInteger(form.retentionPolicy.rawLayerDays, '原始层保留天数'),
+          aggregate_layer_days: parsePositiveInteger(
+            form.retentionPolicy.aggregateLayerDays,
+            '聚合层保留天数',
+          ),
+          event_layer_days: parsePositiveInteger(form.retentionPolicy.eventLayerDays, '事件层保留天数'),
+          notification_layer_days: parsePositiveInteger(
+            form.retentionPolicy.notificationLayerDays,
+            '通知层保留天数',
+          ),
+        },
+      }
+    }
   }
 
-  if ((botToken === '') !== (chatId === '')) {
+  if ((botToken == '') != (chatId == '')) {
     throw new Error('Telegram Bot Token 和 Chat ID 需要同时提供或同时清空。')
   }
 
   return {
     telegram: {
-      bot_token: botToken,
+      ...(replacementTokenProvided ? { bot_token: botToken } : {}),
       chat_id: chatId,
     },
     host_sample_frequency_tier: form.hostSampleFrequencyTier,
@@ -412,7 +476,7 @@ export function SettingsPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    let payload: SettingsUpdateInput
+    let payload: SettingsUpdateDraft
     try {
       payload = buildUpdateInput(form, settings)
     } catch (error) {
@@ -427,7 +491,7 @@ export function SettingsPage() {
     setState((current) => ({ ...current, saving: true, saveError: null, saveSuccess: null }))
 
     try {
-      const updated = await updateSettings(payload)
+      const updated = await updateSettings(payload as SettingsUpdateInput)
       setState((current) => ({
         ...current,
         saving: false,

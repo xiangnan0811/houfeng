@@ -32,6 +32,20 @@ type telegramSettingsResponse struct {
 	RuntimeApplyActive bool   `json:"runtime_apply_active"`
 }
 
+type settingsUpdateRequest struct {
+	Telegram                telegramSettingsUpdateRequest         `json:"telegram"`
+	HostSampleFrequencyTier string                                `json:"host_sample_frequency_tier"`
+	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
+	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
+	OverrideRules           centersettings.OverrideRules          `json:"override_rules"`
+	RetentionPolicy         centersettings.RetentionPolicy        `json:"retention_policy"`
+}
+
+type telegramSettingsUpdateRequest struct {
+	BotToken *string `json:"bot_token,omitempty"`
+	ChatID   string  `json:"chat_id"`
+}
+
 func Settings(repo SettingsRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -43,13 +57,19 @@ func Settings(repo SettingsRepository) http.Handler {
 			}
 			writeJSON(w, http.StatusOK, newSettingsResponse(record))
 		case http.MethodPut:
-			var input centersettings.CenterSettings
+			current, err := repo.GetSettings(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+
+			var input settingsUpdateRequest
 			if err := decodeSettingsJSONBody(r, &input); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
 			}
 
-			record, err := repo.PutSettings(r.Context(), input)
+			record, err := repo.PutSettings(r.Context(), mergeSettingsUpdate(current, input))
 			if err != nil {
 				if errors.Is(err, centersettings.ErrInvalidSettings) {
 					writeError(w, http.StatusBadRequest, "invalid input")
@@ -63,6 +83,29 @@ func Settings(repo SettingsRepository) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUpdateRequest) centersettings.CenterSettings {
+	merged := centersettings.CenterSettings{
+		Telegram: centersettings.TelegramSettings{
+			BotToken: current.Telegram.BotToken,
+			ChatID:   strings.TrimSpace(input.Telegram.ChatID),
+		},
+		HostSampleFrequencyTier: input.HostSampleFrequencyTier,
+		ProbeFrequencyDefaults:  input.ProbeFrequencyDefaults,
+		IncidentDefaults:        input.IncidentDefaults,
+		OverrideRules:           input.OverrideRules,
+		RetentionPolicy:         input.RetentionPolicy,
+	}
+
+	if input.Telegram.BotToken != nil {
+		merged.Telegram.BotToken = strings.TrimSpace(*input.Telegram.BotToken)
+	}
+	if merged.Telegram.ChatID == "" {
+		merged.Telegram.BotToken = ""
+	}
+
+	return merged
 }
 
 func newSettingsResponse(record centersettings.CenterSettings) settingsResponse {

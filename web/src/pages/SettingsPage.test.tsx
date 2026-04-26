@@ -107,6 +107,66 @@ describe('SettingsPage', () => {
     ).toBeInTheDocument()
   })
 
+  it('saves unrelated settings without requiring Telegram token re-entry and omits bot_token from the payload', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          ...settingsResponseBody,
+          host_sample_frequency_tier: '1m',
+          retention_policy: {
+            ...settingsResponseBody.retention_policy,
+            raw_layer_days: 14,
+          },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SettingsPage />)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
+      target: { value: '1m' },
+    })
+    fireEvent.change(screen.getByLabelText('原始层保留天数'), {
+      target: { value: '14' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(screen.getByText('设置已保存。')).toBeInTheDocument())
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      telegram: {
+        chat_id: 'chat-id',
+      },
+      host_sample_frequency_tier: '1m',
+      probe_frequency_defaults: {
+        tcp: '5m',
+        http: '1m',
+        tls: '15m',
+      },
+      incident_defaults: {
+        heartbeat_interval_seconds: 30,
+        stale_threshold_intervals: 3,
+        sweep_interval_seconds: 60,
+        notify_on_started: true,
+        notify_on_escalated: true,
+        notify_on_recovered: true,
+      },
+      override_rules: settingsResponseBody.override_rules,
+      retention_policy: {
+        raw_layer_days: 14,
+        aggregate_layer_days: 30,
+        event_layer_days: 90,
+        notification_layer_days: 180,
+      },
+    })
+  })
+
   it('saves updated settings with a replacement Telegram token and refreshed defaults', async () => {
     const fetchMock = vi
       .fn()
@@ -183,7 +243,7 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('shows an inline validation error when a persisted Telegram token exists but no replacement token is provided for save', async () => {
+  it('shows an inline validation error when Telegram chat id is changed without explicitly replacing the token', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
@@ -193,14 +253,41 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
 
-    fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
-      target: { value: '1m' },
+    fireEvent.change(screen.getByLabelText('Telegram Chat ID'), {
+      target: { value: 'new-chat-id' },
     })
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
     expect(
-      screen.getByText('当前已配置 Telegram Bot Token；保存前请重新输入 Token，或同时清空 Chat ID 以关闭通知。'),
+      screen.getByText('修改 Telegram 配置时，请同时明确提供新的 Bot Token，或同时清空 Token 与 Chat ID 以关闭通知。'),
     ).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects malformed integer text instead of silently coercing it', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SettingsPage />)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('心跳间隔秒数'), {
+      target: { value: '30abc' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    expect(screen.getByText('心跳间隔秒数必须为正整数。')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(screen.getByLabelText('心跳间隔秒数'), {
+      target: { value: '1.5' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    expect(screen.getByText('心跳间隔秒数必须为正整数。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
