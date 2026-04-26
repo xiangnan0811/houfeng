@@ -243,10 +243,19 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('shows an inline validation error when Telegram chat id is changed without explicitly replacing the token', async () => {
+  it('saves a Telegram chat-id-only update when a token is already stored', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          ...settingsResponseBody,
+          telegram: {
+            ...settingsResponseBody.telegram,
+            chat_id: 'new-chat-id',
+          },
+        }),
+      )
     vi.stubGlobal('fetch', fetchMock)
 
     render(<SettingsPage />)
@@ -258,10 +267,30 @@ describe('SettingsPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
-    expect(
-      screen.getByText('修改 Telegram 配置时，请同时明确提供新的 Bot Token，或同时清空 Token 与 Chat ID 以关闭通知。'),
-    ).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByText('设置已保存。')).toBeInTheDocument())
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      telegram: {
+        chat_id: 'new-chat-id',
+      },
+      host_sample_frequency_tier: '5m',
+      probe_frequency_defaults: {
+        tcp: '5m',
+        http: '1m',
+        tls: '15m',
+      },
+      incident_defaults: {
+        heartbeat_interval_seconds: 30,
+        stale_threshold_intervals: 3,
+        sweep_interval_seconds: 60,
+        notify_on_started: true,
+        notify_on_escalated: true,
+        notify_on_recovered: true,
+      },
+      override_rules: settingsResponseBody.override_rules,
+      retention_policy: settingsResponseBody.retention_policy,
+    })
   })
 
   it('rejects malformed integer text instead of silently coercing it', async () => {
