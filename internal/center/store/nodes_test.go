@@ -185,6 +185,15 @@ func TestNodeBindingEpochMigrationAddsBoundaryColumn(t *testing.T) {
 	if !strings.Contains(string(source), "add column if not exists binding_epoch_started_at timestamptz") {
 		t.Fatal("binding epoch migration missing binding_epoch_started_at column")
 	}
+	if !strings.Contains(string(source), "set binding_epoch_started_at = created_at") {
+		t.Fatal("binding epoch migration missing created_at backfill")
+	}
+	if !strings.Contains(string(source), "coalesce(binding_fingerprint, '') <> ''") {
+		t.Fatal("binding epoch migration missing active binding backfill scope")
+	}
+	if !strings.Contains(string(source), "binding_epoch_started_at is null") {
+		t.Fatal("binding epoch migration missing null-epoch guard")
+	}
 }
 
 func TestNodeOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testing.T) {
