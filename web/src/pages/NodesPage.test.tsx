@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -273,5 +273,179 @@ describe('NodesPage', () => {
       'href',
       '/nodes/nd_001/onboarding',
     )
+  })
+
+  it('renders runtime quick actions by node monitoring status and applies light actions immediately', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            node_id: 'nd_enabled',
+            display_name: 'Tokyo Edge',
+            region: 'ap-northeast-1',
+            city: 'Tokyo',
+            provider: 'Vultr',
+            lifecycle_status: '在用',
+            monitoring_status: '启用',
+            binding_status: '已绑定',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-26T09:00:00Z',
+            updated_at: '2026-04-26T09:00:00Z',
+          },
+          {
+            node_id: 'nd_paused',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            provider: 'Hetzner',
+            lifecycle_status: '在用',
+            monitoring_status: '暂停',
+            binding_status: '已绑定',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-26T09:00:00Z',
+            updated_at: '2026-04-26T09:00:00Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_enabled',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '在用',
+          monitoring_status: '维护中',
+          binding_status: '已绑定',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-26T09:00:00Z',
+          updated_at: '2026-04-26T09:10:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_paused',
+          display_name: 'Seoul Edge',
+          region: 'ap-northeast-2',
+          city: 'Seoul',
+          provider: 'Hetzner',
+          lifecycle_status: '在用',
+          monitoring_status: '启用',
+          binding_status: '已绑定',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-26T09:00:00Z',
+          updated_at: '2026-04-26T09:12:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    const enabledRow = screen.getByText('Tokyo Edge').closest('article')
+    const pausedRow = screen.getByText('Seoul Edge').closest('article')
+    expect(enabledRow).not.toBeNull()
+    expect(pausedRow).not.toBeNull()
+
+    expect(within(enabledRow!).getByRole('button', { name: '进入维护' })).toBeInTheDocument()
+    expect(within(enabledRow!).getByRole('button', { name: '暂停监控' })).toBeInTheDocument()
+    expect(within(pausedRow!).queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
+    expect(within(pausedRow!).getByRole('button', { name: '恢复监控' })).toBeInTheDocument()
+
+    fireEvent.click(within(enabledRow!).getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() =>
+      expect(within(enabledRow!).getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(within(pausedRow!).getByRole('button', { name: '恢复监控' }))
+
+    await waitFor(() =>
+      expect(within(pausedRow!).getByRole('button', { name: '进入维护' })).toBeInTheDocument(),
+    )
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_enabled/runtime/enter-maintenance', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_paused/runtime/resume', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('requires strong confirmation before pausing monitoring and keeps runtime errors local', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              node_id: 'nd_001',
+              display_name: 'Tokyo Edge',
+              region: 'ap-northeast-1',
+              city: 'Tokyo',
+              provider: 'Vultr',
+              lifecycle_status: '在用',
+              monitoring_status: '启用',
+              binding_status: '已绑定',
+              labels: [],
+              note: '',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+              created_at: '2026-04-26T09:00:00Z',
+              updated_at: '2026-04-26T09:00:00Z',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid runtime transition' }, 409)),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+
+    expect(confirmMock).toHaveBeenCalledWith('暂停监控会停止采集并产生数据空档，确定继续吗？')
+    await waitFor(() =>
+      expect(screen.getByText('invalid runtime transition')).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
   })
 })

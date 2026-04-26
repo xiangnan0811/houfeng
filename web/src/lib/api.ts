@@ -81,6 +81,22 @@ export function getNodeRuntimeFacts(nodeId: string) {
   return requestJSON<NodeRuntimeFacts>(`/api/nodes/${nodeId}/runtime-facts`)
 }
 
+export function enterNodeMaintenance(nodeId: string) {
+  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/enter-maintenance`)
+}
+
+export function exitNodeMaintenance(nodeId: string) {
+  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/exit-maintenance`)
+}
+
+export function pauseNodeMonitoring(nodeId: string) {
+  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/pause`)
+}
+
+export function resumeNodeMonitoring(nodeId: string) {
+  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/resume`)
+}
+
 export function getNodeOnboarding(nodeId: string) {
   return requestJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/onboarding`)
 }
@@ -115,6 +131,30 @@ export function listTargetProbeItems(targetId: string) {
 
 export function getTargetRuntimeFacts(targetId: string) {
   return requestJSON<TargetRuntimeFacts>(`/api/targets/${targetId}/runtime-facts`)
+}
+
+export function enterTargetMaintenance(targetId: string) {
+  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/enter-maintenance`)
+}
+
+export function exitTargetMaintenance(targetId: string) {
+  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/exit-maintenance`)
+}
+
+export function pauseTarget(targetId: string) {
+  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/pause`)
+}
+
+export function resumeTarget(targetId: string) {
+  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/resume`)
+}
+
+export function archiveTarget(targetId: string) {
+  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/archive`)
+}
+
+export function restoreTargetToPaused(targetId: string) {
+  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/restore-to-paused`)
 }
 
 export function getDashboard() {

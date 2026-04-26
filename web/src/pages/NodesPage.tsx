@@ -2,7 +2,15 @@ import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { StatusBadge } from '../components/StatusBadge'
-import { ApiError, issueNodeEnrollmentToken, listNodes } from '../lib/api'
+import {
+  ApiError,
+  enterNodeMaintenance,
+  exitNodeMaintenance,
+  issueNodeEnrollmentToken,
+  listNodes,
+  pauseNodeMonitoring,
+  resumeNodeMonitoring,
+} from '../lib/api'
 import { formatDateTime } from '../lib/format'
 import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { NodeRecord } from '../lib/types'
@@ -24,6 +32,10 @@ const initialCreateForm: CreateNodeInput = {
   labels: [],
   note: '',
 }
+
+const NODE_PAUSE_CONFIRM_MESSAGE = '暂停监控会停止采集并产生数据空档，确定继续吗？'
+
+type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -69,6 +81,28 @@ function parseLabels(value: string) {
     .filter(Boolean)
 }
 
+function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction; label: string }> {
+  if (node.monitoring_status === '启用') {
+    return [
+      { action: 'enter-maintenance', label: '进入维护' },
+      { action: 'pause', label: '暂停监控' },
+    ]
+  }
+
+  if (node.monitoring_status === '维护中') {
+    return [
+      { action: 'exit-maintenance', label: '退出维护' },
+      { action: 'pause', label: '暂停监控' },
+    ]
+  }
+
+  if (node.monitoring_status === '暂停') {
+    return [{ action: 'resume', label: '恢复监控' }]
+  }
+
+  return []
+}
+
 export function NodesPage() {
   const navigate = useNavigate()
   const [nodes, setNodes] = useState<NodeRecord[]>([])
@@ -79,6 +113,8 @@ export function NodesPage() {
   const [createError, setCreateError] = useState<string | null>(null)
   const [labelInput, setLabelInput] = useState('')
   const [createForm, setCreateForm] = useState<CreateNodeInput>(initialCreateForm)
+  const [runtimeBusyNodeId, setRuntimeBusyNodeId] = useState<string | null>(null)
+  const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
 
   function resetCreateFlow() {
     setCreateError(null)
@@ -107,6 +143,41 @@ export function NodesPage() {
 
   function updateField<K extends keyof CreateNodeInput>(field: K, value: CreateNodeInput[K]) {
     setCreateForm((current) => ({ ...current, [field]: value }))
+  }
+
+  async function handleRuntimeAction(node: NodeRecord, action: NodeRuntimeAction) {
+    if (action === 'pause' && !window.confirm(NODE_PAUSE_CONFIRM_MESSAGE)) {
+      return
+    }
+
+    setRuntimeBusyNodeId(node.node_id)
+    setRuntimeErrors((current) => {
+      if (!current[node.node_id]) return current
+      const next = { ...current }
+      delete next[node.node_id]
+      return next
+    })
+
+    try {
+      const updated =
+        action === 'enter-maintenance'
+          ? await enterNodeMaintenance(node.node_id)
+          : action === 'exit-maintenance'
+            ? await exitNodeMaintenance(node.node_id)
+            : action === 'pause'
+              ? await pauseNodeMonitoring(node.node_id)
+              : await resumeNodeMonitoring(node.node_id)
+      setNodes((current) =>
+        current.map((item) => (item.node_id === updated.node_id ? updated : item)),
+      )
+    } catch (runtimeError) {
+      setRuntimeErrors((current) => ({
+        ...current,
+        [node.node_id]: describeError(runtimeError, '节点运行控制操作失败'),
+      }))
+    } finally {
+      setRuntimeBusyNodeId((current) => (current === node.node_id ? null : current))
+    }
   }
 
   async function issueTokenAndEnterOnboarding(node: NodeRecord) {
@@ -303,6 +374,24 @@ export function NodesPage() {
                   接入工作台
                 </Link>
               </p>
+              <p>
+                <Link className="text-link" to={`/nodes/${node.node_id}`}>
+                  查看详情
+                </Link>
+              </p>
+              <div className="badge-row badge-row--wrap">
+                {nodeRuntimeActions(node).map(({ action, label }) => (
+                  <button
+                    key={action}
+                    type="button"
+                    disabled={runtimeBusyNodeId === node.node_id}
+                    onClick={() => void handleRuntimeAction(node, action)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {runtimeErrors[node.node_id] ? <p>{runtimeErrors[node.node_id]}</p> : null}
             </div>
             <div className="badge-row badge-row--wrap">
               <StatusBadge label={node.lifecycle_status} />

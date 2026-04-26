@@ -7,10 +7,14 @@ import { IncidentList } from '../components/IncidentList'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
+  enterNodeMaintenance,
+  exitNodeMaintenance,
   getNode,
   getNodeRuntimeFacts,
   listEvents,
   listIncidents,
+  pauseNodeMonitoring,
+  resumeNodeMonitoring,
 } from '../lib/api'
 import {
   formatBytes,
@@ -40,10 +44,36 @@ type State = {
   eventsError: string | null
 }
 
+const NODE_PAUSE_CONFIRM_MESSAGE = '暂停监控会停止采集并产生数据空档，确定继续吗？'
+
+type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
+
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
+}
+
+function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction; label: string }> {
+  if (node.monitoring_status === '启用') {
+    return [
+      { action: 'enter-maintenance', label: '进入维护' },
+      { action: 'pause', label: '暂停监控' },
+    ]
+  }
+
+  if (node.monitoring_status === '维护中') {
+    return [
+      { action: 'exit-maintenance', label: '退出维护' },
+      { action: 'pause', label: '暂停监控' },
+    ]
+  }
+
+  if (node.monitoring_status === '暂停') {
+    return [{ action: 'resume', label: '恢复监控' }]
+  }
+
+  return []
 }
 
 export function NodeDetailPage() {
@@ -59,6 +89,8 @@ export function NodeDetailPage() {
     events: [],
     eventsError: null,
   })
+  const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -137,6 +169,35 @@ export function NodeDetailPage() {
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
 
+  async function handleRuntimeAction(action: NodeRuntimeAction) {
+    if (!node) return
+    if (action === 'pause' && !window.confirm(NODE_PAUSE_CONFIRM_MESSAGE)) {
+      return
+    }
+
+    setRuntimeSubmitting(true)
+    setRuntimeError(null)
+
+    try {
+      const updated =
+        action === 'enter-maintenance'
+          ? await enterNodeMaintenance(node.node_id)
+          : action === 'exit-maintenance'
+            ? await exitNodeMaintenance(node.node_id)
+            : action === 'pause'
+              ? await pauseNodeMonitoring(node.node_id)
+              : await resumeNodeMonitoring(node.node_id)
+      setState((current) => ({
+        ...current,
+        node: updated,
+      }))
+    } catch (error) {
+      setRuntimeError(describeError(error, '节点运行控制操作失败'))
+    } finally {
+      setRuntimeSubmitting(false)
+    }
+  }
+
   if (!missingNodeId && !isCurrentNode) {
     return <section className="page-panel">正在加载节点详情…</section>
   }
@@ -208,6 +269,25 @@ export function NodeDetailPage() {
           </p>
         </article>
       </div>
+
+      <DetailSection eyebrow="Runtime Control" title="运行控制">
+        <div className="page-stack">
+          <p>维护会继续采集，但不解释结果。暂停会停止采集并产生数据空档。</p>
+          <div className="badge-row badge-row--wrap">
+            {nodeRuntimeActions(node).map(({ action, label }) => (
+              <button
+                key={action}
+                type="button"
+                disabled={runtimeSubmitting}
+                onClick={() => void handleRuntimeAction(action)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {runtimeError ? <p>{runtimeError}</p> : null}
+        </div>
+      </DetailSection>
 
       <DetailSection
         eyebrow="Current Runtime Facts"

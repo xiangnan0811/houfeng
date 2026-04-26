@@ -546,4 +546,162 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByText('旧目标异常摘要')).not.toBeInTheDocument()
     expect(screen.queryByText('旧目标事件')).not.toBeInTheDocument()
   })
+
+  it('renders runtime controls and restores archived targets to paused from the detail page', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_archived',
+          name: 'Legacy API',
+          target_type: 'service',
+          host: 'legacy.example.com',
+          execution_node_labels: ['edge'],
+          run_status: '已归档',
+          labels: ['legacy'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_archived',
+          latest_probe_observations: [],
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_archived',
+          name: 'Legacy API',
+          target_type: 'service',
+          host: 'legacy.example.com',
+          execution_node_labels: ['edge'],
+          run_status: '暂停',
+          labels: ['legacy'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:15:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_archived']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Legacy API' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByRole('heading', { name: '运行控制' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '恢复到暂停' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '恢复' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole('button', { name: '直接启用' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_archived/runtime/restore-to-paused', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('requires strong confirmation before archiving from the detail page', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: ['public'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          latest_probe_observations: [],
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '已归档',
+          labels: ['public'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:20:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+
+    expect(confirmMock).toHaveBeenCalledWith('归档会让目标退出当前工作集，但会保留历史记录，确定继续吗？')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '恢复到暂停' })).toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/runtime/archive', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
 })

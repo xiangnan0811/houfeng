@@ -7,11 +7,17 @@ import { IncidentList } from '../components/IncidentList'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
+  archiveTarget,
+  enterTargetMaintenance,
+  exitTargetMaintenance,
   getTarget,
   getTargetRuntimeFacts,
   listEvents,
   listIncidents,
   listTargetProbeItems,
+  pauseTarget,
+  restoreTargetToPaused,
+  resumeTarget,
 } from '../lib/api'
 import {
   formatConfigSummary,
@@ -41,10 +47,54 @@ type State = {
   eventsError: string | null
 }
 
+const TARGET_PAUSE_CONFIRM_MESSAGE = '暂停会停止采集并产生数据空档，确定继续吗？'
+const TARGET_ARCHIVE_CONFIRM_MESSAGE = '归档会让目标退出当前工作集，但会保留历史记录，确定继续吗？'
+
+type TargetRuntimeAction =
+  | 'enter-maintenance'
+  | 'exit-maintenance'
+  | 'pause'
+  | 'resume'
+  | 'archive'
+  | 'restore-to-paused'
+
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
+}
+
+function targetRuntimeActions(
+  target: TargetRecord,
+): Array<{ action: TargetRuntimeAction; label: string }> {
+  if (target.run_status === '启用') {
+    return [
+      { action: 'enter-maintenance', label: '进入维护' },
+      { action: 'pause', label: '暂停' },
+      { action: 'archive', label: '归档' },
+    ]
+  }
+
+  if (target.run_status === '维护中') {
+    return [
+      { action: 'exit-maintenance', label: '退出维护' },
+      { action: 'pause', label: '暂停' },
+      { action: 'archive', label: '归档' },
+    ]
+  }
+
+  if (target.run_status === '暂停') {
+    return [
+      { action: 'resume', label: '恢复' },
+      { action: 'archive', label: '归档' },
+    ]
+  }
+
+  if (target.run_status === '已归档') {
+    return [{ action: 'restore-to-paused', label: '恢复到暂停' }]
+  }
+
+  return []
 }
 
 export function TargetDetailPage() {
@@ -61,6 +111,8 @@ export function TargetDetailPage() {
     events: [],
     eventsError: null,
   })
+  const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -155,6 +207,42 @@ export function TargetDetailPage() {
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
 
+  async function handleRuntimeAction(action: TargetRuntimeAction) {
+    if (!target) return
+    if (action === 'pause' && !window.confirm(TARGET_PAUSE_CONFIRM_MESSAGE)) {
+      return
+    }
+    if (action === 'archive' && !window.confirm(TARGET_ARCHIVE_CONFIRM_MESSAGE)) {
+      return
+    }
+
+    setRuntimeSubmitting(true)
+    setRuntimeError(null)
+
+    try {
+      const updated =
+        action === 'enter-maintenance'
+          ? await enterTargetMaintenance(target.target_id)
+          : action === 'exit-maintenance'
+            ? await exitTargetMaintenance(target.target_id)
+            : action === 'pause'
+              ? await pauseTarget(target.target_id)
+              : action === 'resume'
+                ? await resumeTarget(target.target_id)
+                : action === 'archive'
+                  ? await archiveTarget(target.target_id)
+                  : await restoreTargetToPaused(target.target_id)
+      setState((current) => ({
+        ...current,
+        target: updated,
+      }))
+    } catch (error) {
+      setRuntimeError(describeError(error, '目标运行控制操作失败'))
+    } finally {
+      setRuntimeSubmitting(false)
+    }
+  }
+
   if (!missingTargetId && !isCurrentTarget) {
     return <section className="page-panel">正在加载目标详情…</section>
   }
@@ -224,6 +312,25 @@ export function TargetDetailPage() {
           </p>
         </article>
       </div>
+
+      <DetailSection eyebrow="Runtime Control" title="运行控制">
+        <div className="page-stack">
+          <p>维护会继续采集，但不解释结果。暂停会停止采集并产生数据空档。归档会退出当前工作集并保留历史。</p>
+          <div className="badge-row badge-row--wrap">
+            {targetRuntimeActions(target).map(({ action, label }) => (
+              <button
+                key={action}
+                type="button"
+                disabled={runtimeSubmitting}
+                onClick={() => void handleRuntimeAction(action)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {runtimeError ? <p>{runtimeError}</p> : null}
+        </div>
+      </DetailSection>
 
       <DetailSection eyebrow="Probe Items" title="ProbeItem 列表">
         {probeItems.length === 0 ? (

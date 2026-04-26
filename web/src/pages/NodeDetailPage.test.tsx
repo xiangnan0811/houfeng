@@ -512,4 +512,165 @@ describe('NodeDetailPage', () => {
     expect(screen.queryByText('旧节点异常摘要')).not.toBeInTheDocument()
     expect(screen.queryByText('旧节点事件')).not.toBeInTheDocument()
   })
+
+  it('renders runtime controls and applies light maintenance actions from the detail page', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_maintenance',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '在用',
+          monitoring_status: '维护中',
+          binding_status: '已绑定',
+          labels: ['core'],
+          note: '',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_sync_at: '2026-04-24T09:05:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_maintenance',
+          latest_host_sample: null,
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_maintenance',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '在用',
+          monitoring_status: '启用',
+          binding_status: '已绑定',
+          labels: ['core'],
+          note: '',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_sync_at: '2026-04-24T09:05:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:15:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_maintenance']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByRole('heading', { name: '运行控制' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '退出维护' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '进入维护' })).toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_maintenance/runtime/exit-maintenance', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('requires strong confirmation before pausing node monitoring from the detail page', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_001',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '在用',
+          monitoring_status: '启用',
+          binding_status: '已绑定',
+          labels: ['core'],
+          note: '',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_sync_at: '2026-04-24T09:05:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_001',
+          latest_host_sample: null,
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_001',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '在用',
+          monitoring_status: '暂停',
+          binding_status: '已绑定',
+          labels: ['core'],
+          note: '',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_sync_at: '2026-04-24T09:05:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:20:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+
+    expect(confirmMock).toHaveBeenCalledWith('暂停监控会停止采集并产生数据空档，确定继续吗？')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_001/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
 })

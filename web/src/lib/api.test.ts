@@ -2,15 +2,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { matchRoutes } from 'react-router-dom'
 
 import {
+  archiveTarget,
   confirmNodeRebind,
+  enterNodeMaintenance,
+  enterTargetMaintenance,
+  exitNodeMaintenance,
+  exitTargetMaintenance,
   getDashboard,
   getNodeOnboarding,
   issueNodeEnrollmentToken,
+  listNodes,
   listEvents,
   listIncidents,
-  listNodes,
+  pauseNodeMonitoring,
+  pauseTarget,
   rejectPendingNodeBinding,
   resetNodeBinding,
+  restoreTargetToPaused,
+  resumeNodeMonitoring,
+  resumeTarget,
 } from './api'
 import { appRoutes } from '../app/router'
 
@@ -197,6 +207,113 @@ describe('api helpers', () => {
       cache: 'no-store',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/binding/reset', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('posts node runtime control actions to the explicit endpoints', async () => {
+    const responseBody = {
+      node_id: 'nd_001',
+      display_name: 'Tokyo Edge',
+      region: 'ap-northeast-1',
+      city: 'Tokyo',
+      provider: 'aws',
+      lifecycle_status: '在用',
+      monitoring_status: '维护中',
+      binding_status: '已绑定',
+      labels: [],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-26T09:00:00Z',
+      updated_at: '2026-04-26T09:15:00Z',
+    }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(enterNodeMaintenance('nd_001')).resolves.toEqual(responseBody)
+    await expect(exitNodeMaintenance('nd_001')).resolves.toEqual(responseBody)
+    await expect(pauseNodeMonitoring('nd_001')).resolves.toEqual(responseBody)
+    await expect(resumeNodeMonitoring('nd_001')).resolves.toEqual(responseBody)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_001/runtime/enter-maintenance', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/exit-maintenance', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/nodes/nd_001/runtime/resume', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('posts target runtime control actions to the explicit endpoints', async () => {
+    const responseBody = {
+      target_id: 'tg_001',
+      name: 'Blog',
+      target_type: 'service',
+      host: 'blog.example.com',
+      base_port: 443,
+      execution_node_labels: ['edge'],
+      run_status: '暂停',
+      labels: [],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-26T09:00:00Z',
+      updated_at: '2026-04-26T09:20:00Z',
+    }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(enterTargetMaintenance('tg_001')).resolves.toEqual(responseBody)
+    await expect(exitTargetMaintenance('tg_001')).resolves.toEqual(responseBody)
+    await expect(pauseTarget('tg_001')).resolves.toEqual(responseBody)
+    await expect(resumeTarget('tg_001')).resolves.toEqual(responseBody)
+    await expect(archiveTarget('tg_001')).resolves.toEqual(responseBody)
+    await expect(restoreTargetToPaused('tg_001')).resolves.toEqual(responseBody)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/targets/tg_001/runtime/enter-maintenance', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_001/runtime/exit-maintenance', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/targets/tg_001/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/targets/tg_001/runtime/resume', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/targets/tg_001/runtime/archive', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/runtime/restore-to-paused', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
