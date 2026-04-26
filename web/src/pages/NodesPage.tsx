@@ -77,12 +77,10 @@ export function NodesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [retryNode, setRetryNode] = useState<NodeRecord | null>(null)
   const [labelInput, setLabelInput] = useState('')
   const [createForm, setCreateForm] = useState<CreateNodeInput>(initialCreateForm)
 
   function resetCreateFlow() {
-    setRetryNode(null)
     setCreateError(null)
     setLabelInput('')
     setCreateForm(initialCreateForm)
@@ -119,10 +117,13 @@ export function NodesPage() {
       resetCreateFlow()
       navigate(`/nodes/${node.node_id}/onboarding`)
     } catch (issueError) {
-      setRetryNode(node)
-      setCreateError(
-        `节点已创建，但生成接入 Token 失败：${describeError(issueError, '请稍后重试')}`,
-      )
+      setCreateOpen(false)
+      resetCreateFlow()
+      navigate(`/nodes/${node.node_id}/onboarding`, {
+        state: {
+          tokenIssueError: `接入 Token 生成失败：${describeError(issueError, '请稍后重试')}`,
+        },
+      })
     }
   }
 
@@ -142,11 +143,6 @@ export function NodesPage() {
     }
 
     try {
-      if (retryNode) {
-        await issueTokenAndEnterOnboarding(retryNode)
-        return
-      }
-
       const node = await createNode(payload)
       setNodes((current) => {
         const withoutCreated = current.filter((item) => item.node_id !== node.node_id)
@@ -201,12 +197,8 @@ export function NodesPage() {
       {createOpen ? (
         <section className="page-panel">
           <p className="page-panel__eyebrow">Node Create</p>
-          <h3 className="page-panel__title">{retryNode ? '节点已创建，重试生成接入 Token' : '创建节点并进入接入工作台'}</h3>
-          <p className="page-panel__description">
-            {retryNode
-              ? '当前节点已创建成功。继续重试生成接入 Token，不会重复创建节点。'
-              : '创建完成后将立即生成接入 Token，并跳转到节点接入准备页。'}
-          </p>
+          <h3 className="page-panel__title">创建节点并进入接入工作台</h3>
+          <p className="page-panel__description">创建完成后将立即生成接入 Token，并跳转到节点接入准备页。</p>
           <form onSubmit={handleCreate}>
             <p>
               <label>
@@ -281,13 +273,7 @@ export function NodesPage() {
             {createError ? <p>{createError}</p> : null}
             <div>
               <button type="submit" disabled={createSubmitting}>
-                {createSubmitting
-                  ? retryNode
-                    ? '正在生成 Token…'
-                    : '正在创建…'
-                  : retryNode
-                    ? '重试生成 Token'
-                    : '创建并生成 Token'}
+                {createSubmitting ? '正在创建…' : '创建并生成 Token'}
               </button>
             </div>
           </form>
@@ -302,11 +288,20 @@ export function NodesPage() {
           <span>当前主问题</span>
         </div>
         {nodes.map((node) => (
-          <Link key={node.node_id} className="resource-table__row" to={`/nodes/${node.node_id}`}>
+          <article key={node.node_id} className="resource-table__row">
             <div>
-              <strong>{node.display_name}</strong>
+              <strong>
+                <Link className="text-link" to={`/nodes/${node.node_id}`}>
+                  {node.display_name}
+                </Link>
+              </strong>
               <p>
                 {node.region} · {node.city} · {node.provider}
+              </p>
+              <p>
+                <Link className="text-link" to={`/nodes/${node.node_id}/onboarding`}>
+                  接入工作台
+                </Link>
               </p>
             </div>
             <div className="badge-row badge-row--wrap">
@@ -322,7 +317,7 @@ export function NodesPage() {
               <strong>{node.current_active_incident_count}</strong>
               <p>{node.current_primary_issue_summary || '暂无明显异常'}</p>
             </div>
-          </Link>
+          </article>
         ))}
       </div>
     </section>

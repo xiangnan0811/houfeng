@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { DetailSection } from '../components/DetailSection'
 import { StatusBadge } from '../components/StatusBadge'
@@ -90,6 +90,8 @@ function describePhase(state: NodeOnboardingState) {
 
 export function NodeOnboardingPage() {
   const { nodeId } = useParams()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [state, setState] = useState<State>({
     requestedNodeId: null,
     onboarding: null,
@@ -152,6 +154,10 @@ export function NodeOnboardingPage() {
 
   const onboarding = state.requestedNodeId === nodeId ? state.onboarding : null
   const error = state.requestedNodeId === nodeId ? state.error : null
+  const locationTokenIssueError =
+    typeof (location.state as { tokenIssueError?: string } | null)?.tokenIssueError === 'string'
+      ? (location.state as { tokenIssueError?: string }).tokenIssueError
+      : null
   const cachedTokenIssue = nodeId ? getOnboardingTokenCache(nodeId) : null
   const tokenIssue =
     cachedTokenIssue &&
@@ -240,6 +246,7 @@ export function NodeOnboardingPage() {
       try {
         const refreshed = await getNodeOnboarding(nodeId)
         applyOnboardingState(nodeId, refreshed)
+        navigate(`/nodes/${nodeId}/onboarding`, { replace: true })
         setTokenState({
           action: null,
           error: null,
@@ -258,6 +265,7 @@ export function NodeOnboardingPage() {
             },
           }
         })
+        navigate(`/nodes/${nodeId}/onboarding`, { replace: true })
         setTokenState({
           action: null,
           error: describeError(error, '已重新生成 Token，但刷新接入状态失败'),
@@ -390,7 +398,9 @@ export function NodeOnboardingPage() {
             <p>请重新生成接入 Token，再继续安装或核对配置。</p>
           </div>
         )}
-        {tokenState.error ? <p role="alert">{tokenState.error}</p> : null}
+        {tokenState.error ?? locationTokenIssueError ? (
+          <p role="alert">{tokenState.error ?? locationTokenIssueError}</p>
+        ) : null}
         <div className="badge-row">
           <button
             type="button"

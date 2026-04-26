@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { getOnboardingTokenCache } from '../lib/onboardingTokenCache'
+import { NodeOnboardingPage } from './NodeOnboardingPage'
 import { NodesPage } from './NodesPage'
 
 function mockJSONResponse(body: unknown, status = 200) {
@@ -107,7 +108,7 @@ describe('NodesPage', () => {
     })
   })
 
-  it('retries token issuance without creating a duplicate node after create succeeds once', async () => {
+  it('lands on onboarding with a recoverable error state when token issuance fails after create succeeds', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse([]))
@@ -135,8 +136,25 @@ describe('NodesPage', () => {
       )
       .mockResolvedValueOnce(
         mockJSONResponse({
-          token: 'enroll_tokyo_001',
-          issued_at: '2026-04-26T09:06:00Z',
+          node_id: 'nd_001',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '待接入',
+          monitoring_status: '启用',
+          binding_status: '未绑定',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-26T09:00:00Z',
+          updated_at: '2026-04-26T09:00:00Z',
+          phase: '未开始接入',
+          has_host_sample: false,
+          has_accepted_observation: false,
+          enrollment_token_issued_at: '2026-04-26T09:05:00Z',
         }),
       )
     vi.stubGlobal('fetch', fetchMock)
@@ -145,7 +163,7 @@ describe('NodesPage', () => {
       <MemoryRouter initialEntries={['/nodes']}>
         <Routes>
           <Route path="/nodes" element={<NodesPage />} />
-          <Route path="/nodes/:nodeId/onboarding" element={<div>onboarding workspace</div>} />
+          <Route path="/nodes/:nodeId/onboarding" element={<NodeOnboardingPage />} />
         </Routes>
       </MemoryRouter>,
     )
@@ -163,27 +181,16 @@ describe('NodesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建并生成 Token' }))
 
     await waitFor(() =>
-      expect(screen.getByText('节点已创建，但生成接入 Token 失败：token service unavailable')).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /生成 Token/ }))
-
-    await waitFor(() => expect(screen.getByText('onboarding workspace')).toBeInTheDocument())
-
-    expect(fetchMock).toHaveBeenCalledTimes(4)
-    const createCalls = fetchMock.mock.calls.filter(
-      ([url, init]) => url == '/api/nodes' && (init as RequestInit | undefined)?.method == 'POST',
-    )
-    expect(createCalls).toHaveLength(1)
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/nodes/nd_001/enrollment-token', {
-      method: 'POST',
+    expect(screen.getByText('接入 Token 生成失败：token service unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新生成接入 Token' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/nodes/nd_001/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
-    expect(getOnboardingTokenCache('nd_001')).toEqual({
-      token: 'enroll_tokyo_001',
-      issued_at: '2026-04-26T09:06:00Z',
-    })
+    expect(getOnboardingTokenCache('nd_001')).toBeNull()
   })
 
   it('keeps create errors local to the page', async () => {
@@ -224,103 +231,47 @@ describe('NodesPage', () => {
     expect(getOnboardingTokenCache('nd_001')).toBeNull()
   })
 
-  it('closing and reopening the drawer clears retryNode so a fresh create flow can start', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(
-        mockJSONResponse({
-          node_id: 'nd_001',
-          display_name: 'Tokyo Edge',
-          region: 'ap-northeast-1',
-          city: 'Tokyo',
-          provider: 'Vultr',
-          lifecycle_status: '待接入',
-          monitoring_status: '启用',
-          binding_status: '未绑定',
-          labels: [],
-          note: '',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          created_at: '2026-04-26T09:00:00Z',
-          updated_at: '2026-04-26T09:00:00Z',
-        }),
-      )
-      .mockResolvedValueOnce(mockJSONResponse({ error: 'token service unavailable' }, 503))
-      .mockResolvedValueOnce(
-        mockJSONResponse({
-          node_id: 'nd_002',
-          display_name: 'Seoul Edge',
-          region: 'ap-northeast-2',
-          city: 'Seoul',
-          provider: 'AWS',
-          lifecycle_status: '待接入',
-          monitoring_status: '启用',
-          binding_status: '未绑定',
-          labels: [],
-          note: '',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          created_at: '2026-04-26T09:10:00Z',
-          updated_at: '2026-04-26T09:10:00Z',
-        }),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse({
-          token: 'enroll_seoul_001',
-          issued_at: '2026-04-26T09:11:00Z',
-        }),
-      )
-    vi.stubGlobal('fetch', fetchMock)
+  it('shows a clear onboarding workspace path for an existing node', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            region: 'ap-northeast-1',
+            city: 'Tokyo',
+            provider: 'Vultr',
+            lifecycle_status: '待接入',
+            monitoring_status: '启用',
+            binding_status: '未绑定',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-26T09:00:00Z',
+            updated_at: '2026-04-26T09:00:00Z',
+          },
+        ]),
+      ),
+    )
 
     render(
       <MemoryRouter initialEntries={['/nodes']}>
         <Routes>
           <Route path="/nodes" element={<NodesPage />} />
-          <Route path="/nodes/:nodeId/onboarding" element={<div>onboarding workspace</div>} />
         </Routes>
       </MemoryRouter>,
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '新建节点' })).toBeInTheDocument(),
+      expect(screen.getByRole('link', { name: '接入工作台' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
-    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
-    fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })
-    fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
-    fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'Vultr' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建并生成 Token' }))
-
-    await waitFor(() =>
-      expect(screen.getByText('节点已创建，但生成接入 Token 失败：token service unavailable')).toBeInTheDocument(),
+    expect(screen.getByRole('link', { name: '接入工作台' })).toHaveAttribute(
+      'href',
+      '/nodes/nd_001/onboarding',
     )
-
-    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
-    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
-
-    expect(screen.getByRole('button', { name: '创建并生成 Token' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '重试生成 Token' })).not.toBeInTheDocument()
-
-    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Seoul Edge' } })
-    fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-2' } })
-    fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Seoul' } })
-    fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'AWS' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建并生成 Token' }))
-
-    await waitFor(() => expect(screen.getByText('onboarding workspace')).toBeInTheDocument())
-
-    const createCalls = fetchMock.mock.calls.filter(
-      ([url, init]) => url === '/api/nodes' && (init as RequestInit | undefined)?.method === 'POST',
-    )
-    expect(createCalls).toHaveLength(2)
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_002/enrollment-token', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-    })
   })
 })
