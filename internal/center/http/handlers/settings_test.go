@@ -21,6 +21,23 @@ type fakeSettingsRepository struct {
 	putSettingsInput  centersettings.CenterSettings
 }
 
+type settingsHandlerResponse struct {
+	Telegram                telegramSettingsResponse              `json:"telegram"`
+	HostSampleFrequencyTier string                                `json:"host_sample_frequency_tier"`
+	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
+	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
+	OverrideRules           centersettings.OverrideRules          `json:"override_rules"`
+	RetentionPolicy         centersettings.RetentionPolicy        `json:"retention_policy"`
+}
+
+type telegramSettingsResponse struct {
+	BotToken           string `json:"bot_token"`
+	ChatID             string `json:"chat_id"`
+	TokenPresent       bool   `json:"token_present"`
+	TokenMaskedSummary string `json:"token_masked_summary"`
+	RuntimeApplyActive bool   `json:"runtime_apply_active"`
+}
+
 func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
 	if f.getSettingsErr != nil {
 		return centersettings.CenterSettings{}, f.getSettingsErr
@@ -36,8 +53,11 @@ func (f *fakeSettingsRepository) PutSettings(_ context.Context, input centersett
 	return f.putSettingsResult, nil
 }
 
-func TestSettingsHandlerReturnsCurrentSettings(t *testing.T) {
-	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
+func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing.T) {
+	record := centersettings.Default()
+	record.Telegram.BotToken = "123456:ABCDEF-secret-token"
+	record.Telegram.ChatID = "chat-id"
+	repo := &fakeSettingsRepository{getSettingsResult: record}
 
 	handler := handlers.Settings(repo)
 	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
@@ -49,17 +69,32 @@ func TestSettingsHandlerReturnsCurrentSettings(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
 
-	var body centersettings.CenterSettings
+	var body settingsHandlerResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
 
+	if body.Telegram.BotToken != "" {
+		t.Fatalf("expected bot token to be redacted from response, got %q", body.Telegram.BotToken)
+	}
+	if !body.Telegram.TokenPresent {
+		t.Fatal("expected token_present to be true")
+	}
+	if body.Telegram.TokenMaskedSummary == "" {
+		t.Fatal("expected token_masked_summary to be set")
+	}
+	if strings.Contains(body.Telegram.TokenMaskedSummary, "secret-token") {
+		t.Fatalf("expected token_masked_summary to hide raw token, got %q", body.Telegram.TokenMaskedSummary)
+	}
+	if body.Telegram.RuntimeApplyActive {
+		t.Fatal("expected runtime_apply_active to be false for persisted settings")
+	}
 	if body.HostSampleFrequencyTier != centersettings.Default().HostSampleFrequencyTier {
 		t.Fatalf("expected host sample frequency tier %q, got %q", centersettings.Default().HostSampleFrequencyTier, body.HostSampleFrequencyTier)
 	}
 }
 
-func TestSettingsHandlerUpdatesSettingsOnPut(t *testing.T) {
+func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *testing.T) {
 	updated := centersettings.Default()
 	updated.Telegram.BotToken = "bot-token"
 	updated.Telegram.ChatID = "chat-id"
@@ -80,13 +115,25 @@ func TestSettingsHandlerUpdatesSettingsOnPut(t *testing.T) {
 	if repo.putSettingsInput.HostSampleFrequencyTier != "1m" {
 		t.Fatalf("expected persisted host sample frequency tier %q, got %q", "1m", repo.putSettingsInput.HostSampleFrequencyTier)
 	}
+	if repo.putSettingsInput.Telegram.BotToken != "bot-token" {
+		t.Fatalf("expected repository input bot token %q, got %q", "bot-token", repo.putSettingsInput.Telegram.BotToken)
+	}
 
-	var body centersettings.CenterSettings
+	var body settingsHandlerResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body.Telegram.BotToken != "bot-token" {
-		t.Fatalf("expected telegram bot token %q, got %q", "bot-token", body.Telegram.BotToken)
+	if body.Telegram.BotToken != "" {
+		t.Fatalf("expected bot token to be redacted from response, got %q", body.Telegram.BotToken)
+	}
+	if body.Telegram.ChatID != "chat-id" {
+		t.Fatalf("expected telegram chat id %q, got %q", "chat-id", body.Telegram.ChatID)
+	}
+	if !body.Telegram.TokenPresent {
+		t.Fatal("expected token_present to be true")
+	}
+	if body.Telegram.RuntimeApplyActive {
+		t.Fatal("expected runtime_apply_active to be false for persisted settings")
 	}
 }
 
