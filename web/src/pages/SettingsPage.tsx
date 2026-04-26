@@ -483,7 +483,7 @@ export function SettingsPage() {
     setState((current) => ({ ...current, saving: true, saveError: null, saveSuccess: null }))
 
     try {
-      const updated = await updateSettings(payload as SettingsUpdateInput)
+      const updated = await updateSettings(payload)
       setState((current) => ({
         ...current,
         saving: false,
@@ -571,7 +571,9 @@ export function SettingsPage() {
             ? '当前持久化配置已处于运行态应用路径中。'
             : '当前仅保存 Telegram 持久化配置，尚未自动应用到正在运行的通知进程。'}
         </SectionIntro>
-        <SectionIntro>接口不会回显明文 Token。需要修改或继续保留时，请重新输入新的 Token。</SectionIntro>
+        <SectionIntro>
+          接口不会回显明文 Token。留空会继续保留当前已保存的 Token；只有在需要替换时才输入新的 Token。
+        </SectionIntro>
       </DetailSection>
 
       <DetailSection eyebrow="Frequency" title="默认频率档位">

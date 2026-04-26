@@ -233,7 +233,7 @@ export type SettingsTelegramResponse = {
 }
 
 export type SettingsTelegramInput = {
-  bot_token: string
+  bot_token?: string
   chat_id: string
 }
 
