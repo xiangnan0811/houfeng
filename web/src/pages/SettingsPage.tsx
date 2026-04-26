@@ -490,7 +490,7 @@ export function SettingsPage() {
         settings: updated,
         form: buildFormState(updated),
         saveError: null,
-        saveSuccess: '设置已保存。',
+        saveSuccess: '设置已保存。部分设置当前仅作为持久化策略保存，不会立即影响运行时。',
       }))
     } catch (error) {
       setState((current) => ({
@@ -569,7 +569,7 @@ export function SettingsPage() {
         <SectionIntro>
           {settings.telegram.runtime_apply_active
             ? '当前持久化配置已处于运行态应用路径中。'
-            : '当前仅保存 Telegram 持久化配置，尚未自动应用到正在运行的通知进程。'}
+            : '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'}
         </SectionIntro>
         <SectionIntro>
           接口不会回显明文 Token。留空会继续保留当前已保存的 Token；只有在需要替换时才输入新的 Token。
@@ -577,6 +577,7 @@ export function SettingsPage() {
       </DetailSection>
 
       <DetailSection eyebrow="Frequency" title="默认频率档位">
+        <SectionIntro>当前仅保存默认频率策略，尚未接入实时规划链。</SectionIntro>
         <div className="summary-grid">
           <FrequencySelect
             ariaLabel="当前节点主机样本频率"
@@ -645,6 +646,7 @@ export function SettingsPage() {
       </DetailSection>
 
       <DetailSection eyebrow="Global Defaults" title="全局默认规则">
+        <SectionIntro>当前仅保存全局默认规则策略，尚未接入实时异常判定链。</SectionIntro>
         <IncidentDefaultsEditor
           value={form.incidentDefaults}
           onChange={(next) =>
@@ -659,7 +661,9 @@ export function SettingsPage() {
       </DetailSection>
 
       <DetailSection eyebrow="Overrides" title="少量覆盖规则" aside={<TargetTypeSummary />}>
-        <SectionIntro>仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。</SectionIntro>
+        <SectionIntro>
+          仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前仅保存覆盖策略，尚未接入实时规划/判定链。
+        </SectionIntro>
         <div className="page-stack">
           <OverrideTextarea
             ariaLabel="节点标签覆盖规则 JSON"

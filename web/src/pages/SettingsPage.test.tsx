@@ -100,7 +100,14 @@ describe('SettingsPage', () => {
     expect(screen.getByText('已配置 Telegram Bot Token：****************oken')).toBeInTheDocument()
     expect(screen.queryByText('bot-token')).not.toBeInTheDocument()
     expect(
-      screen.getByText('当前仅保存 Telegram 持久化配置，尚未自动应用到正在运行的通知进程。'),
+      screen.getByText('当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('当前仅保存默认频率策略，尚未接入实时规划链。')).toBeInTheDocument()
+    expect(screen.getByText('当前仅保存全局默认规则策略，尚未接入实时异常判定链。')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前仅保存覆盖策略，尚未接入实时规划/判定链。',
+      ),
     ).toBeInTheDocument()
     expect(
       screen.getByText('当前仅保存保留策略，尚未自动执行清理或聚合任务。'),
@@ -136,7 +143,12 @@ describe('SettingsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
-    await waitFor(() => expect(screen.getByText('设置已保存。')).toBeInTheDocument())
+    await waitFor(
+      () =>
+        expect(
+          screen.getByText('设置已保存。部分设置当前仅作为持久化策略保存，不会立即影响运行时。'),
+        ).toBeInTheDocument(),
+    )
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
@@ -203,7 +215,12 @@ describe('SettingsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
-    await waitFor(() => expect(screen.getByText('设置已保存。')).toBeInTheDocument())
+    await waitFor(
+      () =>
+        expect(
+          screen.getByText('设置已保存。部分设置当前仅作为持久化策略保存，不会立即影响运行时。'),
+        ).toBeInTheDocument(),
+    )
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/settings')
@@ -267,7 +284,12 @@ describe('SettingsPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
-    await waitFor(() => expect(screen.getByText('设置已保存。')).toBeInTheDocument())
+    await waitFor(
+      () =>
+        expect(
+          screen.getByText('设置已保存。部分设置当前仅作为持久化策略保存，不会立即影响运行时。'),
+        ).toBeInTheDocument(),
+    )
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
