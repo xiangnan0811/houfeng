@@ -41,4 +41,20 @@ describe('onboardingTokenCache', () => {
       issued_at: '2026-04-26T09:11:00Z',
     })
   })
+
+  it('clears malformed or invalid cached entries and returns null', () => {
+    const cases = [
+      'not json',
+      JSON.stringify({ token: '', issued_at: '2026-04-26T09:10:00Z' }),
+      JSON.stringify({ token: 'enroll_001', issued_at: '' }),
+    ]
+
+    for (const [index, raw] of cases.entries()) {
+      const nodeId = `nd_invalid_${index}`
+      window.sessionStorage.setItem(`houfeng:onboarding-token:${nodeId}`, raw)
+
+      expect(getOnboardingTokenCache(nodeId)).toBeNull()
+      expect(window.sessionStorage.getItem(`houfeng:onboarding-token:${nodeId}`)).toBeNull()
+    }
+  })
 })
