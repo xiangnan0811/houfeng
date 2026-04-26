@@ -86,6 +86,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		NodesCollectionHandler:          handlers.NodesCollection(nodeRepo),
 		NodeItemHandler:                 handlers.NodeItem(nodeRepo),
 		NodeRuntimeFactsHandler:         handlers.NodeRuntimeFacts(runtimeFactsRepo),
+		NodeRuntimeControlHandler:       handlers.NodeRuntimeControls(nodeRepo),
 		NodeOnboardingHandler:           handlers.NodeOnboarding(nodeRepo),
 		NodeEnrollmentTokenHandler:      handlers.NodeEnrollmentToken(nodeRepo),
 		NodeBindingConfirmRebindHandler: handlers.NodeBindingConfirmRebind(nodeRepo),
@@ -95,6 +96,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		TargetItemHandler:               handlers.TargetItem(targetRepo),
 		TargetProbeItemsHandler:         handlers.TargetProbeItems(targetRepo),
 		TargetRuntimeFactsHandler:       handlers.TargetRuntimeFacts(runtimeFactsRepo),
+		TargetRuntimeControlHandler:     handlers.TargetRuntimeControls(targetRepo),
 		AgentEnrollHandler:              handlers.AgentEnroll(enrollmentSvc),
 		AgentSyncHandler:                handlers.AgentSync(syncSvc),
 	})

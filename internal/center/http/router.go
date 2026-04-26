@@ -17,6 +17,7 @@ type RouterOptions struct {
 	NodesCollectionHandler          stdhttp.Handler
 	NodeItemHandler                 stdhttp.Handler
 	NodeRuntimeFactsHandler         stdhttp.Handler
+	NodeRuntimeControlHandler       stdhttp.Handler
 	NodeOnboardingHandler           stdhttp.Handler
 	NodeEnrollmentTokenHandler      stdhttp.Handler
 	NodeBindingConfirmRebindHandler stdhttp.Handler
@@ -26,6 +27,7 @@ type RouterOptions struct {
 	TargetItemHandler               stdhttp.Handler
 	TargetProbeItemsHandler         stdhttp.Handler
 	TargetRuntimeFactsHandler       stdhttp.Handler
+	TargetRuntimeControlHandler     stdhttp.Handler
 	AgentEnrollHandler              stdhttp.Handler
 	AgentSyncHandler                stdhttp.Handler
 }
@@ -45,7 +47,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", opts.NodesCollectionHandler)
 	}
-	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil {
+	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil {
 		mux.Handle("/api/nodes/", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			nodeID, subtree := nodeSubtreePath(r.URL.Path)
 			if nodeID == "" {
@@ -66,6 +68,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.NodeRuntimeFactsHandler.ServeHTTP(w, r)
+			case nodeSubtreeRuntimeControl:
+				if opts.NodeRuntimeControlHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeRuntimeControlHandler.ServeHTTP(w, r)
 			case nodeSubtreeOnboarding:
 				if opts.NodeOnboardingHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -110,7 +118,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.AgentSyncHandler != nil {
 		mux.Handle(agentapi.SyncPath, opts.AgentSyncHandler)
 	}
-	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil || opts.TargetRuntimeFactsHandler != nil {
+	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil || opts.TargetRuntimeFactsHandler != nil || opts.TargetRuntimeControlHandler != nil {
 		mux.Handle("/api/targets/", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			targetID, subtree := targetSubtreePath(r.URL.Path)
 			if targetID == "" {
@@ -137,6 +145,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.TargetRuntimeFactsHandler.ServeHTTP(w, r)
+			case targetSubtreeRuntimeControl:
+				if opts.TargetRuntimeControlHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.TargetRuntimeControlHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -154,6 +168,7 @@ const (
 	nodeSubtreeUnknown              nodeSubtree = ""
 	nodeSubtreeItem                 nodeSubtree = "item"
 	nodeSubtreeRuntimeFacts         nodeSubtree = "runtime-facts"
+	nodeSubtreeRuntimeControl       nodeSubtree = "runtime-control"
 	nodeSubtreeOnboarding           nodeSubtree = "onboarding"
 	nodeSubtreeEnrollmentToken      nodeSubtree = "enrollment-token"
 	nodeSubtreeBindingConfirmRebind nodeSubtree = "binding-confirm-rebind"
@@ -177,6 +192,9 @@ func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
 	if segments[1] == "runtime-facts" && len(segments) == 2 {
 		return segments[0], nodeSubtreeRuntimeFacts
 	}
+	if segments[1] == "runtime" && len(segments) == 3 {
+		return segments[0], nodeSubtreeRuntimeControl
+	}
 	if segments[1] == "onboarding" && len(segments) == 2 {
 		return segments[0], nodeSubtreeOnboarding
 	}
@@ -199,10 +217,11 @@ func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
 type targetSubtree string
 
 const (
-	targetSubtreeUnknown      targetSubtree = ""
-	targetSubtreeItem         targetSubtree = "item"
-	targetSubtreeProbeItems   targetSubtree = "probe-items"
-	targetSubtreeRuntimeFacts targetSubtree = "runtime-facts"
+	targetSubtreeUnknown        targetSubtree = ""
+	targetSubtreeItem           targetSubtree = "item"
+	targetSubtreeProbeItems     targetSubtree = "probe-items"
+	targetSubtreeRuntimeFacts   targetSubtree = "runtime-facts"
+	targetSubtreeRuntimeControl targetSubtree = "runtime-control"
 )
 
 func targetSubtreePath(path string) (targetID string, subtree targetSubtree) {
@@ -223,6 +242,9 @@ func targetSubtreePath(path string) (targetID string, subtree targetSubtree) {
 	}
 	if segments[1] == "runtime-facts" && len(segments) == 2 {
 		return segments[0], targetSubtreeRuntimeFacts
+	}
+	if segments[1] == "runtime" && len(segments) == 3 {
+		return segments[0], targetSubtreeRuntimeControl
 	}
 	return segments[0], targetSubtreeUnknown
 }

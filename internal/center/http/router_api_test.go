@@ -257,6 +257,62 @@ func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsRuntimeControlRoutesOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		NodeRuntimeControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"node_id":"nd_001","monitoring_status":"暂停"}`))
+		}),
+		TargetRuntimeControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"target_id":"tg_001","run_status":"已归档"}`))
+		}),
+	})
+
+	tests := []struct {
+		path            string
+		wantBodySnippet string
+	}{
+		{path: "/api/nodes/nd_001/runtime/enter-maintenance", wantBodySnippet: `"node_id":"nd_001"`},
+		{path: "/api/nodes/nd_001/runtime/exit-maintenance", wantBodySnippet: `"node_id":"nd_001"`},
+		{path: "/api/nodes/nd_001/runtime/pause", wantBodySnippet: `"node_id":"nd_001"`},
+		{path: "/api/nodes/nd_001/runtime/resume", wantBodySnippet: `"node_id":"nd_001"`},
+		{path: "/api/targets/tg_001/runtime/enter-maintenance", wantBodySnippet: `"target_id":"tg_001"`},
+		{path: "/api/targets/tg_001/runtime/exit-maintenance", wantBodySnippet: `"target_id":"tg_001"`},
+		{path: "/api/targets/tg_001/runtime/pause", wantBodySnippet: `"target_id":"tg_001"`},
+		{path: "/api/targets/tg_001/runtime/resume", wantBodySnippet: `"target_id":"tg_001"`},
+		{path: "/api/targets/tg_001/runtime/archive", wantBodySnippet: `"target_id":"tg_001"`},
+		{path: "/api/targets/tg_001/runtime/restore-to-paused", wantBodySnippet: `"target_id":"tg_001"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, want %d", tt.path, recorder.Code, http.StatusOK)
+			}
+
+			body, err := io.ReadAll(recorder.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+
+			if strings.TrimSpace(string(body)) == spaShell {
+				t.Fatalf("%s returned SPA fallback body %q", tt.path, string(body))
+			}
+			if !strings.Contains(string(body), tt.wantBodySnippet) {
+				t.Fatalf("%s body = %q, want snippet %q", tt.path, string(body), tt.wantBodySnippet)
+			}
+		})
+	}
+}
+
 func TestRouterKeepsTargetRuntimeFactsOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",

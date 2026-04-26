@@ -162,6 +162,12 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.NodeItemHandler == nil {
 		t.Fatal("router node item handler = nil, want non-nil")
 	}
+	if gotOpts.NodeRuntimeFactsHandler == nil {
+		t.Fatal("router node runtime facts handler = nil, want non-nil")
+	}
+	if gotOpts.NodeRuntimeControlHandler == nil {
+		t.Fatal("router node runtime control handler = nil, want non-nil")
+	}
 	if gotOpts.NodeOnboardingHandler == nil {
 		t.Fatal("router node onboarding handler = nil, want non-nil")
 	}
@@ -185,6 +191,12 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	}
 	if gotOpts.TargetProbeItemsHandler == nil {
 		t.Fatal("router target probe items handler = nil, want non-nil")
+	}
+	if gotOpts.TargetRuntimeFactsHandler == nil {
+		t.Fatal("router target runtime facts handler = nil, want non-nil")
+	}
+	if gotOpts.TargetRuntimeControlHandler == nil {
+		t.Fatal("router target runtime control handler = nil, want non-nil")
 	}
 	if gotOpts.AgentEnrollHandler == nil {
 		t.Fatal("router agent enroll handler = nil, want non-nil")
