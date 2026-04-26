@@ -9,20 +9,25 @@ import (
 )
 
 type RouterOptions struct {
-	Version                   string
-	WebDistDir                string
-	DashboardHandler          stdhttp.Handler
-	EventsHandler             stdhttp.Handler
-	IncidentsHandler          stdhttp.Handler
-	NodesCollectionHandler    stdhttp.Handler
-	NodeItemHandler           stdhttp.Handler
-	NodeRuntimeFactsHandler   stdhttp.Handler
-	TargetsCollectionHandler  stdhttp.Handler
-	TargetItemHandler         stdhttp.Handler
-	TargetProbeItemsHandler   stdhttp.Handler
-	TargetRuntimeFactsHandler stdhttp.Handler
-	AgentEnrollHandler        stdhttp.Handler
-	AgentSyncHandler          stdhttp.Handler
+	Version                         string
+	WebDistDir                      string
+	DashboardHandler                stdhttp.Handler
+	EventsHandler                   stdhttp.Handler
+	IncidentsHandler                stdhttp.Handler
+	NodesCollectionHandler          stdhttp.Handler
+	NodeItemHandler                 stdhttp.Handler
+	NodeRuntimeFactsHandler         stdhttp.Handler
+	NodeOnboardingHandler           stdhttp.Handler
+	NodeEnrollmentTokenHandler      stdhttp.Handler
+	NodeBindingConfirmRebindHandler stdhttp.Handler
+	NodeBindingRejectPendingHandler stdhttp.Handler
+	NodeBindingResetHandler         stdhttp.Handler
+	TargetsCollectionHandler        stdhttp.Handler
+	TargetItemHandler               stdhttp.Handler
+	TargetProbeItemsHandler         stdhttp.Handler
+	TargetRuntimeFactsHandler       stdhttp.Handler
+	AgentEnrollHandler              stdhttp.Handler
+	AgentSyncHandler                stdhttp.Handler
 }
 
 func New(opts RouterOptions) stdhttp.Handler {
@@ -40,7 +45,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", opts.NodesCollectionHandler)
 	}
-	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil {
+	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil {
 		mux.Handle("/api/nodes/", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			nodeID, subtree := nodeSubtreePath(r.URL.Path)
 			if nodeID == "" {
@@ -61,6 +66,36 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.NodeRuntimeFactsHandler.ServeHTTP(w, r)
+			case nodeSubtreeOnboarding:
+				if opts.NodeOnboardingHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeOnboardingHandler.ServeHTTP(w, r)
+			case nodeSubtreeEnrollmentToken:
+				if opts.NodeEnrollmentTokenHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeEnrollmentTokenHandler.ServeHTTP(w, r)
+			case nodeSubtreeBindingConfirmRebind:
+				if opts.NodeBindingConfirmRebindHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeBindingConfirmRebindHandler.ServeHTTP(w, r)
+			case nodeSubtreeBindingRejectPending:
+				if opts.NodeBindingRejectPendingHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeBindingRejectPendingHandler.ServeHTTP(w, r)
+			case nodeSubtreeBindingReset:
+				if opts.NodeBindingResetHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeBindingResetHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -116,9 +151,14 @@ func New(opts RouterOptions) stdhttp.Handler {
 type nodeSubtree string
 
 const (
-	nodeSubtreeUnknown      nodeSubtree = ""
-	nodeSubtreeItem         nodeSubtree = "item"
-	nodeSubtreeRuntimeFacts nodeSubtree = "runtime-facts"
+	nodeSubtreeUnknown              nodeSubtree = ""
+	nodeSubtreeItem                 nodeSubtree = "item"
+	nodeSubtreeRuntimeFacts         nodeSubtree = "runtime-facts"
+	nodeSubtreeOnboarding           nodeSubtree = "onboarding"
+	nodeSubtreeEnrollmentToken      nodeSubtree = "enrollment-token"
+	nodeSubtreeBindingConfirmRebind nodeSubtree = "binding-confirm-rebind"
+	nodeSubtreeBindingRejectPending nodeSubtree = "binding-reject-pending"
+	nodeSubtreeBindingReset         nodeSubtree = "binding-reset"
 )
 
 func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
@@ -136,6 +176,22 @@ func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
 	}
 	if segments[1] == "runtime-facts" && len(segments) == 2 {
 		return segments[0], nodeSubtreeRuntimeFacts
+	}
+	if segments[1] == "onboarding" && len(segments) == 2 {
+		return segments[0], nodeSubtreeOnboarding
+	}
+	if segments[1] == "enrollment-token" && len(segments) == 2 {
+		return segments[0], nodeSubtreeEnrollmentToken
+	}
+	if segments[1] == "binding" && len(segments) == 3 {
+		switch segments[2] {
+		case "confirm-rebind":
+			return segments[0], nodeSubtreeBindingConfirmRebind
+		case "reject-pending":
+			return segments[0], nodeSubtreeBindingRejectPending
+		case "reset":
+			return segments[0], nodeSubtreeBindingReset
+		}
 	}
 	return segments[0], nodeSubtreeUnknown
 }

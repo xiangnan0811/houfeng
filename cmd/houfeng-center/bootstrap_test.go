@@ -162,6 +162,21 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.NodeItemHandler == nil {
 		t.Fatal("router node item handler = nil, want non-nil")
 	}
+	if gotOpts.NodeOnboardingHandler == nil {
+		t.Fatal("router node onboarding handler = nil, want non-nil")
+	}
+	if gotOpts.NodeEnrollmentTokenHandler == nil {
+		t.Fatal("router node enrollment token handler = nil, want non-nil")
+	}
+	if gotOpts.NodeBindingConfirmRebindHandler == nil {
+		t.Fatal("router node binding confirm rebind handler = nil, want non-nil")
+	}
+	if gotOpts.NodeBindingRejectPendingHandler == nil {
+		t.Fatal("router node binding reject pending handler = nil, want non-nil")
+	}
+	if gotOpts.NodeBindingResetHandler == nil {
+		t.Fatal("router node binding reset handler = nil, want non-nil")
+	}
 	if gotOpts.TargetsCollectionHandler == nil {
 		t.Fatal("router targets collection handler = nil, want non-nil")
 	}

@@ -192,6 +192,71 @@ func TestRouterKeepsNodeRuntimeFactsOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		NodeOnboardingHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"node_id":"nd_001","phase":"未开始接入"}`))
+		}),
+		NodeEnrollmentTokenHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"token":"enroll_001"}`))
+		}),
+		NodeBindingConfirmRebindHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"phase":"已绑定，等待稳定观测"}`))
+		}),
+		NodeBindingRejectPendingHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"phase":"已绑定，等待稳定观测"}`))
+		}),
+		NodeBindingResetHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"phase":"未开始接入"}`))
+		}),
+	})
+
+	tests := []struct {
+		name            string
+		method          string
+		path            string
+		wantBodySnippet string
+	}{
+		{name: "onboarding", method: http.MethodGet, path: "/api/nodes/nd_001/onboarding", wantBodySnippet: `"phase":"未开始接入"`},
+		{name: "issue token", method: http.MethodPost, path: "/api/nodes/nd_001/enrollment-token", wantBodySnippet: `"token":"enroll_001"`},
+		{name: "confirm rebind", method: http.MethodPost, path: "/api/nodes/nd_001/binding/confirm-rebind", wantBodySnippet: `"phase":"已绑定，等待稳定观测"`},
+		{name: "reject pending", method: http.MethodPost, path: "/api/nodes/nd_001/binding/reject-pending", wantBodySnippet: `"phase":"已绑定，等待稳定观测"`},
+		{name: "reset binding", method: http.MethodPost, path: "/api/nodes/nd_001/binding/reset", wantBodySnippet: `"phase":"未开始接入"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			}
+
+			body, err := io.ReadAll(recorder.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+
+			if strings.TrimSpace(string(body)) == spaShell {
+				t.Fatalf("expected API response, got SPA fallback body %q", string(body))
+			}
+			if !strings.Contains(string(body), tt.wantBodySnippet) {
+				t.Fatalf("expected body to contain %q, got %q", tt.wantBodySnippet, string(body))
+			}
+		})
+	}
+}
+
 func TestRouterKeepsTargetRuntimeFactsOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
