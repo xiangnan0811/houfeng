@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
+import { getOnboardingTokenCache, setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import { NodeOnboardingPage } from './NodeOnboardingPage'
 
 function mockJSONResponse(body: unknown, status = 200) {
@@ -161,6 +161,48 @@ describe('NodeOnboardingPage', () => {
       'href',
       '/nodes/nd_001',
     )
+  })
+
+  it('clears a stale cached token when the server reports a different issuance time', async () => {
+    setOnboardingTokenCache('nd_001', {
+      token: 'stale_token_001',
+      issued_at: '2026-04-26T09:05:00Z',
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          node_id: 'nd_001',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '待接入',
+          monitoring_status: '启用',
+          binding_status: '未绑定',
+          labels: ['edge'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-26T09:00:00Z',
+          updated_at: '2026-04-26T09:00:00Z',
+          phase: '未开始接入',
+          has_host_sample: false,
+          has_accepted_observation: false,
+          enrollment_token_issued_at: '2026-04-26T09:10:00Z',
+        }),
+      ),
+    )
+
+    renderOnboardingPage()
+
+    await waitFor(() =>
+      expect(screen.getByText('当前会话里没有可显示的 Token 明文。')).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByText('stale_token_001')).not.toBeInTheDocument()
+    expect(getOnboardingTokenCache('nd_001')).toBeNull()
   })
 
   it('asks for regeneration when the plaintext token is no longer cached', async () => {

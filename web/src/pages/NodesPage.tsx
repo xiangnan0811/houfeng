@@ -76,6 +76,7 @@ export function NodesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [retryNode, setRetryNode] = useState<NodeRecord | null>(null)
   const [labelInput, setLabelInput] = useState('')
   const [createForm, setCreateForm] = useState<CreateNodeInput>(initialCreateForm)
 
@@ -102,6 +103,23 @@ export function NodesPage() {
     setCreateForm((current) => ({ ...current, [field]: value }))
   }
 
+  async function issueTokenAndEnterOnboarding(node: NodeRecord) {
+    try {
+      const issue = await issueNodeEnrollmentToken(node.node_id)
+      setOnboardingTokenCache(node.node_id, issue)
+      setRetryNode(null)
+      setCreateOpen(false)
+      setLabelInput('')
+      setCreateForm(initialCreateForm)
+      navigate(`/nodes/${node.node_id}/onboarding`)
+    } catch (issueError) {
+      setRetryNode(node)
+      setCreateError(
+        `节点已创建，但生成接入 Token 失败：${describeError(issueError, '请稍后重试')}`,
+      )
+    }
+  }
+
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setCreateSubmitting(true)
@@ -118,24 +136,17 @@ export function NodesPage() {
     }
 
     try {
+      if (retryNode) {
+        await issueTokenAndEnterOnboarding(retryNode)
+        return
+      }
+
       const node = await createNode(payload)
       setNodes((current) => {
         const withoutCreated = current.filter((item) => item.node_id !== node.node_id)
         return [node, ...withoutCreated]
       })
-
-      try {
-        const issue = await issueNodeEnrollmentToken(node.node_id)
-        setOnboardingTokenCache(node.node_id, issue)
-        setCreateOpen(false)
-        setLabelInput('')
-        setCreateForm(initialCreateForm)
-        navigate(`/nodes/${node.node_id}/onboarding`)
-      } catch (issueError) {
-        setCreateError(
-          `节点已创建，但生成接入 Token 失败：${describeError(issueError, '请稍后重试')}`,
-        )
-      }
+      await issueTokenAndEnterOnboarding(node)
     } catch (submitError) {
       setCreateError(describeError(submitError, '创建节点失败'))
     } finally {
@@ -174,9 +185,11 @@ export function NodesPage() {
       {createOpen ? (
         <section className="page-panel">
           <p className="page-panel__eyebrow">Node Create</p>
-          <h3 className="page-panel__title">创建节点并进入接入工作台</h3>
+          <h3 className="page-panel__title">{retryNode ? '节点已创建，重试生成接入 Token' : '创建节点并进入接入工作台'}</h3>
           <p className="page-panel__description">
-            创建完成后将立即生成接入 Token，并跳转到节点接入准备页。
+            {retryNode
+              ? '当前节点已创建成功。继续重试生成接入 Token，不会重复创建节点。'
+              : '创建完成后将立即生成接入 Token，并跳转到节点接入准备页。'}
           </p>
           <form onSubmit={handleCreate}>
             <p>
@@ -263,7 +276,13 @@ export function NodesPage() {
             {createError ? <p>{createError}</p> : null}
             <div>
               <button type="submit" disabled={createSubmitting}>
-                {createSubmitting ? '正在创建…' : '创建并生成 Token'}
+                {createSubmitting
+                  ? retryNode
+                    ? '正在生成 Token…'
+                    : '正在创建…'
+                  : retryNode
+                    ? '重试生成 Token'
+                    : '创建并生成 Token'}
               </button>
             </div>
           </form>

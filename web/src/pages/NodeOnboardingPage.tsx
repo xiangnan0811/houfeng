@@ -5,7 +5,7 @@ import { DetailSection } from '../components/DetailSection'
 import { StatusBadge } from '../components/StatusBadge'
 import { ApiError, getNodeOnboarding } from '../lib/api'
 import { formatDateTime, formatLabelList } from '../lib/format'
-import { getOnboardingTokenCache } from '../lib/onboardingTokenCache'
+import { clearOnboardingTokenCache, getOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { NodeOnboardingState } from '../lib/types'
 
 type State = {
@@ -85,10 +85,31 @@ export function NodeOnboardingPage() {
 
   const onboarding = state.requestedNodeId === nodeId ? state.onboarding : null
   const error = state.requestedNodeId === nodeId ? state.error : null
-  const tokenIssue = useMemo(() => {
+  const cachedTokenIssue = useMemo(() => {
     if (!nodeId) return null
     return getOnboardingTokenCache(nodeId)
   }, [nodeId, onboarding?.enrollment_token_issued_at])
+  const tokenIssue = useMemo(() => {
+    if (!cachedTokenIssue) return null
+    if (
+      onboarding?.enrollment_token_issued_at &&
+      onboarding.enrollment_token_issued_at !== cachedTokenIssue.issued_at
+    ) {
+      return null
+    }
+
+    return cachedTokenIssue
+  }, [cachedTokenIssue, onboarding?.enrollment_token_issued_at])
+
+  useEffect(() => {
+    if (!nodeId || !cachedTokenIssue || !onboarding?.enrollment_token_issued_at) {
+      return
+    }
+
+    if (onboarding.enrollment_token_issued_at !== cachedTokenIssue.issued_at) {
+      clearOnboardingTokenCache(nodeId)
+    }
+  }, [cachedTokenIssue, nodeId, onboarding?.enrollment_token_issued_at])
 
   if (nodeId && state.requestedNodeId !== nodeId) {
     return <section className="page-panel">正在加载节点接入状态…</section>
