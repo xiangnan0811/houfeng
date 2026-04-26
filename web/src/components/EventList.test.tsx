@@ -35,7 +35,7 @@ describe('EventList', () => {
     render(<EventList events={[]} />)
 
     expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument()
-    expect(screen.getByText('系统暂时没有新的 incident 变化记录。')).toBeInTheDocument()
+    expect(screen.getByText('系统暂时没有新的状态变更事件。')).toBeInTheDocument()
   })
 
   it('renders binding audit events with sane labels and no incident-only meta row', () => {

@@ -50,7 +50,7 @@ function hasIncidentMeta(event: StateChangeEventRecord) {
 export function EventList({
   events,
   emptyTitle = '最近没有状态变更事件',
-  emptyDescription = '系统暂时没有新的 incident 变化记录。',
+  emptyDescription = '系统暂时没有新的状态变更事件。',
 }: EventListProps) {
   if (events.length === 0) {
     return (
