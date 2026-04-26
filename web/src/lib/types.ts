@@ -224,3 +224,97 @@ export type IncidentListFilter = {
   severity?: IncidentSeverity | ''
   limit?: number
 }
+
+export type SettingsTelegramResponse = {
+  chat_id: string
+  token_present: boolean
+  token_masked_summary?: string
+  runtime_apply_active: boolean
+}
+
+export type SettingsTelegramInput = {
+  bot_token: string
+  chat_id: string
+}
+
+export type ProbeFrequencyDefaults = {
+  tcp: string
+  http: string
+  tls: string
+}
+
+export type IncidentDefaults = {
+  heartbeat_interval_seconds: number
+  stale_threshold_intervals: number
+  sweep_interval_seconds: number
+  notify_on_started: boolean
+  notify_on_escalated: boolean
+  notify_on_recovered: boolean
+}
+
+export type ProbeFrequencyOverride = {
+  tcp?: string
+  http?: string
+  tls?: string
+}
+
+export type IncidentDefaultsOverride = {
+  heartbeat_interval_seconds?: number
+  stale_threshold_intervals?: number
+  sweep_interval_seconds?: number
+  notify_on_started?: boolean
+  notify_on_escalated?: boolean
+  notify_on_recovered?: boolean
+}
+
+export type SettingsOverrideFields = {
+  host_sample_frequency_tier?: string
+  probe_frequency_defaults?: ProbeFrequencyOverride
+  incident_defaults?: IncidentDefaultsOverride
+}
+
+export type NodeLabelOverrideRule = {
+  label: string
+  overrides: SettingsOverrideFields
+}
+
+export type TargetTypeOverrideRule = {
+  target_type: string
+  overrides: SettingsOverrideFields
+}
+
+export type TargetLabelOverrideRule = {
+  label: string
+  overrides: SettingsOverrideFields
+}
+
+export type OverrideRules = {
+  node_labels: NodeLabelOverrideRule[]
+  target_types: TargetTypeOverrideRule[]
+  target_labels: TargetLabelOverrideRule[]
+}
+
+export type RetentionPolicy = {
+  raw_layer_days: number
+  aggregate_layer_days: number
+  event_layer_days: number
+  notification_layer_days: number
+}
+
+export type SettingsRecord = {
+  telegram: SettingsTelegramResponse
+  host_sample_frequency_tier: string
+  probe_frequency_defaults: ProbeFrequencyDefaults
+  incident_defaults: IncidentDefaults
+  override_rules: OverrideRules
+  retention_policy: RetentionPolicy
+}
+
+export type SettingsUpdateInput = {
+  telegram: SettingsTelegramInput
+  host_sample_frequency_tier: string
+  probe_frequency_defaults: ProbeFrequencyDefaults
+  incident_defaults: IncidentDefaults
+  override_rules: OverrideRules
+  retention_policy: RetentionPolicy
+}

@@ -10,6 +10,7 @@ import {
   exitTargetMaintenance,
   getDashboard,
   getNodeOnboarding,
+  getSettings,
   issueNodeEnrollmentToken,
   listNodes,
   listEvents,
@@ -21,7 +22,9 @@ import {
   restoreTargetToPaused,
   resumeNodeMonitoring,
   resumeTarget,
+  updateSettings,
 } from './api'
+import type { SettingsRecord, SettingsUpdateInput } from './types'
 import { appRoutes } from '../app/router'
 
 function mockResponse(status: number, body: string) {
@@ -32,6 +35,116 @@ function mockResponse(status: number, body: string) {
     json: async () => JSON.parse(body),
   } as Response
 }
+
+const settingsResponseBody = {
+  telegram: {
+    chat_id: 'chat-id',
+    token_present: true,
+    token_masked_summary: '****************oken',
+    runtime_apply_active: false,
+  },
+  host_sample_frequency_tier: '5m',
+  probe_frequency_defaults: {
+    tcp: '5m',
+    http: '1m',
+    tls: '15m',
+  },
+  incident_defaults: {
+    heartbeat_interval_seconds: 30,
+    stale_threshold_intervals: 3,
+    sweep_interval_seconds: 60,
+    notify_on_started: true,
+    notify_on_escalated: true,
+    notify_on_recovered: true,
+  },
+  override_rules: {
+    node_labels: [
+      {
+        label: 'edge',
+        overrides: {
+          host_sample_frequency_tier: '1m',
+          probe_frequency_defaults: { http: '1m' },
+        },
+      },
+    ],
+    target_types: [
+      {
+        target_type: 'http',
+        overrides: {
+          incident_defaults: { stale_threshold_intervals: 4 },
+        },
+      },
+    ],
+    target_labels: [
+      {
+        label: 'external',
+        overrides: {
+          probe_frequency_defaults: { tls: '30m' },
+        },
+      },
+    ],
+  },
+  retention_policy: {
+    raw_layer_days: 7,
+    aggregate_layer_days: 30,
+    event_layer_days: 90,
+    notification_layer_days: 180,
+  },
+} satisfies SettingsRecord
+
+const settingsUpdateBody = {
+  telegram: {
+    bot_token: 'bot-token',
+    chat_id: 'chat-id',
+  },
+  host_sample_frequency_tier: '1m',
+  probe_frequency_defaults: {
+    tcp: '5m',
+    http: '1m',
+    tls: '15m',
+  },
+  incident_defaults: {
+    heartbeat_interval_seconds: 30,
+    stale_threshold_intervals: 3,
+    sweep_interval_seconds: 60,
+    notify_on_started: true,
+    notify_on_escalated: true,
+    notify_on_recovered: true,
+  },
+  override_rules: {
+    node_labels: [
+      {
+        label: 'edge',
+        overrides: {
+          host_sample_frequency_tier: '1m',
+          probe_frequency_defaults: { http: '1m' },
+        },
+      },
+    ],
+    target_types: [
+      {
+        target_type: 'http',
+        overrides: {
+          incident_defaults: { stale_threshold_intervals: 4 },
+        },
+      },
+    ],
+    target_labels: [
+      {
+        label: 'external',
+        overrides: {
+          probe_frequency_defaults: { tls: '30m' },
+        },
+      },
+    ],
+  },
+  retention_policy: {
+    raw_layer_days: 7,
+    aggregate_layer_days: 30,
+    event_layer_days: 90,
+    notification_layer_days: 180,
+  },
+} satisfies SettingsUpdateInput
 
 describe('api helpers', () => {
   afterEach(() => {
@@ -82,6 +195,50 @@ describe('api helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/dashboard', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+    })
+  })
+
+  it('loads settings from /api/settings with truthful telegram metadata', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockResponse(200, JSON.stringify(settingsResponseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getSettings()).resolves.toEqual(settingsResponseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/settings', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('updates settings via PUT /api/settings and returns the redacted response shape', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockResponse(200, JSON.stringify(settingsResponseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(updateSettings(settingsUpdateBody)).resolves.toEqual(settingsResponseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/settings', {
+      method: 'PUT',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify(settingsUpdateBody),
+    })
+  })
+
+  it('passes settings update API errors through as ApiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(mockResponse(400, JSON.stringify({ error: 'invalid input' }))),
+    )
+
+    await expect(updateSettings(settingsUpdateBody)).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 400,
+      message: 'invalid input',
     })
   })
 

@@ -8,7 +8,9 @@ import type {
   NodeRecord,
   NodeRuntimeFacts,
   ProbeItemRecord,
+  SettingsRecord,
   StateChangeEventRecord,
+  SettingsUpdateInput,
   TargetRecord,
   TargetRuntimeFacts,
 } from './types'
@@ -159,6 +161,21 @@ export function restoreTargetToPaused(targetId: string) {
 
 export function getDashboard() {
   return requestJSON<DashboardOverview>('/api/dashboard')
+}
+
+export function getSettings() {
+  return requestJSON<SettingsRecord>('/api/settings')
+}
+
+export function updateSettings(settings: SettingsUpdateInput) {
+  return requestJSON<SettingsRecord>('/api/settings', {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(settings),
+  })
 }
 
 export function listEvents(filter?: EventListFilter) {
