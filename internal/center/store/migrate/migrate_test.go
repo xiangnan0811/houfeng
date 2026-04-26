@@ -15,8 +15,8 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 		t.Fatalf("Names() error = %v", err)
 	}
 
-	if len(names) < 4 {
-		t.Fatalf("len(Names()) = %d, want at least 4", len(names))
+	if len(names) < 5 {
+		t.Fatalf("len(Names()) = %d, want at least 5", len(names))
 	}
 
 	if names[0] != "0001_initial_schema.sql" {
@@ -28,8 +28,11 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	if names[2] != "0003_add_sync_token_hash.sql" {
 		t.Fatalf("third migration = %q, want %q", names[2], "0003_add_sync_token_hash.sql")
 	}
-	if names[3] != "0004_add_observation_provenance.sql" {
-		t.Fatalf("fourth migration = %q, want %q", names[3], "0004_add_observation_provenance.sql")
+	if names[3] != "0004_add_node_onboarding_binding_state.sql" {
+		t.Fatalf("fourth migration = %q, want %q", names[3], "0004_add_node_onboarding_binding_state.sql")
+	}
+	if names[4] != "0004_add_observation_provenance.sql" {
+		t.Fatalf("fifth migration = %q, want %q", names[4], "0004_add_observation_provenance.sql")
 	}
 }
 

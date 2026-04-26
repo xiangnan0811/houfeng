@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/enrollment"
@@ -15,8 +17,15 @@ import (
 	"houfeng/internal/center/nodes"
 )
 
+type nodeDB interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
+}
+
 type PostgresNodeRepository struct {
-	db *pgxpool.Pool
+	db nodeDB
 }
 
 func NewPostgresNodeRepository(db *pgxpool.Pool) *PostgresNodeRepository {
@@ -33,8 +42,13 @@ const nodeSelectColumns = `
 	monitoring_status,
 	binding_status,
 	coalesce(enrollment_token_hash, ''),
+	enrollment_token_issued_at,
 	coalesce(sync_token_hash, ''),
 	coalesce(binding_fingerprint, ''),
+	coalesce(pending_binding_fingerprint, ''),
+	pending_binding_first_seen_at,
+	pending_binding_last_seen_at,
+	pending_binding_attempt_count,
 	labels,
 	note,
 	current_health_status,
@@ -51,6 +65,7 @@ type nodeScanner interface {
 
 var _ nodes.Repository = (*PostgresNodeRepository)(nil)
 var _ enrollment.Repository = (*PostgresNodeRepository)(nil)
+var _ nodes.OnboardingRepository = (*PostgresNodeRepository)(nil)
 
 func scanNode(row nodeScanner) (nodes.Record, error) {
 	var record nodes.Record
@@ -64,8 +79,13 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 		&record.MonitoringStatus,
 		&record.BindingStatus,
 		&record.EnrollmentTokenHash,
+		&record.EnrollmentTokenIssuedAt,
 		&record.SyncTokenHash,
 		&record.BindingFingerprint,
+		&record.PendingBindingFingerprint,
+		&record.PendingBindingFirstSeenAt,
+		&record.PendingBindingLastSeenAt,
+		&record.PendingBindingAttemptCount,
 		&record.Labels,
 		&record.Note,
 		&record.CurrentHealthStatus,
@@ -79,6 +99,62 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 		return nodes.Record{}, err
 	}
 	return record, nil
+}
+
+func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
+	var (
+		record                 nodes.Record
+		hasHostSample          bool
+		hasAcceptedObservation bool
+	)
+	if err := row.Scan(
+		&record.NodeID,
+		&record.DisplayName,
+		&record.Region,
+		&record.City,
+		&record.Provider,
+		&record.LifecycleStatus,
+		&record.MonitoringStatus,
+		&record.BindingStatus,
+		&record.EnrollmentTokenHash,
+		&record.EnrollmentTokenIssuedAt,
+		&record.SyncTokenHash,
+		&record.BindingFingerprint,
+		&record.PendingBindingFingerprint,
+		&record.PendingBindingFirstSeenAt,
+		&record.PendingBindingLastSeenAt,
+		&record.PendingBindingAttemptCount,
+		&record.Labels,
+		&record.Note,
+		&record.CurrentHealthStatus,
+		&record.LastHeartbeatAt,
+		&record.LastSyncAt,
+		&record.CurrentActiveIncidentCount,
+		&record.CurrentPrimaryIssueSummary,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+		&hasHostSample,
+		&hasAcceptedObservation,
+	); err != nil {
+		return nodes.OnboardingState{}, err
+	}
+
+	state := nodes.OnboardingState{
+		Record:                  record,
+		Phase:                   nodes.DeriveOnboardingPhase(record, hasHostSample, hasAcceptedObservation),
+		HasHostSample:           hasHostSample,
+		HasAcceptedObservation:  hasAcceptedObservation,
+		EnrollmentTokenIssuedAt: record.EnrollmentTokenIssuedAt,
+	}
+	if record.PendingBindingFingerprint != "" || record.PendingBindingFirstSeenAt != nil || record.PendingBindingLastSeenAt != nil || record.PendingBindingAttemptCount > 0 {
+		state.PendingBinding = &nodes.PendingBindingMetadata{
+			Fingerprint:  record.PendingBindingFingerprint,
+			FirstSeenAt:  record.PendingBindingFirstSeenAt,
+			LastSeenAt:   record.PendingBindingLastSeenAt,
+			AttemptCount: record.PendingBindingAttemptCount,
+		}
+	}
+	return state, nil
 }
 
 func hashOpaqueToken(token string) string {
@@ -190,27 +266,127 @@ func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input nodes.Cre
 }
 
 func (r *PostgresNodeRepository) IssueEnrollmentToken(ctx context.Context, nodeID string) (string, error) {
+	issue, err := r.IssueNodeEnrollmentToken(ctx, nodeID)
+	if err != nil {
+		return "", err
+	}
+	return issue.Token, nil
+}
+
+func (r *PostgresNodeRepository) IssueNodeEnrollmentToken(ctx context.Context, nodeID string) (nodes.EnrollmentTokenIssue, error) {
 	token, err := ids.New("enroll")
 	if err != nil {
-		return "", fmt.Errorf("generate enrollment token: %w", err)
+		return nodes.EnrollmentTokenIssue{}, fmt.Errorf("generate enrollment token: %w", err)
 	}
 
-	tag, err := r.db.Exec(ctx, `
+	var issuedAt time.Time
+	if err := r.db.QueryRow(ctx, `
 		update nodes
 		set enrollment_token_hash = $2,
+			enrollment_token_issued_at = now(),
 			updated_at = now()
-		where node_id = $1`,
+		where node_id = $1
+		returning enrollment_token_issued_at`,
 		nodeID,
 		hashEnrollmentToken(token),
-	)
-	if err != nil {
-		return "", fmt.Errorf("issue enrollment token for node %q: %w", nodeID, err)
-	}
-	if tag.RowsAffected() == 0 {
-		return "", nodes.ErrNodeNotFound
+	).Scan(&issuedAt); errors.Is(err, pgx.ErrNoRows) {
+		return nodes.EnrollmentTokenIssue{}, nodes.ErrNodeNotFound
+	} else if err != nil {
+		return nodes.EnrollmentTokenIssue{}, fmt.Errorf("issue enrollment token for node %q: %w", nodeID, err)
 	}
 
-	return token, nil
+	return nodes.EnrollmentTokenIssue{
+		Token:    token,
+		IssuedAt: issuedAt,
+	}, nil
+}
+
+func (r *PostgresNodeRepository) GetNodeOnboarding(ctx context.Context, nodeID string) (nodes.OnboardingState, error) {
+	state, err := scanNodeOnboarding(r.db.QueryRow(ctx, `
+		select `+nodeSelectColumns+`,
+			exists (select 1 from host_samples where node_id = $1),
+			exists (select 1 from probe_observations where node_id = $1)
+		from nodes
+		where node_id = $1`,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nodes.OnboardingState{}, nodes.ErrNodeNotFound
+	}
+	if err != nil {
+		return nodes.OnboardingState{}, fmt.Errorf("query onboarding state for node %q: %w", nodeID, err)
+	}
+	return state, nil
+}
+
+func (r *PostgresNodeRepository) ConfirmNodeRebind(ctx context.Context, nodeID string) (nodes.Record, error) {
+	record, err := scanNode(r.db.QueryRow(ctx, `
+		update nodes
+		set binding_status = '已绑定',
+			binding_fingerprint = pending_binding_fingerprint,
+			pending_binding_fingerprint = null,
+			pending_binding_first_seen_at = null,
+			pending_binding_last_seen_at = null,
+			pending_binding_attempt_count = 0,
+			sync_token_hash = '',
+			updated_at = now()
+		where node_id = $1
+		returning `+nodeSelectColumns,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nodes.Record{}, nodes.ErrNodeNotFound
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("confirm node rebind for %q: %w", nodeID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresNodeRepository) RejectPendingFingerprint(ctx context.Context, nodeID string) (nodes.Record, error) {
+	record, err := scanNode(r.db.QueryRow(ctx, `
+		update nodes
+		set binding_status = '已绑定',
+			pending_binding_fingerprint = null,
+			pending_binding_first_seen_at = null,
+			pending_binding_last_seen_at = null,
+			pending_binding_attempt_count = 0,
+			updated_at = now()
+		where node_id = $1
+		returning `+nodeSelectColumns,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nodes.Record{}, nodes.ErrNodeNotFound
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("reject pending fingerprint for node %q: %w", nodeID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresNodeRepository) ResetNodeBinding(ctx context.Context, nodeID string) (nodes.Record, error) {
+	record, err := scanNode(r.db.QueryRow(ctx, `
+		update nodes
+		set binding_status = '未绑定',
+			binding_fingerprint = '',
+			pending_binding_fingerprint = null,
+			pending_binding_first_seen_at = null,
+			pending_binding_last_seen_at = null,
+			pending_binding_attempt_count = 0,
+			sync_token_hash = '',
+			updated_at = now()
+		where node_id = $1
+		returning `+nodeSelectColumns,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nodes.Record{}, nodes.ErrNodeNotFound
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("reset node binding for %q: %w", nodeID, err)
+	}
+	return record, nil
 }
 
 func (r *PostgresNodeRepository) IssueSyncToken(ctx context.Context, nodeID string) (string, error) {
@@ -253,17 +429,57 @@ func (r *PostgresNodeRepository) FindNodeByEnrollmentToken(ctx context.Context, 
 	return record, nil
 }
 
-func resolveEnrollmentBindingTransition(currentStatus, currentFingerprint, newFingerprint string) (string, string) {
-	switch currentStatus {
+func clearPendingBinding(record *nodes.Record) {
+	record.PendingBindingFingerprint = ""
+	record.PendingBindingFirstSeenAt = nil
+	record.PendingBindingLastSeenAt = nil
+	record.PendingBindingAttemptCount = 0
+}
+
+func resolveEnrollmentBindingTransition(record nodes.Record, newFingerprint string, now time.Time) nodes.Record {
+	next := record
+	switch record.BindingStatus {
 	case nodes.BindingUnbound:
-		return nodes.BindingBound, newFingerprint
+		next.BindingStatus = nodes.BindingBound
+		next.BindingFingerprint = newFingerprint
+		clearPendingBinding(&next)
+		return next
 	case nodes.BindingBound:
-		if currentFingerprint == newFingerprint {
-			return nodes.BindingBound, currentFingerprint
+		if record.BindingFingerprint == newFingerprint {
+			next.BindingStatus = nodes.BindingBound
+			next.BindingFingerprint = record.BindingFingerprint
+			clearPendingBinding(&next)
+			return next
 		}
-		return nodes.BindingPendingConfirmation, currentFingerprint
+		next.BindingStatus = nodes.BindingPendingConfirmation
+		next.BindingFingerprint = record.BindingFingerprint
+		next.PendingBindingFingerprint = newFingerprint
+		next.PendingBindingFirstSeenAt = &now
+		next.PendingBindingLastSeenAt = &now
+		next.PendingBindingAttemptCount = 1
+		return next
 	default:
-		return currentStatus, currentFingerprint
+		if record.PendingBindingFingerprint == newFingerprint {
+			next.PendingBindingFingerprint = newFingerprint
+			if record.PendingBindingFirstSeenAt == nil {
+				next.PendingBindingFirstSeenAt = &now
+			}
+			next.PendingBindingLastSeenAt = &now
+			next.PendingBindingAttemptCount = record.PendingBindingAttemptCount + 1
+			if next.PendingBindingAttemptCount == 0 {
+				next.PendingBindingAttemptCount = 1
+			}
+			return next
+		}
+		if record.BindingFingerprint == newFingerprint {
+			return next
+		}
+		next.BindingStatus = nodes.BindingPendingConfirmation
+		next.PendingBindingFingerprint = newFingerprint
+		next.PendingBindingFirstSeenAt = &now
+		next.PendingBindingLastSeenAt = &now
+		next.PendingBindingAttemptCount = 1
+		return next
 	}
 }
 
@@ -277,35 +493,66 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 	}()
 
 	var (
-		nodeID             string
-		bindingStatus      string
-		bindingFingerprint string
+		nodeID                     string
+		bindingStatus              string
+		bindingFingerprint         string
+		pendingBindingFingerprint  string
+		pendingBindingFirstSeenAt  *time.Time
+		pendingBindingLastSeenAt   *time.Time
+		pendingBindingAttemptCount int
 	)
 	if err := tx.QueryRow(ctx, `
 		select node_id,
 			binding_status,
-			coalesce(binding_fingerprint, '')
+			coalesce(binding_fingerprint, ''),
+			coalesce(pending_binding_fingerprint, ''),
+			pending_binding_first_seen_at,
+			pending_binding_last_seen_at,
+			pending_binding_attempt_count
 		from nodes
 		where enrollment_token_hash = $1
 		for update`,
 		hashEnrollmentToken(input.Token),
-	).Scan(&nodeID, &bindingStatus, &bindingFingerprint); errors.Is(err, pgx.ErrNoRows) {
+	).Scan(
+		&nodeID,
+		&bindingStatus,
+		&bindingFingerprint,
+		&pendingBindingFingerprint,
+		&pendingBindingFirstSeenAt,
+		&pendingBindingLastSeenAt,
+		&pendingBindingAttemptCount,
+	); errors.Is(err, pgx.ErrNoRows) {
 		return nodes.Record{}, nodes.ErrNodeNotFound
 	} else if err != nil {
 		return nodes.Record{}, fmt.Errorf("query node by enrollment token for update: %w", err)
 	}
 
-	nextBindingStatus, nextBindingFingerprint := resolveEnrollmentBindingTransition(bindingStatus, bindingFingerprint, input.Fingerprint)
+	next := resolveEnrollmentBindingTransition(nodes.Record{
+		BindingStatus:              bindingStatus,
+		BindingFingerprint:         bindingFingerprint,
+		PendingBindingFingerprint:  pendingBindingFingerprint,
+		PendingBindingFirstSeenAt:  pendingBindingFirstSeenAt,
+		PendingBindingLastSeenAt:   pendingBindingLastSeenAt,
+		PendingBindingAttemptCount: pendingBindingAttemptCount,
+	}, input.Fingerprint, time.Now().UTC())
 	record, err := scanNode(tx.QueryRow(ctx, `
 		update nodes
 		set binding_status = $2,
 			binding_fingerprint = $3,
+			pending_binding_fingerprint = $4,
+			pending_binding_first_seen_at = $5,
+			pending_binding_last_seen_at = $6,
+			pending_binding_attempt_count = $7,
 			updated_at = now()
 		where node_id = $1
 		returning `+nodeSelectColumns,
 		nodeID,
-		nextBindingStatus,
-		nextBindingFingerprint,
+		next.BindingStatus,
+		next.BindingFingerprint,
+		nullableText(next.PendingBindingFingerprint),
+		next.PendingBindingFirstSeenAt,
+		next.PendingBindingLastSeenAt,
+		next.PendingBindingAttemptCount,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nodes.Record{}, nodes.ErrNodeNotFound
@@ -317,6 +564,13 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		return nodes.Record{}, fmt.Errorf("commit enrollment transaction for node %q: %w", nodeID, err)
 	}
 	return record, nil
+}
+
+func nullableText(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func (r *PostgresNodeRepository) RecordAcceptedHeartbeats(ctx context.Context, syncToken string, writes []enrollment.HeartbeatWrite) error {

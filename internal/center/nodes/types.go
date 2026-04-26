@@ -18,6 +18,11 @@ const (
 	BindingBound               = "已绑定"
 	BindingPendingConfirmation = "指纹变更待确认"
 	HealthNormal               = "正常"
+
+	OnboardingPhaseNotStarted               = "未开始接入"
+	OnboardingPhaseBoundAwaitingObservation = "已绑定，等待稳定观测"
+	OnboardingPhaseCompleted                = "接入完成"
+	OnboardingPhaseBindingConflict          = "绑定冲突待处理"
 )
 
 var ErrNodeNotFound = errors.New("node not found")
@@ -40,8 +45,13 @@ type Record struct {
 	MonitoringStatus           string     `json:"monitoring_status"`
 	BindingStatus              string     `json:"binding_status"`
 	EnrollmentTokenHash        string     `json:"-"`
+	EnrollmentTokenIssuedAt    *time.Time `json:"-"`
 	SyncTokenHash              string     `json:"-"`
 	BindingFingerprint         string     `json:"-"`
+	PendingBindingFingerprint  string     `json:"-"`
+	PendingBindingFirstSeenAt  *time.Time `json:"-"`
+	PendingBindingLastSeenAt   *time.Time `json:"-"`
+	PendingBindingAttemptCount int        `json:"-"`
 	Labels                     []string   `json:"labels"`
 	Note                       string     `json:"note"`
 	CurrentHealthStatus        string     `json:"current_health_status"`
@@ -69,7 +79,50 @@ type Repository interface {
 	CreateNode(context.Context, CreateInput) (Record, error)
 }
 
+type EnrollmentTokenIssue struct {
+	Token    string    `json:"token"`
+	IssuedAt time.Time `json:"issued_at"`
+}
+
+type PendingBindingMetadata struct {
+	Fingerprint  string     `json:"fingerprint"`
+	FirstSeenAt  *time.Time `json:"first_seen_at,omitempty"`
+	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
+	AttemptCount int        `json:"attempt_count"`
+}
+
+type OnboardingState struct {
+	Record
+	Phase                   string                  `json:"phase"`
+	HasHostSample           bool                    `json:"has_host_sample"`
+	HasAcceptedObservation  bool                    `json:"has_accepted_observation"`
+	EnrollmentTokenIssuedAt *time.Time              `json:"enrollment_token_issued_at,omitempty"`
+	PendingBinding          *PendingBindingMetadata `json:"pending_binding,omitempty"`
+}
+
+type OnboardingRepository interface {
+	IssueNodeEnrollmentToken(context.Context, string) (EnrollmentTokenIssue, error)
+	GetNodeOnboarding(context.Context, string) (OnboardingState, error)
+	ConfirmNodeRebind(context.Context, string) (Record, error)
+	RejectPendingFingerprint(context.Context, string) (Record, error)
+	ResetNodeBinding(context.Context, string) (Record, error)
+}
+
 func IsValidLifecycleStatus(status string) bool {
 	_, ok := allowedLifecycleStatuses[status]
 	return ok
+}
+
+func DeriveOnboardingPhase(record Record, hasHostSample, hasAcceptedObservation bool) string {
+	switch record.BindingStatus {
+	case BindingPendingConfirmation:
+		return OnboardingPhaseBindingConflict
+	case BindingBound:
+		if record.LastHeartbeatAt != nil && (hasHostSample || hasAcceptedObservation) {
+			return OnboardingPhaseCompleted
+		}
+		return OnboardingPhaseBoundAwaitingObservation
+	default:
+		return OnboardingPhaseNotStarted
+	}
 }
