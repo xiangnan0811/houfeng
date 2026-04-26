@@ -119,12 +119,22 @@ const (
 )
 
 const (
-	EventIncidentStarted            EventType = "incident_started"
-	EventIncidentEscalated          EventType = "incident_escalated"
-	EventIncidentRecovered          EventType = "incident_recovered"
-	EventNodeBindingRebindConfirmed EventType = "node_binding_rebind_confirmed"
-	EventNodeBindingPendingRejected EventType = "node_binding_pending_rejected"
-	EventNodeBindingReset           EventType = "node_binding_reset"
+	EventIncidentStarted                  EventType = "incident_started"
+	EventIncidentEscalated                EventType = "incident_escalated"
+	EventIncidentRecovered                EventType = "incident_recovered"
+	EventNodeBindingRebindConfirmed       EventType = "node_binding_rebind_confirmed"
+	EventNodeBindingPendingRejected       EventType = "node_binding_pending_rejected"
+	EventNodeBindingReset                 EventType = "node_binding_reset"
+	EventNodeMonitoringMaintenanceEntered EventType = "node_monitoring_maintenance_entered"
+	EventNodeMonitoringMaintenanceExited  EventType = "node_monitoring_maintenance_exited"
+	EventNodeMonitoringPaused             EventType = "node_monitoring_paused"
+	EventNodeMonitoringResumed            EventType = "node_monitoring_resumed"
+	EventTargetMaintenanceEntered         EventType = "target_maintenance_entered"
+	EventTargetMaintenanceExited          EventType = "target_maintenance_exited"
+	EventTargetPaused                     EventType = "target_paused"
+	EventTargetResumed                    EventType = "target_resumed"
+	EventTargetArchived                   EventType = "target_archived"
+	EventTargetRestoredToPaused           EventType = "target_restored_to_paused"
 )
 
 const (

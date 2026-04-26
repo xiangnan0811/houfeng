@@ -734,6 +734,207 @@ func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) 
 	}
 }
 
+func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		action          func(context.Context, *PostgresNodeRepository, string) (nodes.Record, error)
+		nodeID          string
+		sourceStatus    string
+		returnedStatus  string
+		wantEventType   incidents.EventType
+		wantSummary     string
+		wantPayload     string
+		wantSQLSnippets []string
+	}{
+		{
+			name: "enabled to maintenance",
+			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
+				return repo.SetNodeMonitoringMaintenance(ctx, nodeID)
+			},
+			nodeID:         "nd_maintenance",
+			sourceStatus:   nodes.MonitoringEnabled,
+			returnedStatus: nodeMonitoringStatusMaintenance,
+			wantEventType:  incidents.EventNodeMonitoringMaintenanceEntered,
+			wantSummary:    "进入维护",
+			wantPayload:    nodeMonitoringStatusMaintenance,
+			wantSQLSnippets: []string{
+				"set monitoring_status = '维护中'",
+				"where node_id = $1",
+				"monitoring_status = '启用'",
+			},
+		},
+		{
+			name: "maintenance to enabled",
+			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
+				return repo.ResumeNodeMonitoring(ctx, nodeID)
+			},
+			nodeID:         "nd_resume_maintenance",
+			sourceStatus:   nodeMonitoringStatusMaintenance,
+			returnedStatus: nodes.MonitoringEnabled,
+			wantEventType:  incidents.EventNodeMonitoringMaintenanceExited,
+			wantSummary:    "退出维护",
+			wantPayload:    nodes.MonitoringEnabled,
+			wantSQLSnippets: []string{
+				"set monitoring_status = '启用'",
+				"where node_id = $1",
+				"monitoring_status in ('维护中', '暂停')",
+			},
+		},
+		{
+			name: "enabled to paused",
+			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
+				return repo.PauseNodeMonitoring(ctx, nodeID)
+			},
+			nodeID:         "nd_pause_enabled",
+			sourceStatus:   nodes.MonitoringEnabled,
+			returnedStatus: nodeMonitoringStatusPaused,
+			wantEventType:  incidents.EventNodeMonitoringPaused,
+			wantSummary:    "暂停",
+			wantPayload:    nodeMonitoringStatusPaused,
+			wantSQLSnippets: []string{
+				"set monitoring_status = '暂停'",
+				"where node_id = $1",
+				"monitoring_status in ('启用', '维护中')",
+			},
+		},
+		{
+			name: "paused to enabled",
+			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
+				return repo.ResumeNodeMonitoring(ctx, nodeID)
+			},
+			nodeID:         "nd_resume_paused",
+			sourceStatus:   nodeMonitoringStatusPaused,
+			returnedStatus: nodes.MonitoringEnabled,
+			wantEventType:  incidents.EventNodeMonitoringResumed,
+			wantSummary:    "恢复",
+			wantPayload:    nodes.MonitoringEnabled,
+			wantSQLSnippets: []string{
+				"set monitoring_status = '启用'",
+				"where node_id = $1",
+				"monitoring_status in ('维护中', '暂停')",
+			},
+		},
+		{
+			name: "maintenance to paused",
+			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
+				return repo.PauseNodeMonitoring(ctx, nodeID)
+			},
+			nodeID:         "nd_pause_maintenance",
+			sourceStatus:   nodeMonitoringStatusMaintenance,
+			returnedStatus: nodeMonitoringStatusPaused,
+			wantEventType:  incidents.EventNodeMonitoringPaused,
+			wantSummary:    "暂停",
+			wantPayload:    nodeMonitoringStatusPaused,
+			wantSQLSnippets: []string{
+				"set monitoring_status = '暂停'",
+				"where node_id = $1",
+				"monitoring_status in ('启用', '维护中')",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				gotSQL    string
+				execSQL   string
+				execArgs  []any
+				committed bool
+			)
+			tx := &fakeNodeTx{
+				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+					gotSQL = sql
+					if len(args) != 1 || args[0] != tt.nodeID {
+						t.Fatalf("QueryRow args = %#v, want node id %q", args, tt.nodeID)
+					}
+					return fakeNodeRow{scan: func(dest ...any) error {
+						scanNodeRecordDestinations(dest, nodes.Record{NodeID: tt.nodeID, MonitoringStatus: tt.returnedStatus})
+						if len(dest) > 26 {
+							*(dest[26].(*string)) = tt.sourceStatus
+						}
+						return nil
+					}}
+				},
+				exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					execSQL = sql
+					execArgs = append([]any(nil), args...)
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				},
+				commit: func(context.Context) error {
+					committed = true
+					return nil
+				},
+			}
+			repo := &PostgresNodeRepository{db: fakeNodeDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+
+			record, err := tt.action(context.Background(), repo, tt.nodeID)
+			if err != nil {
+				t.Fatalf("runtime control action error = %v", err)
+			}
+			if record.MonitoringStatus != tt.returnedStatus {
+				t.Fatalf("MonitoringStatus = %q, want %q", record.MonitoringStatus, tt.returnedStatus)
+			}
+			for _, snippet := range tt.wantSQLSnippets {
+				if !strings.Contains(gotSQL, snippet) {
+					t.Fatalf("runtime control SQL missing %q in %q", snippet, gotSQL)
+				}
+			}
+			if !strings.Contains(execSQL, "insert into state_change_events") {
+				t.Fatalf("event SQL = %q, want state_change_events insert", execSQL)
+			}
+			if len(execArgs) != 8 {
+				t.Fatalf("len(execArgs) = %d, want 8", len(execArgs))
+			}
+			if execArgs[1] != string(incidents.ObjectTypeNode) {
+				t.Fatalf("object_type = %#v, want %q", execArgs[1], incidents.ObjectTypeNode)
+			}
+			if execArgs[2] != tt.nodeID {
+				t.Fatalf("object_id = %#v, want %q", execArgs[2], tt.nodeID)
+			}
+			if execArgs[3] != string(tt.wantEventType) {
+				t.Fatalf("event_type = %#v, want %q", execArgs[3], tt.wantEventType)
+			}
+			if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, tt.wantSummary) {
+				t.Fatalf("summary = %#v, want substring %q", execArgs[5], tt.wantSummary)
+			}
+			payload, ok := execArgs[6].([]byte)
+			if !ok || !strings.Contains(string(payload), tt.wantPayload) {
+				t.Fatalf("payload = %#v, want status %q", execArgs[6], tt.wantPayload)
+			}
+			if !committed {
+				t.Fatal("transaction was not committed")
+			}
+		})
+	}
+}
+
+func TestNodeRuntimeControlRejectsInvalidTransition(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeNodeRow{scan: func(dest ...any) error {
+				*(dest[0].(*bool)) = true
+				return nil
+			}}
+		},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeNodeTx{queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+				return fakeNodeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			}}, nil
+		},
+	}}
+
+	_, err := repo.SetNodeMonitoringMaintenance(context.Background(), "nd_paused")
+	if !errors.Is(err, ErrInvalidNodeRuntimeTransition) {
+		t.Fatalf("SetNodeMonitoringMaintenance() error = %v, want ErrInvalidNodeRuntimeTransition", err)
+	}
+}
+
 func sourceBetween(t *testing.T, source, start, end string) string {
 	t.Helper()
 

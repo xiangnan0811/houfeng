@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -70,6 +71,42 @@ var _ nodes.Repository = (*PostgresNodeRepository)(nil)
 var _ enrollment.Repository = (*PostgresNodeRepository)(nil)
 var _ nodes.OnboardingRepository = (*PostgresNodeRepository)(nil)
 
+const (
+	nodeMonitoringStatusMaintenance = "维护中"
+	nodeMonitoringStatusPaused      = "暂停"
+)
+
+var ErrInvalidNodeRuntimeTransition = errors.New("invalid node runtime transition")
+
+var nodeSelectColumnNames = []string{
+	"node_id",
+	"display_name",
+	"region",
+	"city",
+	"provider",
+	"lifecycle_status",
+	"monitoring_status",
+	"binding_status",
+	"coalesce(enrollment_token_hash, '')",
+	"enrollment_token_issued_at",
+	"coalesce(sync_token_hash, '')",
+	"coalesce(binding_fingerprint, '')",
+	"binding_epoch_started_at",
+	"coalesce(pending_binding_fingerprint, '')",
+	"pending_binding_first_seen_at",
+	"pending_binding_last_seen_at",
+	"pending_binding_attempt_count",
+	"labels",
+	"note",
+	"current_health_status",
+	"last_heartbeat_at",
+	"last_sync_at",
+	"current_active_incident_count",
+	"current_primary_issue_summary",
+	"created_at",
+	"updated_at",
+}
+
 func scanNode(row nodeScanner) (nodes.Record, error) {
 	var record nodes.Record
 	if err := row.Scan(
@@ -103,6 +140,65 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 		return nodes.Record{}, err
 	}
 	return record, nil
+}
+
+func qualifiedNodeSelectColumns(alias string) string {
+	parts := make([]string, 0, len(nodeSelectColumnNames))
+	for _, column := range nodeSelectColumnNames {
+		base := column
+		if idx := strings.Index(column, "("); idx != -1 {
+			open := strings.Index(column, "(")
+			close := strings.Index(column, ",")
+			if open != -1 && close != -1 && close > open+1 {
+				base = strings.TrimSpace(column[open+1 : close])
+			}
+		}
+		if base == "labels" || base == "note" || base == "current_active_incident_count" || base == "created_at" || base == "updated_at" || strings.Contains(base, "_") {
+			parts = append(parts, alias+"."+base)
+			continue
+		}
+		parts = append(parts, alias+"."+base)
+	}
+	return strings.Join(parts, ",\n\t\t")
+}
+
+func scanNodeWithPreviousMonitoringStatus(row nodeScanner) (nodes.Record, string, error) {
+	var (
+		record     nodes.Record
+		priorState string
+	)
+	if err := row.Scan(
+		&record.NodeID,
+		&record.DisplayName,
+		&record.Region,
+		&record.City,
+		&record.Provider,
+		&record.LifecycleStatus,
+		&record.MonitoringStatus,
+		&record.BindingStatus,
+		&record.EnrollmentTokenHash,
+		&record.EnrollmentTokenIssuedAt,
+		&record.SyncTokenHash,
+		&record.BindingFingerprint,
+		&record.BindingEpochStartedAt,
+		&record.PendingBindingFingerprint,
+		&record.PendingBindingFirstSeenAt,
+		&record.PendingBindingLastSeenAt,
+		&record.PendingBindingAttemptCount,
+		&record.Labels,
+		&record.Note,
+		&record.CurrentHealthStatus,
+		&record.LastHeartbeatAt,
+		&record.LastSyncAt,
+		&record.CurrentActiveIncidentCount,
+		&record.CurrentPrimaryIssueSummary,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+		&priorState,
+	); err != nil {
+		return nodes.Record{}, "", err
+	}
+	return record, priorState, nil
 }
 
 func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
@@ -558,6 +654,182 @@ func (r *PostgresNodeRepository) ResetNodeBinding(ctx context.Context, nodeID st
 		return nodes.Record{}, fmt.Errorf("commit reset node binding for %q: %w", nodeID, err)
 	}
 
+	return record, nil
+}
+
+func insertNodeRuntimeEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	record nodes.Record,
+	eventType incidents.EventType,
+	summary string,
+) error {
+	eventID, err := ids.New("evt")
+	if err != nil {
+		return fmt.Errorf("generate node runtime event id: %w", err)
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"monitoring_status": record.MonitoringStatus,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal node runtime event payload: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		insert into state_change_events (
+			event_id,
+			object_type,
+			object_id,
+			event_type,
+			severity,
+			summary,
+			payload,
+			created_at
+		) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+		eventID,
+		string(incidents.ObjectTypeNode),
+		record.NodeID,
+		string(eventType),
+		"",
+		summary,
+		payload,
+		time.Now().UTC(),
+	); err != nil {
+		return fmt.Errorf("insert runtime event for node %q: %w", record.NodeID, err)
+	}
+
+	return nil
+}
+
+func (r *PostgresNodeRepository) SetNodeMonitoringMaintenance(ctx context.Context, nodeID string) (nodes.Record, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin set node maintenance transaction for %q: %w", nodeID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, err := scanNode(tx.QueryRow(ctx, `
+		update nodes
+		set monitoring_status = '维护中',
+			updated_at = now()
+		where node_id = $1
+			and monitoring_status = '启用'
+		returning `+nodeSelectColumns,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := r.nodeExists(ctx, nodeID)
+		if existsErr != nil {
+			return nodes.Record{}, fmt.Errorf("set node maintenance for %q: %w", nodeID, existsErr)
+		}
+		if !exists {
+			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
+		}
+		return nodes.Record{}, fmt.Errorf("%w: node %q cannot enter maintenance from current monitoring status", ErrInvalidNodeRuntimeTransition, nodeID)
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("set node maintenance for %q: %w", nodeID, err)
+	}
+	if err := insertNodeRuntimeEvent(ctx, tx, record, incidents.EventNodeMonitoringMaintenanceEntered, "节点监控已进入维护"); err != nil {
+		return nodes.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit set node maintenance for %q: %w", nodeID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresNodeRepository) PauseNodeMonitoring(ctx context.Context, nodeID string) (nodes.Record, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin pause node monitoring transaction for %q: %w", nodeID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, err := scanNode(tx.QueryRow(ctx, `
+		update nodes
+		set monitoring_status = '暂停',
+			updated_at = now()
+		where node_id = $1
+			and monitoring_status in ('启用', '维护中')
+		returning `+nodeSelectColumns,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := r.nodeExists(ctx, nodeID)
+		if existsErr != nil {
+			return nodes.Record{}, fmt.Errorf("pause node monitoring for %q: %w", nodeID, existsErr)
+		}
+		if !exists {
+			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
+		}
+		return nodes.Record{}, fmt.Errorf("%w: node %q cannot pause monitoring from current monitoring status", ErrInvalidNodeRuntimeTransition, nodeID)
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("pause node monitoring for %q: %w", nodeID, err)
+	}
+	if err := insertNodeRuntimeEvent(ctx, tx, record, incidents.EventNodeMonitoringPaused, "节点监控已暂停"); err != nil {
+		return nodes.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit pause node monitoring for %q: %w", nodeID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresNodeRepository) ResumeNodeMonitoring(ctx context.Context, nodeID string) (nodes.Record, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin resume node monitoring transaction for %q: %w", nodeID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, previousStatus, err := scanNodeWithPreviousMonitoringStatus(tx.QueryRow(ctx, `
+		with prior as (
+			select monitoring_status
+			from nodes
+			where node_id = $1
+		),
+		updated as (
+			update nodes
+			set monitoring_status = '启用',
+				updated_at = now()
+			where node_id = $1
+				and monitoring_status in ('维护中', '暂停')
+			returning `+nodeSelectColumns+`
+		)
+		select `+qualifiedNodeSelectColumns("updated")+`, prior.monitoring_status
+		from updated
+		join prior on true`,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := r.nodeExists(ctx, nodeID)
+		if existsErr != nil {
+			return nodes.Record{}, fmt.Errorf("resume node monitoring for %q: %w", nodeID, existsErr)
+		}
+		if !exists {
+			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
+		}
+		return nodes.Record{}, fmt.Errorf("%w: node %q cannot resume monitoring from current monitoring status", ErrInvalidNodeRuntimeTransition, nodeID)
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("resume node monitoring for %q: %w", nodeID, err)
+	}
+
+	eventType := incidents.EventNodeMonitoringResumed
+	summary := "节点监控已恢复"
+	if previousStatus == nodeMonitoringStatusMaintenance {
+		eventType = incidents.EventNodeMonitoringMaintenanceExited
+		summary = "节点监控已退出维护"
+	}
+	if err := insertNodeRuntimeEvent(ctx, tx, record, eventType, summary); err != nil {
+		return nodes.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit resume node monitoring for %q: %w", nodeID, err)
+	}
 	return record, nil
 }
 
