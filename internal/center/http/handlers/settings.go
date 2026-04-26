@@ -68,6 +68,10 @@ func Settings(repo SettingsRepository) http.Handler {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
 			}
+			if input.Telegram.BotToken != nil && strings.TrimSpace(input.Telegram.ChatID) == "" {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
 
 			record, err := repo.PutSettings(r.Context(), mergeSettingsUpdate(current, input))
 			if err != nil {

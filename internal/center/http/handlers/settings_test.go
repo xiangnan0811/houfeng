@@ -19,6 +19,7 @@ type fakeSettingsRepository struct {
 	putSettingsResult centersettings.CenterSettings
 	putSettingsErr    error
 	putSettingsInput  centersettings.CenterSettings
+	putSettingsCalls  int
 }
 
 type settingsHandlerResponse struct {
@@ -46,6 +47,7 @@ func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.Ce
 }
 
 func (f *fakeSettingsRepository) PutSettings(_ context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+	f.putSettingsCalls++
 	f.putSettingsInput = input
 	if f.putSettingsErr != nil {
 		return centersettings.CenterSettings{}, f.putSettingsErr
@@ -200,6 +202,24 @@ func TestSettingsHandlerMapsValidationFailureToBadRequest(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+func TestSettingsHandlerRejectsTelegramTokenWithoutChatID(t *testing.T) {
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
+
+	handler := handlers.Settings(repo)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"replacement-token","chat_id":""},"host_sample_frequency_tier":"5m","probe_frequency_defaults":{"tcp":"5m","http":"5m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":60,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+	if repo.putSettingsCalls != 0 {
+		t.Fatalf("putSettingsCalls = %d, want 0 because repository should not be called", repo.putSettingsCalls)
 	}
 }
 
