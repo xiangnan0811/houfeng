@@ -76,8 +76,8 @@ func normalizeCreateInput(input nodes.CreateInput) nodes.CreateInput {
 	input.Region = strings.TrimSpace(input.Region)
 	input.City = strings.TrimSpace(input.City)
 	input.Provider = strings.TrimSpace(input.Provider)
-	input.LifecycleStatus = strings.TrimSpace(input.LifecycleStatus)
 	input.Note = strings.TrimSpace(input.Note)
+	input.LifecycleStatus = nodes.LifecyclePendingEnrollment
 	return input
 }
 

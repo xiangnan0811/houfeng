@@ -139,6 +139,9 @@ export function EventsPage() {
                 <option value="incident_started">异常开始</option>
                 <option value="incident_escalated">异常升级</option>
                 <option value="incident_recovered">异常恢复</option>
+                <option value="node_binding_rebind_confirmed">确认重新绑定</option>
+                <option value="node_binding_pending_rejected">拒绝待确认指纹</option>
+                <option value="node_binding_reset">绑定已重置</option>
               </select>
             </label>
 

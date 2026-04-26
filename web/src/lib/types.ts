@@ -142,6 +142,9 @@ export type StateChangeEventType =
   | 'incident_started'
   | 'incident_escalated'
   | 'incident_recovered'
+  | 'node_binding_rebind_confirmed'
+  | 'node_binding_pending_rejected'
+  | 'node_binding_reset'
 
 export type StateChangeEventRecord = {
   event_id?: string

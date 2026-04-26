@@ -16,6 +16,9 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   incident_started: '异常开始',
   incident_escalated: '异常升级',
   incident_recovered: '异常恢复',
+  node_binding_rebind_confirmed: '确认重新绑定',
+  node_binding_pending_rejected: '拒绝待确认指纹',
+  node_binding_reset: '绑定已重置',
 }
 
 const OBJECT_TYPE_LABELS = {
@@ -47,6 +50,10 @@ function severityTone(value: StateChangeEventRecord['severity']) {
   if (value === '告警') return 'yellow'
   if (value === '严重') return 'red'
   return 'slate'
+}
+
+function hasIncidentMeta(event: StateChangeEventRecord) {
+  return event.incident_class.trim().length > 0
 }
 
 export function EventList({
@@ -83,10 +90,12 @@ export function EventList({
             </div>
           </header>
           <dl className="probe-card__meta">
-            <div>
-              <dt>异常类型</dt>
-              <dd>{incidentClassLabel(event.incident_class)}</dd>
-            </div>
+            {hasIncidentMeta(event) ? (
+              <div>
+                <dt>异常类型</dt>
+                <dd>{incidentClassLabel(event.incident_class)}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>对象 ID</dt>
               <dd>{event.object_id}</dd>

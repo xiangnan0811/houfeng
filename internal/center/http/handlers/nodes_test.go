@@ -130,27 +130,36 @@ func TestCreateNodeHandlerReturnsCreatedRecord(t *testing.T) {
 	}
 }
 
-func TestCreateNodeHandlerRejectsInvalidLifecycleStatus(t *testing.T) {
-	repo := &fakeNodeRepository{}
+func TestCreateNodeHandlerForcesPendingLifecycleStatus(t *testing.T) {
+	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
+	repo := &fakeNodeRepository{
+		createNodeResult: nodes.Record{
+			NodeID:              "nd_001",
+			DisplayName:         "Tokyo Edge",
+			Region:              "ap-northeast-1",
+			City:                "Tokyo",
+			Provider:            "Vultr",
+			LifecycleStatus:     "待接入",
+			MonitoringStatus:    "启用",
+			BindingStatus:       "未绑定",
+			CurrentHealthStatus: "正常",
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		},
+	}
 
 	handler := handlers.NodesCollection(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/nodes", strings.NewReader(`{"display_name":"Tokyo Edge","region":"ap-northeast-1","city":"Tokyo","provider":"Vultr","lifecycle_status":"未知状态"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes", strings.NewReader(`{"display_name":"Tokyo Edge","region":"ap-northeast-1","city":"Tokyo","provider":"Vultr","lifecycle_status":"在用"}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, recorder.Code)
 	}
-
-	var body map[string]string
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
-	}
-
-	if body["error"] != "invalid input" {
-		t.Fatalf("expected error %q, got %q", "invalid input", body["error"])
+	if repo.createNodeInput.LifecycleStatus != nodes.LifecyclePendingEnrollment {
+		t.Fatalf("create lifecycle_status = %q, want %q", repo.createNodeInput.LifecycleStatus, nodes.LifecyclePendingEnrollment)
 	}
 }
 

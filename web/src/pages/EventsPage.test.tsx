@@ -78,6 +78,32 @@ describe('EventsPage', () => {
     )
   })
 
+  it('offers binding audit event filters for node onboarding actions', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EventsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+    )
+
+    fireEvent.change(screen.getByLabelText('事件类型'), {
+      target: { value: 'node_binding_reset' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith('/api/events?event_type=node_binding_reset&limit=50', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      }),
+    )
+  })
+
   it('renders an explicit empty state when no events exist', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse([])))
 

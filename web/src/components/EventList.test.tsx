@@ -37,4 +37,30 @@ describe('EventList', () => {
     expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument()
     expect(screen.getByText('系统暂时没有新的 incident 变化记录。')).toBeInTheDocument()
   })
+
+  it('renders binding audit events with sane labels and no incident-only meta row', () => {
+    render(
+      <EventList
+        events={[
+          {
+            event_id: 'evt_bind_001',
+            incident_id: '',
+            incident_class: '',
+            object_type: 'node',
+            object_id: 'nd_001',
+            event_type: 'node_binding_reset',
+            severity: '',
+            summary: '节点已重置绑定并等待重新接入',
+            created_at: '2026-04-26T08:10:00Z',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('绑定已重置')).toBeInTheDocument()
+    expect(screen.getByText('节点')).toBeInTheDocument()
+    expect(screen.getByText('nd_001')).toBeInTheDocument()
+    expect(screen.getByText('节点已重置绑定并等待重新接入')).toBeInTheDocument()
+    expect(screen.queryByText('异常类型')).not.toBeInTheDocument()
+  })
 })
