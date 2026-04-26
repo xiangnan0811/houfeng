@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -22,6 +22,35 @@ function renderOnboardingPage(initialEntry = '/nodes/nd_001/onboarding') {
       </Routes>
     </MemoryRouter>,
   )
+}
+
+function createOnboardingState(
+  overrides: Record<string, unknown> = {},
+  pendingBinding?: Record<string, unknown>,
+) {
+  return {
+    node_id: 'nd_001',
+    display_name: 'Tokyo Edge',
+    region: 'ap-northeast-1',
+    city: 'Tokyo',
+    provider: 'Vultr',
+    lifecycle_status: '待接入',
+    monitoring_status: '启用',
+    binding_status: '未绑定',
+    labels: ['edge'],
+    note: '',
+    current_health_status: '正常',
+    current_active_incident_count: 0,
+    current_primary_issue_summary: '',
+    created_at: '2026-04-26T09:00:00Z',
+    updated_at: '2026-04-26T09:00:00Z',
+    phase: '未开始接入',
+    has_host_sample: false,
+    has_accepted_observation: false,
+    enrollment_token_issued_at: '2026-04-26T09:05:00Z',
+    ...(pendingBinding ? { pending_binding: pendingBinding } : {}),
+    ...overrides,
+  }
 }
 
 describe('NodeOnboardingPage', () => {
@@ -241,5 +270,150 @@ describe('NodeOnboardingPage', () => {
 
     expect(screen.getByText('请重新生成接入 Token，再继续安装或核对配置。')).toBeInTheDocument()
     expect(screen.queryByText('enroll_tokyo_001')).not.toBeInTheDocument()
+  })
+
+  it('shows a high-priority conflict card with masked fingerprint summaries and conflict metadata', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(
+          createOnboardingState(
+            {
+              binding_status: '指纹变更待确认',
+              phase: '绑定冲突待处理',
+              current_binding_fingerprint: 'sha256:curr1234567890abcdef',
+            },
+            {
+              fingerprint: 'sha256:pendabcdef1234567890',
+              first_seen_at: '2026-04-26T09:15:00Z',
+              last_seen_at: '2026-04-26T09:18:00Z',
+              attempt_count: 4,
+            },
+          ),
+        ),
+      ),
+    )
+
+    renderOnboardingPage()
+
+    const conflictCard = await screen.findByRole('article', {
+      name: '高优先级：绑定冲突待处理',
+    })
+
+    expect(within(conflictCard).getByText('sha256:c…abcdef')).toBeInTheDocument()
+    expect(within(conflictCard).getByText('sha256:p…567890')).toBeInTheDocument()
+    expect(within(conflictCard).getByText('2026/04/26 17:15')).toBeInTheDocument()
+    expect(within(conflictCard).getByText('2026/04/26 17:18')).toBeInTheDocument()
+    expect(within(conflictCard).getByText('4')).toBeInTheDocument()
+    expect(within(conflictCard).getByRole('button', { name: 'confirm rebind' })).toBeInTheDocument()
+    expect(within(conflictCard).getByRole('button', { name: 'reject fingerprint' })).toBeInTheDocument()
+    expect(within(conflictCard).getByRole('button', { name: 'reset binding' })).toBeInTheDocument()
+  })
+
+  it('keeps action failures local to the conflict section', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          createOnboardingState(
+            {
+              binding_status: '指纹变更待确认',
+              phase: '绑定冲突待处理',
+              current_binding_fingerprint: 'sha256:curr1234567890abcdef',
+            },
+            {
+              fingerprint: 'sha256:pendabcdef1234567890',
+              first_seen_at: '2026-04-26T09:15:00Z',
+              last_seen_at: '2026-04-26T09:18:00Z',
+              attempt_count: 4,
+            },
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'reject failed' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderOnboardingPage()
+
+    const conflictCard = await screen.findByRole('article', {
+      name: '高优先级：绑定冲突待处理',
+    })
+
+    fireEvent.click(within(conflictCard).getByRole('button', { name: 'reject fingerprint' }))
+
+    await waitFor(() => expect(within(conflictCard).getByText('reject failed')).toBeInTheDocument())
+
+    expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.queryByText('节点接入工作台不可用')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/binding/reject-pending', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('refreshes onboarding state after a successful binding action', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          createOnboardingState(
+            {
+              binding_status: '指纹变更待确认',
+              phase: '绑定冲突待处理',
+              current_binding_fingerprint: 'sha256:curr1234567890abcdef',
+            },
+            {
+              fingerprint: 'sha256:pendabcdef1234567890',
+              first_seen_at: '2026-04-26T09:15:00Z',
+              last_seen_at: '2026-04-26T09:18:00Z',
+              attempt_count: 4,
+            },
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          createOnboardingState({
+            binding_status: '已绑定',
+            phase: '已绑定，等待稳定观测',
+            current_binding_fingerprint: 'sha256:pendabcdef1234567890',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          createOnboardingState({
+            binding_status: '已绑定',
+            phase: '已绑定，等待稳定观测',
+            current_binding_fingerprint: 'sha256:pendabcdef1234567890',
+            updated_at: '2026-04-26T09:20:00Z',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderOnboardingPage()
+
+    const conflictCard = await screen.findByRole('article', {
+      name: '高优先级：绑定冲突待处理',
+    })
+
+    fireEvent.click(within(conflictCard).getByRole('button', { name: 'confirm rebind' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('已完成指纹绑定，等待稳定观测')).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByRole('article', { name: '高优先级：绑定冲突待处理' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/binding/confirm-rebind', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/onboarding', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
   })
 })
