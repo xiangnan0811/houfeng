@@ -7,11 +7,16 @@ import {
   ApiError,
   confirmNodeRebind,
   getNodeOnboarding,
+  issueNodeEnrollmentToken,
   rejectPendingNodeBinding,
   resetNodeBinding,
 } from '../lib/api'
 import { formatDateTime, formatLabelList } from '../lib/format'
-import { clearOnboardingTokenCache, getOnboardingTokenCache } from '../lib/onboardingTokenCache'
+import {
+  clearOnboardingTokenCache,
+  getOnboardingTokenCache,
+  setOnboardingTokenCache,
+} from '../lib/onboardingTokenCache'
 import type { NodeOnboardingState } from '../lib/types'
 
 type State = {
@@ -27,9 +32,9 @@ type ConflictState = {
   error: string | null
 }
 
-type NodeOnboardingFingerprintFields = NodeOnboardingState & {
-  current_binding_fingerprint?: string
-  current_binding_fingerprint_summary?: string
+type TokenState = {
+  action: 'issue' | null
+  error: string | null
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -47,12 +52,8 @@ function maskFingerprint(value?: string | null) {
 }
 
 function currentFingerprintSummary(onboarding: NodeOnboardingState) {
-  const state = onboarding as NodeOnboardingFingerprintFields
-  if (state.current_binding_fingerprint_summary?.trim()) {
-    return state.current_binding_fingerprint_summary.trim()
-  }
-  if (state.current_binding_fingerprint?.trim()) {
-    return maskFingerprint(state.current_binding_fingerprint)
+  if (onboarding.current_binding_fingerprint_summary?.trim()) {
+    return onboarding.current_binding_fingerprint_summary.trim()
   }
   return '服务端当前未提供已绑定指纹摘要'
 }
@@ -98,6 +99,10 @@ export function NodeOnboardingPage() {
     action: null,
     error: null,
   })
+  const [tokenState, setTokenState] = useState<TokenState>({
+    action: null,
+    error: null,
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -110,6 +115,10 @@ export function NodeOnboardingPage() {
           action: null,
           error: null,
         })
+        setTokenState({
+          action: null,
+          error: null,
+        })
         setState({
           requestedNodeId: nodeId,
           onboarding,
@@ -119,6 +128,10 @@ export function NodeOnboardingPage() {
       .catch((error: unknown) => {
         if (cancelled) return
         setConflictState({
+          action: null,
+          error: null,
+        })
+        setTokenState({
           action: null,
           error: null,
         })
@@ -178,6 +191,14 @@ export function NodeOnboardingPage() {
   const pendingBinding = onboarding.pending_binding
   const showBindingConflict = onboarding.binding_status === '指纹变更待确认'
 
+  function applyOnboardingState(targetNodeId: string, nextOnboarding: NodeOnboardingState) {
+    setState({
+      requestedNodeId: targetNodeId,
+      onboarding: nextOnboarding,
+      error: null,
+    })
+  }
+
   async function handleBindingAction(
     action: ConflictAction,
     request: (targetNodeId: string) => Promise<NodeOnboardingState>,
@@ -192,11 +213,7 @@ export function NodeOnboardingPage() {
     try {
       await request(nodeId)
       const refreshed = await getNodeOnboarding(nodeId)
-      setState({
-        requestedNodeId: nodeId,
-        onboarding: refreshed,
-        error: null,
-      })
+      applyOnboardingState(nodeId, refreshed)
       setConflictState({
         action: null,
         error: null,
@@ -205,6 +222,52 @@ export function NodeOnboardingPage() {
       setConflictState({
         action: null,
         error: describeError(error, '更新绑定冲突状态失败'),
+      })
+    }
+  }
+
+  async function handleIssueEnrollmentToken() {
+    if (!nodeId) return
+
+    setTokenState({
+      action: 'issue',
+      error: null,
+    })
+
+    try {
+      const issue = await issueNodeEnrollmentToken(nodeId)
+      setOnboardingTokenCache(nodeId, issue)
+
+      try {
+        const refreshed = await getNodeOnboarding(nodeId)
+        applyOnboardingState(nodeId, refreshed)
+        setTokenState({
+          action: null,
+          error: null,
+        })
+      } catch (error: unknown) {
+        setState((current) => {
+          if (current.requestedNodeId !== nodeId || !current.onboarding) {
+            return current
+          }
+
+          return {
+            ...current,
+            onboarding: {
+              ...current.onboarding,
+              enrollment_token_issued_at: issue.issued_at,
+            },
+          }
+        })
+        setTokenState({
+          action: null,
+          error: describeError(error, '已重新生成 Token，但刷新接入状态失败'),
+        })
+      }
+    } catch (error: unknown) {
+      setTokenState({
+        action: null,
+        error: describeError(error, '重新生成接入 Token 失败'),
       })
     }
   }
@@ -328,6 +391,16 @@ export function NodeOnboardingPage() {
             <p>请重新生成接入 Token，再继续安装或核对配置。</p>
           </div>
         )}
+        {tokenState.error ? <p role="alert">{tokenState.error}</p> : null}
+        <div className="badge-row">
+          <button
+            type="button"
+            disabled={tokenState.action !== null}
+            onClick={handleIssueEnrollmentToken}
+          >
+            重新生成接入 Token
+          </button>
+        </div>
       </DetailSection>
 
       <DetailSection eyebrow="Install Steps" title="接入步骤">

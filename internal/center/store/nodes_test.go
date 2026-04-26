@@ -207,6 +207,7 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 	firstSeenAt := issuedAt.Add(5 * time.Minute)
 	lastSeenAt := firstSeenAt.Add(2 * time.Minute)
 	heartbeatAt := issuedAt.Add(10 * time.Minute)
+	activeFingerprint := "sha256:curr1234567890abcdef"
 	var gotSQL string
 	repo := &PostgresNodeRepository{db: fakeNodeDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
@@ -221,7 +222,7 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 					LifecycleStatus:            nodes.LifecyclePendingEnrollment,
 					MonitoringStatus:           nodes.MonitoringEnabled,
 					BindingStatus:              nodes.BindingPendingConfirmation,
-					BindingFingerprint:         "fp-active",
+					BindingFingerprint:         activeFingerprint,
 					PendingBindingFingerprint:  "fp-pending",
 					PendingBindingFirstSeenAt:  &firstSeenAt,
 					PendingBindingLastSeenAt:   &lastSeenAt,
@@ -253,6 +254,9 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 	}
 	if state.PendingBinding.AttemptCount != 4 {
 		t.Fatalf("PendingBinding.AttemptCount = %d, want 4", state.PendingBinding.AttemptCount)
+	}
+	if state.CurrentBindingFingerprintSummary != "sha256:c…abcdef" {
+		t.Fatalf("CurrentBindingFingerprintSummary = %q, want %q", state.CurrentBindingFingerprintSummary, "sha256:c…abcdef")
 	}
 	if state.EnrollmentTokenIssuedAt == nil || !state.EnrollmentTokenIssuedAt.Equal(issuedAt) {
 		t.Fatalf("EnrollmentTokenIssuedAt = %v, want %s", state.EnrollmentTokenIssuedAt, issuedAt.Format(time.RFC3339))

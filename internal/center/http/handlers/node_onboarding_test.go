@@ -84,10 +84,11 @@ func TestNodeOnboardingHandlerReturnsState(t *testing.T) {
 				CurrentHealthStatus:     nodes.HealthNormal,
 				EnrollmentTokenIssuedAt: &issuedAt,
 			},
-			Phase:                   nodes.OnboardingPhaseBindingConflict,
-			HasHostSample:           true,
-			HasAcceptedObservation:  false,
-			EnrollmentTokenIssuedAt: &issuedAt,
+			Phase:                            nodes.OnboardingPhaseBindingConflict,
+			HasHostSample:                    true,
+			HasAcceptedObservation:           false,
+			EnrollmentTokenIssuedAt:          &issuedAt,
+			CurrentBindingFingerprintSummary: "sha256:c…abcdef",
 			PendingBinding: &nodes.PendingBindingMetadata{
 				Fingerprint:  "fp-pending",
 				AttemptCount: 3,
@@ -120,6 +121,9 @@ func TestNodeOnboardingHandlerReturnsState(t *testing.T) {
 	}
 	if body.PendingBinding == nil || body.PendingBinding.Fingerprint != "fp-pending" {
 		t.Fatalf("PendingBinding = %#v, want fingerprint %q", body.PendingBinding, "fp-pending")
+	}
+	if body.CurrentBindingFingerprintSummary != "sha256:c…abcdef" {
+		t.Fatalf("CurrentBindingFingerprintSummary = %q, want %q", body.CurrentBindingFingerprintSummary, "sha256:c…abcdef")
 	}
 }
 

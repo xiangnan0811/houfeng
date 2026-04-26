@@ -269,7 +269,59 @@ describe('NodeOnboardingPage', () => {
     )
 
     expect(screen.getByText('请重新生成接入 Token，再继续安装或核对配置。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新生成接入 Token' })).toBeInTheDocument()
     expect(screen.queryByText('enroll_tokyo_001')).not.toBeInTheDocument()
+  })
+
+  it('reissues the enrollment token and refreshes onboarding state', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          createOnboardingState({
+            enrollment_token_issued_at: '2026-04-26T09:05:00Z',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          token: 'enroll_tokyo_002',
+          issued_at: '2026-04-26T09:25:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          createOnboardingState({
+            enrollment_token_issued_at: '2026-04-26T09:25:00Z',
+            updated_at: '2026-04-26T09:25:00Z',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderOnboardingPage()
+
+    await waitFor(() =>
+      expect(screen.getByText('当前会话里没有可显示的 Token 明文。')).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '重新生成接入 Token' }))
+
+    await waitFor(() => expect(screen.getByText('enroll_tokyo_002')).toBeInTheDocument())
+
+    expect(getOnboardingTokenCache('nd_001')).toEqual({
+      token: 'enroll_tokyo_002',
+      issued_at: '2026-04-26T09:25:00Z',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/enrollment-token', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/onboarding', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
   })
 
   it('shows a high-priority conflict card with masked fingerprint summaries and conflict metadata', async () => {
@@ -281,7 +333,7 @@ describe('NodeOnboardingPage', () => {
             {
               binding_status: '指纹变更待确认',
               phase: '绑定冲突待处理',
-              current_binding_fingerprint: 'sha256:curr1234567890abcdef',
+              current_binding_fingerprint_summary: 'sha256:c…abcdef',
             },
             {
               fingerprint: 'sha256:pendabcdef1234567890',
@@ -319,7 +371,7 @@ describe('NodeOnboardingPage', () => {
             {
               binding_status: '指纹变更待确认',
               phase: '绑定冲突待处理',
-              current_binding_fingerprint: 'sha256:curr1234567890abcdef',
+              current_binding_fingerprint_summary: 'sha256:c…abcdef',
             },
             {
               fingerprint: 'sha256:pendabcdef1234567890',
@@ -361,7 +413,7 @@ describe('NodeOnboardingPage', () => {
             {
               binding_status: '指纹变更待确认',
               phase: '绑定冲突待处理',
-              current_binding_fingerprint: 'sha256:curr1234567890abcdef',
+              current_binding_fingerprint_summary: 'sha256:c…abcdef',
             },
             {
               fingerprint: 'sha256:pendabcdef1234567890',
@@ -377,7 +429,7 @@ describe('NodeOnboardingPage', () => {
           createOnboardingState({
             binding_status: '已绑定',
             phase: '已绑定，等待稳定观测',
-            current_binding_fingerprint: 'sha256:pendabcdef1234567890',
+            current_binding_fingerprint_summary: 'sha256:p…567890',
           }),
         ),
       )
@@ -386,7 +438,7 @@ describe('NodeOnboardingPage', () => {
           createOnboardingState({
             binding_status: '已绑定',
             phase: '已绑定，等待稳定观测',
-            current_binding_fingerprint: 'sha256:pendabcdef1234567890',
+            current_binding_fingerprint_summary: 'sha256:p…567890',
             updated_at: '2026-04-26T09:20:00Z',
           }),
         ),

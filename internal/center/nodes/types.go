@@ -94,11 +94,22 @@ type PendingBindingMetadata struct {
 
 type OnboardingState struct {
 	Record
-	Phase                   string                  `json:"phase"`
-	HasHostSample           bool                    `json:"has_host_sample"`
-	HasAcceptedObservation  bool                    `json:"has_accepted_observation"`
-	EnrollmentTokenIssuedAt *time.Time              `json:"enrollment_token_issued_at,omitempty"`
-	PendingBinding          *PendingBindingMetadata `json:"pending_binding,omitempty"`
+	Phase                            string                  `json:"phase"`
+	HasHostSample                    bool                    `json:"has_host_sample"`
+	HasAcceptedObservation           bool                    `json:"has_accepted_observation"`
+	EnrollmentTokenIssuedAt          *time.Time              `json:"enrollment_token_issued_at,omitempty"`
+	CurrentBindingFingerprintSummary string                  `json:"current_binding_fingerprint_summary,omitempty"`
+	PendingBinding                   *PendingBindingMetadata `json:"pending_binding,omitempty"`
+}
+
+func MaskFingerprintSummary(fingerprint string) string {
+	if fingerprint == "" {
+		return ""
+	}
+	if len(fingerprint) <= 14 {
+		return fingerprint
+	}
+	return fingerprint[:8] + "…" + fingerprint[len(fingerprint)-6:]
 }
 
 type OnboardingRepository interface {

@@ -41,6 +41,7 @@ export type NodeOnboardingState = NodeRecord & {
   has_host_sample: boolean
   has_accepted_observation: boolean
   enrollment_token_issued_at?: string
+  current_binding_fingerprint_summary?: string
   pending_binding?: PendingBindingMetadata
 }
 

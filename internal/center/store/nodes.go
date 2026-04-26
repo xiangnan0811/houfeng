@@ -140,11 +140,12 @@ func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
 	}
 
 	state := nodes.OnboardingState{
-		Record:                  record,
-		Phase:                   nodes.DeriveOnboardingPhase(record, hasHostSample, hasAcceptedObservation),
-		HasHostSample:           hasHostSample,
-		HasAcceptedObservation:  hasAcceptedObservation,
-		EnrollmentTokenIssuedAt: record.EnrollmentTokenIssuedAt,
+		Record:                           record,
+		Phase:                            nodes.DeriveOnboardingPhase(record, hasHostSample, hasAcceptedObservation),
+		HasHostSample:                    hasHostSample,
+		HasAcceptedObservation:           hasAcceptedObservation,
+		EnrollmentTokenIssuedAt:          record.EnrollmentTokenIssuedAt,
+		CurrentBindingFingerprintSummary: nodes.MaskFingerprintSummary(record.BindingFingerprint),
 	}
 	if record.PendingBindingFingerprint != "" || record.PendingBindingFirstSeenAt != nil || record.PendingBindingLastSeenAt != nil || record.PendingBindingAttemptCount > 0 {
 		state.PendingBinding = &nodes.PendingBindingMetadata{
