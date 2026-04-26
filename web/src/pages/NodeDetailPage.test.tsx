@@ -673,4 +673,113 @@ describe('NodeDetailPage', () => {
       cache: 'no-store',
     })
   })
+
+  it('ignores a stale runtime-action success after switching to a different node route', async () => {
+    const runtimeAction = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            region: 'ap-northeast-1',
+            city: 'Tokyo',
+            provider: 'Vultr',
+            lifecycle_status: '在用',
+            monitoring_status: '维护中',
+            binding_status: '已绑定',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_001',
+            latest_host_sample: null,
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockImplementationOnce(() => runtimeAction.promise)
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_002',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            provider: 'Hetzner',
+            lifecycle_status: '在用',
+            monitoring_status: '启用',
+            binding_status: '已绑定',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:10:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_002',
+            latest_host_sample: null,
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <NodeDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '退出维护' }))
+    fireEvent.click(screen.getByRole('button', { name: 'switch node' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
+
+    runtimeAction.resolve(
+      mockJSONResponse({
+        node_id: 'nd_001',
+        display_name: 'Tokyo Edge',
+        region: 'ap-northeast-1',
+        city: 'Tokyo',
+        provider: 'Vultr',
+        lifecycle_status: '在用',
+        monitoring_status: '启用',
+        binding_status: '已绑定',
+        labels: [],
+        note: '',
+        current_health_status: '正常',
+        current_active_incident_count: 0,
+        current_primary_issue_summary: '',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T09:20:00Z',
+      }),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
+  })
 })

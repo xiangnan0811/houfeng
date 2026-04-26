@@ -704,4 +704,98 @@ describe('TargetDetailPage', () => {
       cache: 'no-store',
     })
   })
+
+  it('ignores a stale runtime-action error after switching to a different target route', async () => {
+    const runtimeAction = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: ['public'],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            last_success_at: '2026-04-24T09:00:00Z',
+            last_failure_at: '2026-04-24T08:30:00Z',
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            latest_probe_observations: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockImplementationOnce(() => runtimeAction.promise)
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_002',
+            name: 'Cache',
+            target_type: 'service',
+            host: 'cache.example.com',
+            execution_node_labels: ['edge'],
+            run_status: '暂停',
+            labels: ['infra'],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            last_success_at: '2026-04-24T10:00:00Z',
+            last_failure_at: '2026-04-24T08:00:00Z',
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T10:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_002',
+            latest_probe_observations: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <TargetDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+    fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: '恢复' })).toBeEnabled()
+
+    runtimeAction.resolve(mockJSONResponse({ error: 'runtime action failed' }, 409))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('runtime action failed')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复' })).toBeEnabled()
+  })
 })

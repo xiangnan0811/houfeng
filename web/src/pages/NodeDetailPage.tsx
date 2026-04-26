@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { DetailSection } from '../components/DetailSection'
@@ -78,6 +78,10 @@ function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction
 
 export function NodeDetailPage() {
   const { nodeId } = useParams()
+  return <NodeDetailPageContent key={nodeId ?? 'missing-node'} nodeId={nodeId} />
+}
+
+function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const [state, setState] = useState<State>({
     requestedNodeId: null,
     error: null,
@@ -91,6 +95,20 @@ export function NodeDetailPage() {
   })
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
+  const currentRequestedNodeIdRef = useRef<string | null>(null)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    currentRequestedNodeIdRef.current = state.requestedNodeId
+  }, [state.requestedNodeId])
+
+  useEffect(
+    () => () => {
+      isMountedRef.current = false
+    },
+    [],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -175,26 +193,47 @@ export function NodeDetailPage() {
       return
     }
 
+    const actionNodeId = node.node_id
     setRuntimeSubmitting(true)
     setRuntimeError(null)
 
     try {
       const updated =
         action === 'enter-maintenance'
-          ? await enterNodeMaintenance(node.node_id)
+          ? await enterNodeMaintenance(actionNodeId)
           : action === 'exit-maintenance'
-            ? await exitNodeMaintenance(node.node_id)
+            ? await exitNodeMaintenance(actionNodeId)
             : action === 'pause'
-              ? await pauseNodeMonitoring(node.node_id)
-              : await resumeNodeMonitoring(node.node_id)
+              ? await pauseNodeMonitoring(actionNodeId)
+              : await resumeNodeMonitoring(actionNodeId)
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
       setState((current) => ({
         ...current,
         node: updated,
       }))
     } catch (error) {
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
       setRuntimeError(describeError(error, '节点运行控制操作失败'))
     } finally {
-      setRuntimeSubmitting(false)
+      if (
+        isMountedRef.current &&
+        currentRouteNodeIdRef.current === actionNodeId &&
+        currentRequestedNodeIdRef.current === actionNodeId
+      ) {
+        setRuntimeSubmitting(false)
+      }
     }
   }
 

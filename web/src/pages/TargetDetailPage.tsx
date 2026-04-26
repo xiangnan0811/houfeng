@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { DetailSection } from '../components/DetailSection'
@@ -99,6 +99,10 @@ function targetRuntimeActions(
 
 export function TargetDetailPage() {
   const { targetId } = useParams()
+  return <TargetDetailPageContent key={targetId ?? 'missing-target'} targetId={targetId} />
+}
+
+function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const [state, setState] = useState<State>({
     requestedTargetId: null,
     error: null,
@@ -113,6 +117,20 @@ export function TargetDetailPage() {
   })
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const currentRouteTargetIdRef = useRef<string | null>(targetId ?? null)
+  const currentRequestedTargetIdRef = useRef<string | null>(null)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    currentRequestedTargetIdRef.current = state.requestedTargetId
+  }, [state.requestedTargetId])
+
+  useEffect(
+    () => () => {
+      isMountedRef.current = false
+    },
+    [],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -216,30 +234,51 @@ export function TargetDetailPage() {
       return
     }
 
+    const actionTargetId = target.target_id
     setRuntimeSubmitting(true)
     setRuntimeError(null)
 
     try {
       const updated =
         action === 'enter-maintenance'
-          ? await enterTargetMaintenance(target.target_id)
+          ? await enterTargetMaintenance(actionTargetId)
           : action === 'exit-maintenance'
-            ? await exitTargetMaintenance(target.target_id)
+            ? await exitTargetMaintenance(actionTargetId)
             : action === 'pause'
-              ? await pauseTarget(target.target_id)
+              ? await pauseTarget(actionTargetId)
               : action === 'resume'
-                ? await resumeTarget(target.target_id)
+                ? await resumeTarget(actionTargetId)
                 : action === 'archive'
-                  ? await archiveTarget(target.target_id)
-                  : await restoreTargetToPaused(target.target_id)
+                ? await archiveTarget(actionTargetId)
+                  : await restoreTargetToPaused(actionTargetId)
+      if (
+        !isMountedRef.current ||
+        currentRouteTargetIdRef.current !== actionTargetId ||
+        currentRequestedTargetIdRef.current !== actionTargetId
+      ) {
+        return
+      }
       setState((current) => ({
         ...current,
         target: updated,
       }))
     } catch (error) {
+      if (
+        !isMountedRef.current ||
+        currentRouteTargetIdRef.current !== actionTargetId ||
+        currentRequestedTargetIdRef.current !== actionTargetId
+      ) {
+        return
+      }
       setRuntimeError(describeError(error, '目标运行控制操作失败'))
     } finally {
-      setRuntimeSubmitting(false)
+      if (
+        isMountedRef.current &&
+        currentRouteTargetIdRef.current === actionTargetId &&
+        currentRequestedTargetIdRef.current === actionTargetId
+      ) {
+        setRuntimeSubmitting(false)
+      }
     }
   }
 
