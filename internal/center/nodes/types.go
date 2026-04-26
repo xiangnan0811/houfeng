@@ -26,6 +26,7 @@ const (
 )
 
 var ErrNodeNotFound = errors.New("node not found")
+var ErrInvalidBindingTransition = errors.New("invalid binding transition")
 
 var allowedLifecycleStatuses = map[string]struct{}{
 	LifecyclePendingEnrollment: {},

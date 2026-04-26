@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -265,8 +266,46 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 	if !strings.Contains(gotSQL, "pending_binding_fingerprint") {
 		t.Fatalf("GetNodeOnboarding() SQL = %q, want pending binding columns", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "exists (select 1 from host_samples") {
+	if !strings.Contains(gotSQL, "from host_samples hs") {
 		t.Fatalf("GetNodeOnboarding() SQL = %q, want host sample existence check", gotSQL)
+	}
+}
+
+func TestNodeOnboardingGetStateScopesEvidenceToActiveFingerprint(t *testing.T) {
+	t.Parallel()
+
+	staleHeartbeatAt := time.Date(2026, time.April, 26, 6, 0, 0, 0, time.UTC)
+	var gotSQL string
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			gotSQL = sql
+			return fakeNodeRow{scan: func(dest ...any) error {
+				scanNodeRecordDestinations(dest, nodes.Record{
+					NodeID:             "nd_rebind",
+					BindingStatus:      nodes.BindingBound,
+					BindingFingerprint: "fp-current",
+					LastHeartbeatAt:    &staleHeartbeatAt,
+				})
+				*(dest[25].(*bool)) = false
+				*(dest[26].(*bool)) = false
+				return nil
+			}}
+		},
+	}}
+
+	state, err := repo.GetNodeOnboarding(context.Background(), "nd_rebind")
+	if err != nil {
+		t.Fatalf("GetNodeOnboarding() error = %v", err)
+	}
+
+	if state.Phase != nodes.OnboardingPhaseBoundAwaitingObservation {
+		t.Fatalf("Phase = %q, want %q", state.Phase, nodes.OnboardingPhaseBoundAwaitingObservation)
+	}
+	if !strings.Contains(gotSQL, "hs.fingerprint = nodes.binding_fingerprint") {
+		t.Fatalf("GetNodeOnboarding() SQL = %q, want host sample fingerprint scope", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "po.fingerprint = nodes.binding_fingerprint") {
+		t.Fatalf("GetNodeOnboarding() SQL = %q, want probe observation fingerprint scope", gotSQL)
 	}
 }
 
@@ -305,13 +344,34 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 	for _, snippet := range []string{
 		"binding_fingerprint = pending_binding_fingerprint",
 		"binding_status = '已绑定'",
+		"binding_status = '指纹变更待确认'",
+		"coalesce(pending_binding_fingerprint, '') <> ''",
 		"pending_binding_fingerprint = null",
 		"pending_binding_attempt_count = 0",
 		"sync_token_hash = ''",
+		"last_heartbeat_at = null",
+		"last_sync_at = null",
 	} {
 		if !strings.Contains(gotSQL, snippet) {
 			t.Fatalf("ConfirmNodeRebind() SQL missing %q", snippet)
 		}
+	}
+}
+
+func TestBindingConfirmRebindRejectsRetryWithoutPendingFingerprint(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeNodeRow{scan: func(dest ...any) error {
+				return pgx.ErrNoRows
+			}}
+		},
+	}}
+
+	_, err := repo.ConfirmNodeRebind(context.Background(), "nd_retry")
+	if !errors.Is(err, nodes.ErrInvalidBindingTransition) {
+		t.Fatalf("ConfirmNodeRebind() error = %v, want ErrInvalidBindingTransition", err)
 	}
 }
 
@@ -344,12 +404,31 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 	}
 	for _, snippet := range []string{
 		"binding_status = '已绑定'",
+		"binding_status = '指纹变更待确认'",
+		"coalesce(pending_binding_fingerprint, '') <> ''",
 		"pending_binding_fingerprint = null",
 		"pending_binding_attempt_count = 0",
 	} {
 		if !strings.Contains(gotSQL, snippet) {
 			t.Fatalf("RejectPendingFingerprint() SQL missing %q", snippet)
 		}
+	}
+}
+
+func TestBindingRejectPendingRejectsWhenNoPendingFingerprintExists(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeNodeRow{scan: func(dest ...any) error {
+				return pgx.ErrNoRows
+			}}
+		},
+	}}
+
+	_, err := repo.RejectPendingFingerprint(context.Background(), "nd_retry")
+	if !errors.Is(err, nodes.ErrInvalidBindingTransition) {
+		t.Fatalf("RejectPendingFingerprint() error = %v, want ErrInvalidBindingTransition", err)
 	}
 }
 
@@ -384,6 +463,8 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 		"pending_binding_fingerprint = null",
 		"pending_binding_attempt_count = 0",
 		"sync_token_hash = ''",
+		"last_heartbeat_at = null",
+		"last_sync_at = null",
 	} {
 		if !strings.Contains(gotSQL, snippet) {
 			t.Fatalf("ResetNodeBinding() SQL missing %q", snippet)

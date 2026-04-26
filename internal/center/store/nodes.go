@@ -304,8 +304,20 @@ func (r *PostgresNodeRepository) IssueNodeEnrollmentToken(ctx context.Context, n
 func (r *PostgresNodeRepository) GetNodeOnboarding(ctx context.Context, nodeID string) (nodes.OnboardingState, error) {
 	state, err := scanNodeOnboarding(r.db.QueryRow(ctx, `
 		select `+nodeSelectColumns+`,
-			exists (select 1 from host_samples where node_id = $1),
-			exists (select 1 from probe_observations where node_id = $1)
+			exists (
+				select 1
+				from host_samples hs
+				where hs.node_id = nodes.node_id
+					and nodes.binding_fingerprint <> ''
+					and hs.fingerprint = nodes.binding_fingerprint
+			),
+			exists (
+				select 1
+				from probe_observations po
+				where po.node_id = nodes.node_id
+					and nodes.binding_fingerprint <> ''
+					and po.fingerprint = nodes.binding_fingerprint
+			)
 		from nodes
 		where node_id = $1`,
 		nodeID,
@@ -329,13 +341,17 @@ func (r *PostgresNodeRepository) ConfirmNodeRebind(ctx context.Context, nodeID s
 			pending_binding_last_seen_at = null,
 			pending_binding_attempt_count = 0,
 			sync_token_hash = '',
+			last_heartbeat_at = null,
+			last_sync_at = null,
 			updated_at = now()
 		where node_id = $1
+			and binding_status = '指纹变更待确认'
+			and coalesce(pending_binding_fingerprint, '') <> ''
 		returning `+nodeSelectColumns,
 		nodeID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nodes.Record{}, nodes.ErrNodeNotFound
+		return nodes.Record{}, fmt.Errorf("%w: confirm rebind requires pending fingerprint for node %q", nodes.ErrInvalidBindingTransition, nodeID)
 	}
 	if err != nil {
 		return nodes.Record{}, fmt.Errorf("confirm node rebind for %q: %w", nodeID, err)
@@ -353,11 +369,13 @@ func (r *PostgresNodeRepository) RejectPendingFingerprint(ctx context.Context, n
 			pending_binding_attempt_count = 0,
 			updated_at = now()
 		where node_id = $1
+			and binding_status = '指纹变更待确认'
+			and coalesce(pending_binding_fingerprint, '') <> ''
 		returning `+nodeSelectColumns,
 		nodeID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nodes.Record{}, nodes.ErrNodeNotFound
+		return nodes.Record{}, fmt.Errorf("%w: reject pending fingerprint requires pending fingerprint for node %q", nodes.ErrInvalidBindingTransition, nodeID)
 	}
 	if err != nil {
 		return nodes.Record{}, fmt.Errorf("reject pending fingerprint for node %q: %w", nodeID, err)
@@ -375,6 +393,8 @@ func (r *PostgresNodeRepository) ResetNodeBinding(ctx context.Context, nodeID st
 			pending_binding_last_seen_at = null,
 			pending_binding_attempt_count = 0,
 			sync_token_hash = '',
+			last_heartbeat_at = null,
+			last_sync_at = null,
 			updated_at = now()
 		where node_id = $1
 		returning `+nodeSelectColumns,
