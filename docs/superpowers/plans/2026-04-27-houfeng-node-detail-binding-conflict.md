@@ -51,7 +51,7 @@ Use this local action fallback error copy:
 - Modify: `web/src/pages/NodeDetailPage.tsx`
 - Modify: `web/src/pages/NodeDetailPage.test.tsx`
 
-- [ ] **Step 1: Add focused failing tests for metadata rendering and metadata load failure**
+- [x] **Step 1: Add focused failing tests for metadata rendering and metadata load failure**
 
 In `web/src/pages/NodeDetailPage.test.tsx`, add local fixture helpers near `deferredResponse()`:
 
@@ -180,7 +180,7 @@ it('keeps Node detail visible when binding conflict metadata fails to load', asy
 })
 ```
 
-- [ ] **Step 2: Run focused NodeDetailPage tests and confirm failure**
+- [x] **Step 2: Run focused NodeDetailPage tests and confirm failure**
 
 Run:
 
@@ -190,7 +190,7 @@ cd web && npm test -- --run NodeDetailPage
 
 Expected: fail because Node Detail does not fetch onboarding metadata or render the binding conflict card.
 
-- [ ] **Step 3: Implement conditional metadata loading and read-only card**
+- [x] **Step 3: Implement conditional metadata loading and read-only card**
 
 In `web/src/pages/NodeDetailPage.tsx`, extend imports:
 
@@ -391,7 +391,7 @@ Render the card immediately after the hero panel:
 ) : null}
 ```
 
-- [ ] **Step 4: Re-run focused NodeDetailPage tests and commit**
+- [x] **Step 4: Re-run focused NodeDetailPage tests and commit**
 
 Run:
 
@@ -416,7 +416,7 @@ git commit -m "Surface binding conflicts on Node detail"
 - Modify: `web/src/pages/NodeDetailPage.tsx`
 - Modify: `web/src/pages/NodeDetailPage.test.tsx`
 
-- [ ] **Step 1: Add failing tests for confirm, reject/reset calls, and local action errors**
+- [x] **Step 1: Add failing tests for confirm, reject/reset calls, and local action errors**
 
 Add this success test:
 
@@ -538,7 +538,7 @@ it('keeps binding action errors local to the conflict card', async () => {
 })
 ```
 
-- [ ] **Step 2: Run focused NodeDetailPage tests and confirm failure**
+- [x] **Step 2: Run focused NodeDetailPage tests and confirm failure**
 
 Run:
 
@@ -548,7 +548,7 @@ cd web && npm test -- --run NodeDetailPage
 
 Expected: fail because the card has no action buttons/handlers yet.
 
-- [ ] **Step 3: Implement action handling**
+- [x] **Step 3: Implement action handling**
 
 In `NodeDetailPage.tsx`, add this helper inside `NodeDetailPageContent`:
 
@@ -649,7 +649,7 @@ Add the buttons after the conflict explanation/link in the card:
 </div>
 ```
 
-- [ ] **Step 4: Re-run focused NodeDetailPage tests and commit**
+- [x] **Step 4: Re-run focused NodeDetailPage tests and commit**
 
 Run:
 
@@ -674,7 +674,7 @@ git commit -m "Resolve binding conflicts from Node detail"
 - Modify: `web/src/pages/NodeDetailPage.tsx`
 - Modify: `web/src/pages/NodeDetailPage.test.tsx`
 
-- [ ] **Step 1: Add a failing stale action regression**
+- [x] **Step 1: Add a failing stale action regression**
 
 Add this test:
 
@@ -733,7 +733,7 @@ it('ignores stale binding action success after switching to another node route',
 })
 ```
 
-- [ ] **Step 2: Run focused NodeDetailPage tests**
+- [x] **Step 2: Run focused NodeDetailPage tests**
 
 Run:
 
@@ -743,7 +743,7 @@ cd web && npm test -- --run NodeDetailPage
 
 Expected: pass if Task 2's stale guards already cover the case; fail if an action cleanup path still updates the wrong route.
 
-- [ ] **Step 3: If needed, add a binding action request token**
+- [x] **Step 3: If needed, add a binding action request token**
 
 Only if Step 2 fails due to overlapping or stale action cleanup, add:
 
@@ -753,7 +753,7 @@ const bindingActionRequestRef = useRef(0)
 
 Increment it before each binding action and include `bindingActionRequestRef.current === requestId` in success/error/finally guards.
 
-- [ ] **Step 4: Re-run focused tests and commit if code changed**
+- [x] **Step 4: Re-run focused tests and commit if code changed**
 
 Run:
 
@@ -777,7 +777,7 @@ git commit -m "Guard stale binding actions on Node detail"
 **Files:**
 - No planned edits unless verification exposes a small issue.
 
-- [ ] **Step 1: Run focused frontend checks**
+- [x] **Step 1: Run focused frontend checks**
 
 Run:
 
@@ -789,7 +789,7 @@ cd web && npm run lint
 
 Expected: pass.
 
-- [ ] **Step 2: Run repository verification**
+- [x] **Step 2: Run repository verification**
 
 Run:
 
@@ -802,7 +802,7 @@ cd web && npm run build
 
 Expected: pass.
 
-- [ ] **Step 3: Final scope review**
+- [x] **Step 3: Final scope review**
 
 Confirm:
 
