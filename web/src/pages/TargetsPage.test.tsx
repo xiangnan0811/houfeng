@@ -268,6 +268,76 @@ describe('TargetsPage', () => {
     expect(screen.queryByText('target detail route')).not.toBeInTheDocument()
   })
 
+  it('ignores a late target creation response after the create panel is closed', async () => {
+    const createResponse = deferred<Response>()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockReturnValueOnce(createResponse.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+          <Route path="/targets/:targetId" element={<div>target detail route</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: '正在创建…' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
+    expect(screen.queryByLabelText('目标名称')).not.toBeInTheDocument()
+
+    await act(async () => {
+      createResponse.resolve(
+        mockJSONResponse(
+          {
+            target_id: 'tg_late',
+            name: 'Late Blog',
+            target_type: 'service',
+            host: 'late.example.com',
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-27T09:00:00Z',
+            updated_at: '2026-04-27T09:00:00Z',
+          },
+          201,
+        ),
+      )
+      await createResponse.promise
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(screen.queryByText('target detail route')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+
+    expect(screen.queryByText('Late Blog')).not.toBeInTheDocument()
+    expect(screen.queryByText('target detail route')).not.toBeInTheDocument()
+    expect(screen.queryByText('执行节点标签至少需要填写一个。')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('目标名称')).toHaveValue('')
+    expect(screen.getByRole('button', { name: '创建目标' })).toBeEnabled()
+  })
+
   it('renders runtime quick actions by target run status and restores archived targets to paused', async () => {
     const fetchMock = vi
       .fn()

@@ -137,6 +137,7 @@ function targetRuntimeActions(
 export function TargetsPage() {
   const navigate = useNavigate()
   const mountedRef = useRef(false)
+  const createRequestRef = useRef(0)
   const [targets, setTargets] = useState<TargetRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -174,6 +175,8 @@ export function TargetsPage() {
   }, [])
 
   function resetCreateFlow() {
+    createRequestRef.current += 1
+    setCreateSubmitting(false)
     setCreateError(null)
     setCreateForm(initialCreateForm)
   }
@@ -197,20 +200,22 @@ export function TargetsPage() {
       return
     }
 
+    const requestId = createRequestRef.current + 1
+    createRequestRef.current = requestId
     setCreateSubmitting(true)
     try {
       const created = await createTarget(payload)
-      if (!mountedRef.current) return
+      if (!mountedRef.current || createRequestRef.current !== requestId) return
       setTargets((current) => [
         created,
         ...current.filter((item) => item.target_id !== created.target_id),
       ])
       navigate(`/targets/${created.target_id}`)
     } catch (submitError) {
-      if (!mountedRef.current) return
+      if (!mountedRef.current || createRequestRef.current !== requestId) return
       setCreateError(describeError(submitError, '创建目标失败'))
     } finally {
-      if (mountedRef.current) {
+      if (mountedRef.current && createRequestRef.current === requestId) {
         setCreateSubmitting(false)
       }
     }
