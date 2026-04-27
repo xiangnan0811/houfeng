@@ -10,11 +10,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/nodes"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/contracts/agentapi"
 )
 
-func TestPostgresAgentPlanRepositoryBuildSyncPlanReturnsAssignments(t *testing.T) {
+func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 	t.Parallel()
 
 	var seenStatuses []string
@@ -29,6 +30,16 @@ func TestPostgresAgentPlanRepositoryBuildSyncPlanReturnsAssignments(t *testing.T
 			}
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = []string{"edge", "核心"}
+				if len(dest) > 1 {
+					*(dest[1].(*string)) = agentapi.FrequencyTier15m
+				}
+				if len(dest) > 2 {
+					*(dest[2].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
+						NodeLabels:   []centersettings.NodeLabelOverrideRule{},
+						TargetTypes:  []centersettings.TargetTypeOverrideRule{},
+						TargetLabels: []centersettings.TargetLabelOverrideRule{},
+					})
+				}
 				return nil
 			}}
 		},
@@ -72,14 +83,20 @@ func TestPostgresAgentPlanRepositoryBuildSyncPlanReturnsAssignments(t *testing.T
 	if err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v", err)
 	}
-	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier1m {
-		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier1m)
+	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier15m {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier15m)
 	}
 	if len(plan.ProbeAssignments) != 2 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 2", len(plan.ProbeAssignments))
 	}
+	if plan.ProbeAssignments[0].FrequencyTier != agentapi.FrequencyTier1m {
+		t.Fatalf("ProbeAssignments[0].FrequencyTier = %q, want %q", plan.ProbeAssignments[0].FrequencyTier, agentapi.FrequencyTier1m)
+	}
 	if plan.ProbeAssignments[1].MaintenanceContext != true {
 		t.Fatalf("MaintenanceContext = %v, want true", plan.ProbeAssignments[1].MaintenanceContext)
+	}
+	if plan.ProbeAssignments[1].FrequencyTier != agentapi.FrequencyTier5m {
+		t.Fatalf("ProbeAssignments[1].FrequencyTier = %q, want %q", plan.ProbeAssignments[1].FrequencyTier, agentapi.FrequencyTier5m)
 	}
 	if plan.ProbeAssignments[1].TargetBasePort != nil {
 		t.Fatalf("TargetBasePort = %v, want nil", *plan.ProbeAssignments[1].TargetBasePort)
@@ -92,6 +109,123 @@ func TestPostgresAgentPlanRepositoryBuildSyncPlanReturnsAssignments(t *testing.T
 	}
 	if len(seenLabels) != 2 || seenLabels[0] != "edge" || seenLabels[1] != "核心" {
 		t.Fatalf("labels = %#v, want edge+核心", seenLabels)
+	}
+}
+
+func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
+	t.Parallel()
+
+	hostTier1m := agentapi.FrequencyTier1m
+	httpTier15m := agentapi.FrequencyTier15m
+	tlsTier6h := agentapi.FrequencyTier6h
+	tlsTier5m := agentapi.FrequencyTier5m
+
+	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if sql != selectAgentPlanNodeLabelsSQL {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
+			}
+			if args[0] != "nd_001" {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected node id") }}
+			}
+			return fakeAgentPlanRow{scan: func(dest ...any) error {
+				*(dest[0].(*[]string)) = []string{"edge", "核心"}
+				if len(dest) > 1 {
+					*(dest[1].(*string)) = agentapi.FrequencyTier15m
+				}
+				if len(dest) > 2 {
+					*(dest[2].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
+						NodeLabels: []centersettings.NodeLabelOverrideRule{{
+							Label: "核心",
+							Overrides: centersettings.SettingsOverrideFields{
+								HostSampleFrequencyTier: &hostTier1m,
+							},
+						}},
+						TargetTypes: []centersettings.TargetTypeOverrideRule{{
+							TargetType: targets.TargetTypeService,
+							Overrides: centersettings.SettingsOverrideFields{
+								ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
+									HTTP: &httpTier15m,
+									TLS:  &tlsTier6h,
+								},
+							},
+						}},
+						TargetLabels: []centersettings.TargetLabelOverrideRule{{
+							Label: "slow-lane",
+							Overrides: centersettings.SettingsOverrideFields{
+								ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
+									TLS: &tlsTier5m,
+								},
+							},
+						}},
+					})
+				}
+				return nil
+			}}
+		},
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			if sql != selectAgentPlanAssignmentsSQL {
+				return nil, errors.New("unexpected Query")
+			}
+			return &fakeAgentPlanRows{rows: []fakeAgentPlanScan{
+				{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "tg_http"
+					*(dest[1].(*string)) = "api.example.test"
+					port := 443
+					*(dest[2].(**int)) = &port
+					*(dest[3].(*string)) = targets.RunStatusEnabled
+					*(dest[4].(*string)) = "pb_http"
+					*(dest[5].(*string)) = agentapi.ProbeKindHTTP
+					*(dest[6].(*string)) = agentapi.FrequencyTier5m
+					*(dest[7].(*int)) = 5
+					*(dest[8].(*[]byte)) = []byte(`{"path":"/healthz"}`)
+					if len(dest) > 9 {
+						*(dest[9].(*string)) = targets.TargetTypeService
+					}
+					if len(dest) > 10 {
+						*(dest[10].(*[]string)) = []string{"api"}
+					}
+					return nil
+				}},
+				{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "tg_tls"
+					*(dest[1].(*string)) = "tls.example.test"
+					port := 8443
+					*(dest[2].(**int)) = &port
+					*(dest[3].(*string)) = targets.RunStatusEnabled
+					*(dest[4].(*string)) = "pb_tls"
+					*(dest[5].(*string)) = agentapi.ProbeKindTLS
+					*(dest[6].(*string)) = agentapi.FrequencyTier15m
+					*(dest[7].(*int)) = 10
+					*(dest[8].(*[]byte)) = []byte(`{"server_name":"tls.example.test"}`)
+					if len(dest) > 9 {
+						*(dest[9].(*string)) = targets.TargetTypeService
+					}
+					if len(dest) > 10 {
+						*(dest[10].(*[]string)) = []string{"slow-lane"}
+					}
+					return nil
+				}},
+			}}, nil
+		},
+	}}
+
+	plan, err := repo.BuildSyncPlan(context.Background(), "nd_001")
+	if err != nil {
+		t.Fatalf("BuildSyncPlan() error = %v", err)
+	}
+
+	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier1m {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier1m)
+	}
+	if len(plan.ProbeAssignments) != 2 {
+		t.Fatalf("len(ProbeAssignments) = %d, want 2", len(plan.ProbeAssignments))
+	}
+	if plan.ProbeAssignments[0].FrequencyTier != agentapi.FrequencyTier15m {
+		t.Fatalf("ProbeAssignments[0].FrequencyTier = %q, want %q", plan.ProbeAssignments[0].FrequencyTier, agentapi.FrequencyTier15m)
+	}
+	if plan.ProbeAssignments[1].FrequencyTier != agentapi.FrequencyTier5m {
+		t.Fatalf("ProbeAssignments[1].FrequencyTier = %q, want %q", plan.ProbeAssignments[1].FrequencyTier, agentapi.FrequencyTier5m)
 	}
 }
 
@@ -149,6 +283,16 @@ func TestBuildSyncPlanSQLIncludesEnabledAndLabelOverlapFilters(t *testing.T) {
 	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "t.run_status = any($1)") {
 		t.Fatalf("selectAgentPlanAssignmentsSQL = %q, want run_status filter", selectAgentPlanAssignmentsSQL)
 	}
+}
+
+func mustMarshalAgentPlanJSON(t *testing.T, value any) []byte {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return data
 }
 
 type fakeAgentPlanQueryer struct {
