@@ -541,7 +541,8 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    const pauseTrigger = screen.getByRole('button', { name: '暂停监控' })
+    fireEvent.click(pauseTrigger)
 
     const confirmation = screen.getByRole('alertdialog', { name: '确认暂停节点监控' })
     expect(confirmation).toBeInTheDocument()
@@ -557,6 +558,7 @@ describe('NodesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('heading', { name: '确认暂停节点监控' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '暂停监控' })).toHaveFocus()
 
     fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
     fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
@@ -565,6 +567,7 @@ describe('NodesPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
     )
+    expect(screen.getByRole('button', { name: '恢复监控' })).toHaveFocus()
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },

@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
@@ -42,6 +42,11 @@ type NodeListView = 'all' | 'binding-conflict'
 type PendingNodeConfirmation = {
   nodeId: string
   action: 'pause'
+}
+
+type FocusRestoreRequest = {
+  nodeId: string
+  preferredAction: NodeRuntimeAction
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -134,6 +139,8 @@ export function NodesPage() {
   const [runtimeBusyNodeId, setRuntimeBusyNodeId] = useState<string | null>(null)
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingNodeConfirmation | null>(null)
+  const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
 
   function resetCreateFlow() {
     setCreateError(null)
@@ -163,6 +170,31 @@ export function NodesPage() {
   function updateField<K extends keyof CreateNodeInput>(field: K, value: CreateNodeInput[K]) {
     setCreateForm((current) => ({ ...current, [field]: value }))
   }
+
+  function actionButtonKey(nodeId: string, action: NodeRuntimeAction) {
+    return `${nodeId}:${action}`
+  }
+
+  function queueFocusRestore(nodeId: string, preferredAction: NodeRuntimeAction) {
+    pendingFocusRestoreRef.current = { nodeId, preferredAction }
+  }
+
+  useEffect(() => {
+    if (pendingConfirmation) return
+
+    const request = pendingFocusRestoreRef.current
+    if (!request) return
+
+    const preferred = actionButtonRefs.current[actionButtonKey(request.nodeId, request.preferredAction)]
+    const fallback =
+      request.preferredAction === 'pause'
+        ? actionButtonRefs.current[actionButtonKey(request.nodeId, 'resume')]
+        : null
+    const target = [preferred, fallback].find((element) => element?.isConnected)
+
+    target?.focus()
+    pendingFocusRestoreRef.current = null
+  }, [nodes, pendingConfirmation])
 
   async function handleRuntimeAction(
     node: NodeRecord,
@@ -194,6 +226,7 @@ export function NodesPage() {
       setNodes((current) =>
         current.map((item) => (item.node_id === updated.node_id ? updated : item)),
       )
+      queueFocusRestore(updated.node_id, action)
       setPendingConfirmation((current) =>
         current?.nodeId === updated.node_id ? null : current,
       )
@@ -445,9 +478,17 @@ export function NodesPage() {
                 {nodeRuntimeActions(node).map(({ action, label }) => (
                   <button
                     key={action}
+                    ref={(element) => {
+                      actionButtonRefs.current[actionButtonKey(node.node_id, action)] = element
+                    }}
                     type="button"
                     disabled={runtimeBusyNodeId === node.node_id}
-                    onClick={() => void handleRuntimeAction(node, action)}
+                    onClick={() => {
+                      if (action === 'pause') {
+                        queueFocusRestore(node.node_id, action)
+                      }
+                      void handleRuntimeAction(node, action)
+                    }}
                   >
                     {label}
                   </button>
@@ -463,11 +504,12 @@ export function NodesPage() {
                   confirmLabel="确认暂停监控"
                   disabled={runtimeBusyNodeId === node.node_id}
                   onConfirm={() => void handleRuntimeAction(node, 'pause', true)}
-                  onCancel={() =>
+                  onCancel={() => {
+                    queueFocusRestore(node.node_id, 'pause')
                     setPendingConfirmation((current) =>
                       current?.nodeId === node.node_id ? null : current,
                     )
-                  }
+                  }}
                 />
               ) : null}
               {runtimeErrors[node.node_id] ? <p>{runtimeErrors[node.node_id]}</p> : null}
