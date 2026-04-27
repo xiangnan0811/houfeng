@@ -36,6 +36,11 @@ export type NodeEnrollmentTokenIssue = {
   issued_at: string
 }
 
+export type UpdateNodeMetadataInput = {
+  labels: string[]
+  note: string
+}
+
 export type NodeOnboardingState = NodeRecord & {
   phase: OnboardingPhase
   has_host_sample: boolean
@@ -99,6 +104,11 @@ export type TargetRecord = {
   current_primary_issue_summary: string
   created_at: string
   updated_at: string
+}
+
+export type UpdateTargetMetadataInput = {
+  labels: string[]
+  note: string
 }
 
 export type CreateTargetInput = {

@@ -16,6 +16,8 @@ import type {
   SettingsUpdateInput,
   TargetRecord,
   TargetRuntimeFacts,
+  UpdateNodeMetadataInput,
+  UpdateTargetMetadataInput,
 } from './types'
 
 export class ApiError extends Error {
@@ -77,6 +79,17 @@ function postJSONBody<T>(path: string, body: unknown): Promise<T> {
   })
 }
 
+function patchJSONBody<T>(path: string, body: unknown): Promise<T> {
+  return requestJSON<T>(path, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+}
+
 function withQuery(
   path: string,
   filter?: Record<string, string | number | null | undefined>,
@@ -101,6 +114,10 @@ export function listNodes() {
 
 export function getNode(nodeId: string) {
   return requestJSON<NodeRecord>(`/api/nodes/${nodeId}`)
+}
+
+export function updateNodeMetadata(nodeId: string, input: UpdateNodeMetadataInput) {
+  return patchJSONBody<NodeRecord>(`/api/nodes/${nodeId}`, input)
 }
 
 export function getNodeRuntimeFacts(nodeId: string) {
@@ -161,6 +178,10 @@ export function createTarget(input: CreateTargetInput): Promise<TargetRecord> {
 
 export function getTarget(targetId: string) {
   return requestJSON<TargetRecord>(`/api/targets/${targetId}`)
+}
+
+export function updateTargetMetadata(targetId: string, input: UpdateTargetMetadataInput) {
+  return patchJSONBody<TargetRecord>(`/api/targets/${targetId}`, input)
 }
 
 export function listTargetProbeItems(targetId: string) {
