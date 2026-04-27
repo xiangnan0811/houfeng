@@ -17,6 +17,7 @@ const settingsResponseBody = {
     chat_id: 'chat-id',
     token_present: true,
     token_masked_summary: '****************oken',
+    runtime_managed: false,
     runtime_apply_active: false,
   },
   host_sample_frequency_tier: '5m',
@@ -117,6 +118,30 @@ describe('SettingsPage', () => {
     ).toBeInTheDocument()
   })
 
+  it('keeps the runtime management toggle checked when persisted settings explicitly disable Telegram delivery', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          ...settingsResponseBody,
+          telegram: {
+            chat_id: '',
+            token_present: false,
+            runtime_managed: true,
+            runtime_apply_active: false,
+          },
+        }),
+      ),
+    )
+
+    render(<SettingsPage />)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+
+    expect(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器')).toBeChecked()
+    expect(screen.getByText('当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。')).toBeInTheDocument()
+  })
+
   it('saves unrelated settings without requiring Telegram token re-entry and omits bot_token from the payload', async () => {
     const fetchMock = vi
       .fn()
@@ -192,6 +217,7 @@ describe('SettingsPage', () => {
           ...settingsResponseBody,
           telegram: {
             ...settingsResponseBody.telegram,
+            runtime_managed: true,
             token_masked_summary: '***************oken',
             runtime_apply_active: true,
           },
@@ -276,6 +302,7 @@ describe('SettingsPage', () => {
           ...settingsResponseBody,
           telegram: {
             ...settingsResponseBody.telegram,
+            runtime_managed: true,
             chat_id: 'new-chat-id',
             runtime_apply_active: true,
           },

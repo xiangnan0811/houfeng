@@ -72,7 +72,7 @@ function buildFormState(settings: SettingsRecord): FormState {
   return {
     telegramBotToken: '',
     telegramChatId: settings.telegram.chat_id,
-    telegramRuntimeManaged: settings.telegram.runtime_apply_active,
+    telegramRuntimeManaged: settings.telegram.runtime_managed,
     hostSampleFrequencyTier: settings.host_sample_frequency_tier,
     probeFrequencyDefaults: {
       tcp: settings.probe_frequency_defaults.tcp,
@@ -598,9 +598,11 @@ export function SettingsPage() {
         </div>
 
         <SectionIntro>
-          {settings.telegram.runtime_apply_active
-            ? '当前持久化配置已接入正在运行的通知路径。'
-            : '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'}
+          {!settings.telegram.runtime_managed
+            ? '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'
+            : settings.telegram.runtime_apply_active
+              ? '当前持久化配置已接入正在运行的通知路径。'
+              : '当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。'}
         </SectionIntro>
         <SectionIntro>
           接口不会回显明文 Token。留空会继续保留当前已保存的 Token；只有在需要替换时才输入新的 Token。

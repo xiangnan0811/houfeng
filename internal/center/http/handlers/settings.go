@@ -29,6 +29,7 @@ type telegramSettingsResponse struct {
 	ChatID             string `json:"chat_id"`
 	TokenPresent       bool   `json:"token_present"`
 	TokenMaskedSummary string `json:"token_masked_summary,omitempty"`
+	RuntimeManaged     bool   `json:"runtime_managed"`
 	RuntimeApplyActive bool   `json:"runtime_apply_active"`
 }
 
@@ -124,7 +125,8 @@ func newSettingsResponse(record centersettings.CenterSettings) settingsResponse 
 			ChatID:             record.Telegram.ChatID,
 			TokenPresent:       tokenPresent,
 			TokenMaskedSummary: maskTelegramBotToken(record.Telegram.BotToken),
-			RuntimeApplyActive: record.Telegram.RuntimeManaged,
+			RuntimeManaged:     record.Telegram.RuntimeManaged,
+			RuntimeApplyActive: record.Telegram.RuntimeManaged && record.Telegram.Enabled(),
 		},
 		HostSampleFrequencyTier: record.HostSampleFrequencyTier,
 		ProbeFrequencyDefaults:  record.ProbeFrequencyDefaults,

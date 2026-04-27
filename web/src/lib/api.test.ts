@@ -41,6 +41,7 @@ const settingsResponseBody = {
     chat_id: 'chat-id',
     token_present: true,
     token_masked_summary: '****************oken',
+    runtime_managed: false,
     runtime_apply_active: false,
   },
   host_sample_frequency_tier: '5m',

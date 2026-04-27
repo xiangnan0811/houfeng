@@ -36,6 +36,7 @@ type telegramSettingsResponse struct {
 	ChatID             string `json:"chat_id"`
 	TokenPresent       bool   `json:"token_present"`
 	TokenMaskedSummary string `json:"token_masked_summary"`
+	RuntimeManaged     bool   `json:"runtime_managed"`
 	RuntimeApplyActive bool   `json:"runtime_apply_active"`
 }
 
@@ -92,8 +93,39 @@ func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing
 	if body.Telegram.RuntimeApplyActive {
 		t.Fatal("expected runtime_apply_active to stay false until persisted Telegram settings explicitly manage runtime")
 	}
+	if body.Telegram.RuntimeManaged {
+		t.Fatal("expected runtime_managed to stay false until persisted Telegram settings explicitly manage runtime")
+	}
 	if body.HostSampleFrequencyTier != centersettings.Default().HostSampleFrequencyTier {
 		t.Fatalf("expected host sample frequency tier %q, got %q", centersettings.Default().HostSampleFrequencyTier, body.HostSampleFrequencyTier)
+	}
+}
+
+func TestSettingsHandlerReturnsManagedTelegramDisableStateTruthfully(t *testing.T) {
+	record := centersettings.Default()
+	record.Telegram.RuntimeManaged = true
+	repo := &fakeSettingsRepository{getSettingsResult: record}
+
+	handler := handlers.Settings(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	var body settingsHandlerResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+
+	if !body.Telegram.RuntimeManaged {
+		t.Fatal("expected runtime_managed to stay true when persisted Telegram settings explicitly manage runtime")
+	}
+	if body.Telegram.RuntimeApplyActive {
+		t.Fatal("expected runtime_apply_active to stay false when persisted Telegram settings explicitly disable delivery")
 	}
 }
 
@@ -143,6 +175,9 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	}
 	if !body.Telegram.TokenPresent {
 		t.Fatal("expected token_present to be true")
+	}
+	if !body.Telegram.RuntimeManaged {
+		t.Fatal("expected runtime_managed to be true once persisted Telegram settings explicitly manage runtime")
 	}
 	if !body.Telegram.RuntimeApplyActive {
 		t.Fatal("expected runtime_apply_active to be true once persisted Telegram settings drive the live notifier path")

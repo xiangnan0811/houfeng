@@ -229,6 +229,7 @@ export type SettingsTelegramResponse = {
   chat_id: string
   token_present: boolean
   token_masked_summary?: string
+  runtime_managed: boolean
   runtime_apply_active: boolean
 }
 
