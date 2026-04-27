@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
+import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { IncidentList } from '../components/IncidentList'
@@ -53,11 +54,6 @@ type State = {
   events: StateChangeEventRecord[]
   eventsError: string | null
 }
-
-const TARGET_PAUSE_CONFIRM_MESSAGE = '暂停会停止采集并产生数据空档，确定继续吗？'
-const TARGET_ARCHIVE_CONFIRM_MESSAGE = '归档会让目标退出当前工作集，但会保留历史记录，确定继续吗？'
-const PROBE_DELETE_CONFIRM_MESSAGE =
-  '删除 ProbeItem 会移除这条观测方式，仅应用于误建场景，确定继续吗？'
 
 const PROBE_KIND_OPTIONS = [
   { value: 'tcp', label: 'TCP' },
@@ -115,6 +111,19 @@ type TargetRuntimeAction =
   | 'resume'
   | 'archive'
   | 'restore-to-paused'
+
+type PendingRuntimeConfirmation = {
+  action: 'pause' | 'archive'
+}
+
+type PendingProbeConfirmation = {
+  probeItemId: string
+  action: 'delete'
+}
+
+type ProbeFocusRestoreRequest = {
+  probeItemId?: string
+}
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -247,6 +256,27 @@ function probeActionAccessibleName(action: string, probeItem: ProbeItemRecord): 
   return `${action} ProbeItem ${probeItem.probe_item_id} ${probeItem.probe_kind.toUpperCase()} ${formatConfigSummary(probeItem.config)}`
 }
 
+function pauseConfirmationCurrent() {
+  return '当前：目标运行状态为启用或维护中。'
+}
+
+function focusRestoreActionAfterSuccess(action: TargetRuntimeAction): TargetRuntimeAction {
+  switch (action) {
+    case 'enter-maintenance':
+      return 'exit-maintenance'
+    case 'exit-maintenance':
+      return 'enter-maintenance'
+    case 'pause':
+      return 'resume'
+    case 'resume':
+      return 'pause'
+    case 'archive':
+      return 'restore-to-paused'
+    case 'restore-to-paused':
+      return 'resume'
+  }
+}
+
 function targetRuntimeActions(
   target: TargetRecord,
 ): Array<{ action: TargetRuntimeAction; label: string }> {
@@ -300,12 +330,16 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   })
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] =
+    useState<PendingRuntimeConfirmation | null>(null)
   const [probeCreateOpen, setProbeCreateOpen] = useState(false)
   const [probeFormMode, setProbeFormMode] = useState<ProbeFormMode>({ kind: 'create' })
   const [probeCreateSubmitting, setProbeCreateSubmitting] = useState(false)
   const [probeCreateError, setProbeCreateError] = useState<string | null>(null)
   const [probeMutationError, setProbeMutationError] = useState<string | null>(null)
   const [probeMutationBusyId, setProbeMutationBusyId] = useState<string | null>(null)
+  const [pendingProbeConfirmation, setPendingProbeConfirmation] =
+    useState<PendingProbeConfirmation | null>(null)
   const [probeCreateForm, setProbeCreateForm] = useState<ProbeCreateFormState>(
     initialProbeCreateForm,
   )
@@ -315,6 +349,18 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const probeFormRequestRef = useRef(0)
   const probeRowMutationRequestRef = useRef(0)
   const probeRowMutationInFlightRef = useRef(false)
+  const runtimeActionButtonRefs = useRef<Record<TargetRuntimeAction, HTMLButtonElement | null>>({
+    'enter-maintenance': null,
+    'exit-maintenance': null,
+    pause: null,
+    resume: null,
+    archive: null,
+    'restore-to-paused': null,
+  })
+  const pendingRuntimeFocusRestoreRef = useRef<TargetRuntimeAction | null>(null)
+  const probeDeleteButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const addProbeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const pendingProbeFocusRestoreRef = useRef<ProbeFocusRestoreRequest | null>(null)
 
   useEffect(() => {
     currentRequestedTargetIdRef.current = state.requestedTargetId
@@ -326,6 +372,41 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     },
     [],
   )
+
+  useEffect(() => {
+    if (pendingRuntimeConfirmation) return
+
+    const action = pendingRuntimeFocusRestoreRef.current
+    if (!action) return
+
+    const preferred = runtimeActionButtonRefs.current[action]
+    const fallback =
+      action === 'pause'
+        ? runtimeActionButtonRefs.current.resume
+        : action === 'archive'
+          ? runtimeActionButtonRefs.current['restore-to-paused']
+          : null
+    const target = [preferred, fallback].find((element) => element?.isConnected)
+
+    target?.focus()
+    pendingRuntimeFocusRestoreRef.current = null
+  }, [pendingRuntimeConfirmation, state.target])
+
+  useEffect(() => {
+    if (pendingProbeConfirmation) return
+
+    const request = pendingProbeFocusRestoreRef.current
+    if (!request) return
+
+    const preferred = request.probeItemId
+      ? probeDeleteButtonRefs.current[request.probeItemId]
+      : null
+    const fallback = addProbeButtonRef.current
+    const target = [preferred, fallback].find((element) => element?.isConnected)
+
+    target?.focus()
+    pendingProbeFocusRestoreRef.current = null
+  }, [pendingProbeConfirmation, state.probeItems])
 
   useEffect(() => {
     let cancelled = false
@@ -420,12 +501,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
 
-  async function handleRuntimeAction(action: TargetRuntimeAction) {
+  async function handleRuntimeAction(action: TargetRuntimeAction, confirmed = false) {
     if (!target) return
-    if (action === 'pause' && !window.confirm(TARGET_PAUSE_CONFIRM_MESSAGE)) {
-      return
-    }
-    if (action === 'archive' && !window.confirm(TARGET_ARCHIVE_CONFIRM_MESSAGE)) {
+    if ((action === 'pause' || action === 'archive') && !confirmed) {
+      setPendingRuntimeConfirmation({ action })
       return
     }
 
@@ -457,6 +536,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         ...current,
         target: updated,
       }))
+      pendingRuntimeFocusRestoreRef.current = focusRestoreActionAfterSuccess(action)
+      setPendingRuntimeConfirmation((current) => (current?.action === action ? null : current))
     } catch (error) {
       if (
         !isMountedRef.current ||
@@ -659,11 +740,12 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     }
   }
 
-  async function handleDeleteProbeItem(probeItem: ProbeItemRecord) {
+  async function handleDeleteProbeItem(probeItem: ProbeItemRecord, confirmed = false) {
     if (!target || probeCreateSubmitting || probeRowMutationInFlightRef.current) {
       return
     }
-    if (!window.confirm(PROBE_DELETE_CONFIRM_MESSAGE)) {
+    if (!confirmed) {
+      setPendingProbeConfirmation({ probeItemId: probeItem.probe_item_id, action: 'delete' })
       return
     }
 
@@ -685,6 +767,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         return
       }
       removeProbeItem(probeItem.probe_item_id)
+      pendingProbeFocusRestoreRef.current = {}
+      setPendingProbeConfirmation((current) =>
+        current?.probeItemId === probeItem.probe_item_id ? null : current,
+      )
       if (probeFormMode.kind === 'edit' && probeFormMode.probeItemId === probeItem.probe_item_id) {
         setProbeCreateOpen(false)
         setProbeFormMode({ kind: 'create' })
@@ -796,6 +882,9 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
             {targetRuntimeActions(target).map(({ action, label }) => (
               <button
                 key={action}
+                ref={(element) => {
+                  runtimeActionButtonRefs.current[action] = element
+                }}
                 type="button"
                 disabled={runtimeSubmitting}
                 onClick={() => void handleRuntimeAction(action)}
@@ -804,6 +893,44 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
               </button>
             ))}
           </div>
+          {pendingRuntimeConfirmation ? (
+            <ActionConfirmationCard
+              title={
+                pendingRuntimeConfirmation.action === 'pause'
+                  ? '确认暂停目标监控'
+                  : '确认归档目标'
+              }
+              current={
+                pendingRuntimeConfirmation.action === 'pause'
+                  ? pauseConfirmationCurrent()
+                  : '当前：目标仍在当前工作集中。'
+              }
+              result={
+                pendingRuntimeConfirmation.action === 'pause'
+                  ? '操作后：目标运行状态变为暂停。'
+                  : '操作后：目标退出当前工作集，运行状态变为已归档。'
+              }
+              impact={
+                pendingRuntimeConfirmation.action === 'pause'
+                  ? '会停止该 Target 下所有 ProbeItem 的执行，不再产生新的目标 observation。'
+                  : '归档后不会继续作为活跃目标参与观测、异常判定或通知。'
+              }
+              unchanged={
+                pendingRuntimeConfirmation.action === 'pause'
+                  ? '不会删除历史事件、观测记录或 ProbeItem 配置。'
+                  : '不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'
+              }
+              confirmLabel={
+                pendingRuntimeConfirmation.action === 'pause' ? '确认暂停目标' : '确认归档'
+              }
+              disabled={runtimeSubmitting}
+              onConfirm={() => void handleRuntimeAction(pendingRuntimeConfirmation.action, true)}
+              onCancel={() => {
+                pendingRuntimeFocusRestoreRef.current = pendingRuntimeConfirmation.action
+                setPendingRuntimeConfirmation(null)
+              }}
+            />
+          ) : null}
           {runtimeError ? <p>{runtimeError}</p> : null}
         </div>
       </DetailSection>
@@ -812,6 +939,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         <div className="page-stack">
           <div>
             <button
+              ref={addProbeButtonRef}
               type="button"
               disabled={probeCreateSubmitting}
               onClick={() => {
@@ -1083,6 +1211,9 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                         {probeItem.enabled ? '停用' : '启用'}
                       </button>
                       <button
+                        ref={(element) => {
+                          probeDeleteButtonRefs.current[probeItem.probe_item_id] = element
+                        }}
                         type="button"
                         aria-label={probeActionAccessibleName('删除', probeItem)}
                         disabled={
@@ -1094,6 +1225,26 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                         删除
                       </button>
                     </div>
+                    {pendingProbeConfirmation?.probeItemId === probeItem.probe_item_id ? (
+                      <ActionConfirmationCard
+                        title="确认删除 ProbeItem"
+                        current="当前：这条 ProbeItem 仍属于当前 Target。"
+                        result="操作后：这条观测方式会被移除。"
+                        impact="仅用于误建场景。删除后该 ProbeItem 不再产生新的 observation。"
+                        unchanged="不会删除 Target，也不会删除既有事件或历史观测记录。"
+                        confirmLabel="确认删除 ProbeItem"
+                        disabled={probeCreateSubmitting || probeRowMutationBusy}
+                        onConfirm={() => void handleDeleteProbeItem(probeItem, true)}
+                        onCancel={() => {
+                          pendingProbeFocusRestoreRef.current = {
+                            probeItemId: probeItem.probe_item_id,
+                          }
+                          setPendingProbeConfirmation((current) =>
+                            current?.probeItemId === probeItem.probe_item_id ? null : current,
+                          )
+                        }}
+                      />
+                    ) : null}
 
                     <dl className="probe-card__meta">
                       <div>

@@ -895,7 +895,7 @@ describe('TargetDetailPage', () => {
     })
   })
 
-  it('deletes a ProbeItem after the exact strong confirmation message', async () => {
+  it('uses an inline stateful confirmation before deleting a ProbeItem', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi
       .fn()
@@ -952,12 +952,27 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(probeActionButton('删除'))
 
-    expect(confirmSpy).toHaveBeenCalledWith(
-      '删除 ProbeItem 会移除这条观测方式，仅应用于误建场景，确定继续吗？',
-    )
+    expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByText('当前：这条 ProbeItem 仍属于当前 Target。')).toBeInTheDocument()
+    expect(screen.getByText('操作后：这条观测方式会被移除。')).toBeInTheDocument()
+    expect(
+      screen.getByText('仅用于误建场景。删除后该 ProbeItem 不再产生新的 observation。'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('不会删除 Target，也不会删除既有事件或历史观测记录。'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(probeActionButton('删除')).toHaveFocus())
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+
+    fireEvent.click(probeActionButton('删除'))
+    fireEvent.click(screen.getByRole('button', { name: '确认删除 ProbeItem' }))
+
+    expect(confirmSpy).not.toHaveBeenCalled()
     await waitFor(() =>
       expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
     )
+    expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toHaveFocus()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
       method: 'DELETE',
       headers: { Accept: 'application/json' },
@@ -965,7 +980,7 @@ describe('TargetDetailPage', () => {
     })
   })
 
-  it('keeps ProbeItem errors local when update and delete fail', async () => {
+  it('keeps ProbeItem errors local and leaves delete confirmation visible when delete fails', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi
       .fn()
@@ -1028,8 +1043,11 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
 
     fireEvent.click(probeActionButton('删除'))
-    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '确认删除 ProbeItem' }))
+
+    expect(confirmSpy).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.getByText('delete failed')).toBeInTheDocument())
+    expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
     expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
   })
@@ -1582,13 +1600,13 @@ describe('TargetDetailPage', () => {
     })
   })
 
-  it('requires strong confirmation before archiving from the detail page', async () => {
+  it('uses an inline stateful confirmation before pausing a target from the detail page', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
         mockJSONResponse({
-          target_id: 'tg_001',
+          target_id: 'tg_pause',
           name: 'Blog',
           target_type: 'service',
           host: 'blog.example.com',
@@ -1609,7 +1627,7 @@ describe('TargetDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
         mockJSONResponse({
-          target_id: 'tg_001',
+          target_id: 'tg_pause',
           latest_probe_observations: [],
         }),
       )
@@ -1617,7 +1635,154 @@ describe('TargetDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
         mockJSONResponse({
-          target_id: 'tg_001',
+          target_id: 'tg_pause',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '暂停',
+          labels: ['public'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:20:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_pause']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+
+    expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
+    expect(screen.getByText('当前：目标运行状态为启用或维护中。')).toBeInTheDocument()
+    expect(screen.getByText('操作后：目标运行状态变为暂停。')).toBeInTheDocument()
+    expect(
+      screen.getByText('会停止该 Target 下所有 ProbeItem 的执行，不再产生新的目标 observation。'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '暂停' })).toHaveFocus())
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停目标' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByRole('button', { name: '恢复' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '恢复' })).toHaveFocus()
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_pause/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('keeps the pause confirmation visible and local error when pause fails on the detail page', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_pause_fail',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: ['public'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ target_id: 'tg_pause_fail', latest_probe_observations: [] }))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'pause failed' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_pause_fail']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停目标' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByText('pause failed')).toBeInTheDocument())
+    expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_pause_fail/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('uses an inline stateful confirmation before archiving from the detail page', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_archive',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: ['public'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_archive',
+          latest_probe_observations: [],
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_archive',
           name: 'Blog',
           target_type: 'service',
           host: 'blog.example.com',
@@ -1638,7 +1803,7 @@ describe('TargetDetailPage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <MemoryRouter initialEntries={['/targets/tg_001']}>
+      <MemoryRouter initialEntries={['/targets/tg_archive']}>
         <Routes>
           <Route path="/targets/:targetId" element={<TargetDetailPage />} />
         </Routes>
@@ -1651,11 +1816,80 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '归档' }))
 
-    expect(confirmMock).toHaveBeenCalledWith('归档会让目标退出当前工作集，但会保留历史记录，确定继续吗？')
+    expect(screen.getByRole('alertdialog', { name: '确认归档目标' })).toBeInTheDocument()
+    expect(screen.getByText('当前：目标仍在当前工作集中。')).toBeInTheDocument()
+    expect(screen.getByText('操作后：目标退出当前工作集，运行状态变为已归档。')).toBeInTheDocument()
+    expect(screen.getByText('归档后不会继续作为活跃目标参与观测、异常判定或通知。')).toBeInTheDocument()
+    expect(
+      screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '归档' })).toHaveFocus())
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '恢复到暂停' })).toBeInTheDocument(),
     )
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/runtime/archive', {
+    expect(screen.getByRole('button', { name: '恢复到暂停' })).toHaveFocus()
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_archive/runtime/archive', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('keeps the archive confirmation visible and local error when archive fails on the detail page', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_archive_fail',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: ['public'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ target_id: 'tg_archive_fail', latest_probe_observations: [] }))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'archive failed' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_archive_fail']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByText('archive failed')).toBeInTheDocument())
+    expect(screen.getByRole('alertdialog', { name: '确认归档目标' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_archive_fail/runtime/archive', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
