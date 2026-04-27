@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -952,7 +952,8 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(probeActionButton('删除'))
 
-    expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
+    const confirmation = screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })
+    expect(confirmation).toBeInTheDocument()
     expect(screen.getByText('当前：这条 ProbeItem 仍属于当前 Target。')).toBeInTheDocument()
     expect(screen.getByText('操作后：这条观测方式会被移除。')).toBeInTheDocument()
     expect(
@@ -961,6 +962,7 @@ describe('TargetDetailPage', () => {
     expect(
       screen.getByText('不会删除 Target，也不会删除既有事件或历史观测记录。'),
     ).toBeInTheDocument()
+    expect(within(confirmation).getByText('port: 443')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     await waitFor(() => expect(probeActionButton('删除')).toHaveFocus())
     expect(fetchMock).toHaveBeenCalledTimes(5)
@@ -1050,6 +1052,133 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
     expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
+  })
+
+  it('prevents opening a ProbeItem delete confirmation while a runtime confirmation is active', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              probe_item_id: 'pb_001',
+              target_id: 'tg_001',
+              probe_kind: 'tcp',
+              enabled: true,
+              frequency_tier: '5m',
+              timeout_seconds: 3,
+              config: { port: 443 },
+              created_at: '2026-04-21T00:00:00Z',
+              updated_at: '2026-04-21T00:00:00Z',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('TCP')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+
+    expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
+    expect(probeActionButton('删除')).toBeDisabled()
+    fireEvent.click(probeActionButton('删除'))
+    expect(screen.queryByRole('alertdialog', { name: '确认删除 ProbeItem' })).not.toBeInTheDocument()
+  })
+
+  it('prevents opening a runtime confirmation while a ProbeItem delete confirmation is active', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              probe_item_id: 'pb_001',
+              target_id: 'tg_001',
+              probe_kind: 'tcp',
+              enabled: true,
+              frequency_tier: '5m',
+              timeout_seconds: 3,
+              config: { port: 443 },
+              created_at: '2026-04-21T00:00:00Z',
+              updated_at: '2026-04-21T00:00:00Z',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('TCP')).toBeInTheDocument())
+
+    fireEvent.click(probeActionButton('删除'))
+
+    expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '暂停' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '归档' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    expect(screen.queryByRole('alertdialog', { name: '确认暂停目标监控' })).not.toBeInTheDocument()
   })
 
   it('ignores stale ProbeItem save results after switching to another target route', async () => {
@@ -1894,6 +2023,281 @@ describe('TargetDetailPage', () => {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
+  })
+
+  it('ignores a stale confirmed pause action after switching to a different target route', async () => {
+    const pauseAction = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: ['public'],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            last_success_at: '2026-04-24T09:00:00Z',
+            last_failure_at: '2026-04-24T08:30:00Z',
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            latest_probe_observations: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockImplementationOnce(() => pauseAction.promise)
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_002',
+            name: 'Cache',
+            target_type: 'service',
+            host: 'cache.example.com',
+            execution_node_labels: ['edge'],
+            run_status: '暂停',
+            labels: ['infra'],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            last_success_at: '2026-04-24T10:00:00Z',
+            last_failure_at: '2026-04-24T08:00:00Z',
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T10:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_002',
+            latest_probe_observations: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <TargetDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停目标' }))
+    fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
+
+    pauseAction.resolve(mockJSONResponse({ error: 'pause failed' }, 409))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
+    expect(screen.queryByText('pause failed')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '确认暂停目标监控' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
+    expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
+  })
+
+  it('ignores a stale confirmed archive action after switching to a different target route', async () => {
+    const archiveAction = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: ['public'],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            last_success_at: '2026-04-24T09:00:00Z',
+            last_failure_at: '2026-04-24T08:30:00Z',
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            latest_probe_observations: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockImplementationOnce(() => archiveAction.promise)
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_002',
+            name: 'Cache',
+            target_type: 'service',
+            host: 'cache.example.com',
+            execution_node_labels: ['edge'],
+            run_status: '暂停',
+            labels: ['infra'],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            last_success_at: '2026-04-24T10:00:00Z',
+            last_failure_at: '2026-04-24T08:00:00Z',
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T10:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_002',
+            latest_probe_observations: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <TargetDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+    fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
+
+    archiveAction.resolve(mockJSONResponse({ error: 'archive failed' }, 409))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
+    expect(screen.queryByText('archive failed')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '确认归档目标' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
+    expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
+  })
+
+  it('ignores a stale confirmed ProbeItem delete after switching to a different target route', async () => {
+    const deleteAction = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              probe_item_id: 'pb_001',
+              target_id: 'tg_001',
+              probe_kind: 'tcp',
+              enabled: true,
+              frequency_tier: '5m',
+              timeout_seconds: 3,
+              config: { port: 443 },
+              created_at: '2026-04-21T00:00:00Z',
+              updated_at: '2026-04-21T00:00:00Z',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockImplementationOnce(() => deleteAction.promise)
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_002',
+            name: 'Cache',
+            target_type: 'service',
+            host: 'cache.example.com',
+            execution_node_labels: ['edge'],
+            run_status: '暂停',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T10:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({ target_id: 'tg_002', latest_probe_observations: [] }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <TargetDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('TCP')).toBeInTheDocument())
+
+    fireEvent.click(probeActionButton('删除'))
+    fireEvent.click(screen.getByRole('button', { name: '确认删除 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
+
+    deleteAction.resolve(mockJSONResponse({ error: 'delete failed' }, 503))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
+    expect(screen.queryByText('delete failed')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '确认删除 ProbeItem' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
+    expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
+    expect(screen.getByRole('button', { name: '添加 ProbeItem' })).not.toHaveFocus()
   })
 
   it('ignores a stale runtime-action error after switching to a different target route', async () => {

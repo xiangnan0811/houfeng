@@ -361,6 +361,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const probeDeleteButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const addProbeButtonRef = useRef<HTMLButtonElement | null>(null)
   const pendingProbeFocusRestoreRef = useRef<ProbeFocusRestoreRequest | null>(null)
+  const pendingProbeConfirmationCardRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     currentRequestedTargetIdRef.current = state.requestedTargetId
@@ -406,6 +407,28 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
 
     target?.focus()
     pendingProbeFocusRestoreRef.current = null
+  }, [pendingProbeConfirmation, state.probeItems])
+
+  useEffect(() => {
+    const stack = pendingProbeConfirmationCardRef.current?.querySelector('.page-stack')
+    const existingSummary = stack?.querySelector('[data-probe-confirmation-summary="true"]')
+    existingSummary?.remove()
+
+    if (!pendingProbeConfirmation || !stack) return
+
+    const probeItem = state.probeItems.find(
+      (item) => item.probe_item_id === pendingProbeConfirmation.probeItemId,
+    )
+    if (!probeItem) return
+
+    const summary = document.createElement('p')
+    summary.dataset.probeConfirmationSummary = 'true'
+    summary.textContent = formatConfigSummary(probeItem.config)
+    stack.appendChild(summary)
+
+    return () => {
+      summary.remove()
+    }
   }, [pendingProbeConfirmation, state.probeItems])
 
   useEffect(() => {
@@ -500,9 +523,13 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const incidentsError = hasCurrentActivity ? state.incidentsError : null
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
+  const runtimeConfirmationActive = pendingRuntimeConfirmation !== null
+  const probeConfirmationActive = pendingProbeConfirmation !== null
 
   async function handleRuntimeAction(action: TargetRuntimeAction, confirmed = false) {
     if (!target) return
+    if (probeConfirmationActive) return
+    if (runtimeConfirmationActive && !confirmed) return
     if ((action === 'pause' || action === 'archive') && !confirmed) {
       setPendingRuntimeConfirmation({ action })
       return
@@ -566,7 +593,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   function openProbeCreateForm(target: TargetRecord) {
-    if (probeCreateSubmitting) return
+    if (probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive) return
     probeFormRequestRef.current += 1
     setProbeFormMode({ kind: 'create' })
     setProbeCreateForm(initialProbeCreateFormForTarget(target))
@@ -576,7 +603,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   function openProbeEditForm(probeItem: ProbeItemRecord) {
-    if (probeCreateSubmitting) return
+    if (probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive) return
     if (hasUnsupportedProbeConfigFields(probeItem)) {
       probeFormRequestRef.current += 1
       setProbeCreateOpen(false)
@@ -688,7 +715,15 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   async function handleToggleProbeItem(probeItem: ProbeItemRecord) {
-    if (!target || probeCreateSubmitting || probeRowMutationInFlightRef.current) return
+    if (
+      !target ||
+      probeCreateSubmitting ||
+      probeRowMutationInFlightRef.current ||
+      runtimeConfirmationActive ||
+      probeConfirmationActive
+    ) {
+      return
+    }
 
     const actionTargetId = target.target_id
     const requestId = probeRowMutationRequestRef.current + 1
@@ -742,6 +777,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
 
   async function handleDeleteProbeItem(probeItem: ProbeItemRecord, confirmed = false) {
     if (!target || probeCreateSubmitting || probeRowMutationInFlightRef.current) {
+      return
+    }
+    if (runtimeConfirmationActive) return
+    if (probeConfirmationActive && (!confirmed || pendingProbeConfirmation?.probeItemId !== probeItem.probe_item_id)) {
       return
     }
     if (!confirmed) {
@@ -821,6 +860,9 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   const probeRowMutationBusy = probeMutationBusyId !== null
+  const runtimeActionsDisabled = runtimeSubmitting || probeConfirmationActive || runtimeConfirmationActive
+  const probeActionsDisabled =
+    probeCreateSubmitting || probeRowMutationBusy || runtimeConfirmationActive || probeConfirmationActive
 
   return (
     <div className="page-stack">
@@ -886,7 +928,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                   runtimeActionButtonRefs.current[action] = element
                 }}
                 type="button"
-                disabled={runtimeSubmitting}
+                disabled={runtimeActionsDisabled}
                 onClick={() => void handleRuntimeAction(action)}
               >
                 {label}
@@ -941,7 +983,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
             <button
               ref={addProbeButtonRef}
               type="button"
-              disabled={probeCreateSubmitting}
+              disabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
               onClick={() => {
                 if (probeCreateSubmitting) return
                 if (probeCreateOpen && probeFormMode.kind === 'create') {
@@ -1188,10 +1230,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                       <button
                         type="button"
                         aria-label={probeActionAccessibleName('编辑', probeItem)}
-                        disabled={
-                          probeCreateSubmitting ||
-                          probeRowMutationBusy
-                        }
+                        disabled={probeActionsDisabled}
                         onClick={() => openProbeEditForm(probeItem)}
                       >
                         编辑
@@ -1202,10 +1241,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                           probeItem.enabled ? '停用' : '启用',
                           probeItem,
                         )}
-                        disabled={
-                          probeCreateSubmitting ||
-                          probeRowMutationBusy
-                        }
+                        disabled={probeActionsDisabled}
                         onClick={() => void handleToggleProbeItem(probeItem)}
                       >
                         {probeItem.enabled ? '停用' : '启用'}
@@ -1216,34 +1252,33 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                         }}
                         type="button"
                         aria-label={probeActionAccessibleName('删除', probeItem)}
-                        disabled={
-                          probeCreateSubmitting ||
-                          probeRowMutationBusy
-                        }
+                        disabled={probeActionsDisabled}
                         onClick={() => void handleDeleteProbeItem(probeItem)}
                       >
                         删除
                       </button>
                     </div>
                     {pendingProbeConfirmation?.probeItemId === probeItem.probe_item_id ? (
-                      <ActionConfirmationCard
-                        title="确认删除 ProbeItem"
-                        current="当前：这条 ProbeItem 仍属于当前 Target。"
-                        result="操作后：这条观测方式会被移除。"
-                        impact="仅用于误建场景。删除后该 ProbeItem 不再产生新的 observation。"
-                        unchanged="不会删除 Target，也不会删除既有事件或历史观测记录。"
-                        confirmLabel="确认删除 ProbeItem"
-                        disabled={probeCreateSubmitting || probeRowMutationBusy}
-                        onConfirm={() => void handleDeleteProbeItem(probeItem, true)}
-                        onCancel={() => {
-                          pendingProbeFocusRestoreRef.current = {
-                            probeItemId: probeItem.probe_item_id,
-                          }
-                          setPendingProbeConfirmation((current) =>
-                            current?.probeItemId === probeItem.probe_item_id ? null : current,
-                          )
-                        }}
-                      />
+                      <div ref={pendingProbeConfirmationCardRef}>
+                        <ActionConfirmationCard
+                          title="确认删除 ProbeItem"
+                          current="当前：这条 ProbeItem 仍属于当前 Target。"
+                          result="操作后：这条观测方式会被移除。"
+                          impact="仅用于误建场景。删除后该 ProbeItem 不再产生新的 observation。"
+                          unchanged="不会删除 Target，也不会删除既有事件或历史观测记录。"
+                          confirmLabel="确认删除 ProbeItem"
+                          disabled={probeCreateSubmitting || probeRowMutationBusy}
+                          onConfirm={() => void handleDeleteProbeItem(probeItem, true)}
+                          onCancel={() => {
+                            pendingProbeFocusRestoreRef.current = {
+                              probeItemId: probeItem.probe_item_id,
+                            }
+                            setPendingProbeConfirmation((current) =>
+                              current?.probeItemId === probeItem.probe_item_id ? null : current,
+                            )
+                          }}
+                        />
+                      </div>
                     ) : null}
 
                     <dl className="probe-card__meta">
