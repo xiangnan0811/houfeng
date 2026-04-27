@@ -101,7 +101,7 @@ func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error 
 }
 
 func (n *settingsAwareNotifier) sendWithTelegramSettings(ctx context.Context, summary string, telegram centersettings.TelegramSettings, exists bool) error {
-	if !exists {
+	if !exists || !telegram.RuntimeManaged {
 		if n.fallback != nil {
 			return n.fallback.Send(ctx, summary)
 		}

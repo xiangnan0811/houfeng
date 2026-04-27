@@ -20,6 +20,7 @@ const getCenterSettingsSQL = `
 		settings_id,
 		telegram_bot_token,
 		telegram_chat_id,
+		telegram_runtime_managed,
 		host_sample_frequency_tier,
 		probe_frequency_defaults,
 		incident_defaults,
@@ -35,15 +36,17 @@ const upsertCenterSettingsSQL = `
 		settings_id,
 		telegram_bot_token,
 		telegram_chat_id,
+		telegram_runtime_managed,
 		host_sample_frequency_tier,
 		probe_frequency_defaults,
 		incident_defaults,
 		override_rules,
 		retention_policy
-	) values ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb)
+	) values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb)
 	on conflict (settings_id) do update
 	set telegram_bot_token = excluded.telegram_bot_token,
 		telegram_chat_id = excluded.telegram_chat_id,
+		telegram_runtime_managed = excluded.telegram_runtime_managed,
 		host_sample_frequency_tier = excluded.host_sample_frequency_tier,
 		probe_frequency_defaults = excluded.probe_frequency_defaults,
 		incident_defaults = excluded.incident_defaults,
@@ -54,6 +57,7 @@ const upsertCenterSettingsSQL = `
 		settings_id,
 		telegram_bot_token,
 		telegram_chat_id,
+		telegram_runtime_managed,
 		host_sample_frequency_tier,
 		probe_frequency_defaults,
 		incident_defaults,
@@ -124,6 +128,7 @@ func (r *PostgresSettingsRepository) putSettings(ctx context.Context, input cent
 		centersettings.SingletonID,
 		normalized.Telegram.BotToken,
 		normalized.Telegram.ChatID,
+		normalized.Telegram.RuntimeManaged,
 		normalized.HostSampleFrequencyTier,
 		probeDefaults,
 		incidentDefaults,
@@ -141,6 +146,7 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 		settingsID              string
 		telegramBotToken        string
 		telegramChatID          string
+		telegramRuntimeManaged  bool
 		hostSampleFrequencyTier string
 		probeFrequencyDefaults  []byte
 		incidentDefaults        []byte
@@ -154,6 +160,7 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 		&settingsID,
 		&telegramBotToken,
 		&telegramChatID,
+		&telegramRuntimeManaged,
 		&hostSampleFrequencyTier,
 		&probeFrequencyDefaults,
 		&incidentDefaults,
@@ -171,8 +178,9 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 
 	record := centersettings.CenterSettings{
 		Telegram: centersettings.TelegramSettings{
-			BotToken: telegramBotToken,
-			ChatID:   telegramChatID,
+			BotToken:       telegramBotToken,
+			ChatID:         telegramChatID,
+			RuntimeManaged: telegramRuntimeManaged,
 		},
 		HostSampleFrequencyTier: hostSampleFrequencyTier,
 	}

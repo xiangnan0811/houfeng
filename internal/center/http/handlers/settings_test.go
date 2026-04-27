@@ -59,6 +59,7 @@ func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing
 	record := centersettings.Default()
 	record.Telegram.BotToken = "123456:ABCDEF-secret-token"
 	record.Telegram.ChatID = "chat-id"
+	record.Telegram.RuntimeManaged = false
 	repo := &fakeSettingsRepository{getSettingsResult: record}
 
 	handler := handlers.Settings(repo)
@@ -88,8 +89,8 @@ func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing
 	if strings.Contains(body.Telegram.TokenMaskedSummary, "secret-token") {
 		t.Fatalf("expected token_masked_summary to hide raw token, got %q", body.Telegram.TokenMaskedSummary)
 	}
-	if !body.Telegram.RuntimeApplyActive {
-		t.Fatal("expected runtime_apply_active to be true once persisted Telegram settings drive the live notifier path")
+	if body.Telegram.RuntimeApplyActive {
+		t.Fatal("expected runtime_apply_active to stay false until persisted Telegram settings explicitly manage runtime")
 	}
 	if body.HostSampleFrequencyTier != centersettings.Default().HostSampleFrequencyTier {
 		t.Fatalf("expected host sample frequency tier %q, got %q", centersettings.Default().HostSampleFrequencyTier, body.HostSampleFrequencyTier)
@@ -100,16 +101,18 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	current := centersettings.Default()
 	current.Telegram.BotToken = "current-token"
 	current.Telegram.ChatID = "chat-id"
+	current.Telegram.RuntimeManaged = false
 
 	updated := centersettings.Default()
 	updated.Telegram.BotToken = "bot-token"
 	updated.Telegram.ChatID = "chat-id"
+	updated.Telegram.RuntimeManaged = true
 	updated.HostSampleFrequencyTier = "1m"
 	updated.ProbeFrequencyDefaults.HTTP = "1m"
 	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id"},"host_sample_frequency_tier":"1m","probe_frequency_defaults":{"tcp":"5m","http":"1m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":60,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"1m","probe_frequency_defaults":{"tcp":"5m","http":"1m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":60,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -123,6 +126,9 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	}
 	if repo.putSettingsInput.Telegram.BotToken != "bot-token" {
 		t.Fatalf("expected repository input bot token %q, got %q", "bot-token", repo.putSettingsInput.Telegram.BotToken)
+	}
+	if !repo.putSettingsInput.Telegram.RuntimeManaged {
+		t.Fatal("expected repository input runtime_managed to be true")
 	}
 
 	var body settingsHandlerResponse
@@ -147,10 +153,12 @@ func TestSettingsHandlerPreservesExistingTelegramTokenWhenBotTokenIsOmitted(t *t
 	current := centersettings.Default()
 	current.Telegram.BotToken = "current-token"
 	current.Telegram.ChatID = "chat-id"
+	current.Telegram.RuntimeManaged = false
 
 	updated := centersettings.Default()
 	updated.Telegram.BotToken = "current-token"
 	updated.Telegram.ChatID = "chat-id"
+	updated.Telegram.RuntimeManaged = false
 	updated.HostSampleFrequencyTier = "1m"
 	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
 
@@ -169,6 +177,9 @@ func TestSettingsHandlerPreservesExistingTelegramTokenWhenBotTokenIsOmitted(t *t
 	}
 	if repo.putSettingsInput.Telegram.ChatID != "chat-id" {
 		t.Fatalf("expected telegram chat id %q, got %q", "chat-id", repo.putSettingsInput.Telegram.ChatID)
+	}
+	if repo.putSettingsInput.Telegram.RuntimeManaged {
+		t.Fatal("expected omitted runtime_managed to preserve false for unrelated saves")
 	}
 }
 

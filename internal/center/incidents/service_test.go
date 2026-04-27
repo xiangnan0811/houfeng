@@ -210,7 +210,7 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 	fallbackNotifier := &fakeNotifier{}
 	settingsRepo := &fakeSettingsRepository{
 		getSettingsResult: centersettings.Default(),
-		persistedTelegram: centersettings.Default().Telegram,
+		persistedTelegram: centersettings.TelegramSettings{RuntimeManaged: true},
 		persistedExists:   true,
 	}
 	buildCalls := 0
@@ -284,6 +284,53 @@ func TestSettingsAwareNotifierUsesFallbackWhenFreshDBWouldAutoCreateDisabledDefa
 	}
 }
 
+func TestSettingsAwareNotifierUsesFallbackWhenPersistedTelegramIsNotManagingRuntime(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+	}
+	writer := &fakeMutationWriter{}
+	fallbackNotifier := &fakeNotifier{}
+	settingsRepo := &fakeSettingsRepository{
+		persistedTelegram: centersettings.TelegramSettings{
+			BotToken:       "persisted-bot-token",
+			ChatID:         "persisted-chat-id",
+			RuntimeManaged: false,
+		},
+		persistedExists: true,
+	}
+	buildCalls := 0
+	service := NewService(
+		nodeRepo,
+		targetRepo,
+		snapshots,
+		writer,
+		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
+			buildCalls++
+			return &fakeNotifier{}
+		}, fallbackNotifier),
+		slog.Default(),
+		30*time.Second,
+		time.Minute,
+	)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if len(fallbackNotifier.messages) != 1 {
+		t.Fatalf("fallbackNotifier.messages = %#v, want one env-fallback send when persisted Telegram is not managing runtime", fallbackNotifier.messages)
+	}
+	if buildCalls != 0 {
+		t.Fatalf("buildCalls = %d, want 0", buildCalls)
+	}
+	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSent {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSent)
+	}
+}
+
 func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
@@ -296,6 +343,7 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	settings := centersettings.Default()
 	settings.Telegram.BotToken = "persisted-bot-token"
 	settings.Telegram.ChatID = "persisted-chat-id"
+	settings.Telegram.RuntimeManaged = true
 	settingsRepo := &fakeSettingsRepository{
 		getSettingsResult: settings,
 		persistedTelegram: settings.Telegram,

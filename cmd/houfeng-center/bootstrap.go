@@ -176,10 +176,11 @@ func (r notifierSettingsRepository) PutSettings(ctx context.Context, input cente
 func (r notifierSettingsRepository) GetPersistedTelegramSettings(ctx context.Context) (centersettings.TelegramSettings, bool, error) {
 	var botToken string
 	var chatID string
+	var runtimeManaged bool
 	err := r.db.QueryRow(ctx, `
-		select telegram_bot_token, telegram_chat_id
+		select telegram_bot_token, telegram_chat_id, telegram_runtime_managed
 		from center_settings
-		where settings_id = $1`, centersettings.SingletonID).Scan(&botToken, &chatID)
+		where settings_id = $1`, centersettings.SingletonID).Scan(&botToken, &chatID, &runtimeManaged)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return centersettings.TelegramSettings{}, false, nil
 	}
@@ -187,8 +188,9 @@ func (r notifierSettingsRepository) GetPersistedTelegramSettings(ctx context.Con
 		return centersettings.TelegramSettings{}, false, fmt.Errorf("query persisted telegram settings: %w", err)
 	}
 	return centersettings.TelegramSettings{
-		BotToken: strings.TrimSpace(botToken),
-		ChatID:   strings.TrimSpace(chatID),
+		BotToken:       strings.TrimSpace(botToken),
+		ChatID:         strings.TrimSpace(chatID),
+		RuntimeManaged: runtimeManaged,
 	}, true, nil
 }
 

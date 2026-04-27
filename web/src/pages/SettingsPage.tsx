@@ -26,6 +26,7 @@ const TARGET_TYPE_OPTIONS = [
 type FormState = {
   telegramBotToken: string
   telegramChatId: string
+  telegramRuntimeManaged: boolean
   hostSampleFrequencyTier: string
   probeFrequencyDefaults: ProbeFrequencyDefaults
   incidentDefaults: {
@@ -71,6 +72,7 @@ function buildFormState(settings: SettingsRecord): FormState {
   return {
     telegramBotToken: '',
     telegramChatId: settings.telegram.chat_id,
+    telegramRuntimeManaged: settings.telegram.runtime_apply_active,
     hostSampleFrequencyTier: settings.host_sample_frequency_tier,
     probeFrequencyDefaults: {
       tcp: settings.probe_frequency_defaults.tcp,
@@ -120,6 +122,7 @@ function parseOverrideRuleArray<T>(value: string, label: string): T[] {
 type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram'> & {
   telegram: {
     chat_id: string
+    runtime_managed: boolean
     bot_token?: string
   }
 }
@@ -127,12 +130,20 @@ type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram'> & {
 function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): SettingsUpdateDraft {
   const botToken = form.telegramBotToken.trim()
   const chatId = form.telegramChatId.trim()
+  const runtimeManaged = form.telegramRuntimeManaged
   const hasPersistedToken = currentSettings.telegram.token_present
   const replacementTokenProvided = botToken != ''
 
+  if (runtimeManaged && !hasPersistedToken && !replacementTokenProvided) {
+    throw new Error('启用运行时接管前，需要先提供 Telegram Bot Token 和 Chat ID。')
+  }
+
   if (hasPersistedToken && !replacementTokenProvided) {
+    if (runtimeManaged && chatId == '') {
+      throw new Error('Telegram Bot Token 和 Chat ID 需要同时提供或同时清空。')
+    }
     return {
-      telegram: { chat_id: chatId },
+      telegram: { chat_id: chatId, runtime_managed: runtimeManaged },
       host_sample_frequency_tier: form.hostSampleFrequencyTier,
       probe_frequency_defaults: {
         tcp: form.probeFrequencyDefaults.tcp,
@@ -193,6 +204,7 @@ function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): Set
     telegram: {
       ...(replacementTokenProvided ? { bot_token: botToken } : {}),
       chat_id: chatId,
+      runtime_managed: runtimeManaged,
     },
     host_sample_frequency_tier: form.hostSampleFrequencyTier,
     probe_frequency_defaults: {
@@ -564,6 +576,25 @@ export function SettingsPage() {
                 : '当前未保存 Telegram Bot Token'}
             </strong>
           </article>
+
+          <label className="summary-card">
+            <span className="summary-card__label">运行时接管</span>
+            <input
+              aria-label="使用持久化 Telegram 配置接管运行中的通知器"
+              type="checkbox"
+              checked={form.telegramRuntimeManaged}
+              onChange={(event) =>
+                setState((current) => ({
+                  ...current,
+                  form: current.form
+                    ? { ...current.form, telegramRuntimeManaged: event.target.checked }
+                    : current.form,
+                  saveError: null,
+                  saveSuccess: null,
+                }))
+              }
+            />
+          </label>
         </div>
 
         <SectionIntro>

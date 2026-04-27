@@ -42,8 +42,9 @@ type settingsUpdateRequest struct {
 }
 
 type telegramSettingsUpdateRequest struct {
-	BotToken *string `json:"bot_token,omitempty"`
-	ChatID   string  `json:"chat_id"`
+	BotToken       *string `json:"bot_token,omitempty"`
+	ChatID         string  `json:"chat_id"`
+	RuntimeManaged *bool   `json:"runtime_managed,omitempty"`
 }
 
 func Settings(repo SettingsRepository) http.Handler {
@@ -92,8 +93,9 @@ func Settings(repo SettingsRepository) http.Handler {
 func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUpdateRequest) centersettings.CenterSettings {
 	merged := centersettings.CenterSettings{
 		Telegram: centersettings.TelegramSettings{
-			BotToken: current.Telegram.BotToken,
-			ChatID:   strings.TrimSpace(input.Telegram.ChatID),
+			BotToken:       current.Telegram.BotToken,
+			ChatID:         strings.TrimSpace(input.Telegram.ChatID),
+			RuntimeManaged: current.Telegram.RuntimeManaged,
 		},
 		HostSampleFrequencyTier: input.HostSampleFrequencyTier,
 		ProbeFrequencyDefaults:  input.ProbeFrequencyDefaults,
@@ -104,6 +106,9 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 
 	if input.Telegram.BotToken != nil {
 		merged.Telegram.BotToken = strings.TrimSpace(*input.Telegram.BotToken)
+	}
+	if input.Telegram.RuntimeManaged != nil {
+		merged.Telegram.RuntimeManaged = *input.Telegram.RuntimeManaged
 	}
 	if merged.Telegram.ChatID == "" {
 		merged.Telegram.BotToken = ""
@@ -119,7 +124,7 @@ func newSettingsResponse(record centersettings.CenterSettings) settingsResponse 
 			ChatID:             record.Telegram.ChatID,
 			TokenPresent:       tokenPresent,
 			TokenMaskedSummary: maskTelegramBotToken(record.Telegram.BotToken),
-			RuntimeApplyActive: true,
+			RuntimeApplyActive: record.Telegram.RuntimeManaged,
 		},
 		HostSampleFrequencyTier: record.HostSampleFrequencyTier,
 		ProbeFrequencyDefaults:  record.ProbeFrequencyDefaults,

@@ -14,8 +14,9 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 
 	input := CenterSettings{
 		Telegram: TelegramSettings{
-			BotToken: " bot-token ",
-			ChatID:   " chat-id ",
+			BotToken:       " bot-token ",
+			ChatID:         " chat-id ",
+			RuntimeManaged: true,
 		},
 		HostSampleFrequencyTier: " 1m ",
 		ProbeFrequencyDefaults: ProbeFrequencyDefaults{
@@ -78,6 +79,9 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 	}
 	if got.Telegram.ChatID != "chat-id" {
 		t.Fatalf("ChatID = %q, want %q", got.Telegram.ChatID, "chat-id")
+	}
+	if !got.Telegram.RuntimeManaged {
+		t.Fatal("RuntimeManaged = false, want true")
 	}
 	if !got.Telegram.Enabled() {
 		t.Fatal("Telegram.Enabled() = false, want true")
@@ -243,6 +247,9 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	}
 	if got.ProbeFrequencyDefaults.HTTP != "5m" {
 		t.Fatalf("ProbeFrequencyDefaults.HTTP = %q, want %q", got.ProbeFrequencyDefaults.HTTP, "5m")
+	}
+	if got.Telegram.RuntimeManaged {
+		t.Fatal("Telegram.RuntimeManaged = true, want false by default")
 	}
 	if got.RetentionPolicy.EventLayerDays <= 0 {
 		t.Fatalf("EventLayerDays = %d, want positive", got.RetentionPolicy.EventLayerDays)

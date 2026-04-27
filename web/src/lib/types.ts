@@ -235,6 +235,7 @@ export type SettingsTelegramResponse = {
 export type SettingsTelegramInput = {
   bot_token?: string
   chat_id: string
+  runtime_managed?: boolean
 }
 
 export type ProbeFrequencyDefaults = {

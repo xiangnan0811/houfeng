@@ -17,7 +17,7 @@ const settingsResponseBody = {
     chat_id: 'chat-id',
     token_present: true,
     token_masked_summary: '****************oken',
-    runtime_apply_active: true,
+    runtime_apply_active: false,
   },
   host_sample_frequency_tier: '5m',
   probe_frequency_defaults: {
@@ -99,7 +99,8 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('已配置 Telegram Bot Token：****************oken')).toBeInTheDocument()
     expect(screen.queryByText('bot-token')).not.toBeInTheDocument()
-    expect(screen.getByText('当前持久化配置已接入正在运行的通知路径。')).toBeInTheDocument()
+    expect(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器')).not.toBeChecked()
+    expect(screen.getByText('当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。')).toBeInTheDocument()
     expect(
       screen.getByText('当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。'),
     ).toBeInTheDocument()
@@ -156,6 +157,7 @@ describe('SettingsPage', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
       telegram: {
         chat_id: 'chat-id',
+        runtime_managed: false,
       },
       host_sample_frequency_tier: '1m',
       probe_frequency_defaults: {
@@ -191,6 +193,7 @@ describe('SettingsPage', () => {
           telegram: {
             ...settingsResponseBody.telegram,
             token_masked_summary: '***************oken',
+            runtime_apply_active: true,
           },
           host_sample_frequency_tier: '1m',
           retention_policy: {
@@ -205,6 +208,7 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
 
+    fireEvent.click(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器'))
     fireEvent.change(screen.getByLabelText('新的 Telegram Bot Token'), {
       target: { value: 'replacement-token' },
     })
@@ -237,6 +241,7 @@ describe('SettingsPage', () => {
       telegram: {
         bot_token: 'replacement-token',
         chat_id: 'chat-id',
+        runtime_managed: true,
       },
       host_sample_frequency_tier: '1m',
       probe_frequency_defaults: {
@@ -272,6 +277,7 @@ describe('SettingsPage', () => {
           telegram: {
             ...settingsResponseBody.telegram,
             chat_id: 'new-chat-id',
+            runtime_apply_active: true,
           },
         }),
       )
@@ -281,6 +287,7 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
 
+    fireEvent.click(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器'))
     fireEvent.change(screen.getByLabelText('Telegram Chat ID'), {
       target: { value: 'new-chat-id' },
     })
@@ -297,6 +304,7 @@ describe('SettingsPage', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
       telegram: {
         chat_id: 'new-chat-id',
+        runtime_managed: true,
       },
       host_sample_frequency_tier: '5m',
       probe_frequency_defaults: {
