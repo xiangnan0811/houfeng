@@ -15,6 +15,27 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
+function nodeRecord(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    node_id: 'nd_001',
+    display_name: 'Tokyo Edge',
+    region: 'ap-northeast-1',
+    city: 'Tokyo',
+    provider: 'Vultr',
+    lifecycle_status: '在用',
+    monitoring_status: '启用',
+    binding_status: '已绑定',
+    labels: [],
+    note: '',
+    current_health_status: '正常',
+    current_active_incident_count: 0,
+    current_primary_issue_summary: '',
+    created_at: '2026-04-26T09:00:00Z',
+    updated_at: '2026-04-26T09:00:00Z',
+    ...overrides,
+  }
+}
+
 describe('NodesPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -273,6 +294,91 @@ describe('NodesPage', () => {
       'href',
       '/nodes/nd_001/onboarding',
     )
+  })
+
+  it('surfaces and filters binding-conflict nodes without exposing final binding actions', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_conflict',
+            display_name: 'Tokyo Edge',
+            binding_status: '指纹变更待确认',
+            current_health_status: '关注',
+          }),
+          nodeRecord({
+            node_id: 'nd_normal',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    expect(screen.getByRole('button', { name: '绑定异常 1' })).toBeInTheDocument()
+    const conflictRow = screen.getByText('Tokyo Edge').closest('article')
+    expect(conflictRow).not.toBeNull()
+    expect(within(conflictRow!).getByText('指纹变更待确认')).toBeInTheDocument()
+    expect(within(conflictRow!).getByText('等待绑定确认')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认重绑定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '拒绝新指纹' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重置绑定' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '绑定异常 1' }))
+
+    expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
+    expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '绑定异常 1' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '全部节点 2' }))
+    expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
+  })
+
+  it('renders an empty state when the binding-conflict filter has no rows', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_normal',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Seoul Edge')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '绑定异常 0' }))
+
+    expect(screen.getByText('没有绑定异常节点')).toBeInTheDocument()
+    expect(screen.getByText('当前没有等待绑定确认的节点。')).toBeInTheDocument()
+    expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument()
   })
 
   it('renders runtime quick actions by node monitoring status and applies light actions immediately', async () => {

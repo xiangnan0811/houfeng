@@ -34,8 +34,11 @@ const initialCreateForm: CreateNodeInput = {
 }
 
 const NODE_PAUSE_CONFIRM_MESSAGE = '暂停监控会停止采集并产生数据空档，确定继续吗？'
+const NODE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
+const NODE_BINDING_CONFLICT_SUMMARY = '等待绑定确认'
 
 type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
+type NodeListView = 'all' | 'binding-conflict'
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -103,9 +106,14 @@ function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction
   return []
 }
 
+function isBindingConflictNode(node: NodeRecord) {
+  return node.binding_status === NODE_BINDING_CONFLICT_STATUS
+}
+
 export function NodesPage() {
   const navigate = useNavigate()
   const [nodes, setNodes] = useState<NodeRecord[]>([])
+  const [nodeListView, setNodeListView] = useState<NodeListView>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -240,6 +248,9 @@ export function NodesPage() {
     )
   }
 
+  const bindingConflictNodes = nodes.filter(isBindingConflictNode)
+  const visibleNodes = nodeListView === 'binding-conflict' ? bindingConflictNodes : nodes
+
   return (
     <section className="page-stack">
       <header className="section-heading">
@@ -351,6 +362,38 @@ export function NodesPage() {
         </section>
       ) : null}
 
+      <section className="page-panel">
+        <p className="page-panel__eyebrow">List View</p>
+        <h3 className="page-panel__title">列表视图</h3>
+        <div className="badge-row badge-row--wrap">
+          <button
+            type="button"
+            aria-pressed={nodeListView === 'all'}
+            onClick={() => setNodeListView('all')}
+          >
+            全部节点 {nodes.length}
+          </button>
+          <button
+            type="button"
+            aria-pressed={nodeListView === 'binding-conflict'}
+            onClick={() => setNodeListView('binding-conflict')}
+          >
+            绑定异常 {bindingConflictNodes.length}
+          </button>
+        </div>
+      </section>
+
+      {visibleNodes.length === 0 ? (
+        <div className="empty-state">
+          <h3>{nodeListView === 'binding-conflict' ? '没有绑定异常节点' : '暂无节点'}</h3>
+          <p>
+            {nodeListView === 'binding-conflict'
+              ? '当前没有等待绑定确认的节点。'
+              : '请先创建第一个节点。'}
+          </p>
+        </div>
+      ) : null}
+
       <div className="resource-table">
         <div className="resource-table__head">
           <span>节点</span>
@@ -358,7 +401,7 @@ export function NodesPage() {
           <span>最近心跳 / 同步</span>
           <span>当前主问题</span>
         </div>
-        {nodes.map((node) => (
+        {visibleNodes.map((node) => (
           <article key={node.node_id} className="resource-table__row">
             <div>
               <strong>
@@ -397,6 +440,9 @@ export function NodesPage() {
               <StatusBadge label={node.lifecycle_status} />
               <StatusBadge label={node.monitoring_status} />
               <StatusBadge label={node.current_health_status} />
+              {isBindingConflictNode(node) ? (
+                <StatusBadge label={NODE_BINDING_CONFLICT_STATUS} />
+              ) : null}
             </div>
             <div>
               <strong>{formatDateTime(node.last_heartbeat_at)}</strong>
@@ -404,7 +450,11 @@ export function NodesPage() {
             </div>
             <div>
               <strong>{node.current_active_incident_count}</strong>
-              <p>{node.current_primary_issue_summary || '暂无明显异常'}</p>
+              <p>
+                {isBindingConflictNode(node)
+                  ? NODE_BINDING_CONFLICT_SUMMARY
+                  : node.current_primary_issue_summary || '暂无明显异常'}
+              </p>
             </div>
           </article>
         ))}
