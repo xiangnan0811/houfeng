@@ -56,7 +56,7 @@ First Run
 - Modify: `internal/center/store/dashboard_test.go`
 - Modify: `internal/center/http/handlers/dashboard_test.go`
 
-- [ ] **Step 1: Add failing backend tests for total counts**
+- [x] **Step 1: Add failing backend tests for total counts**
 
 In `internal/center/store/dashboard_test.go`, update `TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents` fake scan so `dest[0]` and `dest[1]` are total counts, shifting the existing values down:
 
@@ -107,7 +107,7 @@ go test ./internal/center/store ./internal/center/http/handlers
 
 Expected: fail because `DashboardOverview` lacks total count fields and SQL scan does not provide them.
 
-- [ ] **Step 2: Implement backend total counts**
+- [x] **Step 2: Implement backend total counts**
 
 In `internal/center/incidents/types.go`, update `DashboardOverview`:
 
@@ -143,7 +143,7 @@ Extend the `Scan` order:
 ...
 ```
 
-- [ ] **Step 3: Run backend focused tests and commit**
+- [x] **Step 3: Run backend focused tests and commit**
 
 Run:
 
@@ -170,7 +170,7 @@ git commit -m "Expose Dashboard total resource counts"
 - Modify: `web/src/pages/DashboardPage.tsx`
 - Modify: `web/src/pages/DashboardPage.test.tsx`
 
-- [ ] **Step 1: Add failing frontend tests**
+- [x] **Step 1: Add failing frontend tests**
 
 In `web/src/lib/types.ts`, the type will be updated in Step 2. First update fixtures in tests with total count fields so the later implementation has a stable contract.
 
@@ -248,7 +248,7 @@ cd web && npm test -- --run api DashboardPage
 
 Expected: fail because DashboardPage does not render the empty state and `DashboardOverview` type lacks total fields.
 
-- [ ] **Step 2: Implement frontend first-run state**
+- [x] **Step 2: Implement frontend first-run state**
 
 In `web/src/lib/types.ts`, extend `DashboardOverview`:
 
@@ -308,7 +308,7 @@ if (isFreshInstall) {
 
 Keep the normal Dashboard rendering path unchanged.
 
-- [ ] **Step 3: Run focused frontend tests and commit**
+- [x] **Step 3: Run focused frontend tests and commit**
 
 Run:
 
@@ -333,7 +333,7 @@ git commit -m "Guide first-run setup from Dashboard"
 **Files:**
 - No planned edits unless verification exposes issues.
 
-- [ ] **Step 1: Run focused checks**
+- [x] **Step 1: Run focused checks**
 
 Run:
 
@@ -344,7 +344,7 @@ cd web && npm test -- --run api DashboardPage
 
 Expected: pass.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -358,7 +358,7 @@ cd web && npm run lint
 
 Expected: pass.
 
-- [ ] **Step 3: Scope review**
+- [x] **Step 3: Scope review**
 
 Confirm:
 
@@ -367,6 +367,6 @@ Confirm:
 - No wizard, auto-open behavior, or new product capability was added.
 - Normal Dashboard still renders when there is at least one Node or Target.
 
-- [ ] **Step 4: Final code review**
+- [x] **Step 4: Final code review**
 
 Dispatch a fresh code-review subagent for the slice. If blocked, apply `superpowers:receiving-code-review`, fix minimally, rerun focused and full verification, and re-review.
