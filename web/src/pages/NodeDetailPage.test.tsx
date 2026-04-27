@@ -391,7 +391,7 @@ describe('NodeDetailPage', () => {
     )
 
     expect(screen.getByText('高优先级：绑定冲突待处理')).toBeInTheDocument()
-    expect(screen.getByText('fp-current-1234567890')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('fp-current-1234567890')).toBeInTheDocument())
     expect(screen.getByText('fp-pendi…uvwxyz')).toBeInTheDocument()
     expect(screen.getByText('2026/04/27 16:55')).toBeInTheDocument()
     expect(screen.getByText('2026/04/27 17:04')).toBeInTheDocument()
