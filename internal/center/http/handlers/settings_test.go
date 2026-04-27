@@ -88,8 +88,8 @@ func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing
 	if strings.Contains(body.Telegram.TokenMaskedSummary, "secret-token") {
 		t.Fatalf("expected token_masked_summary to hide raw token, got %q", body.Telegram.TokenMaskedSummary)
 	}
-	if body.Telegram.RuntimeApplyActive {
-		t.Fatal("expected runtime_apply_active to be false for persisted settings")
+	if !body.Telegram.RuntimeApplyActive {
+		t.Fatal("expected runtime_apply_active to be true once persisted Telegram settings drive the live notifier path")
 	}
 	if body.HostSampleFrequencyTier != centersettings.Default().HostSampleFrequencyTier {
 		t.Fatalf("expected host sample frequency tier %q, got %q", centersettings.Default().HostSampleFrequencyTier, body.HostSampleFrequencyTier)
@@ -138,8 +138,8 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	if !body.Telegram.TokenPresent {
 		t.Fatal("expected token_present to be true")
 	}
-	if body.Telegram.RuntimeApplyActive {
-		t.Fatal("expected runtime_apply_active to be false for persisted settings")
+	if !body.Telegram.RuntimeApplyActive {
+		t.Fatal("expected runtime_apply_active to be true once persisted Telegram settings drive the live notifier path")
 	}
 }
 

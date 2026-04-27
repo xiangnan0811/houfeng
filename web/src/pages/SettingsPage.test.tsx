@@ -17,7 +17,7 @@ const settingsResponseBody = {
     chat_id: 'chat-id',
     token_present: true,
     token_masked_summary: '****************oken',
-    runtime_apply_active: false,
+    runtime_apply_active: true,
   },
   host_sample_frequency_tier: '5m',
   probe_frequency_defaults: {
@@ -99,9 +99,7 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('已配置 Telegram Bot Token：****************oken')).toBeInTheDocument()
     expect(screen.queryByText('bot-token')).not.toBeInTheDocument()
-    expect(
-      screen.getByText('当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('当前持久化配置已处于运行态应用路径中。')).toBeInTheDocument()
     expect(screen.getByText('当前仅保存默认频率策略，尚未接入实时规划链。')).toBeInTheDocument()
     expect(screen.getByText('当前仅保存全局默认规则策略，尚未接入实时异常判定链。')).toBeInTheDocument()
     expect(

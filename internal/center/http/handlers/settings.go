@@ -119,7 +119,7 @@ func newSettingsResponse(record centersettings.CenterSettings) settingsResponse 
 			ChatID:             record.Telegram.ChatID,
 			TokenPresent:       tokenPresent,
 			TokenMaskedSummary: maskTelegramBotToken(record.Telegram.BotToken),
-			RuntimeApplyActive: false,
+			RuntimeApplyActive: true,
 		},
 		HostSampleFrequencyTier: record.HostSampleFrequencyTier,
 		ProbeFrequencyDefaults:  record.ProbeFrequencyDefaults,
