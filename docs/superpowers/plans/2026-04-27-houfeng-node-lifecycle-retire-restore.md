@@ -89,7 +89,7 @@ Use these user-facing labels/copy:
 - Modify: `cmd/houfeng-center/bootstrap.go`
 - Modify: `cmd/houfeng-center/bootstrap_test.go`
 
-- [ ] **Step 1: Add failing backend store tests**
+- [x] **Step 1: Add failing backend store tests**
 
 In `internal/center/store/nodes_test.go`, add tests near the existing node runtime control tests:
 
@@ -239,7 +239,7 @@ go test ./internal/center/store
 
 Expected: fail because lifecycle methods and event constants do not exist.
 
-- [ ] **Step 2: Implement backend store lifecycle transitions**
+- [x] **Step 2: Implement backend store lifecycle transitions**
 
 In `internal/center/incidents/types.go`, add:
 
@@ -276,7 +276,7 @@ Event payload:
 json.Marshal(map[string]string{"lifecycle_status": record.LifecycleStatus})
 ```
 
-- [ ] **Step 3: Add failing lifecycle handler/router/bootstrap tests**
+- [x] **Step 3: Add failing lifecycle handler/router/bootstrap tests**
 
 Extend `internal/center/http/handlers/runtime_controls_test.go`:
 
@@ -335,7 +335,7 @@ go test ./internal/center/http/handlers ./internal/center/http ./cmd/houfeng-cen
 
 Expected: fail because the lifecycle handler/router option is not wired.
 
-- [ ] **Step 4: Implement lifecycle handler, router subtree, and bootstrap wiring**
+- [x] **Step 4: Implement lifecycle handler, router subtree, and bootstrap wiring**
 
 In `internal/center/http/handlers/runtime_controls.go`, add:
 
@@ -365,7 +365,7 @@ In `cmd/houfeng-center/bootstrap.go`, wire:
 NodeLifecycleControlHandler: handlers.NodeLifecycleControls(nodeRepo),
 ```
 
-- [ ] **Step 5: Run focused backend tests and commit**
+- [x] **Step 5: Run focused backend tests and commit**
 
 Run:
 
@@ -393,7 +393,7 @@ git commit -m "Add explicit Node lifecycle transitions"
 - Modify: `web/src/components/EventList.test.tsx`
 - Modify: `web/src/pages/EventsPage.test.tsx`
 
-- [ ] **Step 1: Add failing frontend API/event label tests**
+- [x] **Step 1: Add failing frontend API/event label tests**
 
 In `web/src/lib/api.test.ts`, extend imports with `retireNode` and `restoreRetiredNodeToObserving`, then extend the node runtime helper test or add a new test:
 
@@ -469,7 +469,7 @@ cd web && npm test -- --run api EventList EventsPage
 
 Expected: fail because helpers/types are missing.
 
-- [ ] **Step 2: Implement frontend helpers and labels**
+- [x] **Step 2: Implement frontend helpers and labels**
 
 In `web/src/lib/api.ts`, add:
 
@@ -495,7 +495,7 @@ node_retired: '节点已退役',
 node_restored_to_observing: '节点恢复到观察中',
 ```
 
-- [ ] **Step 3: Run focused frontend helper/label tests and commit**
+- [x] **Step 3: Run focused frontend helper/label tests and commit**
 
 Run:
 
@@ -520,7 +520,7 @@ git commit -m "Expose Node lifecycle actions to the frontend"
 - Modify: `web/src/pages/NodeDetailPage.tsx`
 - Modify: `web/src/pages/NodeDetailPage.test.tsx`
 
-- [ ] **Step 1: Add failing Node Detail lifecycle tests**
+- [x] **Step 1: Add failing Node Detail lifecycle tests**
 
 In `web/src/pages/NodeDetailPage.test.tsx`, add tests after the runtime-control tests:
 
@@ -564,7 +564,7 @@ cd web && npm test -- --run NodeDetailPage
 
 Expected: fail because lifecycle UI is missing.
 
-- [ ] **Step 2: Implement lifecycle card and handlers**
+- [x] **Step 2: Implement lifecycle card and handlers**
 
 In `web/src/pages/NodeDetailPage.tsx`:
 
@@ -624,7 +624,7 @@ Render a `DetailSection eyebrow="Lifecycle Control" title="生命周期"` near r
 </DetailSection>
 ```
 
-- [ ] **Step 3: Run focused Node Detail tests and commit**
+- [x] **Step 3: Run focused Node Detail tests and commit**
 
 Run:
 
@@ -648,7 +648,7 @@ git commit -m "Manage Node lifecycle from detail view"
 **Files:**
 - No planned edits unless verification exposes an issue.
 
-- [ ] **Step 1: Run focused checks**
+- [x] **Step 1: Run focused checks**
 
 Run:
 
@@ -659,7 +659,7 @@ cd web && npm test -- --run api EventList EventsPage NodeDetailPage
 
 Expected: pass.
 
-- [ ] **Step 2: Run repository verification**
+- [x] **Step 2: Run repository verification**
 
 Run:
 
@@ -673,7 +673,7 @@ cd web && npm run lint
 
 Expected: pass.
 
-- [ ] **Step 3: Final scope review**
+- [x] **Step 3: Final scope review**
 
 Confirm:
 
@@ -684,6 +684,6 @@ Confirm:
 - Retired restore goes to `观察中`, not `在用`.
 - Error messages remain local to the lifecycle card.
 
-- [ ] **Step 4: Dispatch final code review**
+- [x] **Step 4: Dispatch final code review**
 
 Use a fresh code-review subagent for the whole slice. If blocked, apply `superpowers:receiving-code-review`, fix minimally, rerun focused and full verification, and re-review.
