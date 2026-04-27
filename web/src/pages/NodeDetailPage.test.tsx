@@ -23,6 +23,54 @@ function deferredResponse() {
   return { promise, resolve, reject }
 }
 
+function nodeRecord(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    node_id: 'nd_conflict',
+    display_name: 'Tokyo Edge',
+    region: 'ap-northeast-1',
+    city: 'Tokyo',
+    provider: 'Vultr',
+    lifecycle_status: '在用',
+    monitoring_status: '启用',
+    binding_status: '指纹变更待确认',
+    labels: ['core'],
+    note: '',
+    current_health_status: '关注',
+    last_heartbeat_at: '2026-04-27T09:00:00Z',
+    last_sync_at: '2026-04-27T09:05:00Z',
+    current_active_incident_count: 1,
+    current_primary_issue_summary: '检测到新的指纹接入请求',
+    created_at: '2026-04-20T00:00:00Z',
+    updated_at: '2026-04-27T09:05:00Z',
+    ...overrides,
+  }
+}
+
+function emptyRuntimeFacts(nodeId = 'nd_conflict') {
+  return {
+    node_id: nodeId,
+    latest_host_sample: null,
+  }
+}
+
+function onboardingConflictState(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    ...nodeRecord(),
+    phase: '绑定冲突待处理',
+    has_host_sample: true,
+    has_accepted_observation: true,
+    enrollment_token_issued_at: '2026-04-26T08:00:00Z',
+    current_binding_fingerprint_summary: 'fp-current-1234567890',
+    pending_binding: {
+      fingerprint: 'fp-pending-abcdefghijklmnopqrstuvwxyz',
+      first_seen_at: '2026-04-27T08:55:00Z',
+      last_seen_at: '2026-04-27T09:04:00Z',
+      attempt_count: 4,
+    },
+    ...overrides,
+  }
+}
+
 function NodeDetailTestHarness() {
   const navigate = useNavigate()
 
@@ -318,6 +366,73 @@ describe('NodeDetailPage', () => {
     expect(
       screen.queryByRole('heading', { name: '节点详情不可用' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('renders a high-priority binding conflict card on Node detail', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(nodeRecord()))
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse(onboardingConflictState()))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_conflict']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('高优先级：绑定冲突待处理')).toBeInTheDocument()
+    expect(screen.getByText('fp-current-1234567890')).toBeInTheDocument()
+    expect(screen.getByText('fp-pendi…uvwxyz')).toBeInTheDocument()
+    expect(screen.getByText('2026/04/27 16:55')).toBeInTheDocument()
+    expect(screen.getByText('2026/04/27 17:04')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(screen.getByText(/同一台机器重装或合法替换/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '打开接入工作台' })).toHaveAttribute(
+      'href',
+      '/nodes/nd_conflict/onboarding',
+    )
+    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/onboarding', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('keeps Node detail visible when binding conflict metadata fails to load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(mockJSONResponse(nodeRecord()))
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse({ error: 'onboarding unavailable' }, 503)),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_conflict']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+    await waitFor(() => expect(screen.getByText('onboarding unavailable')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '节点详情不可用' })).not.toBeInTheDocument()
   })
 
   it('shows the new route core data without stale activity while route-specific requests are still in flight', async () => {

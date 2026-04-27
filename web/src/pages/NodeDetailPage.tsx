@@ -10,6 +10,7 @@ import {
   enterNodeMaintenance,
   exitNodeMaintenance,
   getNode,
+  getNodeOnboarding,
   getNodeRuntimeFacts,
   listEvents,
   listIncidents,
@@ -27,8 +28,10 @@ import {
 } from '../lib/format'
 import type {
   ActiveIncidentRecord,
+  NodeOnboardingState,
   NodeRecord,
   NodeRuntimeFacts,
+  PendingBindingMetadata,
   StateChangeEventRecord,
 } from '../lib/types'
 
@@ -45,13 +48,40 @@ type State = {
 }
 
 const NODE_PAUSE_CONFIRM_MESSAGE = '暂停监控会停止采集并产生数据空档，确定继续吗？'
+const NODE_BINDING_CONFLICT_LOAD_ERROR = '绑定冲突详情暂不可用'
+const NODE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
 
 type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
+type BindingConflictState = {
+  requestedNodeId: string | null
+  onboarding: NodeOnboardingState | null
+  loading: boolean
+  error: string | null
+}
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
+}
+
+function maskFingerprint(value?: string | null) {
+  if (!value) return '尚无'
+  const normalized = value.trim()
+  if (!normalized) return '尚无'
+  if (normalized.length <= 14) return normalized
+  return `${normalized.slice(0, 8)}…${normalized.slice(-6)}`
+}
+
+function currentFingerprintSummary(onboarding: NodeOnboardingState | null) {
+  if (onboarding?.current_binding_fingerprint_summary?.trim()) {
+    return onboarding.current_binding_fingerprint_summary.trim()
+  }
+  return '服务端当前未提供已绑定指纹摘要'
+}
+
+function pendingBindingMetadata(onboarding: NodeOnboardingState | null): PendingBindingMetadata | null {
+  return onboarding?.pending_binding ?? null
 }
 
 function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction; label: string }> {
@@ -95,9 +125,19 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   })
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [bindingConflictState, setBindingConflictState] = useState<BindingConflictState>({
+    requestedNodeId: null,
+    onboarding: null,
+    loading: false,
+    error: null,
+  })
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    currentRouteNodeIdRef.current = nodeId ?? null
+  }, [nodeId])
 
   useEffect(() => {
     currentRequestedNodeIdRef.current = state.requestedNodeId
@@ -144,6 +184,64 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       cancelled = true
     }
   }, [nodeId])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!nodeId) {
+      setBindingConflictState({
+        requestedNodeId: null,
+        onboarding: null,
+        loading: false,
+        error: null,
+      })
+      return
+    }
+
+    if (state.requestedNodeId !== nodeId || !state.node) {
+      return
+    }
+
+    if (state.node.binding_status !== NODE_BINDING_CONFLICT_STATUS) {
+      setBindingConflictState({
+        requestedNodeId: nodeId,
+        onboarding: null,
+        loading: false,
+        error: null,
+      })
+      return
+    }
+
+    setBindingConflictState((current) => ({
+      requestedNodeId: nodeId,
+      onboarding: current.requestedNodeId === nodeId ? current.onboarding : null,
+      loading: true,
+      error: null,
+    }))
+
+    getNodeOnboarding(nodeId)
+      .then((onboarding) => {
+        if (cancelled) return
+        setBindingConflictState({
+          requestedNodeId: nodeId,
+          onboarding,
+          loading: false,
+          error: null,
+        })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setBindingConflictState({
+          requestedNodeId: nodeId,
+          onboarding: null,
+          loading: false,
+          error: describeError(error, NODE_BINDING_CONFLICT_LOAD_ERROR),
+        })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [nodeId, state.node, state.requestedNodeId])
 
   useEffect(() => {
     let cancelled = false
@@ -255,6 +353,12 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   }
 
   const sample = runtimeFacts?.latest_host_sample ?? null
+  const showBindingConflict = node.binding_status === NODE_BINDING_CONFLICT_STATUS
+  const hasCurrentBindingConflictState = bindingConflictState.requestedNodeId === nodeId
+  const bindingConflict = hasCurrentBindingConflictState ? bindingConflictState.onboarding : null
+  const bindingConflictError = hasCurrentBindingConflictState ? bindingConflictState.error : null
+  const bindingConflictLoading =
+    hasCurrentBindingConflictState && bindingConflictState.loading && !bindingConflict
 
   return (
     <div className="page-stack">
@@ -291,6 +395,42 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           </div>
         </div>
       </section>
+
+      {showBindingConflict ? (
+        <DetailSection eyebrow="Binding Conflict" title="绑定冲突处置" aside="高优先级">
+          <article className="metric-card" aria-label="高优先级：绑定冲突待处理">
+            <h3>高优先级：绑定冲突待处理</h3>
+            <p>同一台机器重装或合法替换 agent 后，通常会出现新的指纹接入请求。请先核对这次变更。</p>
+            <dl>
+              <div>
+                <dt>当前已绑定指纹</dt>
+                <dd>{currentFingerprintSummary(bindingConflict)}</dd>
+              </div>
+              <div>
+                <dt>待确认指纹</dt>
+                <dd>{maskFingerprint(pendingBindingMetadata(bindingConflict)?.fingerprint)}</dd>
+              </div>
+              <div>
+                <dt>首次出现</dt>
+                <dd>{formatDateTime(pendingBindingMetadata(bindingConflict)?.first_seen_at)}</dd>
+              </div>
+              <div>
+                <dt>最近出现</dt>
+                <dd>{formatDateTime(pendingBindingMetadata(bindingConflict)?.last_seen_at)}</dd>
+              </div>
+              <div>
+                <dt>尝试次数</dt>
+                <dd>{pendingBindingMetadata(bindingConflict)?.attempt_count ?? 0}</dd>
+              </div>
+            </dl>
+            {bindingConflictLoading ? <p>正在加载绑定冲突详情…</p> : null}
+            {bindingConflictError ? <p>{bindingConflictError}</p> : null}
+            <Link className="text-link" to={`/nodes/${node.node_id}/onboarding`}>
+              打开接入工作台
+            </Link>
+          </article>
+        </DetailSection>
+      ) : null}
 
       <div className="summary-grid">
         <article className="summary-card">
