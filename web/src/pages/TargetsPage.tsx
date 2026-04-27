@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
@@ -16,8 +17,6 @@ import {
 import { formatDateTime, formatLabelList } from '../lib/format'
 import type { CreateTargetInput, TargetRecord } from '../lib/types'
 
-const TARGET_PAUSE_CONFIRM_MESSAGE = '暂停会停止采集并产生数据空档，确定继续吗？'
-const TARGET_ARCHIVE_CONFIRM_MESSAGE = '归档会让目标退出当前工作集，但会保留历史记录，确定继续吗？'
 
 const TARGET_TYPE_OPTIONS = [
   { value: 'service', label: 'service' },
@@ -59,6 +58,16 @@ type TargetRuntimeAction =
   | 'resume'
   | 'archive'
   | 'restore-to-paused'
+
+type PendingTargetConfirmation = {
+  targetId: string
+  action: 'pause' | 'archive'
+}
+
+type FocusRestoreRequest = {
+  targetId: string
+  preferredAction: TargetRuntimeAction
+}
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -134,6 +143,14 @@ function targetRuntimeActions(
   return []
 }
 
+function pauseConfirmationCurrent() {
+  return '当前：目标运行状态为启用或维护中。'
+}
+
+function actionButtonKey(targetId: string, action: TargetRuntimeAction) {
+  return `${targetId}:${action}`
+}
+
 export function TargetsPage() {
   const navigate = useNavigate()
   const mountedRef = useRef(false)
@@ -147,6 +164,9 @@ export function TargetsPage() {
   const [createForm, setCreateForm] = useState<CreateTargetFormState>(initialCreateForm)
   const [runtimeBusyTargetId, setRuntimeBusyTargetId] = useState<string | null>(null)
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingTargetConfirmation | null>(null)
+  const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -221,11 +241,36 @@ export function TargetsPage() {
     }
   }
 
-  async function handleRuntimeAction(target: TargetRecord, action: TargetRuntimeAction) {
-    if (action === 'pause' && !window.confirm(TARGET_PAUSE_CONFIRM_MESSAGE)) {
-      return
-    }
-    if (action === 'archive' && !window.confirm(TARGET_ARCHIVE_CONFIRM_MESSAGE)) {
+  function queueFocusRestore(targetId: string, preferredAction: TargetRuntimeAction) {
+    pendingFocusRestoreRef.current = { targetId, preferredAction }
+  }
+
+  useEffect(() => {
+    if (pendingConfirmation) return
+
+    const request = pendingFocusRestoreRef.current
+    if (!request) return
+
+    const preferred = actionButtonRefs.current[actionButtonKey(request.targetId, request.preferredAction)]
+    const fallback =
+      request.preferredAction === 'pause'
+        ? actionButtonRefs.current[actionButtonKey(request.targetId, 'resume')]
+        : request.preferredAction === 'archive'
+          ? actionButtonRefs.current[actionButtonKey(request.targetId, 'restore-to-paused')]
+          : null
+    const target = [preferred, fallback].find((element) => element?.isConnected)
+
+    target?.focus()
+    pendingFocusRestoreRef.current = null
+  }, [targets, pendingConfirmation])
+
+  async function handleRuntimeAction(
+    target: TargetRecord,
+    action: TargetRuntimeAction,
+    confirmed = false,
+  ) {
+    if ((action === 'pause' || action === 'archive') && !confirmed) {
+      setPendingConfirmation({ targetId: target.target_id, action })
       return
     }
 
@@ -252,6 +297,10 @@ export function TargetsPage() {
                   : await restoreTargetToPaused(target.target_id)
       setTargets((current) =>
         current.map((item) => (item.target_id === updated.target_id ? updated : item)),
+      )
+      queueFocusRestore(updated.target_id, action)
+      setPendingConfirmation((current) =>
+        current?.targetId === updated.target_id ? null : current,
       )
     } catch (runtimeError) {
       setRuntimeErrors((current) => ({
@@ -462,14 +511,62 @@ export function TargetsPage() {
                   {targetRuntimeActions(target).map(({ action, label }) => (
                     <button
                       key={action}
+                      ref={(element) => {
+                        actionButtonRefs.current[actionButtonKey(target.target_id, action)] = element
+                      }}
                       type="button"
                       disabled={runtimeBusyTargetId === target.target_id}
-                      onClick={() => void handleRuntimeAction(target, action)}
+                      onClick={() => {
+                        if (action === 'pause' || action === 'archive') {
+                          queueFocusRestore(target.target_id, action)
+                        }
+                        void handleRuntimeAction(target, action)
+                      }}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
+                {pendingConfirmation?.targetId === target.target_id ? (
+                  <ActionConfirmationCard
+                    title={
+                      pendingConfirmation.action === 'pause' ? '确认暂停目标监控' : '确认归档目标'
+                    }
+                    current={
+                      pendingConfirmation.action === 'pause'
+                        ? pauseConfirmationCurrent()
+                        : '当前：目标仍在当前工作集中。'
+                    }
+                    result={
+                      pendingConfirmation.action === 'pause'
+                        ? '操作后：目标运行状态变为暂停。'
+                        : '操作后：目标退出当前工作集，运行状态变为已归档。'
+                    }
+                    impact={
+                      pendingConfirmation.action === 'pause'
+                        ? '会停止该 Target 下所有 ProbeItem 的执行，不再产生新的目标 observation。'
+                        : '归档后不会继续作为活跃目标参与观测、异常判定或通知。'
+                    }
+                    unchanged={
+                      pendingConfirmation.action === 'pause'
+                        ? '不会删除历史事件、观测记录或 ProbeItem 配置。'
+                        : '不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'
+                    }
+                    confirmLabel={
+                      pendingConfirmation.action === 'pause' ? '确认暂停目标' : '确认归档'
+                    }
+                    disabled={runtimeBusyTargetId === target.target_id}
+                    onConfirm={() =>
+                      void handleRuntimeAction(target, pendingConfirmation.action, true)
+                    }
+                    onCancel={() => {
+                      queueFocusRestore(target.target_id, pendingConfirmation.action)
+                      setPendingConfirmation((current) =>
+                        current?.targetId === target.target_id ? null : current,
+                      )
+                    }}
+                  />
+                ) : null}
                 {runtimeErrors[target.target_id] ? <p>{runtimeErrors[target.target_id]}</p> : null}
               </div>
               <div>

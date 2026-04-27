@@ -434,36 +434,63 @@ describe('TargetsPage', () => {
     })
   })
 
-  it('requires strong confirmation before archiving and keeps runtime errors local', async () => {
+  it('uses an inline stateful confirmation before pausing a target from the list', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          mockJSONResponse([
-            {
-              target_id: 'tg_001',
-              name: 'Blog',
-              target_type: 'service',
-              host: 'blog.example.com',
-              base_port: 443,
-              execution_node_labels: ['edge'],
-              run_status: '启用',
-              labels: ['public'],
-              note: '',
-              current_health_status: '正常',
-              current_active_incident_count: 0,
-              last_success_at: '2026-04-26T09:00:00Z',
-              last_failure_at: '2026-04-26T08:00:00Z',
-              current_primary_issue_summary: '',
-              created_at: '2026-04-20T00:00:00Z',
-              updated_at: '2026-04-26T09:05:00Z',
-            },
-          ]),
-        )
-        .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid runtime transition' }, 409)),
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([targetRecord({ target_id: 'tg_pause', name: 'Blog' })]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          targetRecord({ target_id: 'tg_pause', name: 'Blog', run_status: '暂停' }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
     )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+
+    expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
+    expect(screen.getByText('当前：目标运行状态为启用或维护中。')).toBeInTheDocument()
+    expect(screen.getByText('操作后：目标运行状态变为暂停。')).toBeInTheDocument()
+    expect(
+      screen.getByText('会停止该 Target 下所有 ProbeItem 的执行，不再产生新的目标 observation。'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '暂停' })).toHaveFocus())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停目标' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByRole('button', { name: '恢复' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '恢复' })).toHaveFocus()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_pause/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('uses an inline stateful confirmation before archiving a target from the list', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([targetRecord({ target_id: 'tg_archive', name: 'Blog' })]))
+      .mockResolvedValueOnce(mockJSONResponse(targetRecord({ target_id: 'tg_archive', name: 'Blog', run_status: '已归档' })))
+    vi.stubGlobal('fetch', fetchMock)
 
     render(
       <MemoryRouter initialEntries={['/targets']}>
@@ -476,11 +503,27 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    expect(screen.getByRole('alertdialog', { name: '确认归档目标' })).toBeInTheDocument()
+    expect(screen.getByText('当前：目标仍在当前工作集中。')).toBeInTheDocument()
+    expect(screen.getByText('操作后：目标退出当前工作集，运行状态变为已归档。')).toBeInTheDocument()
+    expect(screen.getByText('归档后不会继续作为活跃目标参与观测、异常判定或通知。')).toBeInTheDocument()
+    expect(
+      screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '归档' })).toHaveFocus())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    expect(confirmMock).toHaveBeenCalledWith('归档会让目标退出当前工作集，但会保留历史记录，确定继续吗？')
-    await waitFor(() =>
-      expect(screen.getByText('invalid runtime transition')).toBeInTheDocument(),
-    )
-    expect(screen.getByRole('heading', { name: '目标列表' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByRole('button', { name: '恢复到暂停' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '恢复到暂停' })).toHaveFocus()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_archive/runtime/archive', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
   })
 })
