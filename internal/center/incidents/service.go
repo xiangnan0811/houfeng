@@ -47,6 +47,10 @@ type SettingsRepository interface {
 	GetSettings(context.Context) (centersettings.CenterSettings, error)
 }
 
+type persistedTelegramSettingsSource interface {
+	GetPersistedTelegramSettings(context.Context) (centersettings.TelegramSettings, bool, error)
+}
+
 type Notifier interface {
 	Send(context.Context, string) error
 }
@@ -71,6 +75,17 @@ func NewSettingsAwareNotifier(settingsRepo SettingsRepository, newNotifier Setti
 }
 
 func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error {
+	if source, ok := n.settingsRepo.(persistedTelegramSettingsSource); ok {
+		telegram, exists, err := source.GetPersistedTelegramSettings(ctx)
+		if err != nil {
+			if n.fallback == nil {
+				return fmt.Errorf("get persisted telegram settings: %w", err)
+			}
+			return n.fallback.Send(ctx, summary)
+		}
+		return n.sendWithTelegramSettings(ctx, summary, telegram, exists)
+	}
+
 	settings, err := n.settingsRepo.GetSettings(ctx)
 	if err != nil {
 		if n.fallback == nil {
@@ -78,13 +93,23 @@ func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error 
 		}
 		return n.fallback.Send(ctx, summary)
 	}
-	if !settings.Telegram.Enabled() {
+	return n.sendWithTelegramSettings(ctx, summary, settings.Telegram, true)
+}
+
+func (n *settingsAwareNotifier) sendWithTelegramSettings(ctx context.Context, summary string, telegram centersettings.TelegramSettings, exists bool) error {
+	if !exists {
+		if n.fallback != nil {
+			return n.fallback.Send(ctx, summary)
+		}
+		return errNotificationSuppressed
+	}
+	if !telegram.Enabled() {
 		return errNotificationSuppressed
 	}
 	if n.newNotifier == nil {
 		return errors.New("telegram notifier factory is nil")
 	}
-	notifier := n.newNotifier(settings.Telegram.BotToken, settings.Telegram.ChatID)
+	notifier := n.newNotifier(telegram.BotToken, telegram.ChatID)
 	if notifier == nil {
 		return errors.New("telegram notifier is nil")
 	}

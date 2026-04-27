@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	centerapp "houfeng/internal/center/app"
@@ -62,10 +65,11 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
 	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
 	settingsRepo := store.NewPostgresSettingsRepository(db.Pool())
+	notifierSettingsRepo := notifierSettingsRepository{repo: settingsRepo, db: db.Pool()}
 	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
 	enrollmentSvc := enrollment.NewService(nodeRepo)
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
-	notifier := deps.newIncidentNotifier(cfg, settingsRepo)
+	notifier := deps.newIncidentNotifier(cfg, notifierSettingsRepo)
 	incidentSvc := incidentservice.NewService(
 		nodeRepo,
 		targetRepo,
@@ -152,4 +156,36 @@ func (p pgxPostgresDB) Close() {
 
 func (p pgxPostgresDB) Pool() *pgxpool.Pool {
 	return p.pool
+}
+
+type notifierSettingsRepository struct {
+	repo centersettings.Repository
+	db   *pgxpool.Pool
+}
+
+func (r notifierSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
+	return r.repo.GetSettings(ctx)
+}
+
+func (r notifierSettingsRepository) PutSettings(ctx context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+	return r.repo.PutSettings(ctx, input)
+}
+
+func (r notifierSettingsRepository) GetPersistedTelegramSettings(ctx context.Context) (centersettings.TelegramSettings, bool, error) {
+	var botToken string
+	var chatID string
+	err := r.db.QueryRow(ctx, `
+		select telegram_bot_token, telegram_chat_id
+		from center_settings
+		where settings_id = $1`, centersettings.SingletonID).Scan(&botToken, &chatID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return centersettings.TelegramSettings{}, false, nil
+	}
+	if err != nil {
+		return centersettings.TelegramSettings{}, false, fmt.Errorf("query persisted telegram settings: %w", err)
+	}
+	return centersettings.TelegramSettings{
+		BotToken: strings.TrimSpace(botToken),
+		ChatID:   strings.TrimSpace(chatID),
+	}, true, nil
 }

@@ -78,6 +78,9 @@ func (f *fakeNotifier) Send(_ context.Context, summary string) error {
 type fakeSettingsRepository struct {
 	getSettingsResult centersettings.CenterSettings
 	getSettingsErr    error
+	persistedTelegram centersettings.TelegramSettings
+	persistedExists   bool
+	persistedErr      error
 }
 
 func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
@@ -89,6 +92,16 @@ func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.Ce
 
 func (f *fakeSettingsRepository) PutSettings(context.Context, centersettings.CenterSettings) (centersettings.CenterSettings, error) {
 	panic("unexpected PutSettings call")
+}
+
+func (f *fakeSettingsRepository) GetPersistedTelegramSettings(context.Context) (centersettings.TelegramSettings, bool, error) {
+	if f.persistedErr != nil {
+		return centersettings.TelegramSettings{}, false, f.persistedErr
+	}
+	if !f.persistedExists {
+		return centersettings.TelegramSettings{}, false, nil
+	}
+	return f.persistedTelegram, true, nil
 }
 
 func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) {
@@ -182,7 +195,11 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 	}
 	writer := &fakeMutationWriter{}
 	fallbackNotifier := &fakeNotifier{}
-	settingsRepo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult: centersettings.Default(),
+		persistedTelegram: centersettings.Default().Telegram,
+		persistedExists:   true,
+	}
 	buildCalls := 0
 	service := NewService(
 		nodeRepo,
@@ -216,6 +233,44 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 	}
 }
 
+func TestSettingsAwareNotifierUsesFallbackWhenFreshDBWouldAutoCreateDisabledDefaults(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+	}
+	writer := &fakeMutationWriter{}
+	fallbackNotifier := &fakeNotifier{}
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult: centersettings.Default(),
+		persistedExists:   false,
+	}
+	service := NewService(
+		nodeRepo,
+		targetRepo,
+		snapshots,
+		writer,
+		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
+			return &fakeNotifier{}
+		}, fallbackNotifier),
+		slog.Default(),
+		30*time.Second,
+		time.Minute,
+	)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if len(fallbackNotifier.messages) != 1 {
+		t.Fatalf("fallbackNotifier.messages = %#v, want one env-fallback send for fresh DB behavior", fallbackNotifier.messages)
+	}
+	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSent {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSent)
+	}
+}
+
 func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
@@ -228,7 +283,11 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	settings := centersettings.Default()
 	settings.Telegram.BotToken = "persisted-bot-token"
 	settings.Telegram.ChatID = "persisted-chat-id"
-	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings}
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult: settings,
+		persistedTelegram: settings.Telegram,
+		persistedExists:   true,
+	}
 	var gotBotToken string
 	var gotChatID string
 	service := NewService(
