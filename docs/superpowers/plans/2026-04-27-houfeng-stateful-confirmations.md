@@ -94,7 +94,7 @@ Render:
 - Modify: `web/src/pages/NodesPage.tsx`
 - Modify: `web/src/pages/NodesPage.test.tsx`
 
-- [ ] **Step 1: Add failing NodesPage test**
+- [x] **Step 1: Add failing NodesPage test**
 
 In `web/src/pages/NodesPage.test.tsx`, replace the browser-confirm expectation in `requires strong confirmation before pausing monitoring and keeps runtime errors local` with a new inline-confirmation flow.
 
@@ -172,11 +172,11 @@ cd web && npm test -- --run NodesPage
 
 Expected: fail because inline confirmation card does not exist and `window.confirm` is still used.
 
-- [ ] **Step 2: Add `ActionConfirmationCard`**
+- [x] **Step 2: Add `ActionConfirmationCard`**
 
 Create `web/src/components/ActionConfirmationCard.tsx` using the shared component shape above.
 
-- [ ] **Step 3: Implement NodesPage pause confirmation**
+- [x] **Step 3: Implement NodesPage pause confirmation**
 
 In `web/src/pages/NodesPage.tsx`:
 
@@ -239,7 +239,7 @@ setPendingConfirmation((current) =>
 ) : null}
 ```
 
-- [ ] **Step 4: Run focused NodesPage tests and commit**
+- [x] **Step 4: Run focused NodesPage tests and commit**
 
 Run:
 
@@ -264,7 +264,7 @@ git commit -m "Replace Node list pause confirm with a stateful card"
 - Modify: `web/src/pages/NodeDetailPage.tsx`
 - Modify: `web/src/pages/NodeDetailPage.test.tsx`
 
-- [ ] **Step 1: Update failing NodeDetailPage test**
+- [x] **Step 1: Update failing NodeDetailPage test**
 
 In `web/src/pages/NodeDetailPage.test.tsx`, update `pauses node monitoring from detail with strong confirmation` so it:
 
@@ -285,7 +285,7 @@ cd web && npm test -- --run NodeDetailPage
 
 Expected: fail because Node detail still uses `window.confirm`.
 
-- [ ] **Step 2: Implement NodeDetailPage confirmation state**
+- [x] **Step 2: Implement NodeDetailPage confirmation state**
 
 In `web/src/pages/NodeDetailPage.tsx`:
 
@@ -301,7 +301,7 @@ const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] = useState<Nod
 5. Clear `pendingRuntimeConfirmation` after a successful state update.
 6. Render the same Node pause `ActionConfirmationCard` in Runtime Control when `pendingRuntimeConfirmation === 'pause'`.
 
-- [ ] **Step 3: Run focused NodeDetailPage tests and commit**
+- [x] **Step 3: Run focused NodeDetailPage tests and commit**
 
 Run:
 
@@ -326,7 +326,7 @@ git commit -m "Replace Node detail pause confirm with a stateful card"
 - Modify: `web/src/pages/TargetsPage.tsx`
 - Modify: `web/src/pages/TargetsPage.test.tsx`
 
-- [ ] **Step 1: Add failing TargetsPage tests**
+- [x] **Step 1: Add failing TargetsPage tests**
 
 Add one test for pause and one for archive:
 
@@ -410,7 +410,7 @@ cd web && npm test -- --run TargetsPage
 
 Expected: fail because Target list still uses `window.confirm`.
 
-- [ ] **Step 2: Implement TargetsPage confirmation state**
+- [x] **Step 2: Implement TargetsPage confirmation state**
 
 In `web/src/pages/TargetsPage.tsx`:
 
@@ -435,7 +435,7 @@ const [pendingConfirmation, setPendingConfirmation] = useState<PendingTargetConf
 6. Clear confirmation after a successful update for the same target.
 7. Render `ActionConfirmationCard` in the matching row with Target pause or archive copy.
 
-- [ ] **Step 3: Run focused TargetsPage tests and commit**
+- [x] **Step 3: Run focused TargetsPage tests and commit**
 
 Run:
 
@@ -460,7 +460,7 @@ git commit -m "Replace Target list risky confirms with stateful cards"
 - Modify: `web/src/pages/TargetDetailPage.tsx`
 - Modify: `web/src/pages/TargetDetailPage.test.tsx`
 
-- [ ] **Step 1: Update/add failing TargetDetailPage tests**
+- [x] **Step 1: Update/add failing TargetDetailPage tests**
 
 Update existing tests that assert `window.confirm` for target pause/archive and ProbeItem delete so they instead:
 
@@ -490,7 +490,7 @@ cd web && npm test -- --run TargetDetailPage
 
 Expected: fail because Target detail and ProbeItem delete still use `window.confirm`.
 
-- [ ] **Step 2: Implement TargetDetailPage confirmation state**
+- [x] **Step 2: Implement TargetDetailPage confirmation state**
 
 In `web/src/pages/TargetDetailPage.tsx`:
 
@@ -511,7 +511,7 @@ const [pendingProbeDeleteId, setPendingProbeDeleteId] = useState<string | null>(
 8. Render Target pause/archive `ActionConfirmationCard` in Runtime Control.
 9. Render ProbeItem delete `ActionConfirmationCard` near the matching ProbeItem controls.
 
-- [ ] **Step 3: Run focused TargetDetailPage tests and commit**
+- [x] **Step 3: Run focused TargetDetailPage tests and commit**
 
 Run:
 
@@ -535,7 +535,7 @@ git commit -m "Replace Target detail risky confirms with stateful cards"
 **Files:**
 - No planned edits unless verification exposes issues.
 
-- [ ] **Step 1: Run focused frontend checks**
+- [x] **Step 1: Run focused frontend checks**
 
 Run:
 
@@ -546,7 +546,7 @@ cd web && npm run build
 
 Expected: pass.
 
-- [ ] **Step 2: Confirm no browser confirms remain in production page code**
+- [x] **Step 2: Confirm no browser confirms remain in production page code**
 
 Run:
 
@@ -556,7 +556,7 @@ grep -RIn "window\\.confirm\\|confirm(" web/src/pages web/src/components || true
 
 Expected: no production `window.confirm` or bare `confirm(` usage remains. Test spies may still exist in test files.
 
-- [ ] **Step 3: Run full verification**
+- [x] **Step 3: Run full verification**
 
 Run:
 
@@ -570,7 +570,7 @@ cd web && npm run lint
 
 Expected: pass.
 
-- [ ] **Step 4: Scope review**
+- [x] **Step 4: Scope review**
 
 Confirm:
 
@@ -579,7 +579,7 @@ Confirm:
 - Risky actions now explain current/result/impact/unchanged before mutation.
 - Existing stale-route guards and local errors still apply.
 
-- [ ] **Step 5: Final code review**
+- [x] **Step 5: Final code review**
 
 Dispatch a fresh code-review subagent for this slice. If review finds issues, apply `superpowers:receiving-code-review`, fix minimally, rerun focused and full verification, and re-review.
 
