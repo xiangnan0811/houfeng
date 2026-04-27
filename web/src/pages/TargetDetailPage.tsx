@@ -9,6 +9,7 @@ import {
   ApiError,
   archiveTarget,
   createProbeItem,
+  deleteProbeItem,
   enterTargetMaintenance,
   exitTargetMaintenance,
   getTarget,
@@ -19,6 +20,7 @@ import {
   pauseTarget,
   restoreTargetToPaused,
   resumeTarget,
+  updateProbeItem,
 } from '../lib/api'
 import {
   formatConfigSummary,
@@ -36,6 +38,7 @@ import type {
   StateChangeEventRecord,
   TargetRecord,
   TargetRuntimeFacts,
+  UpdateProbeItemInput,
 } from '../lib/types'
 
 type State = {
@@ -53,6 +56,8 @@ type State = {
 
 const TARGET_PAUSE_CONFIRM_MESSAGE = '暂停会停止采集并产生数据空档，确定继续吗？'
 const TARGET_ARCHIVE_CONFIRM_MESSAGE = '归档会让目标退出当前工作集，但会保留历史记录，确定继续吗？'
+const PROBE_DELETE_CONFIRM_MESSAGE =
+  '删除 ProbeItem 会移除这条观测方式，仅应用于误建场景，确定继续吗？'
 
 const PROBE_KIND_OPTIONS = [
   { value: 'tcp', label: 'TCP' },
@@ -80,6 +85,8 @@ type ProbeCreateFormState = {
   expectedStatusEnd: string
   tlsExpiryWarningDays: string
 }
+
+type ProbeFormMode = { kind: 'create' } | { kind: 'edit'; probeItemId: string }
 
 const initialProbeCreateForm: ProbeCreateFormState = {
   probeKind: 'tcp',
@@ -168,10 +175,56 @@ function buildProbeCreateInput(form: ProbeCreateFormState): CreateProbeItemInput
   }
 }
 
+function buildProbeUpdateInput(form: ProbeCreateFormState): UpdateProbeItemInput {
+  return buildProbeCreateInput(form)
+}
+
 function initialProbeCreateFormForTarget(target: TargetRecord): ProbeCreateFormState {
   return {
     ...initialProbeCreateForm,
     port: target.base_port ? String(target.base_port) : '',
+  }
+}
+
+function formStateForProbeItem(probeItem: ProbeItemRecord): ProbeCreateFormState {
+  const config = probeItem.config as Record<string, unknown>
+  if (probeItem.probe_kind === 'http') {
+    const range = Array.isArray(config.expected_status_range)
+      ? config.expected_status_range
+      : []
+    return {
+      ...initialProbeCreateForm,
+      probeKind: 'http',
+      enabled: probeItem.enabled,
+      frequencyTier: probeItem.frequency_tier,
+      timeoutSeconds: String(probeItem.timeout_seconds),
+      httpScheme: typeof config.scheme === 'string' ? config.scheme : 'https',
+      httpPath: typeof config.path === 'string' ? config.path : '/',
+      httpMethod: config.method === 'HEAD' ? 'HEAD' : 'GET',
+      expectedStatusStart: String(typeof range[0] === 'number' ? range[0] : 200),
+      expectedStatusEnd: String(typeof range[1] === 'number' ? range[1] : 299),
+    }
+  }
+  if (probeItem.probe_kind === 'tls') {
+    return {
+      ...initialProbeCreateForm,
+      probeKind: 'tls',
+      enabled: probeItem.enabled,
+      frequencyTier: probeItem.frequency_tier,
+      timeoutSeconds: String(probeItem.timeout_seconds),
+      port: String(typeof config.port === 'number' ? config.port : ''),
+      tlsExpiryWarningDays: String(
+        typeof config.expiry_warning_days === 'number' ? config.expiry_warning_days : 14,
+      ),
+    }
+  }
+  return {
+    ...initialProbeCreateForm,
+    probeKind: 'tcp',
+    enabled: probeItem.enabled,
+    frequencyTier: probeItem.frequency_tier,
+    timeoutSeconds: String(probeItem.timeout_seconds),
+    port: String(typeof config.port === 'number' ? config.port : ''),
   }
 }
 
@@ -229,14 +282,18 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [probeCreateOpen, setProbeCreateOpen] = useState(false)
+  const [probeFormMode, setProbeFormMode] = useState<ProbeFormMode>({ kind: 'create' })
   const [probeCreateSubmitting, setProbeCreateSubmitting] = useState(false)
   const [probeCreateError, setProbeCreateError] = useState<string | null>(null)
+  const [probeMutationError, setProbeMutationError] = useState<string | null>(null)
+  const [probeMutationBusyId, setProbeMutationBusyId] = useState<string | null>(null)
   const [probeCreateForm, setProbeCreateForm] = useState<ProbeCreateFormState>(
     initialProbeCreateForm,
   )
   const currentRouteTargetIdRef = useRef<string | null>(targetId ?? null)
   const currentRequestedTargetIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
+  const probeMutationRequestRef = useRef(0)
 
   useEffect(() => {
     currentRequestedTargetIdRef.current = state.requestedTargetId
@@ -407,9 +464,37 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   function openProbeCreateForm(target: TargetRecord) {
+    probeMutationRequestRef.current += 1
+    setProbeFormMode({ kind: 'create' })
     setProbeCreateForm(initialProbeCreateFormForTarget(target))
     setProbeCreateError(null)
+    setProbeMutationError(null)
     setProbeCreateOpen(true)
+  }
+
+  function openProbeEditForm(probeItem: ProbeItemRecord) {
+    probeMutationRequestRef.current += 1
+    setProbeFormMode({ kind: 'edit', probeItemId: probeItem.probe_item_id })
+    setProbeCreateForm(formStateForProbeItem(probeItem))
+    setProbeCreateError(null)
+    setProbeMutationError(null)
+    setProbeCreateOpen(true)
+  }
+
+  function replaceProbeItem(updated: ProbeItemRecord) {
+    setState((current) => ({
+      ...current,
+      probeItems: current.probeItems.map((item) =>
+        item.probe_item_id === updated.probe_item_id ? updated : item,
+      ),
+    }))
+  }
+
+  function removeProbeItem(probeItemId: string) {
+    setState((current) => ({
+      ...current,
+      probeItems: current.probeItems.filter((item) => item.probe_item_id !== probeItemId),
+    }))
   }
 
   async function handleProbeCreate(event: FormEvent<HTMLFormElement>) {
@@ -417,48 +502,173 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     if (!target) return
 
     const actionTargetId = target.target_id
+    const requestId = probeMutationRequestRef.current + 1
+    probeMutationRequestRef.current = requestId
     setProbeCreateError(null)
+    setProbeMutationError(null)
 
-    let payload: CreateProbeItemInput
+    let payload: CreateProbeItemInput | UpdateProbeItemInput
     try {
-      payload = buildProbeCreateInput(probeCreateForm)
+      payload =
+        probeFormMode.kind === 'edit'
+          ? buildProbeUpdateInput(probeCreateForm)
+          : buildProbeCreateInput(probeCreateForm)
     } catch (validationError) {
-      setProbeCreateError(describeError(validationError, '创建 ProbeItem 失败'))
+      setProbeCreateError(
+        describeError(
+          validationError,
+          probeFormMode.kind === 'edit' ? '保存 ProbeItem 失败' : '创建 ProbeItem 失败',
+        ),
+      )
       return
     }
 
     setProbeCreateSubmitting(true)
     try {
-      const created = await createProbeItem(actionTargetId, payload)
+      const createdOrUpdated =
+        probeFormMode.kind === 'edit'
+          ? await updateProbeItem(actionTargetId, probeFormMode.probeItemId, payload)
+          : await createProbeItem(actionTargetId, payload)
       if (
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
-        currentRequestedTargetIdRef.current !== actionTargetId
+        currentRequestedTargetIdRef.current !== actionTargetId ||
+        probeMutationRequestRef.current !== requestId
       ) {
         return
       }
-      setState((current) => ({
-        ...current,
-        probeItems: [...current.probeItems, created],
-      }))
+      if (probeFormMode.kind === 'edit') {
+        replaceProbeItem(createdOrUpdated)
+      } else {
+        setState((current) => ({
+          ...current,
+          probeItems: [...current.probeItems, createdOrUpdated],
+        }))
+      }
       setProbeCreateOpen(false)
+      setProbeFormMode({ kind: 'create' })
       setProbeCreateForm(initialProbeCreateFormForTarget(target))
     } catch (submitError) {
       if (
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
-        currentRequestedTargetIdRef.current !== actionTargetId
+        currentRequestedTargetIdRef.current !== actionTargetId ||
+        probeMutationRequestRef.current !== requestId
       ) {
         return
       }
-      setProbeCreateError(describeError(submitError, '创建 ProbeItem 失败'))
+      setProbeCreateError(
+        describeError(
+          submitError,
+          probeFormMode.kind === 'edit' ? '保存 ProbeItem 失败' : '创建 ProbeItem 失败',
+        ),
+      )
     } finally {
       if (
         isMountedRef.current &&
         currentRouteTargetIdRef.current === actionTargetId &&
-        currentRequestedTargetIdRef.current === actionTargetId
+        currentRequestedTargetIdRef.current === actionTargetId &&
+        probeMutationRequestRef.current === requestId
       ) {
         setProbeCreateSubmitting(false)
+      }
+    }
+  }
+
+  async function handleToggleProbeItem(probeItem: ProbeItemRecord) {
+    if (!target) return
+
+    const actionTargetId = target.target_id
+    const requestId = probeMutationRequestRef.current + 1
+    probeMutationRequestRef.current = requestId
+    setProbeMutationBusyId(probeItem.probe_item_id)
+    setProbeMutationError(null)
+
+    try {
+      const updated = await updateProbeItem(actionTargetId, probeItem.probe_item_id, {
+        probe_kind: probeItem.probe_kind,
+        enabled: !probeItem.enabled,
+        frequency_tier: probeItem.frequency_tier,
+        timeout_seconds: probeItem.timeout_seconds,
+        config: probeItem.config,
+      })
+      if (
+        !isMountedRef.current ||
+        currentRouteTargetIdRef.current !== actionTargetId ||
+        currentRequestedTargetIdRef.current !== actionTargetId ||
+        probeMutationRequestRef.current !== requestId
+      ) {
+        return
+      }
+      replaceProbeItem(updated)
+    } catch (error) {
+      if (
+        !isMountedRef.current ||
+        currentRouteTargetIdRef.current !== actionTargetId ||
+        currentRequestedTargetIdRef.current !== actionTargetId ||
+        probeMutationRequestRef.current !== requestId
+      ) {
+        return
+      }
+      setProbeMutationError(describeError(error, 'ProbeItem 操作失败'))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteTargetIdRef.current === actionTargetId &&
+        currentRequestedTargetIdRef.current === actionTargetId &&
+        probeMutationRequestRef.current === requestId
+      ) {
+        setProbeMutationBusyId(null)
+      }
+    }
+  }
+
+  async function handleDeleteProbeItem(probeItem: ProbeItemRecord) {
+    if (!target || !window.confirm(PROBE_DELETE_CONFIRM_MESSAGE)) {
+      return
+    }
+
+    const actionTargetId = target.target_id
+    const requestId = probeMutationRequestRef.current + 1
+    probeMutationRequestRef.current = requestId
+    setProbeMutationBusyId(probeItem.probe_item_id)
+    setProbeMutationError(null)
+
+    try {
+      await deleteProbeItem(actionTargetId, probeItem.probe_item_id)
+      if (
+        !isMountedRef.current ||
+        currentRouteTargetIdRef.current !== actionTargetId ||
+        currentRequestedTargetIdRef.current !== actionTargetId ||
+        probeMutationRequestRef.current !== requestId
+      ) {
+        return
+      }
+      removeProbeItem(probeItem.probe_item_id)
+      if (probeFormMode.kind === 'edit' && probeFormMode.probeItemId === probeItem.probe_item_id) {
+        setProbeCreateOpen(false)
+        setProbeFormMode({ kind: 'create' })
+        setProbeCreateForm(initialProbeCreateFormForTarget(target))
+        setProbeCreateError(null)
+      }
+    } catch (error) {
+      if (
+        !isMountedRef.current ||
+        currentRouteTargetIdRef.current !== actionTargetId ||
+        currentRequestedTargetIdRef.current !== actionTargetId ||
+        probeMutationRequestRef.current !== requestId
+      ) {
+        return
+      }
+      setProbeMutationError(describeError(error, 'ProbeItem 操作失败'))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteTargetIdRef.current === actionTargetId &&
+        currentRequestedTargetIdRef.current === actionTargetId &&
+        probeMutationRequestRef.current === requestId
+      ) {
+        setProbeMutationBusyId(null)
       }
     }
   }
@@ -557,19 +767,26 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           <div>
             <button
               type="button"
-              onClick={() =>
-                probeCreateOpen
-                  ? setProbeCreateOpen(false)
-                  : openProbeCreateForm(target)
-              }
+              onClick={() => {
+                if (probeCreateOpen && probeFormMode.kind === 'create') {
+                  setProbeCreateOpen(false)
+                  return
+                }
+                openProbeCreateForm(target)
+              }}
             >
               添加 ProbeItem
             </button>
           </div>
+          {probeMutationError ? <p>{probeMutationError}</p> : null}
           {probeCreateOpen ? (
             <section className="page-panel">
-              <p className="page-panel__eyebrow">ProbeItem Create</p>
-              <h3 className="page-panel__title">创建 ProbeItem</h3>
+              <p className="page-panel__eyebrow">
+                {probeFormMode.kind === 'edit' ? 'ProbeItem Edit' : 'ProbeItem Create'}
+              </p>
+              <h3 className="page-panel__title">
+                {probeFormMode.kind === 'edit' ? '编辑 ProbeItem' : '创建 ProbeItem'}
+              </h3>
               <form onSubmit={handleProbeCreate}>
                 <p>
                   <label>
@@ -756,7 +973,13 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                 {probeCreateError ? <p>{probeCreateError}</p> : null}
                 <div>
                   <button type="submit" disabled={probeCreateSubmitting}>
-                    {probeCreateSubmitting ? '正在创建…' : '创建 ProbeItem'}
+                    {probeCreateSubmitting
+                      ? probeFormMode.kind === 'edit'
+                        ? '正在保存…'
+                        : '正在创建…'
+                      : probeFormMode.kind === 'edit'
+                        ? '保存 ProbeItem'
+                        : '创建 ProbeItem'}
                   </button>
                 </div>
               </form>
@@ -783,6 +1006,30 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                         <StatusBadge label={probeItem.frequency_tier} tone="cyan" />
                       </div>
                     </header>
+
+                    <div className="badge-row badge-row--wrap">
+                      <button
+                        type="button"
+                        disabled={probeMutationBusyId === probeItem.probe_item_id}
+                        onClick={() => openProbeEditForm(probeItem)}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        disabled={probeMutationBusyId === probeItem.probe_item_id}
+                        onClick={() => void handleToggleProbeItem(probeItem)}
+                      >
+                        {probeItem.enabled ? '停用' : '启用'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={probeMutationBusyId === probeItem.probe_item_id}
+                        onClick={() => void handleDeleteProbeItem(probeItem)}
+                      >
+                        删除
+                      </button>
+                    </div>
 
                     <dl className="probe-card__meta">
                       <div>

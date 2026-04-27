@@ -402,6 +402,521 @@ describe('TargetDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
+  it('edits an existing ProbeItem and replaces the row after save', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            probe_item_id: 'pb_001',
+            target_id: 'tg_001',
+            probe_kind: 'http',
+            enabled: true,
+            frequency_tier: '1m',
+            timeout_seconds: 5,
+            config: {
+              scheme: 'https',
+              path: '/healthz',
+              method: 'GET',
+              expected_status_range: [200, 299],
+            },
+            created_at: '2026-04-21T00:00:00Z',
+            updated_at: '2026-04-21T00:00:00Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          probe_item_id: 'pb_001',
+          target_id: 'tg_001',
+          probe_kind: 'http',
+          enabled: true,
+          frequency_tier: '5m',
+          timeout_seconds: 8,
+          config: {
+            scheme: 'https',
+            path: '/ready',
+            method: 'HEAD',
+            expected_status_range: [200, 204],
+          },
+          created_at: '2026-04-21T00:00:00Z',
+          updated_at: '2026-04-27T10:00:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByLabelText('HTTP Path')).toHaveValue('/healthz')
+
+    fireEvent.change(screen.getByLabelText('HTTP Path'), { target: { value: '/ready' } })
+    fireEvent.change(screen.getByLabelText('HTTP Method'), { target: { value: 'HEAD' } })
+    fireEvent.change(screen.getByLabelText('期望状态码终点'), { target: { value: '204' } })
+    fireEvent.change(screen.getByLabelText('超时秒数'), { target: { value: '8' } })
+    fireEvent.change(screen.getByLabelText('频率档位'), { target: { value: '5m' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText(/path: \/ready/)).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
+      method: 'PUT',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({
+        probe_kind: 'http',
+        enabled: true,
+        frequency_tier: '5m',
+        timeout_seconds: 8,
+        config: {
+          scheme: 'https',
+          path: '/ready',
+          method: 'HEAD',
+          expected_status_range: [200, 204],
+        },
+      }),
+    })
+  })
+
+  it('disables a ProbeItem with a full update and preserves the existing config', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            probe_item_id: 'pb_001',
+            target_id: 'tg_001',
+            probe_kind: 'http',
+            enabled: true,
+            frequency_tier: '1m',
+            timeout_seconds: 5,
+            config: {
+              scheme: 'https',
+              path: '/healthz',
+              method: 'GET',
+              expected_status_range: [200, 299],
+            },
+            created_at: '2026-04-21T00:00:00Z',
+            updated_at: '2026-04-21T00:00:00Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          probe_item_id: 'pb_001',
+          target_id: 'tg_001',
+          probe_kind: 'http',
+          enabled: false,
+          frequency_tier: '1m',
+          timeout_seconds: 5,
+          config: {
+            scheme: 'https',
+            path: '/healthz',
+            method: 'GET',
+            expected_status_range: [200, 299],
+          },
+          created_at: '2026-04-21T00:00:00Z',
+          updated_at: '2026-04-27T10:00:00Z',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '停用' }))
+
+    await waitFor(() => expect(screen.getByText('停用')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
+      method: 'PUT',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({
+        probe_kind: 'http',
+        enabled: false,
+        frequency_tier: '1m',
+        timeout_seconds: 5,
+        config: {
+          scheme: 'https',
+          path: '/healthz',
+          method: 'GET',
+          expected_status_range: [200, 299],
+        },
+      }),
+    })
+  })
+
+  it('deletes a ProbeItem after the exact strong confirmation message', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            probe_item_id: 'pb_001',
+            target_id: 'tg_001',
+            probe_kind: 'tcp',
+            enabled: true,
+            frequency_tier: '5m',
+            timeout_seconds: 3,
+            config: { port: 443 },
+            created_at: '2026-04-21T00:00:00Z',
+            updated_at: '2026-04-21T00:00:00Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({}, 204))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('TCP')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      '删除 ProbeItem 会移除这条观测方式，仅应用于误建场景，确定继续吗？',
+    )
+    await waitFor(() =>
+      expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('keeps ProbeItem errors local when update and delete fail', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            probe_item_id: 'pb_001',
+            target_id: 'tg_001',
+            probe_kind: 'tcp',
+            enabled: true,
+            frequency_tier: '5m',
+            timeout_seconds: 3,
+            config: { port: 443 },
+            created_at: '2026-04-21T00:00:00Z',
+            updated_at: '2026-04-21T00:00:00Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'update failed' }, 503))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'delete failed' }, 503))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '停用' }))
+    await waitFor(() => expect(screen.getByText('update failed')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByText('delete failed')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
+    expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
+  })
+
+  it('ignores stale ProbeItem save results after switching to another target route', async () => {
+    const tg001Target = deferredResponse()
+    const tg001ProbeItems = deferredResponse()
+    const tg001Runtime = deferredResponse()
+    const tg001Incidents = deferredResponse()
+    const tg001Events = deferredResponse()
+    const staleSave = deferredResponse()
+    const tg002Target = deferredResponse()
+    const tg002ProbeItems = deferredResponse()
+    const tg002Runtime = deferredResponse()
+    const tg002Incidents = deferredResponse()
+    const tg002Events = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementationOnce(() => tg001Target.promise)
+        .mockImplementationOnce(() => tg001ProbeItems.promise)
+        .mockImplementationOnce(() => tg001Runtime.promise)
+        .mockImplementationOnce(() => tg001Incidents.promise)
+        .mockImplementationOnce(() => tg001Events.promise)
+        .mockImplementationOnce(() => staleSave.promise)
+        .mockImplementationOnce(() => tg002Target.promise)
+        .mockImplementationOnce(() => tg002ProbeItems.promise)
+        .mockImplementationOnce(() => tg002Runtime.promise)
+        .mockImplementationOnce(() => tg002Incidents.promise)
+        .mockImplementationOnce(() => tg002Events.promise),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <TargetDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    tg001Target.resolve(
+      mockJSONResponse({
+        target_id: 'tg_001',
+        name: 'Blog',
+        target_type: 'service',
+        host: 'blog.example.com',
+        base_port: 443,
+        execution_node_labels: ['edge'],
+        run_status: '启用',
+        labels: [],
+        note: '',
+        current_health_status: '正常',
+        current_active_incident_count: 0,
+        current_primary_issue_summary: '',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T09:05:00Z',
+      }),
+    )
+    tg001ProbeItems.resolve(
+      mockJSONResponse([
+        {
+          probe_item_id: 'pb_001',
+          target_id: 'tg_001',
+          probe_kind: 'http',
+          enabled: true,
+          frequency_tier: '1m',
+          timeout_seconds: 5,
+          config: {
+            scheme: 'https',
+            path: '/healthz',
+            method: 'GET',
+            expected_status_range: [200, 299],
+          },
+          created_at: '2026-04-21T00:00:00Z',
+          updated_at: '2026-04-21T00:00:00Z',
+        },
+      ]),
+    )
+    tg001Runtime.resolve(
+      mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+    )
+    tg001Incidents.resolve(mockJSONResponse([]))
+    tg001Events.resolve(mockJSONResponse([]))
+
+    await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.change(screen.getByLabelText('HTTP Path'), { target: { value: '/stale' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(6))
+
+    fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(11))
+
+    tg002Target.resolve(
+      mockJSONResponse({
+        target_id: 'tg_002',
+        name: 'Cache',
+        target_type: 'service',
+        host: 'cache.example.com',
+        execution_node_labels: ['edge'],
+        run_status: '启用',
+        labels: [],
+        note: '',
+        current_health_status: '正常',
+        current_active_incident_count: 0,
+        current_primary_issue_summary: '',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T10:05:00Z',
+      }),
+    )
+    tg002ProbeItems.resolve(
+      mockJSONResponse([
+        {
+          probe_item_id: 'pb_002',
+          target_id: 'tg_002',
+          probe_kind: 'tcp',
+          enabled: true,
+          frequency_tier: '5m',
+          timeout_seconds: 3,
+          config: { port: 6379 },
+          created_at: '2026-04-21T00:00:00Z',
+          updated_at: '2026-04-24T10:05:00Z',
+        },
+      ]),
+    )
+    tg002Runtime.resolve(
+      mockJSONResponse({ target_id: 'tg_002', latest_probe_observations: [] }),
+    )
+    tg002Incidents.resolve(mockJSONResponse([]))
+    tg002Events.resolve(mockJSONResponse([]))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
+    )
+
+    staleSave.resolve(
+      mockJSONResponse({
+        probe_item_id: 'pb_001',
+        target_id: 'tg_001',
+        probe_kind: 'http',
+        enabled: true,
+        frequency_tier: '1m',
+        timeout_seconds: 5,
+        config: {
+          scheme: 'https',
+          path: '/stale',
+          method: 'GET',
+          expected_status_range: [200, 299],
+        },
+        created_at: '2026-04-21T00:00:00Z',
+        updated_at: '2026-04-27T10:00:00Z',
+      }),
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Cache')).toBeInTheDocument()
+    expect(screen.getByText('TCP')).toBeInTheDocument()
+    expect(screen.queryByText('/stale')).not.toBeInTheDocument()
+    expect(screen.queryByText('update failed')).not.toBeInTheDocument()
+  })
+
   it('keeps target details visible when incidents and events fail to load', async () => {
     vi.stubGlobal(
       'fetch',
