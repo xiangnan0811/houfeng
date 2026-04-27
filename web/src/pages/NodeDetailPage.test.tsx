@@ -1062,4 +1062,89 @@ describe('NodeDetailPage', () => {
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
   })
+
+  it('ignores a stale binding-action success after switching to a different node route', async () => {
+    const confirmRebind = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(mockJSONResponse(nodeRecord({ node_id: 'nd_001' })))
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            onboardingConflictState({
+              node_id: 'nd_001',
+            }),
+          ),
+        )
+        .mockImplementationOnce(() => confirmRebind.promise)
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_002',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            provider: 'Hetzner',
+            lifecycle_status: '在用',
+            monitoring_status: '启用',
+            binding_status: '已绑定',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:10:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_002',
+            latest_host_sample: null,
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <NodeDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '确认重绑定' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '确认重绑定' }))
+    fireEvent.click(screen.getByRole('button', { name: 'switch node' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument()
+
+    confirmRebind.resolve(
+      mockJSONResponse(
+        onboardingConflictState({
+          node_id: 'nd_001',
+          binding_status: '已绑定',
+          phase: '已绑定，等待稳定观测',
+          pending_binding: undefined,
+          updated_at: '2026-04-27T09:20:00Z',
+        }),
+      ),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument()
+  })
 })
