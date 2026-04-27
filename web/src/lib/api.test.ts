@@ -331,7 +331,7 @@ describe('api helpers', () => {
       status: 204,
       text: async () => '',
       json: async () => { throw new Error('json should not be called for 204 responses') },
-    } as Response)
+    } as unknown as Response)
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(deleteProbeItem('tg_001', 'pb_001')).resolves.toBeUndefined()
