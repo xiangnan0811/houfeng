@@ -7,6 +7,7 @@ import { IncidentList } from '../components/IncidentList'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
+  confirmNodeRebind,
   enterNodeMaintenance,
   exitNodeMaintenance,
   getNode,
@@ -15,6 +16,8 @@ import {
   listEvents,
   listIncidents,
   pauseNodeMonitoring,
+  rejectPendingNodeBinding,
+  resetNodeBinding,
   resumeNodeMonitoring,
 } from '../lib/api'
 import {
@@ -49,7 +52,11 @@ type State = {
 
 const NODE_PAUSE_CONFIRM_MESSAGE = '暂停监控会停止采集并产生数据空档，确定继续吗？'
 const NODE_BINDING_CONFLICT_LOAD_ERROR = '绑定冲突详情暂不可用'
+const NODE_BINDING_ACTION_ERROR = '更新绑定冲突状态失败'
 const NODE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
+const NODE_BINDING_CONFIRM_REBIND_LABEL = '确认重绑定'
+const NODE_BINDING_REJECT_PENDING_LABEL = '拒绝新指纹'
+const NODE_BINDING_RESET_LABEL = '重置绑定'
 
 type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
 type BindingConflictState = {
@@ -58,6 +65,8 @@ type BindingConflictState = {
   loading: boolean
   error: string | null
 }
+
+type BindingConflictAction = 'confirm' | 'reject' | 'reset'
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -131,6 +140,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     loading: false,
     error: null,
   })
+  const [bindingAction, setBindingAction] = useState<BindingConflictAction | null>(null)
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
@@ -335,6 +345,69 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     }
   }
 
+  function applyOnboardingToNode(actionNodeId: string, onboarding: NodeOnboardingState) {
+    setState((current) => {
+      if (current.requestedNodeId !== actionNodeId) return current
+      return {
+        ...current,
+        node: onboarding,
+      }
+    })
+    setBindingConflictState({
+      requestedNodeId: actionNodeId,
+      onboarding: onboarding.binding_status === NODE_BINDING_CONFLICT_STATUS ? onboarding : null,
+      loading: false,
+      error: null,
+    })
+  }
+
+  async function handleBindingAction(
+    action: BindingConflictAction,
+    request: (targetNodeId: string) => Promise<NodeOnboardingState>,
+  ) {
+    if (!node) return
+    const actionNodeId = node.node_id
+    setBindingAction(action)
+    setBindingConflictState((current) => ({
+      ...current,
+      requestedNodeId: actionNodeId,
+      error: null,
+    }))
+
+    try {
+      const nextOnboarding = await request(actionNodeId)
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
+      applyOnboardingToNode(actionNodeId, nextOnboarding)
+    } catch (error: unknown) {
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
+      setBindingConflictState((current) => ({
+        ...current,
+        requestedNodeId: actionNodeId,
+        error: describeError(error, NODE_BINDING_ACTION_ERROR),
+      }))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteNodeIdRef.current === actionNodeId &&
+        currentRequestedNodeIdRef.current === actionNodeId
+      ) {
+        setBindingAction(null)
+      }
+    }
+  }
+
   if (!missingNodeId && !isCurrentNode) {
     return <section className="page-panel">正在加载节点详情…</section>
   }
@@ -425,6 +498,29 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
             </dl>
             {bindingConflictLoading ? <p>正在加载绑定冲突详情…</p> : null}
             {bindingConflictError ? <p>{bindingConflictError}</p> : null}
+            <div className="badge-row badge-row--wrap">
+              <button
+                type="button"
+                disabled={bindingAction !== null || bindingConflictLoading}
+                onClick={() => void handleBindingAction('confirm', confirmNodeRebind)}
+              >
+                {bindingAction === 'confirm' ? '正在确认…' : NODE_BINDING_CONFIRM_REBIND_LABEL}
+              </button>
+              <button
+                type="button"
+                disabled={bindingAction !== null || bindingConflictLoading}
+                onClick={() => void handleBindingAction('reject', rejectPendingNodeBinding)}
+              >
+                {bindingAction === 'reject' ? '正在拒绝…' : NODE_BINDING_REJECT_PENDING_LABEL}
+              </button>
+              <button
+                type="button"
+                disabled={bindingAction !== null || bindingConflictLoading}
+                onClick={() => void handleBindingAction('reset', resetNodeBinding)}
+              >
+                {bindingAction === 'reset' ? '正在重置…' : NODE_BINDING_RESET_LABEL}
+              </button>
+            </div>
             <Link className="text-link" to={`/nodes/${node.node_id}/onboarding`}>
               打开接入工作台
             </Link>

@@ -435,6 +435,119 @@ describe('NodeDetailPage', () => {
     expect(screen.queryByRole('heading', { name: '节点详情不可用' })).not.toBeInTheDocument()
   })
 
+
+  it('confirms a pending node rebind from Node detail and hides the conflict card', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(nodeRecord()))
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse(onboardingConflictState()))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          onboardingConflictState({
+            binding_status: '已绑定',
+            phase: '已绑定，等待稳定观测',
+            pending_binding: undefined,
+            updated_at: '2026-04-27T09:20:00Z',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_conflict']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '确认重绑定' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '确认重绑定' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('已绑定')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/binding/confirm-rebind', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('exposes reject and reset binding actions from Node detail', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(nodeRecord()))
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse(onboardingConflictState()))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          onboardingConflictState({ binding_status: '已绑定', pending_binding: undefined }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_conflict']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '拒绝新指纹' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: '重置绑定' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '拒绝新指纹' }))
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/binding/reject-pending', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      }),
+    )
+  })
+
+  it('keeps binding action errors local to the conflict card', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(nodeRecord()))
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse(onboardingConflictState()))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid binding transition' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_conflict']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '重置绑定' })).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '重置绑定' }))
+
+    await waitFor(() => expect(screen.getByText('invalid binding transition')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument()
+  })
+
   it('shows the new route core data without stale activity while route-specific requests are still in flight', async () => {
     const nd001Node = deferredResponse()
     const nd001Runtime = deferredResponse()
