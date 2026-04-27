@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { NodeDetailPage } from './NodeDetailPage'
+import { formatDateTime } from '../lib/format'
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -393,8 +394,8 @@ describe('NodeDetailPage', () => {
     expect(screen.getByText('高优先级：绑定冲突待处理')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('fp-current-1234567890')).toBeInTheDocument())
     expect(screen.getByText('fp-pendi…uvwxyz')).toBeInTheDocument()
-    expect(screen.getByText('2026/04/27 16:55')).toBeInTheDocument()
-    expect(screen.getByText('2026/04/27 17:04')).toBeInTheDocument()
+    expect(screen.getByText(formatDateTime('2026-04-27T08:55:00Z'))).toBeInTheDocument()
+    expect(screen.getByText(formatDateTime('2026-04-27T09:04:00Z'))).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()
     expect(screen.getByText(/同一台机器重装或合法替换/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '打开接入工作台' })).toHaveAttribute(
