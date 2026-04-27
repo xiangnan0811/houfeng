@@ -12,6 +12,8 @@ import (
 	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/config"
 	centerhttp "houfeng/internal/center/http"
+	incidentservice "houfeng/internal/center/incidents"
+	centersettings "houfeng/internal/center/settings"
 )
 
 func TestBootstrapCenterReturnsOpenPostgresError(t *testing.T) {
@@ -105,12 +107,20 @@ func TestBootstrapCenterClosesDBOnMigrationFailure(t *testing.T) {
 }
 
 func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
-	cfg := config.CenterConfig{HTTPAddr: ":8080", WebDistDir: "web/dist", DatabaseURL: "postgres://center"}
+	cfg := config.CenterConfig{
+		HTTPAddr:         ":8080",
+		WebDistDir:       "web/dist",
+		DatabaseURL:      "postgres://center",
+		TelegramBotToken: "seed-bot-token",
+		TelegramChatID:   "seed-chat-id",
+	}
 	db := &fakePostgresDB{}
 	app := fakeApp{}
 	var gotOpts centerhttp.RouterOptions
 	var gotAddr string
 	var gotHandler http.Handler
+	var gotNotifierCfg config.CenterConfig
+	var gotSettingsRepo centersettings.Repository
 
 	builtApp, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
 		openPostgres: func(context.Context, string) (postgresDB, error) {
@@ -118,6 +128,11 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		},
 		applyMigrations: func(context.Context, postgresDB) error {
 			return nil
+		},
+		newIncidentNotifier: func(inputCfg config.CenterConfig, repo centersettings.Repository) incidentservice.Notifier {
+			gotNotifierCfg = inputCfg
+			gotSettingsRepo = repo
+			return &fakeIncidentNotifier{}
 		},
 		newRouter: func(opts centerhttp.RouterOptions) http.Handler {
 			gotOpts = opts
@@ -213,6 +228,15 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotHandler == nil {
 		t.Fatal("app handler = nil, want non-nil")
 	}
+	if gotNotifierCfg.TelegramBotToken != cfg.TelegramBotToken {
+		t.Fatalf("notifier seed bot token = %q, want %q", gotNotifierCfg.TelegramBotToken, cfg.TelegramBotToken)
+	}
+	if gotNotifierCfg.TelegramChatID != cfg.TelegramChatID {
+		t.Fatalf("notifier seed chat id = %q, want %q", gotNotifierCfg.TelegramChatID, cfg.TelegramChatID)
+	}
+	if gotSettingsRepo == nil {
+		t.Fatal("settings repo = nil, want runtime settings repository for notifier wiring")
+	}
 	if db.closed {
 		t.Fatal("DB closed before cleanup")
 	}
@@ -238,5 +262,11 @@ func (f *fakePostgresDB) Pool() *pgxpool.Pool {
 type fakeApp struct{}
 
 func (fakeApp) Run(context.Context) error {
+	return nil
+}
+
+type fakeIncidentNotifier struct{}
+
+func (*fakeIncidentNotifier) Send(context.Context, string) error {
 	return nil
 }

@@ -16,6 +16,7 @@ import (
 	"houfeng/internal/center/http/handlers"
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/notify"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
 	"houfeng/internal/center/syncing"
@@ -31,10 +32,11 @@ type postgresDB interface {
 }
 
 type bootstrapDeps struct {
-	openPostgres    func(context.Context, string) (postgresDB, error)
-	applyMigrations func(context.Context, postgresDB) error
-	newRouter       func(centerhttp.RouterOptions) http.Handler
-	newApp          func(string, http.Handler, centerapp.Worker) appRunner
+	openPostgres        func(context.Context, string) (postgresDB, error)
+	applyMigrations     func(context.Context, postgresDB) error
+	newIncidentNotifier func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
+	newRouter           func(centerhttp.RouterOptions) http.Handler
+	newApp              func(string, http.Handler, centerapp.Worker) appRunner
 }
 
 type pgxPostgresDB struct {
@@ -63,10 +65,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
 	enrollmentSvc := enrollment.NewService(nodeRepo)
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
-	var notifier incidentservice.Notifier
-	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
-		notifier = notify.NewTelegramNotifier(cfg.TelegramBotToken, cfg.TelegramChatID)
-	}
+	notifier := deps.newIncidentNotifier(cfg, settingsRepo)
 	incidentSvc := incidentservice.NewService(
 		nodeRepo,
 		targetRepo,
@@ -119,6 +118,21 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 	if d.applyMigrations == nil {
 		d.applyMigrations = func(ctx context.Context, db postgresDB) error {
 			return migrate.Apply(ctx, db.Pool())
+		}
+	}
+	if d.newIncidentNotifier == nil {
+		d.newIncidentNotifier = func(cfg config.CenterConfig, settingsRepo centersettings.Repository) incidentservice.Notifier {
+			var fallback incidentservice.Notifier
+			if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+				fallback = notify.NewTelegramNotifier(cfg.TelegramBotToken, cfg.TelegramChatID)
+			}
+			return incidentservice.NewSettingsAwareNotifier(
+				settingsRepo,
+				func(botToken, chatID string) incidentservice.Notifier {
+					return notify.NewTelegramNotifier(botToken, chatID)
+				},
+				fallback,
+			)
 		}
 	}
 	if d.newRouter == nil {

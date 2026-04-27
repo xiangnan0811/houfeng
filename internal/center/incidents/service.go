@@ -2,6 +2,7 @@ package incidents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -12,12 +13,15 @@ import (
 	"houfeng/internal/center/nodes"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/contracts/agentapi"
 )
 
 const defaultHeartbeatInterval = 30 * time.Second
+
+var errNotificationSuppressed = errors.New("incident notification suppressed")
 
 type NodeRepository interface {
 	GetNode(context.Context, string) (nodes.Record, error)
@@ -39,8 +43,52 @@ type MutationWriter interface {
 	AppendNotificationRecords(context.Context, []NotificationRecordWrite) error
 }
 
+type SettingsRepository interface {
+	GetSettings(context.Context) (centersettings.CenterSettings, error)
+}
+
 type Notifier interface {
 	Send(context.Context, string) error
+}
+
+type SettingsAwareNotifierFactory func(botToken, chatID string) Notifier
+
+type settingsAwareNotifier struct {
+	settingsRepo SettingsRepository
+	newNotifier  SettingsAwareNotifierFactory
+	fallback     Notifier
+}
+
+func NewSettingsAwareNotifier(settingsRepo SettingsRepository, newNotifier SettingsAwareNotifierFactory, fallback Notifier) Notifier {
+	if settingsRepo == nil {
+		return fallback
+	}
+	return &settingsAwareNotifier{
+		settingsRepo: settingsRepo,
+		newNotifier:  newNotifier,
+		fallback:     fallback,
+	}
+}
+
+func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error {
+	settings, err := n.settingsRepo.GetSettings(ctx)
+	if err != nil {
+		if n.fallback == nil {
+			return fmt.Errorf("get persisted center settings: %w", err)
+		}
+		return n.fallback.Send(ctx, summary)
+	}
+	if !settings.Telegram.Enabled() {
+		return errNotificationSuppressed
+	}
+	if n.newNotifier == nil {
+		return errors.New("telegram notifier factory is nil")
+	}
+	notifier := n.newNotifier(settings.Telegram.BotToken, settings.Telegram.ChatID)
+	if notifier == nil {
+		return errors.New("telegram notifier is nil")
+	}
+	return notifier.Send(ctx, summary)
 }
 
 type Service struct {
@@ -282,6 +330,10 @@ func (s *Service) appendNotificationRecords(ctx context.Context, objectType Obje
 		}
 		if evaluation.result.Notification.ShouldSend && s.notifier != nil {
 			if err := s.notifier.Send(ctx, evaluation.result.Notification.Summary); err != nil {
+				if errors.Is(err, errNotificationSuppressed) {
+					records = append(records, record)
+					continue
+				}
 				s.logger.Error("send incident notification failed", "object_type", objectType, "object_id", objectID, "error", err)
 				record.DeliveryStatus = DeliveryStatusFailed
 			} else {

@@ -10,6 +10,7 @@ import (
 	"houfeng/internal/center/nodes"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/contracts/agentapi"
@@ -72,6 +73,22 @@ type fakeNotifier struct {
 func (f *fakeNotifier) Send(_ context.Context, summary string) error {
 	f.messages = append(f.messages, summary)
 	return f.err
+}
+
+type fakeSettingsRepository struct {
+	getSettingsResult centersettings.CenterSettings
+	getSettingsErr    error
+}
+
+func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
+	if f.getSettingsErr != nil {
+		return centersettings.CenterSettings{}, f.getSettingsErr
+	}
+	return f.getSettingsResult, nil
+}
+
+func (f *fakeSettingsRepository) PutSettings(context.Context, centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+	panic("unexpected PutSettings call")
 }
 
 func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) {
@@ -153,6 +170,97 @@ func TestServiceRecordsFailedNotificationDelivery(t *testing.T) {
 	}
 	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusFailed {
 		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusFailed)
+	}
+}
+
+func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+	}
+	writer := &fakeMutationWriter{}
+	fallbackNotifier := &fakeNotifier{}
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
+	buildCalls := 0
+	service := NewService(
+		nodeRepo,
+		targetRepo,
+		snapshots,
+		writer,
+		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
+			buildCalls++
+			return &fakeNotifier{}
+		}, fallbackNotifier),
+		slog.Default(),
+		30*time.Second,
+		time.Minute,
+	)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 {
+		t.Fatalf("notifications = %#v, want one suppressed notification record", writer.notifications)
+	}
+	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSuppressed {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSuppressed)
+	}
+	if buildCalls != 0 {
+		t.Fatalf("buildCalls = %d, want 0", buildCalls)
+	}
+	if len(fallbackNotifier.messages) != 0 {
+		t.Fatalf("fallbackNotifier.messages = %#v, want no env-fallback send when persisted Telegram is disabled", fallbackNotifier.messages)
+	}
+}
+
+func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+	}
+	writer := &fakeMutationWriter{}
+	liveNotifier := &fakeNotifier{}
+	settings := centersettings.Default()
+	settings.Telegram.BotToken = "persisted-bot-token"
+	settings.Telegram.ChatID = "persisted-chat-id"
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings}
+	var gotBotToken string
+	var gotChatID string
+	service := NewService(
+		nodeRepo,
+		targetRepo,
+		snapshots,
+		writer,
+		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
+			gotBotToken = botToken
+			gotChatID = chatID
+			return liveNotifier
+		}, &fakeNotifier{}),
+		slog.Default(),
+		30*time.Second,
+		time.Minute,
+	)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if gotBotToken != settings.Telegram.BotToken {
+		t.Fatalf("got bot token = %q, want %q", gotBotToken, settings.Telegram.BotToken)
+	}
+	if gotChatID != settings.Telegram.ChatID {
+		t.Fatalf("got chat id = %q, want %q", gotChatID, settings.Telegram.ChatID)
+	}
+	if len(liveNotifier.messages) != 1 {
+		t.Fatalf("liveNotifier.messages = %#v, want one send", liveNotifier.messages)
+	}
+	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSent {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSent)
 	}
 }
 
