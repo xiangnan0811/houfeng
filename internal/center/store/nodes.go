@@ -312,6 +312,23 @@ func (r *PostgresNodeRepository) GetNode(ctx context.Context, nodeID string) (no
 	return record, nil
 }
 
+func (r *PostgresNodeRepository) UpdateNodeMetadata(ctx context.Context, nodeID string, input nodes.UpdateMetadataInput) (nodes.Record, error) {
+	record, err := scanNode(r.db.QueryRow(ctx, `
+		update nodes
+		set labels = $2,
+		    note = $3,
+		    updated_at = now()
+		where node_id = $1
+		returning `+nodeSelectColumns, nodeID, input.Labels, input.Note))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nodes.Record{}, nodes.ErrNodeNotFound
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("update node metadata %q: %w", nodeID, err)
+	}
+	return record, nil
+}
+
 func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input nodes.CreateInput) (nodes.Record, error) {
 	nodeID, err := ids.New("nd")
 	if err != nil {

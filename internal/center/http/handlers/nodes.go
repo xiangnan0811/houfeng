@@ -45,11 +45,6 @@ func NodesCollection(repo nodes.Repository) http.Handler {
 
 func NodeItem(repo nodes.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
 		nodeID := strings.TrimPrefix(r.URL.Path, "/api/nodes/")
 		nodeID = strings.Trim(nodeID, "/")
 		if nodeID == "" || strings.Contains(nodeID, "/") {
@@ -57,17 +52,46 @@ func NodeItem(repo nodes.Repository) http.Handler {
 			return
 		}
 
-		record, err := repo.GetNode(r.Context(), nodeID)
-		if errors.Is(err, nodes.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "node not found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
+		switch r.Method {
+		case http.MethodGet:
+			record, err := repo.GetNode(r.Context(), nodeID)
+			if errors.Is(err, nodes.ErrNodeNotFound) {
+				writeError(w, http.StatusNotFound, "node not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
 
-		writeJSON(w, http.StatusOK, record)
+			writeJSON(w, http.StatusOK, record)
+		case http.MethodPatch:
+			var input nodes.UpdateMetadataInput
+			if err := decodeJSON(r, &input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+
+			input = normalizeUpdateMetadataInput(input)
+			if !isValidUpdateMetadataInput(input) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+
+			record, err := repo.UpdateNodeMetadata(r.Context(), nodeID, input)
+			if errors.Is(err, nodes.ErrNodeNotFound) {
+				writeError(w, http.StatusNotFound, "node not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+
+			writeJSON(w, http.StatusOK, record)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
 	})
 }
 
@@ -86,4 +110,35 @@ func isValidCreateInput(input nodes.CreateInput) bool {
 		return false
 	}
 	return nodes.IsValidLifecycleStatus(input.LifecycleStatus)
+}
+
+func normalizeUpdateMetadataInput(input nodes.UpdateMetadataInput) nodes.UpdateMetadataInput {
+	normalizedLabels := make([]string, 0, len(input.Labels))
+	seen := make(map[string]struct{}, len(input.Labels))
+	for _, label := range input.Labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		normalizedLabels = append(normalizedLabels, label)
+	}
+	input.Labels = normalizedLabels
+	input.Note = strings.TrimSpace(input.Note)
+	return input
+}
+
+func isValidUpdateMetadataInput(input nodes.UpdateMetadataInput) bool {
+	if len(input.Labels) > 20 {
+		return false
+	}
+	for _, label := range input.Labels {
+		if len(label) > 64 {
+			return false
+		}
+	}
+	return len(input.Note) <= 2000
 }

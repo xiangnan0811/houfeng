@@ -75,10 +75,16 @@ type CreateInput struct {
 	Note            string   `json:"note"`
 }
 
+type UpdateMetadataInput struct {
+	Labels []string `json:"labels"`
+	Note   string   `json:"note"`
+}
+
 type Repository interface {
 	ListNodes(context.Context) ([]Record, error)
 	GetNode(context.Context, string) (Record, error)
 	CreateNode(context.Context, CreateInput) (Record, error)
+	UpdateNodeMetadata(context.Context, string, UpdateMetadataInput) (Record, error)
 }
 
 type EnrollmentTokenIssue struct {
