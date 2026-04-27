@@ -14,24 +14,28 @@ import (
 )
 
 type fakeTargetRepository struct {
-	listTargetsResult     []targets.TargetRecord
-	listTargetsErr        error
-	getTargetResult       targets.TargetRecord
-	getTargetErr          error
-	createTargetResult    targets.TargetRecord
-	createTargetErr       error
-	createTargetInput     targets.CreateTargetInput
-	listProbeItemsResult  []targets.ProbeItemRecord
-	listProbeItemsErr     error
-	createProbeItemResult targets.ProbeItemRecord
-	createProbeItemErr    error
-	createProbeItemInput  targets.CreateProbeItemInput
-	updateProbeItemResult targets.ProbeItemRecord
-	updateProbeItemErr    error
-	updateProbeItemInput  targets.UpdateProbeItemInput
-	updateProbeItemID     string
-	deleteProbeItemErr    error
-	deleteProbeItemID     string
+	listTargetsResult          []targets.TargetRecord
+	listTargetsErr             error
+	getTargetResult            targets.TargetRecord
+	getTargetErr               error
+	createTargetResult         targets.TargetRecord
+	createTargetErr            error
+	createTargetInput          targets.CreateTargetInput
+	updateTargetMetadataResult targets.TargetRecord
+	updateTargetMetadataErr    error
+	updateTargetMetadataInput  targets.UpdateMetadataInput
+	updateTargetMetadataID     string
+	listProbeItemsResult       []targets.ProbeItemRecord
+	listProbeItemsErr          error
+	createProbeItemResult      targets.ProbeItemRecord
+	createProbeItemErr         error
+	createProbeItemInput       targets.CreateProbeItemInput
+	updateProbeItemResult      targets.ProbeItemRecord
+	updateProbeItemErr         error
+	updateProbeItemInput       targets.UpdateProbeItemInput
+	updateProbeItemID          string
+	deleteProbeItemErr         error
+	deleteProbeItemID          string
 }
 
 func (f *fakeTargetRepository) ListTargets(context.Context) ([]targets.TargetRecord, error) {
@@ -51,6 +55,17 @@ func (f *fakeTargetRepository) CreateTarget(_ context.Context, input targets.Cre
 		return targets.TargetRecord{}, f.createTargetErr
 	}
 	return f.createTargetResult, nil
+}
+
+func (f *fakeTargetRepository) UpdateTargetMetadata(_ context.Context, targetID string, input targets.UpdateMetadataInput) (targets.TargetRecord, error) {
+	f.updateTargetMetadataID = targetID
+	f.updateTargetMetadataInput = input
+	if f.updateTargetMetadataErr != nil {
+		return targets.TargetRecord{}, f.updateTargetMetadataErr
+	}
+	record := f.updateTargetMetadataResult
+	record.TargetID = targetID
+	return record, nil
 }
 
 func (f *fakeTargetRepository) ListProbeItems(context.Context, string) ([]targets.ProbeItemRecord, error) {
@@ -215,6 +230,96 @@ func TestDeleteProbeItemHandlerReturnsNoContent(t *testing.T) {
 	}
 	if repo.deleteProbeItemID != "pb_001" {
 		t.Fatalf("probe item id = %q, want pb_001", repo.deleteProbeItemID)
+	}
+}
+
+func TestTargetItemPatchMetadataReturnsUpdatedRecord(t *testing.T) {
+	now := time.Date(2026, time.April, 27, 9, 0, 0, 0, time.UTC)
+	repo := &fakeTargetRepository{
+		updateTargetMetadataResult: targets.TargetRecord{
+			Name:                "Blog",
+			TargetType:          targets.TargetTypeService,
+			Host:                "blog.example.com",
+			ExecutionNodeLabels: []string{"edge"},
+			RunStatus:           targets.RunStatusEnabled,
+			Labels:              []string{"edge", "core"},
+			Note:                "updated",
+			CurrentHealthStatus: targets.HealthNormal,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		},
+	}
+
+	handler := handlers.TargetItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_001", strings.NewReader(`{"labels":[" edge ","core","edge"],"note":" updated "}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if repo.updateTargetMetadataID != "tg_001" {
+		t.Fatalf("update target id = %q, want %q", repo.updateTargetMetadataID, "tg_001")
+	}
+	if len(repo.updateTargetMetadataInput.Labels) != 2 || repo.updateTargetMetadataInput.Labels[0] != "edge" || repo.updateTargetMetadataInput.Labels[1] != "core" {
+		t.Fatalf("update labels = %#v, want %#v", repo.updateTargetMetadataInput.Labels, []string{"edge", "core"})
+	}
+	if repo.updateTargetMetadataInput.Note != "updated" {
+		t.Fatalf("update note = %q, want %q", repo.updateTargetMetadataInput.Note, "updated")
+	}
+
+	var body targets.TargetRecord
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.TargetID != "tg_001" {
+		t.Fatalf("response target_id = %q, want %q", body.TargetID, "tg_001")
+	}
+	if body.Note != "updated" {
+		t.Fatalf("response note = %q, want %q", body.Note, "updated")
+	}
+	if len(body.Labels) != 2 || body.Labels[0] != "edge" || body.Labels[1] != "core" {
+		t.Fatalf("response labels = %#v, want %#v", body.Labels, []string{"edge", "core"})
+	}
+}
+
+func TestTargetItemRejectsInvalidMetadata(t *testing.T) {
+	repo := &fakeTargetRepository{}
+
+	handler := handlers.TargetItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_001", strings.NewReader(`{"labels":["01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","17","18","19","20","21"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body["error"] != "invalid input" {
+		t.Fatalf("expected error %q, got %q", "invalid input", body["error"])
+	}
+}
+
+func TestTargetItemMapsMetadataNotFound(t *testing.T) {
+	repo := &fakeTargetRepository{updateTargetMetadataErr: targets.ErrTargetNotFound}
+
+	handler := handlers.TargetItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_missing", strings.NewReader(`{"labels":["edge"],"note":"updated"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
 	}
 }
 

@@ -45,11 +45,6 @@ func TargetsCollection(repo targets.Repository) http.Handler {
 
 func TargetItem(repo targets.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
 		targetID := strings.TrimPrefix(r.URL.Path, "/api/targets/")
 		targetID = strings.Trim(targetID, "/")
 		if targetID == "" || strings.Contains(targetID, "/") {
@@ -57,17 +52,46 @@ func TargetItem(repo targets.Repository) http.Handler {
 			return
 		}
 
-		record, err := repo.GetTarget(r.Context(), targetID)
-		if errors.Is(err, targets.ErrTargetNotFound) {
-			writeError(w, http.StatusNotFound, "target not found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
+		switch r.Method {
+		case http.MethodGet:
+			record, err := repo.GetTarget(r.Context(), targetID)
+			if errors.Is(err, targets.ErrTargetNotFound) {
+				writeError(w, http.StatusNotFound, "target not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
 
-		writeJSON(w, http.StatusOK, record)
+			writeJSON(w, http.StatusOK, record)
+		case http.MethodPatch:
+			var input targets.UpdateMetadataInput
+			if err := decodeJSON(r, &input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+
+			input = normalizeTargetMetadataInput(input)
+			if !isValidTargetMetadataInput(input) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+
+			record, err := repo.UpdateTargetMetadata(r.Context(), targetID, input)
+			if errors.Is(err, targets.ErrTargetNotFound) {
+				writeError(w, http.StatusNotFound, "target not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+
+			writeJSON(w, http.StatusOK, record)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
 	})
 }
 
@@ -194,6 +218,37 @@ func isValidCreateTargetInput(input targets.CreateTargetInput) bool {
 		return false
 	}
 	return true
+}
+
+func normalizeTargetMetadataInput(input targets.UpdateMetadataInput) targets.UpdateMetadataInput {
+	seen := make(map[string]struct{}, len(input.Labels))
+	labels := make([]string, 0, len(input.Labels))
+	for _, raw := range input.Labels {
+		label := strings.TrimSpace(raw)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		labels = append(labels, label)
+	}
+	input.Labels = labels
+	input.Note = strings.TrimSpace(input.Note)
+	return input
+}
+
+func isValidTargetMetadataInput(input targets.UpdateMetadataInput) bool {
+	if len(input.Labels) > 20 {
+		return false
+	}
+	for _, label := range input.Labels {
+		if len(label) > 64 {
+			return false
+		}
+	}
+	return len(input.Note) <= 2000
 }
 
 func targetProbePath(path string) (targetID string, probeItemID string, isCollection bool) {

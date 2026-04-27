@@ -381,6 +381,108 @@ func TestDeleteProbeItemReturnsProbeItemNotFoundWhenTargetExists(t *testing.T) {
 	}
 }
 
+func TestUpdateTargetMetadata(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
+	var (
+		gotSQL  string
+		gotArgs []any
+	)
+	repo := &PostgresTargetRepository{db: fakeTargetDB{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			gotSQL = sql
+			gotArgs = append([]any(nil), args...)
+			return fakeTargetRow{scan: func(dest ...any) error {
+				scanTargetRecordDestinations(dest, targets.TargetRecord{
+					TargetID:                   "tg_001",
+					Name:                       "Blog",
+					TargetType:                 targets.TargetTypeService,
+					Host:                       "blog.example.com",
+					ExecutionNodeLabels:        []string{"edge"},
+					RunStatus:                  targets.RunStatusEnabled,
+					Labels:                     []string{"edge", "core"},
+					Note:                       "updated",
+					CurrentHealthStatus:        targets.HealthNormal,
+					CurrentActiveIncidentCount: 2,
+					CurrentPrimaryIssueSummary: "packet loss",
+					CreatedAt:                  now.Add(-time.Hour),
+					UpdatedAt:                  now,
+				})
+				return nil
+			}}
+		},
+	}}
+
+	record, err := repo.UpdateTargetMetadata(context.Background(), "tg_001", targets.UpdateMetadataInput{
+		Labels: []string{"edge", "core"},
+		Note:   "updated",
+	})
+	if err != nil {
+		t.Fatalf("UpdateTargetMetadata() error = %v", err)
+	}
+
+	if len(gotArgs) != 3 {
+		t.Fatalf("len(gotArgs) = %d, want 3", len(gotArgs))
+	}
+	if gotArgs[0] != "tg_001" {
+		t.Fatalf("gotArgs[0] = %#v, want %q", gotArgs[0], "tg_001")
+	}
+	if labels, ok := gotArgs[1].([]string); !ok || len(labels) != 2 || labels[0] != "edge" || labels[1] != "core" {
+		t.Fatalf("gotArgs[1] = %#v, want %#v", gotArgs[1], []string{"edge", "core"})
+	}
+	if gotArgs[2] != "updated" {
+		t.Fatalf("gotArgs[2] = %#v, want %q", gotArgs[2], "updated")
+	}
+	if !strings.Contains(gotSQL, "update targets") {
+		t.Fatalf("UpdateTargetMetadata() SQL = %q, want update targets", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "set labels = $2") {
+		t.Fatalf("UpdateTargetMetadata() SQL = %q, want labels update", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "note = $3") {
+		t.Fatalf("UpdateTargetMetadata() SQL = %q, want note update", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "updated_at = now()") {
+		t.Fatalf("UpdateTargetMetadata() SQL = %q, want updated_at refresh", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "returning "+targetSelectColumns) {
+		t.Fatalf("UpdateTargetMetadata() SQL = %q, want returning targetSelectColumns", gotSQL)
+	}
+	if record.TargetID != "tg_001" {
+		t.Fatalf("record.TargetID = %q, want %q", record.TargetID, "tg_001")
+	}
+	if record.Name != "Blog" {
+		t.Fatalf("record.Name = %q, want %q", record.Name, "Blog")
+	}
+	if len(record.Labels) != 2 || record.Labels[0] != "edge" || record.Labels[1] != "core" {
+		t.Fatalf("record.Labels = %#v, want %#v", record.Labels, []string{"edge", "core"})
+	}
+	if record.Note != "updated" {
+		t.Fatalf("record.Note = %q, want %q", record.Note, "updated")
+	}
+	if record.UpdatedAt != now {
+		t.Fatalf("record.UpdatedAt = %s, want %s", record.UpdatedAt.Format(time.RFC3339), now.Format(time.RFC3339))
+	}
+}
+
+func TestUpdateTargetMetadataMapsNotFound(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresTargetRepository{db: fakeTargetDB{
+		queryRow: func(context.Context, string, ...any) pgx.Row {
+			return fakeTargetRow{scan: func(dest ...any) error {
+				return pgx.ErrNoRows
+			}}
+		},
+	}}
+
+	_, err := repo.UpdateTargetMetadata(context.Background(), "tg_missing", targets.UpdateMetadataInput{})
+	if !errors.Is(err, targets.ErrTargetNotFound) {
+		t.Fatalf("UpdateTargetMetadata() error = %v, want ErrTargetNotFound", err)
+	}
+}
+
 type fakeTargetDB struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 	query    func(context.Context, string, ...any) (pgx.Rows, error)

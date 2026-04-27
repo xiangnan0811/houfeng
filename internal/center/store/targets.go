@@ -197,6 +197,23 @@ func (r *PostgresTargetRepository) ListTargets(ctx context.Context) ([]targets.T
 	return records, nil
 }
 
+func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, targetID string, input targets.UpdateMetadataInput) (targets.TargetRecord, error) {
+	record, err := scanTarget(r.db.QueryRow(ctx, `
+		update targets
+		set labels = $2,
+		    note = $3,
+		    updated_at = now()
+		where target_id = $1
+		returning `+targetSelectColumns, targetID, input.Labels, input.Note))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return targets.TargetRecord{}, targets.ErrTargetNotFound
+	}
+	if err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("update target metadata %q: %w", targetID, err)
+	}
+	return record, nil
+}
+
 func (r *PostgresTargetRepository) GetTarget(ctx context.Context, targetID string) (targets.TargetRecord, error) {
 	record, err := scanTarget(r.db.QueryRow(ctx, `
 		select `+targetSelectColumns+`

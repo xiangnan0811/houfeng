@@ -106,12 +106,18 @@ type CreateProbeItemInput struct {
 	Config         json.RawMessage `json:"config"`
 }
 
+type UpdateMetadataInput struct {
+	Labels []string `json:"labels"`
+	Note   string   `json:"note"`
+}
+
 type UpdateProbeItemInput = CreateProbeItemInput
 
 type Repository interface {
 	ListTargets(context.Context) ([]TargetRecord, error)
 	GetTarget(context.Context, string) (TargetRecord, error)
 	CreateTarget(context.Context, CreateTargetInput) (TargetRecord, error)
+	UpdateTargetMetadata(context.Context, string, UpdateMetadataInput) (TargetRecord, error)
 	ListProbeItems(context.Context, string) ([]ProbeItemRecord, error)
 	CreateProbeItem(context.Context, string, CreateProbeItemInput) (ProbeItemRecord, error)
 	UpdateProbeItem(context.Context, string, string, UpdateProbeItemInput) (ProbeItemRecord, error)
