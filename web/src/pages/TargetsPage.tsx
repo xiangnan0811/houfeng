@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { StatusBadge } from '../components/StatusBadge'
@@ -136,6 +136,7 @@ function targetRuntimeActions(
 
 export function TargetsPage() {
   const navigate = useNavigate()
+  const mountedRef = useRef(false)
   const [targets, setTargets] = useState<TargetRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -145,6 +146,13 @@ export function TargetsPage() {
   const [createForm, setCreateForm] = useState<CreateTargetFormState>(initialCreateForm)
   const [runtimeBusyTargetId, setRuntimeBusyTargetId] = useState<string | null>(null)
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -164,6 +172,11 @@ export function TargetsPage() {
       cancelled = true
     }
   }, [])
+
+  function resetCreateFlow() {
+    setCreateError(null)
+    setCreateForm(initialCreateForm)
+  }
 
   function updateCreateField<K extends keyof CreateTargetFormState>(
     field: K,
@@ -187,15 +200,19 @@ export function TargetsPage() {
     setCreateSubmitting(true)
     try {
       const created = await createTarget(payload)
+      if (!mountedRef.current) return
       setTargets((current) => [
         created,
         ...current.filter((item) => item.target_id !== created.target_id),
       ])
       navigate(`/targets/${created.target_id}`)
     } catch (submitError) {
+      if (!mountedRef.current) return
       setCreateError(describeError(submitError, '创建目标失败'))
     } finally {
-      setCreateSubmitting(false)
+      if (mountedRef.current) {
+        setCreateSubmitting(false)
+      }
     }
   }
 
@@ -264,7 +281,17 @@ export function TargetsPage() {
             以 ProbeItem 视角组织目标状态，并保留执行节点标签与最近成功/失败摘要。
           </p>
         </div>
-        <button type="button" onClick={() => setCreateOpen((current) => !current)}>
+        <button
+          type="button"
+          onClick={() =>
+            setCreateOpen((current) => {
+              if (current) {
+                resetCreateFlow()
+              }
+              return !current
+            })
+          }
+        >
           新建目标
         </button>
       </header>
