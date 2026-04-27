@@ -506,35 +506,30 @@ describe('NodesPage', () => {
     })
   })
 
-  it('requires strong confirmation before pausing monitoring and keeps runtime errors local', async () => {
+  it('uses an inline stateful confirmation before pausing node monitoring from the list', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          mockJSONResponse([
-            {
-              node_id: 'nd_001',
-              display_name: 'Tokyo Edge',
-              region: 'ap-northeast-1',
-              city: 'Tokyo',
-              provider: 'Vultr',
-              lifecycle_status: '在用',
-              monitoring_status: '启用',
-              binding_status: '已绑定',
-              labels: [],
-              note: '',
-              current_health_status: '正常',
-              current_active_incident_count: 0,
-              current_primary_issue_summary: '',
-              created_at: '2026-04-26T09:00:00Z',
-              updated_at: '2026-04-26T09:00:00Z',
-            },
-          ]),
-        )
-        .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid runtime transition' }, 409)),
-    )
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            binding_status: '已绑定',
+          }),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            binding_status: '已绑定',
+            monitoring_status: '暂停',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
 
     render(
       <MemoryRouter initialEntries={['/nodes']}>
@@ -548,10 +543,30 @@ describe('NodesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
 
-    expect(confirmMock).toHaveBeenCalledWith('暂停监控会停止采集并产生数据空档，确定继续吗？')
+    expect(screen.getByRole('heading', { name: '确认暂停节点监控' })).toBeInTheDocument()
+    expect(screen.getByText('当前：监控运行状态为启用。')).toBeInTheDocument()
+    expect(screen.getByText('操作后：监控运行状态变为暂停。')).toBeInTheDocument()
+    expect(
+      screen.getByText('会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('不会删除历史事件、观测记录或 agent 绑定关系。')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('heading', { name: '确认暂停节点监控' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
     await waitFor(() =>
-      expect(screen.getByText('invalid runtime transition')).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
     )
-    expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
   })
 })

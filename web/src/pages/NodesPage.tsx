@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
@@ -33,12 +34,15 @@ const initialCreateForm: CreateNodeInput = {
   note: '',
 }
 
-const NODE_PAUSE_CONFIRM_MESSAGE = '暂停监控会停止采集并产生数据空档，确定继续吗？'
 const NODE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
 const NODE_BINDING_CONFLICT_SUMMARY = '等待绑定确认'
 
 type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
 type NodeListView = 'all' | 'binding-conflict'
+type PendingNodeConfirmation = {
+  nodeId: string
+  action: 'pause'
+}
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -123,6 +127,7 @@ export function NodesPage() {
   const [createForm, setCreateForm] = useState<CreateNodeInput>(initialCreateForm)
   const [runtimeBusyNodeId, setRuntimeBusyNodeId] = useState<string | null>(null)
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingNodeConfirmation | null>(null)
 
   function resetCreateFlow() {
     setCreateError(null)
@@ -153,8 +158,13 @@ export function NodesPage() {
     setCreateForm((current) => ({ ...current, [field]: value }))
   }
 
-  async function handleRuntimeAction(node: NodeRecord, action: NodeRuntimeAction) {
-    if (action === 'pause' && !window.confirm(NODE_PAUSE_CONFIRM_MESSAGE)) {
+  async function handleRuntimeAction(
+    node: NodeRecord,
+    action: NodeRuntimeAction,
+    confirmed = false,
+  ) {
+    if (action === 'pause' && !confirmed) {
+      setPendingConfirmation({ nodeId: node.node_id, action })
       return
     }
 
@@ -177,6 +187,9 @@ export function NodesPage() {
               : await resumeNodeMonitoring(node.node_id)
       setNodes((current) =>
         current.map((item) => (item.node_id === updated.node_id ? updated : item)),
+      )
+      setPendingConfirmation((current) =>
+        current?.nodeId === updated.node_id ? null : current,
       )
     } catch (runtimeError) {
       setRuntimeErrors((current) => ({
@@ -434,6 +447,23 @@ export function NodesPage() {
                   </button>
                 ))}
               </div>
+              {pendingConfirmation?.nodeId === node.node_id && pendingConfirmation.action === 'pause' ? (
+                <ActionConfirmationCard
+                  title="确认暂停节点监控"
+                  current="当前：监控运行状态为启用。"
+                  result="操作后：监控运行状态变为暂停。"
+                  impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
+                  unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
+                  confirmLabel="确认暂停监控"
+                  disabled={runtimeBusyNodeId === node.node_id}
+                  onConfirm={() => void handleRuntimeAction(node, 'pause', true)}
+                  onCancel={() =>
+                    setPendingConfirmation((current) =>
+                      current?.nodeId === node.node_id ? null : current,
+                    )
+                  }
+                />
+              ) : null}
               {runtimeErrors[node.node_id] ? <p>{runtimeErrors[node.node_id]}</p> : null}
             </div>
             <div className="badge-row badge-row--wrap">
