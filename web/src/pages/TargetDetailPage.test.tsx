@@ -23,6 +23,12 @@ function deferredResponse() {
   return { promise, resolve, reject }
 }
 
+function probeActionButton(action: string, probeItemId = 'pb_001') {
+  return screen.getByRole('button', {
+    name: new RegExp(`^${action} ProbeItem ${probeItemId}\\b`),
+  })
+}
+
 function TargetDetailTestHarness() {
   const navigate = useNavigate()
 
@@ -478,7 +484,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(probeActionButton('编辑'))
     expect(screen.getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByLabelText('HTTP Path')).toHaveValue('/healthz')
 
@@ -574,7 +580,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(probeActionButton('编辑'))
 
     expect(
       screen.getByText('ProbeItem 包含当前 V1 表单不支持的配置字段，不能安全编辑。'),
@@ -643,16 +649,17 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(probeActionButton('编辑'))
     fireEvent.change(screen.getByLabelText('HTTP Path'), { target: { value: '/ready' } })
     fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
 
     expect(screen.getByRole('button', { name: '正在保存…' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '编辑' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '停用' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '删除' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toBeDisabled()
+    expect(probeActionButton('编辑')).toBeDisabled()
+    expect(probeActionButton('停用')).toBeDisabled()
+    expect(probeActionButton('删除')).toBeDisabled()
 
     saveResponse.resolve(
       mockJSONResponse({
@@ -676,6 +683,115 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument(),
     )
+  })
+
+  it('serializes row ProbeItem mutations across multiple rows', async () => {
+    const rowUpdate = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            probe_item_id: 'pb_001',
+            target_id: 'tg_001',
+            probe_kind: 'http',
+            enabled: true,
+            frequency_tier: '1m',
+            timeout_seconds: 5,
+            config: {
+              scheme: 'https',
+              path: '/healthz',
+              method: 'GET',
+              expected_status_range: [200, 299],
+            },
+            created_at: '2026-04-21T00:00:00Z',
+            updated_at: '2026-04-21T00:00:00Z',
+          },
+          {
+            probe_item_id: 'pb_002',
+            target_id: 'tg_001',
+            probe_kind: 'tcp',
+            enabled: true,
+            frequency_tier: '5m',
+            timeout_seconds: 3,
+            config: { port: 443 },
+            created_at: '2026-04-21T00:00:00Z',
+            updated_at: '2026-04-21T00:00:00Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockImplementationOnce(() => rowUpdate.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
+    expect(screen.getByText('TCP')).toBeInTheDocument()
+
+    fireEvent.click(probeActionButton('停用', 'pb_001'))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
+    expect(probeActionButton('编辑', 'pb_001')).toBeDisabled()
+    expect(probeActionButton('停用', 'pb_001')).toBeDisabled()
+    expect(probeActionButton('删除', 'pb_001')).toBeDisabled()
+    expect(probeActionButton('编辑', 'pb_002')).toBeDisabled()
+    expect(probeActionButton('停用', 'pb_002')).toBeDisabled()
+    expect(probeActionButton('删除', 'pb_002')).toBeDisabled()
+
+    fireEvent.click(probeActionButton('停用', 'pb_002'))
+    expect(fetchMock).toHaveBeenCalledTimes(6)
+
+    rowUpdate.resolve(
+      mockJSONResponse({
+        probe_item_id: 'pb_001',
+        target_id: 'tg_001',
+        probe_kind: 'http',
+        enabled: false,
+        frequency_tier: '1m',
+        timeout_seconds: 5,
+        config: {
+          scheme: 'https',
+          path: '/healthz',
+          method: 'GET',
+          expected_status_range: [200, 299],
+        },
+        created_at: '2026-04-21T00:00:00Z',
+        updated_at: '2026-04-27T10:00:00Z',
+      }),
+    )
+
+    await waitFor(() => expect(probeActionButton('启用', 'pb_001')).toBeEnabled())
+    expect(probeActionButton('停用', 'pb_002')).toBeEnabled()
+    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
   it('disables a ProbeItem with a full update and preserves the existing config', async () => {
@@ -754,7 +870,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '停用' }))
+    fireEvent.click(probeActionButton('停用'))
 
     await waitFor(() => expect(screen.getByText('停用')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
@@ -834,7 +950,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('TCP')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    fireEvent.click(probeActionButton('删除'))
 
     expect(confirmSpy).toHaveBeenCalledWith(
       '删除 ProbeItem 会移除这条观测方式，仅应用于误建场景，确定继续吗？',
@@ -907,11 +1023,11 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '停用' }))
+    fireEvent.click(probeActionButton('停用'))
     await waitFor(() => expect(screen.getByText('update failed')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    fireEvent.click(probeActionButton('删除'))
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.getByText('delete failed')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
@@ -1000,7 +1116,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(probeActionButton('编辑'))
     fireEvent.change(screen.getByLabelText('HTTP Path'), { target: { value: '/stale' } })
     fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
 

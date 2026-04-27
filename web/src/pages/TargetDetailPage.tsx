@@ -243,6 +243,10 @@ function hasUnsupportedProbeConfigFields(probeItem: ProbeItemRecord): boolean {
   return Object.keys(config).some((key) => !allowedKeys.has(key))
 }
 
+function probeActionAccessibleName(action: string, probeItem: ProbeItemRecord): string {
+  return `${action} ProbeItem ${probeItem.probe_item_id} ${probeItem.probe_kind.toUpperCase()} ${formatConfigSummary(probeItem.config)}`
+}
+
 function targetRuntimeActions(
   target: TargetRecord,
 ): Array<{ action: TargetRuntimeAction; label: string }> {
@@ -310,6 +314,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const isMountedRef = useRef(true)
   const probeFormRequestRef = useRef(0)
   const probeRowMutationRequestRef = useRef(0)
+  const probeRowMutationInFlightRef = useRef(false)
 
   useEffect(() => {
     currentRequestedTargetIdRef.current = state.requestedTargetId
@@ -480,20 +485,20 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   function openProbeCreateForm(target: TargetRecord) {
+    if (probeCreateSubmitting) return
     probeFormRequestRef.current += 1
     setProbeFormMode({ kind: 'create' })
     setProbeCreateForm(initialProbeCreateFormForTarget(target))
     setProbeCreateError(null)
-    setProbeCreateSubmitting(false)
     setProbeMutationError(null)
     setProbeCreateOpen(true)
   }
 
   function openProbeEditForm(probeItem: ProbeItemRecord) {
+    if (probeCreateSubmitting) return
     if (hasUnsupportedProbeConfigFields(probeItem)) {
       probeFormRequestRef.current += 1
       setProbeCreateOpen(false)
-      setProbeCreateSubmitting(false)
       setProbeCreateError(null)
       setProbeMutationError('ProbeItem 包含当前 V1 表单不支持的配置字段，不能安全编辑。')
       return
@@ -503,7 +508,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     setProbeFormMode({ kind: 'edit', probeItemId: probeItem.probe_item_id })
     setProbeCreateForm(formStateForProbeItem(probeItem))
     setProbeCreateError(null)
-    setProbeCreateSubmitting(false)
     setProbeMutationError(null)
     setProbeCreateOpen(true)
   }
@@ -603,11 +607,12 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   async function handleToggleProbeItem(probeItem: ProbeItemRecord) {
-    if (!target) return
+    if (!target || probeCreateSubmitting || probeRowMutationInFlightRef.current) return
 
     const actionTargetId = target.target_id
     const requestId = probeRowMutationRequestRef.current + 1
     probeRowMutationRequestRef.current = requestId
+    probeRowMutationInFlightRef.current = true
     setProbeMutationBusyId(probeItem.probe_item_id)
     setProbeMutationError(null)
 
@@ -639,11 +644,15 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       }
       setProbeMutationError(describeError(error, 'ProbeItem 操作失败'))
     } finally {
+      const isCurrentRowMutation = probeRowMutationRequestRef.current === requestId
+      if (isCurrentRowMutation) {
+        probeRowMutationInFlightRef.current = false
+      }
       if (
         isMountedRef.current &&
         currentRouteTargetIdRef.current === actionTargetId &&
         currentRequestedTargetIdRef.current === actionTargetId &&
-        probeRowMutationRequestRef.current === requestId
+        isCurrentRowMutation
       ) {
         setProbeMutationBusyId(null)
       }
@@ -651,13 +660,17 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   async function handleDeleteProbeItem(probeItem: ProbeItemRecord) {
-    if (!target || !window.confirm(PROBE_DELETE_CONFIRM_MESSAGE)) {
+    if (!target || probeCreateSubmitting || probeRowMutationInFlightRef.current) {
+      return
+    }
+    if (!window.confirm(PROBE_DELETE_CONFIRM_MESSAGE)) {
       return
     }
 
     const actionTargetId = target.target_id
     const requestId = probeRowMutationRequestRef.current + 1
     probeRowMutationRequestRef.current = requestId
+    probeRowMutationInFlightRef.current = true
     setProbeMutationBusyId(probeItem.probe_item_id)
     setProbeMutationError(null)
 
@@ -689,11 +702,15 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       }
       setProbeMutationError(describeError(error, 'ProbeItem 操作失败'))
     } finally {
+      const isCurrentRowMutation = probeRowMutationRequestRef.current === requestId
+      if (isCurrentRowMutation) {
+        probeRowMutationInFlightRef.current = false
+      }
       if (
         isMountedRef.current &&
         currentRouteTargetIdRef.current === actionTargetId &&
         currentRequestedTargetIdRef.current === actionTargetId &&
-        probeRowMutationRequestRef.current === requestId
+        isCurrentRowMutation
       ) {
         setProbeMutationBusyId(null)
       }
@@ -716,6 +733,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       </section>
     )
   }
+
+  const probeRowMutationBusy = probeMutationBusyId !== null
 
   return (
     <div className="page-stack">
@@ -794,11 +813,12 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           <div>
             <button
               type="button"
+              disabled={probeCreateSubmitting}
               onClick={() => {
+                if (probeCreateSubmitting) return
                 if (probeCreateOpen && probeFormMode.kind === 'create') {
                   probeFormRequestRef.current += 1
                   setProbeCreateOpen(false)
-                  setProbeCreateSubmitting(false)
                   return
                 }
                 openProbeCreateForm(target)
@@ -1039,9 +1059,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                     <div className="badge-row badge-row--wrap">
                       <button
                         type="button"
+                        aria-label={probeActionAccessibleName('编辑', probeItem)}
                         disabled={
                           probeCreateSubmitting ||
-                          probeMutationBusyId === probeItem.probe_item_id
+                          probeRowMutationBusy
                         }
                         onClick={() => openProbeEditForm(probeItem)}
                       >
@@ -1049,9 +1070,13 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                       </button>
                       <button
                         type="button"
+                        aria-label={probeActionAccessibleName(
+                          probeItem.enabled ? '停用' : '启用',
+                          probeItem,
+                        )}
                         disabled={
                           probeCreateSubmitting ||
-                          probeMutationBusyId === probeItem.probe_item_id
+                          probeRowMutationBusy
                         }
                         onClick={() => void handleToggleProbeItem(probeItem)}
                       >
@@ -1059,9 +1084,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                       </button>
                       <button
                         type="button"
+                        aria-label={probeActionAccessibleName('删除', probeItem)}
                         disabled={
                           probeCreateSubmitting ||
-                          probeMutationBusyId === probeItem.probe_item_id
+                          probeRowMutationBusy
                         }
                         onClick={() => void handleDeleteProbeItem(probeItem)}
                       >
