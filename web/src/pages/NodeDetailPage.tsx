@@ -497,7 +497,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
               </div>
             </dl>
             {bindingConflictLoading ? <p>正在加载绑定冲突详情…</p> : null}
-            {bindingConflictError ? <p>{bindingConflictError}</p> : null}
+            {bindingConflictError ? <p role="alert">{bindingConflictError}</p> : null}
             <div className="badge-row badge-row--wrap">
               <button
                 type="button"

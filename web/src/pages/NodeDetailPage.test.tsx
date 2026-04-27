@@ -481,7 +481,7 @@ describe('NodeDetailPage', () => {
     })
   })
 
-  it('exposes reject and reset binding actions from Node detail', async () => {
+  it('rejects a pending fingerprint from Node detail', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(nodeRecord()))
@@ -517,6 +517,56 @@ describe('NodeDetailPage', () => {
         cache: 'no-store',
       }),
     )
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('resets node binding from Node detail and returns to the unbound state', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(nodeRecord()))
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse(onboardingConflictState()))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          onboardingConflictState({
+            binding_status: '未绑定',
+            phase: '未开始接入',
+            pending_binding: undefined,
+            current_binding_fingerprint_summary: '',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_conflict']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '重置绑定' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '重置绑定' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/binding/reset', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('未绑定')).toBeInTheDocument()
   })
 
   it('keeps binding action errors local to the conflict card', async () => {
@@ -543,7 +593,9 @@ describe('NodeDetailPage', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '重置绑定' }))
 
-    await waitFor(() => expect(screen.getByText('invalid binding transition')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('invalid binding transition'),
+    )
     expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument()
   })
