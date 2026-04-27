@@ -944,7 +944,25 @@ describe('NodeDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
 
-    expect(confirmMock).toHaveBeenCalledWith('暂停监控会停止采集并产生数据空档，确定继续吗？')
+    expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
+    expect(screen.getByText('当前：监控运行状态为启用。')).toBeInTheDocument()
+    expect(screen.getByText('操作后：监控运行状态变为暂停。')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('不会删除历史事件、观测记录或 agent 绑定关系。')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('heading', { name: '确认暂停节点监控' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
     )

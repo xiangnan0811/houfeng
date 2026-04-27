@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
+import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { IncidentList } from '../components/IncidentList'
@@ -52,7 +53,6 @@ type State = {
   eventsError: string | null
 }
 
-const NODE_PAUSE_CONFIRM_MESSAGE = '暂停监控会停止采集并产生数据空档，确定继续吗？'
 const NODE_BINDING_CONFLICT_LOAD_ERROR = '绑定冲突详情暂不可用'
 const NODE_BINDING_ACTION_ERROR = '更新绑定冲突状态失败'
 const NODE_LIFECYCLE_ACTION_ERROR = '节点生命周期操作失败'
@@ -74,6 +74,9 @@ type BindingConflictState = {
 
 type BindingConflictAction = 'confirm' | 'reject' | 'reset'
 type NodeLifecycleAction = 'retire' | 'restore-to-observing'
+type PendingRuntimeConfirmation = {
+  action: 'pause'
+}
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -122,6 +125,12 @@ function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction
   return []
 }
 
+function pauseConfirmationCurrent(node: NodeRecord) {
+  return node.monitoring_status === '维护中'
+    ? '当前：监控运行状态为维护中。'
+    : '当前：监控运行状态为启用。'
+}
+
 export function NodeDetailPage() {
   const { nodeId } = useParams()
   return <NodeDetailPageContent key={nodeId ?? 'missing-node'} nodeId={nodeId} />
@@ -141,6 +150,8 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   })
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] =
+    useState<PendingRuntimeConfirmation | null>(null)
   const [lifecycleSubmitting, setLifecycleSubmitting] = useState<NodeLifecycleAction | null>(null)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [showRetireConfirmation, setShowRetireConfirmation] = useState(false)
@@ -154,6 +165,13 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
+  const actionButtonRefs = useRef<Record<NodeRuntimeAction, HTMLButtonElement | null>>({
+    'enter-maintenance': null,
+    'exit-maintenance': null,
+    pause: null,
+    resume: null,
+  })
+  const pendingFocusRestoreRef = useRef<NodeRuntimeAction | null>(null)
 
   useEffect(() => {
     currentRouteNodeIdRef.current = nodeId ?? null
@@ -162,6 +180,20 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   useEffect(() => {
     currentRequestedNodeIdRef.current = state.requestedNodeId
   }, [state.requestedNodeId])
+
+  useEffect(() => {
+    if (pendingRuntimeConfirmation) return
+
+    const action = pendingFocusRestoreRef.current
+    if (!action) return
+
+    const preferred = actionButtonRefs.current[action]
+    const fallback = action === 'pause' ? actionButtonRefs.current.resume : null
+    const target = [preferred, fallback].find((element) => element?.isConnected)
+
+    target?.focus()
+    pendingFocusRestoreRef.current = null
+  }, [pendingRuntimeConfirmation, state.node])
 
   useEffect(
     () => () => {
@@ -305,9 +337,10 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
 
-  async function handleRuntimeAction(action: NodeRuntimeAction) {
+  async function handleRuntimeAction(action: NodeRuntimeAction, confirmed = false) {
     if (!node) return
-    if (action === 'pause' && !window.confirm(NODE_PAUSE_CONFIRM_MESSAGE)) {
+    if (action === 'pause' && !confirmed) {
+      setPendingRuntimeConfirmation({ action })
       return
     }
 
@@ -335,6 +368,8 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         ...current,
         node: updated,
       }))
+      pendingFocusRestoreRef.current = action
+      setPendingRuntimeConfirmation((current) => (current?.action === action ? null : current))
     } catch (error) {
       if (
         !isMountedRef.current ||
@@ -606,6 +641,9 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
             {nodeRuntimeActions(node).map(({ action, label }) => (
               <button
                 key={action}
+                ref={(element) => {
+                  actionButtonRefs.current[action] = element
+                }}
                 type="button"
                 disabled={runtimeSubmitting}
                 onClick={() => void handleRuntimeAction(action)}
@@ -614,6 +652,22 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
               </button>
             ))}
           </div>
+          {pendingRuntimeConfirmation?.action === 'pause' ? (
+            <ActionConfirmationCard
+              title="确认暂停节点监控"
+              current={pauseConfirmationCurrent(node)}
+              result="操作后：监控运行状态变为暂停。"
+              impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
+              unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
+              confirmLabel="确认暂停监控"
+              disabled={runtimeSubmitting}
+              onConfirm={() => void handleRuntimeAction('pause', true)}
+              onCancel={() => {
+                pendingFocusRestoreRef.current = 'pause'
+                setPendingRuntimeConfirmation(null)
+              }}
+            />
+          ) : null}
           {runtimeError ? <p>{runtimeError}</p> : null}
         </div>
       </DetailSection>
