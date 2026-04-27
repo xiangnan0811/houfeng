@@ -129,6 +129,8 @@ const (
 	EventNodeMonitoringMaintenanceExited  EventType = "node_monitoring_maintenance_exited"
 	EventNodeMonitoringPaused             EventType = "node_monitoring_paused"
 	EventNodeMonitoringResumed            EventType = "node_monitoring_resumed"
+	EventNodeRetired                      EventType = "node_retired"
+	EventNodeRestoredToObserving          EventType = "node_restored_to_observing"
 	EventTargetMaintenanceEntered         EventType = "target_maintenance_entered"
 	EventTargetMaintenanceExited          EventType = "target_maintenance_exited"
 	EventTargetPaused                     EventType = "target_paused"

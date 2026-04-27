@@ -27,6 +27,13 @@ type fakeNodeRuntimeControlRepository struct {
 	resumeNodeID string
 	resumeResult nodes.Record
 	resumeErr    error
+
+	retireNodeID  string
+	retireResult  nodes.Record
+	retireErr     error
+	restoreNodeID string
+	restoreResult nodes.Record
+	restoreErr    error
 }
 
 func (f *fakeNodeRuntimeControlRepository) SetNodeMonitoringMaintenance(_ context.Context, nodeID string) (nodes.Record, error) {
@@ -51,6 +58,22 @@ func (f *fakeNodeRuntimeControlRepository) ResumeNodeMonitoring(_ context.Contex
 		return nodes.Record{}, f.resumeErr
 	}
 	return f.resumeResult, nil
+}
+
+func (f *fakeNodeRuntimeControlRepository) RetireNode(_ context.Context, nodeID string) (nodes.Record, error) {
+	f.retireNodeID = nodeID
+	if f.retireErr != nil {
+		return nodes.Record{}, f.retireErr
+	}
+	return f.retireResult, nil
+}
+
+func (f *fakeNodeRuntimeControlRepository) RestoreRetiredNodeToObserving(_ context.Context, nodeID string) (nodes.Record, error) {
+	f.restoreNodeID = nodeID
+	if f.restoreErr != nil {
+		return nodes.Record{}, f.restoreErr
+	}
+	return f.restoreResult, nil
 }
 
 type fakeTargetRuntimeControlRepository struct {
@@ -250,6 +273,124 @@ func TestNodeRuntimeControlHandlerMapsErrors(t *testing.T) {
 			t.Parallel()
 
 			handler := handlers.NodeRuntimeControls(tt.repo)
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+			assertAdminError(t, recorder, tt.wantMessage)
+		})
+	}
+}
+
+func TestNodeLifecycleControlHandlerReturnsUpdatedNode(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name           string
+		path           string
+		wantNodeID     string
+		wantLifecycle  string
+		buildRepo      func() *fakeNodeRuntimeControlRepository
+		assertCalledID func(*testing.T, *fakeNodeRuntimeControlRepository, string)
+	}{
+		{
+			name:          "retire",
+			path:          "/api/nodes/nd_001/lifecycle/retire",
+			wantNodeID:    "nd_001",
+			wantLifecycle: nodes.LifecycleRetired,
+			buildRepo: func() *fakeNodeRuntimeControlRepository {
+				return &fakeNodeRuntimeControlRepository{retireResult: nodes.Record{NodeID: "nd_001", LifecycleStatus: nodes.LifecycleRetired, UpdatedAt: now}}
+			},
+			assertCalledID: func(t *testing.T, repo *fakeNodeRuntimeControlRepository, want string) {
+				t.Helper()
+				if repo.retireNodeID != want {
+					t.Fatalf("RetireNode nodeID = %q, want %q", repo.retireNodeID, want)
+				}
+			},
+		},
+		{
+			name:          "restore retired to observing",
+			path:          "/api/nodes/nd_002/lifecycle/restore-to-observing",
+			wantNodeID:    "nd_002",
+			wantLifecycle: nodes.LifecycleObserving,
+			buildRepo: func() *fakeNodeRuntimeControlRepository {
+				return &fakeNodeRuntimeControlRepository{restoreResult: nodes.Record{NodeID: "nd_002", LifecycleStatus: nodes.LifecycleObserving, UpdatedAt: now}}
+			},
+			assertCalledID: func(t *testing.T, repo *fakeNodeRuntimeControlRepository, want string) {
+				t.Helper()
+				if repo.restoreNodeID != want {
+					t.Fatalf("RestoreRetiredNodeToObserving nodeID = %q, want %q", repo.restoreNodeID, want)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := tt.buildRepo()
+			handler := handlers.NodeLifecycleControls(repo)
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+			}
+			tt.assertCalledID(t, repo, tt.wantNodeID)
+
+			var body nodes.Record
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal response body: %v", err)
+			}
+			if body.NodeID != tt.wantNodeID {
+				t.Fatalf("NodeID = %q, want %q", body.NodeID, tt.wantNodeID)
+			}
+			if body.LifecycleStatus != tt.wantLifecycle {
+				t.Fatalf("LifecycleStatus = %q, want %q", body.LifecycleStatus, tt.wantLifecycle)
+			}
+		})
+	}
+}
+
+func TestNodeLifecycleControlHandlerMapsErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		repo        *fakeNodeRuntimeControlRepository
+		path        string
+		wantStatus  int
+		wantMessage string
+	}{
+		{
+			name:        "invalid transition",
+			repo:        &fakeNodeRuntimeControlRepository{retireErr: errors.Join(store.ErrInvalidNodeRuntimeTransition, errors.New("cannot retire"))},
+			path:        "/api/nodes/nd_001/lifecycle/retire",
+			wantStatus:  http.StatusConflict,
+			wantMessage: "invalid lifecycle transition",
+		},
+		{
+			name:        "not found",
+			repo:        &fakeNodeRuntimeControlRepository{restoreErr: nodes.ErrNodeNotFound},
+			path:        "/api/nodes/nd_missing/lifecycle/restore-to-observing",
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "node not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := handlers.NodeLifecycleControls(tt.repo)
 			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			recorder := httptest.NewRecorder()
 

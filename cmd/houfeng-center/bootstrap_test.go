@@ -189,6 +189,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.NodeRuntimeControlHandler == nil {
 		t.Fatal("router node runtime control handler = nil, want non-nil")
 	}
+	if gotOpts.NodeLifecycleControlHandler == nil {
+		t.Fatal("router node lifecycle control handler = nil, want non-nil")
+	}
 	if gotOpts.NodeOnboardingHandler == nil {
 		t.Fatal("router node onboarding handler = nil, want non-nil")
 	}

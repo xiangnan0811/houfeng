@@ -104,6 +104,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		NodeItemHandler:                 handlers.NodeItem(nodeRepo),
 		NodeRuntimeFactsHandler:         handlers.NodeRuntimeFacts(runtimeFactsRepo),
 		NodeRuntimeControlHandler:       handlers.NodeRuntimeControls(nodeRepo),
+		NodeLifecycleControlHandler:     handlers.NodeLifecycleControls(nodeRepo),
 		NodeOnboardingHandler:           handlers.NodeOnboarding(nodeRepo),
 		NodeEnrollmentTokenHandler:      handlers.NodeEnrollmentToken(nodeRepo),
 		NodeBindingConfirmRebindHandler: handlers.NodeBindingConfirmRebind(nodeRepo),

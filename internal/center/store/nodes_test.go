@@ -734,6 +734,142 @@ func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) 
 	}
 }
 
+func TestNodeLifecycleTransitionsWriteEvents(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		method           func(*PostgresNodeRepository, context.Context, string) (nodes.Record, error)
+		initialLifecycle string
+		returnLifecycle  string
+		wantEventType    incidents.EventType
+		wantSummary      string
+		wantSQLSnippet   string
+	}{
+		{
+			name:             "retire",
+			method:           (*PostgresNodeRepository).RetireNode,
+			initialLifecycle: nodes.LifecycleInUse,
+			returnLifecycle:  nodes.LifecycleRetired,
+			wantEventType:    incidents.EventNodeRetired,
+			wantSummary:      "节点已退役并退出活跃舰队，历史记录保留",
+			wantSQLSnippet:   "lifecycle_status <> '已退役'",
+		},
+		{
+			name:             "restore retired to observing",
+			method:           (*PostgresNodeRepository).RestoreRetiredNodeToObserving,
+			initialLifecycle: nodes.LifecycleRetired,
+			returnLifecycle:  nodes.LifecycleObserving,
+			wantEventType:    incidents.EventNodeRestoredToObserving,
+			wantSummary:      "节点已从退役恢复到观察中",
+			wantSQLSnippet:   "lifecycle_status = '已退役'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var gotSQL string
+			var execSQL string
+			var execArgs []any
+			committed := false
+			repo := &PostgresNodeRepository{db: fakeNodeDB{
+				beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+					return &fakeNodeTx{
+						queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+							gotSQL = sql
+							if len(args) != 1 || args[0] != "nd_001" {
+								t.Fatalf("QueryRow args = %#v, want node id", args)
+							}
+							return fakeNodeRow{scan: func(dest ...any) error {
+								scanNodeRecordDestinations(dest, nodes.Record{
+									NodeID:           "nd_001",
+									DisplayName:      "Tokyo Edge",
+									LifecycleStatus:  tt.returnLifecycle,
+									MonitoringStatus: nodes.MonitoringEnabled,
+									BindingStatus:    nodes.BindingBound,
+								})
+								return nil
+							}}
+						},
+						exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+							execSQL = sql
+							execArgs = append([]any(nil), args...)
+							return pgconn.NewCommandTag("INSERT 0 1"), nil
+						},
+						commit: func(context.Context) error {
+							committed = true
+							return nil
+						},
+					}, nil
+				},
+			}}
+
+			got, err := tt.method(repo, context.Background(), "nd_001")
+			if err != nil {
+				t.Fatalf("%s error = %v", tt.name, err)
+			}
+			if got.LifecycleStatus != tt.returnLifecycle {
+				t.Fatalf("LifecycleStatus = %q, want %q", got.LifecycleStatus, tt.returnLifecycle)
+			}
+			if !strings.Contains(gotSQL, tt.wantSQLSnippet) {
+				t.Fatalf("transition SQL = %q, want snippet %q", gotSQL, tt.wantSQLSnippet)
+			}
+			if !strings.Contains(execSQL, "insert into state_change_events") {
+				t.Fatalf("event SQL = %q, want state_change_events insert", execSQL)
+			}
+			if len(execArgs) < 8 {
+				t.Fatalf("event args = %#v, want full insert args", execArgs)
+			}
+			if execArgs[1] != string(incidents.ObjectTypeNode) {
+				t.Fatalf("event object_type arg = %#v, want node", execArgs[1])
+			}
+			if execArgs[2] != "nd_001" {
+				t.Fatalf("event object_id arg = %#v, want nd_001", execArgs[2])
+			}
+			if execArgs[3] != string(tt.wantEventType) {
+				t.Fatalf("event type arg = %#v, want %q", execArgs[3], tt.wantEventType)
+			}
+			if execArgs[5] != tt.wantSummary {
+				t.Fatalf("summary arg = %#v, want %q", execArgs[5], tt.wantSummary)
+			}
+			payload, ok := execArgs[6].([]byte)
+			if !ok || !strings.Contains(string(payload), `"lifecycle_status":"`+tt.returnLifecycle+`"`) {
+				t.Fatalf("payload arg = %#v, want lifecycle status", execArgs[6])
+			}
+			if !committed {
+				t.Fatal("transaction was not committed")
+			}
+		})
+	}
+}
+
+func TestNodeLifecycleRejectsInvalidTransition(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeNodeTx{
+				queryRow: func(context.Context, string, ...any) pgx.Row {
+					return fakeNodeRow{scan: func(...any) error { return pgx.ErrNoRows }}
+				},
+			}, nil
+		},
+		queryRow: func(context.Context, string, ...any) pgx.Row {
+			return fakeNodeRow{scan: func(dest ...any) error {
+				*(dest[0].(*bool)) = true
+				return nil
+			}}
+		},
+	}}
+
+	_, err := repo.RetireNode(context.Background(), "nd_001")
+	if !errors.Is(err, ErrInvalidNodeRuntimeTransition) {
+		t.Fatalf("RetireNode() error = %v, want ErrInvalidNodeRuntimeTransition", err)
+	}
+}
+
 func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	t.Parallel()
 

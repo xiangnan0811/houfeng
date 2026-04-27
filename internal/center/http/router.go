@@ -19,6 +19,7 @@ type RouterOptions struct {
 	NodeItemHandler                 stdhttp.Handler
 	NodeRuntimeFactsHandler         stdhttp.Handler
 	NodeRuntimeControlHandler       stdhttp.Handler
+	NodeLifecycleControlHandler     stdhttp.Handler
 	NodeOnboardingHandler           stdhttp.Handler
 	NodeEnrollmentTokenHandler      stdhttp.Handler
 	NodeBindingConfirmRebindHandler stdhttp.Handler
@@ -51,7 +52,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", opts.NodesCollectionHandler)
 	}
-	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil {
+	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil {
 		mux.Handle("/api/nodes/", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			nodeID, subtree := nodeSubtreePath(r.URL.Path)
 			if nodeID == "" {
@@ -78,6 +79,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.NodeRuntimeControlHandler.ServeHTTP(w, r)
+			case nodeSubtreeLifecycleControl:
+				if opts.NodeLifecycleControlHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeLifecycleControlHandler.ServeHTTP(w, r)
 			case nodeSubtreeOnboarding:
 				if opts.NodeOnboardingHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -173,6 +180,7 @@ const (
 	nodeSubtreeItem                 nodeSubtree = "item"
 	nodeSubtreeRuntimeFacts         nodeSubtree = "runtime-facts"
 	nodeSubtreeRuntimeControl       nodeSubtree = "runtime-control"
+	nodeSubtreeLifecycleControl     nodeSubtree = "lifecycle-control"
 	nodeSubtreeOnboarding           nodeSubtree = "onboarding"
 	nodeSubtreeEnrollmentToken      nodeSubtree = "enrollment-token"
 	nodeSubtreeBindingConfirmRebind nodeSubtree = "binding-confirm-rebind"
@@ -198,6 +206,9 @@ func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
 	}
 	if segments[1] == "runtime" && len(segments) == 3 {
 		return segments[0], nodeSubtreeRuntimeControl
+	}
+	if segments[1] == "lifecycle" && len(segments) == 3 {
+		return segments[0], nodeSubtreeLifecycleControl
 	}
 	if segments[1] == "onboarding" && len(segments) == 2 {
 		return segments[0], nodeSubtreeOnboarding

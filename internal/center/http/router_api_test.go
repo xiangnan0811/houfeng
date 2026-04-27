@@ -290,6 +290,41 @@ func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsNodeLifecycleRoutesOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		NodeLifecycleControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"node_id":"nd_001","lifecycle_status":"已退役"}`))
+		}),
+	})
+
+	for _, path := range []string{
+		"/api/nodes/nd_001/lifecycle/retire",
+		"/api/nodes/nd_001/lifecycle/restore-to-observing",
+	} {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusOK)
+		}
+		body, err := io.ReadAll(recorder.Body)
+		if err != nil {
+			t.Fatalf("read response body: %v", err)
+		}
+		if strings.TrimSpace(string(body)) == spaShell {
+			t.Fatalf("%s returned SPA fallback body %q", path, string(body))
+		}
+		if !strings.Contains(string(body), `"node_id":"nd_001"`) {
+			t.Fatalf("%s body = %q, want node payload", path, string(body))
+		}
+	}
+}
+
 func TestRouterKeepsRuntimeControlRoutesOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",

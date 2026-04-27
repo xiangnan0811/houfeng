@@ -656,6 +656,51 @@ func (r *PostgresNodeRepository) ResetNodeBinding(ctx context.Context, nodeID st
 	return record, nil
 }
 
+func insertNodeLifecycleEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	record nodes.Record,
+	eventType incidents.EventType,
+	summary string,
+) error {
+	eventID, err := ids.New("evt")
+	if err != nil {
+		return fmt.Errorf("generate node lifecycle event id: %w", err)
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"lifecycle_status": record.LifecycleStatus,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal node lifecycle event payload: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		insert into state_change_events (
+			event_id,
+			object_type,
+			object_id,
+			event_type,
+			severity,
+			summary,
+			payload,
+			created_at
+		) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+		eventID,
+		string(incidents.ObjectTypeNode),
+		record.NodeID,
+		string(eventType),
+		"",
+		summary,
+		payload,
+		time.Now().UTC(),
+	); err != nil {
+		return fmt.Errorf("insert lifecycle event for node %q: %w", record.NodeID, err)
+	}
+
+	return nil
+}
+
 func insertNodeRuntimeEvent(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -699,6 +744,82 @@ func insertNodeRuntimeEvent(
 	}
 
 	return nil
+}
+
+func (r *PostgresNodeRepository) RetireNode(ctx context.Context, nodeID string) (nodes.Record, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin retire node transaction for %q: %w", nodeID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, err := scanNode(tx.QueryRow(ctx, `
+		update nodes
+		set lifecycle_status = '已退役',
+			updated_at = now()
+		where node_id = $1
+			and lifecycle_status <> '已退役'
+		returning `+nodeSelectColumns,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := r.nodeExists(ctx, nodeID)
+		if existsErr != nil {
+			return nodes.Record{}, fmt.Errorf("retire node %q: %w", nodeID, existsErr)
+		}
+		if !exists {
+			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
+		}
+		return nodes.Record{}, fmt.Errorf("%w: node %q cannot retire from current lifecycle status", ErrInvalidNodeRuntimeTransition, nodeID)
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("retire node %q: %w", nodeID, err)
+	}
+	if err := insertNodeLifecycleEvent(ctx, tx, record, incidents.EventNodeRetired, "节点已退役并退出活跃舰队，历史记录保留"); err != nil {
+		return nodes.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit retire node %q: %w", nodeID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresNodeRepository) RestoreRetiredNodeToObserving(ctx context.Context, nodeID string) (nodes.Record, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("begin restore retired node transaction for %q: %w", nodeID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, err := scanNode(tx.QueryRow(ctx, `
+		update nodes
+		set lifecycle_status = '观察中',
+			updated_at = now()
+		where node_id = $1
+			and lifecycle_status = '已退役'
+		returning `+nodeSelectColumns,
+		nodeID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := r.nodeExists(ctx, nodeID)
+		if existsErr != nil {
+			return nodes.Record{}, fmt.Errorf("restore retired node %q to observing: %w", nodeID, existsErr)
+		}
+		if !exists {
+			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
+		}
+		return nodes.Record{}, fmt.Errorf("%w: node %q can only restore to observing from retired", ErrInvalidNodeRuntimeTransition, nodeID)
+	}
+	if err != nil {
+		return nodes.Record{}, fmt.Errorf("restore retired node %q to observing: %w", nodeID, err)
+	}
+	if err := insertNodeLifecycleEvent(ctx, tx, record, incidents.EventNodeRestoredToObserving, "节点已从退役恢复到观察中"); err != nil {
+		return nodes.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nodes.Record{}, fmt.Errorf("commit restore retired node %q to observing: %w", nodeID, err)
+	}
+	return record, nil
 }
 
 func (r *PostgresNodeRepository) SetNodeMonitoringMaintenance(ctx context.Context, nodeID string) (nodes.Record, error) {

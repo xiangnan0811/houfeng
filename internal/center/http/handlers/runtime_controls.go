@@ -17,6 +17,11 @@ type nodeRuntimeControlRepository interface {
 	ResumeNodeMonitoring(context.Context, string) (nodes.Record, error)
 }
 
+type nodeLifecycleControlRepository interface {
+	RetireNode(context.Context, string) (nodes.Record, error)
+	RestoreRetiredNodeToObserving(context.Context, string) (nodes.Record, error)
+}
+
 type targetRuntimeControlRepository interface {
 	SetTargetMaintenance(context.Context, string) (targets.TargetRecord, error)
 	PauseTargetRun(context.Context, string) (targets.TargetRecord, error)
@@ -60,6 +65,49 @@ func NodeRuntimeControls(repo nodeRuntimeControlRepository) http.Handler {
 			return
 		case errors.Is(err, store.ErrInvalidNodeRuntimeTransition):
 			writeError(w, http.StatusConflict, "invalid runtime transition")
+			return
+		case err != nil:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, record)
+	})
+}
+
+func NodeLifecycleControls(repo nodeLifecycleControlRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		nodeID, action := nodeLifecycleControlAction(r.URL.Path)
+		if nodeID == "" || action == "" {
+			writeError(w, http.StatusNotFound, "node not found")
+			return
+		}
+
+		var (
+			record nodes.Record
+			err    error
+		)
+		switch action {
+		case "retire":
+			record, err = repo.RetireNode(r.Context(), nodeID)
+		case "restore-to-observing":
+			record, err = repo.RestoreRetiredNodeToObserving(r.Context(), nodeID)
+		default:
+			writeError(w, http.StatusNotFound, "node not found")
+			return
+		}
+
+		switch {
+		case errors.Is(err, nodes.ErrNodeNotFound):
+			writeError(w, http.StatusNotFound, "node not found")
+			return
+		case errors.Is(err, store.ErrInvalidNodeRuntimeTransition):
+			writeError(w, http.StatusConflict, "invalid lifecycle transition")
 			return
 		case err != nil:
 			writeError(w, http.StatusInternalServerError, "internal server error")
@@ -117,6 +165,19 @@ func TargetRuntimeControls(repo targetRuntimeControlRepository) http.Handler {
 
 		writeJSON(w, http.StatusOK, record)
 	})
+}
+
+func nodeLifecycleControlAction(path string) (string, string) {
+	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/nodes/"), "/")
+	if trimmed == "" {
+		return "", ""
+	}
+
+	segments := strings.Split(trimmed, "/")
+	if len(segments) != 3 || segments[0] == "" || segments[1] != "lifecycle" || segments[2] == "" {
+		return "", ""
+	}
+	return segments[0], segments[2]
 }
 
 func nodeRuntimeControlAction(path string) (string, string) {
