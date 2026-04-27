@@ -99,12 +99,16 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('已配置 Telegram Bot Token：****************oken')).toBeInTheDocument()
     expect(screen.queryByText('bot-token')).not.toBeInTheDocument()
-    expect(screen.getByText('当前持久化配置已处于运行态应用路径中。')).toBeInTheDocument()
-    expect(screen.getByText('当前仅保存默认频率策略，尚未接入实时规划链。')).toBeInTheDocument()
-    expect(screen.getByText('当前仅保存全局默认规则策略，尚未接入实时异常判定链。')).toBeInTheDocument()
+    expect(screen.getByText('当前持久化配置已接入正在运行的通知路径。')).toBeInTheDocument()
+    expect(
+      screen.getByText('当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('当前仅 heartbeat/sweep 时间参数已接入实时异常判定链；其余默认项仍作为持久化策略保存。'),
+    ).toBeInTheDocument()
     expect(
       screen.getByText(
-        '仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前仅保存覆盖策略，尚未接入实时规划/判定链。',
+        '仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；incident 默认覆盖仍仅作为持久化策略保存。',
       ),
     ).toBeInTheDocument()
     expect(

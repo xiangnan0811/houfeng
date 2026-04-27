@@ -568,7 +568,7 @@ export function SettingsPage() {
 
         <SectionIntro>
           {settings.telegram.runtime_apply_active
-            ? '当前持久化配置已处于运行态应用路径中。'
+            ? '当前持久化配置已接入正在运行的通知路径。'
             : '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'}
         </SectionIntro>
         <SectionIntro>
@@ -577,7 +577,7 @@ export function SettingsPage() {
       </DetailSection>
 
       <DetailSection eyebrow="Frequency" title="默认频率档位">
-        <SectionIntro>当前仅保存默认频率策略，尚未接入实时规划链。</SectionIntro>
+        <SectionIntro>当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。</SectionIntro>
         <div className="summary-grid">
           <FrequencySelect
             ariaLabel="当前节点主机样本频率"
@@ -646,7 +646,7 @@ export function SettingsPage() {
       </DetailSection>
 
       <DetailSection eyebrow="Global Defaults" title="全局默认规则">
-        <SectionIntro>当前仅保存全局默认规则策略，尚未接入实时异常判定链。</SectionIntro>
+        <SectionIntro>当前仅 heartbeat/sweep 时间参数已接入实时异常判定链；其余默认项仍作为持久化策略保存。</SectionIntro>
         <IncidentDefaultsEditor
           value={form.incidentDefaults}
           onChange={(next) =>
@@ -662,7 +662,7 @@ export function SettingsPage() {
 
       <DetailSection eyebrow="Overrides" title="少量覆盖规则" aside={<TargetTypeSummary />}>
         <SectionIntro>
-          仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前仅保存覆盖策略，尚未接入实时规划/判定链。
+          仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；incident 默认覆盖仍仅作为持久化策略保存。
         </SectionIntro>
         <div className="page-stack">
           <OverrideTextarea
