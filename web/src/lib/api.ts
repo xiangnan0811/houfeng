@@ -1,5 +1,7 @@
 import type {
   ActiveIncidentRecord,
+  CreateProbeItemInput,
+  CreateTargetInput,
   DashboardOverview,
   EventListFilter,
   IncidentListFilter,
@@ -51,6 +53,17 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
 
 function postJSON<T>(path: string): Promise<T> {
   return requestJSON<T>(path, { method: 'POST' })
+}
+
+function postJSONBody<T>(path: string, body: unknown): Promise<T> {
+  return requestJSON<T>(path, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
 }
 
 function withQuery(
@@ -123,12 +136,23 @@ export function listTargets() {
   return requestJSON<TargetRecord[]>('/api/targets')
 }
 
+export function createTarget(input: CreateTargetInput): Promise<TargetRecord> {
+  return postJSONBody<TargetRecord>('/api/targets', input)
+}
+
 export function getTarget(targetId: string) {
   return requestJSON<TargetRecord>(`/api/targets/${targetId}`)
 }
 
 export function listTargetProbeItems(targetId: string) {
   return requestJSON<ProbeItemRecord[]>(`/api/targets/${targetId}/probe-items`)
+}
+
+export function createProbeItem(
+  targetId: string,
+  input: CreateProbeItemInput,
+): Promise<ProbeItemRecord> {
+  return postJSONBody<ProbeItemRecord>(`/api/targets/${targetId}/probe-items`, input)
 }
 
 export function getTargetRuntimeFacts(targetId: string) {

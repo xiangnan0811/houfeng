@@ -4,6 +4,8 @@ import { matchRoutes } from 'react-router-dom'
 import {
   archiveTarget,
   confirmNodeRebind,
+  createProbeItem,
+  createTarget,
   enterNodeMaintenance,
   enterTargetMaintenance,
   exitNodeMaintenance,
@@ -24,7 +26,14 @@ import {
   resumeTarget,
   updateSettings,
 } from './api'
-import type { SettingsRecord, SettingsUpdateInput } from './types'
+import type {
+  CreateProbeItemInput,
+  CreateTargetInput,
+  ProbeItemRecord,
+  SettingsRecord,
+  SettingsUpdateInput,
+  TargetRecord,
+} from './types'
 import { appRoutes } from '../app/router'
 
 function mockResponse(status: number, body: string) {
@@ -240,6 +249,76 @@ describe('api helpers', () => {
       name: 'ApiError',
       status: 400,
       message: 'invalid input',
+    })
+  })
+
+  it('creates targets with POST /api/targets and returns the created target', async () => {
+    const requestBody = {
+      name: 'Blog',
+      target_type: 'service',
+      host: 'blog.example.com',
+      base_port: 443,
+      execution_node_labels: ['edge', 'core'],
+      run_status: '启用',
+      labels: ['public'],
+      note: 'primary blog',
+    } satisfies CreateTargetInput
+    const responseBody = {
+      target_id: 'tg_new',
+      ...requestBody,
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-27T09:00:00Z',
+      updated_at: '2026-04-27T09:00:00Z',
+    } satisfies TargetRecord
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(createTarget(requestBody)).resolves.toEqual(responseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/targets', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify(requestBody),
+    })
+  })
+
+  it('creates probe items with POST /api/targets/:targetId/probe-items and returns the created probe item', async () => {
+    const requestBody = {
+      probe_kind: 'http',
+      enabled: true,
+      frequency_tier: '1m',
+      timeout_seconds: 5,
+      config: {
+        scheme: 'https',
+        path: '/healthz',
+        method: 'GET',
+        expected_status_range: [200, 299],
+      },
+    } satisfies CreateProbeItemInput
+    const responseBody = {
+      probe_item_id: 'pb_new',
+      target_id: 'tg_new',
+      ...requestBody,
+      created_at: '2026-04-27T09:05:00Z',
+      updated_at: '2026-04-27T09:05:00Z',
+    } satisfies ProbeItemRecord
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(createProbeItem('tg_new', requestBody)).resolves.toEqual(responseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/targets/tg_new/probe-items', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify(requestBody),
     })
   })
 

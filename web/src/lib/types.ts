@@ -78,14 +78,18 @@ export type NodeRuntimeFacts = {
   latest_host_sample: HostSample | null
 }
 
+export type TargetType = 'service' | 'china_reference'
+
+export type TargetRunStatus = '启用' | '维护中' | '暂停' | '已归档'
+
 export type TargetRecord = {
   target_id: string
   name: string
-  target_type: string
+  target_type: TargetType
   host: string
   base_port?: number
   execution_node_labels: string[]
-  run_status: string
+  run_status: TargetRunStatus
   labels: string[]
   note: string
   current_health_status: string
@@ -97,23 +101,46 @@ export type TargetRecord = {
   updated_at: string
 }
 
+export type CreateTargetInput = {
+  name: string
+  target_type: TargetType
+  host: string
+  base_port?: number
+  execution_node_labels: string[]
+  run_status: TargetRunStatus
+  labels: string[]
+  note: string
+}
+
+export type ProbeKind = 'tcp' | 'http' | 'tls'
+
+export type FrequencyTier = '1m' | '5m' | '15m' | '6h'
+
 export type ProbeItemRecord = {
   probe_item_id: string
   target_id: string
-  probe_kind: string
+  probe_kind: ProbeKind
   enabled: boolean
-  frequency_tier: string
+  frequency_tier: FrequencyTier
   timeout_seconds: number
   config: Record<string, unknown>
   created_at: string
   updated_at: string
 }
 
+export type CreateProbeItemInput = {
+  probe_kind: ProbeKind
+  enabled: boolean
+  frequency_tier: FrequencyTier
+  timeout_seconds: number
+  config: Record<string, unknown>
+}
+
 export type ProbeObservation = {
   node_id: string
   target_id: string
   probe_item_id: string
-  probe_kind: string
+  probe_kind: ProbeKind
   observed_at: string
   received_at: string
   agent_version: string
