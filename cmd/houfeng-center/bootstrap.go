@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -70,12 +71,13 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	enrollmentSvc := enrollment.NewService(nodeRepo)
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
 	notifier := deps.newIncidentNotifier(cfg, notifierSettingsRepo)
-	incidentSvc := incidentservice.NewService(
+	incidentSvc := incidentservice.NewSettingsBackedService(
 		nodeRepo,
 		targetRepo,
 		snapshotReader,
 		incidentRepo,
 		notifier,
+		notifierSettingsRepo,
 		slog.Default(),
 		30*time.Second,
 		cfg.IncidentSweepInterval,
@@ -188,4 +190,23 @@ func (r notifierSettingsRepository) GetPersistedTelegramSettings(ctx context.Con
 		BotToken: strings.TrimSpace(botToken),
 		ChatID:   strings.TrimSpace(chatID),
 	}, true, nil
+}
+
+func (r notifierSettingsRepository) GetPersistedIncidentDefaults(ctx context.Context) (centersettings.IncidentDefaults, bool, error) {
+	var raw []byte
+	err := r.db.QueryRow(ctx, `
+		select incident_defaults
+		from center_settings
+		where settings_id = $1`, centersettings.SingletonID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return centersettings.IncidentDefaults{}, false, nil
+	}
+	if err != nil {
+		return centersettings.IncidentDefaults{}, false, fmt.Errorf("query persisted incident defaults: %w", err)
+	}
+	var defaults centersettings.IncidentDefaults
+	if err := json.Unmarshal(raw, &defaults); err != nil {
+		return centersettings.IncidentDefaults{}, false, fmt.Errorf("decode persisted incident defaults: %w", err)
+	}
+	return defaults, true, nil
 }

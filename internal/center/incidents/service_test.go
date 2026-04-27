@@ -76,11 +76,14 @@ func (f *fakeNotifier) Send(_ context.Context, summary string) error {
 }
 
 type fakeSettingsRepository struct {
-	getSettingsResult centersettings.CenterSettings
-	getSettingsErr    error
-	persistedTelegram centersettings.TelegramSettings
-	persistedExists   bool
-	persistedErr      error
+	getSettingsResult            centersettings.CenterSettings
+	getSettingsErr               error
+	persistedTelegram            centersettings.TelegramSettings
+	persistedExists              bool
+	persistedErr                 error
+	persistedIncidentDefaults    centersettings.IncidentDefaults
+	persistedIncidentExists      bool
+	persistedIncidentDefaultsErr error
 }
 
 func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
@@ -102,6 +105,16 @@ func (f *fakeSettingsRepository) GetPersistedTelegramSettings(context.Context) (
 		return centersettings.TelegramSettings{}, false, nil
 	}
 	return f.persistedTelegram, true, nil
+}
+
+func (f *fakeSettingsRepository) GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error) {
+	if f.persistedIncidentDefaultsErr != nil {
+		return centersettings.IncidentDefaults{}, false, f.persistedIncidentDefaultsErr
+	}
+	if !f.persistedIncidentExists {
+		return centersettings.IncidentDefaults{}, false, nil
+	}
+	return f.persistedIncidentDefaults, true, nil
 }
 
 func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) {
@@ -320,6 +333,77 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	}
 	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSent {
 		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSent)
+	}
+}
+
+func TestSettingsBackedHeartbeatIntervalUsesPersistedSettings(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	stale := now.Add(-75 * time.Second)
+	nodeRepo := &fakeNodeRepo{listNodesResult: []nodes.Record{{NodeID: "nd_001", LastHeartbeatAt: &stale}}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{}
+	writer := &fakeMutationWriter{}
+	settings := centersettings.Default()
+	settings.IncidentDefaults.HeartbeatIntervalSeconds = 120
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult:         settings,
+		persistedIncidentDefaults: settings.IncidentDefaults,
+		persistedIncidentExists:   true,
+	}
+	service := NewSettingsBackedService(nodeRepo, targetRepo, snapshots, writer, nil, settingsRepo, slog.Default(), 30*time.Second, time.Minute)
+
+	if err := service.EvaluateStaleNodes(context.Background(), now); err != nil {
+		t.Fatalf("EvaluateStaleNodes() error = %v", err)
+	}
+	if len(writer.mutations) != 1 {
+		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
+	}
+	if len(writer.mutations[0].Active) != 0 {
+		t.Fatalf("Active = %#v, want no heartbeat incident when persisted heartbeat interval is longer", writer.mutations[0].Active)
+	}
+}
+
+func TestSettingsBackedSweepIntervalUsesPersistedSettings(t *testing.T) {
+	settings := centersettings.Default()
+	settings.IncidentDefaults.SweepIntervalSeconds = 180
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult:         settings,
+		persistedIncidentDefaults: settings.IncidentDefaults,
+		persistedIncidentExists:   true,
+	}
+	service := NewSettingsBackedService(nil, nil, nil, nil, nil, settingsRepo, slog.Default(), 30*time.Second, time.Minute)
+
+	if got := service.sweepIntervalFor(context.Background()); got != 3*time.Minute {
+		t.Fatalf("sweepIntervalFor() = %v, want %v", got, 3*time.Minute)
+	}
+}
+
+func TestIncidentTimingFallsBackWhenPersistedSettingsAbsentOrUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		repo *fakeSettingsRepository
+	}{
+		{
+			name: "absent",
+			repo: &fakeSettingsRepository{},
+		},
+		{
+			name: "unavailable",
+			repo: &fakeSettingsRepository{persistedIncidentDefaultsErr: errors.New("boom")},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := NewSettingsBackedService(nil, nil, nil, nil, nil, tt.repo, slog.Default(), 45*time.Second, 2*time.Minute)
+
+			if got := service.heartbeatIntervalFor(context.Background()); got != 45*time.Second {
+				t.Fatalf("heartbeatIntervalFor() = %v, want %v", got, 45*time.Second)
+			}
+			if got := service.sweepIntervalFor(context.Background()); got != 2*time.Minute {
+				t.Fatalf("sweepIntervalFor() = %v, want %v", got, 2*time.Minute)
+			}
+		})
 	}
 }
 

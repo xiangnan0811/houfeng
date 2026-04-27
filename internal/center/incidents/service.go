@@ -51,6 +51,10 @@ type persistedTelegramSettingsSource interface {
 	GetPersistedTelegramSettings(context.Context) (centersettings.TelegramSettings, bool, error)
 }
 
+type persistedIncidentDefaultsSource interface {
+	GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
+}
+
 type Notifier interface {
 	Send(context.Context, string) error
 }
@@ -117,18 +121,23 @@ func (n *settingsAwareNotifier) sendWithTelegramSettings(ctx context.Context, su
 }
 
 type Service struct {
-	nodes             NodeRepository
-	targets           TargetRepository
-	snapshots         SnapshotReader
-	writer            MutationWriter
-	notifier          Notifier
-	logger            *slog.Logger
-	now               func() time.Time
-	heartbeatInterval time.Duration
-	sweepInterval     time.Duration
+	nodes                     NodeRepository
+	targets                   TargetRepository
+	snapshots                 SnapshotReader
+	writer                    MutationWriter
+	notifier                  Notifier
+	settingsRepo              SettingsRepository
+	logger                    *slog.Logger
+	now                       func() time.Time
+	fallbackHeartbeatInterval time.Duration
+	fallbackSweepInterval     time.Duration
 }
 
 func NewService(nodesRepo NodeRepository, targetsRepo TargetRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
+	return NewSettingsBackedService(nodesRepo, targetsRepo, snapshots, writer, notifier, nil, logger, heartbeatInterval, sweepInterval)
+}
+
+func NewSettingsBackedService(nodesRepo NodeRepository, targetsRepo TargetRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, settingsRepo SettingsRepository, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -139,15 +148,16 @@ func NewService(nodesRepo NodeRepository, targetsRepo TargetRepository, snapshot
 		sweepInterval = time.Minute
 	}
 	return &Service{
-		nodes:             nodesRepo,
-		targets:           targetsRepo,
-		snapshots:         snapshots,
-		writer:            writer,
-		notifier:          notifier,
-		logger:            logger,
-		now:               func() time.Time { return time.Now().UTC() },
-		heartbeatInterval: heartbeatInterval,
-		sweepInterval:     sweepInterval,
+		nodes:                     nodesRepo,
+		targets:                   targetsRepo,
+		snapshots:                 snapshots,
+		writer:                    writer,
+		notifier:                  notifier,
+		settingsRepo:              settingsRepo,
+		logger:                    logger,
+		now:                       func() time.Time { return time.Now().UTC() },
+		fallbackHeartbeatInterval: heartbeatInterval,
+		fallbackSweepInterval:     sweepInterval,
 	}
 }
 
@@ -168,17 +178,22 @@ func (s *Service) AfterSuccessfulSync(ctx context.Context, batch syncing.Batch, 
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	ticker := time.NewTicker(s.sweepInterval)
-	defer ticker.Stop()
-
+	timer := time.NewTimer(s.sweepIntervalFor(ctx))
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case tick := <-ticker.C:
+		case tick := <-timer.C:
 			if err := s.EvaluatePeriodicState(ctx, tick.UTC()); err != nil {
 				return err
 			}
+			nextTick := tick.Add(s.sweepIntervalFor(ctx))
+			delay := time.Until(nextTick)
+			if delay < 0 {
+				delay = 0
+			}
+			timer.Reset(delay)
 		}
 	}
 }
@@ -203,19 +218,20 @@ func (s *Service) EvaluatePeriodicState(ctx context.Context, now time.Time) erro
 }
 
 func (s *Service) EvaluateStaleNodes(ctx context.Context, now time.Time) error {
+	heartbeatInterval := s.heartbeatIntervalFor(ctx)
 	records, err := s.nodes.ListNodes(ctx)
 	if err != nil {
 		return fmt.Errorf("list nodes for stale sweep: %w", err)
 	}
 	for _, record := range records {
-		if err := s.evaluateNodeHeartbeatOnly(ctx, record, now); err != nil {
+		if err := s.evaluateNodeHeartbeatOnly(ctx, record, now, heartbeatInterval); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) evaluateNodeHeartbeatOnly(ctx context.Context, record nodes.Record, now time.Time) error {
+func (s *Service) evaluateNodeHeartbeatOnly(ctx context.Context, record nodes.Record, now time.Time, heartbeatInterval time.Duration) error {
 	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeNode, record.NodeID)
 	if err != nil {
 		return fmt.Errorf("list previous node incidents for %q: %w", record.NodeID, err)
@@ -223,7 +239,7 @@ func (s *Service) evaluateNodeHeartbeatOnly(ctx context.Context, record nodes.Re
 	previousByClass := incidentsByClass(previous)
 	evaluations := []classEvaluation{{
 		class:  IncidentNodeHeartbeatMissing,
-		result: EvaluateNodeHeartbeatMissing(previousByClass[IncidentNodeHeartbeatMissing], record.NodeID, now, record.LastHeartbeatAt, s.heartbeatInterval),
+		result: EvaluateNodeHeartbeatMissing(previousByClass[IncidentNodeHeartbeatMissing], record.NodeID, now, record.LastHeartbeatAt, heartbeatInterval),
 	}}
 	return s.applyEvaluations(ctx, ObjectTypeNode, record.NodeID, previous, evaluations, now)
 }
@@ -238,9 +254,10 @@ func (s *Service) evaluateNode(ctx context.Context, nodeID string, now time.Time
 		return fmt.Errorf("list previous node incidents for %q: %w", nodeID, err)
 	}
 	previousByClass := incidentsByClass(previous)
+	heartbeatInterval := s.heartbeatIntervalFor(ctx)
 	evaluations := []classEvaluation{{
 		class:  IncidentNodeHeartbeatMissing,
-		result: EvaluateNodeHeartbeatMissing(previousByClass[IncidentNodeHeartbeatMissing], nodeID, now, record.LastHeartbeatAt, s.heartbeatInterval),
+		result: EvaluateNodeHeartbeatMissing(previousByClass[IncidentNodeHeartbeatMissing], nodeID, now, record.LastHeartbeatAt, heartbeatInterval),
 	}}
 
 	hostSamples, err := s.snapshots.ListRecentHostSamples(ctx, nodeID, now.Add(-30*time.Minute))
@@ -298,6 +315,51 @@ func (s *Service) applyEvaluations(ctx context.Context, objectType ObjectType, o
 		return err
 	}
 	return s.appendNotificationRecords(ctx, objectType, objectID, evaluations)
+}
+
+type incidentTiming struct {
+	heartbeatInterval time.Duration
+	sweepInterval     time.Duration
+}
+
+func (s *Service) heartbeatIntervalFor(ctx context.Context) time.Duration {
+	return s.incidentTimingFor(ctx).heartbeatInterval
+}
+
+func (s *Service) sweepIntervalFor(ctx context.Context) time.Duration {
+	return s.incidentTimingFor(ctx).sweepInterval
+}
+
+func (s *Service) incidentTimingFor(ctx context.Context) incidentTiming {
+	timing := incidentTiming{
+		heartbeatInterval: s.fallbackHeartbeatInterval,
+		sweepInterval:     s.fallbackSweepInterval,
+	}
+	if s.settingsRepo == nil {
+		return timing
+	}
+	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
+		defaults, exists, err := source.GetPersistedIncidentDefaults(ctx)
+		if err != nil || !exists {
+			return timing
+		}
+		return applyIncidentDefaults(timing, defaults)
+	}
+	settings, err := s.settingsRepo.GetSettings(ctx)
+	if err != nil {
+		return timing
+	}
+	return applyIncidentDefaults(timing, settings.IncidentDefaults)
+}
+
+func applyIncidentDefaults(timing incidentTiming, defaults centersettings.IncidentDefaults) incidentTiming {
+	if defaults.HeartbeatIntervalSeconds > 0 {
+		timing.heartbeatInterval = time.Duration(defaults.HeartbeatIntervalSeconds) * time.Second
+	}
+	if defaults.SweepIntervalSeconds > 0 {
+		timing.sweepInterval = time.Duration(defaults.SweepIntervalSeconds) * time.Second
+	}
+	return timing
 }
 
 type classEvaluation struct {
