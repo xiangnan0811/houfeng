@@ -55,6 +55,8 @@ Every confirmation card must contain:
 - a final confirm button
 - a cancel button
 
+- lightweight announcement/focus behavior so the newly opened confirmation is exposed with dialog semantics and receives focus
+
 The confirm card must replace `window.confirm`; tests should spy on `window.confirm` and assert it is not called.
 
 ## Copy
@@ -64,7 +66,8 @@ Use these exact action titles and button labels where applicable:
 ### Node pause
 
 - Title: `确认暂停节点监控`
-- Current: `当前：监控运行状态为启用。`
+- Current: `当前：监控运行状态为启用。`（当行当前为启用）
+- Current: `当前：监控运行状态为维护中。`（当行当前为维护中）
 - Result: `操作后：监控运行状态变为暂停。`
 - Impact: `会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。`
 - Unchanged: `不会删除历史事件、观测记录或 agent 绑定关系。`

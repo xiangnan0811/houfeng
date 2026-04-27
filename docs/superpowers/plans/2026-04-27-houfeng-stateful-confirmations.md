@@ -59,10 +59,16 @@ type ActionConfirmationCardProps = {
 Render:
 
 ```tsx
-<section className="page-panel" aria-label={title}>
+<section
+  className="page-panel"
+  role="alertdialog"
+  aria-labelledby={titleId}
+  aria-describedby={descriptionId}
+  tabIndex={-1}
+>
   <p className="page-panel__eyebrow">Confirmation</p>
-  <h3 className="page-panel__title">{title}</h3>
-  <div className="page-stack">
+  <h3 id={titleId} className="page-panel__title">{title}</h3>
+  <div id={descriptionId} className="page-stack">
     <p>{current}</p>
     <p>{result}</p>
     <p>{impact}</p>
@@ -132,7 +138,7 @@ it('uses an inline stateful confirmation before pausing node monitoring from the
 
   fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
 
-  expect(screen.getByRole('heading', { name: '确认暂停节点监控' })).toBeInTheDocument()
+  expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
   expect(screen.getByText('当前：监控运行状态为启用。')).toBeInTheDocument()
   expect(screen.getByText('操作后：监控运行状态变为暂停。')).toBeInTheDocument()
   expect(screen.getByText('会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。')).toBeInTheDocument()
@@ -221,7 +227,7 @@ setPendingConfirmation((current) =>
 {pendingConfirmation?.nodeId === node.node_id && pendingConfirmation.action === 'pause' ? (
   <ActionConfirmationCard
     title="确认暂停节点监控"
-    current="当前：监控运行状态为启用。"
+    current={node.monitoring_status === '维护中' ? '当前：监控运行状态为维护中。' : '当前：监控运行状态为启用。'}
     result="操作后：监控运行状态变为暂停。"
     impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
     unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"

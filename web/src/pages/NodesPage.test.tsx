@@ -506,7 +506,7 @@ describe('NodesPage', () => {
     })
   })
 
-  it('uses an inline stateful confirmation before pausing node monitoring from the list', async () => {
+  it('uses an inline stateful confirmation before pausing node monitoring from an enabled row', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi
       .fn()
@@ -543,7 +543,9 @@ describe('NodesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
 
-    expect(screen.getByRole('heading', { name: '确认暂停节点监控' })).toBeInTheDocument()
+    const confirmation = screen.getByRole('alertdialog', { name: '确认暂停节点监控' })
+    expect(confirmation).toBeInTheDocument()
+    expect(confirmation).toHaveFocus()
     expect(screen.getByText('当前：监控运行状态为启用。')).toBeInTheDocument()
     expect(screen.getByText('操作后：监控运行状态变为暂停。')).toBeInTheDocument()
     expect(
@@ -563,6 +565,82 @@ describe('NodesPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
     )
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('shows the maintenance current-state copy before pausing a maintenance row', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        nodeRecord({
+          node_id: 'nd_maint',
+          display_name: 'Osaka Edge',
+          monitoring_status: '维护中',
+          binding_status: '已绑定',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Osaka Edge')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+
+    expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
+    expect(screen.getByText('当前：监控运行状态为维护中。')).toBeInTheDocument()
+    expect(screen.queryByText('当前：监控运行状态为启用。')).not.toBeInTheDocument()
+    expect(confirmMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the pause confirmation and local error visible when pause fails', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            binding_status: '已绑定',
+          }),
+        ]),
+      )
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid runtime transition' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.getByText('invalid runtime transition')).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认暂停监控' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },

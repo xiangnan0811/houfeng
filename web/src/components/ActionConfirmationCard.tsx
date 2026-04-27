@@ -1,3 +1,5 @@
+import { useEffect, useId, useRef } from 'react'
+
 export type ActionConfirmationCardProps = {
   title: string
   current: string
@@ -23,11 +25,28 @@ export function ActionConfirmationCard({
   onConfirm,
   onCancel,
 }: ActionConfirmationCardProps) {
+  const titleId = useId()
+  const descriptionId = useId()
+  const containerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    containerRef.current?.focus()
+  }, [])
+
   return (
-    <section className="page-panel" aria-label={title}>
+    <section
+      ref={containerRef}
+      className="page-panel"
+      role="alertdialog"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      tabIndex={-1}
+    >
       <p className="page-panel__eyebrow">Confirmation</p>
-      <h3 className="page-panel__title">{title}</h3>
-      <div className="page-stack">
+      <h3 id={titleId} className="page-panel__title">
+        {title}
+      </h3>
+      <div id={descriptionId} className="page-stack">
         <p>{current}</p>
         <p>{result}</p>
         <p>{impact}</p>

@@ -114,6 +114,12 @@ function isBindingConflictNode(node: NodeRecord) {
   return node.binding_status === NODE_BINDING_CONFLICT_STATUS
 }
 
+function pauseConfirmationCurrent(node: NodeRecord) {
+  return node.monitoring_status === '维护中'
+    ? '当前：监控运行状态为维护中。'
+    : '当前：监控运行状态为启用。'
+}
+
 export function NodesPage() {
   const navigate = useNavigate()
   const [nodes, setNodes] = useState<NodeRecord[]>([])
@@ -450,7 +456,7 @@ export function NodesPage() {
               {pendingConfirmation?.nodeId === node.node_id && pendingConfirmation.action === 'pause' ? (
                 <ActionConfirmationCard
                   title="确认暂停节点监控"
-                  current="当前：监控运行状态为启用。"
+                  current={pauseConfirmationCurrent(node)}
                   result="操作后：监控运行状态变为暂停。"
                   impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
                   unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
