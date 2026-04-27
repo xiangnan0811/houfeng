@@ -46,6 +46,8 @@ type NotificationDecision struct {
 }
 
 type DashboardOverview struct {
+	TotalNodeCount         int                      `json:"total_node_count"`
+	TotalTargetCount       int                      `json:"total_target_count"`
 	AbnormalNodeCount      int                      `json:"abnormal_node_count"`
 	AbnormalTargetCount    int                      `json:"abnormal_target_count"`
 	SevereNodeCount        int                      `json:"severe_node_count"`

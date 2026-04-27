@@ -26,6 +26,8 @@ func (f *fakeDashboardRepository) GetDashboardOverview(_ context.Context, limit 
 func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	repo := &fakeDashboardRepository{result: incidents.DashboardOverview{
+		TotalNodeCount:         5,
+		TotalTargetCount:       4,
 		AbnormalNodeCount:      2,
 		RecentNewIncidentCount: 3,
 		RecentEvents: []incidents.StateChangeEventRecord{{
@@ -54,6 +56,12 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	var body map[string]any
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["total_node_count"] != float64(5) {
+		t.Fatalf("body = %#v, want total_node_count=5", body)
+	}
+	if body["total_target_count"] != float64(4) {
+		t.Fatalf("body = %#v, want total_target_count=4", body)
 	}
 	if body["abnormal_node_count"] != float64(2) {
 		t.Fatalf("body = %#v, want abnormal_node_count=2", body)

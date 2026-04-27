@@ -16,14 +16,16 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
 		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
 			return fakeRow{scan: func(dest ...any) error {
-				*(dest[0].(*int)) = 2
-				*(dest[1].(*int)) = 1
-				*(dest[2].(*int)) = 1
-				*(dest[3].(*int)) = 0
+				*(dest[0].(*int)) = 5
+				*(dest[1].(*int)) = 4
+				*(dest[2].(*int)) = 2
+				*(dest[3].(*int)) = 1
 				*(dest[4].(*int)) = 1
-				*(dest[5].(*int)) = 1
-				*(dest[6].(*int)) = 3
-				*(dest[7].(*int)) = 2
+				*(dest[5].(*int)) = 0
+				*(dest[6].(*int)) = 1
+				*(dest[7].(*int)) = 1
+				*(dest[8].(*int)) = 3
+				*(dest[9].(*int)) = 2
 				return nil
 			}}
 		},
@@ -45,6 +47,9 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	overview, err := repo.GetDashboardOverview(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("GetDashboardOverview() error = %v", err)
+	}
+	if overview.TotalNodeCount != 5 || overview.TotalTargetCount != 4 {
+		t.Fatalf("total counts = (%d,%d), want (5,4)", overview.TotalNodeCount, overview.TotalTargetCount)
 	}
 	if overview.AbnormalNodeCount != 2 || overview.RecentRecoveryCount != 2 {
 		t.Fatalf("overview = %#v, want populated counts", overview)

@@ -79,6 +79,8 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 	var overview incidents.DashboardOverview
 	if err := queryer.QueryRow(ctx, `
 		select
+			(select count(*) from nodes),
+			(select count(*) from targets),
 			(select count(*) from nodes where current_health_status <> '正常'),
 			(select count(*) from targets where current_health_status <> '正常'),
 			(select count(*) from nodes where current_health_status = '严重'),
@@ -88,6 +90,8 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 			(select count(*) from state_change_events where event_type = 'incident_started' and created_at >= now() - interval '24 hours'),
 			(select count(*) from state_change_events where event_type = 'incident_recovered' and created_at >= now() - interval '24 hours')
 	`).Scan(
+		&overview.TotalNodeCount,
+		&overview.TotalTargetCount,
 		&overview.AbnormalNodeCount,
 		&overview.AbnormalTargetCount,
 		&overview.SevereNodeCount,
