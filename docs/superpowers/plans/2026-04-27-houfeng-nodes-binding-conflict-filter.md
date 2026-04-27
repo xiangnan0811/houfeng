@@ -43,7 +43,7 @@ Use these strings:
 - Modify: `web/src/pages/NodesPage.tsx`
 - Modify: `web/src/pages/NodesPage.test.tsx`
 
-- [ ] **Step 1: Add failing NodesPage tests**
+- [x] **Step 1: Add failing NodesPage tests**
 
 In `web/src/pages/NodesPage.test.tsx`, add a helper near the top:
 
@@ -171,7 +171,7 @@ cd web && npm test -- --run NodesPage
 
 Expected: fail because the filter controls and conflict row summary do not exist.
 
-- [ ] **Step 2: Implement client-side binding-conflict filter**
+- [x] **Step 2: Implement client-side binding-conflict filter**
 
 In `web/src/pages/NodesPage.tsx`, add constants and type near existing constants:
 
@@ -255,7 +255,7 @@ In the current issue column, change the summary expression to:
 
 Do not add binding action buttons.
 
-- [ ] **Step 3: Run focused frontend tests and commit**
+- [x] **Step 3: Run focused frontend tests and commit**
 
 Run:
 
@@ -280,7 +280,7 @@ git commit -m "Surface binding conflicts in the Node list"
 **Files:**
 - No planned edits unless verification exposes issues.
 
-- [ ] **Step 1: Run focused checks**
+- [x] **Step 1: Run focused checks**
 
 Run:
 
@@ -291,7 +291,7 @@ cd web && npm run build
 
 Expected: pass.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -305,7 +305,7 @@ cd web && npm run lint
 
 Expected: pass.
 
-- [ ] **Step 3: Scope review**
+- [x] **Step 3: Scope review**
 
 Confirm:
 
@@ -314,6 +314,6 @@ Confirm:
 - Conflict nodes are filterable and visibly marked.
 - Node Detail remains the decision surface.
 
-- [ ] **Step 4: Final code review**
+- [x] **Step 4: Final code review**
 
 Dispatch a fresh code-review subagent for this slice. If blocked, apply `superpowers:receiving-code-review`, fix minimally, rerun focused and full verification, and re-review.
