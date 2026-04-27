@@ -385,3 +385,21 @@ func TestTargetProbeItemsHandlerRejectsUnsupportedItemMethods(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, recorder.Code)
 	}
 }
+
+func TestTargetProbeItemsHandlerRejectsMalformedItemPaths(t *testing.T) {
+	repo := &fakeTargetRepository{}
+
+	handler := handlers.TargetProbeItems(repo)
+	req := httptest.NewRequest(http.MethodPut, "/api/targets/tg_001/probe-items/pb_001/extra", strings.NewReader(`{"probe_kind":"tcp","enabled":true,"frequency_tier":"1m","timeout_seconds":5,"config":{"port":443}}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+	if repo.updateProbeItemID != "" || repo.deleteProbeItemID != "" {
+		t.Fatalf("unexpected repository mutation for malformed path: update=%q delete=%q", repo.updateProbeItemID, repo.deleteProbeItemID)
+	}
+}

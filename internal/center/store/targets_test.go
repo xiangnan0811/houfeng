@@ -360,6 +360,27 @@ func TestDeleteProbeItemReturnsTargetNotFoundWhenTargetMissing(t *testing.T) {
 	}
 }
 
+func TestDeleteProbeItemReturnsProbeItemNotFoundWhenTargetExists(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresTargetRepository{db: fakeTargetDB{
+		exec: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("DELETE 0"), nil
+		},
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeTargetRow{scan: func(dest ...any) error {
+				scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: "tg_001"})
+				return nil
+			}}
+		},
+	}}
+
+	err := repo.DeleteProbeItem(context.Background(), "tg_001", "pb_missing")
+	if !errors.Is(err, targets.ErrProbeItemNotFound) {
+		t.Fatalf("DeleteProbeItem() error = %v, want ErrProbeItemNotFound", err)
+	}
+}
+
 type fakeTargetDB struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 	query    func(context.Context, string, ...any) (pgx.Rows, error)
