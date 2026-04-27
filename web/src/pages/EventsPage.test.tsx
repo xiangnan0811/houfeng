@@ -166,6 +166,44 @@ describe('EventsPage', () => {
     )
   })
 
+  it('offers node lifecycle event filters and submits them', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EventsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+    )
+
+    const eventTypeSelect = screen.getByLabelText('事件类型')
+
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '节点已退役' }),
+    ).toBeInTheDocument()
+    expect(
+      within(eventTypeSelect).getByRole('option', { name: '节点恢复到观察中' }),
+    ).toBeInTheDocument()
+
+    fireEvent.change(eventTypeSelect, {
+      target: { value: 'node_restored_to_observing' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        '/api/events?event_type=node_restored_to_observing&limit=50',
+        {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        },
+      ),
+    )
+  })
+
   it('renders an explicit empty state when no events exist', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse([])))
 

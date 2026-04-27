@@ -174,6 +174,8 @@ export type StateChangeEventType =
   | 'node_binding_rebind_confirmed'
   | 'node_binding_pending_rejected'
   | 'node_binding_reset'
+  | 'node_retired'
+  | 'node_restored_to_observing'
   | 'node_monitoring_maintenance_entered'
   | 'node_monitoring_maintenance_exited'
   | 'node_monitoring_paused'
@@ -192,6 +194,8 @@ export const STATE_CHANGE_EVENT_TYPE_LABELS: Record<StateChangeEventType, string
   node_binding_rebind_confirmed: '确认重新绑定',
   node_binding_pending_rejected: '拒绝待确认指纹',
   node_binding_reset: '绑定已重置',
+  node_retired: '节点已退役',
+  node_restored_to_observing: '节点恢复到观察中',
   node_monitoring_maintenance_entered: '节点进入维护',
   node_monitoring_maintenance_exited: '节点退出维护',
   node_monitoring_paused: '节点暂停监控',

@@ -955,6 +955,205 @@ describe('NodeDetailPage', () => {
     })
   })
 
+  it('renders a lifecycle card for retired nodes with restore-to-observing guidance', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_retired',
+              lifecycle_status: '已退役',
+              monitoring_status: '暂停',
+              binding_status: '已绑定',
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_retired')))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_retired']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '生命周期' })).toBeInTheDocument(),
+    )
+
+    expect(
+      screen.getByText('已退役节点在 V1 中只能先恢复到观察中，不能直接恢复为在用。'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '退役节点' })).not.toBeInTheDocument()
+  })
+
+  it('retires a node from Node detail with inline confirmation instead of window.confirm', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_lifecycle',
+            binding_status: '已绑定',
+            lifecycle_status: '在用',
+            current_health_status: '正常',
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_lifecycle')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_lifecycle',
+            binding_status: '已绑定',
+            lifecycle_status: '已退役',
+            monitoring_status: '暂停',
+            current_health_status: '正常',
+            current_primary_issue_summary: '',
+            updated_at: '2026-04-27T09:30:00Z',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_lifecycle']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '退役节点' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '退役节点' }))
+    expect(screen.getByRole('button', { name: '确认退役' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '确认退役' }))
+
+    expect(confirmMock).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_lifecycle/lifecycle/retire', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('restores a retired node only to observing from Node detail', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_restore',
+            binding_status: '已绑定',
+            lifecycle_status: '已退役',
+            monitoring_status: '暂停',
+            current_health_status: '正常',
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_restore')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_restore',
+            binding_status: '已绑定',
+            lifecycle_status: '观察中',
+            monitoring_status: '暂停',
+            current_health_status: '正常',
+            current_primary_issue_summary: '',
+            updated_at: '2026-04-27T09:40:00Z',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_restore']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
+
+    await waitFor(() => expect(screen.getByText('观察中')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      '/api/nodes/nd_restore/lifecycle/restore-to-observing',
+      {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      },
+    )
+  })
+
+  it('keeps lifecycle action errors local to the lifecycle card', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_lifecycle_error',
+            binding_status: '已绑定',
+            lifecycle_status: '已退役',
+            monitoring_status: '暂停',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_lifecycle_error')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid lifecycle transition' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_lifecycle_error']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('invalid lifecycle transition'),
+    )
+    expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '生命周期' })).toBeInTheDocument()
+  })
+
   it('ignores a stale runtime-action success after switching to a different node route', async () => {
     const runtimeAction = deferredResponse()
 
@@ -1062,6 +1261,97 @@ describe('NodeDetailPage', () => {
     )
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
+  })
+
+  it('ignores a stale lifecycle-action success after switching to a different node route', async () => {
+    const lifecycleAction = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_001',
+              binding_status: '已绑定',
+              lifecycle_status: '已退役',
+              monitoring_status: '暂停',
+              current_health_status: '正常',
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockImplementationOnce(() => lifecycleAction.promise)
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_002',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            provider: 'Hetzner',
+            lifecycle_status: '在用',
+            monitoring_status: '启用',
+            binding_status: '已绑定',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:10:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_002',
+            latest_host_sample: null,
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <NodeDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
+    fireEvent.click(screen.getByRole('button', { name: 'switch node' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
+
+    lifecycleAction.resolve(
+      mockJSONResponse(
+        nodeRecord({
+          node_id: 'nd_001',
+          binding_status: '已绑定',
+          lifecycle_status: '观察中',
+          monitoring_status: '暂停',
+          current_health_status: '正常',
+          current_primary_issue_summary: '',
+          updated_at: '2026-04-27T09:45:00Z',
+        }),
+      ),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
+    expect(screen.queryByText('观察中')).not.toBeInTheDocument()
   })
 
   it('ignores a stale binding-action success after switching to a different node route', async () => {

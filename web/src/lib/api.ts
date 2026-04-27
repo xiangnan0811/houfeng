@@ -123,6 +123,14 @@ export function resumeNodeMonitoring(nodeId: string) {
   return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/resume`)
 }
 
+export function retireNode(nodeId: string) {
+  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/lifecycle/retire`)
+}
+
+export function restoreRetiredNodeToObserving(nodeId: string) {
+  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/lifecycle/restore-to-observing`)
+}
+
 export function getNodeOnboarding(nodeId: string) {
   return requestJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/onboarding`)
 }

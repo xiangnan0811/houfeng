@@ -21,7 +21,9 @@ import {
   pauseNodeMonitoring,
   pauseTarget,
   rejectPendingNodeBinding,
+  restoreRetiredNodeToObserving,
   resetNodeBinding,
+  retireNode,
   restoreTargetToPaused,
   resumeNodeMonitoring,
   resumeTarget,
@@ -551,6 +553,46 @@ describe('api helpers', () => {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
+  })
+
+  it('posts node lifecycle actions to the explicit endpoints', async () => {
+    const responseBody = {
+      node_id: 'nd_001',
+      display_name: 'Tokyo Edge',
+      region: 'ap-northeast-1',
+      city: 'Tokyo',
+      provider: 'aws',
+      lifecycle_status: '已退役',
+      monitoring_status: '暂停',
+      binding_status: '已绑定',
+      labels: [],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-26T09:00:00Z',
+      updated_at: '2026-04-26T09:18:00Z',
+    }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(retireNode('nd_001')).resolves.toEqual(responseBody)
+    await expect(restoreRetiredNodeToObserving('nd_001')).resolves.toEqual(responseBody)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_001/lifecycle/retire', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/nodes/nd_001/lifecycle/restore-to-observing',
+      {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      },
+    )
   })
 
   it('posts target runtime control actions to the explicit endpoints', async () => {

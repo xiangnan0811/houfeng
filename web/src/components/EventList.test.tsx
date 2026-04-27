@@ -194,4 +194,41 @@ describe('EventList', () => {
     expect(screen.getByRole('heading', { level: 3, name: '目标已恢复为暂停' })).toBeInTheDocument()
     expect(screen.queryByText('异常类型')).not.toBeInTheDocument()
   })
+
+  it('renders readable lifecycle labels without incident-only meta rows', () => {
+    render(
+      <EventList
+        events={[
+          {
+            event_id: 'evt_lifecycle_001',
+            incident_id: '',
+            incident_class: '',
+            object_type: 'node',
+            object_id: 'nd_001',
+            event_type: 'node_retired',
+            severity: '',
+            summary: '节点已退役并退出活跃舰队，历史记录保留',
+            created_at: '2026-04-26T08:10:00Z',
+          },
+          {
+            event_id: 'evt_lifecycle_002',
+            incident_id: '',
+            incident_class: '',
+            object_type: 'node',
+            object_id: 'nd_001',
+            event_type: 'node_restored_to_observing',
+            severity: '',
+            summary: '节点已从退役恢复到观察中',
+            created_at: '2026-04-26T08:11:00Z',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { level: 3, name: '节点已退役' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 3, name: '节点恢复到观察中' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('异常类型')).not.toBeInTheDocument()
+  })
 })

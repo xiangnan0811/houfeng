@@ -18,6 +18,8 @@ import {
   pauseNodeMonitoring,
   rejectPendingNodeBinding,
   resetNodeBinding,
+  restoreRetiredNodeToObserving,
+  retireNode,
   resumeNodeMonitoring,
 } from '../lib/api'
 import {
@@ -53,10 +55,14 @@ type State = {
 const NODE_PAUSE_CONFIRM_MESSAGE = '暂停监控会停止采集并产生数据空档，确定继续吗？'
 const NODE_BINDING_CONFLICT_LOAD_ERROR = '绑定冲突详情暂不可用'
 const NODE_BINDING_ACTION_ERROR = '更新绑定冲突状态失败'
+const NODE_LIFECYCLE_ACTION_ERROR = '节点生命周期操作失败'
 const NODE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
 const NODE_BINDING_CONFIRM_REBIND_LABEL = '确认重绑定'
 const NODE_BINDING_REJECT_PENDING_LABEL = '拒绝新指纹'
 const NODE_BINDING_RESET_LABEL = '重置绑定'
+const NODE_LIFECYCLE_RETIRED = '已退役'
+const NODE_LIFECYCLE_V1_LIMITATION_COPY =
+  '已退役节点在 V1 中只能先恢复到观察中，不能直接恢复为在用。'
 
 type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
 type BindingConflictState = {
@@ -67,6 +73,7 @@ type BindingConflictState = {
 }
 
 type BindingConflictAction = 'confirm' | 'reject' | 'reset'
+type NodeLifecycleAction = 'retire' | 'restore-to-observing'
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -134,6 +141,9 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   })
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [lifecycleSubmitting, setLifecycleSubmitting] = useState<NodeLifecycleAction | null>(null)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const [showRetireConfirmation, setShowRetireConfirmation] = useState(false)
   const [bindingConflictState, setBindingConflictState] = useState<BindingConflictState>({
     requestedNodeId: null,
     onboarding: null,
@@ -345,6 +355,49 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     }
   }
 
+  async function handleLifecycleAction(action: NodeLifecycleAction) {
+    if (!node) return
+    const actionNodeId = node.node_id
+    setLifecycleSubmitting(action)
+    setLifecycleError(null)
+
+    try {
+      const updated =
+        action === 'retire'
+          ? await retireNode(actionNodeId)
+          : await restoreRetiredNodeToObserving(actionNodeId)
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
+      setState((current) => ({
+        ...current,
+        node: updated,
+      }))
+      setShowRetireConfirmation(false)
+    } catch (error) {
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
+      setLifecycleError(describeError(error, NODE_LIFECYCLE_ACTION_ERROR))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteNodeIdRef.current === actionNodeId &&
+        currentRequestedNodeIdRef.current === actionNodeId
+      ) {
+        setLifecycleSubmitting(null)
+      }
+    }
+  }
+
   function applyOnboardingToNode(actionNodeId: string, onboarding: NodeOnboardingState) {
     setState((current) => {
       if (current.requestedNodeId !== actionNodeId) return current
@@ -427,6 +480,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
 
   const sample = runtimeFacts?.latest_host_sample ?? null
   const showBindingConflict = node.binding_status === NODE_BINDING_CONFLICT_STATUS
+  const isRetiredNode = node.lifecycle_status === NODE_LIFECYCLE_RETIRED
   const hasCurrentBindingConflictState = bindingConflictState.requestedNodeId === nodeId
   const bindingConflict = hasCurrentBindingConflictState ? bindingConflictState.onboarding : null
   const bindingConflictError = hasCurrentBindingConflictState ? bindingConflictState.error : null
@@ -561,6 +615,59 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
             ))}
           </div>
           {runtimeError ? <p>{runtimeError}</p> : null}
+        </div>
+      </DetailSection>
+
+      <DetailSection eyebrow="Lifecycle" title="生命周期">
+        <div className="page-stack">
+          {isRetiredNode ? <p>{NODE_LIFECYCLE_V1_LIMITATION_COPY}</p> : null}
+          <div className="badge-row badge-row--wrap">
+            {isRetiredNode ? (
+              <button
+                type="button"
+                disabled={lifecycleSubmitting !== null}
+                onClick={() => void handleLifecycleAction('restore-to-observing')}
+              >
+                {lifecycleSubmitting === 'restore-to-observing' ? '正在恢复…' : '恢复到观察中'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={lifecycleSubmitting !== null}
+                onClick={() => {
+                  setShowRetireConfirmation(true)
+                  setLifecycleError(null)
+                }}
+              >
+                退役节点
+              </button>
+            )}
+          </div>
+          {!isRetiredNode && showRetireConfirmation ? (
+            <div className="page-stack">
+              <p>退役会让节点退出当前工作集，但会保留历史记录。</p>
+              <div className="badge-row badge-row--wrap">
+                <button
+                  type="button"
+                  disabled={lifecycleSubmitting !== null}
+                  onClick={() => void handleLifecycleAction('retire')}
+                >
+                  {lifecycleSubmitting === 'retire' ? '正在退役…' : '确认退役'}
+                </button>
+                <button
+                  type="button"
+                  disabled={lifecycleSubmitting !== null}
+                  onClick={() => {
+                    setShowRetireConfirmation(false)
+                    setLifecycleError(null)
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {lifecycleError ? <p role="alert">{lifecycleError}</p> : null}
         </div>
       </DetailSection>
 
