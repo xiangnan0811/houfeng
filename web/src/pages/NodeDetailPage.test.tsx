@@ -942,7 +942,8 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    const pauseButton = screen.getByRole('button', { name: '暂停监控' })
+    fireEvent.click(pauseButton)
 
     expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
     expect(screen.getByText('当前：监控运行状态为启用。')).toBeInTheDocument()
@@ -958,6 +959,7 @@ describe('NodeDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('heading', { name: '确认暂停节点监控' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(4)
+    await waitFor(() => expect(screen.getByRole('button', { name: '暂停监控' })).toHaveFocus())
 
     fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
     fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
@@ -966,7 +968,115 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
     )
+    await waitFor(() => expect(screen.getByRole('button', { name: '恢复监控' })).toHaveFocus())
     expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_001/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('shows maintenance-state current copy when pausing from a maintenance node detail view', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_maintenance_pause',
+              binding_status: '已绑定',
+              monitoring_status: '维护中',
+              current_health_status: '正常',
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_maintenance_pause')))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_maintenance_pause']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+
+    expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
+    expect(screen.getByText('当前：监控运行状态为维护中。')).toBeInTheDocument()
+  })
+
+  it('keeps the pause confirmation visible and reusable after a pause API failure', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_pause_error',
+            binding_status: '已绑定',
+            monitoring_status: '启用',
+            current_health_status: '正常',
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_pause_error')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'pause failed' }, 500))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_pause_error',
+            binding_status: '已绑定',
+            monitoring_status: '暂停',
+            current_health_status: '正常',
+            current_primary_issue_summary: '',
+            updated_at: '2026-04-27T09:40:00Z',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_pause_error']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
+
+    await waitFor(() => expect(screen.getByText('pause failed')).toBeInTheDocument())
+    expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认暂停监控' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_pause_error/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/nodes/nd_pause_error/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
