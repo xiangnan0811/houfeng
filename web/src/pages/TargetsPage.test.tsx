@@ -18,6 +18,103 @@ describe('TargetsPage', () => {
     vi.restoreAllMocks()
   })
 
+  it('creates the first target and navigates to its detail page', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          {
+            target_id: 'tg_new',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge', 'core'],
+            run_status: '启用',
+            labels: ['public'],
+            note: 'primary blog',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-27T09:00:00Z',
+            updated_at: '2026-04-27T09:00:00Z',
+          },
+          201,
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+          <Route path="/targets/:targetId" element={<div>target detail route</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(screen.getByLabelText('目标类型'), { target: { value: 'service' } })
+    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(screen.getByLabelText('Base Port'), { target: { value: '443' } })
+    fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge, core' } })
+    fireEvent.change(screen.getByLabelText('运行状态'), { target: { value: '启用' } })
+    fireEvent.change(screen.getByLabelText('目标标签'), { target: { value: 'public' } })
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'primary blog' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+
+    await waitFor(() => expect(screen.getByText('target detail route')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({
+        name: 'Blog',
+        target_type: 'service',
+        host: 'blog.example.com',
+        base_port: 443,
+        execution_node_labels: ['edge', 'core'],
+        run_status: '启用',
+        labels: ['public'],
+        note: 'primary blog',
+      }),
+    })
+  })
+
+  it('keeps target creation errors inside the create panel', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+
+    expect(screen.getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('renders runtime quick actions by target run status and restores archived targets to paused', async () => {
     const fetchMock = vi
       .fn()
