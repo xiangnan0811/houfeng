@@ -136,6 +136,8 @@ export type CreateProbeItemInput = {
   config: Record<string, unknown>
 }
 
+export type UpdateProbeItemInput = CreateProbeItemInput
+
 export type ProbeObservation = {
   node_id: string
   target_id: string

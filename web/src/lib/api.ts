@@ -2,6 +2,7 @@ import type {
   ActiveIncidentRecord,
   CreateProbeItemInput,
   CreateTargetInput,
+  UpdateProbeItemInput,
   DashboardOverview,
   EventListFilter,
   IncidentListFilter,
@@ -27,16 +28,17 @@ export class ApiError extends Error {
   }
 }
 
-async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
+async function request(path: string, init?: RequestInit): Promise<string> {
   const response = await fetch(path, {
     headers: { Accept: 'application/json' },
     cache: 'no-store',
     ...init,
   })
 
+  const rawBody = await response.text()
+
   if (!response.ok) {
     let message = `Request failed: ${response.status}`
-    const rawBody = await response.text()
     if (rawBody.trim()) {
       try {
         const errorBody = JSON.parse(rawBody) as { error?: string; message?: string }
@@ -48,7 +50,16 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, message)
   }
 
-  return (await response.json()) as T
+  return rawBody
+}
+
+async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  const rawBody = await request(path, init)
+  return JSON.parse(rawBody) as T
+}
+
+async function requestEmpty(path: string, init?: RequestInit): Promise<void> {
+  await request(path, init)
 }
 
 function postJSON<T>(path: string): Promise<T> {
@@ -153,6 +164,27 @@ export function createProbeItem(
   input: CreateProbeItemInput,
 ): Promise<ProbeItemRecord> {
   return postJSONBody<ProbeItemRecord>(`/api/targets/${targetId}/probe-items`, input)
+}
+
+export function updateProbeItem(
+  targetId: string,
+  probeItemId: string,
+  input: UpdateProbeItemInput,
+): Promise<ProbeItemRecord> {
+  return requestJSON<ProbeItemRecord>(`/api/targets/${targetId}/probe-items/${probeItemId}`, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  })
+}
+
+export function deleteProbeItem(targetId: string, probeItemId: string): Promise<void> {
+  return requestEmpty(`/api/targets/${targetId}/probe-items/${probeItemId}`, {
+    method: 'DELETE',
+  })
 }
 
 export function getTargetRuntimeFacts(targetId: string) {

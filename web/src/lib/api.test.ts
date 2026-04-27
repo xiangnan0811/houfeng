@@ -6,6 +6,7 @@ import {
   confirmNodeRebind,
   createProbeItem,
   createTarget,
+  deleteProbeItem,
   enterNodeMaintenance,
   enterTargetMaintenance,
   exitNodeMaintenance,
@@ -24,12 +25,14 @@ import {
   restoreTargetToPaused,
   resumeNodeMonitoring,
   resumeTarget,
+  updateProbeItem,
   updateSettings,
 } from './api'
 import type {
   CreateProbeItemInput,
   CreateTargetInput,
   ProbeItemRecord,
+  UpdateProbeItemInput,
   SettingsRecord,
   SettingsUpdateInput,
   TargetRecord,
@@ -284,6 +287,58 @@ describe('api helpers', () => {
       },
       cache: 'no-store',
       body: JSON.stringify(requestBody),
+    })
+  })
+
+  it('updates probe items with PUT /api/targets/:targetId/probe-items/:probeItemId and returns the updated probe item', async () => {
+    const requestBody = {
+      probe_kind: 'http',
+      enabled: false,
+      frequency_tier: '5m',
+      timeout_seconds: 8,
+      config: {
+        scheme: 'https',
+        path: '/ready',
+        method: 'HEAD',
+        expected_status_range: [200, 204],
+      },
+    } satisfies UpdateProbeItemInput
+    const responseBody = {
+      probe_item_id: 'pb_001',
+      target_id: 'tg_001',
+      ...requestBody,
+      created_at: '2026-04-27T09:05:00Z',
+      updated_at: '2026-04-27T09:10:00Z',
+    } satisfies ProbeItemRecord
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(updateProbeItem('tg_001', 'pb_001', requestBody)).resolves.toEqual(responseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/targets/tg_001/probe-items/pb_001', {
+      method: 'PUT',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify(requestBody),
+    })
+  })
+
+  it('deletes probe items with DELETE /api/targets/:targetId/probe-items/:probeItemId', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: async () => '',
+      json: async () => { throw new Error('json should not be called for 204 responses') },
+    } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteProbeItem('tg_001', 'pb_001')).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledWith('/api/targets/tg_001/probe-items/pb_001', {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
     })
   })
 
