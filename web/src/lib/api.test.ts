@@ -193,6 +193,8 @@ describe('api helpers', () => {
 
   it('loads dashboard overview from /api/dashboard', async () => {
     const responseBody = {
+      total_node_count: 5,
+      total_target_count: 4,
       abnormal_node_count: 1,
       abnormal_target_count: 2,
       severe_node_count: 0,

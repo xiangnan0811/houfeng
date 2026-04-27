@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
@@ -28,6 +29,8 @@ describe('DashboardPage', () => {
       'fetch',
       vi.fn().mockResolvedValue(
         mockJSONResponse({
+          total_node_count: 5,
+          total_target_count: 4,
           abnormal_node_count: 2,
           abnormal_target_count: 3,
           severe_node_count: 1,
@@ -53,7 +56,11 @@ describe('DashboardPage', () => {
       ),
     )
 
-    render(<DashboardPage />)
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
 
     expect(screen.getByText('正在加载集群概览…')).toBeInTheDocument()
 
@@ -79,11 +86,57 @@ describe('DashboardPage', () => {
       vi.fn().mockResolvedValue(mockJSONResponse({ error: 'dashboard unavailable' }, 503)),
     )
 
-    render(<DashboardPage />)
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '集群概览不可用' })).toBeInTheDocument(),
     )
     expect(screen.getByText('dashboard unavailable')).toBeInTheDocument()
+  })
+
+  it('renders the V1 first-run onboarding path when no nodes or targets exist', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          total_node_count: 0,
+          total_target_count: 0,
+          abnormal_node_count: 0,
+          abnormal_target_count: 0,
+          severe_node_count: 0,
+          severe_target_count: 0,
+          maintenance_node_count: 0,
+          maintenance_target_count: 0,
+          recent_new_incident_count: 0,
+          recent_recovery_count: 0,
+          recent_events: [],
+        }),
+      ),
+    )
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '还没有节点与目标' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('First Run')).toBeInTheDocument()
+    expect(
+      screen.getByText('这不是异常。候风需要先有一个 Node 接入 agent，然后才能创建 Target 并添加 ProbeItem。'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('创建第一个 Node')).toBeInTheDocument()
+    expect(screen.getByText('接入 agent')).toBeInTheDocument()
+    expect(screen.getByText('创建第一个 Target')).toBeInTheDocument()
+    expect(screen.getByText('添加第一个 ProbeItem')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '创建第一个节点' })).toHaveAttribute('href', '/nodes')
+    expect(screen.queryByText('异常对象总数')).not.toBeInTheDocument()
   })
 })

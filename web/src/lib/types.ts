@@ -221,6 +221,8 @@ export type StateChangeEventRecord = {
 }
 
 export type DashboardOverview = {
+  total_node_count: number
+  total_target_count: number
   abnormal_node_count: number
   abnormal_target_count: number
   severe_node_count: number
