@@ -22,7 +22,8 @@ const selectAgentPlanNodeLabelsSQL = `
 		coalesce(
 			cs.override_rules,
 			'{"node_labels":[],"target_types":[],"target_labels":[]}'::jsonb
-		) as override_rules
+		) as override_rules,
+		cs.settings_id is not null as settings_row_present
 	from nodes n
 	left join center_settings cs on cs.settings_id = $2
 	where n.node_id = $1`
@@ -73,17 +74,18 @@ func (r *PostgresAgentPlanRepository) BuildSyncPlan(ctx context.Context, nodeID 
 
 func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string) (agentplan.SyncPlan, error) {
 	var (
-		labels            []string
-		hostSampleTier    string
-		overrideRulesJSON []byte
+		labels             []string
+		hostSampleTier     string
+		overrideRulesJSON  []byte
+		settingsRowPresent bool
 	)
-	if err := queryer.QueryRow(ctx, selectAgentPlanNodeLabelsSQL, nodeID, centersettings.SingletonID).Scan(&labels, &hostSampleTier, &overrideRulesJSON); errors.Is(err, pgx.ErrNoRows) {
+	if err := queryer.QueryRow(ctx, selectAgentPlanNodeLabelsSQL, nodeID, centersettings.SingletonID).Scan(&labels, &hostSampleTier, &overrideRulesJSON, &settingsRowPresent); errors.Is(err, pgx.ErrNoRows) {
 		return agentplan.SyncPlan{}, nodes.ErrNodeNotFound
 	} else if err != nil {
 		return agentplan.SyncPlan{}, fmt.Errorf("query labels for node %q: %w", nodeID, err)
 	}
 
-	settings, err := resolveAgentPlanSettings(labels, hostSampleTier, overrideRulesJSON)
+	settings, err := resolveAgentPlanSettings(settingsRowPresent, labels, hostSampleTier, overrideRulesJSON)
 	if err != nil {
 		return agentplan.SyncPlan{}, fmt.Errorf("resolve sync-plan settings for node %q: %w", nodeID, err)
 	}
@@ -143,12 +145,12 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string)
 	return plan, nil
 }
 
-func resolveAgentPlanSettings(nodeLabels []string, hostSampleTier string, overrideRulesJSON []byte) (agentPlanSettingsSnapshot, error) {
+func resolveAgentPlanSettings(settingsRowPresent bool, nodeLabels []string, hostSampleTier string, overrideRulesJSON []byte) (agentPlanSettingsSnapshot, error) {
 	settings := agentPlanSettingsSnapshot{
 		HostSampleFrequencyTier: centersettings.Default().HostSampleFrequencyTier,
 		OverrideRules:           centersettings.Default().OverrideRules,
 	}
-	if hostSampleTier == "" && len(overrideRulesJSON) == 0 {
+	if !settingsRowPresent {
 		settings.HostSampleFrequencyTier = legacyHostSampleFrequencyTier(nodeLabels)
 		return settings, nil
 	}

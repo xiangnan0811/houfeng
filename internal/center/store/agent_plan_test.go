@@ -40,6 +40,9 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 						TargetLabels: []centersettings.TargetLabelOverrideRule{},
 					})
 				}
+				if len(dest) > 3 {
+					*(dest[3].(*bool)) = true
+				}
 				return nil
 			}}
 		},
@@ -160,6 +163,9 @@ func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
 						}},
 					})
 				}
+				if len(dest) > 3 {
+					*(dest[3].(*bool)) = true
+				}
 				return nil
 			}}
 		},
@@ -226,6 +232,72 @@ func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
 	}
 	if plan.ProbeAssignments[1].FrequencyTier != agentapi.FrequencyTier5m {
 		t.Fatalf("ProbeAssignments[1].FrequencyTier = %q, want %q", plan.ProbeAssignments[1].FrequencyTier, agentapi.FrequencyTier5m)
+	}
+}
+
+func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if sql != selectAgentPlanNodeLabelsSQL {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
+			}
+			return fakeAgentPlanRow{scan: func(dest ...any) error {
+				*(dest[0].(*[]string)) = []string{"edge", "核心"}
+				if len(dest) > 1 {
+					*(dest[1].(*string)) = agentapi.FrequencyTier5m
+				}
+				if len(dest) > 2 {
+					*(dest[2].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
+						NodeLabels:   []centersettings.NodeLabelOverrideRule{},
+						TargetTypes:  []centersettings.TargetTypeOverrideRule{},
+						TargetLabels: []centersettings.TargetLabelOverrideRule{},
+					})
+				}
+				if len(dest) > 3 {
+					*(dest[3].(*bool)) = false
+				}
+				return nil
+			}}
+		},
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			if sql != selectAgentPlanAssignmentsSQL {
+				return nil, errors.New("unexpected Query")
+			}
+			return &fakeAgentPlanRows{rows: []fakeAgentPlanScan{
+				{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "tg_enabled"
+					*(dest[1].(*string)) = "api.example.test"
+					port := 443
+					*(dest[2].(**int)) = &port
+					*(dest[3].(*string)) = targets.RunStatusEnabled
+					*(dest[4].(*string)) = "pb_http"
+					*(dest[5].(*string)) = agentapi.ProbeKindHTTP
+					*(dest[6].(*string)) = agentapi.FrequencyTier1m
+					*(dest[7].(*int)) = 5
+					*(dest[8].(*[]byte)) = []byte(`{"path":"/healthz"}`)
+					if len(dest) > 9 {
+						*(dest[9].(*string)) = targets.TargetTypeService
+					}
+					if len(dest) > 10 {
+						*(dest[10].(*[]string)) = []string{"api"}
+					}
+					return nil
+				}},
+			}}, nil
+		},
+	}}
+
+	plan, err := repo.BuildSyncPlan(context.Background(), "nd_001")
+	if err != nil {
+		t.Fatalf("BuildSyncPlan() error = %v", err)
+	}
+	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier1m {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier1m)
+	}
+	if len(plan.ProbeAssignments) != 1 {
+		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(plan.ProbeAssignments))
 	}
 }
 
