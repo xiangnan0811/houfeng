@@ -72,6 +72,12 @@ const FREQUENCY_TIER_OPTIONS = [
   { value: '6h', label: '6 小时' },
 ] as const
 
+const PROBE_CONFIG_KEYS: Record<ProbeKind, Set<string>> = {
+  tcp: new Set(['port']),
+  http: new Set(['scheme', 'path', 'method', 'expected_status_range']),
+  tls: new Set(['port', 'expiry_warning_days']),
+}
+
 type ProbeCreateFormState = {
   probeKind: ProbeKind
   enabled: boolean
@@ -228,6 +234,15 @@ function formStateForProbeItem(probeItem: ProbeItemRecord): ProbeCreateFormState
   }
 }
 
+function hasUnsupportedProbeConfigFields(probeItem: ProbeItemRecord): boolean {
+  const config = probeItem.config
+  if (config == null || typeof config !== 'object' || Array.isArray(config)) {
+    return true
+  }
+  const allowedKeys = PROBE_CONFIG_KEYS[probeItem.probe_kind]
+  return Object.keys(config).some((key) => !allowedKeys.has(key))
+}
+
 function targetRuntimeActions(
   target: TargetRecord,
 ): Array<{ action: TargetRuntimeAction; label: string }> {
@@ -293,7 +308,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const currentRouteTargetIdRef = useRef<string | null>(targetId ?? null)
   const currentRequestedTargetIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
-  const probeMutationRequestRef = useRef(0)
+  const probeFormRequestRef = useRef(0)
+  const probeRowMutationRequestRef = useRef(0)
 
   useEffect(() => {
     currentRequestedTargetIdRef.current = state.requestedTargetId
@@ -464,19 +480,30 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   function openProbeCreateForm(target: TargetRecord) {
-    probeMutationRequestRef.current += 1
+    probeFormRequestRef.current += 1
     setProbeFormMode({ kind: 'create' })
     setProbeCreateForm(initialProbeCreateFormForTarget(target))
     setProbeCreateError(null)
+    setProbeCreateSubmitting(false)
     setProbeMutationError(null)
     setProbeCreateOpen(true)
   }
 
   function openProbeEditForm(probeItem: ProbeItemRecord) {
-    probeMutationRequestRef.current += 1
+    if (hasUnsupportedProbeConfigFields(probeItem)) {
+      probeFormRequestRef.current += 1
+      setProbeCreateOpen(false)
+      setProbeCreateSubmitting(false)
+      setProbeCreateError(null)
+      setProbeMutationError('ProbeItem 包含当前 V1 表单不支持的配置字段，不能安全编辑。')
+      return
+    }
+
+    probeFormRequestRef.current += 1
     setProbeFormMode({ kind: 'edit', probeItemId: probeItem.probe_item_id })
     setProbeCreateForm(formStateForProbeItem(probeItem))
     setProbeCreateError(null)
+    setProbeCreateSubmitting(false)
     setProbeMutationError(null)
     setProbeCreateOpen(true)
   }
@@ -502,8 +529,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     if (!target) return
 
     const actionTargetId = target.target_id
-    const requestId = probeMutationRequestRef.current + 1
-    probeMutationRequestRef.current = requestId
+    const requestId = probeFormRequestRef.current + 1
+    probeFormRequestRef.current = requestId
     setProbeCreateError(null)
     setProbeMutationError(null)
 
@@ -533,7 +560,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId ||
-        probeMutationRequestRef.current !== requestId
+        probeFormRequestRef.current !== requestId
       ) {
         return
       }
@@ -553,7 +580,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId ||
-        probeMutationRequestRef.current !== requestId
+        probeFormRequestRef.current !== requestId
       ) {
         return
       }
@@ -568,7 +595,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         isMountedRef.current &&
         currentRouteTargetIdRef.current === actionTargetId &&
         currentRequestedTargetIdRef.current === actionTargetId &&
-        probeMutationRequestRef.current === requestId
+        probeFormRequestRef.current === requestId
       ) {
         setProbeCreateSubmitting(false)
       }
@@ -579,8 +606,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     if (!target) return
 
     const actionTargetId = target.target_id
-    const requestId = probeMutationRequestRef.current + 1
-    probeMutationRequestRef.current = requestId
+    const requestId = probeRowMutationRequestRef.current + 1
+    probeRowMutationRequestRef.current = requestId
     setProbeMutationBusyId(probeItem.probe_item_id)
     setProbeMutationError(null)
 
@@ -596,7 +623,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId ||
-        probeMutationRequestRef.current !== requestId
+        probeRowMutationRequestRef.current !== requestId
       ) {
         return
       }
@@ -606,7 +633,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId ||
-        probeMutationRequestRef.current !== requestId
+        probeRowMutationRequestRef.current !== requestId
       ) {
         return
       }
@@ -616,7 +643,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         isMountedRef.current &&
         currentRouteTargetIdRef.current === actionTargetId &&
         currentRequestedTargetIdRef.current === actionTargetId &&
-        probeMutationRequestRef.current === requestId
+        probeRowMutationRequestRef.current === requestId
       ) {
         setProbeMutationBusyId(null)
       }
@@ -629,8 +656,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     }
 
     const actionTargetId = target.target_id
-    const requestId = probeMutationRequestRef.current + 1
-    probeMutationRequestRef.current = requestId
+    const requestId = probeRowMutationRequestRef.current + 1
+    probeRowMutationRequestRef.current = requestId
     setProbeMutationBusyId(probeItem.probe_item_id)
     setProbeMutationError(null)
 
@@ -640,7 +667,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId ||
-        probeMutationRequestRef.current !== requestId
+        probeRowMutationRequestRef.current !== requestId
       ) {
         return
       }
@@ -656,7 +683,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId ||
-        probeMutationRequestRef.current !== requestId
+        probeRowMutationRequestRef.current !== requestId
       ) {
         return
       }
@@ -666,7 +693,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         isMountedRef.current &&
         currentRouteTargetIdRef.current === actionTargetId &&
         currentRequestedTargetIdRef.current === actionTargetId &&
-        probeMutationRequestRef.current === requestId
+        probeRowMutationRequestRef.current === requestId
       ) {
         setProbeMutationBusyId(null)
       }
@@ -769,7 +796,9 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
               type="button"
               onClick={() => {
                 if (probeCreateOpen && probeFormMode.kind === 'create') {
+                  probeFormRequestRef.current += 1
                   setProbeCreateOpen(false)
+                  setProbeCreateSubmitting(false)
                   return
                 }
                 openProbeCreateForm(target)
@@ -1010,21 +1039,30 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                     <div className="badge-row badge-row--wrap">
                       <button
                         type="button"
-                        disabled={probeMutationBusyId === probeItem.probe_item_id}
+                        disabled={
+                          probeCreateSubmitting ||
+                          probeMutationBusyId === probeItem.probe_item_id
+                        }
                         onClick={() => openProbeEditForm(probeItem)}
                       >
                         编辑
                       </button>
                       <button
                         type="button"
-                        disabled={probeMutationBusyId === probeItem.probe_item_id}
+                        disabled={
+                          probeCreateSubmitting ||
+                          probeMutationBusyId === probeItem.probe_item_id
+                        }
                         onClick={() => void handleToggleProbeItem(probeItem)}
                       >
                         {probeItem.enabled ? '停用' : '启用'}
                       </button>
                       <button
                         type="button"
-                        disabled={probeMutationBusyId === probeItem.probe_item_id}
+                        disabled={
+                          probeCreateSubmitting ||
+                          probeMutationBusyId === probeItem.probe_item_id
+                        }
                         onClick={() => void handleDeleteProbeItem(probeItem)}
                       >
                         删除
