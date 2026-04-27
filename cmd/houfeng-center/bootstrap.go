@@ -24,6 +24,7 @@ import (
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
 	"houfeng/internal/center/syncing"
+	"houfeng/internal/center/targets"
 )
 
 type appRunner interface {
@@ -47,6 +48,10 @@ type pgxPostgresDB struct {
 	pool *pgxpool.Pool
 }
 
+type settingsQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version string, deps bootstrapDeps) (appRunner, func(), error) {
 	deps = deps.withDefaults()
 
@@ -67,6 +72,11 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
 	settingsRepo := store.NewPostgresSettingsRepository(db.Pool())
 	notifierSettingsRepo := notifierSettingsRepository{repo: settingsRepo, db: db.Pool()}
+	settingsHandlerRepo := settingsPresentationRepository{
+		repo:                  settingsRepo,
+		queryer:               db.Pool(),
+		incidentSweepInterval: cfg.IncidentSweepInterval,
+	}
 	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
 	enrollmentSvc := enrollment.NewService(nodeRepo)
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
@@ -89,7 +99,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		DashboardHandler:                handlers.Dashboard(dashboardRepo),
 		EventsHandler:                   handlers.Events(dashboardRepo),
 		IncidentsHandler:                handlers.Incidents(incidentRepo),
-		SettingsHandler:                 handlers.Settings(settingsRepo),
+		SettingsHandler:                 handlers.Settings(settingsHandlerRepo),
 		NodesCollectionHandler:          handlers.NodesCollection(nodeRepo),
 		NodeItemHandler:                 handlers.NodeItem(nodeRepo),
 		NodeRuntimeFactsHandler:         handlers.NodeRuntimeFacts(runtimeFactsRepo),
@@ -158,6 +168,96 @@ func (p pgxPostgresDB) Close() {
 
 func (p pgxPostgresDB) Pool() *pgxpool.Pool {
 	return p.pool
+}
+
+type settingsPresentationRepository struct {
+	repo                  centersettings.Repository
+	queryer               settingsQueryer
+	incidentSweepInterval time.Duration
+}
+
+func (r settingsPresentationRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
+	record, err := r.repo.GetSettings(ctx)
+	if err != nil {
+		return centersettings.CenterSettings{}, err
+	}
+
+	persisted, err := r.hasPersistedSettings(ctx)
+	if err != nil {
+		return centersettings.CenterSettings{}, err
+	}
+	if persisted {
+		return record, nil
+	}
+
+	return applyEffectiveFreshInstallSettings(record, r.incidentSweepInterval), nil
+}
+
+func (r settingsPresentationRepository) PutSettings(ctx context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+	return r.repo.PutSettings(ctx, input)
+}
+
+func (r settingsPresentationRepository) hasPersistedSettings(ctx context.Context) (bool, error) {
+	if r.queryer == nil {
+		return true, nil
+	}
+
+	var sentinel int
+	err := r.queryer.QueryRow(ctx, `
+		select 1
+		from center_settings
+		where settings_id = $1`, centersettings.SingletonID).Scan(&sentinel)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("query persisted center settings presence: %w", err)
+	}
+	return true, nil
+}
+
+func applyEffectiveFreshInstallSettings(record centersettings.CenterSettings, incidentSweepInterval time.Duration) centersettings.CenterSettings {
+	record.IncidentDefaults.SweepIntervalSeconds = incidentSweepIntervalSeconds(incidentSweepInterval)
+	record.OverrideRules.NodeLabels = ensureLegacyCoreHostSampleOverride(record.OverrideRules.NodeLabels)
+	return record
+}
+
+func incidentSweepIntervalSeconds(interval time.Duration) int {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	seconds := int(interval.Round(time.Second) / time.Second)
+	if seconds <= 0 {
+		return 60
+	}
+	return seconds
+}
+
+func ensureLegacyCoreHostSampleOverride(rules []centersettings.NodeLabelOverrideRule) []centersettings.NodeLabelOverrideRule {
+	const coreNodeLabel = "核心"
+	coreTier := targets.FrequencyTier1m
+
+	for i, rule := range rules {
+		if rule.Label != coreNodeLabel {
+			continue
+		}
+		if rule.Label == coreNodeLabel && rule.Overrides.HostSampleFrequencyTier != nil {
+			return rules
+		}
+
+		next := append([]centersettings.NodeLabelOverrideRule(nil), rules...)
+		next[i].Overrides.HostSampleFrequencyTier = &coreTier
+		return next
+	}
+
+	legacyRule := centersettings.NodeLabelOverrideRule{
+		Label: coreNodeLabel,
+		Overrides: centersettings.SettingsOverrideFields{
+			HostSampleFrequencyTier: &coreTier,
+		},
+	}
+
+	return append([]centersettings.NodeLabelOverrideRule{legacyRule}, rules...)
 }
 
 type notifierSettingsRepository struct {

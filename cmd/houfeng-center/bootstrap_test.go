@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	centerapp "houfeng/internal/center/app"
@@ -14,6 +16,7 @@ import (
 	centerhttp "houfeng/internal/center/http"
 	incidentservice "houfeng/internal/center/incidents"
 	centersettings "houfeng/internal/center/settings"
+	"houfeng/internal/center/targets"
 )
 
 func TestBootstrapCenterReturnsOpenPostgresError(t *testing.T) {
@@ -247,6 +250,124 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	}
 }
 
+func TestSettingsPresentationRepositoryReturnsEffectiveFreshInstallSettings(t *testing.T) {
+	repo := &fakeCenterSettingsRepository{
+		getSettingsResult: centersettings.Default(),
+	}
+
+	got, err := (settingsPresentationRepository{
+		repo:                  repo,
+		queryer:               fakeSettingsQueryer{scanErr: pgx.ErrNoRows},
+		incidentSweepInterval: 90 * time.Second,
+	}).GetSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetSettings() error = %v", err)
+	}
+
+	if got.IncidentDefaults.SweepIntervalSeconds != 90 {
+		t.Fatalf("SweepIntervalSeconds = %d, want %d", got.IncidentDefaults.SweepIntervalSeconds, 90)
+	}
+	if len(got.OverrideRules.NodeLabels) != 1 {
+		t.Fatalf("len(NodeLabelOverrides) = %d, want 1", len(got.OverrideRules.NodeLabels))
+	}
+	if got.OverrideRules.NodeLabels[0].Label != "核心" {
+		t.Fatalf("NodeLabelOverrides[0].Label = %q, want %q", got.OverrideRules.NodeLabels[0].Label, "核心")
+	}
+	if got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier == nil {
+		t.Fatal("HostSampleFrequencyTier override = nil, want legacy core override")
+	}
+	if *got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier1m {
+		t.Fatalf(
+			"HostSampleFrequencyTier override = %q, want %q",
+			*got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier,
+			targets.FrequencyTier1m,
+		)
+	}
+}
+
+func TestSettingsPresentationRepositoryReturnsPersistedSettingsUnchanged(t *testing.T) {
+	record := centersettings.Default()
+	record.HostSampleFrequencyTier = targets.FrequencyTier15m
+	record.IncidentDefaults.SweepIntervalSeconds = 180
+
+	got, err := (settingsPresentationRepository{
+		repo:                  &fakeCenterSettingsRepository{getSettingsResult: record},
+		queryer:               fakeSettingsQueryer{},
+		incidentSweepInterval: 45 * time.Second,
+	}).GetSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetSettings() error = %v", err)
+	}
+
+	if got.HostSampleFrequencyTier != targets.FrequencyTier15m {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", got.HostSampleFrequencyTier, targets.FrequencyTier15m)
+	}
+	if got.IncidentDefaults.SweepIntervalSeconds != 180 {
+		t.Fatalf("SweepIntervalSeconds = %d, want %d", got.IncidentDefaults.SweepIntervalSeconds, 180)
+	}
+	if len(got.OverrideRules.NodeLabels) != 0 {
+		t.Fatalf("len(NodeLabelOverrides) = %d, want 0", len(got.OverrideRules.NodeLabels))
+	}
+}
+
+func TestSettingsPresentationRepositoryDelegatesPutSettings(t *testing.T) {
+	input := centersettings.Default()
+	input.RetentionPolicy.RawLayerDays = 14
+	repo := &fakeCenterSettingsRepository{putSettingsResult: input}
+
+	got, err := (settingsPresentationRepository{repo: repo}).PutSettings(context.Background(), input)
+	if err != nil {
+		t.Fatalf("PutSettings() error = %v", err)
+	}
+	if repo.putSettingsInput.RetentionPolicy.RawLayerDays != 14 {
+		t.Fatalf(
+			"delegated RawLayerDays = %d, want %d",
+			repo.putSettingsInput.RetentionPolicy.RawLayerDays,
+			14,
+		)
+	}
+	if got.RetentionPolicy.RawLayerDays != 14 {
+		t.Fatalf("returned RawLayerDays = %d, want %d", got.RetentionPolicy.RawLayerDays, 14)
+	}
+}
+
+func TestEnsureLegacyCoreHostSampleOverrideAugmentsExistingCoreRule(t *testing.T) {
+	rules := []centersettings.NodeLabelOverrideRule{{
+		Label: "核心",
+		Overrides: centersettings.SettingsOverrideFields{
+			ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
+				HTTP: stringPtr(targets.FrequencyTier15m),
+			},
+		},
+	}}
+
+	got := ensureLegacyCoreHostSampleOverride(rules)
+
+	if len(got) != 1 {
+		t.Fatalf("len(rules) = %d, want 1", len(got))
+	}
+	if got[0].Overrides.HostSampleFrequencyTier == nil {
+		t.Fatal("HostSampleFrequencyTier override = nil, want legacy core override added in-place")
+	}
+	if *got[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier1m {
+		t.Fatalf(
+			"HostSampleFrequencyTier override = %q, want %q",
+			*got[0].Overrides.HostSampleFrequencyTier,
+			targets.FrequencyTier1m,
+		)
+	}
+	if got[0].Overrides.ProbeFrequencyDefaults == nil || got[0].Overrides.ProbeFrequencyDefaults.HTTP == nil {
+		t.Fatal("ProbeFrequencyDefaults.HTTP = nil, want existing override fields preserved")
+	}
+	if *got[0].Overrides.ProbeFrequencyDefaults.HTTP != targets.FrequencyTier15m {
+		t.Fatalf(
+			"ProbeFrequencyDefaults.HTTP = %q, want %q",
+			*got[0].Overrides.ProbeFrequencyDefaults.HTTP,
+			targets.FrequencyTier15m,
+		)
+	}
+}
+
 type fakePostgresDB struct {
 	closed bool
 }
@@ -257,6 +378,57 @@ func (f *fakePostgresDB) Close() {
 
 func (f *fakePostgresDB) Pool() *pgxpool.Pool {
 	return nil
+}
+
+type fakeSettingsQueryer struct {
+	scanErr error
+}
+
+func (f fakeSettingsQueryer) QueryRow(context.Context, string, ...any) pgx.Row {
+	return fakePGXRow{scanErr: f.scanErr}
+}
+
+type fakePGXRow struct {
+	scanErr error
+}
+
+func (r fakePGXRow) Scan(dest ...any) error {
+	if r.scanErr != nil {
+		return r.scanErr
+	}
+	if len(dest) > 0 {
+		if value, ok := dest[0].(*int); ok {
+			*value = 1
+		}
+	}
+	return nil
+}
+
+type fakeCenterSettingsRepository struct {
+	getSettingsResult centersettings.CenterSettings
+	getSettingsErr    error
+	putSettingsInput  centersettings.CenterSettings
+	putSettingsResult centersettings.CenterSettings
+	putSettingsErr    error
+}
+
+func (f *fakeCenterSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
+	if f.getSettingsErr != nil {
+		return centersettings.CenterSettings{}, f.getSettingsErr
+	}
+	return f.getSettingsResult, nil
+}
+
+func (f *fakeCenterSettingsRepository) PutSettings(_ context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+	f.putSettingsInput = input
+	if f.putSettingsErr != nil {
+		return centersettings.CenterSettings{}, f.putSettingsErr
+	}
+	return f.putSettingsResult, nil
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 type fakeApp struct{}

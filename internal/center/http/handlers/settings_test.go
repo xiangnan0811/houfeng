@@ -218,6 +218,53 @@ func TestSettingsHandlerPreservesExistingTelegramTokenWhenBotTokenIsOmitted(t *t
 	}
 }
 
+func TestSettingsHandlerPreservesEffectiveFreshInstallSettingsOnUnrelatedSave(t *testing.T) {
+	coreTier := "1m"
+	current := centersettings.Default()
+	current.IncidentDefaults.SweepIntervalSeconds = 90
+	current.OverrideRules.NodeLabels = []centersettings.NodeLabelOverrideRule{{
+		Label: "核心",
+		Overrides: centersettings.SettingsOverrideFields{
+			HostSampleFrequencyTier: &coreTier,
+		},
+	}}
+
+	repo := &fakeSettingsRepository{
+		getSettingsResult: current,
+		putSettingsResult: current,
+	}
+
+	handler := handlers.Settings(repo)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"","runtime_managed":false},"host_sample_frequency_tier":"5m","probe_frequency_defaults":{"tcp":"5m","http":"5m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":90,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[{"label":"核心","overrides":{"host_sample_frequency_tier":"1m"}}],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":14,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if repo.putSettingsInput.IncidentDefaults.SweepIntervalSeconds != 90 {
+		t.Fatalf("SweepIntervalSeconds = %d, want %d", repo.putSettingsInput.IncidentDefaults.SweepIntervalSeconds, 90)
+	}
+	if len(repo.putSettingsInput.OverrideRules.NodeLabels) != 1 {
+		t.Fatalf("len(NodeLabelOverrides) = %d, want 1", len(repo.putSettingsInput.OverrideRules.NodeLabels))
+	}
+	if repo.putSettingsInput.OverrideRules.NodeLabels[0].Label != "核心" {
+		t.Fatalf("NodeLabelOverrides[0].Label = %q, want %q", repo.putSettingsInput.OverrideRules.NodeLabels[0].Label, "核心")
+	}
+	if repo.putSettingsInput.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier == nil {
+		t.Fatal("HostSampleFrequencyTier override = nil, want preserved legacy core override")
+	}
+	if *repo.putSettingsInput.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier != "1m" {
+		t.Fatalf(
+			"HostSampleFrequencyTier override = %q, want %q",
+			*repo.putSettingsInput.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier,
+			"1m",
+		)
+	}
+}
+
 func TestSettingsHandlerRejectsUnknownFieldsOnPut(t *testing.T) {
 	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
 
