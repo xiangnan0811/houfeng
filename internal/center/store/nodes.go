@@ -77,6 +77,7 @@ const (
 )
 
 var ErrInvalidNodeRuntimeTransition = errors.New("invalid node runtime transition")
+var ErrInvalidNodeLifecycleTransition = errors.New("invalid node lifecycle transition")
 
 var nodeSelectColumnNames = []string{
 	"node_id",
@@ -770,7 +771,7 @@ func (r *PostgresNodeRepository) RetireNode(ctx context.Context, nodeID string) 
 		if !exists {
 			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
 		}
-		return nodes.Record{}, fmt.Errorf("%w: node %q cannot retire from current lifecycle status", ErrInvalidNodeRuntimeTransition, nodeID)
+		return nodes.Record{}, fmt.Errorf("%w: node %q cannot retire from current lifecycle status", ErrInvalidNodeLifecycleTransition, nodeID)
 	}
 	if err != nil {
 		return nodes.Record{}, fmt.Errorf("retire node %q: %w", nodeID, err)
@@ -808,7 +809,7 @@ func (r *PostgresNodeRepository) RestoreRetiredNodeToObserving(ctx context.Conte
 		if !exists {
 			return nodes.Record{}, fmt.Errorf("%w: node %q", nodes.ErrNodeNotFound, nodeID)
 		}
-		return nodes.Record{}, fmt.Errorf("%w: node %q can only restore to observing from retired", ErrInvalidNodeRuntimeTransition, nodeID)
+		return nodes.Record{}, fmt.Errorf("%w: node %q can only restore to observing from retired", ErrInvalidNodeLifecycleTransition, nodeID)
 	}
 	if err != nil {
 		return nodes.Record{}, fmt.Errorf("restore retired node %q to observing: %w", nodeID, err)

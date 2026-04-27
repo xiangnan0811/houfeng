@@ -1043,6 +1043,8 @@ describe('NodeDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '退役节点' }))
     expect(screen.getByRole('button', { name: '确认退役' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
+    expect(screen.getByText(/这不是删除/)).toBeInTheDocument()
+    expect(screen.getByText(/不会清空事件、 observation 或 agent 绑定历史/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '确认退役' }))
 

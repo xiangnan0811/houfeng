@@ -106,7 +106,7 @@ func NodeLifecycleControls(repo nodeLifecycleControlRepository) http.Handler {
 		case errors.Is(err, nodes.ErrNodeNotFound):
 			writeError(w, http.StatusNotFound, "node not found")
 			return
-		case errors.Is(err, store.ErrInvalidNodeRuntimeTransition):
+		case errors.Is(err, store.ErrInvalidNodeLifecycleTransition):
 			writeError(w, http.StatusConflict, "invalid lifecycle transition")
 			return
 		case err != nil:

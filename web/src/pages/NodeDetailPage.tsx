@@ -645,7 +645,10 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           </div>
           {!isRetiredNode && showRetireConfirmation ? (
             <div className="page-stack">
-              <p>退役会让节点退出当前工作集，但会保留历史记录。</p>
+              <p>
+                退役会让节点退出当前工作集，但会保留历史记录。这不是删除，也不会清空事件、
+                observation 或 agent 绑定历史。
+              </p>
               <div className="badge-row badge-row--wrap">
                 <button
                   type="button"

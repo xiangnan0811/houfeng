@@ -845,7 +845,55 @@ func TestNodeLifecycleTransitionsWriteEvents(t *testing.T) {
 	}
 }
 
-func TestNodeLifecycleRejectsInvalidTransition(t *testing.T) {
+func TestNodeLifecycleRejectsInvalidTransitions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		method func(*PostgresNodeRepository, context.Context, string) (nodes.Record, error)
+	}{
+		{
+			name:   "retire already retired node",
+			method: (*PostgresNodeRepository).RetireNode,
+		},
+		{
+			name:   "restore non-retired node",
+			method: (*PostgresNodeRepository).RestoreRetiredNodeToObserving,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := &PostgresNodeRepository{db: fakeNodeDB{
+				beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+					return &fakeNodeTx{
+						queryRow: func(context.Context, string, ...any) pgx.Row {
+							return fakeNodeRow{scan: func(...any) error { return pgx.ErrNoRows }}
+						},
+					}, nil
+				},
+				queryRow: func(context.Context, string, ...any) pgx.Row {
+					return fakeNodeRow{scan: func(dest ...any) error {
+						*(dest[0].(*bool)) = true
+						return nil
+					}}
+				},
+			}}
+
+			_, err := tt.method(repo, context.Background(), "nd_001")
+			if !errors.Is(err, ErrInvalidNodeLifecycleTransition) {
+				t.Fatalf("%s error = %v, want ErrInvalidNodeLifecycleTransition", tt.name, err)
+			}
+			if errors.Is(err, ErrInvalidNodeRuntimeTransition) {
+				t.Fatalf("%s error = %v, must not use runtime transition sentinel", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestNodeLifecycleReturnsNotFoundForMissingNode(t *testing.T) {
 	t.Parallel()
 
 	repo := &PostgresNodeRepository{db: fakeNodeDB{
@@ -858,15 +906,15 @@ func TestNodeLifecycleRejectsInvalidTransition(t *testing.T) {
 		},
 		queryRow: func(context.Context, string, ...any) pgx.Row {
 			return fakeNodeRow{scan: func(dest ...any) error {
-				*(dest[0].(*bool)) = true
+				*(dest[0].(*bool)) = false
 				return nil
 			}}
 		},
 	}}
 
-	_, err := repo.RetireNode(context.Background(), "nd_001")
-	if !errors.Is(err, ErrInvalidNodeRuntimeTransition) {
-		t.Fatalf("RetireNode() error = %v, want ErrInvalidNodeRuntimeTransition", err)
+	_, err := repo.RestoreRetiredNodeToObserving(context.Background(), "nd_missing")
+	if !errors.Is(err, nodes.ErrNodeNotFound) {
+		t.Fatalf("RestoreRetiredNodeToObserving() error = %v, want nodes.ErrNodeNotFound", err)
 	}
 }
 

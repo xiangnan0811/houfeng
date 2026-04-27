@@ -372,7 +372,7 @@ func TestNodeLifecycleControlHandlerMapsErrors(t *testing.T) {
 	}{
 		{
 			name:        "invalid transition",
-			repo:        &fakeNodeRuntimeControlRepository{retireErr: errors.Join(store.ErrInvalidNodeRuntimeTransition, errors.New("cannot retire"))},
+			repo:        &fakeNodeRuntimeControlRepository{retireErr: errors.Join(store.ErrInvalidNodeLifecycleTransition, errors.New("cannot retire"))},
 			path:        "/api/nodes/nd_001/lifecycle/retire",
 			wantStatus:  http.StatusConflict,
 			wantMessage: "invalid lifecycle transition",
@@ -592,6 +592,7 @@ func TestRuntimeControlHandlersRejectWrongMethod(t *testing.T) {
 		method  string
 	}{
 		{name: "node runtime", handler: handlers.NodeRuntimeControls(&fakeNodeRuntimeControlRepository{}), path: "/api/nodes/nd_001/runtime/pause", method: http.MethodGet},
+		{name: "node lifecycle", handler: handlers.NodeLifecycleControls(&fakeNodeRuntimeControlRepository{}), path: "/api/nodes/nd_001/lifecycle/retire", method: http.MethodGet},
 		{name: "target runtime", handler: handlers.TargetRuntimeControls(&fakeTargetRuntimeControlRepository{}), path: "/api/targets/tg_001/runtime/archive", method: http.MethodGet},
 	}
 
