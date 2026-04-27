@@ -434,6 +434,136 @@ describe('TargetsPage', () => {
     })
   })
 
+
+  it('keeps pause confirmation open and shows row-local error when pause API fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([targetRecord({ target_id: 'tg_pause_fail', name: 'Blog' })]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'pause failed' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认暂停目标' }))
+
+    await waitFor(() => expect(screen.getByText('pause failed')).toBeInTheDocument())
+    expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_pause_fail/runtime/pause', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('keeps archive confirmation open and shows row-local error when archive API fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([targetRecord({ target_id: 'tg_archive_fail', name: 'Blog' })]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'archive failed' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+
+    await waitFor(() => expect(screen.getByText('archive failed')).toBeInTheDocument())
+    expect(screen.getByRole('alertdialog', { name: '确认归档目标' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_archive_fail/runtime/archive', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+  })
+
+  it('keeps a target confirmation open while a different target restores focus after a light action succeeds', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({ target_id: 'tg_pause', name: 'Blog' }),
+          targetRecord({ target_id: 'tg_maintenance', name: 'Storefront' }),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          targetRecord({
+            target_id: 'tg_maintenance',
+            name: 'Storefront',
+            run_status: '维护中',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const pauseRow = screen.getByText('Blog').closest('article')
+    const maintenanceRow = screen.getByText('Storefront').closest('article')
+    expect(pauseRow).not.toBeNull()
+    expect(maintenanceRow).not.toBeNull()
+
+    fireEvent.click(within(pauseRow!).getByRole('button', { name: '暂停' }))
+    fireEvent.click(within(maintenanceRow!).getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() =>
+      expect(within(maintenanceRow!).getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
+    )
+    expect(within(maintenanceRow!).getByRole('button', { name: '退出维护' })).toHaveFocus()
+    expect(within(pauseRow!).getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
+  })
+
+  it('keeps a pause confirmation open when another action succeeds on the same target', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([targetRecord({ target_id: 'tg_same', name: 'Blog' })]))
+      .mockResolvedValueOnce(
+        mockJSONResponse(targetRecord({ target_id: 'tg_same', name: 'Blog', run_status: '维护中' })),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '退出维护' })).toBeInTheDocument())
+    expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
+  })
+
   it('uses an inline stateful confirmation before pausing a target from the list', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi

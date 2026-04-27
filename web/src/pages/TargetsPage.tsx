@@ -151,6 +151,23 @@ function actionButtonKey(targetId: string, action: TargetRuntimeAction) {
   return `${targetId}:${action}`
 }
 
+function focusRestoreActionAfterSuccess(action: TargetRuntimeAction): TargetRuntimeAction {
+  switch (action) {
+    case 'enter-maintenance':
+      return 'exit-maintenance'
+    case 'exit-maintenance':
+      return 'enter-maintenance'
+    case 'pause':
+      return 'resume'
+    case 'resume':
+      return 'pause'
+    case 'archive':
+      return 'restore-to-paused'
+    case 'restore-to-paused':
+      return 'resume'
+  }
+}
+
 export function TargetsPage() {
   const navigate = useNavigate()
   const mountedRef = useRef(false)
@@ -246,8 +263,6 @@ export function TargetsPage() {
   }
 
   useEffect(() => {
-    if (pendingConfirmation) return
-
     const request = pendingFocusRestoreRef.current
     if (!request) return
 
@@ -298,9 +313,9 @@ export function TargetsPage() {
       setTargets((current) =>
         current.map((item) => (item.target_id === updated.target_id ? updated : item)),
       )
-      queueFocusRestore(updated.target_id, action)
+      queueFocusRestore(updated.target_id, focusRestoreActionAfterSuccess(action))
       setPendingConfirmation((current) =>
-        current?.targetId === updated.target_id ? null : current,
+        current?.targetId === updated.target_id && current.action === action ? null : current,
       )
     } catch (runtimeError) {
       setRuntimeErrors((current) => ({
@@ -516,12 +531,7 @@ export function TargetsPage() {
                       }}
                       type="button"
                       disabled={runtimeBusyTargetId === target.target_id}
-                      onClick={() => {
-                        if (action === 'pause' || action === 'archive') {
-                          queueFocusRestore(target.target_id, action)
-                        }
-                        void handleRuntimeAction(target, action)
-                      }}
+                      onClick={() => void handleRuntimeAction(target, action)}
                     >
                       {label}
                     </button>
@@ -560,9 +570,12 @@ export function TargetsPage() {
                       void handleRuntimeAction(target, pendingConfirmation.action, true)
                     }
                     onCancel={() => {
-                      queueFocusRestore(target.target_id, pendingConfirmation.action)
+                      const { action } = pendingConfirmation
+                      queueFocusRestore(target.target_id, action)
                       setPendingConfirmation((current) =>
-                        current?.targetId === target.target_id ? null : current,
+                        current?.targetId === target.target_id && current.action === action
+                          ? null
+                          : current,
                       )
                     }}
                   />
