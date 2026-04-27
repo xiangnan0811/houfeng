@@ -44,6 +44,14 @@ func ValidateCreateProbeItemInput(input CreateProbeItemInput) (CreateProbeItemIn
 	return input, nil
 }
 
+func ValidateUpdateProbeItemInput(input UpdateProbeItemInput) (UpdateProbeItemInput, error) {
+	validated, err := ValidateCreateProbeItemInput(CreateProbeItemInput(input))
+	if err != nil {
+		return UpdateProbeItemInput{}, err
+	}
+	return UpdateProbeItemInput(validated), nil
+}
+
 func normalizeProbeConfig(probeKind string, raw json.RawMessage) (json.RawMessage, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, errors.New("config is required")

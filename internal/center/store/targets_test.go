@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -246,6 +247,116 @@ func TestTargetRuntimeControlRejectsInvalidTransition(t *testing.T) {
 	_, err := repo.ResumeTargetRun(context.Background(), "tg_archived")
 	if !errors.Is(err, ErrInvalidTargetRuntimeTransition) {
 		t.Fatalf("ResumeTargetRun() error = %v, want ErrInvalidTargetRuntimeTransition", err)
+	}
+}
+
+func TestUpdateProbeItemScopesByTargetAndProbeItem(t *testing.T) {
+	t.Parallel()
+
+	var gotSQL string
+	var gotArgs []any
+	repo := &PostgresTargetRepository{db: fakeTargetDB{queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+		gotSQL = sql
+		gotArgs = append([]any(nil), args...)
+		return fakeTargetRow{scan: func(dest ...any) error {
+			*(dest[0].(*string)) = "pb_001"
+			*(dest[1].(*string)) = "tg_001"
+			*(dest[2].(*string)) = targets.ProbeKindTCP
+			*(dest[3].(*bool)) = false
+			*(dest[4].(*string)) = targets.FrequencyTier5m
+			*(dest[5].(*int)) = 7
+			*(dest[6].(*[]byte)) = []byte(`{"port":443}`)
+			*(dest[7].(*time.Time)) = time.Date(2026, time.April, 27, 9, 0, 0, 0, time.UTC)
+			*(dest[8].(*time.Time)) = time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
+			return nil
+		}}
+	}}}
+
+	record, err := repo.UpdateProbeItem(context.Background(), "tg_001", "pb_001", targets.UpdateProbeItemInput{
+		ProbeKind:      targets.ProbeKindTCP,
+		Enabled:        false,
+		FrequencyTier:  targets.FrequencyTier5m,
+		TimeoutSeconds: 7,
+		Config:         json.RawMessage(`{"port":443}`),
+	})
+	if err != nil {
+		t.Fatalf("UpdateProbeItem() error = %v", err)
+	}
+	if record.ProbeItemID != "pb_001" || record.TargetID != "tg_001" || record.Enabled {
+		t.Fatalf("record = %#v, want updated scoped probe item", record)
+	}
+	for _, snippet := range []string{"update probe_items", "where target_id = $1", "probe_item_id = $2", "returning"} {
+		if !strings.Contains(gotSQL, snippet) {
+			t.Fatalf("SQL missing %q in %q", snippet, gotSQL)
+		}
+	}
+	if len(gotArgs) != 7 || gotArgs[0] != "tg_001" || gotArgs[1] != "pb_001" {
+		t.Fatalf("args = %#v, want target/probe ids first", gotArgs)
+	}
+}
+
+func TestDeleteProbeItemScopesByTargetAndProbeItem(t *testing.T) {
+	t.Parallel()
+
+	var gotSQL string
+	var gotArgs []any
+	repo := &PostgresTargetRepository{db: fakeTargetDB{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+		gotSQL = sql
+		gotArgs = append([]any(nil), args...)
+		return pgconn.NewCommandTag("DELETE 1"), nil
+	}}}
+
+	if err := repo.DeleteProbeItem(context.Background(), "tg_001", "pb_001"); err != nil {
+		t.Fatalf("DeleteProbeItem() error = %v", err)
+	}
+	if !strings.Contains(gotSQL, "delete from probe_items") || !strings.Contains(gotSQL, "target_id = $1") || !strings.Contains(gotSQL, "probe_item_id = $2") {
+		t.Fatalf("SQL = %q, want scoped delete", gotSQL)
+	}
+	if len(gotArgs) != 2 || gotArgs[0] != "tg_001" || gotArgs[1] != "pb_001" {
+		t.Fatalf("args = %#v, want target/probe ids", gotArgs)
+	}
+}
+
+func TestUpdateProbeItemReturnsProbeItemNotFoundWhenTargetExists(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresTargetRepository{db: fakeTargetDB{queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+		if strings.Contains(sql, "update probe_items") {
+			return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+		}
+		return fakeTargetRow{scan: func(dest ...any) error {
+			scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: "tg_001"})
+			return nil
+		}}
+	}}}
+
+	_, err := repo.UpdateProbeItem(context.Background(), "tg_001", "pb_missing", targets.UpdateProbeItemInput{
+		ProbeKind:      targets.ProbeKindTCP,
+		Enabled:        true,
+		FrequencyTier:  targets.FrequencyTier1m,
+		TimeoutSeconds: 5,
+		Config:         json.RawMessage(`{"port":443}`),
+	})
+	if !errors.Is(err, targets.ErrProbeItemNotFound) {
+		t.Fatalf("UpdateProbeItem() error = %v, want ErrProbeItemNotFound", err)
+	}
+}
+
+func TestDeleteProbeItemReturnsTargetNotFoundWhenTargetMissing(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresTargetRepository{db: fakeTargetDB{
+		exec: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("DELETE 0"), nil
+		},
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+		},
+	}}
+
+	err := repo.DeleteProbeItem(context.Background(), "tg_missing", "pb_missing")
+	if !errors.Is(err, targets.ErrTargetNotFound) {
+		t.Fatalf("DeleteProbeItem() error = %v, want ErrTargetNotFound", err)
 	}
 }
 

@@ -610,3 +610,57 @@ func (r *PostgresTargetRepository) CreateProbeItem(ctx context.Context, targetID
 	}
 	return record, nil
 }
+
+func (r *PostgresTargetRepository) UpdateProbeItem(ctx context.Context, targetID string, probeItemID string, input targets.UpdateProbeItemInput) (targets.ProbeItemRecord, error) {
+	config := input.Config
+	if len(config) == 0 {
+		config = json.RawMessage(`{}`)
+	}
+
+	record, err := scanProbeItem(r.db.QueryRow(ctx, `
+		update probe_items
+		set probe_kind = $3,
+			enabled = $4,
+			frequency_tier = $5,
+			timeout_seconds = $6,
+			config = $7::jsonb,
+			updated_at = now()
+		where target_id = $1
+			and probe_item_id = $2
+		returning `+probeItemSelectColumns,
+		targetID,
+		probeItemID,
+		input.ProbeKind,
+		input.Enabled,
+		input.FrequencyTier,
+		input.TimeoutSeconds,
+		[]byte(config),
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		if _, targetErr := r.GetTarget(ctx, targetID); targetErr != nil {
+			return targets.ProbeItemRecord{}, targetErr
+		}
+		return targets.ProbeItemRecord{}, fmt.Errorf("%w: probe item %q under target %q", targets.ErrProbeItemNotFound, probeItemID, targetID)
+	}
+	if err != nil {
+		return targets.ProbeItemRecord{}, fmt.Errorf("update probe item %q for target %q: %w", probeItemID, targetID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresTargetRepository) DeleteProbeItem(ctx context.Context, targetID string, probeItemID string) error {
+	tag, err := r.db.Exec(ctx, `
+		delete from probe_items
+		where target_id = $1
+			and probe_item_id = $2`, targetID, probeItemID)
+	if err != nil {
+		return fmt.Errorf("delete probe item %q for target %q: %w", probeItemID, targetID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		if _, targetErr := r.GetTarget(ctx, targetID); targetErr != nil {
+			return targetErr
+		}
+		return fmt.Errorf("%w: probe item %q under target %q", targets.ErrProbeItemNotFound, probeItemID, targetID)
+	}
+	return nil
+}

@@ -73,16 +73,65 @@ func TargetItem(repo targets.Repository) http.Handler {
 
 func TargetProbeItems(repo targets.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		targetID, isCollection := targetProbePath(r.URL.Path)
+		targetID, probeItemID, isCollection := targetProbePath(r.URL.Path)
 		if targetID == "" {
 			writeError(w, http.StatusNotFound, "target not found")
 			return
 		}
-		if !isCollection {
+		if !isCollection && probeItemID == "" {
 			writeError(w, http.StatusNotFound, "probe item not found")
 			return
 		}
+		if !isCollection {
+			switch r.Method {
+			case http.MethodPut:
+				var input targets.UpdateProbeItemInput
+				if err := decodeJSON(r, &input); err != nil {
+					writeError(w, http.StatusBadRequest, "invalid json")
+					return
+				}
 
+				var err error
+				input, err = targets.ValidateUpdateProbeItemInput(input)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "invalid input")
+					return
+				}
+
+				record, err := repo.UpdateProbeItem(r.Context(), targetID, probeItemID, input)
+				if errors.Is(err, targets.ErrTargetNotFound) {
+					writeError(w, http.StatusNotFound, "target not found")
+					return
+				}
+				if errors.Is(err, targets.ErrProbeItemNotFound) {
+					writeError(w, http.StatusNotFound, "probe item not found")
+					return
+				}
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				writeJSON(w, http.StatusOK, record)
+			case http.MethodDelete:
+				err := repo.DeleteProbeItem(r.Context(), targetID, probeItemID)
+				if errors.Is(err, targets.ErrTargetNotFound) {
+					writeError(w, http.StatusNotFound, "target not found")
+					return
+				}
+				if errors.Is(err, targets.ErrProbeItemNotFound) {
+					writeError(w, http.StatusNotFound, "probe item not found")
+					return
+				}
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			}
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
 			records, err := repo.ListProbeItems(r.Context(), targetID)
@@ -147,13 +196,16 @@ func isValidCreateTargetInput(input targets.CreateTargetInput) bool {
 	return true
 }
 
-func targetProbePath(path string) (targetID string, isCollection bool) {
+func targetProbePath(path string) (targetID string, probeItemID string, isCollection bool) {
 	segments := strings.Split(strings.Trim(strings.TrimPrefix(path, "/api/targets/"), "/"), "/")
 	if len(segments) < 2 || segments[0] == "" || segments[1] != "probe-items" {
-		return "", false
+		return "", "", false
 	}
 	if len(segments) == 2 {
-		return segments[0], true
+		return segments[0], "", true
 	}
-	return segments[0], false
+	if len(segments) == 3 && segments[2] != "" {
+		return segments[0], segments[2], false
+	}
+	return segments[0], "", false
 }

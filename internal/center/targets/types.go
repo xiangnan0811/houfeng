@@ -29,6 +29,7 @@ const (
 )
 
 var ErrTargetNotFound = errors.New("target not found")
+var ErrProbeItemNotFound = errors.New("probe item not found")
 
 var allowedTargetTypes = map[string]struct{}{
 	TargetTypeService:        {},
@@ -105,12 +106,16 @@ type CreateProbeItemInput struct {
 	Config         json.RawMessage `json:"config"`
 }
 
+type UpdateProbeItemInput = CreateProbeItemInput
+
 type Repository interface {
 	ListTargets(context.Context) ([]TargetRecord, error)
 	GetTarget(context.Context, string) (TargetRecord, error)
 	CreateTarget(context.Context, CreateTargetInput) (TargetRecord, error)
 	ListProbeItems(context.Context, string) ([]ProbeItemRecord, error)
 	CreateProbeItem(context.Context, string, CreateProbeItemInput) (ProbeItemRecord, error)
+	UpdateProbeItem(context.Context, string, string, UpdateProbeItemInput) (ProbeItemRecord, error)
+	DeleteProbeItem(context.Context, string, string) error
 }
 
 func IsValidTargetType(targetType string) bool {

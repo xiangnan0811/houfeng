@@ -26,6 +26,12 @@ type fakeTargetRepository struct {
 	createProbeItemResult targets.ProbeItemRecord
 	createProbeItemErr    error
 	createProbeItemInput  targets.CreateProbeItemInput
+	updateProbeItemResult targets.ProbeItemRecord
+	updateProbeItemErr    error
+	updateProbeItemInput  targets.UpdateProbeItemInput
+	updateProbeItemID     string
+	deleteProbeItemErr    error
+	deleteProbeItemID     string
 }
 
 func (f *fakeTargetRepository) ListTargets(context.Context) ([]targets.TargetRecord, error) {
@@ -59,6 +65,23 @@ func (f *fakeTargetRepository) CreateProbeItem(_ context.Context, targetID strin
 	record := f.createProbeItemResult
 	record.TargetID = targetID
 	return record, nil
+}
+
+func (f *fakeTargetRepository) UpdateProbeItem(_ context.Context, targetID string, probeItemID string, input targets.UpdateProbeItemInput) (targets.ProbeItemRecord, error) {
+	f.updateProbeItemID = probeItemID
+	f.updateProbeItemInput = input
+	if f.updateProbeItemErr != nil {
+		return targets.ProbeItemRecord{}, f.updateProbeItemErr
+	}
+	record := f.updateProbeItemResult
+	record.TargetID = targetID
+	record.ProbeItemID = probeItemID
+	return record, nil
+}
+
+func (f *fakeTargetRepository) DeleteProbeItem(_ context.Context, _ string, probeItemID string) error {
+	f.deleteProbeItemID = probeItemID
+	return f.deleteProbeItemErr
 }
 
 func TestListTargetsHandlerReturnsJSON(t *testing.T) {
@@ -137,6 +160,61 @@ func TestCreateProbeItemHandlerReturnsCreatedRecord(t *testing.T) {
 
 	if body.ProbeItemID != "pb_001" {
 		t.Fatalf("expected probe_item_id %q, got %q", "pb_001", body.ProbeItemID)
+	}
+}
+
+func TestUpdateProbeItemHandlerReturnsUpdatedRecord(t *testing.T) {
+	now := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
+	repo := &fakeTargetRepository{updateProbeItemResult: targets.ProbeItemRecord{
+		ProbeKind:      targets.ProbeKindHTTP,
+		Enabled:        false,
+		FrequencyTier:  targets.FrequencyTier5m,
+		TimeoutSeconds: 8,
+		Config:         json.RawMessage(`{"scheme":"https","path":"/ready","method":"HEAD","expected_status_range":[200,204]}`),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}}
+
+	handler := handlers.TargetProbeItems(repo)
+	req := httptest.NewRequest(http.MethodPut, "/api/targets/tg_001/probe-items/pb_001", strings.NewReader(`{"probe_kind":"http","enabled":false,"frequency_tier":"5m","timeout_seconds":8,"config":{"scheme":"https","path":"/ready","method":"HEAD","expected_status_range":[200,204]}}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if repo.updateProbeItemID != "pb_001" {
+		t.Fatalf("probe item id = %q, want pb_001", repo.updateProbeItemID)
+	}
+	if repo.updateProbeItemInput.Enabled {
+		t.Fatal("expected update input enabled=false")
+	}
+
+	var body targets.ProbeItemRecord
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.ProbeItemID != "pb_001" || body.TargetID != "tg_001" || body.Enabled {
+		t.Fatalf("body = %#v, want updated scoped probe item", body)
+	}
+}
+
+func TestDeleteProbeItemHandlerReturnsNoContent(t *testing.T) {
+	repo := &fakeTargetRepository{}
+
+	handler := handlers.TargetProbeItems(repo)
+	req := httptest.NewRequest(http.MethodDelete, "/api/targets/tg_001/probe-items/pb_001", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, recorder.Code)
+	}
+	if repo.deleteProbeItemID != "pb_001" {
+		t.Fatalf("probe item id = %q, want pb_001", repo.deleteProbeItemID)
 	}
 }
 
@@ -248,7 +326,53 @@ func TestCreateProbeItemHandlerRejectsStrictConfigViolations(t *testing.T) {
 	}
 }
 
-func TestTargetProbeItemsHandlerRejectsDeeperPaths(t *testing.T) {
+func TestUpdateProbeItemHandlerRejectsInvalidConfig(t *testing.T) {
+	repo := &fakeTargetRepository{}
+
+	handler := handlers.TargetProbeItems(repo)
+	req := httptest.NewRequest(http.MethodPut, "/api/targets/tg_001/probe-items/pb_001", strings.NewReader(`{"probe_kind":"tls","enabled":true,"frequency_tier":"1m","timeout_seconds":5,"config":{"port":443}}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+func TestProbeItemItemHandlerMapsNotFound(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		body   string
+		err    error
+	}{
+		{name: "missing target on update", method: http.MethodPut, body: `{"probe_kind":"tcp","enabled":true,"frequency_tier":"1m","timeout_seconds":5,"config":{"port":443}}`, err: targets.ErrTargetNotFound},
+		{name: "missing probe on update", method: http.MethodPut, body: `{"probe_kind":"tcp","enabled":true,"frequency_tier":"1m","timeout_seconds":5,"config":{"port":443}}`, err: targets.ErrProbeItemNotFound},
+		{name: "missing target on delete", method: http.MethodDelete, err: targets.ErrTargetNotFound},
+		{name: "missing probe on delete", method: http.MethodDelete, err: targets.ErrProbeItemNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeTargetRepository{updateProbeItemErr: tt.err, deleteProbeItemErr: tt.err}
+
+			handler := handlers.TargetProbeItems(repo)
+			req := httptest.NewRequest(tt.method, "/api/targets/tg_missing/probe-items/pb_missing", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+			}
+		})
+	}
+}
+
+func TestTargetProbeItemsHandlerRejectsUnsupportedItemMethods(t *testing.T) {
 	repo := &fakeTargetRepository{}
 
 	handler := handlers.TargetProbeItems(repo)
@@ -257,7 +381,7 @@ func TestTargetProbeItemsHandlerRejectsDeeperPaths(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, recorder.Code)
 	}
 }
