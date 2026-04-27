@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 	centersettings "houfeng/internal/center/settings"
 )
 
-func TestCenterSettingsRepositoryGetSettingsCreatesDefaultSingletonWhenMissing(t *testing.T) {
+func TestCenterSettingsRepositoryGetSettingsReturnsDefaultsWithoutCreatingSingletonWhenMissing(t *testing.T) {
 	t.Parallel()
 
 	queryCount := 0
@@ -23,11 +24,6 @@ func TestCenterSettingsRepositoryGetSettingsCreatesDefaultSingletonWhenMissing(t
 			switch {
 			case sql == getCenterSettingsSQL && len(args) == 1 && args[0] == centersettings.SingletonID && queryCount == 1:
 				return fakeSettingsRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
-			case sql == upsertCenterSettingsSQL && len(args) == 8 && args[0] == centersettings.SingletonID:
-				return fakeSettingsRow{scan: func(dest ...any) error {
-					scanCenterSettingsRow(dest, centersettings.Default())
-					return nil
-				}}
 			default:
 				return fakeSettingsRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
 			}
@@ -38,14 +34,11 @@ func TestCenterSettingsRepositoryGetSettingsCreatesDefaultSingletonWhenMissing(t
 	if err != nil {
 		t.Fatalf("GetSettings() error = %v", err)
 	}
-	if got.HostSampleFrequencyTier != "5m" {
-		t.Fatalf("HostSampleFrequencyTier = %q, want %q", got.HostSampleFrequencyTier, "5m")
+	if !reflect.DeepEqual(got, centersettings.Default()) {
+		t.Fatalf("GetSettings() = %#v, want %#v", got, centersettings.Default())
 	}
-	if got.Telegram.Enabled() {
-		t.Fatal("Telegram.Enabled() = true, want false")
-	}
-	if queryCount != 2 {
-		t.Fatalf("queryCount = %d, want 2", queryCount)
+	if queryCount != 1 {
+		t.Fatalf("queryCount = %d, want 1", queryCount)
 	}
 }
 

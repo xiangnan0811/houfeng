@@ -79,7 +79,7 @@ var _ centersettings.Repository = (*PostgresSettingsRepository)(nil)
 func (r *PostgresSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
 	record, err := r.scanSettingsRow(ctx, getCenterSettingsSQL, centersettings.SingletonID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return r.putSettings(ctx, centersettings.Default())
+		return centersettings.Default(), nil
 	}
 	if err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("query center settings: %w", err)
