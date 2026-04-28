@@ -52,6 +52,36 @@ describe('DashboardPage', () => {
               created_at: '2026-04-25T08:10:00Z',
             },
           ],
+          abnormal_nodes: [
+            {
+              node_id: 'nd_001',
+              display_name: 'Tokyo Edge',
+              region: 'ap-northeast-1',
+              city: 'Tokyo',
+              provider: 'aws',
+              lifecycle_status: '在用',
+              monitoring_status: '启用',
+              current_health_status: '告警',
+              last_heartbeat_at: '2026-04-25T08:05:00Z',
+              current_active_incident_count: 2,
+              current_primary_issue_summary: '磁盘使用率 92.0%',
+            },
+          ],
+          abnormal_targets: [
+            {
+              target_id: 'tg_001',
+              name: 'Blog',
+              target_type: 'service',
+              host: 'blog.example.com',
+              base_port: 443,
+              run_status: '启用',
+              current_health_status: '严重',
+              last_success_at: '2026-04-25T07:50:00Z',
+              last_failure_at: '2026-04-25T08:09:00Z',
+              current_active_incident_count: 1,
+              current_primary_issue_summary: 'HTTPS 探测连续失败',
+            },
+          ],
         }),
       ),
     )
@@ -75,9 +105,21 @@ describe('DashboardPage', () => {
     expectSummaryCard('恢复事件', '1')
     expect(screen.getByText('异常节点概览')).toBeInTheDocument()
     expect(screen.getByText('异常目标概览')).toBeInTheDocument()
+    expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
+    expect(screen.getByText('磁盘使用率 92.0%')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看节点 Tokyo Edge' })).toHaveAttribute(
+      'href',
+      '/nodes/nd_001',
+    )
+    expect(screen.getByText('Blog')).toBeInTheDocument()
+    expect(screen.getByText('blog.example.com:443')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看目标 Blog' })).toHaveAttribute(
+      'href',
+      '/targets/tg_001',
+    )
     expect(screen.getByText('最近事件')).toBeInTheDocument()
-    expect(screen.getByText('HTTPS 探测连续失败')).toBeInTheDocument()
-    expect(screen.getByText('tg_001')).toBeInTheDocument()
+    expect(screen.getAllByText('HTTPS 探测连续失败').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('tg_001').length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders an explicit error state when the dashboard request fails', async () => {

@@ -241,7 +241,37 @@ export type DashboardOverview = {
   maintenance_target_count: number
   recent_new_incident_count: number
   recent_recovery_count: number
+  abnormal_nodes: DashboardNodeSummary[]
+  abnormal_targets: DashboardTargetSummary[]
   recent_events: StateChangeEventRecord[]
+}
+
+export type DashboardNodeSummary = {
+  node_id: string
+  display_name: string
+  region: string
+  city: string
+  provider: string
+  lifecycle_status: string
+  monitoring_status: string
+  current_health_status: IncidentSeverity
+  last_heartbeat_at?: string
+  current_active_incident_count: number
+  current_primary_issue_summary: string
+}
+
+export type DashboardTargetSummary = {
+  target_id: string
+  name: string
+  target_type: string
+  host: string
+  base_port?: number
+  run_status: string
+  current_health_status: IncidentSeverity
+  last_success_at?: string
+  last_failure_at?: string
+  current_active_incident_count: number
+  current_primary_issue_summary: string
 }
 
 export type ActiveIncidentRecord = {

@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom'
 
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
+import { StatusBadge } from '../components/StatusBadge'
 import { ApiError, getDashboard } from '../lib/api'
-import type { DashboardOverview } from '../lib/types'
+import { formatDateTime } from '../lib/format'
+import type { DashboardNodeSummary, DashboardOverview, DashboardTargetSummary } from '../lib/types'
 
 type State = {
   loading: boolean
@@ -18,6 +20,133 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
       <p className="summary-card__label">{label}</p>
       <p className="summary-card__value">{value}</p>
     </article>
+  )
+}
+
+function statusTone(value: string) {
+  if (value === '正常') return 'green'
+  if (value === '严重') return 'red'
+  if (value === '告警' || value === '关注') return 'yellow'
+  return 'slate'
+}
+
+function formatOptionalDateTime(value: string | undefined, fallback: string) {
+  return value ? formatDateTime(value) : fallback
+}
+
+function hostPortSummary(target: DashboardTargetSummary) {
+  return typeof target.base_port === 'number' ? `${target.host}:${target.base_port}` : target.host
+}
+
+function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
+  if (nodes.length === 0) {
+    return (
+      <div className="empty-state">
+        <h3>当前没有异常节点</h3>
+        <p>节点侧暂未发现需要处理的活跃异常。</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="probe-list">
+      {nodes.map((node) => (
+        <article key={node.node_id} className="probe-card">
+          <header className="probe-card__header">
+            <div>
+              <h3>{node.display_name}</h3>
+              <p>{node.current_primary_issue_summary || '暂无关键异常摘要'}</p>
+            </div>
+            <div className="badge-row badge-row--wrap">
+              <StatusBadge label={node.current_health_status} tone={statusTone(node.current_health_status)} />
+              <StatusBadge label={node.monitoring_status} tone="cyan" />
+            </div>
+          </header>
+          <dl className="probe-card__meta">
+            <div>
+              <dt>位置</dt>
+              <dd>
+                {node.region} / {node.city}
+              </dd>
+            </div>
+            <div>
+              <dt>供应商</dt>
+              <dd>{node.provider}</dd>
+            </div>
+            <div>
+              <dt>生命周期</dt>
+              <dd>{node.lifecycle_status}</dd>
+            </div>
+            <div>
+              <dt>活跃异常</dt>
+              <dd>{node.current_active_incident_count}</dd>
+            </div>
+            <div>
+              <dt>最近心跳</dt>
+              <dd>{formatOptionalDateTime(node.last_heartbeat_at, '暂无心跳')}</dd>
+            </div>
+          </dl>
+          <Link className="text-link" to={`/nodes/${node.node_id}`} aria-label={`查看节点 ${node.display_name}`}>
+            查看节点
+          </Link>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) {
+  if (targets.length === 0) {
+    return (
+      <div className="empty-state">
+        <h3>当前没有异常目标</h3>
+        <p>目标侧暂未发现需要处理的活跃异常。</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="probe-list">
+      {targets.map((target) => (
+        <article key={target.target_id} className="probe-card">
+          <header className="probe-card__header">
+            <div>
+              <h3>{target.name}</h3>
+              <p>{target.current_primary_issue_summary || '暂无关键异常摘要'}</p>
+            </div>
+            <div className="badge-row badge-row--wrap">
+              <StatusBadge label={target.current_health_status} tone={statusTone(target.current_health_status)} />
+              <StatusBadge label={target.run_status} tone="cyan" />
+            </div>
+          </header>
+          <dl className="probe-card__meta">
+            <div>
+              <dt>类型</dt>
+              <dd>{target.target_type}</dd>
+            </div>
+            <div>
+              <dt>地址</dt>
+              <dd>{hostPortSummary(target)}</dd>
+            </div>
+            <div>
+              <dt>活跃异常</dt>
+              <dd>{target.current_active_incident_count}</dd>
+            </div>
+            <div>
+              <dt>最近成功</dt>
+              <dd>{formatOptionalDateTime(target.last_success_at, '暂无成功观测')}</dd>
+            </div>
+            <div>
+              <dt>最近失败</dt>
+              <dd>{formatOptionalDateTime(target.last_failure_at, '暂无失败观测')}</dd>
+            </div>
+          </dl>
+          <Link className="text-link" to={`/targets/${target.target_id}`} aria-label={`查看目标 ${target.name}`}>
+            查看目标
+          </Link>
+        </article>
+      ))}
+    </div>
   )
 }
 
@@ -122,6 +251,7 @@ export function DashboardPage() {
           <SummaryCard label="严重节点" value={overview.severe_node_count} />
           <SummaryCard label="维护节点" value={overview.maintenance_node_count} />
         </div>
+        <AbnormalNodeList nodes={overview.abnormal_nodes} />
       </DetailSection>
 
       <DetailSection eyebrow="Targets" title="异常目标概览">
@@ -130,6 +260,7 @@ export function DashboardPage() {
           <SummaryCard label="严重目标" value={overview.severe_target_count} />
           <SummaryCard label="维护目标" value={overview.maintenance_target_count} />
         </div>
+        <AbnormalTargetList targets={overview.abnormal_targets} />
       </DetailSection>
 
       <DetailSection eyebrow="Recent Events" title="最近事件">
