@@ -558,6 +558,30 @@ describe('api helpers', () => {
     })
   })
 
+  it('serializes advanced event filters and omits false booleans', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '[]'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listEvents({
+      object_type: 'node',
+      created_from: '2026-04-25T00:00:00Z',
+      created_to: '2026-04-26T00:00:00Z',
+      label: 'edge',
+      notification_only: true,
+      recovery_only: true,
+      maintenance_only: false,
+      limit: 25,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/events?object_type=node&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true',
+      {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      },
+    )
+  })
+
   it('serializes only non-empty incident filters', async () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '[]'))
     vi.stubGlobal('fetch', fetchMock)

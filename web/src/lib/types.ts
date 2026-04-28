@@ -290,6 +290,12 @@ export type EventListFilter = {
   object_id?: string
   severity?: IncidentSeverity | ''
   event_type?: StateChangeEventType | ''
+  created_from?: string
+  created_to?: string
+  label?: string
+  notification_only?: boolean
+  recovery_only?: boolean
+  maintenance_only?: boolean
   limit?: number
 }
 

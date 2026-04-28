@@ -14,6 +14,12 @@ type FilterState = {
   severity: '' | '关注' | '告警' | '严重'
   event_type: '' | StateChangeEventType
   limit: string
+  created_from: string
+  created_to: string
+  label: string
+  notification_only: boolean
+  recovery_only: boolean
+  maintenance_only: boolean
 }
 
 type State = {
@@ -27,6 +33,12 @@ const DEFAULT_FILTERS: FilterState = {
   severity: '',
   event_type: '',
   limit: '50',
+  created_from: '',
+  created_to: '',
+  label: '',
+  notification_only: false,
+  recovery_only: false,
+  maintenance_only: false,
 }
 
 const EVENT_TYPE_OPTIONS = Object.entries(STATE_CHANGE_EVENT_TYPE_LABELS) as Array<
@@ -39,6 +51,12 @@ function buildFilterQuery(filters: FilterState): EventListFilter {
     severity: filters.severity,
     event_type: filters.event_type,
     limit: Number(filters.limit || DEFAULT_FILTERS.limit),
+    created_from: filters.created_from,
+    created_to: filters.created_to,
+    label: filters.label,
+    notification_only: filters.notification_only,
+    recovery_only: filters.recovery_only,
+    maintenance_only: filters.maintenance_only,
   }
 }
 
@@ -50,6 +68,11 @@ export function EventsPage() {
     error: null,
     events: [],
   })
+
+  function submitFilters(nextFilters: FilterState) {
+    setState((current) => ({ ...current, loading: true, error: null }))
+    setAppliedFilters({ ...nextFilters })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -98,8 +121,7 @@ export function EventsPage() {
         <form
           onSubmit={(event) => {
             event.preventDefault()
-            setState((current) => ({ ...current, loading: true, error: null }))
-            setAppliedFilters({ ...filters })
+            submitFilters(filters)
           }}
         >
           <div className="summary-grid">
@@ -167,9 +189,96 @@ export function EventsPage() {
                 <option value="100">100</option>
               </select>
             </label>
+
+            <label className="summary-card">
+              <span className="summary-card__label">开始时间</span>
+              <input
+                aria-label="开始时间"
+                placeholder="2026-04-25T00:00:00Z"
+                value={filters.created_from}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, created_from: event.target.value }))
+                }
+              />
+            </label>
+
+            <label className="summary-card">
+              <span className="summary-card__label">结束时间</span>
+              <input
+                aria-label="结束时间"
+                placeholder="2026-04-26T00:00:00Z"
+                value={filters.created_to}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, created_to: event.target.value }))
+                }
+              />
+            </label>
+
+            <label className="summary-card">
+              <span className="summary-card__label">标签</span>
+              <input
+                aria-label="标签"
+                placeholder="edge"
+                value={filters.label}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, label: event.target.value }))
+                }
+              />
+            </label>
+
+            <label className="summary-card">
+              <span className="summary-card__label">通知相关</span>
+              <input
+                aria-label="仅看通知事件"
+                type="checkbox"
+                checked={filters.notification_only}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    notification_only: event.target.checked,
+                  }))
+                }
+              />
+            </label>
+
+            <label className="summary-card">
+              <span className="summary-card__label">恢复事件</span>
+              <input
+                aria-label="仅看恢复事件"
+                type="checkbox"
+                checked={filters.recovery_only}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, recovery_only: event.target.checked }))
+                }
+              />
+            </label>
+
+            <label className="summary-card">
+              <span className="summary-card__label">维护事件</span>
+              <input
+                aria-label="仅看维护事件"
+                type="checkbox"
+                checked={filters.maintenance_only}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    maintenance_only: event.target.checked,
+                  }))
+                }
+              />
+            </label>
           </div>
 
           <button type="submit">应用筛选</button>
+          <button
+            type="button"
+            onClick={() => {
+              setFilters({ ...DEFAULT_FILTERS })
+              submitFilters(DEFAULT_FILTERS)
+            }}
+          >
+            重置筛选
+          </button>
         </form>
       </DetailSection>
 

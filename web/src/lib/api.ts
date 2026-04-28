@@ -101,13 +101,14 @@ function patchJSONBody<T>(path: string, body: unknown, options: PatchJSONOptions
 
 function withQuery(
   path: string,
-  filter?: Record<string, string | number | null | undefined>,
+  filter?: Record<string, string | number | boolean | null | undefined>,
 ): string {
   if (!filter) return path
 
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(filter)) {
     if (value == null) continue
+    if (typeof value === 'boolean' && !value) continue
     const normalized = typeof value === 'string' ? value.trim() : String(value)
     if (!normalized) continue
     query.set(key, normalized)
@@ -289,7 +290,26 @@ export function updateSettings(settings: SettingsUpdateInput) {
 }
 
 export function listEvents(filter?: EventListFilter) {
-  return requestJSON<StateChangeEventRecord[]>(withQuery('/api/events', filter))
+  return requestJSON<StateChangeEventRecord[]>(
+    withQuery(
+      '/api/events',
+      filter
+        ? {
+            object_type: filter.object_type,
+            object_id: filter.object_id,
+            severity: filter.severity,
+            event_type: filter.event_type,
+            limit: filter.limit,
+            created_from: filter.created_from,
+            created_to: filter.created_to,
+            label: filter.label,
+            notification_only: filter.notification_only,
+            recovery_only: filter.recovery_only,
+            maintenance_only: filter.maintenance_only,
+          }
+        : undefined,
+    ),
+  )
 }
 
 export function listIncidents(filter?: IncidentListFilter) {

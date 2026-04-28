@@ -204,6 +204,54 @@ describe('EventsPage', () => {
     )
   })
 
+  it('submits advanced context filters and can reset to the default event stream', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EventsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+    )
+
+    fireEvent.change(screen.getByLabelText('对象类型'), { target: { value: 'node' } })
+    fireEvent.change(screen.getByLabelText('数量'), { target: { value: '25' } })
+    fireEvent.change(screen.getByLabelText('开始时间'), {
+      target: { value: '2026-04-25T00:00:00Z' },
+    })
+    fireEvent.change(screen.getByLabelText('结束时间'), {
+      target: { value: '2026-04-26T00:00:00Z' },
+    })
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'edge' } })
+    fireEvent.click(screen.getByLabelText('仅看通知事件'))
+    fireEvent.click(screen.getByLabelText('仅看恢复事件'))
+    fireEvent.click(screen.getByLabelText('仅看维护事件'))
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        '/api/events?object_type=node&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true&maintenance_only=true',
+        {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        },
+      ),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '重置筛选' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith('/api/events?limit=50', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      }),
+    )
+  })
+
   it('renders an explicit empty state when no events exist', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse([])))
 
