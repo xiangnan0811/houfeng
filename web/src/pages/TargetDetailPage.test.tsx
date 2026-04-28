@@ -1208,7 +1208,9 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
     )
-    expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toHaveFocus()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toHaveFocus(),
+    )
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
       method: 'DELETE',
       headers: { Accept: 'application/json' },

@@ -72,6 +72,11 @@ function onboardingConflictState(overrides: Partial<Record<string, unknown>> = {
   }
 }
 
+async function waitForEnabledButton(name: string) {
+  await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled())
+  return screen.getByRole('button', { name })
+}
+
 function NodeDetailTestHarness() {
   const navigate = useNavigate()
 
@@ -436,6 +441,41 @@ describe('NodeDetailPage', () => {
     expect(screen.queryByRole('heading', { name: '节点详情不可用' })).not.toBeInTheDocument()
   })
 
+  it('keeps binding actions disabled until conflict metadata is loaded', async () => {
+    const onboarding = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(nodeRecord()))
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockImplementationOnce(() => onboarding.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_conflict']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: '确认重绑定' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '拒绝新指纹' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '重置绑定' })).toBeDisabled()
+
+    onboarding.resolve(mockJSONResponse(onboardingConflictState()))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '确认重绑定' })).toBeEnabled(),
+    )
+    expect(screen.getByRole('button', { name: '拒绝新指纹' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '重置绑定' })).toBeEnabled()
+  })
+
 
   it('confirms a pending node rebind from Node detail and hides the conflict card', async () => {
     const fetchMock = vi
@@ -465,11 +505,7 @@ describe('NodeDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '确认重绑定' })).toBeInTheDocument(),
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '确认重绑定' }))
+    fireEvent.click(await waitForEnabledButton('确认重绑定'))
 
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
@@ -505,12 +541,10 @@ describe('NodeDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '拒绝新指纹' })).toBeInTheDocument(),
-    )
-    expect(screen.getByRole('button', { name: '重置绑定' })).toBeInTheDocument()
+    const rejectButton = await waitForEnabledButton('拒绝新指纹')
+    expect(screen.getByRole('button', { name: '重置绑定' })).toBeEnabled()
 
-    fireEvent.click(screen.getByRole('button', { name: '拒绝新指纹' }))
+    fireEvent.click(rejectButton)
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/binding/reject-pending', {
         method: 'POST',
@@ -551,11 +585,7 @@ describe('NodeDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '重置绑定' })).toBeInTheDocument(),
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '重置绑定' }))
+    fireEvent.click(await waitForEnabledButton('重置绑定'))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/binding/reset', {
@@ -589,10 +619,7 @@ describe('NodeDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '重置绑定' })).toBeInTheDocument(),
-    )
-    fireEvent.click(screen.getByRole('button', { name: '重置绑定' }))
+    fireEvent.click(await waitForEnabledButton('重置绑定'))
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('invalid binding transition'),
@@ -1538,11 +1565,7 @@ describe('NodeDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '确认重绑定' })).toBeInTheDocument(),
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '确认重绑定' }))
+    fireEvent.click(await waitForEnabledButton('确认重绑定'))
     fireEvent.click(screen.getByRole('button', { name: 'switch node' }))
 
     await waitFor(() =>
@@ -2085,9 +2108,7 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument(),
     )
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '确认重绑定' })).toBeInTheDocument(),
-    )
+    await waitForEnabledButton('确认重绑定')
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
     fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {

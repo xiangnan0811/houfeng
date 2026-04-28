@@ -486,7 +486,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     action: BindingConflictAction,
     request: (targetNodeId: string) => Promise<NodeOnboardingState>,
   ) {
-    if (!node) return
+    if (!node || !bindingConflict || bindingConflictLoading) return
     const actionNodeId = node.node_id
     setBindingAction(action)
     setBindingConflictState((current) => ({
@@ -554,6 +554,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const bindingConflictError = hasCurrentBindingConflictState ? bindingConflictState.error : null
   const bindingConflictLoading =
     hasCurrentBindingConflictState && bindingConflictState.loading && !bindingConflict
+  const bindingActionsDisabled = bindingAction !== null || bindingConflictLoading || !bindingConflict
 
   async function handleMetadataSave() {
     if (!node) return
@@ -683,21 +684,21 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
             <div className="badge-row badge-row--wrap">
               <button
                 type="button"
-                disabled={bindingAction !== null || bindingConflictLoading}
+                disabled={bindingActionsDisabled}
                 onClick={() => void handleBindingAction('confirm', confirmNodeRebind)}
               >
                 {bindingAction === 'confirm' ? '正在确认…' : NODE_BINDING_CONFIRM_REBIND_LABEL}
               </button>
               <button
                 type="button"
-                disabled={bindingAction !== null || bindingConflictLoading}
+                disabled={bindingActionsDisabled}
                 onClick={() => void handleBindingAction('reject', rejectPendingNodeBinding)}
               >
                 {bindingAction === 'reject' ? '正在拒绝…' : NODE_BINDING_REJECT_PENDING_LABEL}
               </button>
               <button
                 type="button"
-                disabled={bindingAction !== null || bindingConflictLoading}
+                disabled={bindingActionsDisabled}
                 onClick={() => void handleBindingAction('reset', resetNodeBinding)}
               >
                 {bindingAction === 'reset' ? '正在重置…' : NODE_BINDING_RESET_LABEL}
