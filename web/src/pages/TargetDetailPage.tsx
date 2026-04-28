@@ -69,6 +69,12 @@ const FREQUENCY_TIER_OPTIONS = [
   { value: '6h', label: '6 小时' },
 ] as const
 
+const DEFAULT_FREQUENCY_BY_PROBE_KIND: Record<ProbeKind, FrequencyTier> = {
+  tcp: '5m',
+  http: '5m',
+  tls: '6h',
+}
+
 const PROBE_CONFIG_KEYS: Record<ProbeKind, Set<string>> = {
   tcp: new Set(['port']),
   http: new Set(['scheme', 'path', 'method', 'expected_status_range']),
@@ -215,6 +221,17 @@ function initialProbeCreateFormForTarget(target: TargetRecord): ProbeCreateFormS
   return {
     ...initialProbeCreateForm,
     port: target.base_port ? String(target.base_port) : '',
+  }
+}
+
+function probeCreateFormForKind(
+  current: ProbeCreateFormState,
+  probeKind: ProbeKind,
+): ProbeCreateFormState {
+  return {
+    ...current,
+    probeKind,
+    frequencyTier: DEFAULT_FREQUENCY_BY_PROBE_KIND[probeKind],
   }
 }
 
@@ -1203,12 +1220,16 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                     <select
                       name="probeKind"
                       value={probeCreateForm.probeKind}
-                      onChange={(event) =>
-                        updateProbeCreateField(
-                          'probeKind',
-                          event.target.value as ProbeCreateFormState['probeKind'],
+                      onChange={(event) => {
+                        const selectedKind = event.target.value as ProbeCreateFormState['probeKind']
+                        if (probeFormMode.kind === 'edit') {
+                          updateProbeCreateField('probeKind', selectedKind)
+                          return
+                        }
+                        setProbeCreateForm((current) =>
+                          probeCreateFormForKind(current, selectedKind),
                         )
-                      }
+                      }}
                     >
                       {PROBE_KIND_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>

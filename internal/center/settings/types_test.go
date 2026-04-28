@@ -248,6 +248,9 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if got.ProbeFrequencyDefaults.HTTP != "5m" {
 		t.Fatalf("ProbeFrequencyDefaults.HTTP = %q, want %q", got.ProbeFrequencyDefaults.HTTP, "5m")
 	}
+	if got.ProbeFrequencyDefaults.TLS != "6h" {
+		t.Fatalf("ProbeFrequencyDefaults.TLS = %q, want %q", got.ProbeFrequencyDefaults.TLS, "6h")
+	}
 	if got.Telegram.RuntimeManaged {
 		t.Fatal("Telegram.RuntimeManaged = true, want false by default")
 	}

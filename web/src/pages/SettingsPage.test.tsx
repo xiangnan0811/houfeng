@@ -106,7 +106,7 @@ describe('SettingsPage', () => {
       screen.getByText('当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。'),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('当前仅 heartbeat/sweep 时间参数已接入实时异常判定链；其余默认项仍作为持久化策略保存。'),
+      screen.getByText('heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路。'),
     ).toBeInTheDocument()
     expect(
       screen.getByText(

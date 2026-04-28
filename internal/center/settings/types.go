@@ -107,7 +107,7 @@ func Default() CenterSettings {
 		ProbeFrequencyDefaults: ProbeFrequencyDefaults{
 			TCP:  targets.FrequencyTier5m,
 			HTTP: targets.FrequencyTier5m,
-			TLS:  targets.FrequencyTier5m,
+			TLS:  targets.FrequencyTier6h,
 		},
 		IncidentDefaults: IncidentDefaults{
 			HeartbeatIntervalSeconds: 30,

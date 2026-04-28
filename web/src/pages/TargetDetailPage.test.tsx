@@ -357,6 +357,103 @@ describe('TargetDetailPage', () => {
     })
   })
 
+  it('defaults a created TLS ProbeItem frequency to 6h after switching the probe kind', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_002',
+          name: 'Cache',
+          target_type: 'service',
+          host: 'cache.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({ target_id: 'tg_002', latest_probe_observations: [] }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          {
+            probe_item_id: 'pb_tls',
+            target_id: 'tg_002',
+            probe_kind: 'tls',
+            enabled: true,
+            frequency_tier: '6h',
+            timeout_seconds: 5,
+            config: {
+              port: 443,
+              expiry_warning_days: 14,
+            },
+            created_at: '2026-04-27T09:00:00Z',
+            updated_at: '2026-04-27T09:00:00Z',
+          },
+          201,
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_002']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
+    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+      target: { value: 'tls' },
+    })
+    expect(screen.getByLabelText('频率档位')).toHaveValue('6h')
+    fireEvent.change(screen.getByLabelText('端口'), {
+      target: { value: '443' },
+    })
+    fireEvent.change(screen.getByLabelText('证书预警天数'), {
+      target: { value: '14' },
+    })
+    fireEvent.change(screen.getByLabelText('超时秒数'), {
+      target: { value: '5' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
+
+    await waitFor(() => expect(screen.getByText('TLS')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_002/probe-items', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({
+        probe_kind: 'tls',
+        enabled: true,
+        frequency_tier: '6h',
+        timeout_seconds: 5,
+        config: {
+          port: 443,
+          expiry_warning_days: 14,
+        },
+      }),
+    })
+  })
+
   it('keeps ProbeItem creation validation errors inside the probe panel', async () => {
     const fetchMock = vi
       .fn()

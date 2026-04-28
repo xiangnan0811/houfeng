@@ -679,7 +679,7 @@ export function SettingsPage() {
       </DetailSection>
 
       <DetailSection eyebrow="Global Defaults" title="全局默认规则">
-        <SectionIntro>当前仅 heartbeat/sweep 时间参数已接入实时异常判定链；其余默认项仍作为持久化策略保存。</SectionIntro>
+        <SectionIntro>heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路。</SectionIntro>
         <IncidentDefaultsEditor
           value={form.incidentDefaults}
           onChange={(next) =>
