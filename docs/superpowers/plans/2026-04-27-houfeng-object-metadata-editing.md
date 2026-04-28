@@ -112,7 +112,7 @@ Use the response text `invalid input` for validation failures.
 - Modify: `internal/center/http/handlers/nodes.go`
 - Modify: `internal/center/http/handlers/nodes_test.go`
 
-- [ ] **Step 1: Add failing Node handler tests**
+- [x] **Step 1: Add failing Node handler tests**
 
 Add tests in `internal/center/http/handlers/nodes_test.go` for:
 
@@ -148,7 +148,7 @@ go test ./internal/center/http/handlers -run 'TestNodeItem.*Metadata|TestNodeIte
 
 Expected: fail because the type/method and PATCH path do not exist.
 
-- [ ] **Step 2: Add failing Node store tests**
+- [x] **Step 2: Add failing Node store tests**
 
 Add tests in `internal/center/store/nodes_test.go` that:
 
@@ -164,7 +164,7 @@ go test ./internal/center/store -run 'TestUpdateNodeMetadata' -v
 
 Expected: fail because the store method does not exist.
 
-- [ ] **Step 3: Implement Node domain, handler, and store**
+- [x] **Step 3: Implement Node domain, handler, and store**
 
 In `internal/center/nodes/types.go`, add:
 
@@ -210,7 +210,7 @@ func (r *PostgresNodeRepository) UpdateNodeMetadata(ctx context.Context, nodeID 
 }
 ```
 
-- [ ] **Step 4: Run focused Node backend tests and commit**
+- [x] **Step 4: Run focused Node backend tests and commit**
 
 Run:
 
@@ -239,7 +239,7 @@ git commit -m "Allow Node labels and notes to be updated"
 - Modify: `internal/center/http/handlers/targets.go`
 - Modify: `internal/center/http/handlers/targets_test.go`
 
-- [ ] **Step 1: Add failing Target handler tests**
+- [x] **Step 1: Add failing Target handler tests**
 
 Add tests mirroring Task 1:
 
@@ -255,7 +255,7 @@ go test ./internal/center/http/handlers -run 'TestTargetItem.*Metadata|TestTarge
 
 Expected: fail before implementation.
 
-- [ ] **Step 2: Add failing Target store tests**
+- [x] **Step 2: Add failing Target store tests**
 
 Add tests in `internal/center/store/targets_test.go` for SQL shape and `targets.ErrTargetNotFound` mapping.
 
@@ -267,7 +267,7 @@ go test ./internal/center/store -run 'TestUpdateTargetMetadata' -v
 
 Expected: fail before implementation.
 
-- [ ] **Step 3: Implement Target domain, handler, and store**
+- [x] **Step 3: Implement Target domain, handler, and store**
 
 In `internal/center/targets/types.go`, add:
 
@@ -307,7 +307,7 @@ func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, tar
 }
 ```
 
-- [ ] **Step 4: Run focused Target backend tests and commit**
+- [x] **Step 4: Run focused Target backend tests and commit**
 
 Run:
 
@@ -334,7 +334,7 @@ git commit -m "Allow Target labels and notes to be updated"
 - Modify: `web/src/lib/api.ts`
 - Modify: `web/src/lib/api.test.ts`
 
-- [ ] **Step 1: Add failing API helper tests**
+- [x] **Step 1: Add failing API helper tests**
 
 Add tests in `web/src/lib/api.test.ts`:
 
@@ -368,7 +368,7 @@ cd web && npm test -- --run api
 
 Expected: fail before helper implementation.
 
-- [ ] **Step 2: Add types and helpers**
+- [x] **Step 2: Add types and helpers**
 
 In `web/src/lib/types.ts`, add:
 
@@ -407,7 +407,7 @@ export function updateTargetMetadata(targetId: string, input: UpdateTargetMetada
 }
 ```
 
-- [ ] **Step 3: Run API tests and commit**
+- [x] **Step 3: Run API tests and commit**
 
 Run:
 
@@ -434,7 +434,7 @@ git commit -m "Expose metadata update helpers to the web UI"
 - Modify: `web/src/pages/NodeDetailPage.tsx`
 - Modify: `web/src/pages/NodeDetailPage.test.tsx`
 
-- [ ] **Step 1: Add failing Node page tests**
+- [x] **Step 1: Add failing Node page tests**
 
 In `NodesPage.test.tsx`, add a test:
 
@@ -463,7 +463,7 @@ cd web && npm test -- --run NodesPage NodeDetailPage
 
 Expected: fail before implementation.
 
-- [ ] **Step 2: Implement Node list quick label editor**
+- [x] **Step 2: Implement Node list quick label editor**
 
 In `NodesPage.tsx`:
 
@@ -475,7 +475,7 @@ In `NodesPage.tsx`:
 - success replaces that row
 - failure is row-local
 
-- [ ] **Step 3: Implement Node detail labels+note editor**
+- [x] **Step 3: Implement Node detail labels+note editor**
 
 In `NodeDetailPage.tsx`:
 
@@ -488,7 +488,7 @@ In `NodeDetailPage.tsx`:
 - failure copy is `标签或备注更新失败`
 - stale responses are ignored
 
-- [ ] **Step 4: Run focused Node frontend tests and commit**
+- [x] **Step 4: Run focused Node frontend tests and commit**
 
 Run:
 
@@ -516,7 +516,7 @@ git commit -m "Let operators edit Node labels and notes"
 - Modify: `web/src/pages/TargetDetailPage.tsx`
 - Modify: `web/src/pages/TargetDetailPage.test.tsx`
 
-- [ ] **Step 1: Add failing Target page tests**
+- [x] **Step 1: Add failing Target page tests**
 
 In `TargetsPage.test.tsx`, add quick label editor coverage mirroring Node list:
 
@@ -540,7 +540,7 @@ cd web && npm test -- --run TargetsPage TargetDetailPage
 
 Expected: fail before implementation.
 
-- [ ] **Step 2: Implement Target list quick label editor**
+- [x] **Step 2: Implement Target list quick label editor**
 
 In `TargetsPage.tsx`:
 
@@ -548,7 +548,7 @@ In `TargetsPage.tsx`:
 - add row quick label editor with same behavior/copy as Node list
 - preserve target note on quick-label save
 
-- [ ] **Step 3: Implement Target detail labels+note editor**
+- [x] **Step 3: Implement Target detail labels+note editor**
 
 In `TargetDetailPage.tsx`:
 
@@ -558,7 +558,7 @@ In `TargetDetailPage.tsx`:
 - update `state.target` on success
 - ignore stale route responses
 
-- [ ] **Step 4: Run focused Target frontend tests and commit**
+- [x] **Step 4: Run focused Target frontend tests and commit**
 
 Run:
 
@@ -583,7 +583,7 @@ git commit -m "Let operators edit Target labels and notes"
 **Files:**
 - No planned edits unless verification exposes issues.
 
-- [ ] **Step 1: Run backend verification**
+- [x] **Step 1: Run backend verification**
 
 Run:
 
@@ -595,7 +595,7 @@ go test ./...
 
 Expected: pass.
 
-- [ ] **Step 2: Run frontend verification**
+- [x] **Step 2: Run frontend verification**
 
 Run:
 
@@ -607,7 +607,7 @@ cd web && npm run lint
 
 Expected: pass.
 
-- [ ] **Step 3: Run repository verification**
+- [x] **Step 3: Run repository verification**
 
 Run:
 
@@ -617,7 +617,7 @@ Run:
 
 Expected: pass.
 
-- [ ] **Step 4: Scope review**
+- [x] **Step 4: Scope review**
 
 Confirm:
 
@@ -627,7 +627,7 @@ Confirm:
 - Detail editors support labels and note.
 - Bulk tag editing and tag center were not added.
 
-- [ ] **Step 5: Final code review**
+- [x] **Step 5: Final code review**
 
 Dispatch a fresh code-review subagent for the whole slice. Fix any issues minimally and rerun focused/full verification.
 
