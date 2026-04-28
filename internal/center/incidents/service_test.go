@@ -35,9 +35,11 @@ func (f *fakeTargetRepo) ListTargets(context.Context) ([]targets.TargetRecord, e
 }
 
 type fakeSnapshotReader struct {
-	activeByObject map[string][]IncidentRecord
-	hostSamples    map[string][]runtimefacts.HostSample
-	probeObs       map[string][]runtimefacts.ProbeObservation
+	activeByObject   map[string][]IncidentRecord
+	hostSamples      map[string][]runtimefacts.HostSample
+	probeObs         map[string][]runtimefacts.ProbeObservation
+	nodeAggregates   map[string][]NodeHostDailyAggregate
+	targetAggregates map[string][]TargetProbeDailyAggregate
 }
 
 func (f *fakeSnapshotReader) ListActiveIncidents(_ context.Context, objectType ObjectType, objectID string) ([]IncidentRecord, error) {
@@ -48,6 +50,12 @@ func (f *fakeSnapshotReader) ListRecentHostSamples(_ context.Context, nodeID str
 }
 func (f *fakeSnapshotReader) ListRecentProbeObservations(_ context.Context, targetID string, _ time.Time) ([]runtimefacts.ProbeObservation, error) {
 	return append([]runtimefacts.ProbeObservation(nil), f.probeObs[targetID]...), nil
+}
+func (f *fakeSnapshotReader) ListNodeHostDailyAggregates(_ context.Context, nodeID string, _, _ time.Time) ([]NodeHostDailyAggregate, error) {
+	return append([]NodeHostDailyAggregate(nil), f.nodeAggregates[nodeID]...), nil
+}
+func (f *fakeSnapshotReader) ListTargetProbeDailyAggregates(_ context.Context, targetID string, _, _ time.Time) ([]TargetProbeDailyAggregate, error) {
+	return append([]TargetProbeDailyAggregate(nil), f.targetAggregates[targetID]...), nil
 }
 
 type fakeMutationWriter struct {
@@ -633,6 +641,82 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 	}
 }
 
+func TestServiceAfterSuccessfulSyncDispatchesNodeTrendDegradation(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		hostSamples: map[string][]runtimefacts.HostSample{
+			"nd_001": {
+				{ObservedAt: now, Load5: 2.1, CPUIOWaitPct: 12, CPUStealPct: 0.5},
+				{ObservedAt: now.Add(-30 * time.Minute), Load5: 2.0, CPUIOWaitPct: 11, CPUStealPct: 0.4},
+				{ObservedAt: now.Add(-23 * time.Hour), Load5: 1.9, CPUIOWaitPct: 13, CPUStealPct: 0.5},
+			},
+		},
+		nodeAggregates: map[string][]NodeHostDailyAggregate{
+			"nd_001": {{
+				BucketDate:      now.AddDate(0, 0, -1),
+				SampleCount:     288,
+				AvgLoad5:        0.7,
+				AvgCPUIOWaitPct: 2,
+				AvgCPUStealPct:  0.2,
+			}},
+		},
+	}
+	writer := &fakeMutationWriter{}
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if !mutationsContainIncident(writer.mutations, IncidentNodeTrendDegradation) {
+		t.Fatalf("mutations = %#v, want node trend degradation incident", writer.mutations)
+	}
+}
+
+func TestServiceAfterSuccessfulSyncDispatchesTargetLatencyTrendDegradation(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	latencyA := 450
+	latencyB := 460
+	latencyC := 470
+	baselineLatency := 120.0
+	snapshots := &fakeSnapshotReader{
+		probeObs: map[string][]runtimefacts.ProbeObservation{
+			"tg_001": {
+				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyA},
+				{ObservedAt: now.Add(-30 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_002", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyB},
+				{ObservedAt: now.Add(-23 * time.Hour), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyC},
+			},
+		},
+		targetAggregates: map[string][]TargetProbeDailyAggregate{
+			"tg_001": {{
+				TargetID:         "tg_001",
+				ProbeItemID:      "pb_001",
+				BucketDate:       now.AddDate(0, 0, -1),
+				ObservationCount: 288,
+				SuccessCount:     288,
+				AvgLatencyMS:     &baselineLatency,
+			}},
+		},
+	}
+	writer := &fakeMutationWriter{}
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
+		NodeID:       "nd_001",
+		Observations: storeProbeBatch("tg_001"),
+	}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if !mutationsContainIncident(writer.mutations, IncidentTargetLatencyTrendDegradation) {
+		t.Fatalf("mutations = %#v, want target latency trend degradation incident", writer.mutations)
+	}
+}
+
 func TestServiceSkippedEvaluationPreservesPriorIncidentDuringMaintenance(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
@@ -966,4 +1050,15 @@ func storeProbeBatch(targetID string) observations.BatchWrite {
 			ErrorSummary: "503",
 		}},
 	}
+}
+
+func mutationsContainIncident(mutations []IncidentMutation, class IncidentClass) bool {
+	for _, mutation := range mutations {
+		for _, incident := range mutation.Active {
+			if incident.IncidentClass == class {
+				return true
+			}
+		}
+	}
+	return false
 }

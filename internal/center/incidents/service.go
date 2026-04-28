@@ -36,6 +36,8 @@ type SnapshotReader interface {
 	ListActiveIncidents(context.Context, ObjectType, string) ([]IncidentRecord, error)
 	ListRecentHostSamples(context.Context, string, time.Time) ([]runtimefacts.HostSample, error)
 	ListRecentProbeObservations(context.Context, string, time.Time) ([]runtimefacts.ProbeObservation, error)
+	ListNodeHostDailyAggregates(context.Context, string, time.Time, time.Time) ([]NodeHostDailyAggregate, error)
+	ListTargetProbeDailyAggregates(context.Context, string, time.Time, time.Time) ([]TargetProbeDailyAggregate, error)
 }
 
 type MutationWriter interface {
@@ -266,27 +268,27 @@ func (s *Service) evaluateNode(ctx context.Context, nodeID string, now time.Time
 	}
 	if len(hostSamples) > 0 {
 		latest := &hostSamples[0]
-		resourceSamples := make([]NodeResourceSample, 0, len(hostSamples))
-		for _, sample := range hostSamples {
-			resourceSamples = append(resourceSamples, NodeResourceSample{
-				ObservedAt:         sample.ObservedAt,
-				CPUUsagePct:        sample.CPUUsagePct,
-				NormalizedLoad5:    sample.Load5,
-				MemUsedPct:         sample.MemUsedPct,
-				MemAvailableBytes:  sample.MemAvailableBytes,
-				SwapUsedPct:        sample.SwapUsedPct,
-				CPUIOWaitPct:       sample.CPUIOWaitPct,
-				CPUStealPct:        sample.CPUStealPct,
-				MaintenanceContext: sample.MaintenanceContext,
-				IsBackfilled:       sample.IsBackfilled,
-			})
-		}
+		resourceSamples := nodeResourceSamplesFromHostSamples(hostSamples)
 		evaluations = append(evaluations,
 			classEvaluation{class: IncidentNodeDiskPressure, result: EvaluateNodeDiskPressure(previousByClass[IncidentNodeDiskPressure], nodeID, latest)},
 			classEvaluation{class: IncidentNodeInodePressure, result: EvaluateNodeInodePressure(previousByClass[IncidentNodeInodePressure], nodeID, latest)},
 			classEvaluation{class: IncidentNodeResourcePressure, result: EvaluateNodeResourcePressure(previousByClass[IncidentNodeResourcePressure], nodeID, resourceSamples)},
 		)
 	}
+
+	trendHostSamples, err := s.snapshots.ListRecentHostSamples(ctx, nodeID, now.Add(-24*time.Hour))
+	if err != nil {
+		return fmt.Errorf("list trend host samples for %q: %w", nodeID, err)
+	}
+	baselineStart, baselineEnd := trendBaselineWindow(now)
+	nodeBaselines, err := s.snapshots.ListNodeHostDailyAggregates(ctx, nodeID, baselineStart, baselineEnd)
+	if err != nil {
+		return fmt.Errorf("list node trend baselines for %q: %w", nodeID, err)
+	}
+	evaluations = append(evaluations, classEvaluation{
+		class:  IncidentNodeTrendDegradation,
+		result: EvaluateNodeTrendDegradation(previousByClass[IncidentNodeTrendDegradation], nodeID, nodeResourceSamplesFromHostSamples(trendHostSamples), nodeBaselines),
+	})
 
 	return s.applyEvaluations(ctx, ObjectTypeNode, nodeID, previous, evaluations, now)
 }
@@ -306,6 +308,19 @@ func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.
 		{class: IncidentTargetProbeFailure, result: evaluateTargetProbeFailureAcrossSeries(previousByClass[IncidentTargetProbeFailure], targetID, observations)},
 		{class: IncidentTargetTLSExpiry, result: evaluateTargetTLSExpiryAcrossSeries(previousByClass[IncidentTargetTLSExpiry], targetID, observations)},
 	}
+	trendObservations, err := s.snapshots.ListRecentProbeObservations(ctx, targetID, now.Add(-24*time.Hour))
+	if err != nil {
+		return fmt.Errorf("list trend probe observations for %q: %w", targetID, err)
+	}
+	baselineStart, baselineEnd := trendBaselineWindow(now)
+	targetBaselines, err := s.snapshots.ListTargetProbeDailyAggregates(ctx, targetID, baselineStart, baselineEnd)
+	if err != nil {
+		return fmt.Errorf("list target trend baselines for %q: %w", targetID, err)
+	}
+	evaluations = append(evaluations, classEvaluation{
+		class:  IncidentTargetLatencyTrendDegradation,
+		result: EvaluateTargetLatencyTrendDegradationAcrossSeries(previousByClass[IncidentTargetLatencyTrendDegradation], targetID, trendObservations, targetBaselines),
+	})
 	return s.applyEvaluations(ctx, ObjectTypeTarget, targetID, previous, evaluations, now)
 }
 
@@ -505,6 +520,31 @@ func incidentsByClass(records []IncidentRecord) map[IncidentClass]*IncidentRecor
 		out[records[i].IncidentClass] = &records[i]
 	}
 	return out
+}
+
+func nodeResourceSamplesFromHostSamples(hostSamples []runtimefacts.HostSample) []NodeResourceSample {
+	resourceSamples := make([]NodeResourceSample, 0, len(hostSamples))
+	for _, sample := range hostSamples {
+		resourceSamples = append(resourceSamples, NodeResourceSample{
+			ObservedAt:         sample.ObservedAt,
+			CPUUsagePct:        sample.CPUUsagePct,
+			NormalizedLoad5:    sample.Load5,
+			MemUsedPct:         sample.MemUsedPct,
+			MemAvailableBytes:  sample.MemAvailableBytes,
+			SwapUsedPct:        sample.SwapUsedPct,
+			CPUIOWaitPct:       sample.CPUIOWaitPct,
+			CPUStealPct:        sample.CPUStealPct,
+			MaintenanceContext: sample.MaintenanceContext,
+			IsBackfilled:       sample.IsBackfilled,
+		})
+	}
+	return resourceSamples
+}
+
+func trendBaselineWindow(now time.Time) (time.Time, time.Time) {
+	utc := now.UTC()
+	end := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
+	return end.AddDate(0, 0, -7), end
 }
 
 func uniqueTargetIDs(items []observations.ProbeObservationWrite) []string {
@@ -770,6 +810,92 @@ func (r *PostgresSnapshotReader) ListRecentProbeObservations(ctx context.Context
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate probe observations: %w", err)
+	}
+	return out, nil
+}
+
+func (r *PostgresSnapshotReader) ListNodeHostDailyAggregates(ctx context.Context, nodeID string, since, before time.Time) ([]NodeHostDailyAggregate, error) {
+	rows, err := r.db.Query(ctx, `
+		select
+			bucket_date,
+			sample_count,
+			avg_load_5,
+			avg_cpu_iowait_pct,
+			avg_cpu_steal_pct,
+			backfilled_sample_count,
+			maintenance_sample_count
+		from node_host_sample_daily_aggregates
+		where node_id = $1
+			and bucket_date >= $2::date
+			and bucket_date < $3::date
+		order by bucket_date desc`, nodeID, since, before)
+	if err != nil {
+		return nil, fmt.Errorf("query node host daily aggregates for %q: %w", nodeID, err)
+	}
+	defer rows.Close()
+	out := make([]NodeHostDailyAggregate, 0)
+	for rows.Next() {
+		var aggregate NodeHostDailyAggregate
+		if err := rows.Scan(
+			&aggregate.BucketDate,
+			&aggregate.SampleCount,
+			&aggregate.AvgLoad5,
+			&aggregate.AvgCPUIOWaitPct,
+			&aggregate.AvgCPUStealPct,
+			&aggregate.BackfilledSampleCount,
+			&aggregate.MaintenanceSampleCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan node host daily aggregate: %w", err)
+		}
+		out = append(out, aggregate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate node host daily aggregates: %w", err)
+	}
+	return out, nil
+}
+
+func (r *PostgresSnapshotReader) ListTargetProbeDailyAggregates(ctx context.Context, targetID string, since, before time.Time) ([]TargetProbeDailyAggregate, error) {
+	rows, err := r.db.Query(ctx, `
+		select
+			target_id,
+			probe_item_id,
+			bucket_date,
+			observation_count,
+			success_count,
+			avg_latency_ms,
+			p95_latency_ms,
+			backfilled_observation_count,
+			maintenance_observation_count
+		from target_probe_daily_aggregates
+		where target_id = $1
+			and bucket_date >= $2::date
+			and bucket_date < $3::date
+		order by bucket_date desc, probe_item_id`, targetID, since, before)
+	if err != nil {
+		return nil, fmt.Errorf("query target probe daily aggregates for %q: %w", targetID, err)
+	}
+	defer rows.Close()
+	out := make([]TargetProbeDailyAggregate, 0)
+	for rows.Next() {
+		var aggregate TargetProbeDailyAggregate
+		if err := rows.Scan(
+			&aggregate.TargetID,
+			&aggregate.ProbeItemID,
+			&aggregate.BucketDate,
+			&aggregate.ObservationCount,
+			&aggregate.SuccessCount,
+			&aggregate.AvgLatencyMS,
+			&aggregate.P95LatencyMS,
+			&aggregate.BackfilledObservationCount,
+			&aggregate.MaintenanceObservationCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan target probe daily aggregate: %w", err)
+		}
+		out = append(out, aggregate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate target probe daily aggregates: %w", err)
 	}
 	return out, nil
 }
