@@ -2411,7 +2411,7 @@ describe('TargetDetailPage', () => {
             execution_node_labels: ['edge'],
             run_status: '启用',
             labels: ['公开'],
-            note: '',
+            note: '   ',
             current_health_status: '正常',
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T09:00:00Z',
