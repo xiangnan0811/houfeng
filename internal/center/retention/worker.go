@@ -2,6 +2,7 @@ package retention
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 )
@@ -64,6 +65,9 @@ func (w *Worker) Run(ctx context.Context) error {
 func (w *Worker) runOnce(ctx context.Context) {
 	record, err := w.settingsRepo.GetSettings(ctx)
 	if err != nil {
+		if isContextDone(err) {
+			return
+		}
 		w.logger.Error("load retention settings failed", "error", err)
 		return
 	}
@@ -76,6 +80,9 @@ func (w *Worker) runOnce(ctx context.Context) {
 
 	result, err := w.repo.ApplyRetention(ctx, policy, w.now().UTC())
 	if err != nil {
+		if isContextDone(err) {
+			return
+		}
 		w.logger.Error("apply retention failed", "error", err)
 		return
 	}
@@ -92,4 +99,8 @@ func (w *Worker) runOnce(ctx context.Context) {
 		"deleted_events", result.DeletedEvents,
 		"deleted_notifications", result.DeletedNotifications,
 	)
+}
+
+func isContextDone(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

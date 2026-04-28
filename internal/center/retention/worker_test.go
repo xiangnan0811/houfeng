@@ -3,7 +3,9 @@ package retention
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,11 +17,16 @@ type fakeRepository struct {
 	errs    []error
 	calls   []Policy
 	nows    []time.Time
+	block   chan struct{}
 }
 
-func (f *fakeRepository) ApplyRetention(_ context.Context, policy Policy, now time.Time) (Result, error) {
+func (f *fakeRepository) ApplyRetention(ctx context.Context, policy Policy, now time.Time) (Result, error) {
 	f.calls = append(f.calls, policy)
 	f.nows = append(f.nows, now)
+	if f.block != nil {
+		<-f.block
+		return Result{}, ctx.Err()
+	}
 	idx := len(f.calls) - 1
 	if idx < len(f.errs) && f.errs[idx] != nil {
 		return Result{}, f.errs[idx]
@@ -34,11 +41,16 @@ type fakeSettingsRepository struct {
 	records []centersettings.CenterSettings
 	errs    []error
 	calls   int
+	block   chan struct{}
 }
 
-func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
+func (f *fakeSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
 	idx := f.calls
 	f.calls++
+	if f.block != nil {
+		<-f.block
+		return centersettings.CenterSettings{}, ctx.Err()
+	}
 	if idx < len(f.errs) && f.errs[idx] != nil {
 		return centersettings.CenterSettings{}, f.errs[idx]
 	}
@@ -111,6 +123,103 @@ func TestWorkerStopsOnContextCancellationBeforeFirstPass(t *testing.T) {
 	}
 	if len(repo.calls) != 0 {
 		t.Fatalf("len(calls) = %d, want 0", len(repo.calls))
+	}
+}
+
+func TestWorkerTreatsCancellationDuringApplyAsNormalShutdown(t *testing.T) {
+	repo := &fakeRepository{block: make(chan struct{})}
+	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(7, 30, 90, 180)}}
+	var logs strings.Builder
+	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- worker.Run(ctx)
+	}()
+
+	deadline := time.After(time.Second)
+	for len(repo.calls) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("worker did not enter ApplyRetention")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	cancel()
+	close(repo.block)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not return after cancellation during ApplyRetention")
+	}
+	if strings.Contains(logs.String(), "apply retention failed") {
+		t.Fatalf("logs = %q, want no failure log for cancellation", logs.String())
+	}
+}
+
+func TestWorkerTreatsCancellationDuringSettingsLoadAsNormalShutdown(t *testing.T) {
+	repo := &fakeRepository{}
+	settingsRepo := &fakeSettingsRepository{block: make(chan struct{})}
+	var logs strings.Builder
+	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- worker.Run(ctx)
+	}()
+
+	deadline := time.After(time.Second)
+	for settingsRepo.calls == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("worker did not enter GetSettings")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	cancel()
+	close(settingsRepo.block)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not return after cancellation during GetSettings")
+	}
+	if strings.Contains(logs.String(), "load retention settings failed") {
+		t.Fatalf("logs = %q, want no failure log for cancellation", logs.String())
+	}
+}
+
+func TestWorkerStopsWhileSleepingOnTimer(t *testing.T) {
+	repo := &fakeRepository{}
+	settingsRepo := &fakeSettingsRepository{}
+	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(io.Discard, nil)), time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	worker.afterPass = cancel
+
+	done := make(chan error, 1)
+	go func() {
+		done <- worker.Run(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not stop while sleeping on timer")
+	}
+	if len(repo.calls) != 1 {
+		t.Fatalf("len(calls) = %d, want startup pass only", len(repo.calls))
 	}
 }
 
