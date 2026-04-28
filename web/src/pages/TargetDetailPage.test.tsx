@@ -1814,7 +1814,7 @@ describe('TargetDetailPage', () => {
 
     expect(confirmMock).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.getByRole('button', { name: '恢复' })).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: '恢复' })).toHaveFocus()
+    await waitFor(() => expect(screen.getByRole('button', { name: '恢复' })).toHaveFocus())
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_pause/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
@@ -1963,7 +1963,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '恢复到暂停' })).toBeInTheDocument(),
     )
-    expect(screen.getByRole('button', { name: '恢复到暂停' })).toHaveFocus()
+    await waitFor(() => expect(screen.getByRole('button', { name: '恢复到暂停' })).toHaveFocus())
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_archive/runtime/archive', {
       method: 'POST',
       headers: { Accept: 'application/json' },
