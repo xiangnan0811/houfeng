@@ -221,34 +221,12 @@ func isValidCreateTargetInput(input targets.CreateTargetInput) bool {
 }
 
 func normalizeTargetMetadataInput(input targets.UpdateMetadataInput) targets.UpdateMetadataInput {
-	seen := make(map[string]struct{}, len(input.Labels))
-	labels := make([]string, 0, len(input.Labels))
-	for _, raw := range input.Labels {
-		label := strings.TrimSpace(raw)
-		if label == "" {
-			continue
-		}
-		if _, ok := seen[label]; ok {
-			continue
-		}
-		seen[label] = struct{}{}
-		labels = append(labels, label)
-	}
-	input.Labels = labels
-	input.Note = strings.TrimSpace(input.Note)
+	input.Labels, input.Note = normalizeMetadata(input.Labels, input.Note)
 	return input
 }
 
 func isValidTargetMetadataInput(input targets.UpdateMetadataInput) bool {
-	if len(input.Labels) > 20 {
-		return false
-	}
-	for _, label := range input.Labels {
-		if len(label) > 64 {
-			return false
-		}
-	}
-	return len(input.Note) <= 2000
+	return isValidMetadata(input.Labels, input.Note)
 }
 
 func targetProbePath(path string) (targetID string, probeItemID string, isCollection bool) {

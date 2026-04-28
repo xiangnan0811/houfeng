@@ -294,6 +294,46 @@ func TestNodeItemRejectsInvalidMetadata(t *testing.T) {
 	}
 }
 
+func TestNodeItemMetadataValidationCountsUnicodeCharacters(t *testing.T) {
+	now := time.Date(2026, time.April, 27, 9, 0, 0, 0, time.UTC)
+	label := strings.Repeat("候", 64)
+	note := strings.Repeat("风", 2000)
+	repo := &fakeNodeRepository{
+		updateNodeMetadataResult: nodes.Record{
+			NodeID:              "nd_001",
+			DisplayName:         "Tokyo Edge",
+			Region:              "ap-northeast-1",
+			City:                "Tokyo",
+			Provider:            "Vultr",
+			LifecycleStatus:     nodes.LifecyclePendingEnrollment,
+			MonitoringStatus:    nodes.MonitoringEnabled,
+			BindingStatus:       nodes.BindingUnbound,
+			Labels:              []string{label},
+			Note:                note,
+			CurrentHealthStatus: nodes.HealthNormal,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		},
+	}
+
+	handler := handlers.NodeItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/nodes/nd_001", strings.NewReader(`{"labels":["`+label+`"],"note":"`+note+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if got := repo.updateNodeMetadataInput.Labels; len(got) != 1 || got[0] != label {
+		t.Fatalf("update labels = %#v, want %#v", got, []string{label})
+	}
+	if repo.updateNodeMetadataInput.Note != note {
+		t.Fatalf("update note length = %d, want %d", len([]rune(repo.updateNodeMetadataInput.Note)), 2000)
+	}
+}
+
 func TestNodeItemMapsMetadataNotFound(t *testing.T) {
 	repo := &fakeNodeRepository{updateNodeMetadataErr: nodes.ErrNodeNotFound}
 

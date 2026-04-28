@@ -308,6 +308,44 @@ func TestTargetItemRejectsInvalidMetadata(t *testing.T) {
 	}
 }
 
+func TestTargetItemMetadataValidationCountsUnicodeCharacters(t *testing.T) {
+	now := time.Date(2026, time.April, 27, 9, 0, 0, 0, time.UTC)
+	label := strings.Repeat("候", 64)
+	note := strings.Repeat("风", 2000)
+	repo := &fakeTargetRepository{
+		updateTargetMetadataResult: targets.TargetRecord{
+			TargetID:            "tg_001",
+			Name:                "Blog",
+			TargetType:          targets.TargetTypeService,
+			Host:                "blog.example.com",
+			ExecutionNodeLabels: []string{"edge"},
+			RunStatus:           targets.RunStatusEnabled,
+			Labels:              []string{label},
+			Note:                note,
+			CurrentHealthStatus: targets.HealthNormal,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		},
+	}
+
+	handler := handlers.TargetItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_001", strings.NewReader(`{"labels":["`+label+`"],"note":"`+note+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if got := repo.updateTargetMetadataInput.Labels; len(got) != 1 || got[0] != label {
+		t.Fatalf("update labels = %#v, want %#v", got, []string{label})
+	}
+	if repo.updateTargetMetadataInput.Note != note {
+		t.Fatalf("update note length = %d, want %d", len([]rune(repo.updateTargetMetadataInput.Note)), 2000)
+	}
+}
+
 func TestTargetItemMapsMetadataNotFound(t *testing.T) {
 	repo := &fakeTargetRepository{updateTargetMetadataErr: targets.ErrTargetNotFound}
 

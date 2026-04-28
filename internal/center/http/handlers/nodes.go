@@ -113,32 +113,10 @@ func isValidCreateInput(input nodes.CreateInput) bool {
 }
 
 func normalizeUpdateMetadataInput(input nodes.UpdateMetadataInput) nodes.UpdateMetadataInput {
-	normalizedLabels := make([]string, 0, len(input.Labels))
-	seen := make(map[string]struct{}, len(input.Labels))
-	for _, label := range input.Labels {
-		label = strings.TrimSpace(label)
-		if label == "" {
-			continue
-		}
-		if _, ok := seen[label]; ok {
-			continue
-		}
-		seen[label] = struct{}{}
-		normalizedLabels = append(normalizedLabels, label)
-	}
-	input.Labels = normalizedLabels
-	input.Note = strings.TrimSpace(input.Note)
+	input.Labels, input.Note = normalizeMetadata(input.Labels, input.Note)
 	return input
 }
 
 func isValidUpdateMetadataInput(input nodes.UpdateMetadataInput) bool {
-	if len(input.Labels) > 20 {
-		return false
-	}
-	for _, label := range input.Labels {
-		if len(label) > 64 {
-			return false
-		}
-	}
-	return len(input.Note) <= 2000
+	return isValidMetadata(input.Labels, input.Note)
 }

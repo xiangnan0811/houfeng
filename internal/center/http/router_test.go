@@ -146,6 +146,10 @@ func (f *fakeNodeRepository) CreateNode(context.Context, nodes.CreateInput) (nod
 	return f.createNodeResult, nil
 }
 
+func (f *fakeNodeRepository) UpdateNodeMetadata(context.Context, string, nodes.UpdateMetadataInput) (nodes.Record, error) {
+	return nodes.Record{}, nil
+}
+
 func TestRouterDispatchesAgentEndpointsBeforeSPAFallback(t *testing.T) {
 	t.Run("enroll", func(t *testing.T) {
 		var called bool
