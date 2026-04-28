@@ -2,6 +2,10 @@ package syncqueue_test
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -105,6 +109,97 @@ func TestFileStoreFallbackEntryIDUsesCurrentTime(t *testing.T) {
 	}
 	if fallbackID != now.Format(time.RFC3339Nano) {
 		t.Fatalf("fallbackID = %q, want current time %q", fallbackID, now.Format(time.RFC3339Nano))
+	}
+}
+
+func TestFileStoreFallbackEntryIDAddsSuffixOnCollision(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/sync-buffer.json"
+	ctx := context.Background()
+	now := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
+	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
+	store.SetNowForTest(func() time.Time { return now })
+
+	firstID, err := store.Enqueue(ctx, agentapi.SyncRequest{NodeID: "nd_001", SyncToken: "sync-token-001"})
+	if err != nil {
+		t.Fatalf("first Enqueue() error = %v", err)
+	}
+	secondID, err := store.Enqueue(ctx, agentapi.SyncRequest{NodeID: "nd_001", SyncToken: "sync-token-001"})
+	if err != nil {
+		t.Fatalf("second Enqueue() error = %v", err)
+	}
+
+	if firstID != now.Format(time.RFC3339Nano) {
+		t.Fatalf("firstID = %q, want current time", firstID)
+	}
+	if secondID != now.Format(time.RFC3339Nano)+"-1" {
+		t.Fatalf("secondID = %q, want suffixed collision ID", secondID)
+	}
+}
+
+func TestFileStoreSerializesConcurrentEnqueues(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/sync-buffer.json"
+	ctx := context.Background()
+	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 100, MaxAge: time.Hour})
+
+	const total = 25
+	done := make(chan error, total)
+	for i := 0; i < total; i++ {
+		i := i
+		go func() {
+			_, err := store.Enqueue(ctx, syncRequest(fmt.Sprintf("sync_%03d", i), false))
+			done <- err
+		}()
+	}
+	for i := 0; i < total; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("concurrent Enqueue() error = %v", err)
+		}
+	}
+
+	entries, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(entries) != total {
+		t.Fatalf("len(entries) = %d, want %d", len(entries), total)
+	}
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		if seen[entry.ID] {
+			t.Fatalf("duplicate entry ID %q in %#v", entry.ID, entries)
+		}
+		seen[entry.ID] = true
+	}
+}
+
+func TestFileStoreWritesPrivateQueueFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not portable on windows")
+	}
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "state", "sync-buffer.json")
+	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
+
+	if _, err := store.Enqueue(context.Background(), syncRequest("sync_private", false)); err != nil {
+		t.Fatalf("Enqueue() error = %v", err)
+	}
+
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("Stat(queue dir) error = %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("queue dir mode = %#o, want 0700", got)
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(queue file) error = %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("queue file mode = %#o, want 0600", got)
 	}
 }
 

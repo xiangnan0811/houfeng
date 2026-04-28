@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"sync"
 	"time"
 
 	"houfeng/internal/contracts/agentapi"
@@ -33,6 +35,18 @@ type FileStore struct {
 	path string
 	opts Options
 	now  func() time.Time
+	mu   *sync.Mutex
+}
+
+var fileStoreLocks sync.Map
+
+func lockForPath(path string) *sync.Mutex {
+	key := filepath.Clean(path)
+	if abs, err := filepath.Abs(key); err == nil {
+		key = abs
+	}
+	lock, _ := fileStoreLocks.LoadOrStore(key, &sync.Mutex{})
+	return lock.(*sync.Mutex)
 }
 
 func NewFileStore(path string, opts Options) *FileStore {
@@ -46,10 +60,13 @@ func NewFileStore(path string, opts Options) *FileStore {
 		path: path,
 		opts: opts,
 		now:  func() time.Time { return time.Now().UTC() },
+		mu:   lockForPath(path),
 	}
 }
 
 func (s *FileStore) SetNowForTest(now func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if now == nil {
 		s.now = func() time.Time { return time.Now().UTC() }
 		return
@@ -61,6 +78,8 @@ func (s *FileStore) Enqueue(ctx context.Context, request agentapi.SyncRequest) (
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries, err := s.readEntries()
 	if err != nil {
 		return "", err
@@ -73,7 +92,7 @@ func (s *FileStore) Enqueue(ctx context.Context, request agentapi.SyncRequest) (
 			createdAt = last.Add(time.Nanosecond)
 		}
 	}
-	id := entryIDForRequest(request, now)
+	id := entryIDForRequest(request, now, entries)
 	entries = append(entries, Entry{
 		ID:        id,
 		CreatedAt: createdAt,
@@ -90,6 +109,8 @@ func (s *FileStore) List(ctx context.Context) ([]Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries, err := s.readEntries()
 	if err != nil {
 		return nil, err
@@ -111,6 +132,8 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries, err := s.readEntries()
 	if err != nil {
 		return err
@@ -128,6 +151,8 @@ func (s *FileStore) MarkAttempt(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries, err := s.readEntries()
 	if err != nil {
 		return err
@@ -145,6 +170,8 @@ func (s *FileStore) Prune(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries, err := s.readEntries()
 	if err != nil {
 		return err
@@ -207,7 +234,11 @@ func (s *FileStore) readEntries() ([]Entry, error) {
 }
 
 func (s *FileStore) writeEntries(entries []Entry) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	sortEntries(entries)
@@ -215,28 +246,71 @@ func (s *FileStore) writeEntries(entries []Entry) error {
 	if err != nil {
 		return err
 	}
-	tmpPath := s.path + ".tmp"
-	file, err := os.Create(tmpPath)
+	file, err := os.CreateTemp(dir, ".sync-buffer-*.tmp")
 	if err != nil {
 		return err
 	}
+	tmpPath := file.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 	if _, err := file.Write(payload); err != nil {
-		file.Close()
-		_ = os.Remove(tmpPath)
+		_ = file.Close()
+		return err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
 		return err
 	}
 	if err := file.Close(); err != nil {
-		_ = os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, s.path)
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		return err
+	}
+	cleanup = false
+	return syncDir(dir)
 }
 
-func entryIDForRequest(request agentapi.SyncRequest, now time.Time) string {
+func entryIDForRequest(request agentapi.SyncRequest, now time.Time, entries []Entry) string {
 	if len(request.Heartbeats) > 0 && request.Heartbeats[0].SyncBatchID != "" {
 		return request.Heartbeats[0].SyncBatchID
 	}
-	return now.UTC().Format(time.RFC3339Nano)
+	base := now.UTC().Format(time.RFC3339Nano)
+	if !entryIDExists(entries, base) {
+		return base
+	}
+	for suffix := 1; ; suffix++ {
+		candidate := base + "-" + strconv.Itoa(suffix)
+		if !entryIDExists(entries, candidate) {
+			return candidate
+		}
+	}
+}
+
+func entryIDExists(entries []Entry, id string) bool {
+	for _, entry := range entries {
+		if entry.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func syncDir(dir string) error {
+	file, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return file.Sync()
 }
 
 func sortEntries(entries []Entry) {
