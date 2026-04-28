@@ -65,14 +65,15 @@ func (s *FileStore) Enqueue(ctx context.Context, request agentapi.SyncRequest) (
 	if err != nil {
 		return "", err
 	}
-	createdAt := s.now()
+	now := s.now()
+	createdAt := now
 	if len(entries) > 0 {
 		last := entries[len(entries)-1].CreatedAt
 		if !createdAt.After(last) {
 			createdAt = last.Add(time.Nanosecond)
 		}
 	}
-	id := entryIDForRequest(request, createdAt)
+	id := entryIDForRequest(request, now)
 	entries = append(entries, Entry{
 		ID:        id,
 		CreatedAt: createdAt,
@@ -153,6 +154,9 @@ func (s *FileStore) Prune(ctx context.Context) error {
 
 func WithBackfilledFacts(request agentapi.SyncRequest, backfilled bool) agentapi.SyncRequest {
 	cloned := cloneRequest(request)
+	for i := range cloned.Heartbeats {
+		cloned.Heartbeats[i].IsBackfilled = backfilled
+	}
 	for i := range cloned.HostSamples {
 		cloned.HostSamples[i].IsBackfilled = backfilled
 	}

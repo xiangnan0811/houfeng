@@ -67,6 +67,9 @@ func TestFileStoreMarksAttemptsAndBuildsBackfilledRequests(t *testing.T) {
 	if backfilled.Heartbeats[0].SyncBatchID != "sync_retry" {
 		t.Fatalf("heartbeat SyncBatchID = %q, want %q", backfilled.Heartbeats[0].SyncBatchID, "sync_retry")
 	}
+	if !backfilled.Heartbeats[0].IsBackfilled {
+		t.Fatal("heartbeat IsBackfilled = false, want true")
+	}
 	if !backfilled.HostSamples[0].IsBackfilled {
 		t.Fatal("host sample IsBackfilled = false, want true")
 	}
@@ -76,8 +79,32 @@ func TestFileStoreMarksAttemptsAndBuildsBackfilledRequests(t *testing.T) {
 
 	entries[0].Request.HostSamples[0].IsBackfilled = false
 	entries[0].Request.ProbeObservations[0].IsBackfilled = false
-	if backfilled.HostSamples[0].IsBackfilled != true || backfilled.ProbeObservations[0].IsBackfilled != true {
+	entries[0].Request.Heartbeats[0].IsBackfilled = false
+	if backfilled.Heartbeats[0].IsBackfilled != true ||
+		backfilled.HostSamples[0].IsBackfilled != true ||
+		backfilled.ProbeObservations[0].IsBackfilled != true {
 		t.Fatal("WithBackfilledFacts() did not deep-copy payload slices")
+	}
+}
+
+func TestFileStoreFallbackEntryIDUsesCurrentTime(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/sync-buffer.json"
+	ctx := context.Background()
+	now := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
+	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
+	store.SetNowForTest(func() time.Time { return now })
+
+	if _, err := store.Enqueue(ctx, syncRequest("sync_existing", false)); err != nil {
+		t.Fatalf("Enqueue(existing) error = %v", err)
+	}
+
+	fallbackID, err := store.Enqueue(ctx, agentapi.SyncRequest{NodeID: "nd_001", SyncToken: "sync-token-001"})
+	if err != nil {
+		t.Fatalf("Enqueue(fallback) error = %v", err)
+	}
+	if fallbackID != now.Format(time.RFC3339Nano) {
+		t.Fatalf("fallbackID = %q, want current time %q", fallbackID, now.Format(time.RFC3339Nano))
 	}
 }
 
@@ -125,6 +152,7 @@ func syncRequest(batchID string, backfilled bool) agentapi.SyncRequest {
 			AgentVersion: "dev",
 			Fingerprint:  "fp-001",
 			SyncBatchID:  batchID,
+			IsBackfilled: backfilled,
 		}},
 		HostSamples: []agentapi.HostSamplePayload{{
 			ObservedAt:   observedAt,
