@@ -1568,4 +1568,229 @@ describe('NodeDetailPage', () => {
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument()
   })
+
+
+  it('shows and edits node labels and note metadata', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_001',
+            binding_status: '已绑定',
+            labels: ['edge'],
+            note: 'keep me',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_001',
+            binding_status: '已绑定',
+            labels: ['edge', 'core'],
+            note: 'trimmed note',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByRole('heading', { name: '标签与备注' })).toBeInTheDocument()
+    expect(screen.getByText('标签：edge')).toBeInTheDocument()
+    expect(screen.getByText('备注：keep me')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
+      target: { value: 'edge, core, edge' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
+      target: { value: '  trimmed note  ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_001', {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        body: JSON.stringify({ labels: ['edge', 'core'], note: 'trimmed note' }),
+      }),
+    )
+    expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
+    expect(screen.getByText('备注：trimmed note')).toBeInTheDocument()
+  })
+
+  it('shows a metadata update failure without replacing the current detail', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_001',
+              binding_status: '已绑定',
+              labels: ['edge'],
+              note: 'keep me',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse({ error: 'metadata write failed' }, 409)),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
+      target: { value: 'new note' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('标签或备注更新失败')).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('new note')
+    expect(screen.queryByText('备注：new note')).not.toBeInTheDocument()
+  })
+
+  it('ignores a stale metadata save after switching to a different node route', async () => {
+    const metadataSave = deferredResponse()
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_001',
+              binding_status: '已绑定',
+              labels: ['edge'],
+              note: 'keep me',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockImplementationOnce(() => metadataSave.promise)
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_002',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            provider: 'Hetzner',
+            lifecycle_status: '在用',
+            monitoring_status: '启用',
+            binding_status: '已绑定',
+            labels: ['seoul'],
+            note: 'seoul note',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:10:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_002',
+            latest_host_sample: null,
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <NodeDetailTestHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
+      target: { value: 'edge, core' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
+      target: { value: 'new note' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
+    fireEvent.click(screen.getByRole('button', { name: 'switch node' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+
+    metadataSave.resolve(
+      mockJSONResponse(
+        nodeRecord({
+          node_id: 'nd_001',
+          binding_status: '已绑定',
+          labels: ['edge', 'core'],
+          note: 'new note',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          updated_at: '2026-04-27T09:45:00Z',
+        }),
+      ),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
+    expect(screen.queryByText('备注：new note')).not.toBeInTheDocument()
+    expect(screen.getByText('备注：seoul note')).toBeInTheDocument()
+  })
+
 })

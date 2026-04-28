@@ -22,6 +22,7 @@ import {
   restoreRetiredNodeToObserving,
   retireNode,
   resumeNodeMonitoring,
+  updateNodeMetadata,
 } from '../lib/api'
 import {
   formatBytes,
@@ -131,6 +132,19 @@ function pauseConfirmationCurrent(node: NodeRecord) {
     : '当前：监控运行状态为启用。'
 }
 
+function parseLabels(value: string) {
+  const result: string[] = []
+  const seen = new Set<string>()
+
+  for (const label of value.split(/[,，]/).map((item) => item.trim()).filter(Boolean)) {
+    if (seen.has(label)) continue
+    seen.add(label)
+    result.push(label)
+  }
+
+  return result
+}
+
 export function NodeDetailPage() {
   const { nodeId } = useParams()
   return <NodeDetailPageContent key={nodeId ?? 'missing-node'} nodeId={nodeId} />
@@ -162,6 +176,11 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     error: null,
   })
   const [bindingAction, setBindingAction] = useState<BindingConflictAction | null>(null)
+  const [metadataEditing, setMetadataEditing] = useState(false)
+  const [metadataLabelDraft, setMetadataLabelDraft] = useState('')
+  const [metadataNoteDraft, setMetadataNoteDraft] = useState('')
+  const [metadataSubmitting, setMetadataSubmitting] = useState(false)
+  const [metadataError, setMetadataError] = useState<string | null>(null)
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
@@ -522,6 +541,52 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const bindingConflictLoading =
     hasCurrentBindingConflictState && bindingConflictState.loading && !bindingConflict
 
+  async function handleMetadataSave() {
+    if (!node) return
+
+    const actionNodeId = node.node_id
+    setMetadataSubmitting(true)
+    setMetadataError(null)
+
+    try {
+      const updated = await updateNodeMetadata(actionNodeId, {
+        labels: parseLabels(metadataLabelDraft),
+        note: metadataNoteDraft.trim(),
+      })
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
+      setState((current) => ({
+        ...current,
+        node: updated,
+      }))
+      setMetadataEditing(false)
+      setMetadataLabelDraft('')
+      setMetadataNoteDraft('')
+    } catch (error) {
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
+      setMetadataError('标签或备注更新失败')
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteNodeIdRef.current === actionNodeId &&
+        currentRequestedNodeIdRef.current === actionNodeId
+      ) {
+        setMetadataSubmitting(false)
+      }
+    }
+  }
+
   return (
     <div className="page-stack">
       <section className="hero-panel">
@@ -633,6 +698,76 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           </p>
         </article>
       </div>
+
+      <DetailSection eyebrow="Metadata" title="标签与备注">
+        <div className="page-stack">
+          {metadataEditing ? (
+            <>
+              <p>
+                <label>
+                  标签
+                  <input
+                    name="metadata-labels"
+                    value={metadataLabelDraft}
+                    onChange={(event) => setMetadataLabelDraft(event.target.value)}
+                  />
+                </label>
+              </p>
+              <p>
+                <label>
+                  备注
+                  <textarea
+                    name="metadata-note"
+                    value={metadataNoteDraft}
+                    onChange={(event) => setMetadataNoteDraft(event.target.value)}
+                    rows={3}
+                  />
+                </label>
+              </p>
+              <div className="badge-row badge-row--wrap">
+                <button
+                  type="button"
+                  disabled={metadataSubmitting}
+                  onClick={() => void handleMetadataSave()}
+                >
+                  {metadataSubmitting ? '正在保存…' : '保存标签与备注'}
+                </button>
+                <button
+                  type="button"
+                  disabled={metadataSubmitting}
+                  onClick={() => {
+                    setMetadataEditing(false)
+                    setMetadataLabelDraft('')
+                    setMetadataNoteDraft('')
+                    setMetadataError(null)
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p>标签：{formatLabelList(node.labels)}</p>
+              <p>备注：{node.note.trim() || '—'}</p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMetadataEditing(true)
+                    setMetadataLabelDraft(node.labels.join(', '))
+                    setMetadataNoteDraft(node.note)
+                    setMetadataError(null)
+                  }}
+                >
+                  编辑标签与备注
+                </button>
+              </div>
+            </>
+          )}
+          {metadataError ? <p role="alert">{metadataError}</p> : null}
+        </div>
+      </DetailSection>
 
       <DetailSection eyebrow="Runtime Control" title="运行控制">
         <div className="page-stack">

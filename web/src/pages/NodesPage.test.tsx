@@ -650,4 +650,70 @@ describe('NodesPage', () => {
       cache: 'no-store',
     })
   })
+
+
+  it('edits row labels without changing the existing note and cancels locally', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            labels: ['edge'],
+            note: 'keep me',
+          }),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            labels: ['edge', 'core'],
+            note: 'keep me',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+    expect(screen.getByText('标签：edge')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '快速编辑标签' }))
+    const editor = screen.getByRole('textbox', { name: '标签' })
+    fireEvent.change(editor, { target: { value: 'edge, core, edge' } })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: '保存标签' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
+      target: { value: 'edge, core, edge' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存标签' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001', {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        body: JSON.stringify({ labels: ['edge', 'core'], note: 'keep me' }),
+      }),
+    )
+    expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
+  })
+
 })

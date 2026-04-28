@@ -11,8 +11,9 @@ import {
   listNodes,
   pauseNodeMonitoring,
   resumeNodeMonitoring,
+  updateNodeMetadata,
 } from '../lib/api'
-import { formatDateTime } from '../lib/format'
+import { formatDateTime, formatLabelList } from '../lib/format'
 import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { NodeRecord } from '../lib/types'
 
@@ -87,10 +88,16 @@ async function createNode(input: CreateNodeInput) {
 }
 
 function parseLabels(value: string) {
-  return value
-    .split(/[,，]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+  const result: string[] = []
+  const seen = new Set<string>()
+
+  for (const label of value.split(/[,，]/).map((item) => item.trim()).filter(Boolean)) {
+    if (seen.has(label)) continue
+    seen.add(label)
+    result.push(label)
+  }
+
+  return result
 }
 
 function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction; label: string }> {
@@ -138,6 +145,10 @@ export function NodesPage() {
   const [createForm, setCreateForm] = useState<CreateNodeInput>(initialCreateForm)
   const [runtimeBusyNodeId, setRuntimeBusyNodeId] = useState<string | null>(null)
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
+  const [editingLabelNodeId, setEditingLabelNodeId] = useState<string | null>(null)
+  const [labelDraft, setLabelDraft] = useState('')
+  const [metadataBusyNodeId, setMetadataBusyNodeId] = useState<string | null>(null)
+  const [metadataErrors, setMetadataErrors] = useState<Record<string, string>>({})
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingNodeConfirmation | null>(null)
   const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
@@ -255,6 +266,35 @@ export function NodesPage() {
           tokenIssueError: `接入 Token 生成失败：${describeError(issueError, '请稍后重试')}`,
         },
       })
+    }
+  }
+
+  async function handleSaveLabels(node: NodeRecord) {
+    setMetadataBusyNodeId(node.node_id)
+    setMetadataErrors((current) => {
+      if (!current[node.node_id]) return current
+      const next = { ...current }
+      delete next[node.node_id]
+      return next
+    })
+
+    try {
+      const updated = await updateNodeMetadata(node.node_id, {
+        labels: parseLabels(labelDraft),
+        note: node.note,
+      })
+      setNodes((current) =>
+        current.map((item) => (item.node_id === updated.node_id ? updated : item)),
+      )
+      setEditingLabelNodeId((current) => (current === node.node_id ? null : current))
+      setLabelDraft('')
+    } catch (metadataError) {
+      setMetadataErrors((current) => ({
+        ...current,
+        [node.node_id]: describeError(metadataError, '标签更新失败'),
+      }))
+    } finally {
+      setMetadataBusyNodeId((current) => (current === node.node_id ? null : current))
     }
   }
 
@@ -474,6 +514,64 @@ export function NodesPage() {
                   查看详情
                 </Link>
               </p>
+              <p>标签：{formatLabelList(node.labels)}</p>
+              {editingLabelNodeId === node.node_id ? (
+                <div className="page-stack">
+                  <p>
+                    <label>
+                      标签
+                      <input
+                        name={`labels-${node.node_id}`}
+                        value={labelDraft}
+                        onChange={(event) => setLabelDraft(event.target.value)}
+                      />
+                    </label>
+                  </p>
+                  <div className="badge-row badge-row--wrap">
+                    <button
+                      type="button"
+                      disabled={metadataBusyNodeId === node.node_id}
+                      onClick={() => void handleSaveLabels(node)}
+                    >
+                      {metadataBusyNodeId === node.node_id ? '正在保存…' : '保存标签'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={metadataBusyNodeId === node.node_id}
+                      onClick={() => {
+                        setEditingLabelNodeId((current) =>
+                          current === node.node_id ? null : current,
+                        )
+                        setLabelDraft('')
+                        setMetadataErrors((current) => {
+                          if (!current[node.node_id]) return current
+                          const next = { ...current }
+                          delete next[node.node_id]
+                          return next
+                        })
+                      }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingLabelNodeId(node.node_id)
+                    setLabelDraft(node.labels.join(', '))
+                    setMetadataErrors((current) => {
+                      if (!current[node.node_id]) return current
+                      const next = { ...current }
+                      delete next[node.node_id]
+                      return next
+                    })
+                  }}
+                >
+                  快速编辑标签
+                </button>
+              )}
               <div className="badge-row badge-row--wrap">
                 {nodeRuntimeActions(node).map(({ action, label }) => (
                   <button
@@ -513,6 +611,7 @@ export function NodesPage() {
                 />
               ) : null}
               {runtimeErrors[node.node_id] ? <p>{runtimeErrors[node.node_id]}</p> : null}
+              {metadataErrors[node.node_id] ? <p>{metadataErrors[node.node_id]}</p> : null}
             </div>
             <div className="badge-row badge-row--wrap">
               <StatusBadge label={node.lifecycle_status} />
