@@ -697,20 +697,24 @@ func degradedTargetLatencyNodes(observations []runtimefacts.ProbeObservation, ba
 }
 
 func hasSustainedTargetLatencyRecoveryEvidence(series map[string][]runtimefacts.ProbeObservation, baselines map[string]float64, window time.Duration) bool {
+	comparableSeries := 0
 	for probeItemID, observations := range series {
 		baseline, ok := baselines[probeItemID]
-		if !ok || len(observations) < 3 {
+		if !ok {
 			continue
+		}
+		comparableSeries++
+		if len(observations) < 3 {
+			return false
 		}
 		if !spansProbeObservationWindow(observations, window) {
-			continue
+			return false
 		}
 		if targetLatencySeriesDegraded(averageProbeLatencyMS(observations), baseline) {
-			continue
+			return false
 		}
-		return true
 	}
-	return false
+	return comparableSeries > 0
 }
 
 func usableLatencyObservationSeries(observations []runtimefacts.ProbeObservation) map[string][]runtimefacts.ProbeObservation {

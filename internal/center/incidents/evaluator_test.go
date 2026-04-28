@@ -603,6 +603,24 @@ func TestEvaluateTargetLatencyTrendSkipsSuppressedStartsAndRecoversConservativel
 		t.Fatalf("Transition = %q, want %q for a short safe latency window", briefSafe.Transition, TransitionNoop)
 	}
 
+	secondBaseline := append([]TargetProbeDailyAggregate(nil), baselines...)
+	secondBaseline = append(secondBaseline, TargetProbeDailyAggregate{TargetID: "tg_001", ProbeItemID: "pb_http_2", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: float64Ptr(100)})
+	partialRecovery := EvaluateTargetLatencyTrendDegradationAcrossSeries(previous, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			targetLatencyObservation(now.Add(time.Hour), "nd_001", "pb_http_1", 120),
+			targetLatencyObservation(now.Add(50*time.Minute), "nd_001", "pb_http_1", 125),
+			targetLatencyObservation(now.Add(40*time.Minute), "nd_001", "pb_http_1", 130),
+			targetLatencyObservation(now.Add(30*time.Minute), "nd_001", "pb_http_1", 124),
+			targetLatencyObservation(now.Add(time.Hour), "nd_001", "pb_http_2", 121),
+			targetLatencyObservation(now.Add(55*time.Minute), "nd_001", "pb_http_2", 122),
+			targetLatencyObservation(now.Add(50*time.Minute), "nd_001", "pb_http_2", 123),
+		},
+		secondBaseline,
+	)
+	if partialRecovery.Transition != TransitionNoop {
+		t.Fatalf("Transition = %q, want %q while another comparable probe item lacks a sustained safe window", partialRecovery.Transition, TransitionNoop)
+	}
+
 	recovered := EvaluateTargetLatencyTrendDegradationAcrossSeries(previous, "tg_001",
 		[]runtimefacts.ProbeObservation{
 			targetLatencyObservation(now.Add(time.Hour), "nd_001", "pb_http_1", 120),
