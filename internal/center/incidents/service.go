@@ -322,6 +322,37 @@ type incidentTiming struct {
 	sweepInterval     time.Duration
 }
 
+type notificationPolicy struct {
+	notifyOnStarted   bool
+	notifyOnEscalated bool
+	notifyOnRecovered bool
+}
+
+func defaultNotificationPolicy() notificationPolicy {
+	return notificationPolicyFromDefaults(centersettings.Default().IncidentDefaults)
+}
+
+func notificationPolicyFromDefaults(defaults centersettings.IncidentDefaults) notificationPolicy {
+	return notificationPolicy{
+		notifyOnStarted:   defaults.NotifyOnStarted,
+		notifyOnEscalated: defaults.NotifyOnEscalated,
+		notifyOnRecovered: defaults.NotifyOnRecovered,
+	}
+}
+
+func (p notificationPolicy) enabled(reason NotificationReason) bool {
+	switch reason {
+	case NotificationReasonStarted:
+		return p.notifyOnStarted
+	case NotificationReasonEscalated:
+		return p.notifyOnEscalated
+	case NotificationReasonRecovered:
+		return p.notifyOnRecovered
+	default:
+		return true
+	}
+}
+
 func (s *Service) heartbeatIntervalFor(ctx context.Context) time.Duration {
 	return s.incidentTimingFor(ctx).heartbeatInterval
 }
@@ -360,6 +391,25 @@ func applyIncidentDefaults(timing incidentTiming, defaults centersettings.Incide
 		timing.sweepInterval = time.Duration(defaults.SweepIntervalSeconds) * time.Second
 	}
 	return timing
+}
+
+func (s *Service) notificationPolicyFor(ctx context.Context) notificationPolicy {
+	policy := defaultNotificationPolicy()
+	if s.settingsRepo == nil {
+		return policy
+	}
+	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
+		defaults, exists, err := source.GetPersistedIncidentDefaults(ctx)
+		if err != nil || !exists {
+			return policy
+		}
+		return notificationPolicyFromDefaults(defaults)
+	}
+	settings, err := s.settingsRepo.GetSettings(ctx)
+	if err != nil {
+		return policy
+	}
+	return notificationPolicyFromDefaults(settings.IncidentDefaults)
 }
 
 type classEvaluation struct {
@@ -403,20 +453,23 @@ func buildMutation(objectType ObjectType, objectID string, previous []IncidentRe
 
 func (s *Service) appendNotificationRecords(ctx context.Context, objectType ObjectType, objectID string, evaluations []classEvaluation) error {
 	records := make([]NotificationRecordWrite, 0)
+	policy := s.notificationPolicyFor(ctx)
 	for _, evaluation := range evaluations {
 		if evaluation.result.Notification == nil {
 			continue
 		}
+		decision := evaluation.result.Notification
 		record := NotificationRecordWrite{
 			IncidentID:     incidentIdentity(evaluation),
 			ObjectType:     objectType,
 			ObjectID:       objectID,
-			Channel:        evaluation.result.Notification.Channel,
+			Channel:        decision.Channel,
 			DeliveryStatus: DeliveryStatusSuppressed,
-			Summary:        evaluation.result.Notification.Summary,
+			Summary:        decision.Summary,
 		}
-		if evaluation.result.Notification.ShouldSend && s.notifier != nil {
-			if err := s.notifier.Send(ctx, evaluation.result.Notification.Summary); err != nil {
+		shouldSend := decision.ShouldSend && policy.enabled(decision.Reason)
+		if shouldSend && s.notifier != nil {
+			if err := s.notifier.Send(ctx, decision.Summary); err != nil {
 				if errors.Is(err, errNotificationSuppressed) {
 					records = append(records, record)
 					continue

@@ -117,6 +117,124 @@ func (f *fakeSettingsRepository) GetPersistedIncidentDefaults(context.Context) (
 	return f.persistedIncidentDefaults, true, nil
 }
 
+func TestServiceNotificationFlags(t *testing.T) {
+	makeEvaluation := func(reason NotificationReason) classEvaluation {
+		return classEvaluation{
+			class: IncidentNodeDiskPressure,
+			result: EvaluationResult{
+				Current: &IncidentRecord{
+					IncidentID:    "inc_node_nd_001_node_disk_pressure",
+					ObjectType:    ObjectTypeNode,
+					ObjectID:      "nd_001",
+					IncidentClass: IncidentNodeDiskPressure,
+				},
+				Notification: &NotificationDecision{
+					ShouldSend: true,
+					Channel:    "telegram",
+					Reason:     reason,
+					Summary:    "summary",
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name               string
+		reason             NotificationReason
+		defaults           centersettings.IncidentDefaults
+		expectStatus       DeliveryStatus
+		expectSendCount    int
+		persistedAvailable bool
+		repoUnavailable    bool
+		useNilRepo         bool
+	}{
+		{
+			name:         "started suppressed by persisted defaults",
+			reason:       NotificationReasonStarted,
+			defaults:     centersettings.IncidentDefaults{NotifyOnStarted: false, NotifyOnEscalated: true, NotifyOnRecovered: true},
+			expectStatus: DeliveryStatusSuppressed,
+		},
+		{
+			name:         "escalated suppressed by persisted defaults",
+			reason:       NotificationReasonEscalated,
+			defaults:     centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: false, NotifyOnRecovered: true},
+			expectStatus: DeliveryStatusSuppressed,
+		},
+		{
+			name:         "recovered suppressed by persisted defaults",
+			reason:       NotificationReasonRecovered,
+			defaults:     centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: true, NotifyOnRecovered: false},
+			expectStatus: DeliveryStatusSuppressed,
+		},
+		{
+			name:               "started enabled by persisted defaults sends notification",
+			reason:             NotificationReasonStarted,
+			defaults:           centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: false, NotifyOnRecovered: false},
+			expectStatus:       DeliveryStatusSent,
+			expectSendCount:    1,
+			persistedAvailable: true,
+		},
+		{
+			name:            "defaults apply when settings repo is nil",
+			reason:          NotificationReasonRecovered,
+			expectStatus:    DeliveryStatusSent,
+			expectSendCount: 1,
+			useNilRepo:      true,
+		},
+		{
+			name:            "defaults apply when persisted defaults are unavailable",
+			reason:          NotificationReasonRecovered,
+			expectStatus:    DeliveryStatusSent,
+			expectSendCount: 1,
+			repoUnavailable: true,
+		},
+		{
+			name:            "defaults apply when persisted defaults row is absent",
+			reason:          NotificationReasonRecovered,
+			expectStatus:    DeliveryStatusSent,
+			expectSendCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := &fakeMutationWriter{}
+			notifier := &fakeNotifier{}
+
+			var settingsRepo SettingsRepository
+			if !tt.useNilRepo {
+				repo := &fakeSettingsRepository{}
+				if tt.repoUnavailable {
+					repo.persistedIncidentDefaultsErr = errors.New("persisted defaults unavailable")
+				} else if tt.persistedAvailable || tt.expectStatus == DeliveryStatusSuppressed {
+					repo.persistedIncidentDefaults = tt.defaults
+					repo.persistedIncidentExists = true
+				}
+				settingsRepo = repo
+			}
+
+			service := NewSettingsBackedService(nil, nil, nil, writer, notifier, settingsRepo, slog.Default(), 30*time.Second, time.Minute)
+			service.now = func() time.Time {
+				return time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+			}
+
+			if err := service.appendNotificationRecords(context.Background(), ObjectTypeNode, "nd_001", []classEvaluation{makeEvaluation(tt.reason)}); err != nil {
+				t.Fatalf("appendNotificationRecords() error = %v", err)
+			}
+			if len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 {
+				t.Fatalf("notifications = %#v, want one record", writer.notifications)
+			}
+			record := writer.notifications[0][0]
+			if record.DeliveryStatus != tt.expectStatus {
+				t.Fatalf("DeliveryStatus = %q, want %q", record.DeliveryStatus, tt.expectStatus)
+			}
+			if got := len(notifier.messages); got != tt.expectSendCount {
+				t.Fatalf("len(notifier.messages) = %d, want %d", got, tt.expectSendCount)
+			}
+		})
+	}
+}
+
 func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
