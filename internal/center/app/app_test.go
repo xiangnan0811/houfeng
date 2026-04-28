@@ -47,3 +47,60 @@ func TestAppWaitsForWorkerShutdownBeforeReturning(t *testing.T) {
 		t.Fatal("worker did not exit before Run() returned")
 	}
 }
+
+type blockingWorker struct {
+	exited  chan struct{}
+	release <-chan struct{}
+}
+
+func (f *blockingWorker) Run(ctx context.Context) error {
+	<-ctx.Done()
+	<-f.release
+	close(f.exited)
+	return nil
+}
+
+func TestAppWaitsForMultipleWorkerShutdownBeforeReturning(t *testing.T) {
+	release := make(chan struct{})
+	workerA := &blockingWorker{exited: make(chan struct{}), release: release}
+	workerB := &blockingWorker{exited: make(chan struct{}), release: release}
+	app := centerapp.New("127.0.0.1:0", http.NewServeMux(), workerA, workerB)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- app.Run(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("Run() returned before workers released: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return after workers released")
+	}
+
+	select {
+	case <-workerA.exited:
+	default:
+		t.Fatal("workerA did not exit before Run() returned")
+	}
+
+	select {
+	case <-workerB.exited:
+	default:
+		t.Fatal("workerB did not exit before Run() returned")
+	}
+}

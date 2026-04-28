@@ -20,6 +20,7 @@ import (
 	"houfeng/internal/center/http/handlers"
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/notify"
+	"houfeng/internal/center/retention"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
@@ -41,7 +42,7 @@ type bootstrapDeps struct {
 	applyMigrations     func(context.Context, postgresDB) error
 	newIncidentNotifier func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
 	newRouter           func(centerhttp.RouterOptions) http.Handler
-	newApp              func(string, http.Handler, centerapp.Worker) appRunner
+	newApp              func(string, http.Handler, ...centerapp.Worker) appRunner
 }
 
 type pgxPostgresDB struct {
@@ -71,6 +72,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
 	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
 	settingsRepo := store.NewPostgresSettingsRepository(db.Pool())
+	retentionRepo := store.NewPostgresRetentionRepository(db.Pool())
+	retentionWorker := retention.NewWorker(retentionRepo, settingsRepo, slog.Default(), retention.DefaultWorkerInterval)
 	notifierSettingsRepo := notifierSettingsRepository{repo: settingsRepo, db: db.Pool()}
 	settingsHandlerRepo := settingsPresentationRepository{
 		repo:                  settingsRepo,
@@ -119,7 +122,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AgentSyncHandler:                handlers.AgentSync(syncSvc),
 	})
 
-	return deps.newApp(cfg.HTTPAddr, router, incidentSvc), db.Close, nil
+	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker), db.Close, nil
 }
 
 func (d bootstrapDeps) withDefaults() bootstrapDeps {
@@ -156,8 +159,8 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 		d.newRouter = centerhttp.New
 	}
 	if d.newApp == nil {
-		d.newApp = func(addr string, handler http.Handler, worker centerapp.Worker) appRunner {
-			return centerapp.New(addr, handler, worker)
+		d.newApp = func(addr string, handler http.Handler, workers ...centerapp.Worker) appRunner {
+			return centerapp.New(addr, handler, workers...)
 		}
 	}
 	return d

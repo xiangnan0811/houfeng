@@ -38,7 +38,7 @@ func TestBootstrapCenterReturnsOpenPostgresError(t *testing.T) {
 			calledRouter = true
 			return http.NewServeMux()
 		},
-		newApp: func(string, http.Handler, centerapp.Worker) appRunner {
+		newApp: func(string, http.Handler, ...centerapp.Worker) appRunner {
 			calledApp = true
 			return fakeApp{}
 		},
@@ -81,7 +81,7 @@ func TestBootstrapCenterClosesDBOnMigrationFailure(t *testing.T) {
 			calledRouter = true
 			return http.NewServeMux()
 		},
-		newApp: func(string, http.Handler, centerapp.Worker) appRunner {
+		newApp: func(string, http.Handler, ...centerapp.Worker) appRunner {
 			calledApp = true
 			return fakeApp{}
 		},
@@ -141,11 +141,16 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 			gotOpts = opts
 			return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 		},
-		newApp: func(addr string, handler http.Handler, worker centerapp.Worker) appRunner {
+		newApp: func(addr string, handler http.Handler, workers ...centerapp.Worker) appRunner {
 			gotAddr = addr
 			gotHandler = handler
-			if worker == nil {
-				t.Fatal("worker = nil, want incident background worker")
+			if len(workers) != 2 {
+				t.Fatalf("len(workers) = %d, want 2", len(workers))
+			}
+			for i, worker := range workers {
+				if worker == nil {
+					t.Fatalf("workers[%d] = nil, want non-nil", i)
+				}
 			}
 			return app
 		},
