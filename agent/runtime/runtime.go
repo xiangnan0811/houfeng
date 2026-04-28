@@ -22,6 +22,8 @@ const (
 
 var ErrMissingSyncToken = errors.New("enrollment bound response missing sync token")
 
+var errRemoteSync = errors.New("remote sync failed")
+
 type EnrollmentNotBoundError struct {
 	BindingStatus string
 }
@@ -188,7 +190,11 @@ func (r *Runtime) Run(ctx context.Context) error {
 				if ctx.Err() != nil {
 					return nil
 				}
-				r.logger.Error("sync queue flush failed", "error", err)
+				if errors.Is(err, errRemoteSync) {
+					r.logger.Error("sync queue flush failed", "error", err)
+					continue
+				}
+				return fmt.Errorf("sync queue operation failed: %w", err)
 			}
 		}
 	}
@@ -261,7 +267,7 @@ func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, curren
 	}
 	response, err := r.client.Sync(ctx, request)
 	if err != nil {
-		return nil, fmt.Errorf("sync heartbeat: %w", err)
+		return nil, fmt.Errorf("%w: sync heartbeat: %w", errRemoteSync, err)
 	}
 	return response, nil
 }

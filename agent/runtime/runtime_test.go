@@ -111,6 +111,71 @@ func (f *fakeProbeProvider) CollectDue(_ context.Context, plan *agentapi.SyncPla
 	return out, nil
 }
 
+type fakeSyncQueue struct {
+	enqueueErr error
+	listErr    error
+	deleteErr  error
+	markErr    error
+	pruneErr   error
+
+	entries     []syncqueue.Entry
+	deleteCalls int
+	markCalls   int
+}
+
+func (f *fakeSyncQueue) Enqueue(_ context.Context, request agentapi.SyncRequest) (string, error) {
+	if f.enqueueErr != nil {
+		return "", f.enqueueErr
+	}
+	id := request.Heartbeats[0].SyncBatchID
+	f.entries = append(f.entries, syncqueue.Entry{
+		ID:      id,
+		Request: request,
+	})
+	return id, nil
+}
+
+func (f *fakeSyncQueue) List(context.Context) ([]syncqueue.Entry, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	out := make([]syncqueue.Entry, len(f.entries))
+	copy(out, f.entries)
+	return out, nil
+}
+
+func (f *fakeSyncQueue) Delete(_ context.Context, id string) error {
+	f.deleteCalls++
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	filtered := f.entries[:0]
+	for _, entry := range f.entries {
+		if entry.ID != id {
+			filtered = append(filtered, entry)
+		}
+	}
+	f.entries = filtered
+	return nil
+}
+
+func (f *fakeSyncQueue) MarkAttempt(_ context.Context, id string) error {
+	f.markCalls++
+	if f.markErr != nil {
+		return f.markErr
+	}
+	for i := range f.entries {
+		if f.entries[i].ID == id {
+			f.entries[i].Attempts++
+		}
+	}
+	return nil
+}
+
+func (f *fakeSyncQueue) Prune(context.Context) error {
+	return f.pruneErr
+}
+
 func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{}
@@ -439,6 +504,45 @@ func TestRuntimeQueuesFailedSyncAndRetriesAsBackfilled(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("len(queue entries) = %d, want 0 after ack", len(entries))
+	}
+}
+
+func TestRuntimeReturnsQueuePersistenceErrorWithoutDroppingCurrentBatch(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{}
+	enqueueErr := errors.New("queue path is read-only")
+	queue := &fakeSyncQueue{enqueueErr: enqueueErr}
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, queue)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := rt.Run(ctx)
+	if !errors.Is(err, enqueueErr) {
+		t.Fatalf("Run() error = %v, want enqueue error", err)
+	}
+	if client.syncCalls != 0 {
+		t.Fatalf("syncCalls = %d, want 0 when enqueue fails before send", client.syncCalls)
+	}
+}
+
+func TestRuntimeReturnsAckDeleteErrorInsteadOfSilentlyReplaying(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{}
+	deleteErr := errors.New("queue delete denied")
+	queue := &fakeSyncQueue{deleteErr: deleteErr}
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, queue)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := rt.Run(ctx)
+	if !errors.Is(err, deleteErr) {
+		t.Fatalf("Run() error = %v, want delete error", err)
+	}
+	if client.syncCalls != 1 {
+		t.Fatalf("syncCalls = %d, want 1 accepted send before delete failure stops runtime", client.syncCalls)
+	}
+	if queue.deleteCalls != 1 {
+		t.Fatalf("deleteCalls = %d, want 1", queue.deleteCalls)
 	}
 }
 
