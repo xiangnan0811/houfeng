@@ -21,6 +21,7 @@ import {
   pauseTarget,
   restoreTargetToPaused,
   resumeTarget,
+  updateTargetMetadata,
   updateProbeItem,
 } from '../lib/api'
 import {
@@ -125,10 +126,26 @@ type ProbeFocusRestoreRequest = {
   probeItemId?: string
 }
 
+type MetadataFormState = {
+  labels: string
+  note: string
+}
+
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
+}
+
+function parseLabels(value: string) {
+  return value
+    .split(/[,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function dedupeLabels(values: string[]) {
+  return values.filter((value, index) => values.indexOf(value) === index)
 }
 
 function parseOptionalPositiveInteger(value: string, label: string): number | undefined {
@@ -338,6 +355,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const [probeCreateError, setProbeCreateError] = useState<string | null>(null)
   const [probeMutationError, setProbeMutationError] = useState<string | null>(null)
   const [probeMutationBusyId, setProbeMutationBusyId] = useState<string | null>(null)
+  const [metadataEditing, setMetadataEditing] = useState(false)
+  const [metadataSubmitting, setMetadataSubmitting] = useState(false)
+  const [metadataError, setMetadataError] = useState<string | null>(null)
+  const [metadataForm, setMetadataForm] = useState<MetadataFormState>({ labels: '', note: '' })
   const [pendingProbeConfirmation, setPendingProbeConfirmation] =
     useState<PendingProbeConfirmation | null>(null)
   const [probeCreateForm, setProbeCreateForm] = useState<ProbeCreateFormState>(
@@ -362,6 +383,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const addProbeButtonRef = useRef<HTMLButtonElement | null>(null)
   const pendingProbeFocusRestoreRef = useRef<ProbeFocusRestoreRequest | null>(null)
   const pendingProbeConfirmationCardRef = useRef<HTMLDivElement | null>(null)
+  const metadataRequestRef = useRef(0)
 
   useEffect(() => {
     currentRequestedTargetIdRef.current = state.requestedTargetId
@@ -525,6 +547,75 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const eventsError = hasCurrentActivity ? state.eventsError : null
   const runtimeConfirmationActive = pendingRuntimeConfirmation !== null
   const probeConfirmationActive = pendingProbeConfirmation !== null
+
+  useEffect(() => {
+    if (!target) return
+    setMetadataEditing(false)
+    setMetadataSubmitting(false)
+    setMetadataError(null)
+    setMetadataForm({
+      labels: target.labels.join(', '),
+      note: target.note,
+    })
+    metadataRequestRef.current += 1
+  }, [target])
+
+  function updateMetadataField<K extends keyof MetadataFormState>(
+    field: K,
+    value: MetadataFormState[K],
+  ) {
+    setMetadataForm((current) => ({ ...current, [field]: value }))
+  }
+
+  async function handleMetadataSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!target || !targetId) return
+
+    const actionTargetId = targetId
+    const requestId = metadataRequestRef.current + 1
+    metadataRequestRef.current = requestId
+    setMetadataSubmitting(true)
+    setMetadataError(null)
+
+    try {
+      const updated = await updateTargetMetadata(actionTargetId, {
+        labels: dedupeLabels(parseLabels(metadataForm.labels)),
+        note: metadataForm.note.trim(),
+      })
+      if (
+        !isMountedRef.current ||
+        currentRouteTargetIdRef.current !== actionTargetId ||
+        currentRequestedTargetIdRef.current !== actionTargetId ||
+        metadataRequestRef.current !== requestId
+      ) {
+        return
+      }
+      setState((current) => ({
+        ...current,
+        target: updated,
+      }))
+      setMetadataEditing(false)
+    } catch {
+      if (
+        !isMountedRef.current ||
+        currentRouteTargetIdRef.current !== actionTargetId ||
+        currentRequestedTargetIdRef.current !== actionTargetId ||
+        metadataRequestRef.current !== requestId
+      ) {
+        return
+      }
+      setMetadataError('标签或备注更新失败')
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteTargetIdRef.current === actionTargetId &&
+        currentRequestedTargetIdRef.current === actionTargetId &&
+        metadataRequestRef.current === requestId
+      ) {
+        setMetadataSubmitting(false)
+      }
+    }
+  }
 
   async function handleRuntimeAction(action: TargetRuntimeAction, confirmed = false) {
     if (!target) return
@@ -916,6 +1007,72 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           </p>
         </article>
       </div>
+
+      <DetailSection eyebrow="Metadata" title="标签与备注">
+        <div className="page-stack">
+          {metadataEditing ? (
+            <form onSubmit={handleMetadataSave} className="page-stack">
+              <label>
+                标签
+                <input
+                  name="metadata-labels"
+                  value={metadataForm.labels}
+                  onChange={(event) => updateMetadataField('labels', event.target.value)}
+                />
+              </label>
+              <label>
+                备注
+                <textarea
+                  name="metadata-note"
+                  value={metadataForm.note}
+                  onChange={(event) => updateMetadataField('note', event.target.value)}
+                  rows={3}
+                />
+              </label>
+              <div className="badge-row badge-row--wrap">
+                <button type="submit" disabled={metadataSubmitting}>
+                  {metadataSubmitting ? '正在保存…' : '保存标签与备注'}
+                </button>
+                <button
+                  type="button"
+                  disabled={metadataSubmitting}
+                  onClick={() => {
+                    setMetadataEditing(false)
+                    setMetadataError(null)
+                    setMetadataForm({
+                      labels: target.labels.join(', '),
+                      note: target.note,
+                    })
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <p>标签：{formatLabelList(target.labels)}</p>
+              <p>{target.note || '暂无备注'}</p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMetadataEditing(true)
+                    setMetadataError(null)
+                    setMetadataForm({
+                      labels: target.labels.join(', '),
+                      note: target.note,
+                    })
+                  }}
+                >
+                  编辑标签与备注
+                </button>
+              </div>
+            </>
+          )}
+          {metadataError ? <p>{metadataError}</p> : null}
+        </div>
+      </DetailSection>
 
       <DetailSection eyebrow="Runtime Control" title="运行控制">
         <div className="page-stack">

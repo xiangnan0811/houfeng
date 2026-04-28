@@ -13,6 +13,7 @@ import {
   pauseTarget,
   restoreTargetToPaused,
   resumeTarget,
+  updateTargetMetadata,
 } from '../lib/api'
 import { formatDateTime, formatLabelList } from '../lib/format'
 import type { CreateTargetInput, TargetRecord } from '../lib/types'
@@ -80,6 +81,10 @@ function parseLabels(value: string) {
     .split(/[,，]/)
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+function dedupeLabels(values: string[]) {
+  return values.filter((value, index) => values.indexOf(value) === index)
 }
 
 function parseOptionalPositiveInteger(value: string, label: string): number | undefined {
@@ -181,6 +186,10 @@ export function TargetsPage() {
   const [createForm, setCreateForm] = useState<CreateTargetFormState>(initialCreateForm)
   const [runtimeBusyTargetId, setRuntimeBusyTargetId] = useState<string | null>(null)
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
+  const [metadataEditingTargetId, setMetadataEditingTargetId] = useState<string | null>(null)
+  const [metadataLabelInput, setMetadataLabelInput] = useState('')
+  const [metadataSavingTargetId, setMetadataSavingTargetId] = useState<string | null>(null)
+  const [metadataErrors, setMetadataErrors] = useState<Record<string, string>>({})
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingTargetConfirmation | null>(null)
   const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
@@ -324,6 +333,58 @@ export function TargetsPage() {
       }))
     } finally {
       setRuntimeBusyTargetId((current) => (current === target.target_id ? null : current))
+    }
+  }
+
+  function beginMetadataEdit(target: TargetRecord) {
+    setMetadataEditingTargetId(target.target_id)
+    setMetadataLabelInput(target.labels.join(', '))
+    setMetadataErrors((current) => {
+      if (!current[target.target_id]) return current
+      const next = { ...current }
+      delete next[target.target_id]
+      return next
+    })
+  }
+
+  function cancelMetadataEdit(targetId: string) {
+    setMetadataEditingTargetId((current) => (current === targetId ? null : current))
+    setMetadataLabelInput('')
+    setMetadataSavingTargetId((current) => (current === targetId ? null : current))
+    setMetadataErrors((current) => {
+      if (!current[targetId]) return current
+      const next = { ...current }
+      delete next[targetId]
+      return next
+    })
+  }
+
+  async function saveMetadataLabels(target: TargetRecord) {
+    setMetadataSavingTargetId(target.target_id)
+    setMetadataErrors((current) => {
+      if (!current[target.target_id]) return current
+      const next = { ...current }
+      delete next[target.target_id]
+      return next
+    })
+
+    try {
+      const updated = await updateTargetMetadata(target.target_id, {
+        labels: dedupeLabels(parseLabels(metadataLabelInput)),
+        note: target.note,
+      })
+      setTargets((current) =>
+        current.map((item) => (item.target_id === updated.target_id ? updated : item)),
+      )
+      setMetadataEditingTargetId((current) => (current === target.target_id ? null : current))
+      setMetadataLabelInput('')
+    } catch (metadataError) {
+      setMetadataErrors((current) => ({
+        ...current,
+        [target.target_id]: describeError(metadataError, '标签更新失败'),
+      }))
+    } finally {
+      setMetadataSavingTargetId((current) => (current === target.target_id ? null : current))
     }
   }
 
@@ -517,11 +578,48 @@ export function TargetsPage() {
                   {target.target_type} · {target.host}
                   {target.base_port ? `:${target.base_port}` : ''}
                 </p>
+                {metadataEditingTargetId === target.target_id ? (
+                  <div className="page-stack">
+                    <label>
+                      标签
+                      <input
+                        name={`target-labels-${target.target_id}`}
+                        value={metadataLabelInput}
+                        onChange={(event) => setMetadataLabelInput(event.target.value)}
+                      />
+                    </label>
+                    <div className="badge-row badge-row--wrap">
+                      <button
+                        type="button"
+                        disabled={metadataSavingTargetId === target.target_id}
+                        onClick={() => void saveMetadataLabels(target)}
+                      >
+                        {metadataSavingTargetId === target.target_id ? '正在保存…' : '保存标签'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={metadataSavingTargetId === target.target_id}
+                        onClick={() => cancelMetadataEdit(target.target_id)}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p>标签：{formatLabelList(target.labels)}</p>
+                )}
                 <p>
                   <Link className="text-link" to={`/targets/${target.target_id}`}>
                     查看详情
                   </Link>
                 </p>
+                {metadataEditingTargetId !== target.target_id ? (
+                  <p>
+                    <button type="button" onClick={() => beginMetadataEdit(target)}>
+                      快速编辑标签
+                    </button>
+                  </p>
+                ) : null}
                 <div className="badge-row badge-row--wrap">
                   {targetRuntimeActions(target).map(({ action, label }) => (
                     <button
@@ -581,6 +679,7 @@ export function TargetsPage() {
                   />
                 ) : null}
                 {runtimeErrors[target.target_id] ? <p>{runtimeErrors[target.target_id]}</p> : null}
+                {metadataErrors[target.target_id] ? <p>{metadataErrors[target.target_id]}</p> : null}
               </div>
               <div>
                 <div className="badge-row badge-row--wrap">

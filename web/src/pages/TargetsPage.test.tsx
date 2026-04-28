@@ -656,4 +656,150 @@ describe('TargetsPage', () => {
       cache: 'no-store',
     })
   })
+
+
+  it('quickly edits target labels from the list and preserves the existing note', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({
+            target_id: 'tg_001',
+            name: 'Blog',
+            labels: ['公开'],
+            note: '现网入口',
+          }),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          targetRecord({
+            target_id: 'tg_001',
+            name: 'Blog',
+            labels: ['alpha', 'beta'],
+            note: '现网入口',
+            updated_at: '2026-04-27T09:30:00Z',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const row = screen.getByText('Blog').closest('article')
+    expect(row).not.toBeNull()
+
+    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(row!).getByLabelText('标签'), {
+      target: { value: 'alpha, beta, alpha, beta' },
+    })
+    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+
+    await waitFor(() => expect(within(row!).getByText('标签：alpha · beta')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({
+        labels: ['alpha', 'beta'],
+        note: '现网入口',
+      }),
+    })
+  })
+
+  it('keeps target label edit failures local to the row', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({
+            target_id: 'tg_001',
+            name: 'Blog',
+            labels: ['公开'],
+            note: '现网入口',
+          }),
+          targetRecord({
+            target_id: 'tg_002',
+            name: 'Cache',
+            labels: ['内部'],
+            note: '',
+          }),
+        ]),
+      )
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'metadata failed' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const blogRow = screen.getByText('Blog').closest('article')
+    const cacheRow = screen.getByText('Cache').closest('article')
+    expect(blogRow).not.toBeNull()
+    expect(cacheRow).not.toBeNull()
+
+    fireEvent.click(within(blogRow!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(blogRow!).getByLabelText('标签'), {
+      target: { value: 'alpha, beta' },
+    })
+    fireEvent.click(within(blogRow!).getByRole('button', { name: '保存标签' }))
+
+    await waitFor(() => expect(within(blogRow!).getByText('metadata failed')).toBeInTheDocument())
+    expect(within(blogRow!).getByRole('button', { name: '保存标签' })).toBeInTheDocument()
+    expect(within(cacheRow!).queryByText('metadata failed')).not.toBeInTheDocument()
+  })
+
+  it('cancels target quick label editing without sending PATCH', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_001',
+          name: 'Blog',
+          labels: ['公开'],
+          note: '现网入口',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const row = screen.getByText('Blog').closest('article')
+    expect(row).not.toBeNull()
+
+    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(row!).getByLabelText('标签'), {
+      target: { value: 'alpha, beta' },
+    })
+    fireEvent.click(within(row!).getByRole('button', { name: '取消' }))
+
+    expect(within(row!).queryByLabelText('标签')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
 })
