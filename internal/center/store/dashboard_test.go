@@ -170,6 +170,86 @@ func TestPostgresDashboardRepositoryListEventsBuildsFilters(t *testing.T) {
 	}
 }
 
+func TestPostgresDashboardRepositoryListEventsBuildsAdvancedContextFilters(t *testing.T) {
+	from := time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, time.April, 26, 0, 0, 0, 0, time.UTC)
+	capturedSQL := ""
+	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeRow{scan: func(dest ...any) error { return nil }}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedSQL = sql
+			return &fakeDashboardRows{}, nil
+		},
+	}}
+
+	_, err := repo.ListEvents(context.Background(), EventsFilter{
+		CreatedFrom:      &from,
+		CreatedTo:        &to,
+		Label:            "edge",
+		NotificationOnly: true,
+		Limit:            20,
+	})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	for _, want := range []string{
+		"e.created_at >= $1",
+		"e.created_at <= $2",
+		"n.labels @> array[$3]::text[]",
+		"t.labels @> array[$3]::text[]",
+		"from notification_records nr",
+		"nr.incident_id = e.payload ->> 'incident_id'",
+	} {
+		if !containsSQL([]string{capturedSQL}, want) {
+			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
+		}
+	}
+}
+
+func TestPostgresDashboardRepositoryListEventsBuildsShortcutFilters(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter EventsFilter
+		want   string
+	}{
+		{
+			name:   "recovery only",
+			filter: EventsFilter{RecoveryOnly: true},
+			want:   "e.event_type = 'incident_recovered'",
+		},
+		{
+			name:   "maintenance only",
+			filter: EventsFilter{MaintenanceOnly: true},
+			want:   "e.event_type in ('node_monitoring_maintenance_entered'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capturedSQL := ""
+			repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
+				queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+					return fakeRow{scan: func(dest ...any) error { return nil }}
+				},
+				query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+					capturedSQL = sql
+					return &fakeDashboardRows{}, nil
+				},
+			}}
+
+			_, err := repo.ListEvents(context.Background(), tt.filter)
+			if err != nil {
+				t.Fatalf("ListEvents() error = %v", err)
+			}
+			if !containsSQL([]string{capturedSQL}, tt.want) {
+				t.Fatalf("capturedSQL = %q, want %q", capturedSQL, tt.want)
+			}
+		})
+	}
+}
+
 type fakeDashboardQueryer struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 	query    func(context.Context, string, ...any) (pgx.Rows, error)

@@ -26,11 +26,17 @@ type EventListItem struct {
 }
 
 type EventsFilter struct {
-	ObjectType incidents.ObjectType
-	ObjectID   string
-	Severity   incidents.Severity
-	EventType  incidents.EventType
-	Limit      int
+	ObjectType       incidents.ObjectType
+	ObjectID         string
+	Severity         incidents.Severity
+	EventType        incidents.EventType
+	CreatedFrom      *time.Time
+	CreatedTo        *time.Time
+	Label            string
+	NotificationOnly bool
+	RecoveryOnly     bool
+	MaintenanceOnly  bool
+	Limit            int
 }
 
 type dashboardQueryer interface {
@@ -238,30 +244,71 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 	conditions := []string{}
 	if filter.ObjectType != "" {
 		args = append(args, string(filter.ObjectType))
-		conditions = append(conditions, fmt.Sprintf("object_type = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("e.object_type = $%d", len(args)))
 	}
 	if filter.ObjectID != "" {
 		args = append(args, filter.ObjectID)
-		conditions = append(conditions, fmt.Sprintf("object_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("e.object_id = $%d", len(args)))
 	}
 	if filter.Severity != "" {
 		args = append(args, string(filter.Severity))
-		conditions = append(conditions, fmt.Sprintf("severity = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("e.severity = $%d", len(args)))
 	}
 	if filter.EventType != "" {
 		args = append(args, string(filter.EventType))
-		conditions = append(conditions, fmt.Sprintf("event_type = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("e.event_type = $%d", len(args)))
+	}
+	if filter.CreatedFrom != nil {
+		args = append(args, *filter.CreatedFrom)
+		conditions = append(conditions, fmt.Sprintf("e.created_at >= $%d", len(args)))
+	}
+	if filter.CreatedTo != nil {
+		args = append(args, *filter.CreatedTo)
+		conditions = append(conditions, fmt.Sprintf("e.created_at <= $%d", len(args)))
+	}
+	if filter.Label != "" {
+		args = append(args, filter.Label)
+		labelArg := len(args)
+		conditions = append(conditions, fmt.Sprintf(`(
+			(e.object_type = 'node' and exists (
+				select 1 from nodes n where n.node_id = e.object_id and n.labels @> array[$%d]::text[]
+			))
+			or
+			(e.object_type = 'target' and exists (
+				select 1 from targets t where t.target_id = e.object_id and t.labels @> array[$%d]::text[]
+			))
+		)`, labelArg, labelArg))
+	}
+	if filter.NotificationOnly {
+		conditions = append(conditions, `exists (
+			select 1
+			from notification_records nr
+			where nr.incident_id = e.payload ->> 'incident_id'
+				and nr.object_type = e.object_type
+				and nr.object_id = e.object_id
+		)`)
+	}
+	if filter.RecoveryOnly {
+		conditions = append(conditions, fmt.Sprintf("e.event_type = '%s'", incidents.EventIncidentRecovered))
+	}
+	if filter.MaintenanceOnly {
+		conditions = append(conditions, fmt.Sprintf("e.event_type in ('%s', '%s', '%s', '%s')",
+			incidents.EventNodeMonitoringMaintenanceEntered,
+			incidents.EventNodeMonitoringMaintenanceExited,
+			incidents.EventTargetMaintenanceEntered,
+			incidents.EventTargetMaintenanceExited,
+		))
 	}
 	args = append(args, limit)
 	limitArg := len(args)
 
 	query := `
-		select event_id, object_type, object_id, event_type, coalesce(severity, ''), summary, payload, created_at
-		from state_change_events`
+		select e.event_id, e.object_type, e.object_id, e.event_type, coalesce(e.severity, ''), e.summary, e.payload, e.created_at
+		from state_change_events e`
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
 	}
-	query += fmt.Sprintf(" order by created_at desc limit $%d", limitArg)
+	query += fmt.Sprintf(" order by e.created_at desc limit $%d", limitArg)
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {

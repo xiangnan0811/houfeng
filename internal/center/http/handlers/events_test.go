@@ -69,6 +69,28 @@ func TestEventsHandlerReturnsListWithFilters(t *testing.T) {
 	}
 }
 
+func TestEventsHandlerReturnsListWithAdvancedFilters(t *testing.T) {
+	repo := &fakeEventsRepository{}
+
+	handler := handlers.Events(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/events?created_from=2026-04-25T00:00:00Z&created_to=2026-04-26T00:00:00Z&label=edge&notification_only=true&recovery_only=true&maintenance_only=true", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if repo.filter.CreatedFrom == nil || !repo.filter.CreatedFrom.Equal(time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("CreatedFrom = %v, want parsed RFC3339 timestamp", repo.filter.CreatedFrom)
+	}
+	if repo.filter.CreatedTo == nil || !repo.filter.CreatedTo.Equal(time.Date(2026, time.April, 26, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("CreatedTo = %v, want parsed RFC3339 timestamp", repo.filter.CreatedTo)
+	}
+	if repo.filter.Label != "edge" || !repo.filter.NotificationOnly || !repo.filter.RecoveryOnly || !repo.filter.MaintenanceOnly {
+		t.Fatalf("filter = %#v, want advanced filters", repo.filter)
+	}
+}
+
 func TestEventsHandlerRejectsInvalidLimit(t *testing.T) {
 	handler := handlers.Events(&fakeEventsRepository{})
 	req := httptest.NewRequest(http.MethodGet, "/api/events?limit=-1", nil)
@@ -77,5 +99,26 @@ func TestEventsHandlerRejectsInvalidLimit(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestEventsHandlerRejectsInvalidAdvancedFilters(t *testing.T) {
+	tests := []string{
+		"/api/events?created_from=not-a-time",
+		"/api/events?created_to=not-a-time",
+		"/api/events?notification_only=definitely",
+	}
+
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			handler := handlers.Events(&fakeEventsRepository{})
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+		})
 	}
 }
