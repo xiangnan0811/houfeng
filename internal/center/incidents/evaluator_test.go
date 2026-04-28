@@ -392,3 +392,199 @@ func TestEvaluateNodeResourcePressureRequiresRecoveryWindowBeforeClosing(t *test
 		t.Fatalf("Transition = %q, want %q for sustained safe window", recovered.Transition, TransitionRecovered)
 	}
 }
+
+func TestEvaluateNodeTrendDegradationStartsAndEscalates(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
+	started := EvaluateNodeTrendDegradation(nil, "nd_001",
+		nodeTrendSamples(now, []float64{1.7, 1.8, 1.9}, []float64{4, 4, 4}, []float64{0.8, 0.9, 0.8}),
+		[]NodeHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: 2, AvgCPUStealPct: 0.5}},
+	)
+	if started.Transition != TransitionStarted {
+		t.Fatalf("Transition = %q, want %q", started.Transition, TransitionStarted)
+	}
+	if started.Current == nil || started.Current.IncidentClass != IncidentNodeTrendDegradation {
+		t.Fatalf("Current = %#v, want node trend incident", started.Current)
+	}
+	if started.Current.Severity != SeverityNotice {
+		t.Fatalf("Severity = %q, want %q", started.Current.Severity, SeverityNotice)
+	}
+	if started.Current.Severity == SeverityCritical {
+		t.Fatal("trend degradation must not emit critical severity")
+	}
+
+	escalated := EvaluateNodeTrendDegradation(started.Current, "nd_001",
+		nodeTrendSamples(now.Add(30*time.Minute), []float64{1.9, 2.0, 2.1}, []float64{11, 12, 13}, []float64{0.8, 0.9, 0.8}),
+		[]NodeHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: 2, AvgCPUStealPct: 0.5}},
+	)
+	if escalated.Transition != TransitionEscalated {
+		t.Fatalf("Transition = %q, want %q", escalated.Transition, TransitionEscalated)
+	}
+	if escalated.Current == nil || escalated.Current.Severity != SeverityAlert {
+		t.Fatalf("Current = %#v, want alert trend incident", escalated.Current)
+	}
+	if escalated.Current.Severity == SeverityCritical {
+		t.Fatal("trend degradation must not escalate to critical")
+	}
+}
+
+func TestEvaluateNodeTrendDegradationSkipsSuppressedStartsAndRecoversConservatively(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
+	baselines := []NodeHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: 2, AvgCPUStealPct: 0.5}}
+	previous := &IncidentRecord{IncidentID: "inc_node_nd_001_node_trend_degradation", ObjectType: ObjectTypeNode, ObjectID: "nd_001", IncidentClass: IncidentNodeTrendDegradation, Severity: SeverityAlert, StartedAt: now.Add(-24 * time.Hour), LastEvaluatedAt: now.Add(-time.Hour)}
+
+	suppressed := EvaluateNodeTrendDegradation(nil, "nd_001",
+		[]NodeResourceSample{
+			{ObservedAt: now, NormalizedLoad5: 2.0, CPUIOWaitPct: 12, MaintenanceContext: true},
+			{ObservedAt: now.Add(-10 * time.Minute), NormalizedLoad5: 2.0, CPUIOWaitPct: 12, MaintenanceContext: true},
+			{ObservedAt: now.Add(-20 * time.Minute), NormalizedLoad5: 2.0, CPUIOWaitPct: 12, MaintenanceContext: true},
+		},
+		baselines,
+	)
+	if suppressed.Transition != TransitionSkipped {
+		t.Fatalf("Transition = %q, want %q", suppressed.Transition, TransitionSkipped)
+	}
+
+	insufficientSafe := EvaluateNodeTrendDegradation(previous, "nd_001",
+		nodeTrendSamples(now, []float64{0.7, 0.8}, []float64{2, 2}, []float64{0.4, 0.4}),
+		baselines,
+	)
+	if insufficientSafe.Transition != TransitionNoop {
+		t.Fatalf("Transition = %q, want %q", insufficientSafe.Transition, TransitionNoop)
+	}
+	if insufficientSafe.Current == nil || insufficientSafe.Current.IncidentClass != IncidentNodeTrendDegradation {
+		t.Fatalf("Current = %#v, want previous incident preserved", insufficientSafe.Current)
+	}
+
+	recovered := EvaluateNodeTrendDegradation(previous, "nd_001",
+		nodeTrendSamples(now.Add(time.Hour), []float64{0.7, 0.8, 0.9}, []float64{2, 2, 2}, []float64{0.4, 0.4, 0.4}),
+		baselines,
+	)
+	if recovered.Transition != TransitionRecovered {
+		t.Fatalf("Transition = %q, want %q", recovered.Transition, TransitionRecovered)
+	}
+	if recovered.Notification == nil || recovered.Notification.Reason != NotificationReasonRecovered {
+		t.Fatalf("Notification = %#v, want recovered notification", recovered.Notification)
+	}
+}
+
+func TestEvaluateTargetLatencyTrendStartsAndEscalatesWithoutCritical(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
+	baselines := []TargetProbeDailyAggregate{{TargetID: "tg_001", ProbeItemID: "pb_http_1", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: float64Ptr(120)}}
+	started := EvaluateTargetLatencyTrendDegradationAcrossSeries(nil, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			targetLatencyObservation(now, "nd_001", "pb_http_1", 330),
+			targetLatencyObservation(now.Add(-10*time.Minute), "nd_001", "pb_http_1", 340),
+			targetLatencyObservation(now.Add(-20*time.Minute), "nd_001", "pb_http_1", 350),
+		},
+		baselines,
+	)
+	if started.Transition != TransitionStarted {
+		t.Fatalf("Transition = %q, want %q", started.Transition, TransitionStarted)
+	}
+	if started.Current == nil || started.Current.IncidentClass != IncidentTargetLatencyTrendDegradation {
+		t.Fatalf("Current = %#v, want target latency trend incident", started.Current)
+	}
+	if started.Current.Severity != SeverityNotice {
+		t.Fatalf("Severity = %q, want %q", started.Current.Severity, SeverityNotice)
+	}
+
+	escalated := EvaluateTargetLatencyTrendDegradationAcrossSeries(started.Current, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			targetLatencyObservation(now.Add(time.Hour), "nd_001", "pb_http_1", 360),
+			targetLatencyObservation(now.Add(50*time.Minute), "nd_001", "pb_http_1", 340),
+			targetLatencyObservation(now.Add(40*time.Minute), "nd_002", "pb_http_1", 350),
+		},
+		baselines,
+	)
+	if escalated.Transition != TransitionEscalated {
+		t.Fatalf("Transition = %q, want %q", escalated.Transition, TransitionEscalated)
+	}
+	if escalated.Current == nil || escalated.Current.Severity != SeverityAlert {
+		t.Fatalf("Current = %#v, want alert target latency trend incident", escalated.Current)
+	}
+	if escalated.Current.Severity == SeverityCritical {
+		t.Fatal("target latency trend must not emit critical severity")
+	}
+}
+
+func TestEvaluateTargetLatencyTrendSkipsSuppressedStartsAndRecoversConservatively(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
+	baselines := []TargetProbeDailyAggregate{{TargetID: "tg_001", ProbeItemID: "pb_http_1", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: float64Ptr(100)}}
+	previous := &IncidentRecord{IncidentID: "inc_target_tg_001_target_latency_trend_degradation", ObjectType: ObjectTypeTarget, ObjectID: "tg_001", IncidentClass: IncidentTargetLatencyTrendDegradation, Severity: SeverityNotice, StartedAt: now.Add(-24 * time.Hour), LastEvaluatedAt: now.Add(-time.Hour)}
+
+	suppressed := EvaluateTargetLatencyTrendDegradationAcrossSeries(nil, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			{ObservedAt: now, NodeID: "nd_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: intPtr(320), IsBackfilled: true},
+			{ObservedAt: now.Add(-10 * time.Minute), NodeID: "nd_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: intPtr(330), IsBackfilled: true},
+			{ObservedAt: now.Add(-20 * time.Minute), NodeID: "nd_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: intPtr(340), IsBackfilled: true},
+		},
+		baselines,
+	)
+	if suppressed.Transition != TransitionSkipped {
+		t.Fatalf("Transition = %q, want %q", suppressed.Transition, TransitionSkipped)
+	}
+
+	insufficientSafe := EvaluateTargetLatencyTrendDegradationAcrossSeries(previous, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			targetLatencyObservation(now, "nd_001", "pb_http_1", 120),
+			targetLatencyObservation(now.Add(-10*time.Minute), "nd_001", "pb_http_1", 125),
+		},
+		baselines,
+	)
+	if insufficientSafe.Transition != TransitionNoop {
+		t.Fatalf("Transition = %q, want %q", insufficientSafe.Transition, TransitionNoop)
+	}
+	if insufficientSafe.Current == nil || insufficientSafe.Current.IncidentClass != IncidentTargetLatencyTrendDegradation {
+		t.Fatalf("Current = %#v, want previous incident preserved", insufficientSafe.Current)
+	}
+
+	recovered := EvaluateTargetLatencyTrendDegradationAcrossSeries(previous, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			targetLatencyObservation(now.Add(time.Hour), "nd_001", "pb_http_1", 120),
+			targetLatencyObservation(now.Add(50*time.Minute), "nd_001", "pb_http_1", 125),
+			targetLatencyObservation(now.Add(40*time.Minute), "nd_001", "pb_http_1", 130),
+		},
+		baselines,
+	)
+	if recovered.Transition != TransitionRecovered {
+		t.Fatalf("Transition = %q, want %q", recovered.Transition, TransitionRecovered)
+	}
+	if recovered.Notification == nil || recovered.Notification.Reason != NotificationReasonRecovered {
+		t.Fatalf("Notification = %#v, want recovered notification", recovered.Notification)
+	}
+}
+
+func nodeTrendSamples(now time.Time, load5 []float64, iowait []float64, steal []float64) []NodeResourceSample {
+	samples := make([]NodeResourceSample, 0, len(load5))
+	for i := range load5 {
+		sample := NodeResourceSample{ObservedAt: now.Add(-time.Duration(i) * 10 * time.Minute), NormalizedLoad5: load5[i]}
+		if i < len(iowait) {
+			sample.CPUIOWaitPct = iowait[i]
+		}
+		if i < len(steal) {
+			sample.CPUStealPct = steal[i]
+		}
+		samples = append(samples, sample)
+	}
+	return samples
+}
+
+func targetLatencyObservation(observedAt time.Time, nodeID, probeItemID string, latencyMS int) runtimefacts.ProbeObservation {
+	return runtimefacts.ProbeObservation{
+		ObservedAt:  observedAt,
+		NodeID:      nodeID,
+		TargetID:    "tg_001",
+		ProbeItemID: probeItemID,
+		ProbeKind:   agentapi.ProbeKindHTTP,
+		ResultKind:  agentapi.ProbeResultSuccess,
+		LatencyMS:   intPtr(latencyMS),
+	}
+}
+
+func intPtr(v int) *int { return &v }
+
+func float64Ptr(v float64) *float64 { return &v }

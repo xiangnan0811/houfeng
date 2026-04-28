@@ -129,13 +129,37 @@ type EvaluationResult struct {
 	Notification *NotificationDecision
 }
 
+type NodeHostDailyAggregate struct {
+	BucketDate             time.Time
+	SampleCount            int
+	AvgLoad5               float64
+	AvgCPUIOWaitPct        float64
+	AvgCPUStealPct         float64
+	BackfilledSampleCount  int
+	MaintenanceSampleCount int
+}
+
+type TargetProbeDailyAggregate struct {
+	TargetID                    string
+	ProbeItemID                 string
+	BucketDate                  time.Time
+	ObservationCount            int
+	SuccessCount                int
+	AvgLatencyMS                *float64
+	P95LatencyMS                *float64
+	BackfilledObservationCount  int
+	MaintenanceObservationCount int
+}
+
 const (
-	IncidentNodeHeartbeatMissing IncidentClass = "node_heartbeat_missing"
-	IncidentNodeDiskPressure     IncidentClass = "node_disk_pressure"
-	IncidentNodeInodePressure    IncidentClass = "node_inode_pressure"
-	IncidentNodeResourcePressure IncidentClass = "node_resource_pressure"
-	IncidentTargetProbeFailure   IncidentClass = "target_probe_failure"
-	IncidentTargetTLSExpiry      IncidentClass = "target_tls_expiry"
+	IncidentNodeHeartbeatMissing          IncidentClass = "node_heartbeat_missing"
+	IncidentNodeDiskPressure              IncidentClass = "node_disk_pressure"
+	IncidentNodeInodePressure             IncidentClass = "node_inode_pressure"
+	IncidentNodeResourcePressure          IncidentClass = "node_resource_pressure"
+	IncidentNodeTrendDegradation          IncidentClass = "node_trend_degradation"
+	IncidentTargetProbeFailure            IncidentClass = "target_probe_failure"
+	IncidentTargetTLSExpiry               IncidentClass = "target_tls_expiry"
+	IncidentTargetLatencyTrendDegradation IncidentClass = "target_latency_trend_degradation"
 )
 
 const (

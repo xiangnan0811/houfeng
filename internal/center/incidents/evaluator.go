@@ -3,6 +3,7 @@ package incidents
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"houfeng/internal/center/runtimefacts"
@@ -138,11 +139,109 @@ func EvaluateTargetTLSExpiry(previous *IncidentRecord, targetID string, recent [
 	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetTLSExpiry, severity, recent[0].ObservedAt, summary)
 }
 
+func EvaluateNodeTrendDegradation(previous *IncidentRecord, nodeID string, samples []NodeResourceSample, baselines []NodeHostDailyAggregate) EvaluationResult {
+	samples = normalizeNodeResourceSamples(samples)
+	if len(samples) == 0 {
+		return noop(previous)
+	}
+	usableCurrent := unsuppressedNodeResourceSamples(samples)
+	usableBaselines := usableNodeHostDailyAggregates(baselines)
+	if len(usableCurrent) < 3 || len(usableBaselines) == 0 || !spansNodeResourceWindow(usableCurrent, time.Second) {
+		if previous != nil {
+			return noop(previous)
+		}
+		if hasSuppressedNodeTrendSamples(samples) {
+			return skip(previous)
+		}
+		return EvaluationResult{Transition: TransitionNoop}
+	}
+
+	referenceTime := usableCurrent[0].ObservedAt
+	loadBaseline, iowaitBaseline, stealBaseline := weightedNodeTrendBaselines(usableBaselines)
+	loadCurrent := averageNodeResourceMetric(usableCurrent, func(sample NodeResourceSample) float64 { return sample.NormalizedLoad5 })
+	iowaitCurrent := averageNodeResourceMetric(usableCurrent, func(sample NodeResourceSample) float64 { return sample.CPUIOWaitPct })
+	stealCurrent := averageNodeResourceMetric(usableCurrent, func(sample NodeResourceSample) float64 { return sample.CPUStealPct })
+
+	degradedMetrics := make([]string, 0, 3)
+	if nodeTrendMetricDegraded(loadCurrent, loadBaseline, 1.6, 0.6) {
+		degradedMetrics = append(degradedMetrics, "load5")
+	}
+	if nodeTrendMetricDegraded(iowaitCurrent, iowaitBaseline, 8, 4) {
+		degradedMetrics = append(degradedMetrics, "iowait")
+	}
+	if nodeTrendMetricDegraded(stealCurrent, stealBaseline, 3, 2) {
+		degradedMetrics = append(degradedMetrics, "steal")
+	}
+	if len(degradedMetrics) == 0 {
+		return recoverIfNeeded(previous, referenceTime, "节点趋势已恢复到安全区间")
+	}
+
+	severity := SeverityNotice
+	if len(degradedMetrics) >= 2 {
+		severity = SeverityAlert
+	}
+	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeTrendDegradation, severity, referenceTime, fmt.Sprintf("节点趋势劣化：%s", joinMetricLabels(degradedMetrics)))
+}
+
+func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord, targetID string, observations []runtimefacts.ProbeObservation, baselines []TargetProbeDailyAggregate) EvaluationResult {
+	observations = normalizeProbeObservations(observations)
+	if len(observations) == 0 {
+		return noop(previous)
+	}
+	usableBaselines := weightedTargetLatencyBaselines(baselines)
+	series := usableLatencyObservationSeries(observations)
+	if len(usableBaselines) == 0 || len(series) == 0 {
+		if previous != nil {
+			return noop(previous)
+		}
+		if hasSuppressedLatencyTrendObservations(observations) {
+			return skip(previous)
+		}
+		return EvaluationResult{Transition: TransitionNoop}
+	}
+
+	referenceTime := observations[0].ObservedAt
+	degradedProbeItems := make([]string, 0)
+	degradedNodes := map[string]struct{}{}
+	comparableSeries := 0
+	for probeItemID, currentSeries := range series {
+		baseline, ok := usableBaselines[probeItemID]
+		if !ok || len(currentSeries) < 3 {
+			continue
+		}
+		comparableSeries++
+		currentAvg := averageProbeLatencyMS(currentSeries)
+		if !targetLatencySeriesDegraded(currentAvg, baseline) {
+			continue
+		}
+		degradedProbeItems = append(degradedProbeItems, probeItemID)
+		for _, observation := range currentSeries {
+			if observation.NodeID == "" {
+				continue
+			}
+			degradedNodes[observation.NodeID] = struct{}{}
+		}
+	}
+	if comparableSeries == 0 {
+		return noop(previous)
+	}
+	if len(degradedProbeItems) == 0 {
+		return recoverIfNeeded(previous, referenceTime, "目标延迟趋势已恢复到安全区间")
+	}
+
+	severity := SeverityNotice
+	if len(degradedProbeItems) >= 2 || len(degradedNodes) >= 2 {
+		severity = SeverityAlert
+	}
+	sort.Strings(degradedProbeItems)
+	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetLatencyTrendDegradation, severity, referenceTime, fmt.Sprintf("目标延迟趋势劣化：%s", joinMetricLabels(degradedProbeItems)))
+}
+
 func noop(previous *IncidentRecord) EvaluationResult {
 	return EvaluationResult{Current: cloneIncident(previous), Transition: TransitionNoop}
 }
 
-func skip(previous *IncidentRecord) EvaluationResult {
+func skip(_ *IncidentRecord) EvaluationResult {
 	return EvaluationResult{Transition: TransitionSkipped}
 }
 
@@ -490,6 +589,141 @@ func minimumNodeResourceMetric(samples []NodeResourceSample, selector func(NodeR
 		}
 	}
 	return minimum
+}
+
+func usableNodeHostDailyAggregates(baselines []NodeHostDailyAggregate) []NodeHostDailyAggregate {
+	usable := make([]NodeHostDailyAggregate, 0, len(baselines))
+	for _, baseline := range baselines {
+		usableSamples := baseline.SampleCount - baseline.BackfilledSampleCount - baseline.MaintenanceSampleCount
+		if usableSamples <= 0 {
+			continue
+		}
+		usable = append(usable, baseline)
+	}
+	return usable
+}
+
+func weightedNodeTrendBaselines(baselines []NodeHostDailyAggregate) (float64, float64, float64) {
+	var totalWeight float64
+	var loadTotal float64
+	var iowaitTotal float64
+	var stealTotal float64
+	for _, baseline := range baselines {
+		weight := float64(baseline.SampleCount - baseline.BackfilledSampleCount - baseline.MaintenanceSampleCount)
+		if weight <= 0 {
+			continue
+		}
+		totalWeight += weight
+		loadTotal += baseline.AvgLoad5 * weight
+		iowaitTotal += baseline.AvgCPUIOWaitPct * weight
+		stealTotal += baseline.AvgCPUStealPct * weight
+	}
+	if totalWeight == 0 {
+		return 0, 0, 0
+	}
+	return loadTotal / totalWeight, iowaitTotal / totalWeight, stealTotal / totalWeight
+}
+
+func nodeTrendMetricDegraded(current, baseline, absoluteFloor, absoluteDelta float64) bool {
+	if current < absoluteFloor {
+		return false
+	}
+	guardBaseline := baseline
+	if guardBaseline < 0.1 {
+		guardBaseline = 0.1
+	}
+	if current < guardBaseline*1.8 {
+		return false
+	}
+	return current >= baseline+absoluteDelta
+}
+
+func hasSuppressedNodeTrendSamples(samples []NodeResourceSample) bool {
+	for _, sample := range samples {
+		if sample.MaintenanceContext || sample.IsBackfilled {
+			return true
+		}
+	}
+	return false
+}
+
+func weightedTargetLatencyBaselines(baselines []TargetProbeDailyAggregate) map[string]float64 {
+	type accumulator struct {
+		total  float64
+		weight float64
+	}
+	accumulators := make(map[string]accumulator)
+	for _, baseline := range baselines {
+		if baseline.AvgLatencyMS == nil || baseline.ProbeItemID == "" {
+			continue
+		}
+		weight := float64(baseline.SuccessCount - baseline.BackfilledObservationCount - baseline.MaintenanceObservationCount)
+		if weight <= 0 {
+			continue
+		}
+		acc := accumulators[baseline.ProbeItemID]
+		acc.total += (*baseline.AvgLatencyMS) * weight
+		acc.weight += weight
+		accumulators[baseline.ProbeItemID] = acc
+	}
+	weighted := make(map[string]float64, len(accumulators))
+	for probeItemID, acc := range accumulators {
+		if acc.weight == 0 {
+			continue
+		}
+		weighted[probeItemID] = acc.total / acc.weight
+	}
+	return weighted
+}
+
+func usableLatencyObservationSeries(observations []runtimefacts.ProbeObservation) map[string][]runtimefacts.ProbeObservation {
+	series := map[string][]runtimefacts.ProbeObservation{}
+	for _, observation := range observations {
+		if observation.MaintenanceContext || observation.IsBackfilled {
+			continue
+		}
+		if observation.ResultKind != agentapi.ProbeResultSuccess || observation.LatencyMS == nil || observation.ProbeItemID == "" {
+			continue
+		}
+		series[observation.ProbeItemID] = append(series[observation.ProbeItemID], observation)
+	}
+	return series
+}
+
+func averageProbeLatencyMS(observations []runtimefacts.ProbeObservation) float64 {
+	if len(observations) == 0 {
+		return 0
+	}
+	var total float64
+	for _, observation := range observations {
+		total += float64(*observation.LatencyMS)
+	}
+	return total / float64(len(observations))
+}
+
+func targetLatencySeriesDegraded(currentAvg, baselineAvg float64) bool {
+	if baselineAvg <= 0 {
+		return false
+	}
+	if currentAvg < baselineAvg*1.8 {
+		return false
+	}
+	return currentAvg >= baselineAvg+100 || currentAvg >= 250
+}
+
+func hasSuppressedLatencyTrendObservations(observations []runtimefacts.ProbeObservation) bool {
+	for _, observation := range observations {
+		if observation.MaintenanceContext || observation.IsBackfilled {
+			return true
+		}
+	}
+	return false
+}
+
+func joinMetricLabels(parts []string) string {
+	sorted := append([]string(nil), parts...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, "、")
 }
 
 func cloneIncident(record *IncidentRecord) *IncidentRecord {
