@@ -562,7 +562,14 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       }
       setState((current) => ({
         ...current,
-        node: updated,
+        node:
+          current.requestedNodeId === actionNodeId && current.node
+            ? {
+                ...current.node,
+                labels: updated.labels,
+                note: updated.note,
+              }
+            : current.node,
       }))
       setMetadataEditing(false)
       setMetadataLabelDraft('')

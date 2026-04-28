@@ -15,6 +15,16 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
+function deferredResponse() {
+  let resolve!: (response: Response) => void
+  let reject!: (error?: unknown) => void
+  const promise = new Promise<Response>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 function nodeRecord(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     node_id: 'nd_001',
@@ -714,6 +724,65 @@ describe('NodesPage', () => {
       }),
     )
     expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
+  })
+
+  it('blocks opening another row editor during metadata save and exposes row errors as alerts', async () => {
+    const rowASave = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            labels: ['edge'],
+            note: 'keep me',
+          }),
+          nodeRecord({
+            node_id: 'nd_002',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            provider: 'Hetzner',
+            labels: ['seoul'],
+            note: 'other note',
+          }),
+        ]),
+      )
+      .mockImplementationOnce(() => rowASave.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    const rows = screen.getAllByRole('article')
+    const tokyoRow = rows.find((row) => within(row).queryByText('Tokyo Edge'))
+    const seoulRow = rows.find((row) => within(row).queryByText('Seoul Edge'))
+    expect(tokyoRow).toBeDefined()
+    expect(seoulRow).toBeDefined()
+
+    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(tokyoRow!).getByRole('textbox', { name: '标签' }), {
+      target: { value: 'edge, core' },
+    })
+    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '保存标签' }))
+
+    expect(within(tokyoRow!).getByRole('button', { name: '正在保存…' })).toBeDisabled()
+    expect(within(seoulRow!).getByRole('button', { name: '快速编辑标签' })).toBeDisabled()
+
+    rowASave.resolve(mockJSONResponse({ error: 'metadata write failed' }, 409))
+
+    await waitFor(() =>
+      expect(within(tokyoRow!).getByRole('alert')).toHaveTextContent('metadata write failed'),
+    )
+    expect(within(seoulRow!).queryByRole('textbox', { name: '标签' })).not.toBeInTheDocument()
   })
 
 })

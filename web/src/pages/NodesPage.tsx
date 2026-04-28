@@ -558,7 +558,9 @@ export function NodesPage() {
               ) : (
                 <button
                   type="button"
+                  disabled={metadataBusyNodeId !== null}
                   onClick={() => {
+                    if (metadataBusyNodeId !== null) return
                     setEditingLabelNodeId(node.node_id)
                     setLabelDraft(node.labels.join(', '))
                     setMetadataErrors((current) => {
@@ -611,7 +613,9 @@ export function NodesPage() {
                 />
               ) : null}
               {runtimeErrors[node.node_id] ? <p>{runtimeErrors[node.node_id]}</p> : null}
-              {metadataErrors[node.node_id] ? <p>{metadataErrors[node.node_id]}</p> : null}
+              {metadataErrors[node.node_id] ? (
+                <p role="alert">{metadataErrors[node.node_id]}</p>
+              ) : null}
             </div>
             <div className="badge-row badge-row--wrap">
               <StatusBadge label={node.lifecycle_status} />

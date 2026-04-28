@@ -1793,4 +1793,96 @@ describe('NodeDetailPage', () => {
     expect(screen.getByText('备注：seoul note')).toBeInTheDocument()
   })
 
+  it('keeps newer runtime fields when a metadata save resolves with stale non-metadata data', async () => {
+    const metadataSave = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_001',
+            binding_status: '已绑定',
+            labels: ['edge'],
+            note: 'keep me',
+            monitoring_status: '启用',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockImplementationOnce(() => metadataSave.promise)
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_001',
+            binding_status: '已绑定',
+            labels: ['edge'],
+            note: 'keep me',
+            monitoring_status: '维护中',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            updated_at: '2026-04-27T09:15:00Z',
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
+      target: { value: 'edge, core' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
+      target: { value: 'new note' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '正在保存…' })).toBeDisabled(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
+    )
+
+    metadataSave.resolve(
+      mockJSONResponse(
+        nodeRecord({
+          node_id: 'nd_001',
+          binding_status: '已绑定',
+          labels: ['edge', 'core'],
+          note: 'new note',
+          monitoring_status: '启用',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          updated_at: '2026-04-27T09:05:00Z',
+        }),
+      ),
+    )
+
+    await waitFor(() => expect(screen.getByText('标签：edge · core')).toBeInTheDocument())
+    expect(screen.getByText('备注：new note')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '退出维护' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
+  })
+
 })
