@@ -400,10 +400,9 @@ func (s *Service) notificationPolicyFor(ctx context.Context) notificationPolicy 
 	}
 	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
 		defaults, exists, err := source.GetPersistedIncidentDefaults(ctx)
-		if err != nil || !exists {
-			return policy
+		if err == nil && exists {
+			return notificationPolicyFromDefaults(defaults)
 		}
-		return notificationPolicyFromDefaults(defaults)
 	}
 	settings, err := s.settingsRepo.GetSettings(ctx)
 	if err != nil {

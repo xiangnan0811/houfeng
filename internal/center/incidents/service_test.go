@@ -139,37 +139,39 @@ func TestServiceNotificationFlags(t *testing.T) {
 	}
 
 	tests := []struct {
-		name               string
-		reason             NotificationReason
-		defaults           centersettings.IncidentDefaults
-		expectStatus       DeliveryStatus
-		expectSendCount    int
-		persistedAvailable bool
-		repoUnavailable    bool
-		useNilRepo         bool
+		name                 string
+		reason               NotificationReason
+		persistedDefaults    centersettings.IncidentDefaults
+		settingsDefaults     centersettings.IncidentDefaults
+		expectStatus         DeliveryStatus
+		expectSendCount      int
+		persistedAvailable   bool
+		persistedUnavailable bool
+		settingsAvailable    bool
+		useNilRepo           bool
 	}{
 		{
-			name:         "started suppressed by persisted defaults",
-			reason:       NotificationReasonStarted,
-			defaults:     centersettings.IncidentDefaults{NotifyOnStarted: false, NotifyOnEscalated: true, NotifyOnRecovered: true},
-			expectStatus: DeliveryStatusSuppressed,
+			name:              "started suppressed by persisted defaults",
+			reason:            NotificationReasonStarted,
+			persistedDefaults: centersettings.IncidentDefaults{NotifyOnStarted: false, NotifyOnEscalated: true, NotifyOnRecovered: true},
+			expectStatus:      DeliveryStatusSuppressed,
 		},
 		{
-			name:         "escalated suppressed by persisted defaults",
-			reason:       NotificationReasonEscalated,
-			defaults:     centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: false, NotifyOnRecovered: true},
-			expectStatus: DeliveryStatusSuppressed,
+			name:              "escalated suppressed by persisted defaults",
+			reason:            NotificationReasonEscalated,
+			persistedDefaults: centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: false, NotifyOnRecovered: true},
+			expectStatus:      DeliveryStatusSuppressed,
 		},
 		{
-			name:         "recovered suppressed by persisted defaults",
-			reason:       NotificationReasonRecovered,
-			defaults:     centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: true, NotifyOnRecovered: false},
-			expectStatus: DeliveryStatusSuppressed,
+			name:              "recovered suppressed by persisted defaults",
+			reason:            NotificationReasonRecovered,
+			persistedDefaults: centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: true, NotifyOnRecovered: false},
+			expectStatus:      DeliveryStatusSuppressed,
 		},
 		{
 			name:               "started enabled by persisted defaults sends notification",
 			reason:             NotificationReasonStarted,
-			defaults:           centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: false, NotifyOnRecovered: false},
+			persistedDefaults:  centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: false, NotifyOnRecovered: false},
 			expectStatus:       DeliveryStatusSent,
 			expectSendCount:    1,
 			persistedAvailable: true,
@@ -182,17 +184,20 @@ func TestServiceNotificationFlags(t *testing.T) {
 			useNilRepo:      true,
 		},
 		{
-			name:            "defaults apply when persisted defaults are unavailable",
-			reason:          NotificationReasonRecovered,
-			expectStatus:    DeliveryStatusSent,
-			expectSendCount: 1,
-			repoUnavailable: true,
+			name:                 "get settings suppresses when persisted defaults are unavailable",
+			reason:               NotificationReasonRecovered,
+			settingsDefaults:     centersettings.IncidentDefaults{NotifyOnStarted: true, NotifyOnEscalated: true, NotifyOnRecovered: false},
+			expectStatus:         DeliveryStatusSuppressed,
+			persistedUnavailable: true,
+			settingsAvailable:    true,
 		},
 		{
-			name:            "defaults apply when persisted defaults row is absent",
-			reason:          NotificationReasonRecovered,
-			expectStatus:    DeliveryStatusSent,
-			expectSendCount: 1,
+			name:              "get settings sends when persisted defaults row is absent",
+			reason:            NotificationReasonRecovered,
+			settingsDefaults:  centersettings.IncidentDefaults{NotifyOnStarted: false, NotifyOnEscalated: false, NotifyOnRecovered: true},
+			expectStatus:      DeliveryStatusSent,
+			expectSendCount:   1,
+			settingsAvailable: true,
 		},
 	}
 
@@ -204,11 +209,14 @@ func TestServiceNotificationFlags(t *testing.T) {
 			var settingsRepo SettingsRepository
 			if !tt.useNilRepo {
 				repo := &fakeSettingsRepository{}
-				if tt.repoUnavailable {
+				if tt.persistedUnavailable {
 					repo.persistedIncidentDefaultsErr = errors.New("persisted defaults unavailable")
 				} else if tt.persistedAvailable || tt.expectStatus == DeliveryStatusSuppressed {
-					repo.persistedIncidentDefaults = tt.defaults
+					repo.persistedIncidentDefaults = tt.persistedDefaults
 					repo.persistedIncidentExists = true
+				}
+				if tt.settingsAvailable {
+					repo.getSettingsResult = centersettings.CenterSettings{IncidentDefaults: tt.settingsDefaults}
 				}
 				settingsRepo = repo
 			}
