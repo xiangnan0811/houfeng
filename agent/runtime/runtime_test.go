@@ -8,6 +8,7 @@ import (
 
 	agentconfig "houfeng/agent/config"
 	agentruntime "houfeng/agent/runtime"
+	"houfeng/agent/syncqueue"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -18,6 +19,7 @@ type fakeClient struct {
 	enrollResponse      agentapi.EnrollmentResponse
 	forceEmptySyncToken bool
 	syncResponses       []agentapi.SyncResponse
+	syncErrs            []error
 
 	lastEnroll   agentapi.EnrollmentRequest
 	lastSync     agentapi.SyncRequest
@@ -50,6 +52,9 @@ func (f *fakeClient) Sync(_ context.Context, request agentapi.SyncRequest) (*age
 	f.syncCalls++
 	f.lastSync = request
 	f.syncRequests = append(f.syncRequests, request)
+	if len(f.syncErrs) >= f.syncCalls && f.syncErrs[f.syncCalls-1] != nil {
+		return nil, f.syncErrs[f.syncCalls-1]
+	}
 	if len(f.syncResponses) >= f.syncCalls {
 		response := f.syncResponses[f.syncCalls-1]
 		return &response, nil
@@ -386,6 +391,85 @@ func TestRuntimeReplacesCurrentPlanWithExplicitEmptyPlan(t *testing.T) {
 	}
 	if len(client.syncRequests[2].ProbeObservations) != 0 {
 		t.Fatalf("len(thirdSync.ProbeObservations) = %d, want 0 after explicit empty plan", len(client.syncRequests[2].ProbeObservations))
+	}
+}
+
+func TestRuntimeQueuesFailedSyncAndRetriesAsBackfilled(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{
+		syncErrs: []error{nil, errors.New("center unavailable"), nil},
+		syncResponses: []agentapi.SyncResponse{
+			{AcceptedAt: time.Now().UTC(), Status: "accepted", Plan: &agentapi.SyncPlan{HostSampleFrequencyTier: agentapi.FrequencyTier1m}},
+			{},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+		},
+	}
+	store := syncqueue.NewFileStore(t.TempDir()+"/buffer.json", syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
+	hostProvider := &fakeHostSampleProvider{result: agentapi.HostSamplePayload{CPUUsagePct: 12.5}}
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, &fakeProbeProvider{}, 10*time.Millisecond, store)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Millisecond)
+	defer cancel()
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if client.syncCalls < 3 {
+		t.Fatalf("syncCalls = %d, want at least 3", client.syncCalls)
+	}
+	var retried *agentapi.SyncRequest
+	for i := range client.syncRequests {
+		request := &client.syncRequests[i]
+		if len(request.Heartbeats) > 0 && request.Heartbeats[0].IsBackfilled {
+			retried = request
+			break
+		}
+	}
+	if retried == nil {
+		t.Fatalf("sync requests = %#v, want one retried backfilled request", client.syncRequests)
+	}
+	if len(retried.Heartbeats) == 0 || !retried.Heartbeats[0].IsBackfilled {
+		t.Fatalf("retried heartbeat = %#v, want backfilled", retried.Heartbeats)
+	}
+	if len(retried.HostSamples) == 0 || !retried.HostSamples[0].IsBackfilled {
+		t.Fatalf("retried host samples = %#v, want backfilled", retried.HostSamples)
+	}
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("queue List() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("len(queue entries) = %d, want 0 after ack", len(entries))
+	}
+}
+
+func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	path := t.TempDir() + "/buffer.json"
+	seedStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
+	seeded := agentapi.SyncRequest{
+		NodeID:    "node-123",
+		SyncToken: "sync-token-001",
+		Heartbeats: []agentapi.NodeHeartbeat{{
+			ObservedAt:   time.Now().UTC().Add(-time.Minute),
+			AgentVersion: "dev",
+			Fingerprint:  "fp-001",
+			SyncBatchID:  "seeded",
+		}},
+	}
+	if _, err := seedStore.Enqueue(context.Background(), seeded); err != nil {
+		t.Fatalf("seed Enqueue() error = %v", err)
+	}
+
+	client := &fakeClient{}
+	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, store)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(client.syncRequests) == 0 || client.syncRequests[0].Heartbeats[0].SyncBatchID != "seeded" || !client.syncRequests[0].Heartbeats[0].IsBackfilled {
+		t.Fatalf("first sync request = %#v, want seeded backfilled request", client.syncRequests)
 	}
 }
 

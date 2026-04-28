@@ -11,6 +11,7 @@ import (
 	"houfeng/agent/enroll"
 	"houfeng/agent/hostsample"
 	"houfeng/agent/probe"
+	"houfeng/agent/syncqueue"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -53,6 +54,14 @@ type ProbeProvider interface {
 	CollectDue(context.Context, *agentapi.SyncPlan, time.Time) ([]agentapi.ProbeObservationPayload, error)
 }
 
+type SyncQueue interface {
+	Enqueue(context.Context, agentapi.SyncRequest) (string, error)
+	List(context.Context) ([]syncqueue.Entry, error)
+	Delete(context.Context, string) error
+	MarkAttempt(context.Context, string) error
+	Prune(context.Context) error
+}
+
 type Runtime struct {
 	cfg                agentconfig.AgentConfig
 	client             Client
@@ -62,12 +71,17 @@ type Runtime struct {
 	hostSampleProvider HostSampleProvider
 	probeProvider      ProbeProvider
 	interval           time.Duration
+	syncQueue          SyncQueue
 	currentPlan        *agentapi.SyncPlan
 	lastHostSampleAt   time.Time
 }
 
 func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSource, fingerprintSource FingerprintSource) *Runtime {
-	return NewWithDeps(cfg, logger, enroll.NewClient(cfg.ServerURL), tokenSource, fingerprintSource, defaultInterval)
+	queue := syncqueue.NewFileStore(cfg.BufferFile, syncqueue.Options{
+		MaxEntries: cfg.BufferMaxEntries,
+		MaxAge:     cfg.BufferMaxAge,
+	})
+	return NewWithRuntimeDeps(cfg, logger, enroll.NewClient(cfg.ServerURL), tokenSource, fingerprintSource, hostsample.New(), probe.New(), defaultInterval, queue)
 }
 
 func NewWithDeps(cfg agentconfig.AgentConfig, logger *slog.Logger, client Client, tokenSource TokenSource, fingerprintSource FingerprintSource, interval time.Duration) *Runtime {
@@ -83,12 +97,17 @@ func NewWithRuntimeDeps(
 	hostSampleProvider HostSampleProvider,
 	probeProvider ProbeProvider,
 	interval time.Duration,
+	queues ...SyncQueue,
 ) *Runtime {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if interval <= 0 {
 		interval = defaultInterval
+	}
+	var queue SyncQueue
+	if len(queues) > 0 {
+		queue = queues[0]
 	}
 
 	return &Runtime{
@@ -100,6 +119,7 @@ func NewWithRuntimeDeps(
 		hostSampleProvider: hostSampleProvider,
 		probeProvider:      probeProvider,
 		interval:           interval,
+		syncQueue:          queue,
 	}
 }
 
@@ -153,37 +173,110 @@ func (r *Runtime) Run(ctx context.Context) error {
 		case tick := <-ticker.C:
 			observedAt := tick.UTC()
 			syncBatchID := observedAt.Format(time.RFC3339Nano)
-			request := agentapi.SyncRequest{
-				NodeID:    enrollment.NodeID,
-				SyncToken: enrollment.SyncToken,
-				Heartbeats: []agentapi.NodeHeartbeat{{
-					ObservedAt:   observedAt,
-					AgentVersion: agentVersion,
-					Fingerprint:  fingerprint,
-					SyncBatchID:  syncBatchID,
-				}},
+			request := r.buildSyncRequest(ctx, enrollment.NodeID, enrollment.SyncToken, observedAt, fingerprint, syncBatchID)
+
+			if r.syncQueue == nil {
+				response, err := r.client.Sync(ctx, request)
+				if err != nil {
+					return fmt.Errorf("sync heartbeat: %w", err)
+				}
+				r.applySyncPlan(response)
+				continue
 			}
 
-			if sample := r.collectHostSample(observedAt, fingerprint, syncBatchID); sample != nil {
-				request.HostSamples = append(request.HostSamples, *sample)
-			}
-
-			probeObservations, err := r.collectProbeObservations(ctx, observedAt, fingerprint, syncBatchID)
-			if err != nil {
-				r.logger.Error("collect probe observations failed", "error", err)
-			} else {
-				request.ProbeObservations = append(request.ProbeObservations, probeObservations...)
-			}
-
-			response, err := r.client.Sync(ctx, request)
-			if err != nil {
-				return fmt.Errorf("sync heartbeat: %w", err)
-			}
-			if response != nil && response.Plan != nil {
-				r.currentPlan = cloneSyncPlan(response.Plan)
+			if err := r.enqueueAndFlush(ctx, request, syncBatchID); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				r.logger.Error("sync queue flush failed", "error", err)
 			}
 		}
 	}
+}
+
+func (r *Runtime) buildSyncRequest(ctx context.Context, nodeID, syncToken string, observedAt time.Time, fingerprint, syncBatchID string) agentapi.SyncRequest {
+	request := agentapi.SyncRequest{
+		NodeID:    nodeID,
+		SyncToken: syncToken,
+		Heartbeats: []agentapi.NodeHeartbeat{{
+			ObservedAt:   observedAt,
+			AgentVersion: agentVersion,
+			Fingerprint:  fingerprint,
+			SyncBatchID:  syncBatchID,
+		}},
+	}
+
+	if sample := r.collectHostSample(observedAt, fingerprint, syncBatchID); sample != nil {
+		request.HostSamples = append(request.HostSamples, *sample)
+	}
+
+	probeObservations, err := r.collectProbeObservations(ctx, observedAt, fingerprint, syncBatchID)
+	if err != nil {
+		r.logger.Error("collect probe observations failed", "error", err)
+	} else {
+		request.ProbeObservations = append(request.ProbeObservations, probeObservations...)
+	}
+
+	return request
+}
+
+func (r *Runtime) enqueueAndFlush(ctx context.Context, request agentapi.SyncRequest, currentBatchID string) error {
+	if _, err := r.syncQueue.Enqueue(ctx, request); err != nil {
+		return fmt.Errorf("enqueue sync request: %w", err)
+	}
+	if err := r.syncQueue.Prune(ctx); err != nil {
+		return fmt.Errorf("prune sync queue: %w", err)
+	}
+	if err := r.flushSyncQueue(ctx, currentBatchID); err != nil {
+		return fmt.Errorf("flush sync queue: %w", err)
+	}
+	return nil
+}
+
+func (r *Runtime) flushSyncQueue(ctx context.Context, currentBatchID string) error {
+	entries, err := r.syncQueue.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		response, err := r.syncRequest(ctx, entry, currentBatchID)
+		if err != nil {
+			if markErr := r.syncQueue.MarkAttempt(ctx, entry.ID); markErr != nil {
+				return fmt.Errorf("mark sync attempt for %s: %w", entry.ID, markErr)
+			}
+			return err
+		}
+		if err := r.syncQueue.Delete(ctx, entry.ID); err != nil {
+			return fmt.Errorf("delete synced queue entry %s: %w", entry.ID, err)
+		}
+		r.applySyncPlan(response)
+	}
+	return nil
+}
+
+func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, currentBatchID string) (*agentapi.SyncResponse, error) {
+	request := entry.Request
+	if entry.Attempts > 0 || syncBatchIDForRequest(entry.Request) != currentBatchID {
+		request = syncqueue.WithBackfilledFacts(entry.Request, true)
+	}
+	response, err := r.client.Sync(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("sync heartbeat: %w", err)
+	}
+	return response, nil
+}
+
+func (r *Runtime) applySyncPlan(response *agentapi.SyncResponse) {
+	if response != nil && response.Plan != nil {
+		r.currentPlan = cloneSyncPlan(response.Plan)
+	}
+}
+
+func syncBatchIDForRequest(request agentapi.SyncRequest) string {
+	if len(request.Heartbeats) == 0 {
+		return ""
+	}
+	return request.Heartbeats[0].SyncBatchID
 }
 
 func (r *Runtime) collectHostSample(observedAt time.Time, fingerprint, syncBatchID string) *agentapi.HostSamplePayload {
