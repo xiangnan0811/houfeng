@@ -40,6 +40,30 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 			Summary:       "磁盘使用率 92.0%",
 			CreatedAt:     now,
 		}},
+		AbnormalNodes: []incidents.DashboardNodeSummary{{
+			NodeID:                     "nd_001",
+			DisplayName:                "Tokyo Edge",
+			Region:                     "ap-northeast-1",
+			City:                       "Tokyo",
+			Provider:                   "aws",
+			LifecycleStatus:            "在用",
+			MonitoringStatus:           "启用",
+			CurrentHealthStatus:        string(incidents.SeverityAlert),
+			LastHeartbeatAt:            &now,
+			CurrentActiveIncidentCount: 2,
+			CurrentPrimaryIssueSummary: "磁盘使用率 92.0%",
+		}},
+		AbnormalTargets: []incidents.DashboardTargetSummary{{
+			TargetID:                   "tg_001",
+			Name:                       "Blog",
+			TargetType:                 "service",
+			Host:                       "blog.example.com",
+			RunStatus:                  "启用",
+			CurrentHealthStatus:        string(incidents.SeverityCritical),
+			LastFailureAt:              &now,
+			CurrentActiveIncidentCount: 1,
+			CurrentPrimaryIssueSummary: "HTTPS 探测连续失败",
+		}},
 	}}
 
 	handler := handlers.Dashboard(repo)
@@ -68,6 +92,31 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	}
 	if _, ok := body["AbnormalNodeCount"]; ok {
 		t.Fatalf("body = %#v, want snake_case keys only", body)
+	}
+	abnormalNodes, ok := body["abnormal_nodes"].([]any)
+	if !ok || len(abnormalNodes) != 1 {
+		t.Fatalf("body = %#v, want one abnormal node", body)
+	}
+	abnormalNode, ok := abnormalNodes[0].(map[string]any)
+	if !ok {
+		t.Fatalf("abnormalNodes[0] = %#v, want object", abnormalNodes[0])
+	}
+	if abnormalNode["node_id"] != "nd_001" || abnormalNode["current_primary_issue_summary"] != "磁盘使用率 92.0%" {
+		t.Fatalf("abnormal node = %#v, want snake_case node summary", abnormalNode)
+	}
+	if _, ok := abnormalNode["NodeID"]; ok {
+		t.Fatalf("abnormal node = %#v, want snake_case keys only", abnormalNode)
+	}
+	abnormalTargets, ok := body["abnormal_targets"].([]any)
+	if !ok || len(abnormalTargets) != 1 {
+		t.Fatalf("body = %#v, want one abnormal target", body)
+	}
+	abnormalTarget, ok := abnormalTargets[0].(map[string]any)
+	if !ok {
+		t.Fatalf("abnormalTargets[0] = %#v, want object", abnormalTargets[0])
+	}
+	if abnormalTarget["target_id"] != "tg_001" || abnormalTarget["current_primary_issue_summary"] != "HTTPS 探测连续失败" {
+		t.Fatalf("abnormal target = %#v, want snake_case target summary", abnormalTarget)
 	}
 	recentEvents, ok := body["recent_events"].([]any)
 	if !ok || len(recentEvents) != 1 {

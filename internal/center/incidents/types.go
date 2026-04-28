@@ -56,7 +56,37 @@ type DashboardOverview struct {
 	MaintenanceTargetCount int                      `json:"maintenance_target_count"`
 	RecentNewIncidentCount int                      `json:"recent_new_incident_count"`
 	RecentRecoveryCount    int                      `json:"recent_recovery_count"`
+	AbnormalNodes          []DashboardNodeSummary   `json:"abnormal_nodes"`
+	AbnormalTargets        []DashboardTargetSummary `json:"abnormal_targets"`
 	RecentEvents           []StateChangeEventRecord `json:"recent_events"`
+}
+
+type DashboardNodeSummary struct {
+	NodeID                     string     `json:"node_id"`
+	DisplayName                string     `json:"display_name"`
+	Region                     string     `json:"region"`
+	City                       string     `json:"city"`
+	Provider                   string     `json:"provider"`
+	LifecycleStatus            string     `json:"lifecycle_status"`
+	MonitoringStatus           string     `json:"monitoring_status"`
+	CurrentHealthStatus        string     `json:"current_health_status"`
+	LastHeartbeatAt            *time.Time `json:"last_heartbeat_at,omitempty"`
+	CurrentActiveIncidentCount int        `json:"current_active_incident_count"`
+	CurrentPrimaryIssueSummary string     `json:"current_primary_issue_summary"`
+}
+
+type DashboardTargetSummary struct {
+	TargetID                   string     `json:"target_id"`
+	Name                       string     `json:"name"`
+	TargetType                 string     `json:"target_type"`
+	Host                       string     `json:"host"`
+	BasePort                   *int       `json:"base_port,omitempty"`
+	RunStatus                  string     `json:"run_status"`
+	CurrentHealthStatus        string     `json:"current_health_status"`
+	LastSuccessAt              *time.Time `json:"last_success_at,omitempty"`
+	LastFailureAt              *time.Time `json:"last_failure_at,omitempty"`
+	CurrentActiveIncidentCount int        `json:"current_active_incident_count"`
+	CurrentPrimaryIssueSummary string     `json:"current_primary_issue_summary"`
 }
 
 type NotificationRecordWrite struct {

@@ -55,6 +55,14 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 	if err != nil {
 		return incidents.DashboardOverview{}, err
 	}
+	overview.AbnormalNodes, err = loadAbnormalNodeSummaries(ctx, r.db, limit)
+	if err != nil {
+		return incidents.DashboardOverview{}, err
+	}
+	overview.AbnormalTargets, err = loadAbnormalTargetSummaries(ctx, r.db, limit)
+	if err != nil {
+		return incidents.DashboardOverview{}, err
+	}
 	events, err := r.ListEvents(ctx, EventsFilter{Limit: limit})
 	if err != nil {
 		return incidents.DashboardOverview{}, err
@@ -73,6 +81,120 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 		})
 	}
 	return overview, nil
+}
+
+func loadAbnormalNodeSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardNodeSummary, error) {
+	rows, err := queryer.Query(ctx, `
+		select
+			node_id,
+			display_name,
+			region,
+			city,
+			provider,
+			lifecycle_status,
+			monitoring_status,
+			current_health_status,
+			last_heartbeat_at,
+			current_active_incident_count,
+			current_primary_issue_summary
+		from nodes
+		where current_health_status <> '正常'
+		order by case current_health_status
+			when '严重' then 3
+			when '告警' then 2
+			when '关注' then 1
+			else 0
+		end desc,
+		current_active_incident_count desc,
+		updated_at desc,
+		node_id asc
+		limit $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard abnormal nodes: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]incidents.DashboardNodeSummary, 0)
+	for rows.Next() {
+		var record incidents.DashboardNodeSummary
+		if err := rows.Scan(
+			&record.NodeID,
+			&record.DisplayName,
+			&record.Region,
+			&record.City,
+			&record.Provider,
+			&record.LifecycleStatus,
+			&record.MonitoringStatus,
+			&record.CurrentHealthStatus,
+			&record.LastHeartbeatAt,
+			&record.CurrentActiveIncidentCount,
+			&record.CurrentPrimaryIssueSummary,
+		); err != nil {
+			return nil, fmt.Errorf("scan dashboard abnormal node row: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dashboard abnormal nodes: %w", err)
+	}
+	return records, nil
+}
+
+func loadAbnormalTargetSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardTargetSummary, error) {
+	rows, err := queryer.Query(ctx, `
+		select
+			target_id,
+			name,
+			target_type,
+			host,
+			base_port,
+			run_status,
+			current_health_status,
+			last_success_at,
+			last_failure_at,
+			current_active_incident_count,
+			current_primary_issue_summary
+		from targets
+		where current_health_status <> '正常'
+		order by case current_health_status
+			when '严重' then 3
+			when '告警' then 2
+			when '关注' then 1
+			else 0
+		end desc,
+		current_active_incident_count desc,
+		updated_at desc,
+		target_id asc
+		limit $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard abnormal targets: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]incidents.DashboardTargetSummary, 0)
+	for rows.Next() {
+		var record incidents.DashboardTargetSummary
+		if err := rows.Scan(
+			&record.TargetID,
+			&record.Name,
+			&record.TargetType,
+			&record.Host,
+			&record.BasePort,
+			&record.RunStatus,
+			&record.CurrentHealthStatus,
+			&record.LastSuccessAt,
+			&record.LastFailureAt,
+			&record.CurrentActiveIncidentCount,
+			&record.CurrentPrimaryIssueSummary,
+		); err != nil {
+			return nil, fmt.Errorf("scan dashboard abnormal target row: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dashboard abnormal targets: %w", err)
+	}
+	return records, nil
 }
 
 func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardOverview, error) {
