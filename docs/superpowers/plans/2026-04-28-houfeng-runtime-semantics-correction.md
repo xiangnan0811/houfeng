@@ -93,7 +93,7 @@ Out of scope:
 - Modify: `internal/center/store/agent_plan.go`
 - Modify: `internal/center/store/agent_plan_test.go`
 
-- [ ] **Step 1: Add failing sync-plan tests for paused and retired Nodes**
+- [x] **Step 1: Add failing sync-plan tests for paused and retired Nodes**
 
 Append this test to `internal/center/store/agent_plan_test.go` near the other `TestBuildSyncPlan...` tests:
 
@@ -183,7 +183,7 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredNodes(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Add failing sync-plan test for Node maintenance context**
+- [x] **Step 2: Add failing sync-plan test for Node maintenance context**
 
 Append this test to `internal/center/store/agent_plan_test.go`:
 
@@ -270,7 +270,7 @@ func TestBuildSyncPlanMarksNodeMaintenanceContext(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run focused tests and confirm failure**
+- [x] **Step 3: Run focused tests and confirm failure**
 
 Run:
 
@@ -280,7 +280,7 @@ go test ./internal/center/store -run 'TestBuildSyncPlan(SuppressesPausedAndRetir
 
 Expected: FAIL. Acceptable failure forms are compile failure for `HostSampleMaintenanceContext` / `nodes.MonitoringMaintenance`, or assertion failure showing paused/retired nodes still receive a normal plan.
 
-- [ ] **Step 4: Export Node monitoring status constants**
+- [x] **Step 4: Export Node monitoring status constants**
 
 In `internal/center/nodes/types.go`, replace the current monitoring constant block:
 
@@ -299,7 +299,7 @@ with:
 	BindingUnbound             = "未绑定"
 ```
 
-- [ ] **Step 5: Add host-sample maintenance field to center plan type**
+- [x] **Step 5: Add host-sample maintenance field to center plan type**
 
 In `internal/center/agentplan/types.go`, replace `SyncPlan` with:
 
@@ -311,7 +311,7 @@ type SyncPlan struct {
 }
 ```
 
-- [ ] **Step 6: Make agent-plan SQL read Node lifecycle/runtime state**
+- [x] **Step 6: Make agent-plan SQL read Node lifecycle/runtime state**
 
 In `internal/center/store/agent_plan.go`, replace `selectAgentPlanNodeLabelsSQL` with:
 
@@ -331,7 +331,7 @@ const selectAgentPlanNodeLabelsSQL = `
 	where n.node_id = $1`
 ```
 
-- [ ] **Step 7: Apply pause, maintenance, and retired semantics in plan construction**
+- [x] **Step 7: Apply pause, maintenance, and retired semantics in plan construction**
 
 In `internal/center/store/agent_plan.go`, update the local variables and scan in `buildSyncPlan` to include lifecycle/runtime state:
 
@@ -393,7 +393,7 @@ Replace assignment maintenance calculation with:
 		assignment.MaintenanceContext = nodeMaintenance || runStatus == targets.RunStatusMaintenance
 ```
 
-- [ ] **Step 8: Run focused sync-plan tests**
+- [x] **Step 8: Run focused sync-plan tests**
 
 Run:
 
@@ -403,7 +403,7 @@ go test ./internal/center/store -run 'TestBuildSyncPlan(SuppressesPausedAndRetir
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit center sync-plan semantics**
+- [x] **Step 9: Commit center sync-plan semantics**
 
 Run:
 
@@ -424,7 +424,7 @@ git commit -m "Make Node runtime state shape sync plans" -m "Node pause and reti
 - Modify: `agent/runtime/runtime.go`
 - Modify: `agent/runtime/runtime_test.go`
 
-- [ ] **Step 1: Add failing contract and handler assertions**
+- [x] **Step 1: Add failing contract and handler assertions**
 
 In `internal/contracts/agentapi/types_sync_plan_test.go`, update `TestSyncPlan` by setting:
 
@@ -459,7 +459,7 @@ After the host frequency assertion, add:
 	}
 ```
 
-- [ ] **Step 2: Add failing agent runtime assertion**
+- [x] **Step 2: Add failing agent runtime assertion**
 
 In `agent/runtime/runtime_test.go`, update `TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations` by setting the first response plan:
 
@@ -477,7 +477,7 @@ After the second sync host metadata assertion, add:
 	}
 ```
 
-- [ ] **Step 3: Run focused tests and confirm failure**
+- [x] **Step 3: Run focused tests and confirm failure**
 
 Run:
 
@@ -489,7 +489,7 @@ go test ./agent/runtime -run TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndPr
 
 Expected: FAIL due missing `HostSampleMaintenanceContext` field or missing propagation.
 
-- [ ] **Step 4: Add the wire contract field**
+- [x] **Step 4: Add the wire contract field**
 
 In `internal/contracts/agentapi/types.go`, replace `SyncPlan` with:
 
@@ -501,7 +501,7 @@ type SyncPlan struct {
 }
 ```
 
-- [ ] **Step 5: Map center plan field into API response**
+- [x] **Step 5: Map center plan field into API response**
 
 In `internal/center/http/handlers/agent.go`, replace the return block in `syncPlanToAPI` with:
 
@@ -513,7 +513,7 @@ In `internal/center/http/handlers/agent.go`, replace the return block in `syncPl
 	}
 ```
 
-- [ ] **Step 6: Propagate host-sample maintenance context in agent runtime**
+- [x] **Step 6: Propagate host-sample maintenance context in agent runtime**
 
 In `agent/runtime/runtime.go`, update `collectHostSample` after metadata assignment:
 
@@ -548,7 +548,7 @@ func cloneSyncPlan(plan *agentapi.SyncPlan) *agentapi.SyncPlan {
 }
 ```
 
-- [ ] **Step 7: Run focused contract/runtime tests**
+- [x] **Step 7: Run focused contract/runtime tests**
 
 Run:
 
@@ -560,7 +560,7 @@ go test ./agent/runtime -run 'TestRuntime(UpdatesPlanAndAttachesDueHostSampleAnd
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit API/runtime propagation**
+- [x] **Step 8: Commit API/runtime propagation**
 
 Run:
 
@@ -577,7 +577,7 @@ git commit -m "Carry Node maintenance context into host samples" -m "Host sample
 - Modify: `internal/center/incidents/service.go`
 - Modify: `internal/center/incidents/service_test.go`
 
-- [ ] **Step 1: Add failing table test for notification flag suppression**
+- [x] **Step 1: Add failing table test for notification flag suppression**
 
 Append this test to `internal/center/incidents/service_test.go` near other notification tests:
 
@@ -670,7 +670,7 @@ func TestServiceNotificationFlagsSuppressConfiguredReasons(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Add passing-control test for enabled reasons**
+- [x] **Step 2: Add passing-control test for enabled reasons**
 
 Append this test to `internal/center/incidents/service_test.go`:
 
@@ -714,7 +714,7 @@ func TestServiceNotificationFlagsAllowEnabledReason(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run focused tests and confirm failure**
+- [x] **Step 3: Run focused tests and confirm failure**
 
 Run:
 
@@ -724,7 +724,7 @@ go test ./internal/center/incidents -run 'TestServiceNotificationFlags' -v
 
 Expected: FAIL because persisted notify flags are not consulted before delivery.
 
-- [ ] **Step 4: Add notification policy helpers**
+- [x] **Step 4: Add notification policy helpers**
 
 In `internal/center/incidents/service.go`, add this type and helper near `incidentTiming`:
 
@@ -789,7 +789,7 @@ func (s *Service) notificationPolicyFor(ctx context.Context) notificationPolicy 
 }
 ```
 
-- [ ] **Step 5: Apply notification policy before sending**
+- [x] **Step 5: Apply notification policy before sending**
 
 In `appendNotificationRecords`, before checking `ShouldSend`, assign:
 
@@ -812,7 +812,7 @@ with:
 
 The resulting control flow must still append a suppressed `NotificationRecordWrite` when `shouldSend` is false.
 
-- [ ] **Step 6: Run focused incident tests**
+- [x] **Step 6: Run focused incident tests**
 
 Run:
 
@@ -822,7 +822,7 @@ go test ./internal/center/incidents -run 'TestServiceNotificationFlags|TestSetti
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit notification flag integration**
+- [x] **Step 7: Commit notification flag integration**
 
 Run:
 
@@ -844,7 +844,7 @@ git commit -m "Honor persisted notification reason flags" -m "Settings expose st
 - Modify: `web/src/pages/TargetDetailPage.tsx`
 - Modify: `web/src/pages/TargetDetailPage.test.tsx`
 
-- [ ] **Step 1: Add failing settings default assertion for TLS `6h`**
+- [x] **Step 1: Add failing settings default assertion for TLS `6h`**
 
 In `internal/center/settings/types_test.go`, update `TestSettingsDefaultProvidesDeterministicSingletonShape` by adding this assertion after the existing HTTP default assertion:
 
@@ -854,7 +854,7 @@ In `internal/center/settings/types_test.go`, update `TestSettingsDefaultProvides
 	}
 ```
 
-- [ ] **Step 2: Add failing Target Detail TLS default test**
+- [x] **Step 2: Add failing Target Detail TLS default test**
 
 Append this test to `web/src/pages/TargetDetailPage.test.tsx` near the ProbeItem creation tests:
 
@@ -905,7 +905,7 @@ Append this test to `web/src/pages/TargetDetailPage.test.tsx` near the ProbeItem
 
 Use existing local helpers `targetRecord`, `probeItemRecord`, `renderWithRoute`, `mockJSONResponse`, `fetchMock`, `screen`, `waitFor`, and `fireEvent`.
 
-- [ ] **Step 3: Run focused tests and confirm failure**
+- [x] **Step 3: Run focused tests and confirm failure**
 
 Run:
 
@@ -916,7 +916,7 @@ cd web && npm run test -- TargetDetailPage.test.tsx --run -t 'uses the V1 6h def
 
 Expected: FAIL because TLS currently defaults to `5m` in settings and the Target detail create form.
 
-- [ ] **Step 4: Change backend default TLS frequency**
+- [x] **Step 4: Change backend default TLS frequency**
 
 In `internal/center/settings/types.go`, replace:
 
@@ -932,7 +932,7 @@ with:
 
 Review `internal/center/http/handlers/settings_test.go` and keep explicit request payloads unchanged unless the assertion is about `centersettings.Default()`. Explicit user-submitted `tls` values remain valid even when they are `5m` or `15m`.
 
-- [ ] **Step 5: Add kind-specific ProbeItem create defaults**
+- [x] **Step 5: Add kind-specific ProbeItem create defaults**
 
 In `web/src/pages/TargetDetailPage.tsx`, add this constant after `FREQUENCY_TIER_OPTIONS`:
 
@@ -978,7 +978,7 @@ with:
 
 Keep edit mode safe: when opening an existing ProbeItem, `formStateForProbeItem` already uses `probeItem.frequency_tier`, so this create-mode default must not override existing records.
 
-- [ ] **Step 6: Update Settings copy to reflect operative notification flags**
+- [x] **Step 6: Update Settings copy to reflect operative notification flags**
 
 In `web/src/pages/SettingsPage.tsx`, replace the Global Defaults section intro:
 
@@ -994,7 +994,7 @@ with:
 
 Keep the Overrides copy unchanged because incident defaults inside override rules remain stored policy.
 
-- [ ] **Step 7: Update Settings page test copy expectation**
+- [x] **Step 7: Update Settings page test copy expectation**
 
 In `web/src/pages/SettingsPage.test.tsx`, replace the expected Global Defaults copy:
 
@@ -1008,7 +1008,7 @@ with:
       screen.getByText('heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路。'),
 ```
 
-- [ ] **Step 8: Run focused settings/frontend tests**
+- [x] **Step 8: Run focused settings/frontend tests**
 
 Run:
 
@@ -1020,7 +1020,7 @@ cd web && npm run test -- SettingsPage.test.tsx TargetDetailPage.test.tsx --run
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit defaults and copy corrections**
+- [x] **Step 9: Commit defaults and copy corrections**
 
 Run:
 
@@ -1036,7 +1036,7 @@ git commit -m "Align V1 frequency defaults and settings copy" -m "TLS checks are
 **Files:**
 - No planned source edits unless verification exposes a regression.
 
-- [ ] **Step 1: Run focused backend suites touched by this phase**
+- [x] **Step 1: Run focused backend suites touched by this phase**
 
 Run:
 
@@ -1051,7 +1051,7 @@ go test ./internal/center/settings -v
 
 Expected: PASS.
 
-- [ ] **Step 2: Run full Go tests**
+- [x] **Step 2: Run full Go tests**
 
 Run:
 
@@ -1061,7 +1061,7 @@ go test ./...
 
 Expected: PASS.
 
-- [ ] **Step 3: Run focused web tests**
+- [x] **Step 3: Run focused web tests**
 
 Run:
 
@@ -1071,7 +1071,7 @@ cd web && npm run test -- SettingsPage.test.tsx TargetDetailPage.test.tsx --run
 
 Expected: PASS.
 
-- [ ] **Step 4: Run full web verification**
+- [x] **Step 4: Run full web verification**
 
 Run:
 
@@ -1081,7 +1081,7 @@ cd web && npm run test -- --run && npm run build && npm run lint
 
 Expected: PASS. If `npm run lint` is not defined in `web/package.json`, record that exact absence and rely on `./scripts/verify.sh` for the repository-standard verification command.
 
-- [ ] **Step 5: Run repository verification**
+- [x] **Step 5: Run repository verification**
 
 Run:
 
@@ -1091,7 +1091,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 6: Inspect git status**
+- [x] **Step 6: Inspect git status**
 
 Run:
 
