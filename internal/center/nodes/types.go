@@ -14,6 +14,8 @@ const (
 	LifecycleRetired           = "已退役"
 
 	MonitoringEnabled          = "启用"
+	MonitoringMaintenance      = "维护中"
+	MonitoringPaused           = "暂停"
 	BindingUnbound             = "未绑定"
 	BindingBound               = "已绑定"
 	BindingPendingConfirmation = "指纹变更待确认"

@@ -18,6 +18,8 @@ import (
 
 const selectAgentPlanNodeLabelsSQL = `
 	select labels,
+		lifecycle_status,
+		monitoring_status,
 		coalesce(nullif(cs.host_sample_frequency_tier, ''), '5m') as host_sample_frequency_tier,
 		coalesce(
 			cs.override_rules,
@@ -75,11 +77,13 @@ func (r *PostgresAgentPlanRepository) BuildSyncPlan(ctx context.Context, nodeID 
 func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string) (agentplan.SyncPlan, error) {
 	var (
 		labels             []string
+		lifecycleStatus    string
+		monitoringStatus   string
 		hostSampleTier     string
 		overrideRulesJSON  []byte
 		settingsRowPresent bool
 	)
-	if err := queryer.QueryRow(ctx, selectAgentPlanNodeLabelsSQL, nodeID, centersettings.SingletonID).Scan(&labels, &hostSampleTier, &overrideRulesJSON, &settingsRowPresent); errors.Is(err, pgx.ErrNoRows) {
+	if err := queryer.QueryRow(ctx, selectAgentPlanNodeLabelsSQL, nodeID, centersettings.SingletonID).Scan(&labels, &lifecycleStatus, &monitoringStatus, &hostSampleTier, &overrideRulesJSON, &settingsRowPresent); errors.Is(err, pgx.ErrNoRows) {
 		return agentplan.SyncPlan{}, nodes.ErrNodeNotFound
 	} else if err != nil {
 		return agentplan.SyncPlan{}, fmt.Errorf("query labels for node %q: %w", nodeID, err)
@@ -91,8 +95,14 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string)
 	}
 
 	plan := agentplan.SyncPlan{
-		HostSampleFrequencyTier: resolveHostSampleFrequencyTier(settings.HostSampleFrequencyTier, labels, settings.OverrideRules),
-		ProbeAssignments:        make([]agentplan.ProbeAssignment, 0),
+		HostSampleFrequencyTier:      resolveHostSampleFrequencyTier(settings.HostSampleFrequencyTier, labels, settings.OverrideRules),
+		HostSampleMaintenanceContext: monitoringStatus == nodes.MonitoringMaintenance,
+		ProbeAssignments:             make([]agentplan.ProbeAssignment, 0),
+	}
+	if lifecycleStatus == nodes.LifecycleRetired || monitoringStatus == nodes.MonitoringPaused {
+		plan.HostSampleFrequencyTier = ""
+		plan.HostSampleMaintenanceContext = false
+		return plan, nil
 	}
 	if len(labels) == 0 {
 		return plan, nil
@@ -127,7 +137,7 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string)
 		); err != nil {
 			return agentplan.SyncPlan{}, fmt.Errorf("scan sync-plan assignment for node %q: %w", nodeID, err)
 		}
-		assignment.MaintenanceContext = runStatus == targets.RunStatusMaintenance
+		assignment.MaintenanceContext = monitoringStatus == nodes.MonitoringMaintenance || runStatus == targets.RunStatusMaintenance
 		assignment.Config = json.RawMessage(append([]byte(nil), config...))
 		assignment.FrequencyTier = resolveProbeAssignmentFrequencyTier(
 			assignment.FrequencyTier,

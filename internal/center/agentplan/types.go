@@ -18,8 +18,9 @@ type ProbeAssignment struct {
 }
 
 type SyncPlan struct {
-	HostSampleFrequencyTier string
-	ProbeAssignments        []ProbeAssignment
+	HostSampleFrequencyTier      string
+	HostSampleMaintenanceContext bool
+	ProbeAssignments             []ProbeAssignment
 }
 
 type Repository interface {
