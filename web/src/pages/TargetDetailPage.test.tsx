@@ -2395,6 +2395,58 @@ describe('TargetDetailPage', () => {
   })
 
 
+
+  it('renders empty note copy with the 备注 label in target detail metadata', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: ['公开'],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            last_success_at: '2026-04-24T09:00:00Z',
+            last_failure_at: '2026-04-24T08:30:00Z',
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            latest_probe_observations: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '标签与备注' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('备注：暂无备注')).toBeInTheDocument()
+  })
+
   it('edits target labels and note from the detail page', async () => {
     const fetchMock = vi
       .fn()
@@ -2461,7 +2513,7 @@ describe('TargetDetailPage', () => {
 
     expect(screen.getByRole('heading', { name: '标签与备注' })).toBeInTheDocument()
     expect(screen.getByText('公开')).toBeInTheDocument()
-    expect(screen.getByText('现网入口')).toBeInTheDocument()
+    expect(screen.getByText('备注：现网入口')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
     fireEvent.change(screen.getByLabelText('标签'), {
@@ -2473,7 +2525,7 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
 
     await waitFor(() => expect(screen.getByText('alpha · beta')).toBeInTheDocument())
-    expect(screen.getByText('新的备注')).toBeInTheDocument()
+    expect(screen.getByText('备注：新的备注')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001', {
       method: 'PATCH',
       headers: {
@@ -2647,8 +2699,8 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
-    expect(screen.queryByText('新的备注')).not.toBeInTheDocument()
-    expect(screen.getByText('缓存入口')).toBeInTheDocument()
+    expect(screen.queryByText('备注：新的备注')).not.toBeInTheDocument()
+    expect(screen.getByText('备注：缓存入口')).toBeInTheDocument()
   })
 
   it('preserves a successful metadata save across an unrelated target refresh', async () => {
@@ -2758,9 +2810,9 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('alpha · beta')).toBeInTheDocument())
-    expect(screen.getByText('新的备注')).toBeInTheDocument()
+    expect(screen.getByText('备注：新的备注')).toBeInTheDocument()
     expect(screen.getByText('维护中')).toBeInTheDocument()
-    expect(screen.queryByText('现网入口')).not.toBeInTheDocument()
+    expect(screen.queryByText('备注：现网入口')).not.toBeInTheDocument()
   })
 
   it('preserves saved metadata when a later runtime response returns stale labels and note', async () => {
@@ -2847,7 +2899,7 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('alpha · beta')).toBeInTheDocument())
-    expect(screen.getByText('新的备注')).toBeInTheDocument()
+    expect(screen.getByText('备注：新的备注')).toBeInTheDocument()
 
     runtimeAction.resolve(
       mockJSONResponse({
@@ -2872,8 +2924,8 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('维护中')).toBeInTheDocument())
     expect(screen.getByText('alpha · beta')).toBeInTheDocument()
-    expect(screen.getByText('新的备注')).toBeInTheDocument()
-    expect(screen.queryByText('现网入口')).not.toBeInTheDocument()
+    expect(screen.getByText('备注：新的备注')).toBeInTheDocument()
+    expect(screen.queryByText('备注：现网入口')).not.toBeInTheDocument()
   })
 
 })

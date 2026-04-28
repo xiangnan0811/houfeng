@@ -145,6 +145,14 @@ function parseLabels(value: string) {
   return result
 }
 
+function mergeNonMetadataNodeRecord<T extends NodeRecord>(current: NodeRecord, updated: T): T {
+  return {
+    ...updated,
+    labels: current.labels,
+    note: current.note,
+  }
+}
+
 export function NodeDetailPage() {
   const { nodeId } = useParams()
   return <NodeDetailPageContent key={nodeId ?? 'missing-node'} nodeId={nodeId} />
@@ -385,7 +393,10 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       }
       setState((current) => ({
         ...current,
-        node: updated,
+        node:
+          current.requestedNodeId === actionNodeId && current.node
+            ? mergeNonMetadataNodeRecord(current.node, updated)
+            : current.node,
       }))
       pendingFocusRestoreRef.current = action
       setPendingRuntimeConfirmation((current) => (current?.action === action ? null : current))
@@ -429,7 +440,10 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       }
       setState((current) => ({
         ...current,
-        node: updated,
+        node:
+          current.requestedNodeId === actionNodeId && current.node
+            ? mergeNonMetadataNodeRecord(current.node, updated)
+            : current.node,
       }))
       setShowRetireConfirmation(false)
     } catch (error: unknown) {
@@ -457,7 +471,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       if (current.requestedNodeId !== actionNodeId) return current
       return {
         ...current,
-        node: onboarding,
+        node: current.node ? mergeNonMetadataNodeRecord(current.node, onboarding) : onboarding,
       }
     })
     setBindingConflictState({
@@ -756,7 +770,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           ) : (
             <>
               <p>标签：{formatLabelList(node.labels)}</p>
-              <p>备注：{node.note.trim() || '—'}</p>
+              <p>备注：{node.note.trim() || '暂无备注'}</p>
               <div>
                 <button
                   type="button"

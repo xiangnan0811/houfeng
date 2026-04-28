@@ -1075,7 +1075,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           ) : (
             <>
               <p>标签：{formatLabelList(target.labels)}</p>
-              <p>{target.note || '暂无备注'}</p>
+              <p>备注：{target.note || '暂无备注'}</p>
               <div>
                 <button
                   type="button"

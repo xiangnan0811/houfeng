@@ -132,6 +132,14 @@ function pauseConfirmationCurrent(node: NodeRecord) {
     : '当前：监控运行状态为启用。'
 }
 
+function mergeNonMetadataNodeRecord(current: NodeRecord, updated: NodeRecord): NodeRecord {
+  return {
+    ...updated,
+    labels: current.labels,
+    note: current.note,
+  }
+}
+
 export function NodesPage() {
   const navigate = useNavigate()
   const [nodes, setNodes] = useState<NodeRecord[]>([])
@@ -235,7 +243,9 @@ export function NodesPage() {
               ? await pauseNodeMonitoring(node.node_id)
               : await resumeNodeMonitoring(node.node_id)
       setNodes((current) =>
-        current.map((item) => (item.node_id === updated.node_id ? updated : item)),
+        current.map((item) =>
+          item.node_id === updated.node_id ? mergeNonMetadataNodeRecord(item, updated) : item,
+        ),
       )
       queueFocusRestore(updated.node_id, action)
       setPendingConfirmation((current) =>
