@@ -774,6 +774,64 @@ func TestServiceDoesNotRecoverTargetProbeFailureUntilAllSeriesRecover(t *testing
 	}
 }
 
+func TestServiceAfterSuccessfulSyncDoesNotNotifyForBackfilledProbeFailure(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		probeObs: map[string][]runtimefacts.ProbeObservation{
+			"tg_001": {
+				{ObservedAt: now, TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
+				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
+			},
+		},
+	}
+	writer := &fakeMutationWriter{}
+	notifier := &fakeNotifier{}
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
+
+	err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
+		NodeID: "nd_001",
+		Observations: observations.BatchWrite{
+			ProbeObservations: []observations.ProbeObservationWrite{{
+				NodeID:       "nd_001",
+				TargetID:     "tg_001",
+				ProbeItemID:  "pb_001",
+				ProbeKind:    agentapi.ProbeKindHTTP,
+				ObservedAt:   now,
+				ResultKind:   agentapi.ProbeResultFailure,
+				ErrorSummary: "503",
+				IsBackfilled: true,
+			}},
+		},
+	}, syncing.Result{AcceptedAt: now})
+	if err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+
+	if len(writer.mutations) < 2 {
+		t.Fatalf("mutations = %#v, want node and target mutations", writer.mutations)
+	}
+	targetMutation := writer.mutations[1]
+	if targetMutation.ObjectType != ObjectTypeTarget || targetMutation.ObjectID != "tg_001" {
+		t.Fatalf("target mutation identity = %#v, want target tg_001", targetMutation)
+	}
+	if len(targetMutation.Active) != 0 {
+		t.Fatalf("target mutation Active = %#v, want no active backfilled incident", targetMutation.Active)
+	}
+	if len(targetMutation.Events) != 0 {
+		t.Fatalf("target mutation Events = %#v, want no notification-driving events", targetMutation.Events)
+	}
+	if len(writer.notifications) != 0 {
+		t.Fatalf("notifications = %#v, want none for backfilled probe failure", writer.notifications)
+	}
+	if len(notifier.messages) != 0 {
+		t.Fatalf("notifier.messages = %#v, want no sends for backfilled probe failure", notifier.messages)
+	}
+}
+
 func TestServiceEvaluatesTLSExpiryFromTLSOnlySeries(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
