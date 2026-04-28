@@ -389,7 +389,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       }))
       pendingFocusRestoreRef.current = action
       setPendingRuntimeConfirmation((current) => (current?.action === action ? null : current))
-    } catch (error) {
+    } catch (error: unknown) {
       if (
         !isMountedRef.current ||
         currentRouteNodeIdRef.current !== actionNodeId ||
@@ -432,7 +432,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         node: updated,
       }))
       setShowRetireConfirmation(false)
-    } catch (error) {
+    } catch (error: unknown) {
       if (
         !isMountedRef.current ||
         currentRouteNodeIdRef.current !== actionNodeId ||
@@ -574,7 +574,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       setMetadataEditing(false)
       setMetadataLabelDraft('')
       setMetadataNoteDraft('')
-    } catch (error) {
+    } catch {
       if (
         !isMountedRef.current ||
         currentRouteNodeIdRef.current !== actionNodeId ||

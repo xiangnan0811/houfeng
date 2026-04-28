@@ -284,7 +284,16 @@ export function NodesPage() {
         note: node.note,
       })
       setNodes((current) =>
-        current.map((item) => (item.node_id === updated.node_id ? updated : item)),
+        current.map((item) =>
+          item.node_id === updated.node_id
+            ? {
+                ...item,
+                labels: updated.labels,
+                note: updated.note,
+                updated_at: updated.updated_at,
+              }
+            : item,
+        ),
       )
       setEditingLabelNodeId((current) => (current === node.node_id ? null : current))
       setLabelDraft('')

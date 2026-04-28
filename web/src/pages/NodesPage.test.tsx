@@ -726,6 +726,85 @@ describe('NodesPage', () => {
     expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
   })
 
+  it('preserves newer runtime fields when a stale metadata save resolves later', async () => {
+    const metadataSave = deferredResponse()
+    const runtimeUpdate = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            monitoring_status: '启用',
+            labels: ['edge'],
+            note: 'keep me',
+            updated_at: '2026-04-26T09:00:00Z',
+          }),
+        ]),
+      )
+      .mockImplementationOnce(() => metadataSave.promise)
+      .mockImplementationOnce(() => runtimeUpdate.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    const row = screen.getAllByRole('article').find((item) =>
+      within(item).queryByText('Tokyo Edge'),
+    )
+    expect(row).toBeDefined()
+
+    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(row!).getByRole('textbox', { name: '标签' }), {
+      target: { value: 'edge, core' },
+    })
+    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+
+    fireEvent.click(within(row!).getByRole('button', { name: '进入维护' }))
+
+    runtimeUpdate.resolve(
+      mockJSONResponse(
+        nodeRecord({
+          node_id: 'nd_001',
+          display_name: 'Tokyo Edge',
+          monitoring_status: '维护中',
+          labels: ['edge'],
+          note: 'keep me',
+          updated_at: '2026-04-26T09:02:00Z',
+        }),
+      ),
+    )
+
+    await waitFor(() =>
+      expect(within(row!).getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
+    )
+
+    metadataSave.resolve(
+      mockJSONResponse(
+        nodeRecord({
+          node_id: 'nd_001',
+          display_name: 'Tokyo Edge',
+          monitoring_status: '启用',
+          labels: ['edge', 'core'],
+          note: 'keep me',
+          updated_at: '2026-04-26T09:01:00Z',
+        }),
+      ),
+    )
+
+    await waitFor(() => expect(within(row!).getByText('标签：edge · core')).toBeInTheDocument())
+    expect(within(row!).getByRole('button', { name: '退出维护' })).toBeInTheDocument()
+    expect(within(row!).queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
+  })
+
   it('blocks opening another row editor during metadata save and exposes row errors as alerts', async () => {
     const rowASave = deferredResponse()
     const fetchMock = vi
