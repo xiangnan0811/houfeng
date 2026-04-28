@@ -15,8 +15,8 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 		t.Fatalf("Names() error = %v", err)
 	}
 
-	if len(names) < 8 {
-		t.Fatalf("len(Names()) = %d, want at least 8", len(names))
+	if len(names) < 9 {
+		t.Fatalf("len(Names()) = %d, want at least 9", len(names))
 	}
 
 	if names[0] != "0001_initial_schema.sql" {
@@ -42,6 +42,9 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 	if names[7] != "0007_add_telegram_runtime_managed.sql" {
 		t.Fatalf("eighth migration = %q, want %q", names[7], "0007_add_telegram_runtime_managed.sql")
+	}
+	if names[8] != "0008_add_retention_aggregates.sql" {
+		t.Fatalf("ninth migration = %q, want %q", names[8], "0008_add_retention_aggregates.sql")
 	}
 }
 
