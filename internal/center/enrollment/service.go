@@ -95,6 +95,7 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 			AgentVersion: heartbeat.AgentVersion,
 			Fingerprint:  heartbeat.Fingerprint,
 			SyncBatchID:  heartbeat.SyncBatchID,
+			IsBackfilled: heartbeat.IsBackfilled,
 		})
 	}
 

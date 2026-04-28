@@ -69,6 +69,7 @@ type NodeHeartbeat struct {
 	AgentVersion string    `json:"agent_version"`
 	Fingerprint  string    `json:"fingerprint"`
 	SyncBatchID  string    `json:"sync_batch_id"`
+	IsBackfilled bool      `json:"is_backfilled,omitempty"`
 }
 
 type HostSamplePayload struct {

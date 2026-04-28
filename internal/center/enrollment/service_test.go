@@ -348,6 +348,7 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 				AgentVersion: "v1.0.1",
 				Fingerprint:  "fp-3",
 				SyncBatchID:  "sync_789",
+				IsBackfilled: true,
 			},
 			{
 				ObservedAt:   secondObservedAt,
@@ -378,6 +379,9 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 	}
 	if repo.acceptedHeartbeatBatches[0][0].SyncBatchID != "sync_789" {
 		t.Fatalf("acceptedHeartbeatBatches[0][0].SyncBatchID = %q, want %q", repo.acceptedHeartbeatBatches[0][0].SyncBatchID, "sync_789")
+	}
+	if !repo.acceptedHeartbeatBatches[0][0].IsBackfilled {
+		t.Fatal("acceptedHeartbeatBatches[0][0].IsBackfilled = false, want true")
 	}
 	if repo.acceptedHeartbeatBatches[0][1].ObservedAt != secondObservedAt {
 		t.Fatalf("acceptedHeartbeatBatches[0][1].ObservedAt = %s, want %s", repo.acceptedHeartbeatBatches[0][1].ObservedAt.Format(time.RFC3339), secondObservedAt.Format(time.RFC3339))

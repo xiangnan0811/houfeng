@@ -170,7 +170,7 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","is_backfilled":true}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -227,6 +227,9 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 	if svc.syncBatch.Heartbeats[0].SyncBatchID != "sync_001" {
 		t.Fatalf("SyncBatchID = %q, want %q", svc.syncBatch.Heartbeats[0].SyncBatchID, "sync_001")
+	}
+	if !svc.syncBatch.Heartbeats[0].IsBackfilled {
+		t.Fatal("SyncBatch Heartbeats[0].IsBackfilled = false, want true")
 	}
 }
 

@@ -126,6 +126,7 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 			AgentVersion: "dev",
 			Fingerprint:  "fp-001",
 			SyncBatchID:  "batch-001",
+			IsBackfilled: true,
 		}},
 	}
 
@@ -152,6 +153,9 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 
 	if roundTrip.Heartbeats[0].Fingerprint != "fp-001" {
 		t.Fatalf("Fingerprint = %q, want %q", roundTrip.Heartbeats[0].Fingerprint, "fp-001")
+	}
+	if !roundTrip.Heartbeats[0].IsBackfilled {
+		t.Fatal("Heartbeats[0].IsBackfilled = false, want true")
 	}
 }
 

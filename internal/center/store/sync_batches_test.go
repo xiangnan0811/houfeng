@@ -185,12 +185,14 @@ type fakeSyncBatchTx struct {
 	execErrForSQLSubstring string
 	execErr                error
 	execSQL                []string
+	execArgs               [][]any
 	commitCalls            int
 	rollbackCalls          int
 }
 
-func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	f.execSQL = append(f.execSQL, sql)
+	f.execArgs = append(f.execArgs, append([]any(nil), args...))
 	if f.execErr != nil && strings.Contains(sql, f.execErrForSQLSubstring) {
 		return pgconn.CommandTag{}, f.execErr
 	}
@@ -248,6 +250,52 @@ func (f *fakeSyncBatchTx) Commit(context.Context) error {
 func (f *fakeSyncBatchTx) Rollback(context.Context) error {
 	f.rollbackCalls++
 	return nil
+}
+
+func TestPostgresSyncRepositoryPersistsBackfilledHeartbeatFlag(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		nodeBindingStatus: agentapi.BindingStatusBound,
+		nodeFingerprint:   "fp-001",
+		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
+		nodeLabels:        []string{"核心", "edge"},
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+		planRows: []fakeAgentPlanScan{{
+			scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "tg_001"
+				*(dest[1].(*string)) = "api.example.test"
+				port := 443
+				*(dest[2].(**int)) = &port
+				*(dest[3].(*string)) = "启用"
+				*(dest[4].(*string)) = "pb_001"
+				*(dest[5].(*string)) = agentapi.ProbeKindHTTP
+				*(dest[6].(*string)) = agentapi.FrequencyTier1m
+				*(dest[7].(*int)) = 5
+				*(dest[8].(*[]byte)) = []byte(`{"path":"/healthz"}`)
+				return nil
+			},
+		}},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	batch := testSyncBatch()
+	batch.Heartbeats[0].IsBackfilled = true
+
+	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	heartbeatArgs := tx.argsForSQL("insert into node_heartbeats")
+	if got, ok := heartbeatArgs[6].(bool); !ok || !got {
+		t.Fatalf("heartbeat is_backfilled arg = %#v, want true", heartbeatArgs[6])
+	}
 }
 
 func TestSyncBatchPlanReturnsAcceptedAtAndDerivedPlan(t *testing.T) {
@@ -319,4 +367,13 @@ func containsSQL(sqls []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func (f *fakeSyncBatchTx) argsForSQL(want string) []any {
+	for i, sql := range f.execSQL {
+		if strings.Contains(sql, want) {
+			return f.execArgs[i]
+		}
+	}
+	return nil
 }

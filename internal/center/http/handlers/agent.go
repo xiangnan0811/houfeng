@@ -211,6 +211,7 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 			AgentVersion: heartbeat.AgentVersion,
 			Fingerprint:  heartbeat.Fingerprint,
 			SyncBatchID:  heartbeat.SyncBatchID,
+			IsBackfilled: heartbeat.IsBackfilled,
 		})
 	}
 

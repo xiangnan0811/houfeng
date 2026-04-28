@@ -18,6 +18,7 @@ type HeartbeatPayload struct {
 	AgentVersion string
 	Fingerprint  string
 	SyncBatchID  string
+	IsBackfilled bool
 }
 
 type SyncInput struct {

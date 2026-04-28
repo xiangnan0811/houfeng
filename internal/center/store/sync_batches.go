@@ -201,7 +201,7 @@ func recordHeartbeatBatch(ctx context.Context, tx syncBatchTx, nodeID, bindingFi
 			write.AgentVersion,
 			write.Fingerprint,
 			write.SyncBatchID,
-			false,
+			write.IsBackfilled,
 		); err != nil {
 			return time.Time{}, fmt.Errorf("record heartbeat for node %q: %w", nodeID, err)
 		}
