@@ -15,8 +15,8 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 		t.Fatalf("Names() error = %v", err)
 	}
 
-	if len(names) < 9 {
-		t.Fatalf("len(Names()) = %d, want at least 9", len(names))
+	if len(names) < 10 {
+		t.Fatalf("len(Names()) = %d, want at least 10", len(names))
 	}
 
 	if names[0] != "0001_initial_schema.sql" {
@@ -45,6 +45,9 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 	if names[8] != "0008_add_retention_aggregates.sql" {
 		t.Fatalf("ninth migration = %q, want %q", names[8], "0008_add_retention_aggregates.sql")
+	}
+	if names[9] != "0009_add_observability_filter_indexes.sql" {
+		t.Fatalf("tenth migration = %q, want %q", names[9], "0009_add_observability_filter_indexes.sql")
 	}
 }
 
