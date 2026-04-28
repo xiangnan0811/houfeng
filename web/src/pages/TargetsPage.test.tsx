@@ -761,9 +761,82 @@ describe('TargetsPage', () => {
     })
     fireEvent.click(within(blogRow!).getByRole('button', { name: '保存标签' }))
 
-    await waitFor(() => expect(within(blogRow!).getByText('metadata failed')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(within(blogRow!).getByRole('alert')).toHaveTextContent('metadata failed'),
+    )
     expect(within(blogRow!).getByRole('button', { name: '保存标签' })).toBeInTheDocument()
     expect(within(cacheRow!).queryByText('metadata failed')).not.toBeInTheDocument()
+  })
+
+  it('blocks opening another row label editor while a metadata save is in flight', async () => {
+    const saveResponse = deferred<Response>()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({
+            target_id: 'tg_001',
+            name: 'Blog',
+            labels: ['公开'],
+            note: '现网入口',
+          }),
+          targetRecord({
+            target_id: 'tg_002',
+            name: 'Cache',
+            labels: ['内部'],
+            note: '',
+          }),
+        ]),
+      )
+      .mockReturnValueOnce(saveResponse.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const blogRow = screen.getByText('Blog').closest('article')
+    const cacheRow = screen.getByText('Cache').closest('article')
+    expect(blogRow).not.toBeNull()
+    expect(cacheRow).not.toBeNull()
+
+    fireEvent.click(within(blogRow!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(blogRow!).getByLabelText('标签'), {
+      target: { value: 'alpha, beta' },
+    })
+    fireEvent.click(within(blogRow!).getByRole('button', { name: '保存标签' }))
+
+    await waitFor(() =>
+      expect(within(cacheRow!).getByRole('button', { name: '快速编辑标签' })).toBeDisabled(),
+    )
+
+    fireEvent.click(within(cacheRow!).getByRole('button', { name: '快速编辑标签' }))
+    expect(within(cacheRow!).queryByLabelText('标签')).not.toBeInTheDocument()
+
+    await act(async () => {
+      saveResponse.resolve(
+        mockJSONResponse({
+          ...targetRecord({
+            target_id: 'tg_001',
+            name: 'Blog',
+            labels: ['alpha', 'beta'],
+            note: '现网入口',
+          }),
+          updated_at: '2026-04-27T10:00:00Z',
+        }),
+      )
+    })
+
+    await waitFor(() =>
+      expect(within(blogRow!).queryByRole('button', { name: '保存标签' })).not.toBeInTheDocument(),
+    )
+    expect(within(cacheRow!).getByRole('button', { name: '快速编辑标签' })).toBeEnabled()
   })
 
   it('cancels target quick label editing without sending PATCH', async () => {

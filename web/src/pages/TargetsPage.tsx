@@ -337,6 +337,7 @@ export function TargetsPage() {
   }
 
   function beginMetadataEdit(target: TargetRecord) {
+    if (metadataSavingTargetId) return
     setMetadataEditingTargetId(target.target_id)
     setMetadataLabelInput(target.labels.join(', '))
     setMetadataErrors((current) => {
@@ -615,7 +616,11 @@ export function TargetsPage() {
                 </p>
                 {metadataEditingTargetId !== target.target_id ? (
                   <p>
-                    <button type="button" onClick={() => beginMetadataEdit(target)}>
+                    <button
+                      type="button"
+                      disabled={metadataSavingTargetId !== null}
+                      onClick={() => beginMetadataEdit(target)}
+                    >
                       快速编辑标签
                     </button>
                   </p>
@@ -679,7 +684,11 @@ export function TargetsPage() {
                   />
                 ) : null}
                 {runtimeErrors[target.target_id] ? <p>{runtimeErrors[target.target_id]}</p> : null}
-                {metadataErrors[target.target_id] ? <p>{metadataErrors[target.target_id]}</p> : null}
+                {metadataErrors[target.target_id] ? (
+                  <p role="alert" aria-live="assertive">
+                    {metadataErrors[target.target_id]}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <div className="badge-row badge-row--wrap">

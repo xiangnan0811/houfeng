@@ -386,6 +386,11 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const metadataRequestRef = useRef(0)
 
   useEffect(() => {
+    currentRouteTargetIdRef.current = targetId ?? null
+    metadataRequestRef.current += 1
+  }, [targetId])
+
+  useEffect(() => {
     currentRequestedTargetIdRef.current = state.requestedTargetId
   }, [state.requestedTargetId])
 
@@ -557,8 +562,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       labels: target.labels.join(', '),
       note: target.note,
     })
-    metadataRequestRef.current += 1
-  }, [target])
+  }, [target?.target_id])
 
   function updateMetadataField<K extends keyof MetadataFormState>(
     field: K,
@@ -592,8 +596,20 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       }
       setState((current) => ({
         ...current,
-        target: updated,
+        target:
+          current.target?.target_id === actionTargetId
+            ? {
+                ...current.target,
+                labels: updated.labels,
+                note: updated.note,
+                updated_at: updated.updated_at,
+              }
+            : current.target,
       }))
+      setMetadataForm({
+        labels: updated.labels.join(', '),
+        note: updated.note,
+      })
       setMetadataEditing(false)
     } catch {
       if (
@@ -1070,7 +1086,11 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
               </div>
             </>
           )}
-          {metadataError ? <p>{metadataError}</p> : null}
+          {metadataError ? (
+            <p role="alert" aria-live="assertive">
+              {metadataError}
+            </p>
+          ) : null}
         </div>
       </DetailSection>
 

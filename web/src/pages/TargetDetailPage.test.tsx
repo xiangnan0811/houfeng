@@ -2539,12 +2539,15 @@ describe('TargetDetailPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
 
-    await waitFor(() => expect(screen.getByText('标签或备注更新失败')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('标签或备注更新失败'),
+    )
     expect(screen.getByDisplayValue('alpha, beta')).toBeInTheDocument()
   })
 
   it('ignores a stale metadata save response after switching to a different target route', async () => {
     const metadataAction = deferredResponse()
+    const targetTwoResponse = deferredResponse()
 
     vi.stubGlobal(
       'fetch',
@@ -2577,23 +2580,7 @@ describe('TargetDetailPage', () => {
         .mockResolvedValueOnce(mockJSONResponse([]))
         .mockResolvedValueOnce(mockJSONResponse([]))
         .mockImplementationOnce(() => metadataAction.promise)
-        .mockResolvedValueOnce(
-          mockJSONResponse({
-            target_id: 'tg_002',
-            name: 'Cache',
-            target_type: 'service',
-            host: 'cache.example.com',
-            execution_node_labels: ['edge'],
-            run_status: '暂停',
-            labels: ['内部'],
-            note: '缓存入口',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-            created_at: '2026-04-20T00:00:00Z',
-            updated_at: '2026-04-24T10:05:00Z',
-          }),
-        )
+        .mockImplementationOnce(() => targetTwoResponse.promise)
         .mockResolvedValueOnce(mockJSONResponse([]))
         .mockResolvedValueOnce(
           mockJSONResponse({ target_id: 'tg_002', latest_probe_observations: [] }),
@@ -2620,8 +2607,6 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
     fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
-
     metadataAction.resolve(
       mockJSONResponse({
         target_id: 'tg_001',
@@ -2643,9 +2628,139 @@ describe('TargetDetailPage', () => {
       }),
     )
 
+    targetTwoResponse.resolve(
+      mockJSONResponse({
+        target_id: 'tg_002',
+        name: 'Cache',
+        target_type: 'service',
+        host: 'cache.example.com',
+        execution_node_labels: ['edge'],
+        run_status: '暂停',
+        labels: ['内部'],
+        note: '缓存入口',
+        current_health_status: '正常',
+        current_active_incident_count: 0,
+        current_primary_issue_summary: '',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T10:05:00Z',
+      }),
+    )
+
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
     expect(screen.queryByText('新的备注')).not.toBeInTheDocument()
     expect(screen.getByText('缓存入口')).toBeInTheDocument()
+  })
+
+  it('preserves a successful metadata save across an unrelated target refresh', async () => {
+    const metadataAction = deferredResponse()
+    const runtimeAction = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: ['公开'],
+          note: '现网入口',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: '2026-04-24T08:30:00Z',
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          latest_probe_observations: [],
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockImplementationOnce(() => metadataAction.promise)
+      .mockImplementationOnce(() => runtimeAction.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    fireEvent.change(screen.getByLabelText('标签'), {
+      target: { value: 'alpha, beta' },
+    })
+    fireEvent.change(screen.getByLabelText('备注'), {
+      target: { value: '新的备注' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
+
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7))
+
+    runtimeAction.resolve(
+      mockJSONResponse({
+        target_id: 'tg_001',
+        name: 'Blog',
+        target_type: 'service',
+        host: 'blog.example.com',
+        base_port: 443,
+        execution_node_labels: ['edge'],
+        run_status: '维护中',
+        labels: ['公开'],
+        note: '现网入口',
+        current_health_status: '正常',
+        current_active_incident_count: 0,
+        last_success_at: '2026-04-24T09:00:00Z',
+        last_failure_at: '2026-04-24T08:30:00Z',
+        current_primary_issue_summary: '',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T09:10:00Z',
+      }),
+    )
+
+    await waitFor(() => expect(screen.getByText('维护中')).toBeInTheDocument())
+
+    metadataAction.resolve(
+      mockJSONResponse({
+        target_id: 'tg_001',
+        name: 'Blog',
+        target_type: 'service',
+        host: 'blog.example.com',
+        base_port: 443,
+        execution_node_labels: ['edge'],
+        run_status: '启用',
+        labels: ['alpha', 'beta'],
+        note: '新的备注',
+        current_health_status: '正常',
+        current_active_incident_count: 0,
+        last_success_at: '2026-04-24T09:00:00Z',
+        last_failure_at: '2026-04-24T08:30:00Z',
+        current_primary_issue_summary: '',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-24T09:12:00Z',
+      }),
+    )
+
+    await waitFor(() => expect(screen.getByText('alpha · beta')).toBeInTheDocument())
+    expect(screen.getByText('新的备注')).toBeInTheDocument()
+    expect(screen.getByText('维护中')).toBeInTheDocument()
+    expect(screen.queryByText('现网入口')).not.toBeInTheDocument()
   })
 
 })
