@@ -320,7 +320,9 @@ function summarizeRecentLatencyTrends(observations: ProbeObservation[]) {
       nodeIds: Set<string>
       totalLatency: number
       maxLatency: number
+      latestLatency: number
       newestObservedAt: string
+      oldestObservedAt: string
     }
   >()
 
@@ -335,6 +337,10 @@ function summarizeRecentLatencyTrends(observations: ProbeObservation[]) {
       current.maxLatency = Math.max(current.maxLatency, observation.latency_ms)
       if (new Date(observation.observed_at).getTime() > new Date(current.newestObservedAt).getTime()) {
         current.newestObservedAt = observation.observed_at
+        current.latestLatency = observation.latency_ms
+      }
+      if (new Date(observation.observed_at).getTime() < new Date(current.oldestObservedAt).getTime()) {
+        current.oldestObservedAt = observation.observed_at
       }
       continue
     }
@@ -345,7 +351,9 @@ function summarizeRecentLatencyTrends(observations: ProbeObservation[]) {
       nodeIds: new Set([observation.node_id]),
       totalLatency: observation.latency_ms,
       maxLatency: observation.latency_ms,
+      latestLatency: observation.latency_ms,
       newestObservedAt: observation.observed_at,
+      oldestObservedAt: observation.observed_at,
     })
   }
 
@@ -357,7 +365,9 @@ function summarizeRecentLatencyTrends(observations: ProbeObservation[]) {
       distinctNodeCount: summary.nodeIds.size,
       averageLatency: summary.totalLatency / summary.count,
       maxLatency: summary.maxLatency,
+      latestLatency: summary.latestLatency,
       newestObservedAt: summary.newestObservedAt,
+      oldestObservedAt: summary.oldestObservedAt,
     }))
     .sort(
       (left, right) =>
@@ -1247,7 +1257,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       <DetailSection
         eyebrow="Recent Latency"
         title="近期延迟趋势"
-        aside={recentLatencyTrends.length > 0 ? `样本更新到：${formatDateTime(recentLatencyTrends[0].newestObservedAt)}` : '近 24h 暂无延迟样本'}
+        aside={recentLatencyTrends.length > 0 ? `最近样本更新到：${formatDateTime(recentLatencyTrends[0].newestObservedAt)}` : '暂无可用延迟样本'}
       >
         {recentLatencyTrends.length > 0 ? (
           <div className="probe-list">
@@ -1272,8 +1282,19 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                       <dd>{formatLatency(Math.round(trend.averageLatency))}</dd>
                     </div>
                     <div>
+                      <dt>最新延迟</dt>
+                      <dd>{formatLatency(trend.latestLatency)}</dd>
+                    </div>
+                    <div>
                       <dt>最大延迟</dt>
                       <dd>{formatLatency(trend.maxLatency)}</dd>
+                    </div>
+                    <div>
+                      <dt>样本窗口</dt>
+                      <dd>
+                        {formatDateTime(trend.oldestObservedAt)} →{' '}
+                        {formatDateTime(trend.newestObservedAt)}
+                      </dd>
                     </div>
                     <div>
                       <dt>观测次数</dt>
@@ -1294,8 +1315,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           </div>
         ) : (
           <div className="empty-state">
-            <h3>近 24h 暂无延迟样本</h3>
-            <p>近期延迟趋势仅统计成功且带 latency 的 recent_probe_observations。</p>
+            <h3>暂无可用延迟样本</h3>
+            <p>近期延迟趋势仅统计已返回的成功且带 latency 的 recent_probe_observations。</p>
           </div>
         )}
       </DetailSection>

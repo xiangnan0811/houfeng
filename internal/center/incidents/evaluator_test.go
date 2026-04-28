@@ -446,6 +446,19 @@ func TestEvaluateNodeTrendDegradationSkipsSuppressedStartsAndRecoversConservativ
 		t.Fatalf("Transition = %q, want %q", suppressed.Transition, TransitionSkipped)
 	}
 
+	latestSuppressed := EvaluateNodeTrendDegradation(nil, "nd_001",
+		[]NodeResourceSample{
+			{ObservedAt: now, NormalizedLoad5: 0.7, CPUIOWaitPct: 2, IsBackfilled: true},
+			{ObservedAt: now.Add(-10 * time.Minute), NormalizedLoad5: 2.0, CPUIOWaitPct: 12},
+			{ObservedAt: now.Add(-20 * time.Minute), NormalizedLoad5: 2.0, CPUIOWaitPct: 12},
+			{ObservedAt: now.Add(-30 * time.Minute), NormalizedLoad5: 2.0, CPUIOWaitPct: 12},
+		},
+		baselines,
+	)
+	if latestSuppressed.Transition != TransitionSkipped {
+		t.Fatalf("Transition = %q, want %q when newest trend sample is suppressed", latestSuppressed.Transition, TransitionSkipped)
+	}
+
 	insufficientSafe := EvaluateNodeTrendDegradation(previous, "nd_001",
 		nodeTrendSamples(now, []float64{0.7, 0.8}, []float64{2, 2}, []float64{0.4, 0.4}),
 		baselines,
@@ -457,8 +470,16 @@ func TestEvaluateNodeTrendDegradationSkipsSuppressedStartsAndRecoversConservativ
 		t.Fatalf("Current = %#v, want previous incident preserved", insufficientSafe.Current)
 	}
 
-	recovered := EvaluateNodeTrendDegradation(previous, "nd_001",
+	briefSafe := EvaluateNodeTrendDegradation(previous, "nd_001",
 		nodeTrendSamples(now.Add(time.Hour), []float64{0.7, 0.8, 0.9}, []float64{2, 2, 2}, []float64{0.4, 0.4, 0.4}),
+		baselines,
+	)
+	if briefSafe.Transition != TransitionNoop {
+		t.Fatalf("Transition = %q, want %q for a short safe trend window", briefSafe.Transition, TransitionNoop)
+	}
+
+	recovered := EvaluateNodeTrendDegradation(previous, "nd_001",
+		nodeTrendSamples(now.Add(time.Hour), []float64{0.7, 0.8, 0.9, 0.8}, []float64{2, 2, 2, 2}, []float64{0.4, 0.4, 0.4, 0.4}),
 		baselines,
 	)
 	if recovered.Transition != TransitionRecovered {
@@ -495,7 +516,10 @@ func TestEvaluateTargetLatencyTrendStartsAndEscalatesWithoutCritical(t *testing.
 		[]runtimefacts.ProbeObservation{
 			targetLatencyObservation(now.Add(time.Hour), "nd_001", "pb_http_1", 360),
 			targetLatencyObservation(now.Add(50*time.Minute), "nd_001", "pb_http_1", 340),
-			targetLatencyObservation(now.Add(40*time.Minute), "nd_002", "pb_http_1", 350),
+			targetLatencyObservation(now.Add(40*time.Minute), "nd_001", "pb_http_1", 350),
+			targetLatencyObservation(now.Add(time.Hour), "nd_002", "pb_http_1", 365),
+			targetLatencyObservation(now.Add(50*time.Minute), "nd_002", "pb_http_1", 345),
+			targetLatencyObservation(now.Add(40*time.Minute), "nd_002", "pb_http_1", 355),
 		},
 		baselines,
 	)
@@ -507,6 +531,18 @@ func TestEvaluateTargetLatencyTrendStartsAndEscalatesWithoutCritical(t *testing.
 	}
 	if escalated.Current.Severity == SeverityCritical {
 		t.Fatal("target latency trend must not emit critical severity")
+	}
+
+	mixedContributors := EvaluateTargetLatencyTrendDegradationAcrossSeries(nil, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			targetLatencyObservation(now.Add(2*time.Hour), "nd_001", "pb_http_1", 360),
+			targetLatencyObservation(now.Add(110*time.Minute), "nd_002", "pb_http_1", 340),
+			targetLatencyObservation(now.Add(100*time.Minute), "nd_003", "pb_http_1", 350),
+		},
+		baselines,
+	)
+	if mixedContributors.Current == nil || mixedContributors.Current.Severity != SeverityNotice {
+		t.Fatalf("Current = %#v, want notice when one degraded aggregate lacks multiple degraded node perspectives", mixedContributors.Current)
 	}
 }
 
@@ -528,6 +564,19 @@ func TestEvaluateTargetLatencyTrendSkipsSuppressedStartsAndRecoversConservativel
 		t.Fatalf("Transition = %q, want %q", suppressed.Transition, TransitionSkipped)
 	}
 
+	latestSuppressed := EvaluateTargetLatencyTrendDegradationAcrossSeries(nil, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			{ObservedAt: now, NodeID: "nd_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: intPtr(120), MaintenanceContext: true},
+			targetLatencyObservation(now.Add(-10*time.Minute), "nd_001", "pb_http_1", 330),
+			targetLatencyObservation(now.Add(-20*time.Minute), "nd_001", "pb_http_1", 340),
+			targetLatencyObservation(now.Add(-30*time.Minute), "nd_001", "pb_http_1", 350),
+		},
+		baselines,
+	)
+	if latestSuppressed.Transition != TransitionSkipped {
+		t.Fatalf("Transition = %q, want %q when newest latency observation is suppressed", latestSuppressed.Transition, TransitionSkipped)
+	}
+
 	insufficientSafe := EvaluateTargetLatencyTrendDegradationAcrossSeries(previous, "tg_001",
 		[]runtimefacts.ProbeObservation{
 			targetLatencyObservation(now, "nd_001", "pb_http_1", 120),
@@ -542,11 +591,24 @@ func TestEvaluateTargetLatencyTrendSkipsSuppressedStartsAndRecoversConservativel
 		t.Fatalf("Current = %#v, want previous incident preserved", insufficientSafe.Current)
 	}
 
+	briefSafe := EvaluateTargetLatencyTrendDegradationAcrossSeries(previous, "tg_001",
+		[]runtimefacts.ProbeObservation{
+			targetLatencyObservation(now.Add(time.Hour), "nd_001", "pb_http_1", 120),
+			targetLatencyObservation(now.Add(50*time.Minute), "nd_001", "pb_http_1", 125),
+			targetLatencyObservation(now.Add(40*time.Minute), "nd_001", "pb_http_1", 130),
+		},
+		baselines,
+	)
+	if briefSafe.Transition != TransitionNoop {
+		t.Fatalf("Transition = %q, want %q for a short safe latency window", briefSafe.Transition, TransitionNoop)
+	}
+
 	recovered := EvaluateTargetLatencyTrendDegradationAcrossSeries(previous, "tg_001",
 		[]runtimefacts.ProbeObservation{
 			targetLatencyObservation(now.Add(time.Hour), "nd_001", "pb_http_1", 120),
 			targetLatencyObservation(now.Add(50*time.Minute), "nd_001", "pb_http_1", 125),
 			targetLatencyObservation(now.Add(40*time.Minute), "nd_001", "pb_http_1", 130),
+			targetLatencyObservation(now.Add(30*time.Minute), "nd_001", "pb_http_1", 124),
 		},
 		baselines,
 	)

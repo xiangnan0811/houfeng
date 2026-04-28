@@ -144,14 +144,14 @@ func EvaluateNodeTrendDegradation(previous *IncidentRecord, nodeID string, sampl
 	if len(samples) == 0 {
 		return noop(previous)
 	}
+	if samples[0].MaintenanceContext || samples[0].IsBackfilled {
+		return skip(previous)
+	}
 	usableCurrent := unsuppressedNodeResourceSamples(samples)
 	usableBaselines := usableNodeHostDailyAggregates(baselines)
 	if len(usableCurrent) < 3 || len(usableBaselines) == 0 || !spansNodeResourceWindow(usableCurrent, time.Second) {
 		if previous != nil {
 			return noop(previous)
-		}
-		if hasSuppressedNodeTrendSamples(samples) {
-			return skip(previous)
 		}
 		return EvaluationResult{Transition: TransitionNoop}
 	}
@@ -173,6 +173,9 @@ func EvaluateNodeTrendDegradation(previous *IncidentRecord, nodeID string, sampl
 		degradedMetrics = append(degradedMetrics, "steal")
 	}
 	if len(degradedMetrics) == 0 {
+		if previous != nil && !spansNodeResourceWindow(usableCurrent, 30*time.Minute) {
+			return noop(previous)
+		}
 		return recoverIfNeeded(previous, referenceTime, "节点趋势已恢复到安全区间")
 	}
 
@@ -188,14 +191,14 @@ func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord,
 	if len(observations) == 0 {
 		return noop(previous)
 	}
+	if observations[0].MaintenanceContext || observations[0].IsBackfilled {
+		return skip(previous)
+	}
 	usableBaselines := weightedTargetLatencyBaselines(baselines)
 	series := usableLatencyObservationSeries(observations)
 	if len(usableBaselines) == 0 || len(series) == 0 {
 		if previous != nil {
 			return noop(previous)
-		}
-		if hasSuppressedLatencyTrendObservations(observations) {
-			return skip(previous)
 		}
 		return EvaluationResult{Transition: TransitionNoop}
 	}
@@ -211,21 +214,22 @@ func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord,
 		}
 		comparableSeries++
 		currentAvg := averageProbeLatencyMS(currentSeries)
-		if !targetLatencySeriesDegraded(currentAvg, baseline) {
+		degradedNodesForProbe := degradedTargetLatencyNodes(currentSeries, baseline)
+		if !targetLatencySeriesDegraded(currentAvg, baseline) && len(degradedNodesForProbe) == 0 {
 			continue
 		}
 		degradedProbeItems = append(degradedProbeItems, probeItemID)
-		for _, observation := range currentSeries {
-			if observation.NodeID == "" {
-				continue
-			}
-			degradedNodes[observation.NodeID] = struct{}{}
+		for _, nodeID := range degradedNodesForProbe {
+			degradedNodes[nodeID] = struct{}{}
 		}
 	}
 	if comparableSeries == 0 {
 		return noop(previous)
 	}
 	if len(degradedProbeItems) == 0 {
+		if previous != nil && !hasSustainedTargetLatencyRecoveryEvidence(series, usableBaselines, 30*time.Minute) {
+			return noop(previous)
+		}
 		return recoverIfNeeded(previous, referenceTime, "目标延迟趋势已恢复到安全区间")
 	}
 
@@ -638,15 +642,6 @@ func nodeTrendMetricDegraded(current, baseline, absoluteFloor, absoluteDelta flo
 	return current >= baseline+absoluteDelta
 }
 
-func hasSuppressedNodeTrendSamples(samples []NodeResourceSample) bool {
-	for _, sample := range samples {
-		if sample.MaintenanceContext || sample.IsBackfilled {
-			return true
-		}
-	}
-	return false
-}
-
 func weightedTargetLatencyBaselines(baselines []TargetProbeDailyAggregate) map[string]float64 {
 	type accumulator struct {
 		total  float64
@@ -674,6 +669,48 @@ func weightedTargetLatencyBaselines(baselines []TargetProbeDailyAggregate) map[s
 		weighted[probeItemID] = acc.total / acc.weight
 	}
 	return weighted
+}
+
+func degradedTargetLatencyNodes(observations []runtimefacts.ProbeObservation, baselineAvg float64) []string {
+	byNode := map[string][]runtimefacts.ProbeObservation{}
+	nodeIDs := make([]string, 0)
+	for _, observation := range observations {
+		if observation.NodeID == "" {
+			continue
+		}
+		if _, ok := byNode[observation.NodeID]; !ok {
+			nodeIDs = append(nodeIDs, observation.NodeID)
+		}
+		byNode[observation.NodeID] = append(byNode[observation.NodeID], observation)
+	}
+	degraded := make([]string, 0, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		series := byNode[nodeID]
+		if len(series) < 3 {
+			continue
+		}
+		if targetLatencySeriesDegraded(averageProbeLatencyMS(series), baselineAvg) {
+			degraded = append(degraded, nodeID)
+		}
+	}
+	return degraded
+}
+
+func hasSustainedTargetLatencyRecoveryEvidence(series map[string][]runtimefacts.ProbeObservation, baselines map[string]float64, window time.Duration) bool {
+	for probeItemID, observations := range series {
+		baseline, ok := baselines[probeItemID]
+		if !ok || len(observations) < 3 {
+			continue
+		}
+		if !spansProbeObservationWindow(observations, window) {
+			continue
+		}
+		if targetLatencySeriesDegraded(averageProbeLatencyMS(observations), baseline) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func usableLatencyObservationSeries(observations []runtimefacts.ProbeObservation) map[string][]runtimefacts.ProbeObservation {
@@ -711,15 +748,6 @@ func targetLatencySeriesDegraded(currentAvg, baselineAvg float64) bool {
 	return currentAvg >= baselineAvg+100 || currentAvg >= 250
 }
 
-func hasSuppressedLatencyTrendObservations(observations []runtimefacts.ProbeObservation) bool {
-	for _, observation := range observations {
-		if observation.MaintenanceContext || observation.IsBackfilled {
-			return true
-		}
-	}
-	return false
-}
-
 func joinMetricLabels(parts []string) string {
 	sorted := append([]string(nil), parts...)
 	sort.Strings(sorted)
@@ -740,6 +768,15 @@ func spansNodeResourceWindow(samples []NodeResourceSample, window time.Duration)
 	}
 	newest := samples[0].ObservedAt
 	oldest := samples[len(samples)-1].ObservedAt
+	return newest.Sub(oldest) >= window
+}
+
+func spansProbeObservationWindow(observations []runtimefacts.ProbeObservation, window time.Duration) bool {
+	if len(observations) == 0 {
+		return false
+	}
+	newest := observations[0].ObservedAt
+	oldest := observations[len(observations)-1].ObservedAt
 	return newest.Sub(oldest) >= window
 }
 

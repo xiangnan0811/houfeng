@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { TargetDetailPage } from './TargetDetailPage'
+import { formatDateTime } from '../lib/format'
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -314,6 +315,14 @@ describe('TargetDetailPage', () => {
     expect(screen.getByText('pb_http')).toBeInTheDocument()
     expect(screen.getByText('平均延迟')).toBeInTheDocument()
     expect(screen.getByText('100 ms')).toBeInTheDocument()
+    expect(screen.getByText('最新延迟')).toBeInTheDocument()
+    expect(screen.getAllByText('120 ms').length).toBeGreaterThan(0)
+    expect(screen.getByText('样本窗口')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        `${formatDateTime('2026-04-24T09:05:00Z')} → ${formatDateTime('2026-04-24T09:10:00Z')}`,
+      ),
+    ).toBeInTheDocument()
     expect(screen.getByText('观测次数')).toBeInTheDocument()
     expect(screen.getByText('2 次观测')).toBeInTheDocument()
   })
@@ -365,7 +374,7 @@ describe('TargetDetailPage', () => {
     )
 
     expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '近 24h 暂无延迟样本' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '暂无可用延迟样本' })).toBeInTheDocument()
   })
 
   it('renders probe, incident, and event empty states when the target has no related records', async () => {
