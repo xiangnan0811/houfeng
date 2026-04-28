@@ -114,8 +114,11 @@ describe('SettingsPage', () => {
       ),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('当前仅保存保留策略，尚未自动执行清理或聚合任务。'),
+      screen.getByText('中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础。'),
     ).toBeInTheDocument()
+    expect(
+      screen.queryByText('当前仅保存保留策略，尚未自动执行清理或聚合任务。'),
+    ).not.toBeInTheDocument()
   })
 
   it('keeps the runtime management toggle checked when persisted settings explicitly disable Telegram delivery', async () => {

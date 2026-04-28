@@ -808,7 +808,7 @@ export function SettingsPage() {
             }
           />
         </div>
-        <SectionIntro>当前仅保存保留策略，尚未自动执行清理或聚合任务。</SectionIntro>
+        <SectionIntro>中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础。</SectionIntro>
       </DetailSection>
 
       {state.saveError ? <section className="page-panel">{state.saveError}</section> : null}
