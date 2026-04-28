@@ -454,6 +454,68 @@ describe('TargetDetailPage', () => {
     })
   })
 
+  it('keeps HTTP and TCP create-mode frequency defaults at 5m when switching probe kinds', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_002',
+            name: 'Cache',
+            target_type: 'service',
+            host: 'cache.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({ target_id: 'tg_002', latest_probe_observations: [] }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_002']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
+    expect(screen.getByLabelText('频率档位')).toHaveValue('5m')
+
+    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+      target: { value: 'tls' },
+    })
+    expect(screen.getByLabelText('频率档位')).toHaveValue('6h')
+
+    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+      target: { value: 'http' },
+    })
+    expect(screen.getByLabelText('频率档位')).toHaveValue('5m')
+
+    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+      target: { value: 'tcp' },
+    })
+    expect(screen.getByLabelText('频率档位')).toHaveValue('5m')
+  })
+
   it('keeps ProbeItem creation validation errors inside the probe panel', async () => {
     const fetchMock = vi
       .fn()
@@ -616,6 +678,81 @@ describe('TargetDetailPage', () => {
         },
       }),
     })
+  })
+
+  it('preserves the stored frequency tier in edit mode when the probe kind changes', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_001',
+            name: 'Blog',
+            target_type: 'service',
+            host: 'blog.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              probe_item_id: 'pb_001',
+              target_id: 'tg_001',
+              probe_kind: 'http',
+              enabled: true,
+              frequency_tier: '15m',
+              timeout_seconds: 5,
+              config: {
+                scheme: 'https',
+                path: '/healthz',
+                method: 'GET',
+                expected_status_range: [200, 299],
+              },
+              created_at: '2026-04-21T00:00:00Z',
+              updated_at: '2026-04-21T00:00:00Z',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
+
+    fireEvent.click(probeActionButton('编辑'))
+    expect(screen.getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByLabelText('频率档位')).toHaveValue('15m')
+
+    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+      target: { value: 'tls' },
+    })
+    expect(screen.getByLabelText('频率档位')).toHaveValue('15m')
+
+    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+      target: { value: 'tcp' },
+    })
+    expect(screen.getByLabelText('频率档位')).toHaveValue('15m')
   })
 
   it('blocks edit when an existing ProbeItem contains unsupported config fields', async () => {
