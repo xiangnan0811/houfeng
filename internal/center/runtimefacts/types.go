@@ -54,13 +54,15 @@ type ProbeObservation struct {
 }
 
 type NodeRuntimeFacts struct {
-	NodeID           string      `json:"node_id"`
-	LatestHostSample *HostSample `json:"latest_host_sample"`
+	NodeID            string       `json:"node_id"`
+	LatestHostSample  *HostSample  `json:"latest_host_sample"`
+	RecentHostSamples []HostSample `json:"recent_host_samples"`
 }
 
 type TargetRuntimeFacts struct {
 	TargetID                string             `json:"target_id"`
 	LatestProbeObservations []ProbeObservation `json:"latest_probe_observations"`
+	RecentProbeObservations []ProbeObservation `json:"recent_probe_observations"`
 }
 
 type Repository interface {
