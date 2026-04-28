@@ -177,7 +177,7 @@ describe('SettingsPage', () => {
     await waitFor(
       () =>
         expect(
-          screen.getByText('设置已保存。部分设置当前仅作为持久化策略保存，不会立即影响运行时。'),
+          screen.getByText('设置已保存。保留策略会由中心后台执行；仍仅持久化保存的策略不会立即影响运行时。'),
         ).toBeInTheDocument(),
     )
 
@@ -253,7 +253,7 @@ describe('SettingsPage', () => {
     await waitFor(
       () =>
         expect(
-          screen.getByText('设置已保存。部分设置当前仅作为持久化策略保存，不会立即影响运行时。'),
+          screen.getByText('设置已保存。保留策略会由中心后台执行；仍仅持久化保存的策略不会立即影响运行时。'),
         ).toBeInTheDocument(),
     )
 
@@ -326,7 +326,7 @@ describe('SettingsPage', () => {
     await waitFor(
       () =>
         expect(
-          screen.getByText('设置已保存。部分设置当前仅作为持久化策略保存，不会立即影响运行时。'),
+          screen.getByText('设置已保存。保留策略会由中心后台执行；仍仅持久化保存的策略不会立即影响运行时。'),
         ).toBeInTheDocument(),
     )
 

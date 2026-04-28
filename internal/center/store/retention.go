@@ -33,7 +33,7 @@ func NewPostgresRetentionRepository(db *pgxpool.Pool) *PostgresRetentionReposito
 var _ retention.Repository = (*PostgresRetentionRepository)(nil)
 
 func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy retention.Policy, now time.Time) (retention.Result, error) {
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		return retention.Result{}, fmt.Errorf("begin retention transaction: %w", err)
 	}

@@ -49,6 +49,27 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 	}
 }
 
+func TestPostgresRetentionRepositoryUsesRepeatableReadTransaction(t *testing.T) {
+	t.Parallel()
+	tx := &fakeRetentionTx{}
+	var options pgx.TxOptions
+	repo := &PostgresRetentionRepository{
+		beginTx: func(_ context.Context, opts pgx.TxOptions) (retentionTx, error) {
+			options = opts
+			return tx, nil
+		},
+	}
+
+	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ApplyRetention() error = %v", err)
+	}
+
+	if options.IsoLevel != pgx.RepeatableRead {
+		t.Fatalf("transaction isolation = %q, want %q", options.IsoLevel, pgx.RepeatableRead)
+	}
+}
+
 func TestPostgresRetentionRepositoryUsesExpectedCutoffs(t *testing.T) {
 	t.Parallel()
 	tx := &fakeRetentionTx{}
