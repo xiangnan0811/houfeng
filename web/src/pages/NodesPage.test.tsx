@@ -577,7 +577,7 @@ describe('NodesPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
     )
-    expect(screen.getByRole('button', { name: '恢复监控' })).toHaveFocus()
+    await waitFor(() => expect(screen.getByRole('button', { name: '恢复监控' })).toHaveFocus())
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
