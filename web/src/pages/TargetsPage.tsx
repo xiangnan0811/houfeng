@@ -173,6 +173,23 @@ function focusRestoreActionAfterSuccess(action: TargetRuntimeAction): TargetRunt
   }
 }
 
+function mergeRuntimeTargetRecord(current: TargetRecord, updated: TargetRecord): TargetRecord {
+  return {
+    ...updated,
+    labels: current.labels,
+    note: current.note,
+  }
+}
+
+function mergeMetadataTargetRecord(current: TargetRecord, updated: TargetRecord): TargetRecord {
+  return {
+    ...current,
+    labels: updated.labels,
+    note: updated.note,
+    updated_at: updated.updated_at,
+  }
+}
+
 export function TargetsPage() {
   const navigate = useNavigate()
   const mountedRef = useRef(false)
@@ -320,7 +337,9 @@ export function TargetsPage() {
                   ? await archiveTarget(target.target_id)
                   : await restoreTargetToPaused(target.target_id)
       setTargets((current) =>
-        current.map((item) => (item.target_id === updated.target_id ? updated : item)),
+        current.map((item) =>
+          item.target_id === updated.target_id ? mergeRuntimeTargetRecord(item, updated) : item,
+        ),
       )
       queueFocusRestore(updated.target_id, focusRestoreActionAfterSuccess(action))
       setPendingConfirmation((current) =>
@@ -375,7 +394,9 @@ export function TargetsPage() {
         note: target.note,
       })
       setTargets((current) =>
-        current.map((item) => (item.target_id === updated.target_id ? updated : item)),
+        current.map((item) =>
+          item.target_id === updated.target_id ? mergeMetadataTargetRecord(item, updated) : item,
+        ),
       )
       setMetadataEditingTargetId((current) => (current === target.target_id ? null : current))
       setMetadataLabelInput('')

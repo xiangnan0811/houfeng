@@ -839,6 +839,170 @@ describe('TargetsPage', () => {
     expect(within(cacheRow!).getByRole('button', { name: '快速编辑标签' })).toBeEnabled()
   })
 
+  it('preserves saved labels when a later runtime response returns stale metadata', async () => {
+    const metadataResponse = deferred<Response>()
+    const runtimeResponse = deferred<Response>()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({
+            target_id: 'tg_overlap',
+            name: 'Blog',
+            run_status: '启用',
+            labels: ['公开'],
+            note: '现网入口',
+          }),
+        ]),
+      )
+      .mockImplementationOnce(() => metadataResponse.promise)
+      .mockImplementationOnce(() => runtimeResponse.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const row = screen.getByText('Blog').closest('article')
+    expect(row).not.toBeNull()
+
+    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(row!).getByLabelText('标签'), {
+      target: { value: 'alpha, beta' },
+    })
+    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(within(row!).getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+
+    await act(async () => {
+      metadataResponse.resolve(
+        mockJSONResponse(
+          targetRecord({
+            target_id: 'tg_overlap',
+            name: 'Blog',
+            run_status: '启用',
+            labels: ['alpha', 'beta'],
+            note: '现网入口',
+            updated_at: '2026-04-27T10:00:00Z',
+          }),
+        ),
+      )
+    })
+
+    await waitFor(() => expect(within(row!).getByText('标签：alpha · beta')).toBeInTheDocument())
+
+    await act(async () => {
+      runtimeResponse.resolve(
+        mockJSONResponse(
+          targetRecord({
+            target_id: 'tg_overlap',
+            name: 'Blog',
+            run_status: '维护中',
+            labels: ['公开'],
+            note: '过期备注',
+            updated_at: '2026-04-27T10:05:00Z',
+          }),
+        ),
+      )
+    })
+
+    await waitFor(() => expect(within(row!).getByText('维护中')).toBeInTheDocument())
+    expect(within(row!).getByText('标签：alpha · beta')).toBeInTheDocument()
+    expect(within(row!).queryByText('标签：公开')).not.toBeInTheDocument()
+  })
+
+  it('preserves a newer runtime status when a later metadata response returns stale runtime fields', async () => {
+    const metadataResponse = deferred<Response>()
+    const runtimeResponse = deferred<Response>()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({
+            target_id: 'tg_overlap',
+            name: 'Blog',
+            run_status: '启用',
+            labels: ['公开'],
+            note: '现网入口',
+          }),
+        ]),
+      )
+      .mockImplementationOnce(() => metadataResponse.promise)
+      .mockImplementationOnce(() => runtimeResponse.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const row = screen.getByText('Blog').closest('article')
+    expect(row).not.toBeNull()
+
+    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(row!).getByLabelText('标签'), {
+      target: { value: 'alpha, beta' },
+    })
+    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(within(row!).getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+
+    await act(async () => {
+      runtimeResponse.resolve(
+        mockJSONResponse(
+          targetRecord({
+            target_id: 'tg_overlap',
+            name: 'Blog',
+            run_status: '维护中',
+            labels: ['公开'],
+            note: '现网入口',
+            updated_at: '2026-04-27T10:05:00Z',
+          }),
+        ),
+      )
+    })
+
+    await waitFor(() => expect(within(row!).getByText('维护中')).toBeInTheDocument())
+
+    await act(async () => {
+      metadataResponse.resolve(
+        mockJSONResponse(
+          targetRecord({
+            target_id: 'tg_overlap',
+            name: 'Blog',
+            run_status: '启用',
+            labels: ['alpha', 'beta'],
+            note: '现网入口',
+            updated_at: '2026-04-27T10:10:00Z',
+          }),
+        ),
+      )
+    })
+
+    await waitFor(() => expect(within(row!).getByText('标签：alpha · beta')).toBeInTheDocument())
+    expect(within(row!).getByText('维护中')).toBeInTheDocument()
+    expect(within(row!).queryByText('启用')).not.toBeInTheDocument()
+  })
+
   it('cancels target quick label editing without sending PATCH', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       mockJSONResponse([

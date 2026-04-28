@@ -327,6 +327,14 @@ function targetRuntimeActions(
   return []
 }
 
+function mergeRuntimeTargetRecord(current: TargetRecord, updated: TargetRecord): TargetRecord {
+  return {
+    ...updated,
+    labels: current.labels,
+    note: current.note,
+  }
+}
+
 export function TargetDetailPage() {
   const { targetId } = useParams()
   return <TargetDetailPageContent key={targetId ?? 'missing-target'} targetId={targetId} />
@@ -477,6 +485,13 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           probeItems,
           runtimeFacts,
         }))
+        setMetadataEditing(false)
+        setMetadataSubmitting(false)
+        setMetadataError(null)
+        setMetadataForm({
+          labels: target.labels.join(', '),
+          note: target.note,
+        })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -552,17 +567,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const eventsError = hasCurrentActivity ? state.eventsError : null
   const runtimeConfirmationActive = pendingRuntimeConfirmation !== null
   const probeConfirmationActive = pendingProbeConfirmation !== null
-
-  useEffect(() => {
-    if (!target) return
-    setMetadataEditing(false)
-    setMetadataSubmitting(false)
-    setMetadataError(null)
-    setMetadataForm({
-      labels: target.labels.join(', '),
-      note: target.note,
-    })
-  }, [target?.target_id])
 
   function updateMetadataField<K extends keyof MetadataFormState>(
     field: K,
@@ -668,7 +672,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       }
       setState((current) => ({
         ...current,
-        target: updated,
+        target:
+          current.target?.target_id === actionTargetId
+            ? mergeRuntimeTargetRecord(current.target, updated)
+            : current.target,
       }))
       pendingRuntimeFocusRestoreRef.current = focusRestoreActionAfterSuccess(action)
       setPendingRuntimeConfirmation((current) => (current?.action === action ? null : current))
