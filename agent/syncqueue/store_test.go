@@ -174,6 +174,83 @@ func TestFileStoreSerializesConcurrentEnqueues(t *testing.T) {
 	}
 }
 
+func TestFileStoreSerializesMutatorsAcrossInstances(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "sync-buffer.json")
+	ctx := context.Background()
+	first := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 100, MaxAge: time.Hour})
+	second := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 100, MaxAge: time.Hour})
+
+	var deleteIDs []string
+	var markIDs []string
+	for i := 0; i < 40; i++ {
+		id, err := first.Enqueue(ctx, syncRequest(fmt.Sprintf("seed_%03d", i), false))
+		if err != nil {
+			t.Fatalf("seed Enqueue(%d) error = %v", i, err)
+		}
+		if i%2 == 0 {
+			deleteIDs = append(deleteIDs, id)
+		} else {
+			markIDs = append(markIDs, id)
+		}
+	}
+
+	done := make(chan error, len(deleteIDs)+len(markIDs)+20)
+	for _, id := range deleteIDs {
+		id := id
+		go func() {
+			done <- first.Delete(ctx, id)
+		}()
+	}
+	for _, id := range markIDs {
+		id := id
+		go func() {
+			done <- second.MarkAttempt(ctx, id)
+		}()
+	}
+	for i := 0; i < 20; i++ {
+		i := i
+		go func() {
+			_, err := second.Enqueue(ctx, syncRequest(fmt.Sprintf("new_%03d", i), false))
+			done <- err
+		}()
+	}
+	for i := 0; i < cap(done); i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("concurrent mutator error = %v", err)
+		}
+	}
+
+	entries, err := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 100, MaxAge: time.Hour}).List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	byID := map[string]syncqueue.Entry{}
+	for _, entry := range entries {
+		byID[entry.ID] = entry
+	}
+	for _, id := range deleteIDs {
+		if _, ok := byID[id]; ok {
+			t.Fatalf("deleted ID %q was resurrected in %#v", id, entries)
+		}
+	}
+	for _, id := range markIDs {
+		entry, ok := byID[id]
+		if !ok {
+			t.Fatalf("marked ID %q was lost in %#v", id, entries)
+		}
+		if entry.Attempts != 1 {
+			t.Fatalf("entry %q Attempts = %d, want 1", id, entry.Attempts)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("new_%03d", i)
+		if _, ok := byID[id]; !ok {
+			t.Fatalf("new ID %q was lost in %#v", id, entries)
+		}
+	}
+}
+
 func TestFileStoreWritesPrivateQueueFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are not portable on windows")

@@ -235,11 +235,10 @@ func (s *FileStore) readEntries() ([]Entry, error) {
 
 func (s *FileStore) writeEntries(entries []Entry) error {
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return err
+	if dir != "." {
+		if err := ensurePrivateDir(dir); err != nil {
+			return err
+		}
 	}
 	sortEntries(entries)
 	payload, err := json.Marshal(entries)
@@ -304,7 +303,56 @@ func entryIDExists(entries []Entry, id string) bool {
 	return false
 }
 
-func syncDir(dir string) error {
+func ensurePrivateDir(dir string) error {
+	created, err := missingDirs(dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for _, createdDir := range created {
+		if err := os.Chmod(createdDir, 0o700); err != nil {
+			return err
+		}
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	for _, createdDir := range created {
+		if err := syncDir(filepath.Dir(createdDir)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func missingDirs(dir string) ([]string, error) {
+	dir = filepath.Clean(dir)
+	var missing []string
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			break
+		} else if errors.Is(err, os.ErrNotExist) {
+			missing = append(missing, dir)
+		} else {
+			return nil, err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	for left, right := 0, len(missing)-1; left < right; left, right = left+1, right-1 {
+		missing[left], missing[right] = missing[right], missing[left]
+	}
+	return missing, nil
+}
+
+var syncDir = syncDirectory
+
+func syncDirectory(dir string) error {
 	file, err := os.Open(dir)
 	if err != nil {
 		return err
