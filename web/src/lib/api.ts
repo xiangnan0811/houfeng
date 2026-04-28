@@ -79,13 +79,22 @@ function postJSONBody<T>(path: string, body: unknown): Promise<T> {
   })
 }
 
-function patchJSONBody<T>(path: string, body: unknown): Promise<T> {
+type PatchJSONOptions = {
+  ifMatch?: string
+}
+
+function patchJSONBody<T>(path: string, body: unknown, options: PatchJSONOptions = {}): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  }
+  if (options.ifMatch) {
+    headers['If-Match'] = `"${options.ifMatch}"`
+  }
+
   return requestJSON<T>(path, {
     method: 'PATCH',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(body),
   })
 }
@@ -116,8 +125,18 @@ export function getNode(nodeId: string) {
   return requestJSON<NodeRecord>(`/api/nodes/${nodeId}`)
 }
 
-export function updateNodeMetadata(nodeId: string, input: UpdateNodeMetadataInput) {
-  return patchJSONBody<NodeRecord>(`/api/nodes/${nodeId}`, input)
+type MetadataUpdateOptions = {
+  expectedUpdatedAt?: string
+}
+
+export function updateNodeMetadata(
+  nodeId: string,
+  input: UpdateNodeMetadataInput,
+  options: MetadataUpdateOptions = {},
+) {
+  return patchJSONBody<NodeRecord>(`/api/nodes/${nodeId}`, input, {
+    ifMatch: options.expectedUpdatedAt,
+  })
 }
 
 export function getNodeRuntimeFacts(nodeId: string) {
@@ -180,8 +199,14 @@ export function getTarget(targetId: string) {
   return requestJSON<TargetRecord>(`/api/targets/${targetId}`)
 }
 
-export function updateTargetMetadata(targetId: string, input: UpdateTargetMetadataInput) {
-  return patchJSONBody<TargetRecord>(`/api/targets/${targetId}`, input)
+export function updateTargetMetadata(
+  targetId: string,
+  input: UpdateTargetMetadataInput,
+  options: MetadataUpdateOptions = {},
+) {
+  return patchJSONBody<TargetRecord>(`/api/targets/${targetId}`, input, {
+    ifMatch: options.expectedUpdatedAt,
+  })
 }
 
 export function listTargetProbeItems(targetId: string) {

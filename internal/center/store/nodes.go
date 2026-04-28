@@ -313,14 +313,31 @@ func (r *PostgresNodeRepository) GetNode(ctx context.Context, nodeID string) (no
 }
 
 func (r *PostgresNodeRepository) UpdateNodeMetadata(ctx context.Context, nodeID string, input nodes.UpdateMetadataInput) (nodes.Record, error) {
+	args := []any{nodeID, input.Labels, input.Note}
+	precondition := ""
+	if input.ExpectedUpdatedAt != nil {
+		args = append(args, *input.ExpectedUpdatedAt)
+		precondition = `
+		  and updated_at = $4`
+	}
+
 	record, err := scanNode(r.db.QueryRow(ctx, `
 		update nodes
 		set labels = $2,
 		    note = $3,
 		    updated_at = now()
-		where node_id = $1
-		returning `+nodeSelectColumns, nodeID, input.Labels, input.Note))
+		where node_id = $1`+precondition+`
+		returning `+nodeSelectColumns, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
+		if input.ExpectedUpdatedAt != nil {
+			exists, existsErr := r.nodeExists(ctx, nodeID)
+			if existsErr != nil {
+				return nodes.Record{}, fmt.Errorf("check node metadata conflict %q: %w", nodeID, existsErr)
+			}
+			if exists {
+				return nodes.Record{}, nodes.ErrNodeMetadataConflict
+			}
+		}
 		return nodes.Record{}, nodes.ErrNodeNotFound
 	}
 	if err != nil {

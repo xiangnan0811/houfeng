@@ -1638,6 +1638,21 @@ describe('NodeDetailPage', () => {
             current_health_status: '正常',
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
+            updated_at: '2026-04-27T09:10:00Z',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_001',
+            binding_status: '已绑定',
+            labels: ['edge', 'core'],
+            note: 'second note',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            updated_at: '2026-04-27T09:15:00Z',
           }),
         ),
       )
@@ -1674,6 +1689,7 @@ describe('NodeDetailPage', () => {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
+          'If-Match': '"2026-04-27T09:05:00Z"',
         },
         cache: 'no-store',
         body: JSON.stringify({ labels: ['edge', 'core'], note: 'trimmed note' }),
@@ -1681,6 +1697,26 @@ describe('NodeDetailPage', () => {
     )
     expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
     expect(screen.getByText('备注：trimmed note')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
+      target: { value: 'second note' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/nodes/nd_001', {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'If-Match': '"2026-04-27T09:10:00Z"',
+        },
+        cache: 'no-store',
+        body: JSON.stringify({ labels: ['edge', 'core'], note: 'second note' }),
+      }),
+    )
+    expect(screen.getByText('备注：second note')).toBeInTheDocument()
   })
 
   it('shows a metadata update failure without replacing the current detail', async () => {
@@ -1726,7 +1762,7 @@ describe('NodeDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
 
     await waitFor(() =>
-      expect(screen.getByText('标签或备注更新失败')).toBeInTheDocument(),
+      expect(screen.getByText('metadata write failed')).toBeInTheDocument(),
     )
     expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('new note')
     expect(screen.queryByText('备注：new note')).not.toBeInTheDocument()

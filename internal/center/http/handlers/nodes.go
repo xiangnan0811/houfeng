@@ -66,12 +66,23 @@ func NodeItem(repo nodes.Repository) http.Handler {
 
 			writeJSON(w, http.StatusOK, record)
 		case http.MethodPatch:
-			var input nodes.UpdateMetadataInput
-			if err := decodeJSON(r, &input); err != nil {
+			labels, note, ok, err := decodeUpdateMetadataRequest(r)
+			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
 			}
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
 
+			input := nodes.UpdateMetadataInput{Labels: labels, Note: note}
+			expectedUpdatedAt, ok := parseMetadataPrecondition(r.Header.Get("If-Match"))
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			input.ExpectedUpdatedAt = expectedUpdatedAt
 			input = normalizeUpdateMetadataInput(input)
 			if !isValidUpdateMetadataInput(input) {
 				writeError(w, http.StatusBadRequest, "invalid input")
@@ -81,6 +92,10 @@ func NodeItem(repo nodes.Repository) http.Handler {
 			record, err := repo.UpdateNodeMetadata(r.Context(), nodeID, input)
 			if errors.Is(err, nodes.ErrNodeNotFound) {
 				writeError(w, http.StatusNotFound, "node not found")
+				return
+			}
+			if errors.Is(err, nodes.ErrNodeMetadataConflict) {
+				writeError(w, http.StatusConflict, "metadata conflict")
 				return
 			}
 			if err != nil {

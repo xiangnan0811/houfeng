@@ -30,6 +30,7 @@ const (
 
 var ErrTargetNotFound = errors.New("target not found")
 var ErrProbeItemNotFound = errors.New("probe item not found")
+var ErrTargetMetadataConflict = errors.New("target metadata conflict")
 
 var allowedTargetTypes = map[string]struct{}{
 	TargetTypeService:        {},
@@ -107,8 +108,9 @@ type CreateProbeItemInput struct {
 }
 
 type UpdateMetadataInput struct {
-	Labels []string `json:"labels"`
-	Note   string   `json:"note"`
+	Labels            []string   `json:"labels"`
+	Note              string     `json:"note"`
+	ExpectedUpdatedAt *time.Time `json:"-"`
 }
 
 type UpdateProbeItemInput = CreateProbeItemInput

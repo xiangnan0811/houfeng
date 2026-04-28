@@ -586,10 +586,16 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     setMetadataError(null)
 
     try {
-      const updated = await updateTargetMetadata(actionTargetId, {
-        labels: dedupeLabels(parseLabels(metadataForm.labels)),
-        note: metadataForm.note.trim(),
-      })
+      const updated = await updateTargetMetadata(
+        actionTargetId,
+        {
+          labels: dedupeLabels(parseLabels(metadataForm.labels)),
+          note: metadataForm.note.trim(),
+        },
+        {
+          expectedUpdatedAt: target.updated_at,
+        },
+      )
       if (
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
@@ -615,7 +621,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         note: updated.note,
       })
       setMetadataEditing(false)
-    } catch {
+    } catch (metadataError) {
       if (
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
@@ -624,7 +630,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       ) {
         return
       }
-      setMetadataError('标签或备注更新失败')
+      setMetadataError(describeError(metadataError, '标签或备注更新失败'))
     } finally {
       if (
         isMountedRef.current &&

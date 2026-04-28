@@ -235,6 +235,7 @@ func TestDeleteProbeItemHandlerReturnsNoContent(t *testing.T) {
 
 func TestTargetItemPatchMetadataReturnsUpdatedRecord(t *testing.T) {
 	now := time.Date(2026, time.April, 27, 9, 0, 0, 0, time.UTC)
+	expectedUpdatedAt := time.Date(2026, time.April, 27, 8, 55, 0, 123000000, time.UTC)
 	repo := &fakeTargetRepository{
 		updateTargetMetadataResult: targets.TargetRecord{
 			Name:                "Blog",
@@ -253,6 +254,7 @@ func TestTargetItemPatchMetadataReturnsUpdatedRecord(t *testing.T) {
 	handler := handlers.TargetItem(repo)
 	req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_001", strings.NewReader(`{"labels":[" edge ","core","edge"],"note":" updated "}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", `"`+expectedUpdatedAt.Format(time.RFC3339Nano)+`"`)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -268,6 +270,9 @@ func TestTargetItemPatchMetadataReturnsUpdatedRecord(t *testing.T) {
 	}
 	if repo.updateTargetMetadataInput.Note != "updated" {
 		t.Fatalf("update note = %q, want %q", repo.updateTargetMetadataInput.Note, "updated")
+	}
+	if repo.updateTargetMetadataInput.ExpectedUpdatedAt == nil || !repo.updateTargetMetadataInput.ExpectedUpdatedAt.Equal(expectedUpdatedAt) {
+		t.Fatalf("expected updated_at = %v, want %s", repo.updateTargetMetadataInput.ExpectedUpdatedAt, expectedUpdatedAt.Format(time.RFC3339Nano))
 	}
 
 	var body targets.TargetRecord
@@ -289,7 +294,7 @@ func TestTargetItemRejectsInvalidMetadata(t *testing.T) {
 	repo := &fakeTargetRepository{}
 
 	handler := handlers.TargetItem(repo)
-	req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_001", strings.NewReader(`{"labels":["01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","17","18","19","20","21"]}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_001", strings.NewReader(`{"labels":["01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","17","18","19","20","21"],"note":""}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -305,6 +310,45 @@ func TestTargetItemRejectsInvalidMetadata(t *testing.T) {
 	}
 	if body["error"] != "invalid input" {
 		t.Fatalf("expected error %q, got %q", "invalid input", body["error"])
+	}
+}
+
+func TestTargetItemRejectsPartialMetadataPayloads(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty object", body: `{}`},
+		{name: "labels only", body: `{"labels":["edge"]}`},
+		{name: "note only", body: `{"note":"updated"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeTargetRepository{}
+
+			handler := handlers.TargetItem(repo)
+			req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_001", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+			}
+			if repo.updateTargetMetadataID != "" {
+				t.Fatalf("UpdateTargetMetadata called for partial payload")
+			}
+
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal response body: %v", err)
+			}
+			if body["error"] != "invalid input" {
+				t.Fatalf("expected error %q, got %q", "invalid input", body["error"])
+			}
+		})
 	}
 }
 
@@ -358,6 +402,29 @@ func TestTargetItemMapsMetadataNotFound(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+}
+
+func TestTargetItemMapsMetadataConflict(t *testing.T) {
+	repo := &fakeTargetRepository{updateTargetMetadataErr: targets.ErrTargetMetadataConflict}
+
+	handler := handlers.TargetItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/targets/tg_001", strings.NewReader(`{"labels":["edge"],"note":"updated"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d", http.StatusConflict, recorder.Code)
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body["error"] != "metadata conflict" {
+		t.Fatalf("expected error %q, got %q", "metadata conflict", body["error"])
 	}
 }
 

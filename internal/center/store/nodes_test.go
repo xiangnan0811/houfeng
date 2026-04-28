@@ -366,6 +366,7 @@ func TestUpdateNodeMetadata(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
+	expectedUpdatedAt := now.Add(-5 * time.Minute)
 	var (
 		gotSQL  string
 		gotArgs []any
@@ -398,15 +399,16 @@ func TestUpdateNodeMetadata(t *testing.T) {
 	}}
 
 	record, err := repo.UpdateNodeMetadata(context.Background(), "nd_001", nodes.UpdateMetadataInput{
-		Labels: []string{"edge", "core"},
-		Note:   "updated",
+		Labels:            []string{"edge", "core"},
+		Note:              "updated",
+		ExpectedUpdatedAt: &expectedUpdatedAt,
 	})
 	if err != nil {
 		t.Fatalf("UpdateNodeMetadata() error = %v", err)
 	}
 
-	if len(gotArgs) != 3 {
-		t.Fatalf("len(gotArgs) = %d, want 3", len(gotArgs))
+	if len(gotArgs) != 4 {
+		t.Fatalf("len(gotArgs) = %d, want 4", len(gotArgs))
 	}
 	if gotArgs[0] != "nd_001" {
 		t.Fatalf("gotArgs[0] = %#v, want %q", gotArgs[0], "nd_001")
@@ -416,6 +418,9 @@ func TestUpdateNodeMetadata(t *testing.T) {
 	}
 	if gotArgs[2] != "updated" {
 		t.Fatalf("gotArgs[2] = %#v, want %q", gotArgs[2], "updated")
+	}
+	if gotUpdatedAt, ok := gotArgs[3].(time.Time); !ok || !gotUpdatedAt.Equal(expectedUpdatedAt) {
+		t.Fatalf("gotArgs[3] = %#v, want %s", gotArgs[3], expectedUpdatedAt.Format(time.RFC3339Nano))
 	}
 	if !strings.Contains(gotSQL, "update nodes") {
 		t.Fatalf("UpdateNodeMetadata() SQL = %q, want update nodes", gotSQL)
@@ -428,6 +433,9 @@ func TestUpdateNodeMetadata(t *testing.T) {
 	}
 	if !strings.Contains(gotSQL, "updated_at = now()") {
 		t.Fatalf("UpdateNodeMetadata() SQL = %q, want updated_at refresh", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "updated_at = $4") {
+		t.Fatalf("UpdateNodeMetadata() SQL = %q, want optimistic updated_at precondition", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "returning "+nodeSelectColumns) {
 		t.Fatalf("UpdateNodeMetadata() SQL = %q, want returning nodeSelectColumns", gotSQL)
@@ -463,6 +471,56 @@ func TestUpdateNodeMetadataMapsNotFound(t *testing.T) {
 	_, err := repo.UpdateNodeMetadata(context.Background(), "nd_missing", nodes.UpdateMetadataInput{})
 	if !errors.Is(err, nodes.ErrNodeNotFound) {
 		t.Fatalf("UpdateNodeMetadata() error = %v, want ErrNodeNotFound", err)
+	}
+}
+
+func TestUpdateNodeMetadataMapsPreconditionMissToConflictWhenNodeExists(t *testing.T) {
+	t.Parallel()
+
+	expectedUpdatedAt := time.Date(2026, time.April, 27, 9, 55, 0, 0, time.UTC)
+	queryCount := 0
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			queryCount++
+			switch queryCount {
+			case 1:
+				if !strings.Contains(sql, "updated_at = $4") {
+					t.Fatalf("update SQL = %q, want updated_at precondition", sql)
+				}
+				if len(args) != 4 {
+					t.Fatalf("update args = %#v, want four args", args)
+				}
+				return fakeNodeRow{scan: func(dest ...any) error {
+					return pgx.ErrNoRows
+				}}
+			case 2:
+				if !strings.Contains(sql, "select exists") || !strings.Contains(sql, "from nodes") {
+					t.Fatalf("existence SQL = %q, want node existence check", sql)
+				}
+				if len(args) != 1 || args[0] != "nd_001" {
+					t.Fatalf("existence args = %#v, want node id", args)
+				}
+				return fakeNodeRow{scan: func(dest ...any) error {
+					*(dest[0].(*bool)) = true
+					return nil
+				}}
+			default:
+				t.Fatalf("unexpected QueryRow call %d", queryCount)
+				return fakeNodeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+	}}
+
+	_, err := repo.UpdateNodeMetadata(context.Background(), "nd_001", nodes.UpdateMetadataInput{
+		Labels:            []string{"edge"},
+		Note:              "updated",
+		ExpectedUpdatedAt: &expectedUpdatedAt,
+	})
+	if !errors.Is(err, nodes.ErrNodeMetadataConflict) {
+		t.Fatalf("UpdateNodeMetadata() error = %v, want ErrNodeMetadataConflict", err)
+	}
+	if queryCount != 2 {
+		t.Fatalf("QueryRow calls = %d, want 2", queryCount)
 	}
 }
 

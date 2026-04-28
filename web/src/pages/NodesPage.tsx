@@ -289,10 +289,16 @@ export function NodesPage() {
     })
 
     try {
-      const updated = await updateNodeMetadata(node.node_id, {
-        labels: parseLabels(labelDraft),
-        note: node.note,
-      })
+      const updated = await updateNodeMetadata(
+        node.node_id,
+        {
+          labels: parseLabels(labelDraft),
+          note: node.note,
+        },
+        {
+          expectedUpdatedAt: node.updated_at,
+        },
+      )
       setNodes((current) =>
         current.map((item) =>
           item.node_id === updated.node_id

@@ -27,6 +27,7 @@ const (
 
 var ErrNodeNotFound = errors.New("node not found")
 var ErrInvalidBindingTransition = errors.New("invalid binding transition")
+var ErrNodeMetadataConflict = errors.New("node metadata conflict")
 
 var allowedLifecycleStatuses = map[string]struct{}{
 	LifecyclePendingEnrollment: {},
@@ -76,8 +77,9 @@ type CreateInput struct {
 }
 
 type UpdateMetadataInput struct {
-	Labels []string `json:"labels"`
-	Note   string   `json:"note"`
+	Labels            []string   `json:"labels"`
+	Note              string     `json:"note"`
+	ExpectedUpdatedAt *time.Time `json:"-"`
 }
 
 type Repository interface {

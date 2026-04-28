@@ -718,6 +718,7 @@ describe('NodesPage', () => {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
+          'If-Match': '"2026-04-26T09:00:00Z"',
         },
         cache: 'no-store',
         body: JSON.stringify({ labels: ['edge', 'core'], note: 'keep me' }),

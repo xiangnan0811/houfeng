@@ -66,12 +66,23 @@ func TargetItem(repo targets.Repository) http.Handler {
 
 			writeJSON(w, http.StatusOK, record)
 		case http.MethodPatch:
-			var input targets.UpdateMetadataInput
-			if err := decodeJSON(r, &input); err != nil {
+			labels, note, ok, err := decodeUpdateMetadataRequest(r)
+			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
 			}
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
 
+			input := targets.UpdateMetadataInput{Labels: labels, Note: note}
+			expectedUpdatedAt, ok := parseMetadataPrecondition(r.Header.Get("If-Match"))
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			input.ExpectedUpdatedAt = expectedUpdatedAt
 			input = normalizeTargetMetadataInput(input)
 			if !isValidTargetMetadataInput(input) {
 				writeError(w, http.StatusBadRequest, "invalid input")
@@ -81,6 +92,10 @@ func TargetItem(repo targets.Repository) http.Handler {
 			record, err := repo.UpdateTargetMetadata(r.Context(), targetID, input)
 			if errors.Is(err, targets.ErrTargetNotFound) {
 				writeError(w, http.StatusNotFound, "target not found")
+				return
+			}
+			if errors.Is(err, targets.ErrTargetMetadataConflict) {
+				writeError(w, http.StatusConflict, "metadata conflict")
 				return
 			}
 			if err != nil {

@@ -198,14 +198,31 @@ func (r *PostgresTargetRepository) ListTargets(ctx context.Context) ([]targets.T
 }
 
 func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, targetID string, input targets.UpdateMetadataInput) (targets.TargetRecord, error) {
+	args := []any{targetID, input.Labels, input.Note}
+	precondition := ""
+	if input.ExpectedUpdatedAt != nil {
+		args = append(args, *input.ExpectedUpdatedAt)
+		precondition = `
+		  and updated_at = $4`
+	}
+
 	record, err := scanTarget(r.db.QueryRow(ctx, `
 		update targets
 		set labels = $2,
 		    note = $3,
 		    updated_at = now()
-		where target_id = $1
-		returning `+targetSelectColumns, targetID, input.Labels, input.Note))
+		where target_id = $1`+precondition+`
+		returning `+targetSelectColumns, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
+		if input.ExpectedUpdatedAt != nil {
+			exists, existsErr := r.targetExists(ctx, targetID)
+			if existsErr != nil {
+				return targets.TargetRecord{}, fmt.Errorf("check target metadata conflict %q: %w", targetID, existsErr)
+			}
+			if exists {
+				return targets.TargetRecord{}, targets.ErrTargetMetadataConflict
+			}
+		}
 		return targets.TargetRecord{}, targets.ErrTargetNotFound
 	}
 	if err != nil {

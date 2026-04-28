@@ -563,10 +563,16 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     setMetadataError(null)
 
     try {
-      const updated = await updateNodeMetadata(actionNodeId, {
-        labels: parseLabels(metadataLabelDraft),
-        note: metadataNoteDraft.trim(),
-      })
+      const updated = await updateNodeMetadata(
+        actionNodeId,
+        {
+          labels: parseLabels(metadataLabelDraft),
+          note: metadataNoteDraft.trim(),
+        },
+        {
+          expectedUpdatedAt: node.updated_at,
+        },
+      )
       if (
         !isMountedRef.current ||
         currentRouteNodeIdRef.current !== actionNodeId ||
@@ -582,13 +588,14 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
                 ...current.node,
                 labels: updated.labels,
                 note: updated.note,
+                updated_at: updated.updated_at,
               }
             : current.node,
       }))
       setMetadataEditing(false)
       setMetadataLabelDraft('')
       setMetadataNoteDraft('')
-    } catch {
+    } catch (metadataError) {
       if (
         !isMountedRef.current ||
         currentRouteNodeIdRef.current !== actionNodeId ||
@@ -596,7 +603,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       ) {
         return
       }
-      setMetadataError('标签或备注更新失败')
+      setMetadataError(describeError(metadataError, '标签或备注更新失败'))
     } finally {
       if (
         isMountedRef.current &&

@@ -2531,6 +2531,7 @@ describe('TargetDetailPage', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'If-Match': '"2026-04-24T09:05:00Z"',
       },
       cache: 'no-store',
       body: JSON.stringify({
@@ -2592,7 +2593,7 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
 
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('标签或备注更新失败'),
+      expect(screen.getByRole('alert')).toHaveTextContent('save failed'),
     )
     expect(screen.getByDisplayValue('alpha, beta')).toBeInTheDocument()
   })

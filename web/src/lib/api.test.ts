@@ -301,6 +301,47 @@ describe('api helpers', () => {
     })
   })
 
+  it('sends node metadata optimistic preconditions when provided', async () => {
+    const requestBody = {
+      labels: ['edge'],
+      note: 'updated note',
+    } satisfies UpdateNodeMetadataInput
+    const responseBody = {
+      node_id: 'nd_001',
+      display_name: 'Tokyo Edge',
+      region: 'ap-northeast-1',
+      city: 'Tokyo',
+      provider: 'aws',
+      lifecycle_status: '在用',
+      monitoring_status: '启用',
+      binding_status: '已绑定',
+      labels: ['edge'],
+      note: 'updated note',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-27T09:00:00Z',
+      updated_at: '2026-04-27T09:15:00Z',
+    } satisfies NodeRecord
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await updateNodeMetadata('nd_001', requestBody, {
+      expectedUpdatedAt: '2026-04-27T09:00:00Z',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'If-Match': '"2026-04-27T09:00:00Z"',
+      },
+      cache: 'no-store',
+      body: JSON.stringify(requestBody),
+    })
+  })
+
   it('updates target metadata with PATCH /api/targets/:targetId and returns the updated target', async () => {
     const requestBody = {
       labels: ['public', 'external'],
@@ -331,6 +372,46 @@ describe('api helpers', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify(requestBody),
+    })
+  })
+
+  it('sends target metadata optimistic preconditions when provided', async () => {
+    const requestBody = {
+      labels: ['public'],
+      note: 'updated target note',
+    } satisfies UpdateTargetMetadataInput
+    const responseBody = {
+      target_id: 'tg_001',
+      name: 'Blog',
+      target_type: 'service',
+      host: 'blog.example.com',
+      base_port: 443,
+      execution_node_labels: ['edge'],
+      run_status: '启用',
+      labels: ['public'],
+      note: 'updated target note',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-27T09:00:00Z',
+      updated_at: '2026-04-27T09:20:00Z',
+    } satisfies TargetRecord
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await updateTargetMetadata('tg_001', requestBody, {
+      expectedUpdatedAt: '2026-04-27T09:00:00Z',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/targets/tg_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'If-Match': '"2026-04-27T09:00:00Z"',
       },
       cache: 'no-store',
       body: JSON.stringify(requestBody),

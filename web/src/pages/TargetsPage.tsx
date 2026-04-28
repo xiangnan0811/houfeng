@@ -389,10 +389,16 @@ export function TargetsPage() {
     })
 
     try {
-      const updated = await updateTargetMetadata(target.target_id, {
-        labels: dedupeLabels(parseLabels(metadataLabelInput)),
-        note: target.note,
-      })
+      const updated = await updateTargetMetadata(
+        target.target_id,
+        {
+          labels: dedupeLabels(parseLabels(metadataLabelInput)),
+          note: target.note,
+        },
+        {
+          expectedUpdatedAt: target.updated_at,
+        },
+      )
       setTargets((current) =>
         current.map((item) =>
           item.target_id === updated.target_id ? mergeMetadataTargetRecord(item, updated) : item,
