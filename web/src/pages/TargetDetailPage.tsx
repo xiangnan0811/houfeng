@@ -311,6 +311,60 @@ function focusRestoreActionAfterSuccess(action: TargetRuntimeAction): TargetRunt
   }
 }
 
+function summarizeRecentLatencyTrends(observations: ProbeObservation[]) {
+  const grouped = new Map<
+    string,
+    {
+      probeKind: ProbeKind
+      count: number
+      nodeIds: Set<string>
+      totalLatency: number
+      maxLatency: number
+      newestObservedAt: string
+    }
+  >()
+
+  for (const observation of observations) {
+    if (observation.result_kind !== 'success' || observation.latency_ms == null) continue
+
+    const current = grouped.get(observation.probe_item_id)
+    if (current) {
+      current.count += 1
+      current.nodeIds.add(observation.node_id)
+      current.totalLatency += observation.latency_ms
+      current.maxLatency = Math.max(current.maxLatency, observation.latency_ms)
+      if (new Date(observation.observed_at).getTime() > new Date(current.newestObservedAt).getTime()) {
+        current.newestObservedAt = observation.observed_at
+      }
+      continue
+    }
+
+    grouped.set(observation.probe_item_id, {
+      probeKind: observation.probe_kind,
+      count: 1,
+      nodeIds: new Set([observation.node_id]),
+      totalLatency: observation.latency_ms,
+      maxLatency: observation.latency_ms,
+      newestObservedAt: observation.observed_at,
+    })
+  }
+
+  return Array.from(grouped.entries())
+    .map(([probeItemId, summary]) => ({
+      probeItemId,
+      probeKind: summary.probeKind,
+      count: summary.count,
+      distinctNodeCount: summary.nodeIds.size,
+      averageLatency: summary.totalLatency / summary.count,
+      maxLatency: summary.maxLatency,
+      newestObservedAt: summary.newestObservedAt,
+    }))
+    .sort(
+      (left, right) =>
+        new Date(right.newestObservedAt).getTime() - new Date(left.newestObservedAt).getTime(),
+    )
+}
+
 function targetRuntimeActions(
   target: TargetRecord,
 ): Array<{ action: TargetRuntimeAction; label: string }> {
@@ -571,6 +625,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     }
     return map
   }, [state.runtimeFacts])
+  const recentLatencyTrends = useMemo(
+    () => summarizeRecentLatencyTrends(state.runtimeFacts?.recent_probe_observations ?? []),
+    [state.runtimeFacts],
+  )
 
   const missingTargetId = !targetId
   const isCurrentTarget = state.requestedTargetId === targetId
@@ -578,6 +636,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const error = isCurrentTarget ? state.error : null
   const target = isCurrentTarget ? state.target : null
   const probeItems = isCurrentTarget ? state.probeItems : []
+  const probeItemsById = new Map(probeItems.map((probeItem) => [probeItem.probe_item_id, probeItem]))
   const incidents = hasCurrentActivity ? state.incidents : []
   const incidentsError = hasCurrentActivity ? state.incidentsError : null
   const events = hasCurrentActivity ? state.events : []
@@ -1182,6 +1241,63 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           ) : null}
           {runtimeError ? <p>{runtimeError}</p> : null}
         </div>
+      </DetailSection>
+
+
+      <DetailSection
+        eyebrow="Recent Latency"
+        title="近期延迟趋势"
+        aside={recentLatencyTrends.length > 0 ? `样本更新到：${formatDateTime(recentLatencyTrends[0].newestObservedAt)}` : '近 24h 暂无延迟样本'}
+      >
+        {recentLatencyTrends.length > 0 ? (
+          <div className="probe-list">
+            {recentLatencyTrends.map((trend) => {
+              const probeItem = probeItemsById.get(trend.probeItemId)
+              return (
+                <article key={trend.probeItemId} className="probe-card">
+                  <header className="probe-card__header">
+                    <div>
+                      <h3>{probeItem?.probe_kind.toUpperCase() ?? trend.probeKind.toUpperCase()}</h3>
+                      <p>{trend.probeItemId}</p>
+                    </div>
+                    <div className="badge-row">
+                      <StatusBadge label={`${trend.count} 次观测`} tone="cyan" />
+                      <StatusBadge label={`${trend.distinctNodeCount} 个节点`} />
+                    </div>
+                  </header>
+
+                  <dl className="probe-card__meta">
+                    <div>
+                      <dt>平均延迟</dt>
+                      <dd>{formatLatency(Math.round(trend.averageLatency))}</dd>
+                    </div>
+                    <div>
+                      <dt>最大延迟</dt>
+                      <dd>{formatLatency(trend.maxLatency)}</dd>
+                    </div>
+                    <div>
+                      <dt>观测次数</dt>
+                      <dd>{trend.count}</dd>
+                    </div>
+                    <div>
+                      <dt>覆盖节点</dt>
+                      <dd>{trend.distinctNodeCount}</dd>
+                    </div>
+                    <div>
+                      <dt>最近样本</dt>
+                      <dd>{formatDateTime(trend.newestObservedAt)}</dd>
+                    </div>
+                  </dl>
+                </article>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <h3>近 24h 暂无延迟样本</h3>
+            <p>近期延迟趋势仅统计成功且带 latency 的 recent_probe_observations。</p>
+          </div>
+        )}
       </DetailSection>
 
       <DetailSection eyebrow="Probe Items" title="ProbeItem 列表">

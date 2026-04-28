@@ -233,6 +233,179 @@ describe('NodeDetailPage', () => {
     )
   })
 
+
+  it('renders recent trend metrics from recent host samples', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_trend',
+            display_name: 'Trend Node',
+            region: 'ap-east-1',
+            city: 'Hong Kong',
+            provider: 'Vultr',
+            lifecycle_status: '在用',
+            monitoring_status: '启用',
+            binding_status: '已绑定',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_trend',
+            latest_host_sample: {
+              node_id: 'nd_trend',
+              observed_at: '2026-04-24T10:05:00Z',
+              received_at: '2026-04-24T10:05:01Z',
+              agent_version: 'dev',
+              fingerprint: 'fp-trend',
+              cpu_usage_pct: 21,
+              load_1: 0.8,
+              load_5: 1.6,
+              load_15: 1.9,
+              mem_used_pct: 62,
+              mem_available_bytes: 1073741824,
+              swap_used_pct: 0,
+              disk_used_pct: 41,
+              inode_used_pct: 9,
+              net_in_bytes_per_sec: 1024,
+              net_out_bytes_per_sec: 2048,
+              cpu_iowait_pct: 6,
+              cpu_steal_pct: 1.4,
+              disk_read_bytes_per_sec: 3072,
+              disk_write_bytes_per_sec: 4096,
+              disk_busy_pct: 8,
+              uptime_seconds: 7200,
+              maintenance_context: false,
+              is_backfilled: false,
+              sync_batch_id: 'sync-trend-latest',
+            },
+            recent_host_samples: [
+              {
+                node_id: 'nd_trend',
+                observed_at: '2026-04-24T10:05:00Z',
+                received_at: '2026-04-24T10:05:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-trend',
+                cpu_usage_pct: 21,
+                load_1: 0.8,
+                load_5: 1.6,
+                load_15: 1.9,
+                mem_used_pct: 62,
+                mem_available_bytes: 1073741824,
+                swap_used_pct: 0,
+                disk_used_pct: 41,
+                inode_used_pct: 9,
+                net_in_bytes_per_sec: 1024,
+                net_out_bytes_per_sec: 2048,
+                cpu_iowait_pct: 6,
+                cpu_steal_pct: 1.4,
+                disk_read_bytes_per_sec: 3072,
+                disk_write_bytes_per_sec: 4096,
+                disk_busy_pct: 8,
+                uptime_seconds: 7200,
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-trend-1',
+              },
+              {
+                node_id: 'nd_trend',
+                observed_at: '2026-04-24T09:35:00Z',
+                received_at: '2026-04-24T09:35:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-trend',
+                cpu_usage_pct: 18,
+                load_1: 0.7,
+                load_5: 1.2,
+                load_15: 1.5,
+                mem_used_pct: 58,
+                mem_available_bytes: 2147483648,
+                swap_used_pct: 0,
+                disk_used_pct: 40,
+                inode_used_pct: 8,
+                net_in_bytes_per_sec: 900,
+                net_out_bytes_per_sec: 1800,
+                cpu_iowait_pct: 4,
+                cpu_steal_pct: 1.1,
+                disk_read_bytes_per_sec: 2048,
+                disk_write_bytes_per_sec: 3072,
+                disk_busy_pct: 6,
+                uptime_seconds: 5400,
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-trend-2',
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_trend']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Trend Node' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('近期趋势')).toBeInTheDocument()
+    expect(screen.getByText('近 24h 样本')).toBeInTheDocument()
+    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.getByText('Load5 平均')).toBeInTheDocument()
+    expect(screen.getByText('1.4')).toBeInTheDocument()
+    expect(screen.getByText('iowait 平均')).toBeInTheDocument()
+    expect(screen.getByText('5.0%')).toBeInTheDocument()
+    expect(screen.getByText('steal 平均')).toBeInTheDocument()
+    expect(screen.getByText('1.3%')).toBeInTheDocument()
+  })
+
+  it('renders an empty state when no recent host samples are available', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(mockJSONResponse(nodeRecord({ node_id: 'nd_empty', display_name: 'Empty Trend Node', binding_status: '已绑定' })))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_empty',
+            latest_host_sample: null,
+            recent_host_samples: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_empty']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Empty Trend Node' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('近期趋势')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '近 24h 暂无样本' })).toBeInTheDocument()
+  })
+
   it('renders first-sync, incident, and event empty states when no related records exist yet', async () => {
     vi.stubGlobal(
       'fetch',

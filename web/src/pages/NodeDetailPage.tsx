@@ -35,6 +35,7 @@ import {
 } from '../lib/format'
 import type {
   ActiveIncidentRecord,
+  HostSample,
   NodeOnboardingState,
   NodeRecord,
   NodeRuntimeFacts,
@@ -150,6 +151,33 @@ function mergeNonMetadataNodeRecord<T extends NodeRecord>(current: NodeRecord, u
     ...updated,
     labels: current.labels,
     note: current.note,
+  }
+}
+
+function averageOf(values: number[]) {
+  if (values.length === 0) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function summarizeRecentHostSamples(samples: HostSample[]) {
+  if (samples.length === 0) return null
+
+  const sortedSamples = [...samples].sort(
+    (left, right) => new Date(right.observed_at).getTime() - new Date(left.observed_at).getTime(),
+  )
+  const newest = sortedSamples[0]
+  const oldest = sortedSamples[sortedSamples.length - 1]
+
+  return {
+    count: sortedSamples.length,
+    newestObservedAt: newest.observed_at,
+    oldestObservedAt: oldest.observed_at,
+    averageLoad5: averageOf(sortedSamples.map((sample) => sample.load_5)),
+    averageIowait: averageOf(sortedSamples.map((sample) => sample.cpu_iowait_pct)),
+    averageSteal: averageOf(sortedSamples.map((sample) => sample.cpu_steal_pct)),
+    latestLoad5: newest.load_5,
+    latestIowait: newest.cpu_iowait_pct,
+    latestSteal: newest.cpu_steal_pct,
   }
 }
 
@@ -547,6 +575,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   }
 
   const sample = runtimeFacts?.latest_host_sample ?? null
+  const recentTrend = summarizeRecentHostSamples(runtimeFacts?.recent_host_samples ?? [])
   const showBindingConflict = node.binding_status === NODE_BINDING_CONFLICT_STATUS
   const isRetiredNode = node.lifecycle_status === NODE_LIFECYCLE_RETIRED
   const hasCurrentBindingConflictState = bindingConflictState.requestedNodeId === nodeId
@@ -987,6 +1016,82 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           <div className="empty-state">
             <h3>尚未收到主机样本</h3>
             <p>该节点已存在，但首批 HostSample 还未到达。请等待下一次 agent 同步。</p>
+          </div>
+        )}
+      </DetailSection>
+
+
+      <DetailSection
+        eyebrow="Recent Trend"
+        title="近期趋势"
+        aside={recentTrend ? `最新样本：${formatDateTime(recentTrend.newestObservedAt)}` : '近 24h 暂无样本'}
+      >
+        {recentTrend ? (
+          <div className="metric-grid">
+            <article className="metric-card">
+              <h3>样本概览</h3>
+              <dl>
+                <div>
+                  <dt>近 24h 样本</dt>
+                  <dd>{recentTrend.count}</dd>
+                </div>
+                <div>
+                  <dt>最早观测</dt>
+                  <dd>{formatDateTime(recentTrend.oldestObservedAt)}</dd>
+                </div>
+                <div>
+                  <dt>最新观测</dt>
+                  <dd>{formatDateTime(recentTrend.newestObservedAt)}</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article className="metric-card">
+              <h3>Load5 趋势</h3>
+              <dl>
+                <div>
+                  <dt>Load5 平均</dt>
+                  <dd>{formatNumber(recentTrend.averageLoad5)}</dd>
+                </div>
+                <div>
+                  <dt>最新 Load5</dt>
+                  <dd>{formatNumber(recentTrend.latestLoad5)}</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article className="metric-card">
+              <h3>CPU 等待</h3>
+              <dl>
+                <div>
+                  <dt>iowait 平均</dt>
+                  <dd>{formatPercent(recentTrend.averageIowait)}</dd>
+                </div>
+                <div>
+                  <dt>最新 iowait</dt>
+                  <dd>{formatPercent(recentTrend.latestIowait)}</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article className="metric-card">
+              <h3>CPU steal</h3>
+              <dl>
+                <div>
+                  <dt>steal 平均</dt>
+                  <dd>{formatPercent(recentTrend.averageSteal)}</dd>
+                </div>
+                <div>
+                  <dt>最新 steal</dt>
+                  <dd>{formatPercent(recentTrend.latestSteal)}</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <h3>近 24h 暂无样本</h3>
+            <p>近期趋势需要 recent_host_samples 数据，当前还没有可用样本。</p>
           </div>
         )}
       </DetailSection>

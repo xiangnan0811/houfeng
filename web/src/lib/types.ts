@@ -81,6 +81,7 @@ export type HostSample = {
 export type NodeRuntimeFacts = {
   node_id: string
   latest_host_sample: HostSample | null
+  recent_host_samples: HostSample[]
 }
 
 export type TargetType = 'service' | 'china_reference'
@@ -171,6 +172,7 @@ export type ProbeObservation = {
 export type TargetRuntimeFacts = {
   target_id: string
   latest_probe_observations: ProbeObservation[]
+  recent_probe_observations: ProbeObservation[]
 }
 
 export type ObservabilityObjectType = 'node' | 'target'

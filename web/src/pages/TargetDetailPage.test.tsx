@@ -194,6 +194,180 @@ describe('TargetDetailPage', () => {
     )
   })
 
+
+  it('renders recent latency trends grouped by probe item', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_trend',
+            name: 'Trend Target',
+            target_type: 'service',
+            host: 'trend.example.com',
+            base_port: 443,
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              probe_item_id: 'pb_http',
+              target_id: 'tg_trend',
+              probe_kind: 'http',
+              enabled: true,
+              frequency_tier: '1m',
+              timeout_seconds: 5,
+              config: { path: '/healthz', method: 'GET' },
+              created_at: '2026-04-20T00:00:00Z',
+              updated_at: '2026-04-24T09:05:00Z',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_trend',
+            latest_probe_observations: [],
+            recent_probe_observations: [
+              {
+                node_id: 'nd_001',
+                target_id: 'tg_trend',
+                probe_item_id: 'pb_http',
+                probe_kind: 'http',
+                observed_at: '2026-04-24T09:05:00Z',
+                received_at: '2026-04-24T09:05:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-001',
+                result_kind: 'success',
+                latency_ms: 80,
+                http_status: 200,
+                tls_expiry_days: null,
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-001',
+              },
+              {
+                node_id: 'nd_002',
+                target_id: 'tg_trend',
+                probe_item_id: 'pb_http',
+                probe_kind: 'http',
+                observed_at: '2026-04-24T09:10:00Z',
+                received_at: '2026-04-24T09:10:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-002',
+                result_kind: 'success',
+                latency_ms: 120,
+                http_status: 200,
+                tls_expiry_days: null,
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-002',
+              },
+              {
+                node_id: 'nd_002',
+                target_id: 'tg_trend',
+                probe_item_id: 'pb_http',
+                probe_kind: 'http',
+                observed_at: '2026-04-24T09:11:00Z',
+                received_at: '2026-04-24T09:11:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-002',
+                result_kind: 'timeout',
+                latency_ms: null,
+                http_status: null,
+                tls_expiry_days: null,
+                error_code: 'timeout',
+                error_summary: 'timeout',
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-003',
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_trend']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Trend Target' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
+    expect(screen.getByText('pb_http')).toBeInTheDocument()
+    expect(screen.getByText('平均延迟')).toBeInTheDocument()
+    expect(screen.getByText('100 ms')).toBeInTheDocument()
+    expect(screen.getByText('观测次数')).toBeInTheDocument()
+    expect(screen.getByText('2 次观测')).toBeInTheDocument()
+  })
+
+  it('renders an empty state when no recent latency samples are available', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_empty',
+            name: 'Empty Trend Target',
+            target_type: 'service',
+            host: 'empty.example.com',
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_empty',
+            latest_probe_observations: [],
+            recent_probe_observations: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_empty']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Empty Trend Target' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '近 24h 暂无延迟样本' })).toBeInTheDocument()
+  })
+
   it('renders probe, incident, and event empty states when the target has no related records', async () => {
     vi.stubGlobal(
       'fetch',
