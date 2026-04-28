@@ -217,7 +217,8 @@ func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testi
 				AcceptedAt: time.Now().UTC(),
 				Status:     "accepted",
 				Plan: &agentapi.SyncPlan{
-					HostSampleFrequencyTier: agentapi.FrequencyTier1m,
+					HostSampleFrequencyTier:      agentapi.FrequencyTier1m,
+					HostSampleMaintenanceContext: true,
 					ProbeAssignments: []agentapi.ProbeAssignment{{
 						TargetID:       "tg_001",
 						TargetHost:     "api.example.test",
@@ -270,6 +271,9 @@ func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testi
 	}
 	if secondSync.HostSamples[0].AgentVersion != "dev" || secondSync.HostSamples[0].Fingerprint != "fp-001" || secondSync.HostSamples[0].SyncBatchID == "" {
 		t.Fatalf("host sample metadata not populated: %#v", secondSync.HostSamples[0])
+	}
+	if !secondSync.HostSamples[0].MaintenanceContext {
+		t.Fatal("HostSamples[0].MaintenanceContext = false, want true")
 	}
 	if len(secondSync.ProbeObservations) != 1 {
 		t.Fatalf("len(secondSync.ProbeObservations) = %d, want 1", len(secondSync.ProbeObservations))

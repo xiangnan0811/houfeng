@@ -203,6 +203,7 @@ func (r *Runtime) collectHostSample(observedAt time.Time, fingerprint, syncBatch
 	sample.AgentVersion = agentVersion
 	sample.Fingerprint = fingerprint
 	sample.SyncBatchID = syncBatchID
+	sample.MaintenanceContext = r.currentPlan.HostSampleMaintenanceContext
 	r.lastHostSampleAt = observedAt
 	return &sample
 }
@@ -255,8 +256,9 @@ func cloneSyncPlan(plan *agentapi.SyncPlan) *agentapi.SyncPlan {
 		return nil
 	}
 	cloned := &agentapi.SyncPlan{
-		HostSampleFrequencyTier: plan.HostSampleFrequencyTier,
-		ProbeAssignments:        make([]agentapi.ProbeAssignment, 0, len(plan.ProbeAssignments)),
+		HostSampleFrequencyTier:      plan.HostSampleFrequencyTier,
+		HostSampleMaintenanceContext: plan.HostSampleMaintenanceContext,
+		ProbeAssignments:             make([]agentapi.ProbeAssignment, 0, len(plan.ProbeAssignments)),
 	}
 	for _, assignment := range plan.ProbeAssignments {
 		var basePort *int

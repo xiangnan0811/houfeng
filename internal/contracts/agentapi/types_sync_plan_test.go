@@ -56,7 +56,8 @@ func TestSyncResponseRoundTripWithPlan(t *testing.T) {
 			AcceptedAt: acceptedAt,
 			Status:     "accepted",
 			Plan: &agentapi.SyncPlan{
-				HostSampleFrequencyTier: agentapi.FrequencyTier5m,
+				HostSampleFrequencyTier:      agentapi.FrequencyTier5m,
+				HostSampleMaintenanceContext: true,
 				ProbeAssignments: []agentapi.ProbeAssignment{
 					{
 						TargetID:           "target-http",
@@ -110,6 +111,9 @@ func TestSyncResponseRoundTripWithPlan(t *testing.T) {
 		}
 		if roundTrip.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier5m {
 			t.Fatalf("HostSampleFrequencyTier = %q, want %q", roundTrip.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier5m)
+		}
+		if !roundTrip.Plan.HostSampleMaintenanceContext {
+			t.Fatal("HostSampleMaintenanceContext = false, want true")
 		}
 		if len(roundTrip.Plan.ProbeAssignments) != 3 {
 			t.Fatalf("len(ProbeAssignments) = %d, want 3", len(roundTrip.Plan.ProbeAssignments))
@@ -178,7 +182,8 @@ func TestSyncResponseOmitsPlanWhenUnset(t *testing.T) {
 
 func TestSyncPlan(t *testing.T) {
 	plan := agentapi.SyncPlan{
-		HostSampleFrequencyTier: agentapi.FrequencyTier15m,
+		HostSampleFrequencyTier:      agentapi.FrequencyTier15m,
+		HostSampleMaintenanceContext: true,
 		ProbeAssignments: []agentapi.ProbeAssignment{{
 			TargetID:           "target-nil-port",
 			TargetHost:         "cache.internal.test",
@@ -202,6 +207,10 @@ func TestSyncPlan(t *testing.T) {
 		t.Fatalf("unmarshal sync plan payload: %v", err)
 	}
 
+	if got["host_sample_maintenance_context"] != true {
+		t.Fatalf("host_sample_maintenance_context = %#v, want true", got["host_sample_maintenance_context"])
+	}
+
 	assignments, ok := got["probe_assignments"].([]any)
 	if !ok || len(assignments) != 1 {
 		t.Fatalf("probe_assignments = %#v, want single assignment", got["probe_assignments"])
@@ -220,6 +229,9 @@ func TestSyncPlan(t *testing.T) {
 		t.Fatalf("unmarshal sync plan: %v", err)
 	}
 
+	if !roundTrip.HostSampleMaintenanceContext {
+		t.Fatal("HostSampleMaintenanceContext = false, want true")
+	}
 	if len(roundTrip.ProbeAssignments) != 1 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(roundTrip.ProbeAssignments))
 	}

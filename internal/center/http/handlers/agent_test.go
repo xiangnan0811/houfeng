@@ -153,7 +153,8 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 		syncResult: syncing.Result{
 			AcceptedAt: acceptedAt,
 			Plan: agentplan.SyncPlan{
-				HostSampleFrequencyTier: agentapi.FrequencyTier5m,
+				HostSampleFrequencyTier:      agentapi.FrequencyTier5m,
+				HostSampleMaintenanceContext: true,
 				ProbeAssignments: []agentplan.ProbeAssignment{{
 					TargetID:           "tg_001",
 					TargetHost:         "api.example.test",
@@ -195,6 +196,9 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 	if body.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier5m {
 		t.Fatalf("HostSampleFrequencyTier = %q, want %q", body.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier5m)
+	}
+	if !body.Plan.HostSampleMaintenanceContext {
+		t.Fatal("HostSampleMaintenanceContext = false, want true")
 	}
 	if len(body.Plan.ProbeAssignments) != 1 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(body.Plan.ProbeAssignments))

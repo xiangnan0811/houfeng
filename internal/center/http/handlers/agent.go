@@ -242,7 +242,8 @@ func syncPlanToAPI(plan agentplan.SyncPlan) *agentapi.SyncPlan {
 		})
 	}
 	return &agentapi.SyncPlan{
-		HostSampleFrequencyTier: plan.HostSampleFrequencyTier,
-		ProbeAssignments:        assignments,
+		HostSampleFrequencyTier:      plan.HostSampleFrequencyTier,
+		HostSampleMaintenanceContext: plan.HostSampleMaintenanceContext,
+		ProbeAssignments:             assignments,
 	}
 }

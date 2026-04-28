@@ -142,8 +142,9 @@ type ProbeAssignment struct {
 }
 
 type SyncPlan struct {
-	HostSampleFrequencyTier string            `json:"host_sample_frequency_tier"`
-	ProbeAssignments        []ProbeAssignment `json:"probe_assignments,omitempty"`
+	HostSampleFrequencyTier      string            `json:"host_sample_frequency_tier"`
+	HostSampleMaintenanceContext bool              `json:"host_sample_maintenance_context"`
+	ProbeAssignments             []ProbeAssignment `json:"probe_assignments,omitempty"`
 }
 
 type SyncResponse struct {
