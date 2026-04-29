@@ -98,7 +98,10 @@ describe('DashboardPage', () => {
       expect(screen.getByRole('heading', { name: '集群概览' })).toBeInTheDocument(),
     )
 
-    expectSummaryCard('异常对象总数', '5')
+    expect(screen.getByText('当前风险总览')).toBeInTheDocument()
+    expect(screen.getByText('先处理当前异常，再查看趋势与事件历史。')).toBeInTheDocument()
+    expect(screen.getByText('风险对象')).toBeInTheDocument()
+    expectSummaryCard('风险对象', '5')
     expectSummaryCard('严重对象总数', '3')
     expectSummaryCard('维护对象总数', '1')
     expectSummaryCard('新增异常', '4')

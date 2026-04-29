@@ -183,7 +183,7 @@ export function DashboardPage() {
   if (state.error || !state.overview) {
     return (
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Dashboard</p>
+        <p className="page-panel__eyebrow">当前风险总览</p>
         <h2 className="page-panel__title">集群概览不可用</h2>
         <p className="page-panel__description">{state.error ?? '未获取到概览数据'}</p>
       </section>
@@ -200,10 +200,10 @@ export function DashboardPage() {
     return (
       <div className="page-stack">
         <section className="page-panel">
-          <p className="page-panel__eyebrow">Dashboard</p>
+          <p className="page-panel__eyebrow">当前风险总览</p>
           <h2 className="page-panel__title">集群概览</h2>
           <p className="page-panel__description">
-            查看当前异常、维护与最近状态变更，保持 V1 控制面总览页的信息密度与层级稳定。
+            先处理当前异常，再查看趋势与事件历史。
           </p>
         </section>
 
@@ -230,15 +230,15 @@ export function DashboardPage() {
   return (
     <div className="page-stack">
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Dashboard</p>
+        <p className="page-panel__eyebrow">当前风险总览</p>
         <h2 className="page-panel__title">集群概览</h2>
         <p className="page-panel__description">
-          查看当前异常、维护与最近状态变更，保持 V1 控制面总览页的信息密度与层级稳定。
+          先处理当前异常，再查看趋势与事件历史。
         </p>
       </section>
 
       <div className="summary-grid">
-        <SummaryCard label="异常对象总数" value={abnormalTotal} />
+        <SummaryCard label="风险对象" value={abnormalTotal} />
         <SummaryCard label="严重对象总数" value={severeTotal} />
         <SummaryCard label="维护对象总数" value={maintenanceTotal} />
         <SummaryCard label="新增异常" value={overview.recent_new_incident_count} />
