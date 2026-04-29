@@ -564,7 +564,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   if (missingNodeId || error || !node) {
     return (
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Node Detail</p>
+        <p className="page-panel__eyebrow">节点详情</p>
         <h2 className="page-panel__title">节点详情不可用</h2>
         <p className="page-panel__description">{error ?? '未找到节点'}</p>
         <Link className="text-link" to="/nodes">
@@ -649,7 +649,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     <div className="page-stack">
       <section className="hero-panel">
         <div className="hero-panel__content">
-          <p className="hero-panel__eyebrow">Node Detail</p>
+          <p className="hero-panel__eyebrow">节点详情</p>
           <h2 className="hero-panel__title">{node.display_name}</h2>
           <p className="hero-panel__description">
             {node.region} · {node.city} · {node.provider}
@@ -682,7 +682,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       </section>
 
       {showBindingConflict ? (
-        <DetailSection eyebrow="Binding Conflict" title="绑定冲突处置" aside="高优先级">
+        <DetailSection eyebrow="绑定冲突" title="绑定冲突处置" aside="高优先级">
           <article className="metric-card" aria-label="高优先级：绑定冲突待处理">
             <h3>高优先级：绑定冲突待处理</h3>
             <p>同一台机器重装或合法替换 agent 后，通常会出现新的指纹接入请求。请先核对这次变更。</p>
@@ -757,7 +757,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         </article>
       </div>
 
-      <DetailSection eyebrow="Metadata" title="标签与备注">
+      <DetailSection eyebrow="标签与备注" title="标签与备注">
         <div className="page-stack">
           {metadataEditing ? (
             <>
@@ -827,7 +827,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         </div>
       </DetailSection>
 
-      <DetailSection eyebrow="Runtime Control" title="运行控制">
+      <DetailSection eyebrow="运行控制" title="运行控制">
         <div className="page-stack">
           <p>维护会继续采集，但不解释结果。暂停会停止采集并产生数据空档。</p>
           <div className="badge-row badge-row--wrap">
@@ -865,7 +865,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         </div>
       </DetailSection>
 
-      <DetailSection eyebrow="Lifecycle" title="生命周期">
+      <DetailSection eyebrow="生命周期" title="生命周期">
         <div className="page-stack">
           {isRetiredNode ? <p>{NODE_LIFECYCLE_V1_LIMITATION_COPY}</p> : null}
           <div className="badge-row badge-row--wrap">
@@ -922,7 +922,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       </DetailSection>
 
       <DetailSection
-        eyebrow="Current Runtime Facts"
+        eyebrow="当前运行事实"
         title="当前主机指标"
         aside={sample ? `样本时间：${formatDateTime(sample.observed_at)}` : '等待首批样本'}
       >
@@ -1022,7 +1022,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
 
 
       <DetailSection
-        eyebrow="Recent Trend"
+        eyebrow="近期趋势"
         title="近期趋势"
         aside={recentTrend ? `最新样本：${formatDateTime(recentTrend.newestObservedAt)}` : '近 24h 暂无样本'}
       >
@@ -1075,7 +1075,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
             </article>
 
             <article className="metric-card">
-              <h3>CPU steal</h3>
+              <h3>CPU steal 指标</h3>
               <dl>
                 <div>
                   <dt>steal 平均</dt>
@@ -1096,7 +1096,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         )}
       </DetailSection>
 
-      <DetailSection eyebrow="Incidents" title="当前活跃异常">
+      <DetailSection eyebrow="当前异常" title="当前异常">
         {!hasCurrentActivity ? (
           <div className="empty-state">
             <h3>正在加载活跃异常…</h3>
@@ -1112,7 +1112,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         )}
       </DetailSection>
 
-      <DetailSection eyebrow="Events" title="最近相关事件">
+      <DetailSection eyebrow="事件" title="事件">
         {!hasCurrentActivity ? (
           <div className="empty-state">
             <h3>正在加载相关事件…</h3>

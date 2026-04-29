@@ -154,14 +154,19 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
-    expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
+    expect(screen.getByText('目标详情')).toBeInTheDocument()
+    expect(screen.getAllByText('标签与备注')[0]).toBeInTheDocument()
+    expect(screen.getAllByText('运行控制')[0]).toBeInTheDocument()
+    expect(screen.getAllByText('近期延迟')[0]).toBeInTheDocument()
+    expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByText('HTTP')).toBeInTheDocument()
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
     expect(screen.getByText('nd_001')).toBeInTheDocument()
-    expect(screen.getByText('当前活跃异常')).toBeInTheDocument()
+    expect(screen.getByText('延迟')).toBeInTheDocument()
+    expect(screen.getAllByText('当前异常')[0]).toBeInTheDocument()
     expect(screen.getByText('HTTP 探测在多个节点上失败')).toBeInTheDocument()
-    expect(screen.getByText('最近相关事件')).toBeInTheDocument()
+    expect(screen.getAllByText('事件')[0]).toBeInTheDocument()
     expect(screen.getByText('HTTPS 探测连续失败')).toBeInTheDocument()
     expect(screen.queryByText('事件与 incident 仍由后续切片接入，这里先保留版位。')).not.toBeInTheDocument()
 
@@ -827,6 +832,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
     fireEvent.click(probeActionButton('编辑'))
+    expect(screen.getAllByText('ProbeItem 编辑')[0]).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByLabelText('HTTP 路径')).toHaveValue('/healthz')
 
@@ -1470,7 +1476,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('delete failed')).toBeInTheDocument())
     expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
-    expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
+    expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
   })
 
   it('prevents opening a ProbeItem delete confirmation while a runtime confirmation is active', async () => {
@@ -1845,7 +1851,7 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Payments' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
+    expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByText('origin timeout')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
     expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
@@ -1956,7 +1962,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
     )
-    expect(screen.getByText('ProbeItem 列表')).toBeInTheDocument()
+    expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByText('正在加载活跃异常…')).toBeInTheDocument()
     expect(screen.getByText('正在加载相关事件…')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Blog' })).not.toBeInTheDocument()

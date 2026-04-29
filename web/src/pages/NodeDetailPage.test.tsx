@@ -197,13 +197,16 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
+    expect(screen.getByText('节点详情')).toBeInTheDocument()
+    expect(screen.getByText('当前运行事实')).toBeInTheDocument()
+    expect(screen.getAllByText('近期趋势')[0]).toBeInTheDocument()
     expect(screen.getByText('当前主机指标')).toBeInTheDocument()
     expect(screen.getByText('12.5%')).toBeInTheDocument()
     expect(screen.getByText(/2.0 GB/i)).toBeInTheDocument()
     expect(screen.getByText('2小时 0分钟')).toBeInTheDocument()
-    expect(screen.getByText('当前活跃异常')).toBeInTheDocument()
+    expect(screen.getAllByText('当前异常')[0]).toBeInTheDocument()
     expect(screen.getByText('磁盘使用率持续超过阈值')).toBeInTheDocument()
-    expect(screen.getByText('最近相关事件')).toBeInTheDocument()
+    expect(screen.getAllByText('事件')[0]).toBeInTheDocument()
     expect(screen.getByText('磁盘压力已升级为严重')).toBeInTheDocument()
     expect(screen.queryByText('将在 incidents / events 切片接入后替换为真实内容。')).not.toBeInTheDocument()
 
@@ -362,7 +365,7 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Trend Node' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('近期趋势')).toBeInTheDocument()
+    expect(screen.getAllByText('近期趋势')[0]).toBeInTheDocument()
     expect(screen.getByText('近 24h 样本')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(screen.getByText('Load5 平均')).toBeInTheDocument()
@@ -402,7 +405,7 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Empty Trend Node' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('近期趋势')).toBeInTheDocument()
+    expect(screen.getAllByText('近期趋势')[0]).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '近 24h 暂无样本' })).toBeInTheDocument()
   })
 
@@ -569,6 +572,7 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument(),
     )
 
+    expect(screen.getAllByText('绑定冲突')[0]).toBeInTheDocument()
     expect(screen.getByText('高优先级：绑定冲突待处理')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('fp-current-1234567890')).toBeInTheDocument())
     expect(screen.getByText('fp-pendi…uvwxyz')).toBeInTheDocument()
@@ -576,6 +580,9 @@ describe('NodeDetailPage', () => {
     expect(screen.getByText(formatDateTime('2026-04-27T09:04:00Z'))).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()
     expect(screen.getByText(/同一台机器重装或合法替换/)).toBeInTheDocument()
+    expect(screen.getAllByText('标签与备注')[0]).toBeInTheDocument()
+    expect(screen.getAllByText('运行控制')[0]).toBeInTheDocument()
+    expect(screen.getAllByText('生命周期')[0]).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '打开接入工作台' })).toHaveAttribute(
       'href',
       '/nodes/nd_conflict/onboarding',

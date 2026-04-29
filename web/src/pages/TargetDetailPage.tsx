@@ -1055,7 +1055,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   if (missingTargetId || error || !target) {
     return (
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Target Detail</p>
+        <p className="page-panel__eyebrow">目标详情</p>
         <h2 className="page-panel__title">目标详情不可用</h2>
         <p className="page-panel__description">{error ?? '未找到目标'}</p>
         <Link className="text-link" to="/targets">
@@ -1074,7 +1074,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     <div className="page-stack">
       <section className="hero-panel">
         <div className="hero-panel__content">
-          <p className="hero-panel__eyebrow">Target Detail</p>
+          <p className="hero-panel__eyebrow">目标详情</p>
           <h2 className="hero-panel__title">{target.name}</h2>
           <p className="hero-panel__description">
             {target.target_type} · {target.host}
@@ -1123,7 +1123,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         </article>
       </div>
 
-      <DetailSection eyebrow="Metadata" title="标签与备注">
+      <DetailSection eyebrow="标签与备注" title="标签与备注">
         <div className="page-stack">
           {metadataEditing ? (
             <form onSubmit={handleMetadataSave} className="page-stack">
@@ -1193,7 +1193,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         </div>
       </DetailSection>
 
-      <DetailSection eyebrow="Runtime Control" title="运行控制">
+      <DetailSection eyebrow="运行控制" title="运行控制">
         <div className="page-stack">
           <p>维护会继续采集，但不解释结果。暂停会停止采集并产生数据空档。归档会退出当前工作集并保留历史。</p>
           <div className="badge-row badge-row--wrap">
@@ -1255,7 +1255,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
 
 
       <DetailSection
-        eyebrow="Recent Latency"
+        eyebrow="近期延迟"
         title="近期延迟趋势"
         aside={recentLatencyTrends.length > 0 ? `最近样本更新到：${formatDateTime(recentLatencyTrends[0].newestObservedAt)}` : '暂无可用延迟样本'}
       >
@@ -1321,7 +1321,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         )}
       </DetailSection>
 
-      <DetailSection eyebrow="Probe Items" title="ProbeItem 列表">
+      <DetailSection eyebrow="ProbeItem 列表" title="ProbeItem 列表">
         <div className="page-stack">
           <div>
             <button
@@ -1345,7 +1345,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           {probeCreateOpen ? (
             <section className="page-panel">
               <p className="page-panel__eyebrow">
-                {probeFormMode.kind === 'edit' ? 'ProbeItem Edit' : 'ProbeItem Create'}
+                {probeFormMode.kind === 'edit' ? 'ProbeItem 编辑' : 'ProbeItem 创建'}
               </p>
               <h3 className="page-panel__title">
                 {probeFormMode.kind === 'edit' ? '编辑 ProbeItem' : '创建 ProbeItem'}
@@ -1666,7 +1666,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                               />
                             </div>
                             <div>
-                              <span>Latency</span>
+                              <span>延迟</span>
                               <strong>{formatLatency(observation.latency_ms)}</strong>
                             </div>
                             <div>
@@ -1695,7 +1695,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         </div>
       </DetailSection>
 
-      <DetailSection eyebrow="Incidents" title="当前活跃异常">
+      <DetailSection eyebrow="当前异常" title="当前异常">
         {!hasCurrentActivity ? (
           <div className="empty-state">
             <h3>正在加载活跃异常…</h3>
@@ -1711,7 +1711,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         )}
       </DetailSection>
 
-      <DetailSection eyebrow="Events" title="最近相关事件">
+      <DetailSection eyebrow="事件" title="事件">
         {!hasCurrentActivity ? (
           <div className="empty-state">
             <h3>正在加载相关事件…</h3>
