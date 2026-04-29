@@ -68,7 +68,7 @@ function describePhase(state: NodeOnboardingState) {
     case '已绑定，等待稳定观测':
       return {
         title: '已完成指纹绑定，等待稳定观测',
-        description: '绑定已经建立，系统正在等待首批 HostSample 或已接收观测到达。',
+        description: '绑定已经建立，系统正在等待首批主机采样（HostSample）或已接收观测到达。',
       }
     case '接入完成':
       return {

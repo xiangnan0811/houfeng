@@ -101,7 +101,7 @@ function buildCreateTargetInput(form: CreateTargetFormState): CreateTargetInput 
     throw new Error('执行节点标签至少需要填写一个。')
   }
 
-  const basePort = parseOptionalPositiveInteger(form.basePort, 'Base Port')
+  const basePort = parseOptionalPositiveInteger(form.basePort, '基础端口')
   return {
     name: form.name.trim(),
     target_type: form.targetType,
@@ -495,7 +495,7 @@ export function TargetsPage() {
             </p>
             <p>
               <label>
-                Host
+                主机地址
                 <input
                   name="host"
                   value={createForm.host}
@@ -506,7 +506,7 @@ export function TargetsPage() {
             </p>
             <p>
               <label>
-                Base Port
+                基础端口
                 <input
                   name="basePort"
                   inputMode="numeric"
@@ -683,7 +683,7 @@ export function TargetsPage() {
                     }
                     impact={
                       pendingConfirmation.action === 'pause'
-                        ? '会停止该 Target 下所有 ProbeItem 的执行，不再产生新的目标 observation。'
+                        ? '会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。'
                         : '归档后不会继续作为活跃目标参与观测、异常判定或通知。'
                     }
                     unchanged={

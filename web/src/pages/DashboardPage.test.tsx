@@ -177,11 +177,11 @@ describe('DashboardPage', () => {
 
     expect(screen.getByText('首次接入')).toBeInTheDocument()
     expect(
-      screen.getByText('这不是异常。候风需要先有一个 Node 接入 agent，然后才能创建 Target 并添加 ProbeItem。'),
+      screen.getByText('这不是异常。候风需要先有一个节点接入 agent，然后才能创建目标并添加 ProbeItem。'),
     ).toBeInTheDocument()
-    expect(screen.getByText('创建第一个 Node')).toBeInTheDocument()
+    expect(screen.getAllByText('创建第一个节点')).toHaveLength(2)
     expect(screen.getByText('接入 agent')).toBeInTheDocument()
-    expect(screen.getByText('创建第一个 Target')).toBeInTheDocument()
+    expect(screen.getByText('创建第一个目标')).toBeInTheDocument()
     expect(screen.getByText('添加第一个 ProbeItem')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '创建第一个节点' })).toHaveAttribute('href', '/nodes')
     expect(screen.queryByText('异常对象总数')).not.toBeInTheDocument()

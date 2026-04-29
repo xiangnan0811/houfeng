@@ -892,10 +892,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           </div>
           {!isRetiredNode && showRetireConfirmation ? (
             <div className="page-stack">
-              <p>
-                退役会让节点退出当前工作集，但会保留历史记录。这不是删除，也不会清空事件、
-                observation 或 agent 绑定历史。
-              </p>
+              <p>退役会让节点退出当前工作集，但会保留历史记录。这不是删除，也不会清空事件、观测记录或 agent 绑定历史。</p>
               <div className="badge-row badge-row--wrap">
                 <button
                   type="button"
@@ -1015,7 +1012,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         ) : (
           <div className="empty-state">
             <h3>尚未收到主机样本</h3>
-            <p>该节点已存在，但首批 HostSample 还未到达。请等待下一次 agent 同步。</p>
+            <p>该节点已存在，但首批主机采样（HostSample）还未到达。请等待下一次 agent 同步。</p>
           </div>
         )}
       </DetailSection>
@@ -1091,7 +1088,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         ) : (
           <div className="empty-state">
             <h3>近 24h 暂无样本</h3>
-            <p>近期趋势需要 recent_host_samples 数据，当前还没有可用样本。</p>
+            <p>近期趋势需要近 24h 主机采样数据，当前还没有可用样本。</p>
           </div>
         )}
       </DetailSection>
@@ -1100,7 +1097,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         {!hasCurrentActivity ? (
           <div className="empty-state">
             <h3>正在加载活跃异常…</h3>
-            <p>等待节点相关的 incident 读模型返回最新结果。</p>
+            <p>等待节点相关的异常读模型返回最新结果。</p>
           </div>
         ) : incidentsError ? (
           <div className="empty-state">

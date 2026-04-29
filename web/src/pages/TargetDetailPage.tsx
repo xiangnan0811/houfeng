@@ -1230,7 +1230,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
               }
               impact={
                 pendingRuntimeConfirmation.action === 'pause'
-                  ? '会停止该 Target 下所有 ProbeItem 的执行，不再产生新的目标 observation。'
+                  ? '会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。'
                   : '归档后不会继续作为活跃目标参与观测、异常判定或通知。'
               }
               unchanged={
@@ -1316,7 +1316,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         ) : (
           <div className="empty-state">
             <h3>暂无可用延迟样本</h3>
-            <p>近期延迟趋势仅统计已返回的成功且带 latency 的 recent_probe_observations。</p>
+            <p>近期延迟趋势仅统计已返回成功且带延迟值的近期探测观测。</p>
           </div>
         )}
       </DetailSection>
@@ -1610,10 +1610,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                       <div ref={pendingProbeConfirmationCardRef}>
                         <ActionConfirmationCard
                           title="确认删除 ProbeItem"
-                          current="当前：这条 ProbeItem 仍属于当前 Target。"
+                          current="当前：这条 ProbeItem 仍属于当前目标。"
                           result="操作后：这条观测方式会被移除。"
-                          impact="仅用于误建场景。删除后该 ProbeItem 不再产生新的 observation。"
-                          unchanged="不会删除 Target，也不会删除既有事件或历史观测记录。"
+                          impact="仅用于误建场景。删除后该 ProbeItem 不再产生新的观测记录。"
+                          unchanged="不会删除目标，也不会删除既有事件或历史观测记录。"
                           confirmLabel="确认删除 ProbeItem"
                           disabled={probeCreateSubmitting || probeRowMutationBusy}
                           onConfirm={() => void handleDeleteProbeItem(probeItem, true)}
@@ -1699,7 +1699,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         {!hasCurrentActivity ? (
           <div className="empty-state">
             <h3>正在加载活跃异常…</h3>
-            <p>等待目标相关的 incident 读模型返回最新结果。</p>
+            <p>等待目标相关的异常读模型返回最新结果。</p>
           </div>
         ) : incidentsError ? (
           <div className="empty-state">

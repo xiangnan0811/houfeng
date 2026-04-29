@@ -33,6 +33,6 @@ describe('IncidentList', () => {
     render(<IncidentList incidents={[]} />)
 
     expect(screen.getByText('当前没有活跃异常')).toBeInTheDocument()
-    expect(screen.getByText('一切正常，暂未发现需要处理的活跃 incident。')).toBeInTheDocument()
+    expect(screen.getByText('一切正常，暂未发现需要处理的活跃异常。')).toBeInTheDocument()
   })
 })

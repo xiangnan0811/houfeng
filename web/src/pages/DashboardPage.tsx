@@ -211,12 +211,12 @@ export function DashboardPage() {
           <p className="page-panel__eyebrow">首次接入</p>
           <h3 className="page-panel__title">还没有节点与目标</h3>
           <p className="page-panel__description">
-            这不是异常。候风需要先有一个 Node 接入 agent，然后才能创建 Target 并添加 ProbeItem。
+            这不是异常。候风需要先有一个节点接入 agent，然后才能创建目标并添加 ProbeItem。
           </p>
           <ol>
-            <li>创建第一个 Node</li>
+            <li>创建第一个节点</li>
             <li>接入 agent</li>
-            <li>创建第一个 Target</li>
+            <li>创建第一个目标</li>
             <li>添加第一个 ProbeItem</li>
           </ol>
           <Link className="text-link" to="/nodes">
@@ -267,7 +267,7 @@ export function DashboardPage() {
         <EventList
           events={overview.recent_events}
           emptyTitle="最近没有状态变更事件"
-          emptyDescription="当前没有新的 incident 变化，首页事件流保持为空。"
+          emptyDescription="当前没有新的异常变化，首页事件流保持为空。"
         />
       </DetailSection>
     </div>

@@ -145,6 +145,9 @@ describe('NodeOnboardingPage', () => {
       expect(screen.getByText('已完成指纹绑定，等待稳定观测')).toBeInTheDocument(),
     )
 
+    expect(
+      screen.getByText('绑定已经建立，系统正在等待首批主机采样（HostSample）或已接收观测到达。'),
+    ).toBeInTheDocument()
     expect(screen.getByText('已接收观测')).toBeInTheDocument()
     expect(screen.getByText('首批样本：未到达')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '查看节点详情' })).not.toBeInTheDocument()

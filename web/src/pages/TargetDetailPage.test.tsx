@@ -380,6 +380,9 @@ describe('TargetDetailPage', () => {
 
     expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '暂无可用延迟样本' })).toBeInTheDocument()
+    expect(
+      screen.getByText('近期延迟趋势仅统计已返回成功且带延迟值的近期探测观测。'),
+    ).toBeInTheDocument()
   })
 
   it('renders probe, incident, and event empty states when the target has no related records', async () => {
@@ -1377,13 +1380,13 @@ describe('TargetDetailPage', () => {
 
     const confirmation = screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })
     expect(confirmation).toBeInTheDocument()
-    expect(screen.getByText('当前：这条 ProbeItem 仍属于当前 Target。')).toBeInTheDocument()
+    expect(screen.getByText('当前：这条 ProbeItem 仍属于当前目标。')).toBeInTheDocument()
     expect(screen.getByText('操作后：这条观测方式会被移除。')).toBeInTheDocument()
     expect(
-      screen.getByText('仅用于误建场景。删除后该 ProbeItem 不再产生新的 observation。'),
+      screen.getByText('仅用于误建场景。删除后该 ProbeItem 不再产生新的观测记录。'),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('不会删除 Target，也不会删除既有事件或历史观测记录。'),
+      screen.getByText('不会删除目标，也不会删除既有事件或历史观测记录。'),
     ).toBeInTheDocument()
     expect(within(confirmation).getByText('port: 443')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
@@ -1964,6 +1967,7 @@ describe('TargetDetailPage', () => {
     )
     expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByText('正在加载活跃异常…')).toBeInTheDocument()
+    expect(screen.getByText('等待目标相关的异常读模型返回最新结果。')).toBeInTheDocument()
     expect(screen.getByText('正在加载相关事件…')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Blog' })).not.toBeInTheDocument()
 
@@ -2227,7 +2231,7 @@ describe('TargetDetailPage', () => {
     expect(screen.getByText('当前：目标运行状态为启用或维护中。')).toBeInTheDocument()
     expect(screen.getByText('操作后：目标运行状态变为暂停。')).toBeInTheDocument()
     expect(
-      screen.getByText('会停止该 Target 下所有 ProbeItem 的执行，不再产生新的目标 observation。'),
+      screen.getByText('会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。'),
     ).toBeInTheDocument()
     expect(screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))

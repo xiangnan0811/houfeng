@@ -41,7 +41,7 @@ function severityTone(value: ActiveIncidentRecord['severity']) {
 export function IncidentList({
   incidents,
   emptyTitle = '当前没有活跃异常',
-  emptyDescription = '一切正常，暂未发现需要处理的活跃 incident。',
+  emptyDescription = '一切正常，暂未发现需要处理的活跃异常。',
 }: IncidentListProps) {
   if (incidents.length === 0) {
     return (

@@ -94,8 +94,8 @@ describe('TargetsPage', () => {
     expect(screen.getByText('目标创建')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(screen.getByLabelText('目标类型'), { target: { value: 'service' } })
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(screen.getByLabelText('Base Port'), { target: { value: '443' } })
+    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(screen.getByLabelText('基础端口'), { target: { value: '443' } })
     fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge, core' } })
     fireEvent.change(screen.getByLabelText('运行状态'), { target: { value: '启用' } })
     fireEvent.change(screen.getByLabelText('目标标签'), { target: { value: 'public' } })
@@ -141,10 +141,37 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
 
     expect(screen.getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses Chinese-first validation for base port', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(screen.getByLabelText('基础端口'), { target: { value: 'abc' } })
+    fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+
+    expect(screen.getByText('基础端口必须为正整数。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -164,7 +191,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Stale target' } })
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'stale.example.com' } })
+    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'stale.example.com' } })
     fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
 
     expect(screen.getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
@@ -176,7 +203,7 @@ describe('TargetsPage', () => {
 
     expect(screen.queryByText('执行节点标签至少需要填写一个。')).not.toBeInTheDocument()
     expect(screen.getByLabelText('目标名称')).toHaveValue('')
-    expect(screen.getByLabelText('Host')).toHaveValue('')
+    expect(screen.getByLabelText('主机地址')).toHaveValue('')
   })
 
   it('keeps failed target creation API errors local while preserving the loaded list', async () => {
@@ -198,7 +225,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
     fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
 
@@ -233,7 +260,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
     fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
 
@@ -294,7 +321,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
     fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
 
@@ -599,7 +626,7 @@ describe('TargetsPage', () => {
     expect(screen.getByText('当前：目标运行状态为启用或维护中。')).toBeInTheDocument()
     expect(screen.getByText('操作后：目标运行状态变为暂停。')).toBeInTheDocument()
     expect(
-      screen.getByText('会停止该 Target 下所有 ProbeItem 的执行，不再产生新的目标 observation。'),
+      screen.getByText('会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。'),
     ).toBeInTheDocument()
     expect(screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))

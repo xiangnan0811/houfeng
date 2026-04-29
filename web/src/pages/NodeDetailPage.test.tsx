@@ -455,7 +455,10 @@ describe('NodeDetailPage', () => {
       expect(screen.getByText('尚未收到主机样本')).toBeInTheDocument(),
     )
     expect(
-      screen.getByText('该节点已存在，但首批 HostSample 还未到达。请等待下一次 agent 同步。'),
+      screen.getByText('该节点已存在，但首批主机采样（HostSample）还未到达。请等待下一次 agent 同步。'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('近期趋势需要近 24h 主机采样数据，当前还没有可用样本。'),
     ).toBeInTheDocument()
     expect(screen.getByText('当前没有活跃异常')).toBeInTheDocument()
     expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument()
@@ -901,6 +904,7 @@ describe('NodeDetailPage', () => {
     )
     expect(screen.getByText('当前主机指标')).toBeInTheDocument()
     expect(screen.getByText('正在加载活跃异常…')).toBeInTheDocument()
+    expect(screen.getByText('等待节点相关的异常读模型返回最新结果。')).toBeInTheDocument()
     expect(screen.getByText('正在加载相关事件…')).toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: 'Tokyo Edge' }),
@@ -1379,7 +1383,7 @@ describe('NodeDetailPage', () => {
     expect(screen.getByRole('button', { name: '确认退役' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
     expect(screen.getByText(/这不是删除/)).toBeInTheDocument()
-    expect(screen.getByText(/不会清空事件、 observation 或 agent 绑定历史/)).toBeInTheDocument()
+    expect(screen.getByText(/不会清空事件、观测记录或 agent 绑定历史/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '确认退役' }))
 
