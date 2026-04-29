@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
@@ -16,7 +17,6 @@ import {
 } from '../lib/api'
 import { formatDateTime, formatLabelList } from '../lib/format'
 import type { CreateTargetInput, TargetRecord } from '../lib/types'
-
 
 const TARGET_TYPE_OPTIONS = [
   { value: 'service', label: 'service' },
@@ -73,63 +73,6 @@ function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
-}
-
-function ActionConfirmationCard({
-  title,
-  current,
-  result,
-  impact,
-  unchanged,
-  confirmLabel,
-  cancelLabel = '取消',
-  disabled = false,
-  onConfirm,
-  onCancel,
-}: {
-  title: string
-  current: string
-  result: string
-  impact: string
-  unchanged: string
-  confirmLabel: string
-  cancelLabel?: string
-  disabled?: boolean
-  onConfirm: () => void
-  onCancel: () => void
-}) {
-  const containerRef = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    containerRef.current?.focus()
-  }, [])
-
-  return (
-    <section
-      ref={containerRef}
-      className="page-panel"
-      role="alertdialog"
-      aria-label={title}
-      tabIndex={-1}
-    >
-      <p className="page-panel__eyebrow">操作确认</p>
-      <h3 className="page-panel__title">{title}</h3>
-      <div className="page-stack">
-        <p>{current}</p>
-        <p>{result}</p>
-        <p>{impact}</p>
-        <p>{unchanged}</p>
-        <div className="badge-row badge-row--wrap">
-          <button type="button" disabled={disabled} onClick={onConfirm}>
-            {confirmLabel}
-          </button>
-          <button type="button" disabled={disabled} onClick={onCancel}>
-            {cancelLabel}
-          </button>
-        </div>
-      </div>
-    </section>
-  )
 }
 
 function parseLabels(value: string) {
