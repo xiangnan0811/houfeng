@@ -193,7 +193,7 @@ Expected:
 
 ## Step 8: Verify notification record surface
 
-If Telegram is configured and notification policy allows delivery, notification-backed event records should be visible through the event surface:
+Notification-backed event records are visible through the event surface whenever an incident transition created a `notification_records` row. This includes sent, failed, and policy-suppressed notification records; `notification_only=true` does not mean “Telegram send succeeded”.
 
 ```bash
 curl -fsS 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&notification_only=true&limit=10'
@@ -201,8 +201,8 @@ curl -fsS 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target
 
 Expected:
 
-- if Telegram settings are enabled and the incident transition emitted a notification, the response contains notification-backed event rows;
-- if Telegram is disabled or policy suppressed delivery, record that intentional empty result in the evidence table instead of treating it as a failure.
+- if the incident transition emitted a notification decision, the response contains notification-backed event rows even when delivery was suppressed or failed;
+- if the response is empty, verify whether the transition produced no notification decision for the current policy/state before treating the result as expected.
 
 ## Step 9: UI verification checkpoints
 
