@@ -68,10 +68,13 @@ The token file must contain an enrollment token issued from the Node onboarding 
 ```bash
 export HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
 export HOUFENG_AGENT_TOKEN_FILE=/tmp/houfeng-agent-token
-export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent-sync-buffer.json
+install -d -m 0700 /tmp/houfeng-agent
+export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent/sync-buffer.json
 make build-agent
 ./bin/houfeng-agent
 ```
+
+Use a private agent state directory for the sync buffer. A buffer file placed directly under `/tmp` can fail on hosts where the agent cannot tighten permissions on the shared `/tmp` directory.
 
 ## systemd installation example
 

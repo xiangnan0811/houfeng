@@ -71,7 +71,7 @@ Status values:
 | systemd examples for center and agent | Closed | `docs/deploy/systemd/*.service` |
 | Deployment guide | Closed | `docs/deploy/local-and-systemd.md` |
 | Fresh-install smoke procedure | Closed | `docs/operations/v1-smoke-run.md` documents the reproducible Node → agent enrollment → Target → ProbeItem → observation → incident/event/notification path |
-| Fresh-install smoke executed on live PostgreSQL | Partial | Requires live PostgreSQL and agent run; evidence table remains pending until filled |
+| Fresh-install smoke executed on live PostgreSQL | Closed | `docs/operations/v1-smoke-run.md` records the 2026-04-29 live run against PostgreSQL `192.168.100.192:5432/user_82Xkx5`: center health, Node, agent enrollment/sync, Target, ProbeItem, observation, incident start/recovery, and notification-backed event query passed. Telegram delivery and browser screenshots remain separate evidence rows. |
 
 ## Final V1 release gate
 
@@ -80,6 +80,6 @@ Before tagging or declaring V1 fully release-ready, collect:
 - passing `go test ./...`;
 - passing `./scripts/verify.sh`;
 - passing `cd web && npm run build`;
-- completed live PostgreSQL smoke table in `docs/operations/v1-smoke-run.md`;
+- completed live PostgreSQL smoke table in `docs/operations/v1-smoke-run.md` (collected 2026-04-29);
 - visual screenshot comparison artifacts or an explicit accepted waiver for pending screenshot evidence;
 - Telegram delivery proof or an explicit note that Telegram is disabled for the deployment.

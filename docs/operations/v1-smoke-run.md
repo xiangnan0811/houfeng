@@ -95,7 +95,8 @@ chmod 0600 /tmp/houfeng-agent-token
 ```bash
 export HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
 export HOUFENG_AGENT_TOKEN_FILE=/tmp/houfeng-agent-token
-export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent-sync-buffer.json
+install -d -m 0700 /tmp/houfeng-agent
+export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent/sync-buffer.json
 ./bin/houfeng-agent > /tmp/houfeng-agent.log 2>&1 &
 AGENT_PID=$!
 ```
@@ -221,21 +222,21 @@ Open `http://127.0.0.1:8080/` and check:
 
 | Check | Evidence level | Result field |
 | --- | --- | --- |
-| `go test ./...` | Automated | Fill with command output summary |
-| `./scripts/verify.sh` | Automated | Fill with command output summary |
-| center starts and `/api/healthz` returns 200 | Local PostgreSQL required | Fill after live run |
-| Node created | Local PostgreSQL required | Fill returned `node_id` |
-| enrollment token issued | Local PostgreSQL required | Fill timestamp only, not token |
-| agent enrolls and syncs | Local PostgreSQL required | Fill log excerpt |
-| Target created | Local PostgreSQL required | Fill returned `target_id` |
-| ProbeItem created | Local PostgreSQL required | Fill returned probe id |
-| observations received | Local PostgreSQL required | Fill runtime-facts summary |
-| incident started | Local PostgreSQL required | Fill event id / incident id |
-| incident recovered | Local PostgreSQL required | Fill event id |
-| notification-backed event query checked | Local PostgreSQL / Telegram policy dependent | Fill `/api/events?...notification_only=true` result summary |
-| Telegram notification sent or intentionally disabled | Manual / Telegram required | Fill delivery result or intentional disabled status |
-| primary UI pages checked | Manual | Fill screenshots or notes |
+| `go test ./...` | Automated | Passed on 2026-04-29 after evidence update |
+| `./scripts/verify.sh` | Automated | Passed on 2026-04-29: Go tests, `npm ci`, 14 Vitest files / 165 tests, and frontend build |
+| center starts and `/api/healthz` returns 200 | Local PostgreSQL required | 2026-04-29 live run `smoke-20260429024908`: `{"name":"houfeng-center","version":"dev","status":"ok"}` |
+| Node created | Local PostgreSQL required | 2026-04-29 live run `smoke-20260429024908`: `node_id=nd_1450995f5b3bdf38` |
+| enrollment token issued | Local PostgreSQL required | Issued at `2026-04-29T10:49:09.129938+08:00`; plaintext token intentionally not recorded |
+| agent enrolls and syncs | Local PostgreSQL required | `houfeng-agent` enrolled with `binding_status=已绑定`; latest host sample at `2026-04-29T10:50:09.151525+08:00` |
+| Target created | Local PostgreSQL required | `target_id=tg_02d55cc117129e57`, host `127.0.0.1`, smoke center port `34923` |
+| ProbeItem created | Local PostgreSQL required | `probe_item_id=pb_98a9b2826106bcb1`, `probe_kind=http`, `frequency_tier=1m` |
+| observations received | Local PostgreSQL required | Runtime facts showed HTTP success observation, `http_status=200`, observed at `2026-04-29T10:50:09.151525+08:00` |
+| incident started | Local PostgreSQL required | `incident_id=inc_target_tg_02d55cc117129e57_target_probe_failure`, `event_id=evt_813ad08f1029a282`, severity `关注` after two 404 probe failures |
+| incident recovered | Local PostgreSQL required | Active incident count returned to `0`; recovered event `evt_b7416f1f3da1f506` |
+| notification-backed event query checked | Local PostgreSQL / Telegram policy dependent | `notification_only=true` returned 2 event rows for the incident start/recovery transitions |
+| Telegram notification sent or intentionally disabled | Manual / Telegram required | Telegram env vars were intentionally empty for this smoke; outbound Telegram delivery was not attempted |
+| primary UI pages checked | Manual | Not checked in browser during this live PostgreSQL run; screenshot/visual evidence remains tracked in `docs/operations/v1-visual-verification.md` |
 
 ## Current session status
 
-This file is a reproducible smoke procedure. Unless a later commit fills the evidence table with actual command output, live PostgreSQL, agent, incident, notification, and screenshot evidence should be treated as pending manual evidence rather than completed proof.
+Live PostgreSQL smoke was executed on 2026-04-29 against `192.168.100.192:5432/user_82Xkx5` with `HOUFENG_INCIDENT_SWEEP_INTERVAL=5s`. The center, agent enrollment/sync, target probe observation, incident start/recovery, notification-backed event query, `go test ./...`, `./scripts/verify.sh`, and `cd web && npm run build` passed. Telegram delivery and browser screenshot comparison remain separate evidence gaps because no Telegram credentials or screenshot capture were provided in this run.
