@@ -468,7 +468,7 @@ export function SettingsPage() {
   if (state.error || !state.settings || !state.form) {
     return (
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Settings</p>
+        <p className="page-panel__eyebrow">设置</p>
         <h2 className="page-panel__title">设置不可用</h2>
         <p className="page-panel__description">{state.error ?? '未获取到设置数据'}</p>
       </section>
@@ -517,7 +517,7 @@ export function SettingsPage() {
   return (
     <form className="page-stack" onSubmit={handleSubmit}>
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Settings</p>
+        <p className="page-panel__eyebrow">设置</p>
         <h2 className="page-panel__title">设置</h2>
         <p className="page-panel__description">
           集中维护 Telegram 通知、默认频率、全局规则、少量覆盖与保留策略，保持页面信息密度低于观测页。
@@ -609,7 +609,7 @@ export function SettingsPage() {
         </SectionIntro>
       </DetailSection>
 
-      <DetailSection eyebrow="Frequency" title="默认频率档位">
+      <DetailSection eyebrow="频率档位" title="默认频率档位">
         <SectionIntro>当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。</SectionIntro>
         <div className="summary-grid">
           <FrequencySelect
@@ -678,7 +678,7 @@ export function SettingsPage() {
         </div>
       </DetailSection>
 
-      <DetailSection eyebrow="Global Defaults" title="全局默认规则">
+      <DetailSection eyebrow="全局默认" title="全局默认规则">
         <SectionIntro>heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路。</SectionIntro>
         <IncidentDefaultsEditor
           value={form.incidentDefaults}
@@ -693,7 +693,7 @@ export function SettingsPage() {
         />
       </DetailSection>
 
-      <DetailSection eyebrow="Overrides" title="少量覆盖规则" aside={<TargetTypeSummary />}>
+      <DetailSection eyebrow="覆盖规则" title="少量覆盖规则" aside={<TargetTypeSummary />}>
         <SectionIntro>
           仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；incident 默认覆盖仍仅作为持久化策略保存。
         </SectionIntro>
@@ -737,7 +737,7 @@ export function SettingsPage() {
         </div>
       </DetailSection>
 
-      <DetailSection eyebrow="Retention" title="数据保留策略">
+      <DetailSection eyebrow="保留策略" title="数据保留策略">
         <div className="summary-grid">
           <RetentionInput
             ariaLabel="原始层保留天数"

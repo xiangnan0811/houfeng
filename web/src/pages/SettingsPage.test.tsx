@@ -86,7 +86,12 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
 
+    expect(screen.getByText('设置', { selector: '.page-panel__eyebrow' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument()
+    expect(screen.getByText('频率档位')).toBeInTheDocument()
+    expect(screen.getByText('全局默认')).toBeInTheDocument()
+    expect(screen.getByText('覆盖规则')).toBeInTheDocument()
+    expect(screen.getByText('保留策略')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '默认频率档位' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '全局默认规则' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '少量覆盖规则' })).toBeInTheDocument()

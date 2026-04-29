@@ -42,7 +42,7 @@ export function ActionConfirmationCard({
       aria-describedby={descriptionId}
       tabIndex={-1}
     >
-      <p className="page-panel__eyebrow">Confirmation</p>
+      <p className="page-panel__eyebrow">操作确认</p>
       <h3 id={titleId} className="page-panel__title">
         {title}
       </h3>
