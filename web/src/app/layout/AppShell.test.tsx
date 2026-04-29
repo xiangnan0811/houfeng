@@ -26,6 +26,12 @@ describe('AppShell', () => {
       expect(screen.getByRole('link', { name: item.label })).toBeInTheDocument()
     })
 
+    expect(screen.getByText('单体中心')).toBeInTheDocument()
+    expect(screen.getByText('PostgreSQL')).toBeInTheDocument()
+    expect(screen.getByText('systemd agent')).toBeInTheDocument()
+    expect(screen.getByText('当前视图')).toBeInTheDocument()
+    expect(screen.getByText('V1 冻结基线')).toBeInTheDocument()
+
     expect(document.title).toBe(PRODUCT_FULL_NAME_ZH)
   })
 })

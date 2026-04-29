@@ -81,6 +81,31 @@ select {
   gap: 10px;
 }
 
+.app-shell__sidebar-context {
+  display: grid;
+  gap: 8px;
+  margin-top: 28px;
+  padding: 18px 16px;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.app-shell__sidebar-context p {
+  margin: 0 0 4px;
+  color: #8e989d;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-shell__sidebar-context span {
+  display: block;
+  color: #f4f7f8;
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
 .app-shell__nav-link {
   padding: 11px 14px;
   border: 1px solid transparent;
@@ -114,6 +139,8 @@ select {
 .app-shell__header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 24px;
   min-height: 80px;
   padding: 24px 32px;
   border-bottom: 1px solid #2a2a2a;
@@ -133,6 +160,30 @@ select {
   margin: 0;
   font-size: 1.25rem;
   font-weight: 600;
+}
+
+.app-shell__section-label {
+  margin: 0 0 6px;
+  color: #8e989d;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-shell__status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.app-shell__status-strip span {
+  padding: 8px 12px;
+  border: 1px solid rgba(68, 216, 241, 0.22);
+  border-radius: 999px;
+  background: rgba(68, 216, 241, 0.08);
+  color: #dce8eb;
+  font-size: 0.82rem;
 }
 
 .app-shell__content {

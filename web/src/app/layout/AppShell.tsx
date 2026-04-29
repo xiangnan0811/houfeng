@@ -35,13 +35,27 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
+
+        <div className="app-shell__sidebar-context" aria-label="系统形态">
+          <p>运行形态</p>
+          <span>单体中心</span>
+          <span>PostgreSQL</span>
+          <span>systemd agent</span>
+        </div>
       </aside>
 
       <div className="app-shell__main">
         <header className="app-shell__header">
           <div>
             <p className="app-shell__eyebrow">{PRODUCT_NAME_EN}</p>
+            <p className="app-shell__section-label">当前视图</p>
             <h1 className="app-shell__title">{PRODUCT_FULL_NAME_ZH}</h1>
+          </div>
+
+          <div className="app-shell__status-strip" aria-label="V1 基线状态">
+            <span>V1 冻结基线</span>
+            <span>中文主界面</span>
+            <span>Unified / Baseline</span>
           </div>
         </header>
 
