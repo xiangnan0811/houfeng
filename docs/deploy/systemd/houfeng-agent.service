@@ -1,0 +1,23 @@
+[Unit]
+Description=Houfeng Fleet Control Plane agent
+Documentation=file:/opt/houfeng/docs/deploy/local-and-systemd.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=houfeng-agent
+Group=houfeng-agent
+EnvironmentFile=/etc/houfeng-agent/agent.env
+ExecStart=/usr/local/bin/houfeng-agent
+Restart=always
+RestartSec=10s
+StateDirectory=houfeng-agent
+ReadWritePaths=/var/lib/houfeng-agent
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

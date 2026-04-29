@@ -1,0 +1,23 @@
+[Unit]
+Description=Houfeng Fleet Control Plane center
+Documentation=file:/opt/houfeng/docs/deploy/local-and-systemd.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=houfeng
+Group=houfeng
+WorkingDirectory=/opt/houfeng
+EnvironmentFile=/etc/houfeng/center.env
+ExecStart=/usr/local/bin/houfeng-center
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/houfeng
+
+[Install]
+WantedBy=multi-user.target
