@@ -73,6 +73,15 @@ Status values:
 | Fresh-install smoke procedure | Closed | `docs/operations/v1-smoke-run.md` documents the reproducible Node → agent enrollment → Target → ProbeItem → observation → incident/event/notification path |
 | Fresh-install smoke executed on live PostgreSQL | Closed | `docs/operations/v1-smoke-run.md` records the 2026-04-29 live run against PostgreSQL `192.168.100.192:5432/user_82Xkx5`: center health, Node, agent enrollment/sync, Target, ProbeItem, observation, incident start/recovery, and notification-backed event query passed. Telegram delivery and browser screenshots remain separate evidence rows. |
 
+## Authentication (V1.x scope add)
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| Username + password login (方案 2) | Closed | `internal/center/auth/`, `internal/center/store/users.go`, `internal/center/store/sessions.go`, migration `db/migrations/0010_add_users_and_sessions.sql` |
+| All non-agent / non-health API protected by session cookie | Closed | `internal/center/http/middleware.go`, `internal/center/http/router.go`, `internal/center/http/auth_e2e_test.go` |
+| Initial user seed from env on first startup | Closed | `internal/center/auth/seed.go`, `cmd/houfeng-center/bootstrap.go` |
+| Session cleanup worker | Closed | `internal/center/auth/cleanup.go`, wired in `cmd/houfeng-center/bootstrap.go` |
+
 ## Final V1 release gate
 
 Before tagging or declaring V1 fully release-ready, collect:
