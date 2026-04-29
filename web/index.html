@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>候风 · 服务器舰队控制面</title>
+    <script>
+      (function () {
+        try {
+          var p = localStorage.getItem('houfeng.theme.preset') || 'houfeng';
+          var m = localStorage.getItem('houfeng.theme.mode') || 'system';
+          var scheme = m === 'system'
+            ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : m;
+          document.documentElement.classList.add('theme-' + p + '-' + scheme);
+        } catch (e) { /* ignore */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
