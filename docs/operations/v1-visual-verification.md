@@ -90,4 +90,10 @@ The implementation-controlled alignment pass has been applied:
 - dashboard copy now prioritizes current risk in `web/src/pages/DashboardPage.tsx`;
 - ordinary onboarding and ProbeItem form labels are Chinese-first in `web/src/pages/NodeOnboardingPage.tsx` and `web/src/pages/TargetDetailPage.tsx`.
 
+The follow-up residual copy sweep extended the same rule across the implemented V1 page family:
+
+- list and event pages now use Chinese-first section eyebrows in `web/src/pages/NodesPage.tsx`, `web/src/pages/TargetsPage.tsx`, `web/src/pages/DashboardPage.tsx`, and `web/src/pages/EventsPage.tsx`;
+- settings and shared confirmation UI now use Chinese-first ordinary labels in `web/src/pages/SettingsPage.tsx` and `web/src/components/ActionConfirmationCard.tsx`;
+- node/target detail section eyebrows and chart labels now use Chinese-first ordinary labels while preserving technical terms such as `ProbeItem` and `CPU steal`.
+
 This does not replace screenshot comparison. `docs/operations/visual-evidence/*.png` remains the expected place for future captured evidence.
