@@ -45,13 +45,14 @@ Status values:
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Frozen app shell and primary navigation | Closed | `web/src/app/layout/AppShell.tsx`, `web/src/app/router.tsx` |
+| Frozen app shell and primary navigation | Partial | Functional shell and routes exist in `web/src/app/layout/AppShell.tsx` and `web/src/app/router.tsx`; screenshot-level alignment with the Unified shell remains pending |
 | Dashboard abnormal summaries and event stream | Closed | `web/src/pages/DashboardPage.tsx` |
 | Nodes list filters and onboarding entry | Closed | `web/src/pages/NodesPage.tsx`, `web/src/pages/NodeOnboardingPage.tsx` |
 | Node detail operational summary and trends | Closed | `web/src/pages/NodeDetailPage.tsx` |
 | Target list/detail and ProbeItem management | Closed | `web/src/pages/TargetsPage.tsx`, `web/src/pages/TargetDetailPage.tsx` |
 | Events advanced filters | Closed | `web/src/pages/EventsPage.tsx` |
 | Settings runtime truthfulness | Closed | `web/src/pages/SettingsPage.tsx`, `internal/center/settings` |
+| Chinese-first UI copy and dense baseline hierarchy | Partial | Functional pages exist, but read-only visual inspection in `docs/operations/v1-visual-verification.md` records remaining language and visual-density verification risks |
 | Visual screenshot comparison against baseline PNGs | Partial | `docs/operations/v1-visual-verification.md`; live screenshot evidence pending unless PNG evidence is later committed |
 
 ## Notifications
@@ -69,7 +70,7 @@ Status values:
 | Local build/test verification path | Closed | `Makefile`, `scripts/verify.sh` |
 | systemd examples for center and agent | Closed | `docs/deploy/systemd/*.service` |
 | Deployment guide | Closed | `docs/deploy/local-and-systemd.md` |
-| Fresh-install smoke procedure | Partial | `docs/operations/v1-smoke-run.md` is not present in this branch state; live smoke evidence therefore remains pending |
+| Fresh-install smoke procedure | Closed | `docs/operations/v1-smoke-run.md` documents the reproducible Node → agent enrollment → Target → ProbeItem → observation → incident/event/notification path |
 | Fresh-install smoke executed on live PostgreSQL | Partial | Requires live PostgreSQL and agent run; evidence table remains pending until filled |
 
 ## Final V1 release gate

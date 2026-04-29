@@ -39,3 +39,22 @@ The following files are the source of truth for the V1 baseline and must remain 
 - `docs/design/v1-baseline`
 
 这不是冻结最终目录名，最终结构以后续代码落地为准。
+
+## Delivery and V1 verification artifacts
+
+- Local/systemd deployment: `docs/deploy/local-and-systemd.md`
+- Center systemd example: `docs/deploy/systemd/houfeng-center.service`
+- Agent systemd example: `docs/deploy/systemd/houfeng-agent.service`
+- Fresh-install smoke run: `docs/operations/v1-smoke-run.md`
+- Visual verification record: `docs/operations/v1-visual-verification.md`
+- Final V1 gap checklist: `docs/release/v1-gap-checklist.md`
+
+Automated verification:
+
+```bash
+go test ./...
+./scripts/verify.sh
+cd web && npm run build
+```
+
+Live PostgreSQL smoke, Telegram delivery, and screenshot comparison evidence are tracked separately in the operation/release documents because they require environment-specific runtime setup.

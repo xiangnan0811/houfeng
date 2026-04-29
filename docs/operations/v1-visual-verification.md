@@ -68,3 +68,16 @@ Compare each captured screenshot with the matching reference PNG. Record results
 ## Current evidence status
 
 This document records the authoritative comparison set and reproducible capture path. If no `docs/operations/visual-evidence/*.png` files are committed, visual verification remains a tracked evidence gap rather than completed visual proof.
+
+## Read-only visual inspection findings
+
+The current frontend routes and tests cover the V1 page family, but screenshot evidence has not yet been captured. A read-only inspection against the Unified / Baseline references identifies these visual-alignment risks to verify before release:
+
+- The app shell is functionally present, but current `web/src/app/layout/AppShell.tsx` is materially simpler than the frozen shell baseline. It needs screenshot comparison for left navigation, top header, density, and surface hierarchy.
+- The dashboard has the required operational data surfaces, but its current composition is summary-card/list oriented. The Unified dashboard baseline has stronger anomaly, topology, and danger-zone hierarchy.
+- Node detail is semantically close, but the baseline emphasizes “current issue first, trend second” in a tighter control-center composition. Current section ordering needs visual review with seeded incident/trend data.
+- Node onboarding has the right domain workflow, but any remaining English UI fragments should be treated as a Chinese-first V1 language risk.
+- Events and Settings are functional but need comparison against the denser supporting Security Audit / Logs Explorer / System Configuration references.
+- `/targets` has no dedicated frozen screen. It should be verified through the shared shell rules and target-detail reference until a future baseline adds a dedicated target-list screen.
+
+These findings are not design changes. They are implementation verification risks against the existing frozen baseline.
