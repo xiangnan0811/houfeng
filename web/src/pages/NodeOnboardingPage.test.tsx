@@ -233,7 +233,7 @@ describe('NodeOnboardingPage', () => {
     )
 
     expect(screen.queryByText('stale_token_001')).not.toBeInTheDocument()
-    expect(getOnboardingTokenCache('nd_001')).toBeNull()
+    await waitFor(() => expect(getOnboardingTokenCache('nd_001')).toBeNull())
   })
 
   it('asks for regeneration when the plaintext token is no longer cached', async () => {

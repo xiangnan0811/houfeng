@@ -45,14 +45,14 @@ Status values:
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Frozen app shell and primary navigation | Partial | Functional shell and routes exist in `web/src/app/layout/AppShell.tsx` and `web/src/app/router.tsx`; screenshot-level alignment with the Unified shell remains pending |
+| Frozen app shell and primary navigation | Closed | Implementation-level shell hierarchy and routes are aligned in `web/src/app/layout/AppShell.tsx`, `web/src/app/router.tsx`, and `web/src/index.css`; screenshot evidence remains tracked separately |
 | Dashboard abnormal summaries and event stream | Closed | `web/src/pages/DashboardPage.tsx` |
 | Nodes list filters and onboarding entry | Closed | `web/src/pages/NodesPage.tsx`, `web/src/pages/NodeOnboardingPage.tsx` |
 | Node detail operational summary and trends | Closed | `web/src/pages/NodeDetailPage.tsx` |
 | Target list/detail and ProbeItem management | Closed | `web/src/pages/TargetsPage.tsx`, `web/src/pages/TargetDetailPage.tsx` |
 | Events advanced filters | Closed | `web/src/pages/EventsPage.tsx` |
 | Settings runtime truthfulness | Closed | `web/src/pages/SettingsPage.tsx`, `internal/center/settings` |
-| Chinese-first UI copy and dense baseline hierarchy | Partial | Functional pages exist, but read-only visual inspection in `docs/operations/v1-visual-verification.md` records remaining language and visual-density verification risks |
+| Chinese-first UI copy and dense baseline hierarchy | Closed | Alignment pass recorded in `docs/operations/v1-visual-verification.md`; frontend evidence in `web/src/app/layout/AppShell.tsx`, `web/src/pages/DashboardPage.tsx`, `web/src/pages/NodeOnboardingPage.tsx`, and `web/src/pages/TargetDetailPage.tsx` |
 | Visual screenshot comparison against baseline PNGs | Partial | `docs/operations/v1-visual-verification.md`; live screenshot evidence pending unless PNG evidence is later committed |
 
 ## Notifications

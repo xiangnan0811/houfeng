@@ -81,3 +81,13 @@ The current frontend routes and tests cover the V1 page family, but screenshot e
 - `/targets` has no dedicated frozen screen. It should be verified through the shared shell rules and target-detail reference until a future baseline adds a dedicated target-list screen.
 
 These findings are not design changes. They are implementation verification risks against the existing frozen baseline.
+
+## Implementation alignment pass
+
+The implementation-controlled alignment pass has been applied:
+
+- shell context and top-header hierarchy were strengthened in `web/src/app/layout/AppShell.tsx` and `web/src/index.css`;
+- dashboard copy now prioritizes current risk in `web/src/pages/DashboardPage.tsx`;
+- ordinary onboarding and ProbeItem form labels are Chinese-first in `web/src/pages/NodeOnboardingPage.tsx` and `web/src/pages/TargetDetailPage.tsx`.
+
+This does not replace screenshot comparison. `docs/operations/visual-evidence/*.png` remains the expected place for future captured evidence.
