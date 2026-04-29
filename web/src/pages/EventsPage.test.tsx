@@ -57,6 +57,10 @@ describe('EventsPage', () => {
       expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
     )
 
+    expect(screen.getAllByText('筛选条件').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('事件流').length).toBeGreaterThanOrEqual(2)
+
+    expect(screen.getAllByText('事件').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('较新的事件')).toBeInTheDocument()
     expect(screen.getByText('较早的事件')).toBeInTheDocument()
     expect(screen.getByText('较新的事件').compareDocumentPosition(screen.getByText('较早的事件')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

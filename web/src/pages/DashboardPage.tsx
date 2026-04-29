@@ -208,7 +208,7 @@ export function DashboardPage() {
         </section>
 
         <section className="page-panel">
-          <p className="page-panel__eyebrow">First Run</p>
+          <p className="page-panel__eyebrow">首次接入</p>
           <h3 className="page-panel__title">还没有节点与目标</h3>
           <p className="page-panel__description">
             这不是异常。候风需要先有一个 Node 接入 agent，然后才能创建 Target 并添加 ProbeItem。
@@ -245,7 +245,7 @@ export function DashboardPage() {
         <SummaryCard label="恢复事件" value={overview.recent_recovery_count} />
       </div>
 
-      <DetailSection eyebrow="Nodes" title="异常节点概览">
+      <DetailSection eyebrow="节点" title="异常节点概览">
         <div className="summary-grid">
           <SummaryCard label="当前异常数" value={overview.abnormal_node_count} />
           <SummaryCard label="严重节点" value={overview.severe_node_count} />
@@ -254,7 +254,7 @@ export function DashboardPage() {
         <AbnormalNodeList nodes={overview.abnormal_nodes} />
       </DetailSection>
 
-      <DetailSection eyebrow="Targets" title="异常目标概览">
+      <DetailSection eyebrow="目标" title="异常目标概览">
         <div className="summary-grid">
           <SummaryCard label="当前异常数" value={overview.abnormal_target_count} />
           <SummaryCard label="严重目标" value={overview.severe_target_count} />
@@ -263,7 +263,7 @@ export function DashboardPage() {
         <AbnormalTargetList targets={overview.abnormal_targets} />
       </DetailSection>
 
-      <DetailSection eyebrow="Recent Events" title="最近事件">
+      <DetailSection eyebrow="最近事件" title="最近事件">
         <EventList
           events={overview.recent_events}
           emptyTitle="最近没有状态变更事件"

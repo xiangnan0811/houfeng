@@ -88,7 +88,10 @@ describe('TargetsPage', () => {
       expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
     )
 
+    expect(screen.getAllByText('目标').length).toBeGreaterThanOrEqual(1)
+
     fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    expect(screen.getByText('目标创建')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(screen.getByLabelText('目标类型'), { target: { value: 'service' } })
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'blog.example.com' } })

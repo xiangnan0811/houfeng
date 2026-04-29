@@ -106,7 +106,9 @@ describe('DashboardPage', () => {
     expectSummaryCard('维护对象总数', '1')
     expectSummaryCard('新增异常', '4')
     expectSummaryCard('恢复事件', '1')
+    expect(screen.getAllByText('节点').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('异常节点概览')).toBeInTheDocument()
+    expect(screen.getAllByText('目标').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('异常目标概览')).toBeInTheDocument()
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
     expect(screen.getByText('磁盘使用率 92.0%')).toBeInTheDocument()
@@ -120,7 +122,7 @@ describe('DashboardPage', () => {
       'href',
       '/targets/tg_001',
     )
-    expect(screen.getByText('最近事件')).toBeInTheDocument()
+    expect(screen.getAllByText('最近事件').length).toBeGreaterThanOrEqual(2)
     expect(screen.getAllByText('HTTPS 探测连续失败').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('tg_001').length).toBeGreaterThanOrEqual(1)
   })
@@ -173,7 +175,7 @@ describe('DashboardPage', () => {
       expect(screen.getByRole('heading', { name: '还没有节点与目标' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('First Run')).toBeInTheDocument()
+    expect(screen.getByText('首次接入')).toBeInTheDocument()
     expect(
       screen.getByText('这不是异常。候风需要先有一个 Node 接入 agent，然后才能创建 Target 并添加 ProbeItem。'),
     ).toBeInTheDocument()

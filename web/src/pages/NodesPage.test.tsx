@@ -96,7 +96,11 @@ describe('NodesPage', () => {
       expect(screen.getByRole('button', { name: '新建节点' })).toBeInTheDocument(),
     )
 
+    expect(screen.getAllByText('节点').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('列表视图').length).toBeGreaterThanOrEqual(2)
+
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
+    expect(screen.getByText('节点创建')).toBeInTheDocument()
     expect(screen.queryByLabelText('生命周期状态')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
     fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })

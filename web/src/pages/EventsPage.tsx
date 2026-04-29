@@ -100,7 +100,7 @@ export function EventsPage() {
   if (state.error) {
     return (
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Events</p>
+        <p className="page-panel__eyebrow">事件</p>
         <h2 className="page-panel__title">事件不可用</h2>
         <p className="page-panel__description">{state.error}</p>
       </section>
@@ -110,14 +110,14 @@ export function EventsPage() {
   return (
     <div className="page-stack">
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Events</p>
+        <p className="page-panel__eyebrow">事件</p>
         <h2 className="page-panel__title">事件</h2>
         <p className="page-panel__description">
           查看最新状态变更事件，并按对象类型、严重程度、事件类型与数量快速筛选。
         </p>
       </section>
 
-      <DetailSection eyebrow="Filters" title="筛选条件">
+      <DetailSection eyebrow="筛选条件" title="筛选条件">
         <form
           onSubmit={(event) => {
             event.preventDefault()
@@ -282,7 +282,7 @@ export function EventsPage() {
         </form>
       </DetailSection>
 
-      <DetailSection eyebrow="Timeline" title="事件流">
+      <DetailSection eyebrow="事件流" title="事件流">
         <EventList events={state.events} />
       </DetailSection>
     </div>

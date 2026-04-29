@@ -1,7 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
@@ -74,6 +73,63 @@ function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
+}
+
+function ActionConfirmationCard({
+  title,
+  current,
+  result,
+  impact,
+  unchanged,
+  confirmLabel,
+  cancelLabel = '取消',
+  disabled = false,
+  onConfirm,
+  onCancel,
+}: {
+  title: string
+  current: string
+  result: string
+  impact: string
+  unchanged: string
+  confirmLabel: string
+  cancelLabel?: string
+  disabled?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const containerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    containerRef.current?.focus()
+  }, [])
+
+  return (
+    <section
+      ref={containerRef}
+      className="page-panel"
+      role="alertdialog"
+      aria-label={title}
+      tabIndex={-1}
+    >
+      <p className="page-panel__eyebrow">操作确认</p>
+      <h3 className="page-panel__title">{title}</h3>
+      <div className="page-stack">
+        <p>{current}</p>
+        <p>{result}</p>
+        <p>{impact}</p>
+        <p>{unchanged}</p>
+        <div className="badge-row badge-row--wrap">
+          <button type="button" disabled={disabled} onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+          <button type="button" disabled={disabled} onClick={onCancel}>
+            {cancelLabel}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
 }
 
 function parseLabels(value: string) {
@@ -433,7 +489,7 @@ export function TargetsPage() {
     <section className="page-stack">
       <header className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">Targets</p>
+          <p className="section-heading__eyebrow">目标</p>
           <h2 className="section-heading__title">目标列表</h2>
           <p className="section-heading__description">
             以 ProbeItem 视角组织目标状态，并保留执行节点标签与最近成功/失败摘要。
@@ -456,7 +512,7 @@ export function TargetsPage() {
 
       {createOpen ? (
         <section className="page-panel">
-          <p className="page-panel__eyebrow">Target Create</p>
+          <p className="page-panel__eyebrow">目标创建</p>
           <h3 className="page-panel__title">创建目标</h3>
           <p className="page-panel__description">
             填写入口、执行节点标签与运行状态，创建后进入目标详情页继续配置 ProbeItem。

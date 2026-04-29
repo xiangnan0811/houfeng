@@ -1,7 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
@@ -54,6 +53,63 @@ function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
+}
+
+function ActionConfirmationCard({
+  title,
+  current,
+  result,
+  impact,
+  unchanged,
+  confirmLabel,
+  cancelLabel = '取消',
+  disabled = false,
+  onConfirm,
+  onCancel,
+}: {
+  title: string
+  current: string
+  result: string
+  impact: string
+  unchanged: string
+  confirmLabel: string
+  cancelLabel?: string
+  disabled?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const containerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    containerRef.current?.focus()
+  }, [])
+
+  return (
+    <section
+      ref={containerRef}
+      className="page-panel"
+      role="alertdialog"
+      aria-label={title}
+      tabIndex={-1}
+    >
+      <p className="page-panel__eyebrow">操作确认</p>
+      <h3 className="page-panel__title">{title}</h3>
+      <div className="page-stack">
+        <p>{current}</p>
+        <p>{result}</p>
+        <p>{impact}</p>
+        <p>{unchanged}</p>
+        <div className="badge-row badge-row--wrap">
+          <button type="button" disabled={disabled} onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+          <button type="button" disabled={disabled} onClick={onCancel}>
+            {cancelLabel}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
 }
 
 async function createNode(input: CreateNodeInput) {
@@ -372,7 +428,7 @@ export function NodesPage() {
     <section className="page-stack">
       <header className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">Nodes</p>
+          <p className="section-heading__eyebrow">节点</p>
           <h2 className="section-heading__title">节点列表</h2>
           <p className="section-heading__description">
             当前以“当前问题优先、最近运行事实次之”的冻结 V1 层级展示节点状态。
@@ -395,7 +451,7 @@ export function NodesPage() {
 
       {createOpen ? (
         <section className="page-panel">
-          <p className="page-panel__eyebrow">Node Create</p>
+          <p className="page-panel__eyebrow">节点创建</p>
           <h3 className="page-panel__title">创建节点并进入接入工作台</h3>
           <p className="page-panel__description">创建完成后将立即生成接入 Token，并跳转到节点接入准备页。</p>
           <form onSubmit={handleCreate}>
@@ -480,7 +536,7 @@ export function NodesPage() {
       ) : null}
 
       <section className="page-panel">
-        <p className="page-panel__eyebrow">List View</p>
+        <p className="page-panel__eyebrow">列表视图</p>
         <h3 className="page-panel__title">列表视图</h3>
         <div className="badge-row badge-row--wrap">
           <button
