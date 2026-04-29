@@ -1,0 +1,255 @@
+/* Component atom styles. Tokens come from tokens.css. */
+
+/* ---------- Button ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-sans);
+  font-weight: var(--type-link-weight);
+  border-radius: var(--radius-2);
+  border: var(--border-w) solid transparent;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, box-shadow 0.12s;
+  white-space: nowrap;
+}
+.btn--sm { padding: 5px 11px; font-size: 11px; border-radius: var(--radius-1); }
+.btn--md { padding: 8px 16px; font-size: 13px; }
+.btn--lg { padding: 11px 22px; font-size: 14px; border-radius: 8px; }
+
+.btn--primary {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent) 20%, transparent) 0%,
+    color-mix(in srgb, var(--accent) 10%, transparent) 100%);
+  border-color: var(--accent);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 15%, transparent) inset;
+}
+.btn--primary:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.btn--primary:active { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+.btn--secondary { background: var(--surface); border-color: var(--border); color: var(--text-primary); }
+.btn--secondary:hover { background: var(--surface-elevated); }
+
+.btn--ghost { color: var(--accent); background: transparent; border-color: transparent; }
+.btn--ghost:hover { background: var(--accent-soft); }
+
+.btn--danger {
+  color: color-mix(in srgb, var(--color-state-critical) 80%, white 20%);
+  border-color: var(--color-state-critical);
+  background: color-mix(in srgb, var(--color-state-critical) 12%, transparent);
+}
+.btn--danger:hover { background: color-mix(in srgb, var(--color-state-critical) 20%, transparent); }
+
+.btn:disabled { color: var(--text-disabled); cursor: not-allowed; opacity: 0.6; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- Input ---------- */
+.input-field { display: flex; flex-direction: column; gap: 6px; }
+.input-field__label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+}
+.input-field__shell { position: relative; display: flex; align-items: center; }
+.input-field__prefix, .input-field__suffix {
+  position: absolute;
+  color: var(--text-muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+.input-field__prefix { left: 12px; }
+.input-field__suffix { right: 12px; }
+.input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: 9px 12px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--type-body-size);
+  outline: none;
+}
+.input:focus {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.input--error {
+  background: color-mix(in srgb, var(--color-state-critical) 6%, var(--surface));
+  border-color: var(--color-state-critical);
+}
+.input-field__error {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-state-critical) 70%, white 30%);
+}
+.input-field__hint { font-size: 11px; color: var(--text-muted); }
+
+/* ---------- Badge ---------- */
+.badge { display: inline-flex; align-items: center; gap: 6px; }
+.badge--state {
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-serif);
+  font-size: var(--type-state-size);
+  letter-spacing: var(--type-state-tracking);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+.badge--info {
+  padding: 2px 8px;
+  border-radius: var(--radius-1);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+.badge--count {
+  padding: 0 5px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+.badge__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); }
+
+.tone--normal {
+  color: var(--color-state-normal);
+  border-color: color-mix(in srgb, var(--color-state-normal) 30%, transparent);
+  background: color-mix(in srgb, var(--color-state-normal) 10%, transparent);
+}
+.tone--normal .badge__dot { background: var(--color-state-normal); }
+
+.tone--notice {
+  color: var(--color-state-notice);
+  border-color: color-mix(in srgb, var(--color-state-notice) 30%, transparent);
+  background: color-mix(in srgb, var(--color-state-notice) 10%, transparent);
+}
+.tone--notice .badge__dot { background: var(--color-state-notice); }
+
+.tone--alert {
+  color: var(--color-state-alert);
+  border-color: color-mix(in srgb, var(--color-state-alert) 30%, transparent);
+  background: color-mix(in srgb, var(--color-state-alert) 10%, transparent);
+}
+.tone--alert .badge__dot { background: var(--color-state-alert); }
+
+.tone--critical {
+  color: color-mix(in srgb, var(--color-state-critical) 70%, white 30%);
+  border-color: color-mix(in srgb, var(--color-state-critical) 30%, transparent);
+  background: color-mix(in srgb, var(--color-state-critical) 10%, transparent);
+}
+.tone--critical .badge__dot { background: var(--color-state-critical); }
+
+.tone--maintenance {
+  color: var(--color-state-maintenance);
+  border-color: color-mix(in srgb, var(--color-state-maintenance) 30%, transparent);
+  background: color-mix(in srgb, var(--color-state-maintenance) 10%, transparent);
+}
+.tone--maintenance .badge__dot { background: var(--color-state-maintenance); }
+
+.tone--offline {
+  color: var(--text-muted);
+  border-style: dashed;
+  border-color: var(--border-dashed);
+  background: color-mix(in srgb, var(--color-state-offline) 6%, transparent);
+}
+.tone--offline .badge__dot { background: var(--color-state-offline); }
+
+/* ---------- Card ---------- */
+.card {
+  padding: var(--space-4);
+  border-radius: var(--radius-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.card--state { border-left-width: 2px; border-left-style: solid; border-left-color: var(--text-muted); }
+.card--state.tone--normal      { border-left-color: var(--color-state-normal); }
+.card--state.tone--notice      { border-left-color: var(--color-state-notice); }
+.card--state.tone--alert       { border-left-color: var(--color-state-alert); }
+.card--state.tone--critical    { border-left-color: var(--color-state-critical); }
+.card--state.tone--maintenance { border-left-color: var(--color-state-maintenance); }
+.card--state.tone--offline     { border-style: dashed; border-color: var(--border-dashed); opacity: 0.85; }
+
+.card--accent {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: var(--accent-border);
+}
+.card--warning {
+  background: color-mix(in srgb, var(--color-state-critical) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--color-state-critical) 30%, transparent);
+  border-style: dashed;
+}
+
+/* ---------- Tabs ---------- */
+.tabs--underline { display: flex; gap: var(--space-6); border-bottom: 1px solid var(--border); }
+.tabs--underline .tab {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 8px 0;
+  margin-bottom: -1px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+.tabs--underline .tab.is-active { color: var(--text-primary); border-bottom: 2px solid var(--accent); }
+
+.tabs--pill {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  gap: 2px;
+}
+.tabs--pill .tab {
+  background: none;
+  border: none;
+  padding: 6px 14px;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tabs--pill .tab.is-active { background: var(--accent-soft); color: var(--text-primary); font-weight: 500; }
+
+/* ---------- Toggle ---------- */
+.toggle {
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border-radius: 10px;
+  background: var(--border);
+  border: none;
+  position: relative;
+  cursor: pointer;
+}
+.toggle.is-on { background: var(--accent); }
+.toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg);
+  transition: left 0.15s;
+}
+.toggle.is-on .toggle__thumb { left: 18px; }
+.toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+.toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
