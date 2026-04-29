@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	centerapp "houfeng/internal/center/app"
+	"houfeng/internal/center/auth"
 	"houfeng/internal/center/config"
 	centerhttp "houfeng/internal/center/http"
 	incidentservice "houfeng/internal/center/incidents"
@@ -132,6 +133,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		applyMigrations: func(context.Context, postgresDB) error {
 			return nil
 		},
+		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {
+			return nil
+		},
 		newIncidentNotifier: func(inputCfg config.CenterConfig, repo centersettings.Repository) incidentservice.Notifier {
 			gotNotifierCfg = inputCfg
 			gotSettingsRepo = repo
@@ -144,8 +148,8 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		newApp: func(addr string, handler http.Handler, workers ...centerapp.Worker) appRunner {
 			gotAddr = addr
 			gotHandler = handler
-			if len(workers) != 2 {
-				t.Fatalf("len(workers) = %d, want 2", len(workers))
+			if len(workers) != 3 {
+				t.Fatalf("len(workers) = %d, want 3", len(workers))
 			}
 			for i, worker := range workers {
 				if worker == nil {
