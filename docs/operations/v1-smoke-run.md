@@ -35,6 +35,8 @@ export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
 ```
 
+Run the center and agent in separate terminals, or use the background commands below from one shell. If using the background form, stop both processes at the end with `kill "$CENTER_PID" "$AGENT_PID"` after `AGENT_PID` has been set.
+
 Build:
 
 ```bash
@@ -43,10 +45,11 @@ make build-agent
 cd web && npm ci && npm run build
 ```
 
-Start center:
+Start center in the background:
 
 ```bash
-./bin/houfeng-center
+./bin/houfeng-center > /tmp/houfeng-center.log 2>&1 &
+CENTER_PID=$!
 ```
 
 Health check:
@@ -93,7 +96,8 @@ chmod 0600 /tmp/houfeng-agent-token
 export HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
 export HOUFENG_AGENT_TOKEN_FILE=/tmp/houfeng-agent-token
 export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent-sync-buffer.json
-./bin/houfeng-agent
+./bin/houfeng-agent > /tmp/houfeng-agent.log 2>&1 &
+AGENT_PID=$!
 ```
 
 Expected:
@@ -187,7 +191,20 @@ Expected:
 - an `incident_recovered` event is recorded;
 - recovery notification follows current settings.
 
-## Step 8: UI verification checkpoints
+## Step 8: Verify notification record surface
+
+If Telegram is configured and notification policy allows delivery, notification-backed event records should be visible through the event surface:
+
+```bash
+curl -fsS 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&notification_only=true&limit=10'
+```
+
+Expected:
+
+- if Telegram settings are enabled and the incident transition emitted a notification, the response contains notification-backed event rows;
+- if Telegram is disabled or policy suppressed delivery, record that intentional empty result in the evidence table instead of treating it as a failure.
+
+## Step 9: UI verification checkpoints
 
 Open `http://127.0.0.1:8080/` and check:
 
@@ -215,7 +232,8 @@ Open `http://127.0.0.1:8080/` and check:
 | observations received | Local PostgreSQL required | Fill runtime-facts summary |
 | incident started | Local PostgreSQL required | Fill event id / incident id |
 | incident recovered | Local PostgreSQL required | Fill event id |
-| Telegram notification sent or intentionally disabled | Manual / Telegram required | Fill delivery result |
+| notification-backed event query checked | Local PostgreSQL / Telegram policy dependent | Fill `/api/events?...notification_only=true` result summary |
+| Telegram notification sent or intentionally disabled | Manual / Telegram required | Fill delivery result or intentional disabled status |
 | primary UI pages checked | Manual | Fill screenshots or notes |
 
 ## Current session status

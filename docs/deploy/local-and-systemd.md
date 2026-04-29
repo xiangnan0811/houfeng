@@ -75,17 +75,57 @@ make build-agent
 
 ## systemd installation example
 
+Create service users and install the center runtime files:
+
 ```bash
+getent passwd houfeng >/dev/null || sudo useradd --system --home-dir /opt/houfeng --shell /usr/sbin/nologin houfeng
+sudo install -d -o houfeng -g houfeng -m 0755 /opt/houfeng
+sudo install -d -o houfeng -g houfeng -m 0755 /opt/houfeng/web
+sudo install -d -o houfeng -g houfeng -m 0755 /opt/houfeng/docs
+sudo cp -a web/dist /opt/houfeng/web/
+sudo cp -a docs/deploy /opt/houfeng/docs/
 sudo install -o root -g root -m 0755 bin/houfeng-center /usr/local/bin/houfeng-center
-sudo install -o root -g root -m 0755 bin/houfeng-agent /usr/local/bin/houfeng-agent
+sudo install -d -o root -g houfeng -m 0750 /etc/houfeng
+sudo tee /etc/houfeng/center.env >/dev/null <<'EOF'
+HOUFENG_HTTP_ADDR=:8080
+HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
+HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
+HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+HOUFENG_TELEGRAM_BOT_TOKEN=
+HOUFENG_TELEGRAM_CHAT_ID=
+EOF
+sudo chown root:houfeng /etc/houfeng/center.env
+sudo chmod 0640 /etc/houfeng/center.env
 sudo install -o root -g root -m 0644 docs/deploy/systemd/houfeng-center.service /etc/systemd/system/houfeng-center.service
-sudo install -o root -g root -m 0644 docs/deploy/systemd/houfeng-agent.service /etc/systemd/system/houfeng-agent.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now houfeng-center
+```
+
+Then issue an enrollment token from the Node onboarding flow or smoke run, install the agent runtime files, and start the agent:
+
+```bash
+getent passwd houfeng-agent >/dev/null || sudo useradd --system --home-dir /var/lib/houfeng-agent --shell /usr/sbin/nologin houfeng-agent
+sudo install -d -o houfeng-agent -g houfeng-agent -m 0750 /etc/houfeng-agent
+sudo install -d -o houfeng-agent -g houfeng-agent -m 0750 /var/lib/houfeng-agent
+sudo install -o root -g root -m 0755 bin/houfeng-agent /usr/local/bin/houfeng-agent
+sudo tee /etc/houfeng-agent/agent.env >/dev/null <<'EOF'
+HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
+HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
+HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
+HOUFENG_AGENT_BUFFER_MAX_ENTRIES=2048
+HOUFENG_AGENT_BUFFER_MAX_AGE=72h
+EOF
+sudo chown root:houfeng-agent /etc/houfeng-agent/agent.env
+sudo chmod 0640 /etc/houfeng-agent/agent.env
+printf '%s' '<enrollment_token>' | sudo tee /etc/houfeng-agent/token >/dev/null
+sudo chown houfeng-agent:houfeng-agent /etc/houfeng-agent/token
+sudo chmod 0600 /etc/houfeng-agent/token
+sudo install -o root -g root -m 0644 docs/deploy/systemd/houfeng-agent.service /etc/systemd/system/houfeng-agent.service
+sudo systemctl daemon-reload
 sudo systemctl enable --now houfeng-agent
 ```
 
-Adjust users, paths, PostgreSQL URL, TLS/reverse-proxy setup, and token file ownership for the target host.
+Adjust users, paths, PostgreSQL URL, TLS/reverse-proxy setup, and token file ownership for the target host. Do not enable the agent until `/etc/houfeng-agent/token` contains a valid enrollment token.
 
 ## Reverse proxy and TLS
 
