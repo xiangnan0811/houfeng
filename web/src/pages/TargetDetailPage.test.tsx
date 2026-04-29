@@ -494,13 +494,13 @@ describe('TargetDetailPage', () => {
     fireEvent.change(screen.getByLabelText('Probe 类型'), {
       target: { value: 'http' },
     })
-    fireEvent.change(screen.getByLabelText('HTTP Scheme'), {
+    fireEvent.change(screen.getByLabelText('HTTP 协议'), {
       target: { value: 'https' },
     })
-    fireEvent.change(screen.getByLabelText('HTTP Path'), {
+    fireEvent.change(screen.getByLabelText('HTTP 路径'), {
       target: { value: '/healthz' },
     })
-    fireEvent.change(screen.getByLabelText('HTTP Method'), {
+    fireEvent.change(screen.getByLabelText('HTTP 方法'), {
       target: { value: 'GET' },
     })
     fireEvent.change(screen.getByLabelText('期望状态码起点'), {
@@ -828,10 +828,10 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(probeActionButton('编辑'))
     expect(screen.getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
-    expect(screen.getByLabelText('HTTP Path')).toHaveValue('/healthz')
+    expect(screen.getByLabelText('HTTP 路径')).toHaveValue('/healthz')
 
-    fireEvent.change(screen.getByLabelText('HTTP Path'), { target: { value: '/ready' } })
-    fireEvent.change(screen.getByLabelText('HTTP Method'), { target: { value: 'HEAD' } })
+    fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/ready' } })
+    fireEvent.change(screen.getByLabelText('HTTP 方法'), { target: { value: 'HEAD' } })
     fireEvent.change(screen.getByLabelText('期望状态码终点'), { target: { value: '204' } })
     fireEvent.change(screen.getByLabelText('超时秒数'), { target: { value: '8' } })
     fireEvent.change(screen.getByLabelText('频率档位'), { target: { value: '5m' } })
@@ -1067,7 +1067,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
     fireEvent.click(probeActionButton('编辑'))
-    fireEvent.change(screen.getByLabelText('HTTP Path'), { target: { value: '/ready' } })
+    fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/ready' } })
     fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
@@ -1683,7 +1683,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
     fireEvent.click(probeActionButton('编辑'))
-    fireEvent.change(screen.getByLabelText('HTTP Path'), { target: { value: '/stale' } })
+    fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/stale' } })
     fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(6))

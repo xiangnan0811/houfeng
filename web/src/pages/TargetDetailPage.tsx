@@ -1442,7 +1442,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                   <>
                     <p>
                       <label>
-                        HTTP Scheme
+                        HTTP 协议
                         <select
                           name="httpScheme"
                           value={probeCreateForm.httpScheme}
@@ -1457,7 +1457,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                     </p>
                     <p>
                       <label>
-                        HTTP Path
+                        HTTP 路径
                         <input
                           name="httpPath"
                           value={probeCreateForm.httpPath}
@@ -1469,7 +1469,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
                     </p>
                     <p>
                       <label>
-                        HTTP Method
+                        HTTP 方法
                         <select
                           name="httpMethod"
                           value={probeCreateForm.httpMethod}

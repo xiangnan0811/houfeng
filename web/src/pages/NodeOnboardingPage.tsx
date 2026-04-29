@@ -68,7 +68,7 @@ function describePhase(state: NodeOnboardingState) {
     case '已绑定，等待稳定观测':
       return {
         title: '已完成指纹绑定，等待稳定观测',
-        description: '绑定已经建立，系统正在等待首批 HostSample 或 accepted observation 到达。',
+        description: '绑定已经建立，系统正在等待首批 HostSample 或已接收观测到达。',
       }
     case '接入完成':
       return {
@@ -183,7 +183,7 @@ export function NodeOnboardingPage() {
   if (!nodeId || error || !onboarding) {
     return (
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Node Onboarding</p>
+        <p className="page-panel__eyebrow">节点接入</p>
         <h2 className="page-panel__title">节点接入工作台不可用</h2>
         <p className="page-panel__description">{error ?? '未找到节点'}</p>
         <Link className="text-link" to="/nodes">
@@ -283,7 +283,7 @@ export function NodeOnboardingPage() {
     <div className="page-stack">
       <section className="hero-panel">
         <div className="hero-panel__content">
-          <p className="hero-panel__eyebrow">Node Onboarding</p>
+          <p className="hero-panel__eyebrow">节点接入</p>
           <h2 className="hero-panel__title">{onboarding.display_name}</h2>
           <p className="hero-panel__description">
             {onboarding.region} · {onboarding.city} · {onboarding.provider}
@@ -325,13 +325,13 @@ export function NodeOnboardingPage() {
           <p className="summary-card__value">{onboarding.has_host_sample ? '已到达' : '未到达'}</p>
         </article>
         <article className="summary-card">
-          <p className="summary-card__label">accepted observation</p>
+          <p className="summary-card__label">已接收观测</p>
           <p className="summary-card__value">{onboarding.has_accepted_observation ? '已接收' : '未接收'}</p>
         </article>
       </div>
 
       {showBindingConflict ? (
-        <DetailSection eyebrow="Binding Conflict" title="绑定冲突处置" aside="高优先级">
+        <DetailSection eyebrow="绑定冲突" title="绑定冲突处置" aside="高优先级">
           <article className="metric-card" aria-label="高优先级：绑定冲突待处理">
             <h3>高优先级：绑定冲突待处理</h3>
             <p>系统检测到新的指纹接入请求，请先确认是否接受新的绑定关系。</p>
@@ -364,28 +364,28 @@ export function NodeOnboardingPage() {
                 disabled={conflictState.action !== null}
                 onClick={() => handleBindingAction('confirm', confirmNodeRebind)}
               >
-                confirm rebind
+                确认重新绑定
               </button>
               <button
                 type="button"
                 disabled={conflictState.action !== null}
                 onClick={() => handleBindingAction('reject', rejectPendingNodeBinding)}
               >
-                reject fingerprint
+                拒绝该指纹
               </button>
               <button
                 type="button"
                 disabled={conflictState.action !== null}
                 onClick={() => handleBindingAction('reset', resetNodeBinding)}
               >
-                reset binding
+                重置绑定关系
               </button>
             </div>
           </article>
         </DetailSection>
       ) : null}
 
-      <DetailSection eyebrow="Enrollment Token" title="接入凭证" aside={tokenIssue ? `最近生成：${formatDateTime(tokenIssue.issued_at)}` : onboarding.enrollment_token_issued_at ? `上次签发：${formatDateTime(onboarding.enrollment_token_issued_at)}` : '尚未签发'}>
+      <DetailSection eyebrow="接入 Token" title="接入凭证" aside={tokenIssue ? `最近生成：${formatDateTime(tokenIssue.issued_at)}` : onboarding.enrollment_token_issued_at ? `上次签发：${formatDateTime(onboarding.enrollment_token_issued_at)}` : '尚未签发'}>
         {tokenIssue ? (
           <article className="metric-card">
             <h3>当前会话 Token</h3>
@@ -412,7 +412,7 @@ export function NodeOnboardingPage() {
         </div>
       </DetailSection>
 
-      <DetailSection eyebrow="Install Steps" title="接入步骤">
+      <DetailSection eyebrow="安装步骤" title="接入步骤">
         <article className="metric-card">
           <h3>建议顺序</h3>
           <ol>
@@ -424,13 +424,13 @@ export function NodeOnboardingPage() {
         </article>
       </DetailSection>
 
-      <DetailSection eyebrow="Current Status" title="状态反馈">
+      <DetailSection eyebrow="当前状态" title="状态反馈">
         <div className="empty-state">
           <h3>{phase.title}</h3>
           <p>{phase.description}</p>
           <p>首批样本：{onboarding.has_host_sample ? '已到达' : '未到达'}</p>
           <p>
-            accepted observation：
+            已接收观测：
             {onboarding.has_accepted_observation ? '已接收' : '未接收'}
           </p>
           {onboarding.phase === '接入完成' ? (

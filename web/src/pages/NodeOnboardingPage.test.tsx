@@ -97,6 +97,7 @@ describe('NodeOnboardingPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
+    expect(screen.getByText('节点接入')).toBeInTheDocument()
     expect(screen.getByText('enroll_tokyo_001')).toBeInTheDocument()
     expect(screen.getByText('在服务器上安装 agent')).toBeInTheDocument()
     expect(screen.getByText('写入该节点专属 token')).toBeInTheDocument()
@@ -144,6 +145,7 @@ describe('NodeOnboardingPage', () => {
       expect(screen.getByText('已完成指纹绑定，等待稳定观测')).toBeInTheDocument(),
     )
 
+    expect(screen.getByText('已接收观测')).toBeInTheDocument()
     expect(screen.getByText('首批样本：未到达')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '查看节点详情' })).not.toBeInTheDocument()
   })
@@ -357,9 +359,9 @@ describe('NodeOnboardingPage', () => {
     expect(within(conflictCard).getByText('2026/04/26 17:15')).toBeInTheDocument()
     expect(within(conflictCard).getByText('2026/04/26 17:18')).toBeInTheDocument()
     expect(within(conflictCard).getByText('4')).toBeInTheDocument()
-    expect(within(conflictCard).getByRole('button', { name: 'confirm rebind' })).toBeInTheDocument()
-    expect(within(conflictCard).getByRole('button', { name: 'reject fingerprint' })).toBeInTheDocument()
-    expect(within(conflictCard).getByRole('button', { name: 'reset binding' })).toBeInTheDocument()
+    expect(within(conflictCard).getByRole('button', { name: '确认重新绑定' })).toBeInTheDocument()
+    expect(within(conflictCard).getByRole('button', { name: '拒绝该指纹' })).toBeInTheDocument()
+    expect(within(conflictCard).getByRole('button', { name: '重置绑定关系' })).toBeInTheDocument()
   })
 
   it('keeps action failures local to the conflict section', async () => {
@@ -391,7 +393,7 @@ describe('NodeOnboardingPage', () => {
       name: '高优先级：绑定冲突待处理',
     })
 
-    fireEvent.click(within(conflictCard).getByRole('button', { name: 'reject fingerprint' }))
+    fireEvent.click(within(conflictCard).getByRole('button', { name: '拒绝该指纹' }))
 
     await waitFor(() => expect(within(conflictCard).getByText('reject failed')).toBeInTheDocument())
 
@@ -442,7 +444,7 @@ describe('NodeOnboardingPage', () => {
       name: '高优先级：绑定冲突待处理',
     })
 
-    fireEvent.click(within(conflictCard).getByRole('button', { name: 'confirm rebind' }))
+    fireEvent.click(within(conflictCard).getByRole('button', { name: '确认重新绑定' }))
 
     await waitFor(() =>
       expect(screen.getByText('已完成指纹绑定，等待稳定观测')).toBeInTheDocument(),
@@ -494,7 +496,7 @@ describe('NodeOnboardingPage', () => {
       name: '高优先级：绑定冲突待处理',
     })
 
-    fireEvent.click(within(conflictCard).getByRole('button', { name: 'confirm rebind' }))
+    fireEvent.click(within(conflictCard).getByRole('button', { name: '确认重新绑定' }))
 
     await waitFor(() =>
       expect(screen.getByText('已完成指纹绑定，等待稳定观测')).toBeInTheDocument(),
