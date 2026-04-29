@@ -15,6 +15,10 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
+function mockTextResponse(body: string, status = 200) {
+  return new Response(body, { status })
+}
+
 function deferredResponse() {
   let resolve!: (response: Response) => void
   let reject!: (error?: unknown) => void
@@ -264,6 +268,41 @@ describe('NodesPage', () => {
     expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
     expect(screen.queryByText('onboarding workspace')).not.toBeInTheDocument()
     expect(getOnboardingTokenCache('nd_001')).toBeNull()
+  })
+
+  it('uses Chinese-first fallback when node creation fails without an error body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockTextResponse('', 500)),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+          <Route path="/nodes/:nodeId/onboarding" element={<div>onboarding workspace</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '新建节点' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
+    fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })
+    fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
+    fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'Vultr' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '创建并生成 Token' }))
+
+    await waitFor(() => expect(screen.getByText('请求失败：状态码 500')).toBeInTheDocument())
+    expect(screen.queryByText('Request failed: 500')).not.toBeInTheDocument()
+    expect(screen.queryByText('onboarding workspace')).not.toBeInTheDocument()
   })
 
   it('shows a clear onboarding workspace path for an existing node', async () => {

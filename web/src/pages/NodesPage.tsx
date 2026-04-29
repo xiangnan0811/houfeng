@@ -71,7 +71,7 @@ async function createNode(input: CreateNodeInput) {
   })
 
   if (!response.ok) {
-    let message = `Request failed: ${response.status}`
+    let message = `请求失败：状态码 ${response.status}`
     const rawBody = await response.text()
     if (rawBody.trim()) {
       try {
