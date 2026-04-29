@@ -32,28 +32,59 @@ type RouterOptions struct {
 	TargetRuntimeControlHandler     stdhttp.Handler
 	AgentEnrollHandler              stdhttp.Handler
 	AgentSyncHandler                stdhttp.Handler
+	AuthLoginHandler                stdhttp.Handler
+	AuthLogoutHandler               stdhttp.Handler
+	AuthMeHandler                   stdhttp.Handler
+	AuthChangePasswordHandler       stdhttp.Handler
+	// AuthMiddleware wraps each protected /api/* handler. The four auth
+	// routes, /api/healthz, /api/agent/*, and the SPA static handler at "/"
+	// are intentionally NOT wrapped. Pass nil to disable wrapping (e.g. in
+	// tests that don't exercise auth).
+	AuthMiddleware func(stdhttp.Handler) stdhttp.Handler
 }
 
 func New(opts RouterOptions) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
+
+	protect := func(h stdhttp.Handler) stdhttp.Handler {
+		if opts.AuthMiddleware == nil || h == nil {
+			return h
+		}
+		return opts.AuthMiddleware(h)
+	}
+
 	mux.Handle("/api/healthz", handlers.Healthz(opts.Version))
+
+	if opts.AuthLoginHandler != nil {
+		mux.Handle("/api/auth/login", opts.AuthLoginHandler)
+	}
+	if opts.AuthLogoutHandler != nil {
+		mux.Handle("/api/auth/logout", opts.AuthLogoutHandler)
+	}
+	if opts.AuthMeHandler != nil {
+		mux.Handle("/api/auth/me", opts.AuthMeHandler)
+	}
+	if opts.AuthChangePasswordHandler != nil {
+		mux.Handle("/api/auth/password", opts.AuthChangePasswordHandler)
+	}
+
 	if opts.DashboardHandler != nil {
-		mux.Handle("/api/dashboard", opts.DashboardHandler)
+		mux.Handle("/api/dashboard", protect(opts.DashboardHandler))
 	}
 	if opts.EventsHandler != nil {
-		mux.Handle("/api/events", opts.EventsHandler)
+		mux.Handle("/api/events", protect(opts.EventsHandler))
 	}
 	if opts.IncidentsHandler != nil {
-		mux.Handle("/api/incidents", opts.IncidentsHandler)
+		mux.Handle("/api/incidents", protect(opts.IncidentsHandler))
 	}
 	if opts.SettingsHandler != nil {
-		mux.Handle("/api/settings", opts.SettingsHandler)
+		mux.Handle("/api/settings", protect(opts.SettingsHandler))
 	}
 	if opts.NodesCollectionHandler != nil {
-		mux.Handle("/api/nodes", opts.NodesCollectionHandler)
+		mux.Handle("/api/nodes", protect(opts.NodesCollectionHandler))
 	}
 	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil {
-		mux.Handle("/api/nodes/", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		mux.Handle("/api/nodes/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			nodeID, subtree := nodeSubtreePath(r.URL.Path)
 			if nodeID == "" {
 				stdhttp.NotFound(w, r)
@@ -118,10 +149,10 @@ func New(opts RouterOptions) stdhttp.Handler {
 			default:
 				stdhttp.NotFound(w, r)
 			}
-		}))
+		})))
 	}
 	if opts.TargetsCollectionHandler != nil {
-		mux.Handle("/api/targets", opts.TargetsCollectionHandler)
+		mux.Handle("/api/targets", protect(opts.TargetsCollectionHandler))
 	}
 	if opts.AgentEnrollHandler != nil {
 		mux.Handle(agentapi.EnrollPath, opts.AgentEnrollHandler)
@@ -130,7 +161,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 		mux.Handle(agentapi.SyncPath, opts.AgentSyncHandler)
 	}
 	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil || opts.TargetRuntimeFactsHandler != nil || opts.TargetRuntimeControlHandler != nil {
-		mux.Handle("/api/targets/", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		mux.Handle("/api/targets/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			targetID, subtree := targetSubtreePath(r.URL.Path)
 			if targetID == "" {
 				stdhttp.NotFound(w, r)
@@ -165,7 +196,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 			default:
 				stdhttp.NotFound(w, r)
 			}
-		}))
+		})))
 	}
 	if opts.WebDistDir != "" {
 		mux.Handle("/", handlers.SPA(opts.WebDistDir))
