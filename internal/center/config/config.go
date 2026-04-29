@@ -20,6 +20,10 @@ type CenterConfig struct {
 	TelegramBotToken      string
 	TelegramChatID        string
 	IncidentSweepInterval time.Duration
+	InitialUsername       string
+	InitialPassword       string
+	InitialDisplayName    string
+	SessionTTL            time.Duration
 }
 
 func LoadCenterConfig() (CenterConfig, error) {
@@ -49,6 +53,20 @@ func LoadCenterConfig() (CenterConfig, error) {
 		return CenterConfig{}, fmt.Errorf("HOUFENG_TELEGRAM_BOT_TOKEN and HOUFENG_TELEGRAM_CHAT_ID must both be set or both be empty")
 	}
 
+	initialUsername, err := requiredEnv("HOUFENG_INITIAL_USERNAME")
+	if err != nil {
+		return CenterConfig{}, err
+	}
+	initialPassword, err := requiredEnv("HOUFENG_INITIAL_PASSWORD")
+	if err != nil {
+		return CenterConfig{}, err
+	}
+	initialDisplayName := strings.TrimSpace(os.Getenv("HOUFENG_INITIAL_DISPLAY_NAME"))
+	sessionTTL, err := durationEnvOrDefault("HOUFENG_SESSION_TTL", 7*24*time.Hour)
+	if err != nil {
+		return CenterConfig{}, err
+	}
+
 	return CenterConfig{
 		HTTPAddr:              httpAddr,
 		WebDistDir:            webDistDir,
@@ -56,6 +74,10 @@ func LoadCenterConfig() (CenterConfig, error) {
 		TelegramBotToken:      telegramBotToken,
 		TelegramChatID:        telegramChatID,
 		IncidentSweepInterval: sweepInterval,
+		InitialUsername:       initialUsername,
+		InitialPassword:       initialPassword,
+		InitialDisplayName:    initialDisplayName,
+		SessionTTL:            sessionTTL,
 	}, nil
 }
 

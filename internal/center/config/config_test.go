@@ -2,11 +2,22 @@ package config_test
 
 import (
 	"testing"
+	"time"
 
 	centerconfig "houfeng/internal/center/config"
 )
 
+// setRequiredAuth sets the bcrypt-seed credentials so other Load* tests can
+// focus on what they're asserting without LoadCenterConfig short-circuiting on
+// missing initial creds.
+func setRequiredAuth(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOUFENG_INITIAL_USERNAME", "admin")
+	t.Setenv("HOUFENG_INITIAL_PASSWORD", "correct-horse-battery")
+}
+
 func TestLoadCenterConfigRequiresDatabaseURL(t *testing.T) {
+	setRequiredAuth(t)
 	t.Setenv("HOUFENG_HTTP_ADDR", ":8080")
 	t.Setenv("HOUFENG_WEB_DIST_DIR", "web/dist")
 	t.Setenv("HOUFENG_DATABASE_URL", "")
@@ -17,6 +28,7 @@ func TestLoadCenterConfigRequiresDatabaseURL(t *testing.T) {
 }
 
 func TestLoadCenterConfigParsesOptionalIncidentAndTelegramSettings(t *testing.T) {
+	setRequiredAuth(t)
 	t.Setenv("HOUFENG_HTTP_ADDR", ":9090")
 	t.Setenv("HOUFENG_WEB_DIST_DIR", "web/custom-dist")
 	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
@@ -40,6 +52,7 @@ func TestLoadCenterConfigParsesOptionalIncidentAndTelegramSettings(t *testing.T)
 }
 
 func TestLoadCenterConfigRejectsHalfConfiguredTelegramOrInvalidSweepInterval(t *testing.T) {
+	setRequiredAuth(t)
 	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
 	t.Setenv("HOUFENG_TELEGRAM_BOT_TOKEN", "bot-token")
 	t.Setenv("HOUFENG_TELEGRAM_CHAT_ID", "")
@@ -54,5 +67,68 @@ func TestLoadCenterConfigRejectsHalfConfiguredTelegramOrInvalidSweepInterval(t *
 
 	if _, err := centerconfig.LoadCenterConfig(); err == nil {
 		t.Fatal("LoadCenterConfig() error = nil, want non-nil for invalid sweep interval")
+	}
+}
+
+func TestLoadCenterConfigParsesAuthFields(t *testing.T) {
+	t.Setenv("HOUFENG_HTTP_ADDR", ":8080")
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+	t.Setenv("HOUFENG_INITIAL_USERNAME", "admin")
+	t.Setenv("HOUFENG_INITIAL_PASSWORD", "correct-horse-battery")
+	t.Setenv("HOUFENG_INITIAL_DISPLAY_NAME", "管理员")
+	t.Setenv("HOUFENG_SESSION_TTL", "168h")
+
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig: %v", err)
+	}
+	if cfg.InitialUsername != "admin" {
+		t.Fatalf("InitialUsername = %q", cfg.InitialUsername)
+	}
+	if cfg.InitialPassword != "correct-horse-battery" {
+		t.Fatalf("InitialPassword wrong: %q", cfg.InitialPassword)
+	}
+	if cfg.InitialDisplayName != "管理员" {
+		t.Fatalf("InitialDisplayName = %q", cfg.InitialDisplayName)
+	}
+	if cfg.SessionTTL != 168*time.Hour {
+		t.Fatalf("SessionTTL = %v", cfg.SessionTTL)
+	}
+}
+
+func TestLoadCenterConfigDefaultsSessionTTL(t *testing.T) {
+	t.Setenv("HOUFENG_HTTP_ADDR", ":8080")
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+	t.Setenv("HOUFENG_INITIAL_USERNAME", "admin")
+	t.Setenv("HOUFENG_INITIAL_PASSWORD", "correct-horse-battery")
+
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig: %v", err)
+	}
+	if cfg.SessionTTL != 7*24*time.Hour {
+		t.Fatalf("SessionTTL default = %v, want 168h", cfg.SessionTTL)
+	}
+}
+
+func TestLoadCenterConfigRequiresInitialUsername(t *testing.T) {
+	t.Setenv("HOUFENG_HTTP_ADDR", ":8080")
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+	t.Setenv("HOUFENG_INITIAL_USERNAME", "")
+	t.Setenv("HOUFENG_INITIAL_PASSWORD", "correct-horse-battery")
+
+	if _, err := centerconfig.LoadCenterConfig(); err == nil {
+		t.Fatal("LoadCenterConfig() error = nil, want non-nil for missing initial username")
+	}
+}
+
+func TestLoadCenterConfigRequiresInitialPassword(t *testing.T) {
+	t.Setenv("HOUFENG_HTTP_ADDR", ":8080")
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+	t.Setenv("HOUFENG_INITIAL_USERNAME", "admin")
+	t.Setenv("HOUFENG_INITIAL_PASSWORD", "")
+
+	if _, err := centerconfig.LoadCenterConfig(); err == nil {
+		t.Fatal("LoadCenterConfig() error = nil, want non-nil for missing initial password")
 	}
 }
