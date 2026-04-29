@@ -57,17 +57,19 @@ Compare each captured screenshot with the matching reference PNG. Record results
 
 | Route | Captured screenshot | Reference screenshot | Verdict | Notes |
 | --- | --- | --- | --- | --- |
-| `/` | `docs/operations/visual-evidence/dashboard.png` | `docs/design/v1-baseline/stitch/global_control_center_unified/screen.png` | Pending live capture | Requires seeded data |
-| `/nodes` | `docs/operations/visual-evidence/nodes.png` | `docs/design/v1-baseline/stitch/fleet_nodes_list/screen.png` | Pending live capture | Requires seeded node |
-| `/nodes/<node_id>` | `docs/operations/visual-evidence/node-detail.png` | `docs/design/v1-baseline/stitch/node_detail_center_unified/screen.png` | Pending live capture | Requires runtime facts/incidents |
-| `/nodes/<node_id>/onboarding` | `docs/operations/visual-evidence/node-onboarding.png` | `docs/design/v1-baseline/stitch/node_onboarding_binding_conflict_unified/screen.png` | Pending live capture | Requires onboarding or conflict state |
-| `/events` | `docs/operations/visual-evidence/events.png` | `docs/design/v1-baseline/stitch/security_audit_events/screen.png` | Pending live capture | Requires event stream |
-| `/settings` | `docs/operations/visual-evidence/settings.png` | `docs/design/v1-baseline/stitch/system_configuration/screen.png` | Pending live capture | Requires settings page |
-| `/targets/<target_id>` | `docs/operations/visual-evidence/target-detail.png` | `docs/design/v1-baseline/stitch/target_details_blog.example.com/screen.png` | Pending live capture | Legacy reference |
+| `/` | `docs/operations/visual-evidence/dashboard.png` | `docs/design/v1-baseline/stitch/global_control_center_unified/screen.png` | Captured 2026-04-29 | Live PostgreSQL smoke data; visual comparison still needs acceptance |
+| `/nodes` | `docs/operations/visual-evidence/nodes.png` | `docs/design/v1-baseline/stitch/fleet_nodes_list/screen.png` | Captured 2026-04-29 | Live PostgreSQL smoke data; visual comparison still needs acceptance |
+| `/nodes/<node_id>` | `docs/operations/visual-evidence/node-detail.png` | `docs/design/v1-baseline/stitch/node_detail_center_unified/screen.png` | Captured 2026-04-29 | Uses `nd_1450995f5b3bdf38` |
+| `/nodes/<node_id>/onboarding` | `docs/operations/visual-evidence/node-onboarding.png` | `docs/design/v1-baseline/stitch/node_onboarding_binding_conflict_unified/screen.png` | Captured 2026-04-29 | Uses `nd_1450995f5b3bdf38`; no forced binding-conflict state |
+| `/events` | `docs/operations/visual-evidence/events.png` | `docs/design/v1-baseline/stitch/security_audit_events/screen.png` | Captured 2026-04-29 | Includes live incident start/recovery events |
+| `/settings` | `docs/operations/visual-evidence/settings.png` | `docs/design/v1-baseline/stitch/system_configuration/screen.png` | Captured 2026-04-29 | Runtime settings page capture |
+| `/targets/<target_id>` | `docs/operations/visual-evidence/target-detail.png` | `docs/design/v1-baseline/stitch/target_details_blog.example.com/screen.png` | Captured 2026-04-29 | Uses `tg_02d55cc117129e57`; legacy reference |
 
 ## Current evidence status
 
-This document records the authoritative comparison set and reproducible capture path. If no `docs/operations/visual-evidence/*.png` files are committed, visual verification remains a tracked evidence gap rather than completed visual proof.
+Live implementation screenshots were captured at `1440x1024` on 2026-04-29 and recorded under `docs/operations/visual-evidence/` with capture metadata in `docs/operations/visual-evidence/manifest.json`.
+
+These artifacts close the missing-screenshot capture gap. They do **not** by themselves close strict visual-fidelity acceptance: the implementation screenshots must still be reviewed against the frozen references before declaring pixel-level or high-fidelity visual parity.
 
 ## Read-only visual inspection findings
 

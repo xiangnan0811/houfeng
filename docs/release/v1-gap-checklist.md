@@ -53,7 +53,7 @@ Status values:
 | Events advanced filters | Closed | `web/src/pages/EventsPage.tsx` |
 | Settings runtime truthfulness | Closed | `web/src/pages/SettingsPage.tsx`, `internal/center/settings` |
 | Chinese-first UI copy and dense baseline hierarchy | Closed | Alignment pass recorded in `docs/operations/v1-visual-verification.md`; frontend evidence in `web/src/app/layout/AppShell.tsx`, `web/src/components/ActionConfirmationCard.tsx`, `web/src/pages/DashboardPage.tsx`, `web/src/pages/NodesPage.tsx`, `web/src/pages/NodeDetailPage.tsx`, `web/src/pages/NodeOnboardingPage.tsx`, `web/src/pages/TargetsPage.tsx`, `web/src/pages/TargetDetailPage.tsx`, `web/src/pages/EventsPage.tsx`, and `web/src/pages/SettingsPage.tsx` |
-| Visual screenshot comparison against baseline PNGs | Partial | `docs/operations/v1-visual-verification.md`; live screenshot evidence pending unless PNG evidence is later committed |
+| Visual screenshot comparison against baseline PNGs | Partial | Live route screenshots were captured on 2026-04-29 under `docs/operations/visual-evidence/` and indexed by `docs/operations/visual-evidence/manifest.json`; strict visual-fidelity acceptance remains pending because the captures have not been accepted as high-fidelity matches to the frozen references |
 
 ## Notifications
 
@@ -81,5 +81,5 @@ Before tagging or declaring V1 fully release-ready, collect:
 - passing `./scripts/verify.sh`;
 - passing `cd web && npm run build`;
 - completed live PostgreSQL smoke table in `docs/operations/v1-smoke-run.md` (collected 2026-04-29);
-- visual screenshot comparison artifacts or an explicit accepted waiver for pending screenshot evidence;
+- visual screenshot comparison artifacts are captured; strict visual-fidelity acceptance or an explicit accepted waiver remains pending;
 - Telegram delivery proof or an explicit note that Telegram is disabled for the deployment.
