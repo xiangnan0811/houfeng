@@ -1,8 +1,9 @@
 # V1.x Frontend Redesign — Branch Status
 
-**Branch:** `feat/v1.x-plan-1-backend-auth` (despite the name, this branch carries Plan 1 **and** Plan 2; Plan 3 is pending and will land on the same or a sibling branch)
+**Branch:** `feat/v1.x-plan-1-backend-auth` (carries Plan 1, Plan 2, and the Plan 3 visual-skin
+pass — the deeper page-level redesign per spec §10 is deferred as V1.x.1, see below)
 
-**As of:** 2026-04-30, 25 commits ahead of `main`
+**As of:** 2026-04-30, ~30 commits ahead of `main`
 
 ## Plan 1 — Backend auth ✅ Complete
 
@@ -47,19 +48,51 @@
 
 - **Settings page Theme Tab** — Plan 2 §10.10.1 spec adds a 5th Pill Tab inside `SettingsPage.tsx`. Since Plan 3 wholesale rewrites SettingsPage anyway, layering the partial Theme tab now would be undone in Plan 3. Theme switching is still fully functional from the user-chip dropdown route to `/settings`, just not yet exposed as a Pill Tab section.
 
-## Plan 3 — 8 page rewrites + visual evidence ⏸️ Pending
+## Plan 3 — page visual skin + Theme Tab + cross-link docs ✅ Complete (skin pass)
 
-0/15 tasks shipped. Pending because:
+Pragmatic scope reduction agreed with the user: instead of a full per-page rewrite per spec §10,
+this branch ships a **visual skin pass** that gives every existing page V1.x tokens, atoms, and
+the new shell, while keeping all business logic untouched. Tasks 13–14 (gap-checklist + cross-link)
+are also closed here.
 
-- 8 pages × ~700-1700 lines each + matching tests = ~16,000 lines under active edit
-- Inline same-session execution risks context-pressure errors on a complex page (NodeDetail, TargetDetail) that already encode binding-state machines, runtime control flows, etc.
-- The skill-prescribed flow (subagent-driven-development) is currently blocked by the org monthly subagent quota. Best executed once the quota refreshes.
+What landed:
 
-When Plan 3 resumes the foundation laid in Plan 2 is fully ready: every page will compose existing atoms + token classes; no new infrastructure required.
+- `web/src/styles/pages.css` — single token-driven sheet that re-skins every shared page class
+  (`.page-panel`, `.page-stack`, `.summary-card`, `.detail-section*`, `.resource-table`,
+  `.metric-card`, `.probe-card`, `.observation-row`, etc.) so all 8 pages immediately render in
+  the new V1.x palette / typography / spacing across all four themes.
+- Settings page **Theme tab** (`ThemeSettingsSection`) wired to `useTheme` with two pill tabs:
+  风格 (候风原色 / 经典) and 明暗 (深色 / 浅色 / 跟随系统).
+- DashboardPage H1 renamed to `首页 / Dashboard` (per spec §10.1) with matching test updates.
+- `docs/release/v1-gap-checklist.md` — V1.x visual baseline section added with status rows.
+- `docs/design/v1-baseline/README.md` — `VISUAL PORTION UNFROZEN 2026-04-29` banner pointing to
+  `v1.x-frontend-redesign/`.
+- Top-level `README.md` — Guardrails updated so `Visual authority` points to the V1.x folder.
+
+Tests: 234/234 frontend tests pass after the skin pass. Production build still ~414 KB JS / ~27 KB
+CSS (pages.css adds ~9 KB).
+
+### Deferred to V1.x.1 (separate follow-up plan)
+
+The deeper per-page restructure per spec §10 — identity card with status dot, 5-tab layout on Node
+detail, danger zone, ProbeItem inline toggle list, advanced events filter card, KPI 4-card row on
+Dashboard, etc. — is intentionally **not** in this branch. Reasons:
+
+- Each of the 8 pages currently encodes business logic (binding-state machines, runtime control
+  flows, ProbeItem CRUD, dirty-bar form tracking) whose rewrite alongside layout changes is a
+  large surface area best handled by subagent-driven plans.
+- The skin pass already gives users a unified visual experience and keeps every existing test
+  passing, so the branch is safe to merge as-is.
+- A follow-up plan (V1.x.1) under `docs/design/v1.x-frontend-redesign/plans/` should pick this up
+  when subagent dispatch budget permits and tackle one page per plan.
 
 ### Current state of the 8 pages
 
-The 8 page components (`Dashboard`, `Nodes`, `NodeDetail`, `NodeOnboarding`, `Targets`, `TargetDetail`, `Events`, `Settings`) **still render their pre-V1.x visuals** inside the new sidebar shell. They are functional — login → page → all CRUD flows work — they just aren't yet on the new design. This is the deliberate intermediate state Plan 3 was sized to address.
+`Dashboard`, `Nodes`, `NodeDetail`, `NodeOnboarding`, `Targets`, `TargetDetail`, `Events`, `Settings`
+all render with V1.x tokens (palette, typography, borders, spacing) under the new sidebar shell.
+The information density and component grouping inside each page reflect the pre-V1.x layout — for
+example NodeDetail still uses its existing summary cards rather than the spec §10.5 「身份卡 + 5 Tab + 危险区」
+structure. Functionality is unchanged.
 
 ## How to review the branch
 
@@ -79,10 +112,16 @@ cd web && npm ci && npm run build && npm run test
 
 then booting the center against a local Postgres (see `docs/deploy/local-and-systemd.md` Authentication section) and walking the login → dashboard flow in 4 themes via the user-chip dropdown's localStorage entries, since the in-page Theme Tab is deferred (see above).
 
-## Resume protocol
+## Resume protocol — V1.x.1 (deeper per-page redesign)
 
-When ready to restart Plan 3:
+When subagent budget permits:
 
-1. Spawn `oh-my-claudecode:executor` per page (8 dispatches expected).
-2. After each page lands, run `npm run build && npx vitest run` before moving on.
-3. Tasks 12–14 (visual evidence regen, gap-checklist, v1-baseline cross-link) close out the plan.
+1. Author a per-page V1.x.1 plan under `docs/design/v1.x-frontend-redesign/plans/` for one page
+   at a time. Each plan should explicitly enumerate the §10 layout primitives the page should
+   adopt (身份卡, Tab strip, 危险区, etc.) and how each call site rebinds existing API hooks
+   onto the new layout.
+2. Spawn `oh-my-claudecode:executor` for the implementation, with `oh-my-claudecode:code-reviewer`
+   as the second-stage reviewer. Run `make verify-go && cd web && npm run build && npx vitest run`
+   between pages.
+3. After all pages land, regenerate `docs/operations/visual-evidence/` (4 themes × representative
+   pages) and run a manual contrast smoke for WCAG AA.
