@@ -21,11 +21,22 @@ export async function logout(): Promise<void> {
 
 export async function me(): Promise<User | null> {
   try {
-    return await fetcher<User>('/api/auth/me')
+    const result = await fetcher<unknown>('/api/auth/me')
+    if (!isUser(result)) return null
+    return result
   } catch (e) {
     if (e instanceof AuthError) return null
     throw e
   }
+}
+
+function isUser(v: unknown): v is User {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as User).user_id === 'string' &&
+    typeof (v as User).username === 'string'
+  )
 }
 
 export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {

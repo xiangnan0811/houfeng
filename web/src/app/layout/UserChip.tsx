@@ -23,8 +23,9 @@ export function UserChip({ user, onLogout, onChangePassword }: UserChipProps) {
     return () => document.removeEventListener('mousedown', close)
   }, [open])
 
-  const initial = (user.display_name || user.username).slice(0, 1)
-  const roleLabel = ROLE_LABEL[user.role] ?? user.role
+  const display = user.display_name || user.username || ''
+  const initial = display.slice(0, 1) || '·'
+  const roleLabel = ROLE_LABEL[user.role] ?? user.role ?? ''
 
   return (
     <div className="user-chip" ref={ref}>
