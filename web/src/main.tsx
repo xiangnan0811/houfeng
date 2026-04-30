@@ -5,6 +5,7 @@ import { RouterProvider } from 'react-router-dom'
 import './styles/reset.css'
 import './styles/tokens.css'
 import './styles/atoms.css'
+import './styles/pages.css'
 import './app/layout/layout.css'
 
 import { router } from './app/router'
