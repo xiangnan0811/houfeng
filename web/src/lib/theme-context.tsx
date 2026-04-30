@@ -8,6 +8,8 @@ import {
   type Mode,
 } from './theme'
 
+export type { Preset, Mode } from './theme'
+
 interface ThemeContextValue {
   preset: Preset
   mode: Mode
