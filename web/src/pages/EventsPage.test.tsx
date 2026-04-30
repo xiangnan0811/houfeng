@@ -77,6 +77,7 @@ describe('EventsPage', () => {
         {
           headers: { Accept: 'application/json' },
           cache: 'no-store',
+        credentials: 'include',
         },
       ),
     )
@@ -104,6 +105,7 @@ describe('EventsPage', () => {
       expect(fetchMock).toHaveBeenLastCalledWith('/api/events?event_type=node_binding_reset&limit=50', {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       }),
     )
   })
@@ -165,6 +167,7 @@ describe('EventsPage', () => {
         {
           headers: { Accept: 'application/json' },
           cache: 'no-store',
+        credentials: 'include',
         },
       ),
     )
@@ -203,6 +206,7 @@ describe('EventsPage', () => {
         {
           headers: { Accept: 'application/json' },
           cache: 'no-store',
+        credentials: 'include',
         },
       ),
     )
@@ -242,6 +246,7 @@ describe('EventsPage', () => {
         {
           headers: { Accept: 'application/json' },
           cache: 'no-store',
+        credentials: 'include',
         },
       ),
     )
@@ -252,6 +257,7 @@ describe('EventsPage', () => {
       expect(fetchMock).toHaveBeenLastCalledWith('/api/events?limit=50', {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       }),
     )
   })

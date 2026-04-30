@@ -217,6 +217,7 @@ describe('api helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/dashboard', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -230,6 +231,7 @@ describe('api helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/settings', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -247,6 +249,7 @@ describe('api helpers', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+      credentials: 'include',
       body: JSON.stringify(settingsUpdateBody),
     })
   })
@@ -297,6 +300,7 @@ describe('api helpers', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+      credentials: 'include',
       body: JSON.stringify(requestBody),
     })
   })
@@ -338,6 +342,7 @@ describe('api helpers', () => {
         'If-Match': '"2026-04-27T09:00:00Z"',
       },
       cache: 'no-store',
+      credentials: 'include',
       body: JSON.stringify(requestBody),
     })
   })
@@ -374,6 +379,7 @@ describe('api helpers', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+      credentials: 'include',
       body: JSON.stringify(requestBody),
     })
   })
@@ -414,6 +420,7 @@ describe('api helpers', () => {
         'If-Match': '"2026-04-27T09:00:00Z"',
       },
       cache: 'no-store',
+      credentials: 'include',
       body: JSON.stringify(requestBody),
     })
   })
@@ -449,6 +456,7 @@ describe('api helpers', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+      credentials: 'include',
       body: JSON.stringify(requestBody),
     })
   })
@@ -484,6 +492,7 @@ describe('api helpers', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+      credentials: 'include',
       body: JSON.stringify(requestBody),
     })
   })
@@ -502,6 +511,7 @@ describe('api helpers', () => {
       method: 'DELETE',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -536,6 +546,7 @@ describe('api helpers', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+      credentials: 'include',
       body: JSON.stringify(requestBody),
     })
   })
@@ -555,6 +566,7 @@ describe('api helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/events?object_type=node&event_type=incident_started&limit=25', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -578,6 +590,7 @@ describe('api helpers', () => {
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+      credentials: 'include',
       },
     )
   })
@@ -596,6 +609,7 @@ describe('api helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/incidents?object_type=target&object_id=tg_001&limit=10', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -628,6 +642,7 @@ describe('api helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -644,6 +659,7 @@ describe('api helpers', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -679,16 +695,19 @@ describe('api helpers', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/binding/reject-pending', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/binding/reset', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -722,21 +741,25 @@ describe('api helpers', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/exit-maintenance', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/nodes/nd_001/runtime/resume', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -768,6 +791,7 @@ describe('api helpers', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
@@ -776,6 +800,7 @@ describe('api helpers', () => {
         method: 'POST',
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+      credentials: 'include',
       },
     )
   })
@@ -811,31 +836,37 @@ describe('api helpers', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_001/runtime/exit-maintenance', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/targets/tg_001/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/targets/tg_001/runtime/resume', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/targets/tg_001/runtime/archive', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/runtime/restore-to-paused', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      credentials: 'include',
     })
   })
 })

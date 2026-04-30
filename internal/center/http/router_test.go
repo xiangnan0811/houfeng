@@ -14,6 +14,7 @@ import (
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/nodes"
+	"houfeng/internal/contracts/agentapi"
 )
 
 func TestRouterHealthz(t *testing.T) {
@@ -290,5 +291,140 @@ func TestRouterDispatchesTargetRuntimeFactsAPI(t *testing.T) {
 	}
 	if called != "runtime-facts" {
 		t.Fatalf("expected runtime facts handler, got %q", called)
+	}
+}
+
+func TestRouterRegistersAuthRoutesPublic(t *testing.T) {
+	loginCalled := false
+	logoutCalled := false
+	meCalled := false
+	pwCalled := false
+	opts := centerhttp.RouterOptions{
+		Version: "test",
+		AuthLoginHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			loginCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		AuthLogoutHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			logoutCalled = true
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		AuthMeHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			meCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		AuthChangePasswordHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			pwCalled = true
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		AuthMiddleware: func(_ http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+			})
+		},
+	}
+	mux := centerhttp.New(opts)
+
+	for _, tc := range []struct {
+		method, path string
+	}{
+		{http.MethodPost, "/api/auth/login"},
+		{http.MethodPost, "/api/auth/logout"},
+		{http.MethodGet, "/api/auth/me"},
+		{http.MethodPut, "/api/auth/password"},
+	} {
+		r := httptest.NewRequest(tc.method, tc.path, nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code == http.StatusNotFound {
+			t.Errorf("%s %s -> 404, want registered", tc.method, tc.path)
+		}
+		if w.Code == http.StatusUnauthorized {
+			t.Errorf("%s %s -> 401, want public (auth routes must skip middleware)", tc.method, tc.path)
+		}
+	}
+	if !loginCalled || !logoutCalled || !meCalled || !pwCalled {
+		t.Fatalf("auth handlers not all reached: login=%v logout=%v me=%v pw=%v",
+			loginCalled, logoutCalled, meCalled, pwCalled)
+	}
+}
+
+func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
+	innerCalled := false
+	mwCalled := false
+	opts := centerhttp.RouterOptions{
+		Version: "test",
+		DashboardHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			innerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		AuthMiddleware: func(_ http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				mwCalled = true
+				w.WriteHeader(http.StatusUnauthorized)
+			})
+		},
+	}
+	mux := centerhttp.New(opts)
+	r := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (middleware should block)", w.Code)
+	}
+	if innerCalled {
+		t.Fatal("inner dashboard handler must not be called when middleware blocks")
+	}
+	if !mwCalled {
+		t.Fatal("middleware not invoked")
+	}
+}
+
+func TestRouterHealthzAndAgentRoutesBypassAuthMiddleware(t *testing.T) {
+	enrollCalled := false
+	syncCalled := false
+	opts := centerhttp.RouterOptions{
+		Version: "test",
+		AgentEnrollHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			enrollCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		AgentSyncHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			syncCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		AuthMiddleware: func(_ http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+			})
+		},
+	}
+	mux := centerhttp.New(opts)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/healthz", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code == http.StatusUnauthorized {
+		t.Fatalf("healthz blocked by middleware, want bypass")
+	}
+
+	r = httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code == http.StatusUnauthorized {
+		t.Fatalf("agent enroll blocked by middleware, want bypass")
+	}
+	if !enrollCalled {
+		t.Fatal("enroll handler not reached")
+	}
+
+	r = httptest.NewRequest(http.MethodPost, agentapi.SyncPath, nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code == http.StatusUnauthorized {
+		t.Fatalf("agent sync blocked by middleware, want bypass")
+	}
+	if !syncCalled {
+		t.Fatal("sync handler not reached")
 	}
 }

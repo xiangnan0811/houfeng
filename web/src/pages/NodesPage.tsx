@@ -64,6 +64,7 @@ async function createNode(input: CreateNodeInput) {
       'Content-Type': 'application/json',
     },
     cache: 'no-store',
+    credentials: 'include',
     body: JSON.stringify({
       ...input,
       lifecycle_status: '待接入',

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	centerapp "houfeng/internal/center/app"
+	"houfeng/internal/center/auth"
 	"houfeng/internal/center/config"
 	"houfeng/internal/center/enrollment"
 	centerhttp "houfeng/internal/center/http"
@@ -40,6 +41,7 @@ type postgresDB interface {
 type bootstrapDeps struct {
 	openPostgres        func(context.Context, string) (postgresDB, error)
 	applyMigrations     func(context.Context, postgresDB) error
+	seedInitialUser     func(context.Context, auth.UserRepository, config.CenterConfig) error
 	newIncidentNotifier func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
 	newRouter           func(centerhttp.RouterOptions) http.Handler
 	newApp              func(string, http.Handler, ...centerapp.Worker) appRunner
@@ -96,6 +98,20 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		cfg.IncidentSweepInterval,
 	)
 	syncSvc := syncing.NewService(syncRepo, incidentSvc)
+
+	userRepo := store.NewPostgresUserRepository(db.Pool())
+	sessionRepo := store.NewPostgresSessionRepository(db.Pool())
+	if err := deps.seedInitialUser(ctx, userRepo, cfg); err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("seed initial user: %w", err)
+	}
+	authSvc := auth.New(userRepo, sessionRepo, auth.Options{
+		SessionTTL: cfg.SessionTTL,
+		Now:        time.Now,
+	})
+	sessionCleanup := auth.NewSessionCleanupWorker(sessionRepo, slog.Default(), auth.DefaultSessionCleanupInterval)
+	authMW := centerhttp.RequireSession(authSvc)
+
 	router := deps.newRouter(centerhttp.RouterOptions{
 		Version:                         version,
 		WebDistDir:                      cfg.WebDistDir,
@@ -120,9 +136,14 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		TargetRuntimeControlHandler:     handlers.TargetRuntimeControls(targetRepo),
 		AgentEnrollHandler:              handlers.AgentEnroll(enrollmentSvc),
 		AgentSyncHandler:                handlers.AgentSync(syncSvc),
+		AuthLoginHandler:                handlers.Login(authSvc),
+		AuthLogoutHandler:               handlers.Logout(authSvc),
+		AuthMeHandler:                   handlers.Me(authSvc),
+		AuthChangePasswordHandler:       handlers.ChangePassword(authSvc),
+		AuthMiddleware:                  authMW,
 	})
 
-	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker), db.Close, nil
+	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker, sessionCleanup), db.Close, nil
 }
 
 func (d bootstrapDeps) withDefaults() bootstrapDeps {
@@ -138,6 +159,11 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 	if d.applyMigrations == nil {
 		d.applyMigrations = func(ctx context.Context, db postgresDB) error {
 			return migrate.Apply(ctx, db.Pool())
+		}
+	}
+	if d.seedInitialUser == nil {
+		d.seedInitialUser = func(ctx context.Context, repo auth.UserRepository, cfg config.CenterConfig) error {
+			return auth.SeedInitialUser(ctx, repo, cfg.InitialUsername, cfg.InitialPassword, cfg.InitialDisplayName, time.Now)
 		}
 	}
 	if d.newIncidentNotifier == nil {

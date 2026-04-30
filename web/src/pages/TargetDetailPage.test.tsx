@@ -173,14 +173,17 @@ describe('TargetDetailPage', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/targets/tg_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_001/probe-items', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/targets/tg_001/runtime-facts', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
@@ -188,6 +191,7 @@ describe('TargetDetailPage', () => {
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       },
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -196,6 +200,7 @@ describe('TargetDetailPage', () => {
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       },
     )
   })
@@ -533,6 +538,7 @@ describe('TargetDetailPage', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+        credentials: 'include',
       body: JSON.stringify({
         probe_kind: 'http',
         enabled: true,
@@ -632,6 +638,7 @@ describe('TargetDetailPage', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+        credentials: 'include',
       body: JSON.stringify({
         probe_kind: 'tls',
         enabled: true,
@@ -857,6 +864,7 @@ describe('TargetDetailPage', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+        credentials: 'include',
       body: JSON.stringify({
         probe_kind: 'http',
         enabled: true,
@@ -1306,6 +1314,7 @@ describe('TargetDetailPage', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+        credentials: 'include',
       body: JSON.stringify({
         probe_kind: 'http',
         enabled: false,
@@ -1407,6 +1416,7 @@ describe('TargetDetailPage', () => {
       method: 'DELETE',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -2155,6 +2165,7 @@ describe('TargetDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -2248,6 +2259,7 @@ describe('TargetDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -2302,6 +2314,7 @@ describe('TargetDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -2397,6 +2410,7 @@ describe('TargetDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -2451,6 +2465,7 @@ describe('TargetDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -2963,6 +2978,7 @@ describe('TargetDetailPage', () => {
         'If-Match': '"2026-04-24T09:05:00Z"',
       },
       cache: 'no-store',
+        credentials: 'include',
       body: JSON.stringify({
         labels: ['alpha', 'beta'],
         note: '新的备注',

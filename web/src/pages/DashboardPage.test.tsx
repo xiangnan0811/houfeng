@@ -92,10 +92,10 @@ describe('DashboardPage', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByText('正在加载集群概览…')).toBeInTheDocument()
+    expect(screen.getByText('正在加载首页 / Dashboard…')).toBeInTheDocument()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '集群概览' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '首页 / Dashboard' })).toBeInTheDocument(),
     )
 
     expect(screen.getByText('当前风险总览')).toBeInTheDocument()
@@ -140,7 +140,7 @@ describe('DashboardPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '集群概览不可用' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '首页不可用' })).toBeInTheDocument(),
     )
     expect(screen.getByText('dashboard unavailable')).toBeInTheDocument()
   })

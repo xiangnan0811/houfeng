@@ -167,7 +167,7 @@ export function DashboardPage() {
       })
       .catch((error: unknown) => {
         if (cancelled) return
-        const message = error instanceof ApiError ? error.message : '加载集群概览失败'
+        const message = error instanceof ApiError ? error.message : '加载首页 / Dashboard失败'
         setState({ loading: false, error: message, overview: null })
       })
 
@@ -177,14 +177,14 @@ export function DashboardPage() {
   }, [])
 
   if (state.loading) {
-    return <section className="page-panel">正在加载集群概览…</section>
+    return <section className="page-panel">正在加载首页 / Dashboard…</section>
   }
 
   if (state.error || !state.overview) {
     return (
       <section className="page-panel">
         <p className="page-panel__eyebrow">当前风险总览</p>
-        <h2 className="page-panel__title">集群概览不可用</h2>
+        <h2 className="page-panel__title">首页不可用</h2>
         <p className="page-panel__description">{state.error ?? '未获取到概览数据'}</p>
       </section>
     )
@@ -201,7 +201,7 @@ export function DashboardPage() {
       <div className="page-stack">
         <section className="page-panel">
           <p className="page-panel__eyebrow">当前风险总览</p>
-          <h2 className="page-panel__title">集群概览</h2>
+          <h2 className="page-panel__title">首页 / Dashboard</h2>
           <p className="page-panel__description">
             先处理当前异常，再查看趋势与事件历史。
           </p>
@@ -231,7 +231,7 @@ export function DashboardPage() {
     <div className="page-stack">
       <section className="page-panel">
         <p className="page-panel__eyebrow">当前风险总览</p>
-        <h2 className="page-panel__title">集群概览</h2>
+        <h2 className="page-panel__title">首页 / Dashboard</h2>
         <p className="page-panel__description">
           先处理当前异常，再查看趋势与事件历史。
         </p>

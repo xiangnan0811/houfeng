@@ -1,0 +1,82 @@
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  position: relative;
+  overflow: hidden;
+}
+.login-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--bg-aurora);
+  pointer-events: none;
+}
+.login-page__seal {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--accent-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(45deg);
+  font-family: var(--font-serif);
+  color: var(--accent);
+  font-size: 14px;
+}
+.login-page__seal > span {
+  transform: rotate(-45deg);
+}
+.login-page__card {
+  position: relative;
+  width: 380px;
+  padding: 32px 32px 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.login-page__brand { text-align: center; margin-bottom: 16px; }
+.login-page__brand-zh {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+}
+.login-page__brand-en {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.30em;
+  margin-top: 6px;
+}
+.login-page__motto {
+  font-family: var(--font-serif);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.2em;
+  margin-top: 4px;
+}
+.login-page__error {
+  padding: 9px 12px;
+  background: color-mix(in srgb, var(--color-state-critical) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-state-critical) 30%, transparent);
+  border-radius: var(--radius-2);
+  color: color-mix(in srgb, var(--color-state-critical) 75%, white 25%);
+  font-size: 12px;
+}
+.login-page__footer {
+  text-align: center;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 14px;
+}

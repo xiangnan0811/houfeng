@@ -30,14 +30,26 @@ export class ApiError extends Error {
   }
 }
 
+// Set by AuthProvider on mount; fired when any /api/* responds with 401.
+let onUnauthorized: (() => void) | undefined
+export function setApiUnauthorizedHandler(h: (() => void) | undefined): void {
+  onUnauthorized = h
+}
+
 async function request(path: string, init?: RequestInit): Promise<string> {
   const response = await fetch(path, {
     headers: { Accept: 'application/json' },
     cache: 'no-store',
+    credentials: 'include',
     ...init,
   })
 
   const rawBody = await response.text()
+
+  if (response.status === 401) {
+    onUnauthorized?.()
+    throw new ApiError(401, 'unauthenticated')
+  }
 
   if (!response.ok) {
     let message = `Request failed: ${response.status}`

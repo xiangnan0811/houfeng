@@ -1,0 +1,163 @@
+/* V1.x design tokens. Default = candidate-原色 dark. Theme classes on <html>
+ * override the surface and accent variables. State semantic colors and
+ * typography stay intentionally consistent across all four themes. */
+
+:root {
+  /* Type scale (size / weight / leading / spacing) */
+  --type-display-size: 28px;     --type-display-weight: 600; --type-display-leading: 1.1;
+  --type-h1-size: 22px;          --type-h1-weight: 600;      --type-h1-leading: 1.3;
+  --type-h2-size: 16px;          --type-h2-weight: 600;      --type-h2-leading: 1.4;
+  --type-body-size: 14px;        --type-body-weight: 400;    --type-body-leading: 1.6;
+  --type-small-size: 12px;       --type-small-weight: 400;   --type-small-leading: 1.5;
+  --type-eyebrow-size: 10px;     --type-eyebrow-weight: 500; --type-eyebrow-tracking: 0.18em;
+  --type-metric-size: 14px;      --type-metric-weight: 500;
+  --type-state-size: 11px;       --type-state-weight: 400;   --type-state-tracking: 0.06em;
+  --type-code-size: 12px;        --type-code-weight: 400;
+  --type-link-size: 14px;        --type-link-weight: 500;
+
+  /* Font fallbacks. Web-font bundling is an optional follow-up; running
+   * scripts/subset-fonts.sh and importing fonts.css will pin to bundled
+   * woff2 files, otherwise system CJK fonts (PingFang SC, Microsoft YaHei UI,
+   * Noto Sans CJK SC) provide ~90% visual fidelity across platforms. */
+  --font-serif: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', serif;
+  --font-sans:  'Source Han Sans SC', 'Noto Sans SC', Inter, ui-sans-serif, system-ui, -apple-system,
+                BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  --font-numeric: var(--font-sans);
+
+  /* Spacing scale */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-12: 48px;
+
+  /* Radius scale */
+  --radius-0: 0; --radius-1: 4px; --radius-2: 7px; --radius-3: 12px; --radius-pill: 999px;
+
+  /* Border weights */
+  --border-w: 1px;
+  --border-w-strong: 2px;
+
+  /* Shadow levels */
+  --shadow-glow:    0 0 16px rgba(184, 153, 104, 0.35);
+  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 8px rgba(0, 0, 0, 0.10);
+  --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35);
+
+  /* Default theme = candidate-原色 dark */
+  --bg:               #131419;
+  --bg-sidebar:       #0E0F13;
+  --surface:          rgba(255, 255, 255, 0.025);
+  --surface-elevated: rgba(255, 255, 255, 0.040);
+  --border:           #26241D;
+  --border-dashed:    #3A3833;
+  --text-primary:     #F1ECE0;
+  --text-secondary:   #A39E94;
+  --text-muted:       #8A8576;
+  --text-disabled:    #5C584F;
+
+  --accent:        #B89968;
+  --accent-strong: #D4B876;
+  --accent-soft:   rgba(184, 153, 104, 0.10);
+  --accent-border: rgba(184, 153, 104, 0.30);
+
+  --color-state-normal:      #5BA88E;
+  --color-state-notice:      #B89968;
+  --color-state-alert:       #C4814E;
+  --color-state-critical:    #B85042;
+  --color-state-maintenance: #6E8FA8;
+  --color-state-offline:     #6B6760;
+
+  --bg-aurora:
+    radial-gradient(ellipse at top right,    rgba(184, 153, 104, 0.10) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom left,  rgba(99,  102, 241, 0.05) 0%, transparent 50%);
+}
+
+/* candidate-原色 light */
+html.theme-houfeng-light {
+  --bg:               #FAF7EF;
+  --bg-sidebar:       #F2EDDF;
+  --surface:          #FFFEFA;
+  --surface-elevated: #FFFEFA;
+  --border:           #E8E2D5;
+  --border-dashed:    #C7BCA0;
+  --text-primary:     #2C2A24;
+  --text-secondary:   #5C5849;
+  --text-muted:       #857F6E;
+  --text-disabled:    #B5AC95;
+
+  --accent:        #8B6B3D;
+  --accent-strong: #8B6B3D;
+  --accent-soft:   rgba(139, 107, 61, 0.08);
+  --accent-border: rgba(139, 107, 61, 0.25);
+
+  --color-state-normal:      #2F8265;
+  --color-state-notice:      #8B6B3D;
+  --color-state-alert:       #A06434;
+  --color-state-critical:    #A53D2F;
+  --color-state-maintenance: #4F7393;
+  --color-state-offline:     #7A7568;
+
+  --bg-aurora:
+    radial-gradient(ellipse at top right,    rgba(139, 107, 61, 0.10) 0%, transparent 55%),
+    radial-gradient(ellipse at bottom left,  rgba(99,  102, 241, 0.05) 0%, transparent 50%);
+
+  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 8px rgba(0, 0, 0, 0.04);
+  --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.10);
+}
+
+/* classic dark */
+html.theme-classic-dark {
+  --bg:               #15140F;
+  --bg-sidebar:       #100F0B;
+  --surface:          rgba(255, 255, 255, 0.020);
+  --surface-elevated: rgba(255, 255, 255, 0.035);
+  --border:           #2A2823;
+  --border-dashed:    #3A3833;
+  --text-primary:     #E8E1D5;
+  --text-secondary:   #A39884;
+  --text-muted:       #8C8472;
+  --text-disabled:    #5C584F;
+
+  --accent:        #C09A5C;
+  --accent-strong: #D4B876;
+  --accent-soft:   rgba(192, 154, 92, 0.10);
+  --accent-border: rgba(192, 154, 92, 0.30);
+
+  --color-state-normal:      #4D9C7C;
+  --color-state-notice:      #C09A5C;
+  --color-state-alert:       #C97847;
+  --color-state-critical:    #B85042;
+  --color-state-maintenance: #618BA8;
+  --color-state-offline:     #6B6760;
+
+  --bg-aurora: none;
+}
+
+/* classic light */
+html.theme-classic-light {
+  --bg:               #F5F0E1;
+  --bg-sidebar:       #ECE5D2;
+  --surface:          #FBF7E8;
+  --surface-elevated: #FFFEFA;
+  --border:           #D8CFB8;
+  --border-dashed:    #C7BCA0;
+  --text-primary:     #2A2620;
+  --text-secondary:   #5C5849;
+  --text-muted:       #7A6F58;
+  --text-disabled:    #B5AC95;
+
+  --accent:        #9A7A3D;
+  --accent-strong: #9A7A3D;
+  --accent-soft:   rgba(154, 122, 61, 0.08);
+  --accent-border: rgba(154, 122, 61, 0.30);
+
+  --color-state-normal:      #2F8265;
+  --color-state-notice:      #9A7A3D;
+  --color-state-alert:       #A06434;
+  --color-state-critical:    #A53D2F;
+  --color-state-maintenance: #4F7393;
+  --color-state-offline:     #7A7568;
+
+  --bg-aurora: none;
+
+  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 8px rgba(0, 0, 0, 0.04);
+  --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.08);
+}

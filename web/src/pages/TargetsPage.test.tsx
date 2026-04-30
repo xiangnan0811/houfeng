@@ -110,6 +110,7 @@ describe('TargetsPage', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+        credentials: 'include',
       body: JSON.stringify({
         name: 'Blog',
         target_type: 'service',
@@ -461,6 +462,7 @@ describe('TargetsPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -491,6 +493,7 @@ describe('TargetsPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -520,6 +523,7 @@ describe('TargetsPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -643,6 +647,7 @@ describe('TargetsPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -686,6 +691,7 @@ describe('TargetsPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -744,6 +750,7 @@ describe('TargetsPage', () => {
         'If-Match': '"2026-04-26T09:05:00Z"',
       },
       cache: 'no-store',
+        credentials: 'include',
       body: JSON.stringify({
         labels: ['alpha', 'beta'],
         note: '现网入口',

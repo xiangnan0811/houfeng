@@ -213,10 +213,12 @@ describe('NodeDetailPage', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime-facts', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
@@ -224,6 +226,7 @@ describe('NodeDetailPage', () => {
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       },
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -232,6 +235,7 @@ describe('NodeDetailPage', () => {
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       },
     )
   })
@@ -593,6 +597,7 @@ describe('NodeDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -698,6 +703,7 @@ describe('NodeDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -733,6 +739,7 @@ describe('NodeDetailPage', () => {
         method: 'POST',
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       }),
     )
     await waitFor(() =>
@@ -775,6 +782,7 @@ describe('NodeDetailPage', () => {
         method: 'POST',
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       }),
     )
     await waitFor(() =>
@@ -1082,6 +1090,7 @@ describe('NodeDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -1184,6 +1193,7 @@ describe('NodeDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -1286,11 +1296,13 @@ describe('NodeDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/nodes/nd_pause_error/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -1395,6 +1407,7 @@ describe('NodeDetailPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -1452,6 +1465,7 @@ describe('NodeDetailPage', () => {
         method: 'POST',
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        credentials: 'include',
       },
     )
   })
@@ -1899,6 +1913,7 @@ describe('NodeDetailPage', () => {
           'If-Match': '"2026-04-27T09:05:00Z"',
         },
         cache: 'no-store',
+        credentials: 'include',
         body: JSON.stringify({ labels: ['edge', 'core'], note: 'trimmed note' }),
       }),
     )
@@ -1920,6 +1935,7 @@ describe('NodeDetailPage', () => {
           'If-Match': '"2026-04-27T09:10:00Z"',
         },
         cache: 'no-store',
+        credentials: 'include',
         body: JSON.stringify({ labels: ['edge', 'core'], note: 'second note' }),
       }),
     )

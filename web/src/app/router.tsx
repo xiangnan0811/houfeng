@@ -1,8 +1,10 @@
-import { createBrowserRouter, type RouteObject } from 'react-router-dom'
+import { createBrowserRouter, type RouteObject, Navigate } from 'react-router-dom'
 
 import { AppShell } from './layout/AppShell'
+import { RequireAuth } from './RequireAuth'
 import { DashboardPage } from '../pages/DashboardPage'
 import { EventsPage } from '../pages/EventsPage'
+import { LoginPage } from '../pages/LoginPage'
 import { NodeDetailPage } from '../pages/NodeDetailPage'
 import { NodeOnboardingPage } from '../pages/NodeOnboardingPage'
 import { NodesPage } from '../pages/NodesPage'
@@ -11,18 +13,25 @@ import { TargetDetailPage } from '../pages/TargetDetailPage'
 import { TargetsPage } from '../pages/TargetsPage'
 
 export const appRoutes: RouteObject[] = [
+  { path: '/login', element: <LoginPage /> },
   {
-    path: '/',
-    element: <AppShell />,
+    element: <RequireAuth />,
     children: [
-      { index: true, element: <DashboardPage /> },
-      { path: 'nodes', element: <NodesPage /> },
-      { path: 'nodes/:nodeId', element: <NodeDetailPage /> },
-      { path: 'nodes/:nodeId/onboarding', element: <NodeOnboardingPage /> },
-      { path: 'targets', element: <TargetsPage /> },
-      { path: 'targets/:targetId', element: <TargetDetailPage /> },
-      { path: 'events', element: <EventsPage /> },
-      { path: 'settings', element: <SettingsPage /> },
+      {
+        path: '/',
+        element: <AppShell />,
+        children: [
+          { index: true, element: <DashboardPage /> },
+          { path: 'nodes', element: <NodesPage /> },
+          { path: 'nodes/:nodeId', element: <NodeDetailPage /> },
+          { path: 'nodes/:nodeId/onboarding', element: <NodeOnboardingPage /> },
+          { path: 'targets', element: <TargetsPage /> },
+          { path: 'targets/:targetId', element: <TargetDetailPage /> },
+          { path: 'events', element: <EventsPage /> },
+          { path: 'settings', element: <SettingsPage /> },
+          { path: '*', element: <Navigate to="/" replace /> },
+        ],
+      },
     ],
   },
 ]

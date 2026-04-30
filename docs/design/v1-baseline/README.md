@@ -8,6 +8,18 @@ tags:
 status: frozen
 ---
 
+> **VISUAL PORTION UNFROZEN 2026-04-29.**
+> The V1.x frontend redesign at [`docs/design/v1.x-frontend-redesign/`](../v1.x-frontend-redesign/README.md)
+> supersedes the visual sections of this baseline:
+>
+> - `ui-ux-spec.md`
+> - `visual-review-round2.md`
+> - `baseline-screens.md`
+> - `stitch/*` (deprecated)
+>
+> The structural sections (`architecture-data-model.md`, `rules-and-interaction.md`,
+> `tech-selection.md`) remain **frozen and authoritative**.
+
 # 服务器舰队控制面 v1 设计总览
 
 > 目标：为个人多服务器舰队设计一个 **监控与探针优先** 的单用户控制面。  

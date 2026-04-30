@@ -1,5 +1,13 @@
 # Houfeng V1 Local and systemd Deployment Guide
 
+> Authentication note (added in V1.x): the center now requires a username +
+> password login for every API call except `/api/healthz` and `/api/agent/*`.
+> First-startup credentials come from `HOUFENG_INITIAL_USERNAME` and
+> `HOUFENG_INITIAL_PASSWORD`; once the `users` table is populated those
+> variables are ignored. Session cookies are HttpOnly + SameSite=Lax and
+> the deployment **must** terminate HTTPS at a reverse proxy to prevent
+> cookie leakage on plain HTTP. See the **Authentication** section below.
+
 ## Scope
 
 This guide describes the V1 deployment path for `候风 / Houfeng Fleet Control Plane`: one Go center process, one PostgreSQL database, and one or more Go agents managed by systemd.
@@ -129,6 +137,40 @@ sudo systemctl enable --now houfeng-agent
 ```
 
 Adjust users, paths, PostgreSQL URL, TLS/reverse-proxy setup, and token file ownership for the target host. Do not enable the agent until `/etc/houfeng-agent/token` contains a valid enrollment token.
+
+## Authentication
+
+The center protects every `/api/*` route except `/api/healthz` and the agent
+endpoints (`/api/agent/enroll`, `/api/agent/sync`) with a session-cookie auth
+layer added in V1.x. Required environment variables:
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `HOUFENG_INITIAL_USERNAME` | yes | — | Admin username seeded on first startup. |
+| `HOUFENG_INITIAL_PASSWORD` | yes | — | Admin password seeded on first startup (bcrypt-hashed before persisting). |
+| `HOUFENG_INITIAL_DISPLAY_NAME` | no | username | Display name for the seed user. |
+| `HOUFENG_SESSION_TTL` | no | `168h` | Rolling session lifetime; refreshed on each authenticated request. |
+
+Behavior:
+
+- On first startup with an empty `users` table, the center creates a single
+  admin user from the environment variables.
+- On subsequent startups (any rows present in `users`) the variables are
+  **ignored**; password rotation is done through the future change-password
+  flow, not by re-setting the env var.
+- Sessions are stored in the new `sessions` table (migration `0010`) and
+  delivered as `HttpOnly` + `SameSite=Lax` cookies named `houfeng_session`.
+  A background worker sweeps expired rows hourly.
+- Agent endpoints continue to authenticate via enrollment tokens (independent
+  of the user session layer).
+
+### HTTPS requirement
+
+The session cookie does **not** carry the `Secure` attribute in V1.x — the
+deployment is expected to terminate HTTPS at a reverse proxy (Caddy, Nginx,
+etc.) and forward to `HOUFENG_HTTP_ADDR`. Running the center directly on a
+public network without HTTPS will leak the session cookie on plain HTTP and
+**must not** be done.
 
 ## Reverse proxy and TLS
 
