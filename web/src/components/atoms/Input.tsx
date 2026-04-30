@@ -4,12 +4,12 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string
   error?: string
   hint?: string
-  prefix?: ReactNode
-  suffix?: ReactNode
+  leadingIcon?: ReactNode
+  trailingIcon?: ReactNode
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { label, error, hint, prefix, suffix, id, className = '', ...rest },
+  { label, error, hint, leadingIcon, trailingIcon, id, className = '', ...rest },
   ref,
 ) {
   const fallbackId = useId()
@@ -23,9 +23,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         </label>
       )}
       <div className="input-field__shell">
-        {prefix && <span className="input-field__prefix">{prefix}</span>}
+        {leadingIcon && <span className="input-field__prefix">{leadingIcon}</span>}
         <input ref={ref} id={inputId} className={cls} {...rest} />
-        {suffix && <span className="input-field__suffix">{suffix}</span>}
+        {trailingIcon && <span className="input-field__suffix">{trailingIcon}</span>}
       </div>
       {error ? (
         <div className="input-field__error">{error}</div>
