@@ -27,8 +27,10 @@ func (s *stubAuth) Login(_ context.Context, username, password, _, _ string) (au
 	s.gotUser, s.gotPass = username, password
 	return s.loginSess, s.loginErr
 }
-func (s *stubAuth) Logout(_ context.Context, _ string) error                { return s.logoutErr }
-func (s *stubAuth) Touch(_ context.Context, _ string) (auth.Session, error) { return auth.Session{}, s.touchErr }
+func (s *stubAuth) Logout(_ context.Context, _ string) error { return s.logoutErr }
+func (s *stubAuth) Touch(_ context.Context, _ string) (auth.Session, error) {
+	return auth.Session{}, s.touchErr
+}
 func (s *stubAuth) UserBySession(_ context.Context, _ string) (auth.User, error) {
 	return s.touchUser, s.touchErr
 }

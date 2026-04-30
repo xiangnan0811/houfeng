@@ -118,6 +118,7 @@ describe('NodesPage', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes', {
       method: 'POST',
@@ -126,6 +127,7 @@ describe('NodesPage', () => {
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
+        credentials: 'include',
       body: JSON.stringify({
         display_name: 'Tokyo Edge',
         region: 'ap-northeast-1',
@@ -140,6 +142,7 @@ describe('NodesPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(getOnboardingTokenCache('nd_001')).toEqual({
       token: 'enroll_tokyo_001',
@@ -228,6 +231,7 @@ describe('NodesPage', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/nodes/nd_001/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(getOnboardingTokenCache('nd_001')).toBeNull()
   })
@@ -551,11 +555,13 @@ describe('NodesPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_paused/runtime/resume', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -625,6 +631,7 @@ describe('NodesPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -701,6 +708,7 @@ describe('NodesPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -764,6 +772,7 @@ describe('NodesPage', () => {
           'If-Match': '"2026-04-26T09:00:00Z"',
         },
         cache: 'no-store',
+        credentials: 'include',
         body: JSON.stringify({ labels: ['edge', 'core'], note: 'keep me' }),
       }),
     )

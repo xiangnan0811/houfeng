@@ -18,8 +18,10 @@ type stubAuthSvc struct {
 func (s *stubAuthSvc) Login(_ context.Context, _, _, _, _ string) (auth.Session, error) {
 	return auth.Session{}, nil
 }
-func (s *stubAuthSvc) Logout(_ context.Context, _ string) error                { return nil }
-func (s *stubAuthSvc) Touch(_ context.Context, _ string) (auth.Session, error) { return auth.Session{}, s.err }
+func (s *stubAuthSvc) Logout(_ context.Context, _ string) error { return nil }
+func (s *stubAuthSvc) Touch(_ context.Context, _ string) (auth.Session, error) {
+	return auth.Session{}, s.err
+}
 func (s *stubAuthSvc) UserBySession(_ context.Context, _ string) (auth.User, error) {
 	return s.user, s.err
 }

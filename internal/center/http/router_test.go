@@ -294,7 +294,6 @@ func TestRouterDispatchesTargetRuntimeFactsAPI(t *testing.T) {
 	}
 }
 
-
 func TestRouterRegistersAuthRoutesPublic(t *testing.T) {
 	loginCalled := false
 	logoutCalled := false

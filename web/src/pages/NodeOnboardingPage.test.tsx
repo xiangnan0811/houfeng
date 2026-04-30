@@ -322,10 +322,12 @@ describe('NodeOnboardingPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -406,6 +408,7 @@ describe('NodeOnboardingPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
   })
 
@@ -458,6 +461,7 @@ describe('NodeOnboardingPage', () => {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+        credentials: 'include',
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
