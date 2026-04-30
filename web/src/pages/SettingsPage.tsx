@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
 import { DetailSection } from '../components/DetailSection'
+import { Tabs } from '../components/atoms'
+import { useThemeOptional, type Preset, type Mode } from '../lib/theme-context'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
 import type {
   NodeLabelOverrideRule,
@@ -518,11 +520,13 @@ export function SettingsPage() {
     <form className="page-stack" onSubmit={handleSubmit}>
       <section className="page-panel">
         <p className="page-panel__eyebrow">设置</p>
-        <h2 className="page-panel__title">设置</h2>
+        <h2 className="page-panel__title">设置 / Settings</h2>
         <p className="page-panel__description">
           集中维护 Telegram 通知、默认频率、全局规则、少量覆盖与保留策略，保持页面信息密度低于观测页。
         </p>
       </section>
+
+      <ThemeSettingsSection />
 
       <DetailSection
         eyebrow="Telegram"
@@ -820,5 +824,50 @@ export function SettingsPage() {
         </button>
       </div>
     </form>
+  )
+}
+
+const PRESET_TABS = [
+  { value: 'houfeng' as const, label: '候风原色' },
+  { value: 'classic' as const, label: '经典' },
+]
+
+const MODE_TABS = [
+  { value: 'dark' as const, label: '深色' },
+  { value: 'light' as const, label: '浅色' },
+  { value: 'system' as const, label: '跟随系统' },
+]
+
+function ThemeSettingsSection() {
+  const theme = useThemeOptional()
+  if (!theme) return null
+  const { preset, mode, setPreset, setMode } = theme
+  return (
+    <DetailSection
+      eyebrow="主题"
+      title="主题"
+      aside="本地浏览器偏好"
+    >
+      <div className="page-stack">
+        <div>
+          <p className="section-heading__eyebrow" style={{ marginBottom: 8 }}>风格</p>
+          <Tabs<Preset>
+            variant="pill"
+            value={preset}
+            onChange={setPreset}
+            items={PRESET_TABS}
+          />
+        </div>
+        <div>
+          <p className="section-heading__eyebrow" style={{ marginBottom: 8 }}>明暗</p>
+          <Tabs<Mode>
+            variant="pill"
+            value={mode}
+            onChange={setMode}
+            items={MODE_TABS}
+          />
+        </div>
+      </div>
+    </DetailSection>
   )
 }

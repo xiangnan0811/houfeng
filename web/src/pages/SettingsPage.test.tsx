@@ -84,7 +84,7 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('正在加载设置…')).toBeInTheDocument()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     expect(screen.getByText('设置', { selector: '.page-panel__eyebrow' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument()
@@ -144,7 +144,7 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     expect(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器')).toBeChecked()
     expect(screen.getByText('当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。')).toBeInTheDocument()
@@ -168,7 +168,7 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
       target: { value: '1m' },
@@ -240,7 +240,7 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器'))
     fireEvent.change(screen.getByLabelText('新的 Telegram Bot Token'), {
@@ -320,7 +320,7 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器'))
     fireEvent.change(screen.getByLabelText('Telegram Chat ID'), {
@@ -368,7 +368,7 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     fireEvent.change(screen.getByLabelText('心跳间隔秒数'), {
       target: { value: '30abc' },

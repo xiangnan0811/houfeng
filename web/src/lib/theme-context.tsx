@@ -57,3 +57,8 @@ export function useTheme(): ThemeContextValue {
   if (!ctx) throw new Error('useTheme must be inside <ThemeProvider>')
   return ctx
 }
+
+/** Like useTheme but returns null when no provider is present (test ergonomics). */
+export function useThemeOptional(): ThemeContextValue | null {
+  return useContext(ThemeContext)
+}
