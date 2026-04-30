@@ -23,9 +23,9 @@ The following files are the source of truth for the V1 baseline and must remain 
 ## Guardrails
 
 - Product name stays: `候风 / Houfeng Fleet Control Plane`
-- Visual authority stays: Unified / Baseline Stitch screens only
+- Visual authority: V1.x frontend redesign at `docs/design/v1.x-frontend-redesign/` (the earlier Unified / Baseline Stitch screens under `docs/design/v1-baseline/` are historical and no longer the development reference; the structural V1 baseline remains frozen)
 - Tech direction stays: Go center + Go agent + React/Vite web + PostgreSQL
-- Scope stays: single-user, monolith center, systemd agent fleet
+- Scope: V1.x adds username/password login + sessions; product remains a tightly bounded operator tool
 - If implementation diverges from design, report the gap before changing behavior
 
 当前实施入口 / 初始实现落位可先围绕以下路径展开，其中 `docs/design/v1-baseline/` 仍是唯一冻结设计入口：
