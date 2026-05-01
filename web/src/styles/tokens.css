@@ -1,9 +1,13 @@
-/* V1.x design tokens. Default = candidate-原色 dark. Theme classes on <html>
- * override the surface and accent variables. State semantic colors and
- * typography stay intentionally consistent across all four themes. */
+/* 候风 v2 design tokens.
+ * Default = houfeng-dark (玄夜青 + 晨晖金).
+ * Theme classes on <html> override the surface and accent variables.
+ * State semantic colors and typography stay intentionally consistent across themes.
+ *
+ * See docs/design/v2-houfeng/design-language.md for the full spec.
+ */
 
 :root {
-  /* Type scale (size / weight / leading / spacing) */
+  /* ---------- Type scale (size / weight / leading / spacing) ---------- */
   --type-display-size: 28px;     --type-display-weight: 600; --type-display-leading: 1.1;
   --type-h1-size: 22px;          --type-h1-weight: 600;      --type-h1-leading: 1.3;
   --type-h2-size: 16px;          --type-h2-weight: 600;      --type-h2-leading: 1.4;
@@ -15,101 +19,128 @@
   --type-code-size: 12px;        --type-code-weight: 400;
   --type-link-size: 14px;        --type-link-weight: 500;
 
-  /* Font fallbacks. Web-font bundling is an optional follow-up; running
-   * scripts/subset-fonts.sh and importing fonts.css will pin to bundled
-   * woff2 files, otherwise system CJK fonts (PingFang SC, Microsoft YaHei UI,
-   * Noto Sans CJK SC) provide ~90% visual fidelity across platforms. */
+  /* ---------- Font fallbacks ---------- */
   --font-serif: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', serif;
   --font-sans:  'Source Han Sans SC', 'Noto Sans SC', Inter, ui-sans-serif, system-ui, -apple-system,
                 BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
   --font-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
   --font-numeric: var(--font-sans);
 
-  /* Spacing scale */
-  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  /* ---------- Spacing scale (8pt) ---------- */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
   --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-12: 48px;
 
-  /* Radius scale */
+  /* ---------- Radius scale ---------- */
   --radius-0: 0; --radius-1: 4px; --radius-2: 7px; --radius-3: 12px; --radius-pill: 999px;
 
-  /* Border weights */
+  /* ---------- Border weights ---------- */
   --border-w: 1px;
   --border-w-strong: 2px;
 
-  /* Shadow levels */
-  --shadow-glow:    0 0 16px rgba(184, 153, 104, 0.35);
-  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 8px rgba(0, 0, 0, 0.10);
+  /* ---------- Shadow levels ---------- */
+  --shadow-glow:    0 0 16px rgba(201, 165, 111, 0.32);
+  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.20), 0 4px 10px rgba(0, 0, 0, 0.12);
   --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35);
 
-  /* Default theme = candidate-原色 dark */
-  --bg:               #131419;
-  --bg-sidebar:       #0E0F13;
-  --surface:          rgba(255, 255, 255, 0.025);
-  --surface-elevated: rgba(255, 255, 255, 0.040);
-  --border:           #26241D;
-  --border-dashed:    #3A3833;
-  --text-primary:     #F1ECE0;
-  --text-secondary:   #A39E94;
-  --text-muted:       #8A8576;
-  --text-disabled:    #5C584F;
+  /* ---------- Motion ---------- */
+  --ease-calm: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-micro: 120ms;
+  --dur-state: 220ms;
+  --dur-page:  360ms;
 
-  --accent:        #B89968;
-  --accent-strong: #D4B876;
-  --accent-soft:   rgba(184, 153, 104, 0.10);
-  --accent-border: rgba(184, 153, 104, 0.30);
+  /* ---------- Default theme = houfeng-dark v2 ---------- */
+  --bg:               #0B0E13;
+  --bg-sidebar:       #070A0E;
+  --surface:          rgba(255, 255, 255, 0.022);
+  --surface-elevated: rgba(255, 255, 255, 0.045);
+  --surface-pressed:  rgba(255, 255, 255, 0.070);
+  --border:           #1F2128;
+  --border-strong:    #2A2D36;
+  --border-dashed:    #383B45;
+  --text-primary:     #EDE8DA;
+  --text-secondary:   #9EA3AE;
+  --text-muted:       #7B7F88;
+  --text-disabled:    #48494E;
 
-  --color-state-normal:      #5BA88E;
-  --color-state-notice:      #B89968;
-  --color-state-alert:       #C4814E;
-  --color-state-critical:    #B85042;
-  --color-state-maintenance: #6E8FA8;
-  --color-state-offline:     #6B6760;
+  --accent:        #C9A56F;
+  --accent-strong: #E0BE85;
+  --accent-soft:   rgba(201, 165, 111, 0.12);
+  --accent-border: rgba(201, 165, 111, 0.32);
+  --accent-2:      #5C8FA8;
+
+  --color-state-normal:      #4FA08A;
+  --color-state-notice:      #D4A053;
+  --color-state-alert:       #C97247;
+  --color-state-critical:    #B6493A;
+  --color-state-maintenance: #638DA9;
+  --color-state-offline:     #6F6B62;
+
+  /* ---------- Chart palette (for trend / sparkline) ---------- */
+  --chart-1: #C9A56F;
+  --chart-2: #5C8FA8;
+  --chart-3: #4FA08A;
+  --chart-4: #D4A053;
+  --chart-5: #C97247;
+  --chart-6: #B6493A;
 
   --bg-aurora:
-    radial-gradient(ellipse at top right,    rgba(184, 153, 104, 0.10) 0%, transparent 50%),
-    radial-gradient(ellipse at bottom left,  rgba(99,  102, 241, 0.05) 0%, transparent 50%);
+    radial-gradient(ellipse at top right,    rgba(201, 165, 111, 0.10) 0%, transparent 55%),
+    radial-gradient(ellipse at bottom left,  rgba(92, 143, 168, 0.06) 0%, transparent 55%);
 }
 
-/* candidate-原色 light */
+/* ---------- houfeng-light (宣纸白基底，独立打磨) ---------- */
 html.theme-houfeng-light {
-  --bg:               #FAF7EF;
-  --bg-sidebar:       #F2EDDF;
-  --surface:          #FFFEFA;
+  --bg:               #F4EFE3;
+  --bg-sidebar:       #EAE3D0;
+  --surface:          #FBF7EC;
   --surface-elevated: #FFFEFA;
-  --border:           #E8E2D5;
+  --surface-pressed:  #F0E9D6;
+  --border:           #D8CFB8;
+  --border-strong:    #C4B89E;
   --border-dashed:    #C7BCA0;
-  --text-primary:     #2C2A24;
-  --text-secondary:   #5C5849;
-  --text-muted:       #857F6E;
+  --text-primary:     #1F1C16;
+  --text-secondary:   #4A4638;
+  --text-muted:       #6E6856;
   --text-disabled:    #B5AC95;
 
-  --accent:        #8B6B3D;
-  --accent-strong: #8B6B3D;
-  --accent-soft:   rgba(139, 107, 61, 0.08);
-  --accent-border: rgba(139, 107, 61, 0.25);
+  --accent:        #9A7A3D;
+  --accent-strong: #7E6128;
+  --accent-soft:   rgba(154, 122, 61, 0.10);
+  --accent-border: rgba(154, 122, 61, 0.30);
+  --accent-2:      #406D86;
 
   --color-state-normal:      #2F8265;
-  --color-state-notice:      #8B6B3D;
-  --color-state-alert:       #A06434;
-  --color-state-critical:    #A53D2F;
+  --color-state-notice:      #A37B2C;
+  --color-state-alert:       #A05A2C;
+  --color-state-critical:    #93362A;
   --color-state-maintenance: #4F7393;
   --color-state-offline:     #7A7568;
 
-  --bg-aurora:
-    radial-gradient(ellipse at top right,    rgba(139, 107, 61, 0.10) 0%, transparent 55%),
-    radial-gradient(ellipse at bottom left,  rgba(99,  102, 241, 0.05) 0%, transparent 50%);
+  --chart-1: #9A7A3D;
+  --chart-2: #406D86;
+  --chart-3: #2F8265;
+  --chart-4: #A37B2C;
+  --chart-5: #A05A2C;
+  --chart-6: #93362A;
 
+  --bg-aurora:
+    radial-gradient(ellipse at top right,    rgba(154, 122, 61, 0.06) 0%, transparent 55%),
+    radial-gradient(ellipse at bottom left,  rgba(64,  109, 134, 0.04) 0%, transparent 55%);
+
+  --shadow-glow:    0 0 16px rgba(154, 122, 61, 0.18);
   --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 8px rgba(0, 0, 0, 0.04);
   --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.10);
 }
 
-/* classic dark */
+/* ---------- classic-dark (preserved, with new tokens added) ---------- */
 html.theme-classic-dark {
   --bg:               #15140F;
   --bg-sidebar:       #100F0B;
   --surface:          rgba(255, 255, 255, 0.020);
   --surface-elevated: rgba(255, 255, 255, 0.035);
+  --surface-pressed:  rgba(255, 255, 255, 0.060);
   --border:           #2A2823;
+  --border-strong:    #3A3833;
   --border-dashed:    #3A3833;
   --text-primary:     #E8E1D5;
   --text-secondary:   #A39884;
@@ -120,6 +151,7 @@ html.theme-classic-dark {
   --accent-strong: #D4B876;
   --accent-soft:   rgba(192, 154, 92, 0.10);
   --accent-border: rgba(192, 154, 92, 0.30);
+  --accent-2:      #618BA8;
 
   --color-state-normal:      #4D9C7C;
   --color-state-notice:      #C09A5C;
@@ -128,16 +160,25 @@ html.theme-classic-dark {
   --color-state-maintenance: #618BA8;
   --color-state-offline:     #6B6760;
 
+  --chart-1: #C09A5C;
+  --chart-2: #618BA8;
+  --chart-3: #4D9C7C;
+  --chart-4: #C09A5C;
+  --chart-5: #C97847;
+  --chart-6: #B85042;
+
   --bg-aurora: none;
 }
 
-/* classic light */
+/* ---------- classic-light (preserved) ---------- */
 html.theme-classic-light {
   --bg:               #F5F0E1;
   --bg-sidebar:       #ECE5D2;
   --surface:          #FBF7E8;
   --surface-elevated: #FFFEFA;
+  --surface-pressed:  #EFE7CF;
   --border:           #D8CFB8;
+  --border-strong:    #C4B89E;
   --border-dashed:    #C7BCA0;
   --text-primary:     #2A2620;
   --text-secondary:   #5C5849;
@@ -145,9 +186,10 @@ html.theme-classic-light {
   --text-disabled:    #B5AC95;
 
   --accent:        #9A7A3D;
-  --accent-strong: #9A7A3D;
+  --accent-strong: #7E6128;
   --accent-soft:   rgba(154, 122, 61, 0.08);
   --accent-border: rgba(154, 122, 61, 0.30);
+  --accent-2:      #4F7393;
 
   --color-state-normal:      #2F8265;
   --color-state-notice:      #9A7A3D;
@@ -156,8 +198,26 @@ html.theme-classic-light {
   --color-state-maintenance: #4F7393;
   --color-state-offline:     #7A7568;
 
+  --chart-1: #9A7A3D;
+  --chart-2: #4F7393;
+  --chart-3: #2F8265;
+  --chart-4: #9A7A3D;
+  --chart-5: #A06434;
+  --chart-6: #A53D2F;
+
   --bg-aurora: none;
 
+  --shadow-glow:    0 0 16px rgba(154, 122, 61, 0.18);
   --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 8px rgba(0, 0, 0, 0.04);
   --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

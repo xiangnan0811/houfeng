@@ -9,7 +9,19 @@ body {
   line-height: var(--type-body-leading);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  position: relative;
 }
+/* Global aurora — weak ambient layer, fixed so it does not scroll. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: var(--bg-aurora);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+#root { position: relative; z-index: 1; }
 h1, h2, h3, h4, p, ul, ol, figure, blockquote { margin: 0; padding: 0; }
 ul, ol { list-style: none; }
 a { color: inherit; text-decoration: none; }

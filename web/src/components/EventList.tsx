@@ -1,4 +1,4 @@
-import { formatDateTime } from '../lib/format'
+import { Hostname, StatusGlyph, Timestamp, type HealthState } from './atoms'
 import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../lib/types'
 
 import { StatusBadge } from './StatusBadge'
@@ -43,6 +43,14 @@ function severityTone(value: StateChangeEventRecord['severity']) {
   return 'slate'
 }
 
+function severityGlyph(value: StateChangeEventRecord['severity']): HealthState {
+  if (value === '正常') return 'normal'
+  if (value === '关注') return 'notice'
+  if (value === '告警') return 'alert'
+  if (value === '严重') return 'critical'
+  return 'offline'
+}
+
 function hasIncidentMeta(event: StateChangeEventRecord) {
   return event.incident_class.trim().length > 0
 }
@@ -62,40 +70,49 @@ export function EventList({
   }
 
   return (
-    <div className="probe-list">
+    <div className="probe-list probe-list--timeline">
       {events.map((event) => (
         <article
           key={event.event_id ?? `${event.created_at}-${event.incident_id}-${event.event_type}`}
-          className="probe-card"
+          className="probe-card probe-card--timeline"
         >
-          <header className="probe-card__header">
-            <div>
-              <h3>{eventTypeLabel(event.event_type)}</h3>
-              <p>{event.summary || '暂无摘要'}</p>
-            </div>
-            <div className="badge-row badge-row--wrap">
-              {event.severity ? (
-                <StatusBadge label={event.severity} tone={severityTone(event.severity)} />
-              ) : null}
-              <StatusBadge label={objectTypeLabel(event.object_type)} tone="cyan" />
-            </div>
-          </header>
-          <dl className="probe-card__meta">
-            {hasIncidentMeta(event) ? (
+          <div className="probe-card__rail" aria-hidden>
+            <StatusGlyph state={severityGlyph(event.severity)} size="sm" />
+          </div>
+          <div className="probe-card__body">
+            <header className="probe-card__header">
               <div>
-                <dt>异常类型</dt>
-                <dd>{incidentClassLabel(event.incident_class)}</dd>
+                <h3>{eventTypeLabel(event.event_type)}</h3>
+                <p>{event.summary || '暂无摘要'}</p>
               </div>
-            ) : null}
-            <div>
-              <dt>对象 ID</dt>
-              <dd>{event.object_id}</dd>
-            </div>
-            <div>
-              <dt>发生时间</dt>
-              <dd>{formatDateTime(event.created_at)}</dd>
-            </div>
-          </dl>
+              <div className="badge-row badge-row--wrap">
+                {event.severity ? (
+                  <StatusBadge label={event.severity} tone={severityTone(event.severity)} />
+                ) : null}
+                <StatusBadge label={objectTypeLabel(event.object_type)} tone="cyan" />
+              </div>
+            </header>
+            <dl className="probe-card__meta">
+              {hasIncidentMeta(event) ? (
+                <div>
+                  <dt>异常类型</dt>
+                  <dd>{incidentClassLabel(event.incident_class)}</dd>
+                </div>
+              ) : null}
+              <div>
+                <dt>对象 ID</dt>
+                <dd>
+                  <Hostname>{event.object_id}</Hostname>
+                </dd>
+              </div>
+              <div>
+                <dt>发生时间</dt>
+                <dd>
+                  <Timestamp value={event.created_at} mode="absolute" />
+                </dd>
+              </div>
+            </dl>
+          </div>
         </article>
       ))}
     </div>

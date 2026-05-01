@@ -38,7 +38,6 @@ export function Sidebar({
               : item.to === '/targets'
                 ? anomalyCounts.targets
                 : 0
-          const tone = item.to === '/nodes' ? 'critical' : 'alert'
           return (
             <NavLink
               key={item.to}
@@ -50,7 +49,11 @@ export function Sidebar({
             >
               <span>{item.label}</span>
               {count > 0 && (
-                <Badge variant="count" tone={tone}>
+                /* v2: tone fixed to 'neutral'. Nav items must not carry
+                 * alarm semantics — the count is informational, not a state
+                 * indicator. Visual emphasis on the active route comes from
+                 * the accent ribbon + soft background, not Badge color. */
+                <Badge variant="count" tone="neutral">
                   {count}
                 </Badge>
               )}

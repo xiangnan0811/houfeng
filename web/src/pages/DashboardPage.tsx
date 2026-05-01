@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import {
+  Hostname,
+  MonoDigits,
+  StatusGlyph,
+  Timestamp,
+  type HealthState,
+} from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { StatusBadge } from '../components/StatusBadge'
 import { ApiError, getDashboard } from '../lib/api'
-import { formatDateTime } from '../lib/format'
 import type { DashboardNodeSummary, DashboardOverview, DashboardTargetSummary } from '../lib/types'
 
 type State = {
@@ -14,11 +20,25 @@ type State = {
   overview: DashboardOverview | null
 }
 
-function SummaryCard({ label, value }: { label: string; value: number }) {
+function StatTile({
+  label,
+  value,
+  ariaLabel,
+}: {
+  label: string
+  value: number | string
+  ariaLabel?: string
+}) {
   return (
-    <article className="summary-card">
-      <p className="summary-card__label">{label}</p>
-      <p className="summary-card__value">{value}</p>
+    <article
+      className="summary-card stat-tile"
+      role="group"
+      aria-label={ariaLabel ?? label}
+    >
+      <p className="summary-card__label stat-tile__label">{label}</p>
+      <p className="summary-card__value stat-tile__value">
+        <MonoDigits>{value}</MonoDigits>
+      </p>
     </article>
   )
 }
@@ -30,8 +50,19 @@ function statusTone(value: string) {
   return 'slate'
 }
 
-function formatOptionalDateTime(value: string | undefined, fallback: string) {
-  return value ? formatDateTime(value) : fallback
+function statusGlyph(value: string): HealthState {
+  if (value === '正常') return 'normal'
+  if (value === '关注') return 'notice'
+  if (value === '告警') return 'alert'
+  if (value === '严重') return 'critical'
+  if (value === '维护中') return 'maintenance'
+  return 'offline'
+}
+
+const SEVERITY_RANK = ['严重', '告警', '关注', '维护中', '正常'] as const
+function severityWeight(v: string): number {
+  const idx = (SEVERITY_RANK as readonly string[]).indexOf(v)
+  return idx === -1 ? 999 : idx
 }
 
 function hostPortSummary(target: DashboardTargetSummary) {
@@ -48,47 +79,68 @@ function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
     )
   }
 
+  const sorted = [...nodes].sort(
+    (a, b) =>
+      severityWeight(a.current_health_status) - severityWeight(b.current_health_status),
+  )
+
   return (
-    <div className="probe-list">
-      {nodes.map((node) => (
-        <article key={node.node_id} className="probe-card">
-          <header className="probe-card__header">
-            <div>
-              <h3>{node.display_name}</h3>
-              <p>{node.current_primary_issue_summary || '暂无关键异常摘要'}</p>
-            </div>
-            <div className="badge-row badge-row--wrap">
-              <StatusBadge label={node.current_health_status} tone={statusTone(node.current_health_status)} />
-              <StatusBadge label={node.monitoring_status} tone="cyan" />
-            </div>
-          </header>
-          <dl className="probe-card__meta">
-            <div>
-              <dt>位置</dt>
-              <dd>
-                {node.region} / {node.city}
-              </dd>
-            </div>
-            <div>
-              <dt>供应商</dt>
-              <dd>{node.provider}</dd>
-            </div>
-            <div>
-              <dt>生命周期</dt>
-              <dd>{node.lifecycle_status}</dd>
-            </div>
-            <div>
-              <dt>活跃异常</dt>
-              <dd>{node.current_active_incident_count}</dd>
-            </div>
-            <div>
-              <dt>最近心跳</dt>
-              <dd>{formatOptionalDateTime(node.last_heartbeat_at, '暂无心跳')}</dd>
-            </div>
-          </dl>
-          <Link className="text-link" to={`/nodes/${node.node_id}`} aria-label={`查看节点 ${node.display_name}`}>
-            查看节点
-          </Link>
+    <div className="probe-list probe-list--rows">
+      {sorted.map((node) => (
+        <article key={node.node_id} className="probe-card probe-card--row">
+          <div className="probe-card__lead">
+            <StatusGlyph state={statusGlyph(node.current_health_status)} />
+          </div>
+          <div className="probe-card__body">
+            <header className="probe-card__header">
+              <div>
+                <h3>{node.display_name}</h3>
+                <p>{node.current_primary_issue_summary || '暂无关键异常摘要'}</p>
+              </div>
+              <div className="badge-row badge-row--wrap">
+                <StatusBadge
+                  label={node.current_health_status}
+                  tone={statusTone(node.current_health_status)}
+                />
+                <StatusBadge label={node.monitoring_status} tone="cyan" />
+              </div>
+            </header>
+            <dl className="probe-card__meta">
+              <div>
+                <dt>位置</dt>
+                <dd>
+                  {node.region} / {node.city}
+                </dd>
+              </div>
+              <div>
+                <dt>供应商</dt>
+                <dd>{node.provider}</dd>
+              </div>
+              <div>
+                <dt>生命周期</dt>
+                <dd>{node.lifecycle_status}</dd>
+              </div>
+              <div>
+                <dt>活跃异常</dt>
+                <dd>
+                  <MonoDigits>{node.current_active_incident_count}</MonoDigits>
+                </dd>
+              </div>
+              <div>
+                <dt>最近心跳</dt>
+                <dd>
+                  <Timestamp value={node.last_heartbeat_at ?? null} mode="relative" />
+                </dd>
+              </div>
+            </dl>
+            <Link
+              className="text-link"
+              to={`/nodes/${node.node_id}`}
+              aria-label={`查看节点 ${node.display_name}`}
+            >
+              查看节点
+            </Link>
+          </div>
         </article>
       ))}
     </div>
@@ -105,45 +157,70 @@ function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) 
     )
   }
 
+  const sorted = [...targets].sort(
+    (a, b) =>
+      severityWeight(a.current_health_status) - severityWeight(b.current_health_status),
+  )
+
   return (
-    <div className="probe-list">
-      {targets.map((target) => (
-        <article key={target.target_id} className="probe-card">
-          <header className="probe-card__header">
-            <div>
-              <h3>{target.name}</h3>
-              <p>{target.current_primary_issue_summary || '暂无关键异常摘要'}</p>
-            </div>
-            <div className="badge-row badge-row--wrap">
-              <StatusBadge label={target.current_health_status} tone={statusTone(target.current_health_status)} />
-              <StatusBadge label={target.run_status} tone="cyan" />
-            </div>
-          </header>
-          <dl className="probe-card__meta">
-            <div>
-              <dt>类型</dt>
-              <dd>{target.target_type}</dd>
-            </div>
-            <div>
-              <dt>地址</dt>
-              <dd>{hostPortSummary(target)}</dd>
-            </div>
-            <div>
-              <dt>活跃异常</dt>
-              <dd>{target.current_active_incident_count}</dd>
-            </div>
-            <div>
-              <dt>最近成功</dt>
-              <dd>{formatOptionalDateTime(target.last_success_at, '暂无成功观测')}</dd>
-            </div>
-            <div>
-              <dt>最近失败</dt>
-              <dd>{formatOptionalDateTime(target.last_failure_at, '暂无失败观测')}</dd>
-            </div>
-          </dl>
-          <Link className="text-link" to={`/targets/${target.target_id}`} aria-label={`查看目标 ${target.name}`}>
-            查看目标
-          </Link>
+    <div className="probe-list probe-list--rows">
+      {sorted.map((target) => (
+        <article key={target.target_id} className="probe-card probe-card--row">
+          <div className="probe-card__lead">
+            <StatusGlyph state={statusGlyph(target.current_health_status)} />
+          </div>
+          <div className="probe-card__body">
+            <header className="probe-card__header">
+              <div>
+                <h3>{target.name}</h3>
+                <p>{target.current_primary_issue_summary || '暂无关键异常摘要'}</p>
+              </div>
+              <div className="badge-row badge-row--wrap">
+                <StatusBadge
+                  label={target.current_health_status}
+                  tone={statusTone(target.current_health_status)}
+                />
+                <StatusBadge label={target.run_status} tone="cyan" />
+              </div>
+            </header>
+            <dl className="probe-card__meta">
+              <div>
+                <dt>类型</dt>
+                <dd>{target.target_type}</dd>
+              </div>
+              <div>
+                <dt>地址</dt>
+                <dd>
+                  <Hostname>{hostPortSummary(target)}</Hostname>
+                </dd>
+              </div>
+              <div>
+                <dt>活跃异常</dt>
+                <dd>
+                  <MonoDigits>{target.current_active_incident_count}</MonoDigits>
+                </dd>
+              </div>
+              <div>
+                <dt>最近成功</dt>
+                <dd>
+                  <Timestamp value={target.last_success_at ?? null} mode="relative" />
+                </dd>
+              </div>
+              <div>
+                <dt>最近失败</dt>
+                <dd>
+                  <Timestamp value={target.last_failure_at ?? null} mode="relative" />
+                </dd>
+              </div>
+            </dl>
+            <Link
+              className="text-link"
+              to={`/targets/${target.target_id}`}
+              aria-label={`查看目标 ${target.name}`}
+            >
+              查看目标
+            </Link>
+          </div>
         </article>
       ))}
     </div>
@@ -199,12 +276,12 @@ export function DashboardPage() {
   if (isFreshInstall) {
     return (
       <div className="page-stack">
-        <section className="page-panel">
-          <p className="page-panel__eyebrow">当前风险总览</p>
-          <h2 className="page-panel__title">首页 / Dashboard</h2>
-          <p className="page-panel__description">
-            先处理当前异常，再查看趋势与事件历史。
-          </p>
+        <section className="hero-panel">
+          <div className="hero-panel__content">
+            <p className="hero-panel__eyebrow">当前风险总览</p>
+            <h2 className="hero-panel__title">首页 / Dashboard</h2>
+            <p className="hero-panel__description">先处理当前异常，再查看趋势与事件历史。</p>
+          </div>
         </section>
 
         <section className="page-panel">
@@ -229,36 +306,36 @@ export function DashboardPage() {
 
   return (
     <div className="page-stack">
-      <section className="page-panel">
-        <p className="page-panel__eyebrow">当前风险总览</p>
-        <h2 className="page-panel__title">首页 / Dashboard</h2>
-        <p className="page-panel__description">
-          先处理当前异常，再查看趋势与事件历史。
-        </p>
+      <section className="hero-panel">
+        <div className="hero-panel__content">
+          <p className="hero-panel__eyebrow">当前风险总览</p>
+          <h2 className="hero-panel__title">首页 / Dashboard</h2>
+          <p className="hero-panel__description">先处理当前异常，再查看趋势与事件历史。</p>
+        </div>
       </section>
 
-      <div className="summary-grid">
-        <SummaryCard label="风险对象" value={abnormalTotal} />
-        <SummaryCard label="严重对象总数" value={severeTotal} />
-        <SummaryCard label="维护对象总数" value={maintenanceTotal} />
-        <SummaryCard label="新增异常" value={overview.recent_new_incident_count} />
-        <SummaryCard label="恢复事件" value={overview.recent_recovery_count} />
+      <div className="summary-grid summary-grid--strip">
+        <StatTile label="风险对象" value={abnormalTotal} />
+        <StatTile label="严重对象总数" value={severeTotal} />
+        <StatTile label="维护对象总数" value={maintenanceTotal} />
+        <StatTile label="新增异常" value={overview.recent_new_incident_count} />
+        <StatTile label="恢复事件" value={overview.recent_recovery_count} />
       </div>
 
-      <DetailSection eyebrow="节点" title="异常节点概览">
-        <div className="summary-grid">
-          <SummaryCard label="当前异常数" value={overview.abnormal_node_count} />
-          <SummaryCard label="严重节点" value={overview.severe_node_count} />
-          <SummaryCard label="维护节点" value={overview.maintenance_node_count} />
+      <DetailSection eyebrow="节点" title="异常节点概览" ribbon="alert">
+        <div className="summary-grid summary-grid--strip">
+          <StatTile label="当前异常数" value={overview.abnormal_node_count} />
+          <StatTile label="严重节点" value={overview.severe_node_count} />
+          <StatTile label="维护节点" value={overview.maintenance_node_count} />
         </div>
         <AbnormalNodeList nodes={overview.abnormal_nodes} />
       </DetailSection>
 
-      <DetailSection eyebrow="目标" title="异常目标概览">
-        <div className="summary-grid">
-          <SummaryCard label="当前异常数" value={overview.abnormal_target_count} />
-          <SummaryCard label="严重目标" value={overview.severe_target_count} />
-          <SummaryCard label="维护目标" value={overview.maintenance_target_count} />
+      <DetailSection eyebrow="目标" title="异常目标概览" ribbon="alert">
+        <div className="summary-grid summary-grid--strip">
+          <StatTile label="当前异常数" value={overview.abnormal_target_count} />
+          <StatTile label="严重目标" value={overview.severe_target_count} />
+          <StatTile label="维护目标" value={overview.maintenance_target_count} />
         </div>
         <AbnormalTargetList targets={overview.abnormal_targets} />
       </DetailSection>
