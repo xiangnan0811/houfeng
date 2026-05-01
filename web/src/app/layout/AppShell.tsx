@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { ChangePasswordModal } from './ChangePasswordModal'
+import { TopBar } from './TopBar'
 import { useAuth } from '../../lib/auth-context'
 import { PRODUCT_FULL_NAME_ZH } from '../metadata'
 
@@ -31,6 +32,7 @@ export function AppShell() {
         onChangePassword={() => setChangePwOpen(true)}
       />
       <main className="app-shell__main">
+        <TopBar />
         <Outlet />
       </main>
       {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
