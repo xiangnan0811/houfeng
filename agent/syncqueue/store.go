@@ -22,6 +22,13 @@ const (
 type Options struct {
 	MaxEntries int
 	MaxAge     time.Duration
+	// SkipFsync, when true, skips the file.Sync() and syncDir() calls in
+	// writeEntries. fsync provides crash durability — losing a queue file's
+	// last write on power loss. Tests that exercise runtime retry/restart
+	// logic on tight timing budgets do not need disk durability and would
+	// otherwise be dominated by macOS APFS fsync latency (10-30ms each).
+	// Production callers MUST leave this false.
+	SkipFsync bool
 }
 
 type Entry struct {
@@ -264,9 +271,11 @@ func (s *FileStore) writeEntries(entries []Entry) error {
 		_ = file.Close()
 		return err
 	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return err
+	if !s.opts.SkipFsync {
+		if err := file.Sync(); err != nil {
+			_ = file.Close()
+			return err
+		}
 	}
 	if err := file.Close(); err != nil {
 		return err
@@ -275,6 +284,9 @@ func (s *FileStore) writeEntries(entries []Entry) error {
 		return err
 	}
 	cleanup = false
+	if s.opts.SkipFsync {
+		return nil
+	}
 	return syncDir(dir)
 }
 
