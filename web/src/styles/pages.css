@@ -193,6 +193,11 @@
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
+.stat-tile__trend {
+  margin-top: var(--space-1);
+  display: flex;
+  opacity: 0.75;
+}
 .summary-card {
   background: var(--surface-elevated);
   border: 1px solid var(--border);

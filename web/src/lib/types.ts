@@ -246,6 +246,18 @@ export type DashboardOverview = {
   abnormal_nodes: DashboardNodeSummary[]
   abnormal_targets: DashboardTargetSummary[]
   recent_events: StateChangeEventRecord[]
+  /**
+   * 24-element array of per-hour incident_started counts. Index 0 is 23
+   * hours ago, index 23 is the current hour. Optional — older backends
+   * (and unit-test fixtures) may omit it; consumers should treat missing
+   * as "no trend data, hide sparkline".
+   */
+  new_incident_trend_24h?: number[]
+  /**
+   * 24-element array of per-hour incident_recovered counts. Same indexing
+   * as new_incident_trend_24h.
+   */
+  recovery_trend_24h?: number[]
 }
 
 export type DashboardNodeSummary = {

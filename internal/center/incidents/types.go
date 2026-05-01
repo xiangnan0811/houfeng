@@ -59,6 +59,13 @@ type DashboardOverview struct {
 	AbnormalNodes          []DashboardNodeSummary   `json:"abnormal_nodes"`
 	AbnormalTargets        []DashboardTargetSummary `json:"abnormal_targets"`
 	RecentEvents           []StateChangeEventRecord `json:"recent_events"`
+	// NewIncidentTrend24h is a 24-element array of per-hour incident_started
+	// counts. Index 0 is 23 hours ago, index 23 is the current hour. Frontend
+	// uses this to render the dashboard "新增异常" sparkline.
+	NewIncidentTrend24h []int `json:"new_incident_trend_24h,omitempty"`
+	// RecoveryTrend24h is a 24-element array of per-hour incident_recovered
+	// counts. Same indexing as NewIncidentTrend24h.
+	RecoveryTrend24h []int `json:"recovery_trend_24h,omitempty"`
 }
 
 type DashboardNodeSummary struct {

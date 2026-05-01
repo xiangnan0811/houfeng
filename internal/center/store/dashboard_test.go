@@ -35,6 +35,21 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 		},
 		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			switch {
+			case strings.Contains(sql, "hour_buckets"):
+				// 24-bucket trend query for the dashboard sparkline.
+				// Each bucket returns (started, recovered) ints.
+				rows := make([]fakeDashboardScan, 0, 24)
+				for i := 0; i < 24; i++ {
+					started, recovered := i%5, i%3
+					rows = append(rows, fakeDashboardScan{scan: func(s, r int) func(dest ...any) error {
+						return func(dest ...any) error {
+							*(dest[0].(*int)) = s
+							*(dest[1].(*int)) = r
+							return nil
+						}
+					}(started, recovered)})
+				}
+				return &fakeDashboardRows{rows: rows}, nil
 			case strings.Contains(sql, "from state_change_events"):
 				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "evt_001"
@@ -108,6 +123,13 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	}
 	if overview.AbnormalTargets[0].BasePort == nil || *overview.AbnormalTargets[0].BasePort != 443 || overview.AbnormalTargets[0].LastFailureAt == nil {
 		t.Fatalf("AbnormalTargets[0] = %#v, want base port and failure timestamp", overview.AbnormalTargets[0])
+	}
+	if len(overview.NewIncidentTrend24h) != 24 || len(overview.RecoveryTrend24h) != 24 {
+		t.Fatalf("trend lens = (%d,%d), want (24,24)", len(overview.NewIncidentTrend24h), len(overview.RecoveryTrend24h))
+	}
+	// Spot-check the synthetic per-bucket pattern from the fake (i%5, i%3).
+	if overview.NewIncidentTrend24h[5] != 0 || overview.RecoveryTrend24h[5] != 2 {
+		t.Fatalf("trend[5] = (%d,%d), want (0,2)", overview.NewIncidentTrend24h[5], overview.RecoveryTrend24h[5])
 	}
 }
 

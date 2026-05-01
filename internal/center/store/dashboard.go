@@ -69,6 +69,10 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 	if err != nil {
 		return incidents.DashboardOverview{}, err
 	}
+	overview.NewIncidentTrend24h, overview.RecoveryTrend24h, err = loadDashboardTrends24h(ctx, r.db)
+	if err != nil {
+		return incidents.DashboardOverview{}, err
+	}
 	events, err := r.ListEvents(ctx, EventsFilter{Limit: limit})
 	if err != nil {
 		return incidents.DashboardOverview{}, err
@@ -201,6 +205,55 @@ func loadAbnormalTargetSummaries(ctx context.Context, queryer dashboardQueryer, 
 		return nil, fmt.Errorf("iterate dashboard abnormal targets: %w", err)
 	}
 	return records, nil
+}
+
+// loadDashboardTrends24h returns two 24-element arrays of per-hour event
+// counts: incident_started and incident_recovered. Index 0 is 23 hours ago
+// (oldest bucket), index 23 is the current hour. Used by the dashboard
+// sparkline. Empty buckets are zero-filled.
+func loadDashboardTrends24h(ctx context.Context, queryer dashboardQueryer) ([]int, []int, error) {
+	rows, err := queryer.Query(ctx, `
+		with hour_buckets as (
+			select generate_series(
+				date_trunc('hour', now() - interval '23 hours'),
+				date_trunc('hour', now()),
+				interval '1 hour'
+			) as bucket_start
+		)
+		select
+			coalesce((
+				select count(*)::int
+				from state_change_events e
+				where e.event_type = 'incident_started'
+					and date_trunc('hour', e.created_at) = hb.bucket_start
+			), 0),
+			coalesce((
+				select count(*)::int
+				from state_change_events e
+				where e.event_type = 'incident_recovered'
+					and date_trunc('hour', e.created_at) = hb.bucket_start
+			), 0)
+		from hour_buckets hb
+		order by hb.bucket_start asc`)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query dashboard trends 24h: %w", err)
+	}
+	defer rows.Close()
+
+	started := make([]int, 0, 24)
+	recovered := make([]int, 0, 24)
+	for rows.Next() {
+		var s, r int
+		if err := rows.Scan(&s, &r); err != nil {
+			return nil, nil, fmt.Errorf("scan dashboard trend row: %w", err)
+		}
+		started = append(started, s)
+		recovered = append(recovered, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate dashboard trends 24h: %w", err)
+	}
+	return started, recovered, nil
 }
 
 func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardOverview, error) {

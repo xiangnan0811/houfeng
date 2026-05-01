@@ -4,9 +4,11 @@ import { Link } from 'react-router-dom'
 import {
   Hostname,
   MonoDigits,
+  Sparkline,
   StatusGlyph,
   Timestamp,
   type HealthState,
+  type SparklineTone,
 } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
@@ -24,10 +26,17 @@ function StatTile({
   label,
   value,
   ariaLabel,
+  trend,
+  trendTone = 'accent',
+  trendAriaLabel,
 }: {
   label: string
   value: number | string
   ariaLabel?: string
+  /** Optional 24-bucket time series. When non-empty renders a Sparkline below the value. */
+  trend?: number[]
+  trendTone?: SparklineTone
+  trendAriaLabel?: string
 }) {
   return (
     <article
@@ -39,6 +48,17 @@ function StatTile({
       <p className="summary-card__value stat-tile__value">
         <MonoDigits>{value}</MonoDigits>
       </p>
+      {trend && trend.length > 0 ? (
+        <div className="stat-tile__trend">
+          <Sparkline
+            values={trend}
+            tone={trendTone}
+            width={120}
+            height={20}
+            ariaLabel={trendAriaLabel ?? `${label} 近 24h 趋势`}
+          />
+        </div>
+      ) : null}
     </article>
   )
 }
@@ -318,8 +338,18 @@ export function DashboardPage() {
         <StatTile label="风险对象" value={abnormalTotal} />
         <StatTile label="严重对象总数" value={severeTotal} />
         <StatTile label="维护对象总数" value={maintenanceTotal} />
-        <StatTile label="新增异常" value={overview.recent_new_incident_count} />
-        <StatTile label="恢复事件" value={overview.recent_recovery_count} />
+        <StatTile
+          label="新增异常"
+          value={overview.recent_new_incident_count}
+          trend={overview.new_incident_trend_24h}
+          trendTone="critical"
+        />
+        <StatTile
+          label="恢复事件"
+          value={overview.recent_recovery_count}
+          trend={overview.recovery_trend_24h}
+          trendTone="normal"
+        />
       </div>
 
       <DetailSection eyebrow="节点" title="异常节点概览" ribbon="alert">
