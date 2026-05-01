@@ -1,6 +1,8 @@
 ---
 date: 2026-04-29
-status: design-approved
+status: superseded-by-v2-houfeng
+superseded-on: 2026-04-30
+superseded-by: docs/design/v2-houfeng/design-language.md
 supersedes:
   - docs/design/v1-baseline/ui-ux-spec.md (visual portion only)
   - docs/design/v1-baseline/baseline-screens.md
@@ -12,7 +14,12 @@ preserves:
   - docs/design/v1-baseline/tech-selection.md
 ---
 
-# 候风 V1.x 前端视觉重新设计
+> **SUPERSEDED 2026-04-30.**
+> 本文档及 `plans/`、`status.md` 是 v1.x-frontend-redesign 的设计产物，落地后用户判定为简陋、缺乏成体系的设计语言。
+> 现行视觉权威是 [`docs/design/v2-houfeng/design-language.md`](../v2-houfeng/design-language.md)。
+> 本目录仅作历史记录，不再驱动开发。
+
+# 候风 V1.x 前端视觉重新设计（已被 v2-houfeng 取代）
 
 ## 1. 背景
 

@@ -8,9 +8,12 @@ tags:
 status: frozen
 ---
 
-> **VISUAL PORTION UNFROZEN 2026-04-29.**
-> The V1.x frontend redesign at [`docs/design/v1.x-frontend-redesign/`](../v1.x-frontend-redesign/README.md)
-> supersedes the visual sections of this baseline:
+> **VISUAL PORTION SUPERSEDED 2026-04-30 by v2-houfeng.**
+> The current visual authority is [`docs/design/v2-houfeng/`](../v2-houfeng/design-language.md).
+> v2-houfeng supersedes both this baseline's visual sections AND the earlier
+> `v1.x-frontend-redesign/` (which produced the implementation later judged 简陋).
+>
+> Superseded visual sections of this baseline:
 >
 > - `ui-ux-spec.md`
 > - `visual-review-round2.md`
@@ -18,7 +21,9 @@ status: frozen
 > - `stitch/*` (deprecated)
 >
 > The structural sections (`architecture-data-model.md`, `rules-and-interaction.md`,
-> `tech-selection.md`) remain **frozen and authoritative**.
+> `tech-selection.md`) remain **frozen and authoritative**. v2-houfeng does not
+> change product behavior, data model, or backend; only the visual / interaction
+> surface.
 
 # 服务器舰队控制面 v1 设计总览
 

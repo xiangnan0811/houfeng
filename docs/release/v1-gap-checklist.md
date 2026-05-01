@@ -114,3 +114,13 @@ Before tagging or declaring V1 fully release-ready, collect:
 - completed live PostgreSQL smoke table in `docs/operations/v1-smoke-run.md` (collected 2026-04-29);
 - visual screenshot comparison artifacts are captured; strict visual-fidelity acceptance or an explicit accepted waiver remains pending;
 - Telegram delivery proof or an explicit note that Telegram is disabled for the deployment.
+
+---
+
+## V2 设计语言取代记录 (2026-05-01)
+
+- v1 视觉基线（`docs/design/v1-baseline/ui-ux-spec.md`）和 v1.x 前端重设计（`docs/design/v1.x-frontend-redesign/`）的视觉部分均已被 **v2-houfeng** 取代
+- 新视觉权威：`docs/design/v2-houfeng/{design-language,component-spec}.md`
+- v2 不动后端 / 数据形状 / API / 路由 / 主题切换逻辑
+- 实施完工证据：259 web tests 全绿、`npm run build` 通过、CSS 41KB（v1=28KB，+47%）
+- 已知遗留：`agent/runtime` 的 `TestRuntimeQueuesFailedSyncAndRetriesAsBackfilled` / `TestRuntimeFlushesPersistedQueueAfterRestart` 在 main HEAD baseline 上同样失败，与 v2 重塑无关，须单独 issue 跟踪
