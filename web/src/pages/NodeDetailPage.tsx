@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
+import { Sparkline } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { IncidentList } from '../components/IncidentList'
@@ -162,22 +163,27 @@ function averageOf(values: number[]) {
 function summarizeRecentHostSamples(samples: HostSample[]) {
   if (samples.length === 0) return null
 
-  const sortedSamples = [...samples].sort(
-    (left, right) => new Date(right.observed_at).getTime() - new Date(left.observed_at).getTime(),
+  // Ascending by observed_at: oldest left, newest right — required for
+  // Sparkline to read left-to-right as a forward time line.
+  const ascending = [...samples].sort(
+    (left, right) => new Date(left.observed_at).getTime() - new Date(right.observed_at).getTime(),
   )
-  const newest = sortedSamples[0]
-  const oldest = sortedSamples[sortedSamples.length - 1]
+  const oldest = ascending[0]
+  const newest = ascending[ascending.length - 1]
 
   return {
-    count: sortedSamples.length,
+    count: ascending.length,
     newestObservedAt: newest.observed_at,
     oldestObservedAt: oldest.observed_at,
-    averageLoad5: averageOf(sortedSamples.map((sample) => sample.load_5)),
-    averageIowait: averageOf(sortedSamples.map((sample) => sample.cpu_iowait_pct)),
-    averageSteal: averageOf(sortedSamples.map((sample) => sample.cpu_steal_pct)),
+    averageLoad5: averageOf(ascending.map((sample) => sample.load_5)),
+    averageIowait: averageOf(ascending.map((sample) => sample.cpu_iowait_pct)),
+    averageSteal: averageOf(ascending.map((sample) => sample.cpu_steal_pct)),
     latestLoad5: newest.load_5,
     latestIowait: newest.cpu_iowait_pct,
     latestSteal: newest.cpu_steal_pct,
+    load5Series: ascending.map((sample) => sample.load_5),
+    iowaitSeries: ascending.map((sample) => sample.cpu_iowait_pct),
+    stealSeries: ascending.map((sample) => sample.cpu_steal_pct),
   }
 }
 
@@ -1055,6 +1061,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
                   <dd>{formatNumber(recentTrend.latestLoad5)}</dd>
                 </div>
               </dl>
+              <Sparkline values={recentTrend.load5Series} tone="accent" width={140} height={28} ariaLabel="Load5 近 24h 趋势" />
             </article>
 
             <article className="metric-card">
@@ -1069,6 +1076,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
                   <dd>{formatPercent(recentTrend.latestIowait)}</dd>
                 </div>
               </dl>
+              <Sparkline values={recentTrend.iowaitSeries} tone="alert" width={140} height={28} ariaLabel="iowait 近 24h 趋势" />
             </article>
 
             <article className="metric-card">
@@ -1083,6 +1091,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
                   <dd>{formatPercent(recentTrend.latestSteal)}</dd>
                 </div>
               </dl>
+              <Sparkline values={recentTrend.stealSeries} tone="critical" width={140} height={28} ariaLabel="CPU steal 近 24h 趋势" />
             </article>
           </div>
         ) : (
