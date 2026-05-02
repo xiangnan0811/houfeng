@@ -450,3 +450,37 @@ Final child 3 + parent archived. EventsPage 4 features: (1) 含 backfill toggle 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: V1 live PostgreSQL smoke run + Stage 1 P0 complete
+
+**Date**: 2026-05-02
+**Task**: V1 live PostgreSQL smoke run + Stage 1 P0 complete
+**Branch**: `main`
+
+### Summary
+
+Stage 1 P0 last item complete. Live smoke against 192.168.100.192:5432/houfeng: 6 PASS + 1 PARTIAL (agent macOS /proc/loadavg incompatibility) + 1 INCONCLUSIVE (center root 404, HOUFENG_WEB_DIST_DIR unset). Incident detection 3m25s, recovery 2m05s. 4 new gap candidates surfaced (enrollment-token key name, agent macOS, center root no SPA, /api/events bare array). docs/operations/v1-smoke-run.md updated with new evidence sub-table + dated section + caveats. ENTIRE Stage 1 P0 NOW COMPLETE.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `efaaa72` | (see git log) |
+| `6394b29` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
