@@ -484,3 +484,38 @@ Stage 1 P0 last item complete. Live smoke against 192.168.100.192:5432/houfeng: 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Stage 1 P1 quickwins: gap #4 (sessions index naming) + gap #10 (NodesPage createNode refactor)
+
+**Date**: 2026-05-02
+**Task**: Stage 1 P1 quickwins: gap #4 (sessions index naming) + gap #10 (NodesPage createNode refactor)
+**Branch**: `main`
+
+### Summary
+
+Stage 1 P1 quickwins complete. gap #4: new 0011 migration ALTER INDEX renames sessions_user_idx/sessions_expires_idx -> idx_sessions_user/idx_sessions_expires (safe via new migration; unlike gap #3 which couldn't be renamed). gap #10: NodesPage 30-line inline createNode moved to lib/api.ts via postJSONBody helper, CreateNodeInput type promoted to lib/types.ts, lifecycle_status='待接入' default preserved. Test fallback message updated to lib/api standard English. Closes the last Partial row from 2026-05-02 reassess workstream. make verify-go + verify-web all green.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4079d6e` | (see git log) |
+| `d78ef0f` | (see git log) |
+| `8cbae4d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

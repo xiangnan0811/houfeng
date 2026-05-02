@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 14
+- **Total Sessions**: 15
 - **Last Active**: 2026-05-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~486 | Active |
+| `journal-1.md` | ~521 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-05-02 | Stage 1 P1 quickwins: gap #4 (sessions index naming) + gap #10 (NodesPage createNode refactor) | `4079d6e`, `d78ef0f`, `8cbae4d` | `main` |
 | 14 | 2026-05-02 | V1 live PostgreSQL smoke run + Stage 1 P0 complete | `efaaa72`, `6394b29` | `main` |
 | 13 | 2026-05-02 | EventsPage 4 missing features + list-filter-completion workstream complete | `88c1c24`, `3398109` | `main` |
 | 12 | 2026-05-02 | Apply FilterBar to NodesPage (child 2 of list-filter-completion) | `896b22e`, `43af18b` | `main` |
