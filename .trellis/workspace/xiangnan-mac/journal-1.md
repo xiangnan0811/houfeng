@@ -416,3 +416,37 @@ Child 2 complete: NodesPage 8 control FilterBar (7 §6.3 filters; 地区/城市 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: EventsPage 4 missing features + list-filter-completion workstream complete
+
+**Date**: 2026-05-02
+**Task**: EventsPage 4 missing features + list-filter-completion workstream complete
+**Branch**: `main`
+
+### Summary
+
+Final child 3 + parent archived. EventsPage 4 features: (1) 含 backfill toggle UI-only forward-compat (backend no is_backfilled column today; toggle wired but no-op until backend supports); (2) Time segmented Tabs (24h/7d/30d/自定义); (3) client-side time grouping today/yesterday/this week/earlier; (4) server-side load-more via incrementing limit + exhausted state. 289 web tests pass; make verify-web green. list-filter-completion workstream complete: 3 children + parent all archived. NodesPage / TargetsPage / EventsPage list-filter root cause closed; '实现连 V0.1 都不到' user judgment addressed at the V1 收口 layer.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `88c1c24` | (see git log) |
+| `3398109` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
