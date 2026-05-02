@@ -140,3 +140,40 @@ Completed T2 (roadmap-and-claude-md): drafted docs/release/next-phase-plan.md (1
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Stage 1 P0 quickwins: 3 gaps + lint baseline
+
+**Date**: 2026-05-02
+**Task**: Stage 1 P0 quickwins: 3 gaps + lint baseline
+**Branch**: `main`
+
+### Summary
+
+Stage 1 P0 quickwins task complete. Fixed 3 gaps from V1 收口期 gap list: (gap #12) Makefile verify-web now runs npm run lint; (gap #7) cmd/houfeng-center/main.go unified to log/slog with fatal() helper; (gap #3) docs-only — confirmed migration 0004 collision cannot be renamed (schema_migrations uses filename as primary key per migrate.go:16-19), updated v1-gap-checklist.md and next-phase-plan.md to record convention 'next migration starts at 0011'. Scope-extended mid-task to fix 4 baseline lint errors (auth-context.tsx + theme-context.tsx, inline disable comments with rationale per early-stage Provider+hook colocation convention) — pre-requisite for gap #12. make verify-web fully green end-to-end (lint -> test 268 -> build).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `75d4034` | (see git log) |
+| `a613f8e` | (see git log) |
+| `6a52ced` | (see git log) |
+| `1704c02` | (see git log) |
+| `bc7f5b2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
