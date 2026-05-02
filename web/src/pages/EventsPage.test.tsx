@@ -285,4 +285,83 @@ describe('EventsPage', () => {
     )
     expect(screen.getByText('events unavailable')).toBeInTheDocument()
   })
+
+  it('selects a 7d time range preset and forwards created_from/created_to', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EventsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '近 7 天' }))
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const lastCall = fetchMock.mock.calls.at(-1)
+    expect(lastCall).toBeDefined()
+    const url = new URL(String(lastCall?.[0]), 'http://localhost')
+    expect(url.pathname).toBe('/api/events')
+    expect(url.searchParams.get('limit')).toBe('50')
+    expect(url.searchParams.get('created_from')).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(url.searchParams.get('created_to')).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    const fromMs = Date.parse(url.searchParams.get('created_from') ?? '')
+    const toMs = Date.parse(url.searchParams.get('created_to') ?? '')
+    expect(toMs - fromMs).toBeGreaterThan(6.5 * 24 * 60 * 60 * 1000)
+    expect(toMs - fromMs).toBeLessThan(7.5 * 24 * 60 * 60 * 1000)
+
+    // Date inputs are disabled while a preset range is selected.
+    expect(screen.getByLabelText('开始时间')).toBeDisabled()
+    expect(screen.getByLabelText('结束时间')).toBeDisabled()
+  })
+
+  it('renders time-grouped events and a load-more button that refetches with a larger limit', async () => {
+    const firstBatch = Array.from({ length: 50 }, (_, i) => ({
+      event_id: `evt_${String(i).padStart(3, '0')}`,
+      incident_id: `inc_${i}`,
+      incident_class: 'target_probe_failure',
+      object_type: 'target',
+      object_id: 'tg_001',
+      event_type: 'incident_started',
+      severity: '告警',
+      summary: `事件 ${i}`,
+      created_at: new Date().toISOString(),
+    }))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(firstBatch))
+      .mockResolvedValueOnce(mockJSONResponse([...firstBatch, ...firstBatch.slice(0, 10)]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EventsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+    )
+
+    // Time-group header for "今天" should appear (50 events created now).
+    expect(screen.getByRole('heading', { name: '今天' })).toBeInTheDocument()
+
+    // Load-more button should be enabled because returned count == effectiveLimit
+    // (backend may have more rows). Click it to refetch with a bigger limit.
+    const loadMore = screen.getByRole('button', { name: '加载更早事件 ↓' })
+    expect(loadMore).not.toBeDisabled()
+    fireEvent.click(loadMore)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const secondCallUrl = new URL(String(fetchMock.mock.calls[1]?.[0]), 'http://localhost')
+    expect(secondCallUrl.searchParams.get('limit')).toBe('100')
+
+    // Second batch returned 60 items < limit 100 → exhausted.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: '无更多事件' }),
+      ).toBeInTheDocument(),
+    )
+  })
 })
