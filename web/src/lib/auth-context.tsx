@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import * as client from './auth-client'
-import { setUnauthorizedHandler } from './fetcher'
-import { setApiUnauthorizedHandler } from './api'
+import { setUnauthorizedHandler } from './api'
 
 export interface AuthValue {
   user: client.User | null
@@ -24,12 +23,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const drop = () => setUser(null)
     setUnauthorizedHandler(drop)
-    setApiUnauthorizedHandler(drop)
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial-load gate: setLoading(false) runs in async .finally() after refresh() resolves, not synchronously in effect body
     refresh().finally(() => setLoading(false))
     return () => {
       setUnauthorizedHandler(undefined)
-      setApiUnauthorizedHandler(undefined)
     }
   }, [refresh])
 

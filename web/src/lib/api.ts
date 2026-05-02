@@ -33,7 +33,7 @@ export class ApiError extends Error {
 
 // Set by AuthProvider on mount; fired when any /api/* responds with 401.
 let onUnauthorized: (() => void) | undefined
-export function setApiUnauthorizedHandler(h: (() => void) | undefined): void {
+export function setUnauthorizedHandler(h: (() => void) | undefined): void {
   onUnauthorized = h
 }
 
@@ -68,20 +68,20 @@ async function request(path: string, init?: RequestInit): Promise<string> {
   return rawBody
 }
 
-async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
+export async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const rawBody = await request(path, init)
   return JSON.parse(rawBody) as T
 }
 
-async function requestEmpty(path: string, init?: RequestInit): Promise<void> {
+export async function requestEmpty(path: string, init?: RequestInit): Promise<void> {
   await request(path, init)
 }
 
-function postJSON<T>(path: string): Promise<T> {
+export function postJSON<T>(path: string): Promise<T> {
   return requestJSON<T>(path, { method: 'POST' })
 }
 
-function postJSONBody<T>(path: string, body: unknown): Promise<T> {
+export function postJSONBody<T>(path: string, body: unknown): Promise<T> {
   return requestJSON<T>(path, {
     method: 'POST',
     headers: {

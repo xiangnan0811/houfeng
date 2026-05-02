@@ -1,4 +1,4 @@
-import { fetcher, AuthError } from './fetcher'
+import { ApiError, postJSONBody, requestEmpty, requestJSON } from './api'
 
 export interface User {
   user_id: string
@@ -8,24 +8,20 @@ export interface User {
 }
 
 export async function login(username: string, password: string): Promise<User> {
-  return fetcher<User>('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  })
+  return postJSONBody<User>('/api/auth/login', { username, password })
 }
 
 export async function logout(): Promise<void> {
-  await fetcher<void>('/api/auth/logout', { method: 'POST' })
+  await requestEmpty('/api/auth/logout', { method: 'POST' })
 }
 
 export async function me(): Promise<User | null> {
   try {
-    const result = await fetcher<unknown>('/api/auth/me')
+    const result = await requestJSON<unknown>('/api/auth/me')
     if (!isUser(result)) return null
     return result
   } catch (e) {
-    if (e instanceof AuthError) return null
+    if (e instanceof ApiError && e.status === 401) return null
     throw e
   }
 }
@@ -40,9 +36,12 @@ function isUser(v: unknown): v is User {
 }
 
 export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
-  await fetcher<void>('/api/auth/password', {
+  await requestEmpty('/api/auth/password', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
   })
 }
