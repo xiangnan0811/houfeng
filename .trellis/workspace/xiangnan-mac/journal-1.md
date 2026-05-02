@@ -211,3 +211,37 @@ Reassessed 9 Closed (⚠️ need-reassess) rows in v1-gap-checklist.md first two
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Reassess gap-checklist Closed batch 2 (Runtime + Notifications)
+
+**Date**: 2026-05-02
+**Task**: Reassess gap-checklist Closed batch 2 (Runtime + Notifications)
+**Branch**: `main`
+
+### Summary
+
+Reassessed 8 Closed (⚠️ need-reassess) rows in v1-gap-checklist.md Runtime behavior (6) + Notifications (2). All 8 verdict = Closed (verified 2026-05-02), 0 Partial / Not Closed / Inconclusive. Cumulative batch 1+2 = 17 rows: 16 Closed verified + 1 Partial (NodesPage createNode reuse of gap #10). Reframe: foundational + runtime + notification layers substantively aligned with design — user 实现连 V0.1 都不到 judgment must originate in UI / e2e / delivery hardening (batch 3/4 focus). Live Telegram delivery (Partial) untouched.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3f7cca9` | (see git log) |
+| `c4ecc3f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
