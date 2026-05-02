@@ -1,9 +1,9 @@
 {
-  "id": "list-filter-completion",
-  "name": "list-filter-completion",
-  "title": "Front-end list-page filter completion",
+  "id": "filterbar-nodes",
+  "name": "filterbar-nodes",
+  "title": "Apply FilterBar to NodesPage",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -18,11 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "05-02-filterbar-and-targets",
-    "05-02-filterbar-nodes"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "05-02-list-filter-completion",
   "relatedFiles": [],
   "notes": "",
   "meta": {}
