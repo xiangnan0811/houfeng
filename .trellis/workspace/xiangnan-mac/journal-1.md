@@ -177,3 +177,37 @@ Stage 1 P0 quickwins task complete. Fixed 3 gaps from V1 收口期 gap list: (ga
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Reassess gap-checklist Closed batch 1 (Product/arch + Core model)
+
+**Date**: 2026-05-02
+**Task**: Reassess gap-checklist Closed batch 1 (Product/arch + Core model)
+**Branch**: `main`
+
+### Summary
+
+Reassessed 9 Closed (⚠️ need-reassess) rows in v1-gap-checklist.md first two sections (Product/architecture baseline 4 rows + Core object model 5 rows): 8 verified Closed + 1 Partial (Row 5 Node persistence and UI, due to NodesPage.tsx:60 createNode bypassing lib/api.ts -- already gap #10) + 0 Not Closed + 0 inconclusive. Key reframe: foundational layers are largely aligned with v1-baseline design; user judgment '实现连 V0.1 都不到' likely originates in UI / runtime end-to-end / notification delivery (batch 2/3/4 focus). Verdict scheme: 4 tiers (Closed verified / Partial / Not Closed / Reassess inconclusive) written to Status column + Reassessed 2026-05-02 evidence note appended. Subsequent 33 rows still tagged need-reassess for batch 2/3/4.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dfa32fc` | (see git log) |
+| `6777c32` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
