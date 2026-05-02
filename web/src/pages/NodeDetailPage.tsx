@@ -2,11 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
-import { Sparkline } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { IncidentList } from '../components/IncidentList'
-import { StatusBadge } from '../components/StatusBadge'
+import {
+  NodeHero,
+  NodeHostMetrics,
+  NodeLabelsAndNote,
+  NodeStatusSummary,
+  NodeTrendCards,
+} from '../components/node-detail'
 import {
   ApiError,
   confirmNodeRebind,
@@ -25,15 +30,7 @@ import {
   resumeNodeMonitoring,
   updateNodeMetadata,
 } from '../lib/api'
-import {
-  formatBytes,
-  formatBytesPerSecond,
-  formatDateTime,
-  formatLabelList,
-  formatNumber,
-  formatPercent,
-  formatUptime,
-} from '../lib/format'
+import { formatDateTime } from '../lib/format'
 import type {
   ActiveIncidentRecord,
   HostSample,
@@ -653,39 +650,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
 
   return (
     <div className="page-stack">
-      <section className="hero-panel">
-        <div className="hero-panel__content">
-          <p className="hero-panel__eyebrow">节点详情</p>
-          <h2 className="hero-panel__title">{node.display_name}</h2>
-          <p className="hero-panel__description">
-            {node.region} · {node.city} · {node.provider}
-          </p>
-          <div className="badge-row">
-            <StatusBadge label={node.lifecycle_status} />
-            <StatusBadge label={node.monitoring_status} />
-            <StatusBadge label={node.binding_status} />
-            <StatusBadge label={node.current_health_status} />
-          </div>
-        </div>
-        <div className="hero-panel__meta">
-          <div className="hero-meta-card">
-            <span>标签</span>
-            <strong>{formatLabelList(node.labels)}</strong>
-          </div>
-          <div className="hero-meta-card">
-            <span>最近心跳</span>
-            <strong>{formatDateTime(node.last_heartbeat_at)}</strong>
-          </div>
-          <div className="hero-meta-card">
-            <span>最近同步</span>
-            <strong>{formatDateTime(node.last_sync_at)}</strong>
-          </div>
-          <div className="hero-meta-card">
-            <span>当前主问题</span>
-            <strong>{node.current_primary_issue_summary || '暂无明显异常'}</strong>
-          </div>
-        </div>
-      </section>
+      <NodeHero node={node} />
 
       {showBindingConflict ? (
         <DetailSection eyebrow="绑定冲突" title="绑定冲突处置" aside="高优先级">
@@ -746,92 +711,31 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         </DetailSection>
       ) : null}
 
-      <div className="summary-grid">
-        <article className="summary-card">
-          <p className="summary-card__label">健康状态</p>
-          <p className="summary-card__value">{node.current_health_status}</p>
-        </article>
-        <article className="summary-card">
-          <p className="summary-card__label">活跃异常数</p>
-          <p className="summary-card__value">{node.current_active_incident_count}</p>
-        </article>
-        <article className="summary-card">
-          <p className="summary-card__label">当前主问题</p>
-          <p className="summary-card__value summary-card__value--text">
-            {node.current_primary_issue_summary || '暂无明显异常'}
-          </p>
-        </article>
-      </div>
+      <NodeStatusSummary node={node} />
 
-      <DetailSection eyebrow="标签与备注" title="标签与备注">
-        <div className="page-stack">
-          {metadataEditing ? (
-            <>
-              <p>
-                <label>
-                  标签
-                  <input
-                    name="metadata-labels"
-                    value={metadataLabelDraft}
-                    onChange={(event) => setMetadataLabelDraft(event.target.value)}
-                  />
-                </label>
-              </p>
-              <p>
-                <label>
-                  备注
-                  <textarea
-                    name="metadata-note"
-                    value={metadataNoteDraft}
-                    onChange={(event) => setMetadataNoteDraft(event.target.value)}
-                    rows={3}
-                  />
-                </label>
-              </p>
-              <div className="badge-row badge-row--wrap">
-                <button
-                  type="button"
-                  disabled={metadataSubmitting}
-                  onClick={() => void handleMetadataSave()}
-                >
-                  {metadataSubmitting ? '正在保存…' : '保存标签与备注'}
-                </button>
-                <button
-                  type="button"
-                  disabled={metadataSubmitting}
-                  onClick={() => {
-                    setMetadataEditing(false)
-                    setMetadataLabelDraft('')
-                    setMetadataNoteDraft('')
-                    setMetadataError(null)
-                  }}
-                >
-                  取消
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p>标签：{formatLabelList(node.labels)}</p>
-              <p>备注：{node.note.trim() || '暂无备注'}</p>
-              <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMetadataEditing(true)
-                    setMetadataLabelDraft(node.labels.join(', '))
-                    setMetadataNoteDraft(node.note)
-                    setMetadataError(null)
-                  }}
-                >
-                  编辑标签与备注
-                </button>
-              </div>
-            </>
-          )}
-          {metadataError ? <p role="alert">{metadataError}</p> : null}
-        </div>
-      </DetailSection>
+      <NodeLabelsAndNote
+        node={node}
+        editing={metadataEditing}
+        labelDraft={metadataLabelDraft}
+        noteDraft={metadataNoteDraft}
+        submitting={metadataSubmitting}
+        error={metadataError}
+        onLabelDraftChange={setMetadataLabelDraft}
+        onNoteDraftChange={setMetadataNoteDraft}
+        onStartEdit={() => {
+          setMetadataEditing(true)
+          setMetadataLabelDraft(node.labels.join(', '))
+          setMetadataNoteDraft(node.note)
+          setMetadataError(null)
+        }}
+        onCancelEdit={() => {
+          setMetadataEditing(false)
+          setMetadataLabelDraft('')
+          setMetadataNoteDraft('')
+          setMetadataError(null)
+        }}
+        onSave={() => void handleMetadataSave()}
+      />
 
       <DetailSection eyebrow="运行控制" title="运行控制">
         <div className="page-stack">
@@ -924,183 +828,9 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         </div>
       </DetailSection>
 
-      <DetailSection
-        eyebrow="当前运行事实"
-        title="当前主机指标"
-        aside={sample ? `样本时间：${formatDateTime(sample.observed_at)}` : '等待首批样本'}
-      >
-        {sample ? (
-          <div className="metric-grid">
-            <article className="metric-card">
-              <h3>CPU / Load</h3>
-              <dl>
-                <div>
-                  <dt>CPU 使用率</dt>
-                  <dd>{formatPercent(sample.cpu_usage_pct)}</dd>
-                </div>
-                <div>
-                  <dt>Load 1 / 5 / 15</dt>
-                  <dd>
-                    {formatNumber(sample.load_1)} / {formatNumber(sample.load_5)} /{' '}
-                    {formatNumber(sample.load_15)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>iowait / steal</dt>
-                  <dd>
-                    {formatPercent(sample.cpu_iowait_pct)} /{' '}
-                    {formatPercent(sample.cpu_steal_pct)}
-                  </dd>
-                </div>
-              </dl>
-            </article>
+      <NodeHostMetrics sample={sample} />
 
-            <article className="metric-card">
-              <h3>内存 / Swap</h3>
-              <dl>
-                <div>
-                  <dt>内存使用率</dt>
-                  <dd>{formatPercent(sample.mem_used_pct)}</dd>
-                </div>
-                <div>
-                  <dt>可用内存</dt>
-                  <dd>{formatBytes(sample.mem_available_bytes)}</dd>
-                </div>
-                <div>
-                  <dt>Swap 使用率</dt>
-                  <dd>{formatPercent(sample.swap_used_pct)}</dd>
-                </div>
-              </dl>
-            </article>
-
-            <article className="metric-card">
-              <h3>磁盘 / Inode</h3>
-              <dl>
-                <div>
-                  <dt>磁盘使用率</dt>
-                  <dd>{formatPercent(sample.disk_used_pct)}</dd>
-                </div>
-                <div>
-                  <dt>Inode 使用率</dt>
-                  <dd>{formatPercent(sample.inode_used_pct)}</dd>
-                </div>
-                <div>
-                  <dt>磁盘繁忙度</dt>
-                  <dd>{formatPercent(sample.disk_busy_pct)}</dd>
-                </div>
-              </dl>
-            </article>
-
-            <article className="metric-card">
-              <h3>网络 / 吞吐</h3>
-              <dl>
-                <div>
-                  <dt>流入 / 流出</dt>
-                  <dd>
-                    {formatBytesPerSecond(sample.net_in_bytes_per_sec)} /{' '}
-                    {formatBytesPerSecond(sample.net_out_bytes_per_sec)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>磁盘读 / 写</dt>
-                  <dd>
-                    {formatBytesPerSecond(sample.disk_read_bytes_per_sec)} /{' '}
-                    {formatBytesPerSecond(sample.disk_write_bytes_per_sec)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>运行时长</dt>
-                  <dd>{formatUptime(sample.uptime_seconds)}</dd>
-                </div>
-              </dl>
-            </article>
-          </div>
-        ) : (
-          <div className="empty-state">
-            <h3>尚未收到主机样本</h3>
-            <p>该节点已存在，但首批主机采样（HostSample）还未到达。请等待下一次 agent 同步。</p>
-          </div>
-        )}
-      </DetailSection>
-
-
-      <DetailSection
-        eyebrow="近期趋势"
-        title="近期趋势"
-        aside={recentTrend ? `最新样本：${formatDateTime(recentTrend.newestObservedAt)}` : '近 24h 暂无样本'}
-      >
-        {recentTrend ? (
-          <div className="metric-grid">
-            <article className="metric-card">
-              <h3>样本概览</h3>
-              <dl>
-                <div>
-                  <dt>近 24h 样本</dt>
-                  <dd>{recentTrend.count}</dd>
-                </div>
-                <div>
-                  <dt>最早观测</dt>
-                  <dd>{formatDateTime(recentTrend.oldestObservedAt)}</dd>
-                </div>
-                <div>
-                  <dt>最新观测</dt>
-                  <dd>{formatDateTime(recentTrend.newestObservedAt)}</dd>
-                </div>
-              </dl>
-            </article>
-
-            <article className="metric-card">
-              <h3>Load5 趋势</h3>
-              <dl>
-                <div>
-                  <dt>Load5 平均</dt>
-                  <dd>{formatNumber(recentTrend.averageLoad5)}</dd>
-                </div>
-                <div>
-                  <dt>最新 Load5</dt>
-                  <dd>{formatNumber(recentTrend.latestLoad5)}</dd>
-                </div>
-              </dl>
-              <Sparkline values={recentTrend.load5Series} tone="accent" width={140} height={28} ariaLabel="Load5 近 24h 趋势" />
-            </article>
-
-            <article className="metric-card">
-              <h3>CPU 等待</h3>
-              <dl>
-                <div>
-                  <dt>iowait 平均</dt>
-                  <dd>{formatPercent(recentTrend.averageIowait)}</dd>
-                </div>
-                <div>
-                  <dt>最新 iowait</dt>
-                  <dd>{formatPercent(recentTrend.latestIowait)}</dd>
-                </div>
-              </dl>
-              <Sparkline values={recentTrend.iowaitSeries} tone="alert" width={140} height={28} ariaLabel="iowait 近 24h 趋势" />
-            </article>
-
-            <article className="metric-card">
-              <h3>CPU steal 指标</h3>
-              <dl>
-                <div>
-                  <dt>steal 平均</dt>
-                  <dd>{formatPercent(recentTrend.averageSteal)}</dd>
-                </div>
-                <div>
-                  <dt>最新 steal</dt>
-                  <dd>{formatPercent(recentTrend.latestSteal)}</dd>
-                </div>
-              </dl>
-              <Sparkline values={recentTrend.stealSeries} tone="critical" width={140} height={28} ariaLabel="CPU steal 近 24h 趋势" />
-            </article>
-          </div>
-        ) : (
-          <div className="empty-state">
-            <h3>近 24h 暂无样本</h3>
-            <p>近期趋势需要近 24h 主机采样数据，当前还没有可用样本。</p>
-          </div>
-        )}
-      </DetailSection>
+      <NodeTrendCards recentTrend={recentTrend} />
 
       <DetailSection eyebrow="当前异常" title="当前异常">
         {!hasCurrentActivity ? (
