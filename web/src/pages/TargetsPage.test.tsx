@@ -1043,6 +1043,84 @@ describe('TargetsPage', () => {
     expect(within(row!).queryByText('启用')).not.toBeInTheDocument()
   })
 
+  it('filters the list by target type via the FilterBar select', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({ target_id: 'tg_service', name: 'Service Blog', target_type: 'service' }),
+        targetRecord({
+          target_id: 'tg_china',
+          name: 'China Reference',
+          target_type: 'china_reference',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Service Blog')).toBeInTheDocument())
+    expect(screen.getByText('China Reference')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'service' } })
+
+    await waitFor(() =>
+      expect(screen.queryByText('China Reference')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Service Blog')).toBeInTheDocument()
+    expect(screen.getByText('类型: service')).toBeInTheDocument()
+  })
+
+  it('toggles "仅看异常" and clears all filters via FilterBar', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_normal',
+          name: 'Healthy API',
+          current_health_status: '正常',
+        }),
+        targetRecord({
+          target_id: 'tg_alert',
+          name: 'Failing API',
+          current_health_status: '告警',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Healthy API')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('switch', { name: '仅看异常' }))
+
+    await waitFor(() =>
+      expect(screen.queryByText('Healthy API')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Failing API')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '移除筛选 仅看异常' }),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '清空所有' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('Healthy API')).toBeInTheDocument(),
+    )
+    expect(screen.getByText('Failing API')).toBeInTheDocument()
+  })
+
   it('cancels target quick label editing without sending PATCH', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       mockJSONResponse([

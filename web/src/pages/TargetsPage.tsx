@@ -1,8 +1,15 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
+import {
+  FilterBar,
+  FilterChip,
+  FilterMultiSelect,
+  FilterSelect,
+  FilterToggle,
+} from '../components/filters'
 import {
   ApiError,
   archiveTarget,
@@ -28,6 +35,49 @@ const TARGET_RUN_STATUS_OPTIONS = [
   { value: '维护中', label: '维护中' },
   { value: '暂停', label: '暂停' },
 ] as const
+
+const TARGET_RUN_STATUS_FILTER_OPTIONS = [
+  { value: '启用', label: '启用' },
+  { value: '维护中', label: '维护中' },
+  { value: '暂停', label: '暂停' },
+  { value: '已归档', label: '已归档' },
+] as const
+
+const TARGET_HEALTH_STATUS_FILTER_OPTIONS = [
+  { value: '正常', label: '正常' },
+  { value: '关注', label: '关注' },
+  { value: '告警', label: '告警' },
+  { value: '严重', label: '严重' },
+] as const
+
+type TargetFilterState = {
+  type: string | null
+  runStatus: string | null
+  health: string | null
+  labels: string[]
+  executionLabels: string[]
+  abnormal: boolean
+}
+
+function parseMultiValue(value: string | null): string[] {
+  if (!value) return []
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function distinctSorted(values: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const value of values) {
+    if (!seen.has(value)) {
+      seen.add(value)
+      out.push(value)
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+}
 
 type CreateTargetFormState = {
   name: string
@@ -191,6 +241,7 @@ function mergeMetadataTargetRecord(current: TargetRecord, updated: TargetRecord)
 
 export function TargetsPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const mountedRef = useRef(false)
   const createRequestRef = useRef(0)
   const [targets, setTargets] = useState<TargetRecord[]>([])
@@ -415,6 +466,94 @@ export function TargetsPage() {
     }
   }
 
+  const filterState: TargetFilterState = useMemo(
+    () => ({
+      type: searchParams.get('type'),
+      runStatus: searchParams.get('run_status'),
+      health: searchParams.get('health'),
+      labels: parseMultiValue(searchParams.get('labels')),
+      executionLabels: parseMultiValue(searchParams.get('execution_labels')),
+      abnormal: searchParams.get('abnormal') === '1',
+    }),
+    [searchParams],
+  )
+
+  const labelOptions = useMemo(
+    () =>
+      distinctSorted(targets.flatMap((target) => target.labels)).map((value) => ({
+        value,
+        label: value,
+      })),
+    [targets],
+  )
+
+  const executionLabelOptions = useMemo(
+    () =>
+      distinctSorted(targets.flatMap((target) => target.execution_node_labels)).map(
+        (value) => ({ value, label: value }),
+      ),
+    [targets],
+  )
+
+  const filteredTargets = useMemo(() => {
+    return targets.filter((target) => {
+      if (filterState.type && target.target_type !== filterState.type) return false
+      if (filterState.runStatus && target.run_status !== filterState.runStatus) return false
+      if (filterState.health && target.current_health_status !== filterState.health) return false
+      if (filterState.labels.length > 0) {
+        const hasAll = filterState.labels.every((label) => target.labels.includes(label))
+        if (!hasAll) return false
+      }
+      if (filterState.executionLabels.length > 0) {
+        const hasAll = filterState.executionLabels.every((label) =>
+          target.execution_node_labels.includes(label),
+        )
+        if (!hasAll) return false
+      }
+      if (filterState.abnormal && target.current_health_status === '正常') return false
+      return true
+    })
+  }, [targets, filterState])
+
+  const hasActiveFilters =
+    filterState.type !== null ||
+    filterState.runStatus !== null ||
+    filterState.health !== null ||
+    filterState.labels.length > 0 ||
+    filterState.executionLabels.length > 0 ||
+    filterState.abnormal
+
+  function updateSearchParam(key: string, value: string | null) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        if (value === null || value === '') {
+          next.delete(key)
+        } else {
+          next.set(key, value)
+        }
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  function setSingleFilter(key: 'type' | 'run_status' | 'health', value: string | null) {
+    updateSearchParam(key, value)
+  }
+
+  function setMultiFilter(key: 'labels' | 'execution_labels', values: string[]) {
+    updateSearchParam(key, values.length === 0 ? null : values.join(','))
+  }
+
+  function setAbnormalFilter(checked: boolean) {
+    updateSearchParam('abnormal', checked ? '1' : null)
+  }
+
+  function clearAllFilters() {
+    setSearchParams(new URLSearchParams(), { replace: true })
+  }
+
   if (loading) {
     return <section className="page-panel">正在加载目标列表…</section>
   }
@@ -590,14 +729,118 @@ export function TargetsPage() {
           </p>
         </div>
       ) : (
-        <div className="resource-table">
-          <div className="resource-table__head">
-            <span>目标</span>
-            <span>执行与状态</span>
-            <span>最近成功 / 失败</span>
-            <span>当前主问题</span>
-          </div>
-          {targets.map((target) => (
+        <>
+          <FilterBar
+            hasActiveFilters={hasActiveFilters}
+            onClearAll={clearAllFilters}
+            activeChips={
+              <>
+                {filterState.type ? (
+                  <FilterChip
+                    label={`类型: ${filterState.type}`}
+                    onRemove={() => setSingleFilter('type', null)}
+                  />
+                ) : null}
+                {filterState.runStatus ? (
+                  <FilterChip
+                    label={`运行状态: ${filterState.runStatus}`}
+                    onRemove={() => setSingleFilter('run_status', null)}
+                  />
+                ) : null}
+                {filterState.health ? (
+                  <FilterChip
+                    label={`健康状态: ${filterState.health}`}
+                    onRemove={() => setSingleFilter('health', null)}
+                  />
+                ) : null}
+                {filterState.labels.map((label) => (
+                  <FilterChip
+                    key={`label-${label}`}
+                    label={`标签: ${label}`}
+                    onRemove={() =>
+                      setMultiFilter(
+                        'labels',
+                        filterState.labels.filter((item) => item !== label),
+                      )
+                    }
+                  />
+                ))}
+                {filterState.executionLabels.map((label) => (
+                  <FilterChip
+                    key={`execution-${label}`}
+                    label={`执行节点标签: ${label}`}
+                    onRemove={() =>
+                      setMultiFilter(
+                        'execution_labels',
+                        filterState.executionLabels.filter((item) => item !== label),
+                      )
+                    }
+                  />
+                ))}
+                {filterState.abnormal ? (
+                  <FilterChip
+                    label="仅看异常"
+                    onRemove={() => setAbnormalFilter(false)}
+                  />
+                ) : null}
+              </>
+            }
+          >
+            <FilterSelect
+              label="类型"
+              value={filterState.type}
+              options={TARGET_TYPE_OPTIONS}
+              onChange={(value) => setSingleFilter('type', value)}
+            />
+            <FilterSelect
+              label="运行状态"
+              value={filterState.runStatus}
+              options={TARGET_RUN_STATUS_FILTER_OPTIONS}
+              onChange={(value) => setSingleFilter('run_status', value)}
+            />
+            <FilterSelect
+              label="健康状态"
+              value={filterState.health}
+              options={TARGET_HEALTH_STATUS_FILTER_OPTIONS}
+              onChange={(value) => setSingleFilter('health', value)}
+            />
+            <FilterMultiSelect
+              label="标签"
+              values={filterState.labels}
+              options={labelOptions}
+              onChange={(values) => setMultiFilter('labels', values)}
+            />
+            <FilterMultiSelect
+              label="执行节点标签"
+              values={filterState.executionLabels}
+              options={executionLabelOptions}
+              onChange={(values) => setMultiFilter('execution_labels', values)}
+            />
+            <FilterToggle
+              label="仅看异常"
+              checked={filterState.abnormal}
+              onChange={setAbnormalFilter}
+            />
+          </FilterBar>
+          {filteredTargets.length === 0 ? (
+            <div className="empty-state">
+              <h3>没有匹配当前筛选的目标</h3>
+              <p>请尝试调整筛选条件，或清空筛选恢复完整列表。</p>
+              <p>
+                <button type="button" onClick={clearAllFilters}>
+                  清空筛选
+                </button>
+              </p>
+            </div>
+          ) : (
+            <div className="resource-table">
+              <div className="resource-table__head">
+                <span>目标</span>
+                <span>执行与状态</span>
+                <span>最近成功 / 失败</span>
+                <span>当前主问题</span>
+              </div>
+              {filteredTargets.map((target) => (
             <article key={target.target_id} className="resource-table__row">
               <div>
                 <strong>{target.name}</strong>
@@ -732,8 +975,10 @@ export function TargetsPage() {
                 <p>{target.current_primary_issue_summary || '暂无明显异常'}</p>
               </div>
             </article>
-          ))}
-        </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </section>
   )

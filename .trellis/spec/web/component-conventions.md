@@ -29,6 +29,8 @@ pages/           ← 路由页装配点（拉数据、编排状态、组合组�
    ↑ 由 app/router.tsx 唯一注册
 components/      ← 跨页业务组合组件（IncidentList / EventList / DetailSection...）
    ↑ 受控、纯展示，不发请求
+components/filters/ ← 列表页筛选原语（FilterBar / FilterSelect / FilterMultiSelect / FilterToggle / FilterChip）
+   ↑ 业务无关、受控；样式落 components/filters/filters.css，由 main.tsx 集中引入
 components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / Mono...）
    ↑ 不感知任何业务类型，仅依赖 tokens.css / atoms.css
 ```
