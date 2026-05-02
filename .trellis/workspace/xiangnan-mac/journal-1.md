@@ -279,3 +279,37 @@ Reassessed 8 Closed (⚠️ need-reassess) UI rows. 5 verified + 3 Partial (Node
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Reassess gap-checklist Closed batch 4 (Delivery + Auth + V1.x visual) - workstream complete
+
+**Date**: 2026-05-02
+**Task**: Reassess gap-checklist Closed batch 4 (Delivery + Auth + V1.x visual) - workstream complete
+**Branch**: `main`
+
+### Summary
+
+FINAL batch 4 of 4 reassess. 17 rows (Delivery 5 + Auth 4 + V1.x visual 8) all Closed verified. V1.x visual rows include supersession note (implementations preserved by v2-houfeng reuse; v1.x docs archived). Cumulative 42 rows: 38 verified + 4 Partial. The 4 Partial rows are: NodesPage createNode bypass (gap #10) + Nodes list filters missing 5/7 + TargetsPage zero filter UI + EventsPage filter incompleteness. ROOT CAUSE LOCATED: user judgment '实现连 V0.1 都不到' is entirely from front-end list-page filter incompleteness, not backend / runtime / notifications / delivery / auth / visual.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dbdb383` | (see git log) |
+| `227537d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
