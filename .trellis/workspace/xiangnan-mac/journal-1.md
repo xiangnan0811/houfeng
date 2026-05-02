@@ -313,3 +313,37 @@ FINAL batch 4 of 4 reassess. 17 rows (Delivery 5 + Auth 4 + V1.x visual 8) all C
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: Reframe next-phase-plan + gap-checklist banner with reassess root cause
+
+**Date**: 2026-05-02
+**Task**: Reframe next-phase-plan + gap-checklist banner with reassess root cause
+**Branch**: `main`
+
+### Summary
+
+Captured gap-reassess workstream root-cause finding into next-phase-plan.md (new top-priority Stage 1 P0 work item 'Front-end list-page filter completion' + new Reassess findings section) and into v1-gap-checklist.md banner (L5/L7 replaced; banner now reflects reassess completion = 38 verified + 4 Partial = root cause = list-page filters). Sub-agent identified and fixed an internal banner inconsistency (L7 vs L5) mid-task. Stage 1 P0 list now leads with list-filter completion work.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ff1670` | (see git log) |
+| `4cbbed9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
