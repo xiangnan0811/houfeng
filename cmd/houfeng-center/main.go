@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -14,7 +15,7 @@ var version = "dev"
 func main() {
 	cfg, err := config.LoadCenterConfig()
 	if err != nil {
-		log.Fatalf("load center config: %v", err)
+		fatal("load center config", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -22,11 +23,16 @@ func main() {
 
 	app, cleanup, err := bootstrapCenter(ctx, cfg, version, bootstrapDeps{})
 	if err != nil {
-		log.Fatalf("bootstrap center: %v", err)
+		fatal("bootstrap center", err)
 	}
 	defer cleanup()
 
 	if err := app.Run(ctx); err != nil {
-		log.Fatalf("run center app: %v", err)
+		fatal("run center app", err)
 	}
+}
+
+func fatal(msg string, err error) {
+	slog.Error(msg, "error", err)
+	os.Exit(1)
 }
