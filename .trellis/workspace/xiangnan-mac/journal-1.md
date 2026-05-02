@@ -553,3 +553,37 @@ Stage 1 P1 docs sync: 4 caveats from 2026-05-02 V1 smoke now landed in canonical
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: Merge fetcher.ts into api.ts with single 401 hook (gap #9)
+
+**Date**: 2026-05-03
+**Task**: Merge fetcher.ts into api.ts with single 401 hook (gap #9)
+**Branch**: `main`
+
+### Summary
+
+gap #9 closed. Single fetch wrapper (api.ts) consumed by both auth and business. AuthError class deleted; auth-client uses ApiError && status===401. auth-context now registers single 401 hook that actually fires for business calls (previously the api hook was dead because auth-context only set the fetcher hook). 2 files deleted (fetcher.ts/test). verify-web all green (284 tests).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2a61c80` | (see git log) |
+| `b354f3f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
