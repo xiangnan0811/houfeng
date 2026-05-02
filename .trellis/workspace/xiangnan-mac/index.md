@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
+- **Total Sessions**: 4
 - **Last Active**: 2026-05-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~108 | Active |
+| `journal-1.md` | ~142 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-05-02 | T2 roadmap + CLAUDE.md/README revision; docs-roadmap workstream complete | `d23071f`, `5927994` | `main` |
 | 3 | 2026-05-02 | T3 spec-sync: align spec authority + merge V1 gap items | `103b23d`, `64d7a87` | `main` |
 | 2 | 2026-05-02 | Docs audit + T1 archive (V1 收口 stage) | `9e8c3c0`, `882d89c` | `main` |
 | 1 | 2026-05-02 | Bootstrap trellis: backend & web spec | `aed6a65` | `main` |

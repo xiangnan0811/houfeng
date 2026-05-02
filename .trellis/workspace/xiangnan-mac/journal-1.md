@@ -106,3 +106,37 @@ Completed T3: replaced authority-source line in 11 .trellis/spec/*.md (5 backend
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: T2 roadmap + CLAUDE.md/README revision; docs-roadmap workstream complete
+
+**Date**: 2026-05-02
+**Task**: T2 roadmap + CLAUDE.md/README revision; docs-roadmap workstream complete
+**Branch**: `main`
+
+### Summary
+
+Completed T2 (roadmap-and-claude-md): drafted docs/release/next-phase-plan.md (131 lines, mid-grain Stage 1 V1 收口 with P0/P1/P2 + Stage 2/3 placeholders). Targeted-rewrote CLAUDE.md (3 sections + 8 minimal patches: worker count, handler list, subpackages, ProbeKind, visual authority -> v2-houfeng). Targeted-rewrote README.md (3 sections, 6 stale refs cleared). Minimal-patched v1-baseline/README.md (Line 35 frozen-completion wording softened + doc-nav archive note). Also archived parent docs-roadmap (3 children all done). docs-roadmap workstream complete.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d23071f` | (see git log) |
+| `5927994` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
