@@ -38,3 +38,37 @@ Replaced omc/superpowers with trellis. Filled .trellis/spec/ backend (5 files) a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Docs audit + T1 archive (V1 收口 stage)
+
+**Date**: 2026-05-02
+**Task**: Docs audit + T1 archive (V1 收口 stage)
+**Branch**: `main`
+
+### Summary
+
+Started docs-roadmap parent (Stage 1/2/3 framing, V1 收口 direction, V1 != MVP) + scaffolded 3 children (T1 docs-audit-cleanup, T2 roadmap-and-claude-md, T3 spec-sync). Completed T1: 82 files git mv to docs/_archive/<mirror>/, audit report 320 lines, D-class unintended links 0. Accumulated for follow-ups: README.md 6 stale refs (T2), gap-checklist Closed status severely outdated since user判定 实现连 V0.1 都不到 (T3).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e8c3c0` | (see git log) |
+| `882d89c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
