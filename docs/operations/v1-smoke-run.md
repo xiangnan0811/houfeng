@@ -237,6 +237,86 @@ Open `http://127.0.0.1:8080/` and check:
 | Telegram notification sent or intentionally disabled | Manual / Telegram required | Telegram env vars were intentionally empty for this smoke; outbound Telegram delivery was not attempted |
 | primary UI pages checked | Manual | Not checked in browser during this live PostgreSQL run; screenshot/visual evidence remains tracked in `docs/operations/v1-visual-verification.md` |
 
+### 2026-05-02 Run Evidence
+
+| Check | Evidence level | Result field |
+| --- | --- | --- |
+| `go test ./...` / `./scripts/verify.sh` | Automated | Not re-run in this smoke (black-box validation only); see 2026-04-29 row above |
+| center starts and `/api/healthz` returns 200 | Local PostgreSQL required | Pre-existing center process at `localhost:8080`: `{"name":"houfeng-center","version":"dev","status":"ok"}` |
+| Login (acquire session cookie) | Local PostgreSQL required | `POST /api/auth/login` admin/Houfeng@123*: HTTP 200, cookie `houfeng_session`, `user_id=usr_8ca5360bcc10195ccff02f58` |
+| Node created | Local PostgreSQL required | `node_id=nd_cc1c47a6803a648c`, `display_name=smoke-node-20260502T152318Z`, created `2026-05-02T23:23:26+08:00` |
+| enrollment token issued | Local PostgreSQL required | `POST /api/nodes/<id>/enrollment-token` returned `{"token":"enroll_c7a01127341509ae", ...}` (response key is `token`, not `plaintext_token`) |
+| agent enrolls and syncs | Local PostgreSQL required (PARTIAL) | Agent PID `42347` enrolled at `2026-05-02T23:23:46+08:00`, `binding_status=已绑定`, sync heartbeat OK; host sample collection FAILED on macOS (`/proc/loadavg` not found) — Linux deploy target unaffected |
+| Target created | Local PostgreSQL required | `target_id=tg_5742021c60d2cff1`, host `127.0.0.1:8080`, created `2026-05-02T23:25:25+08:00` |
+| ProbeItem created | Local PostgreSQL required | `probe_item_id=pb_3bcefcd290adb5f8`, `probe_kind=http`, `frequency_tier=1m`, path `/api/healthz` |
+| observations received | Local PostgreSQL required | First observation `2026-05-02T23:26:16+08:00`, `result_kind=success`, `http_status=200`, `latency_ms=1` |
+| incident started | Local PostgreSQL required | `incident_id=inc_target_tg_5742021c60d2cff1_target_probe_failure`, started event `evt_18584acd91cc1236` (severity 关注), escalation event `evt_5f3dbc952fb7a055` (severity 告警); ~3m25s wait from probe-path mutation to detection |
+| incident recovered | Local PostgreSQL required | Recovered event `evt_4a26540ab9b8afd0` at `2026-05-02T23:35:16+08:00`; ~2m05s wait from probe-path restore; active incident count back to 0 |
+| notification-backed event query checked | Local PostgreSQL / Telegram policy dependent | `notification_only=true` returned 3 rows (started/escalated/recovered); Telegram intentionally not configured |
+| Telegram notification sent or intentionally disabled | Manual / Telegram required | `telegram.token_present = false`; outbound delivery suppressed; notification records still persisted |
+| primary UI pages checked | Manual | INCONCLUSIVE: pre-running center process serves `/` as HTTP 404 (no `HOUFENG_WEB_DIST_DIR` set); SPA dev shell at `http://localhost:5173/` returns 200; backing JSON endpoints (`/api/dashboard`, `/api/nodes`, `/api/targets`, `/api/events`, `/api/incidents`) verified directly |
+
 ## Current session status
 
-Live PostgreSQL smoke was executed on 2026-04-29 against `192.168.100.192:5432/user_82Xkx5` with `HOUFENG_INCIDENT_SWEEP_INTERVAL=5s`. The center, agent enrollment/sync, target probe observation, incident start/recovery, notification-backed event query, `go test ./...`, `./scripts/verify.sh`, and `cd web && npm run build` passed. Telegram delivery and browser screenshot comparison remain separate evidence gaps because no Telegram credentials or screenshot capture were provided in this run.
+Most recent live PostgreSQL smoke: **2026-05-02** against
+`192.168.100.192:5432/houfeng` with the V1.x auth middleware in place
+(admin login successful → cookie reused for protected endpoints).
+End-to-end Step 1-2, 4-8 PASSED on first run; Step 3 (agent host sample)
+PARTIAL because the local box is macOS and `agent/hostsample` requires
+Linux `/proc/loadavg` (does not affect the systemd deploy target);
+Step 9 INCONCLUSIVE because the running center process has no
+`HOUFENG_WEB_DIST_DIR` set and serves SPA via the parallel vite dev
+server instead.
+
+Earlier 2026-04-29 run against `192.168.100.192:5432/user_82Xkx5`
+remains tracked in the legacy evidence table (above) for historical
+comparison.
+
+## 2026-05-02 Live PostgreSQL Smoke Run
+
+### Environment
+- DB: `192.168.100.192:5432/houfeng`
+- Center: pre-running `localhost:8080` (no `HOUFENG_WEB_DIST_DIR` set; SPA via vite :5173 instead)
+- Auth: admin / Houfeng@123*
+- Agent: built locally and run as background process (PID killed cleanly post-run)
+- Effective center settings: `incident_defaults.sweep_interval_seconds = 60`, `heartbeat_interval_seconds = 30`, `stale_threshold_intervals = 3`, `probe_frequency_defaults.http = 5m` (smoke ProbeItem overrides to `1m`), `notify_on_started/escalated/recovered = true`, `telegram.token_present = false`
+
+### Resource IDs
+- node_id: `nd_cc1c47a6803a648c` (`smoke-node-20260502T152318Z`)
+- target_id: `tg_5742021c60d2cff1` (`smoke-target-20260502T152318Z`, host `127.0.0.1:8080`)
+- probe_item_id: `pb_3bcefcd290adb5f8` (http GET `/api/healthz`, freq `1m`, timeout `3s`)
+- incident_id: `inc_target_tg_5742021c60d2cff1_target_probe_failure`
+- events: started `evt_18584acd91cc1236` / escalated `evt_5f3dbc952fb7a055` / recovered `evt_4a26540ab9b8afd0`
+
+### Timing
+- incident started detection: 3 min 25 s after probe-path mutation (`23:27:21` → `23:30:46`), consistent with 1m probe cadence + 60s sweep + 2-failure threshold
+- incident recovered detection: 2 min 5 s after probe-path restore (`23:33:11` → `23:35:16`)
+
+### Per-step result summary
+
+| Step | Status | Note |
+| --- | --- | --- |
+| 0. Login | PASS | session cookie reused for all protected calls |
+| 1. Create Node | PASS | initial `binding_status=未绑定`, `lifecycle_status=待接入` |
+| 2. Issue token | PASS | response key is `token`, not `plaintext_token` (see caveat below) |
+| 3. Enroll + run agent | PARTIAL | enroll/sync/plan delivery OK; macOS host-sample fails (Darwin lacks `/proc/loadavg`) |
+| 4. Create Target | PASS | self-probe target against running center |
+| 5. Add ProbeItem | PASS | first observation ~50s after creation |
+| 6. Trigger incident | PASS | `PUT` updates ProbeItem `config.path` to `/api/__nonexistent__`; full body required |
+| 7. Recover incident | PASS | restore `config.path=/api/healthz`; recovered event observed within 2m05s |
+| 8. Notification surface | PASS | 3 notification-backed events returned; delivery suppressed by missing Telegram config |
+| 9. UI checkpoints | INCONCLUSIVE | no headless browser; backing JSON endpoints verified directly |
+
+### Caveats / new findings (consider for v1-gap-checklist follow-ups)
+
+1. **`POST /api/nodes/{id}/enrollment-token` response key is `token`** (not `plaintext_token` as the Step-2 doc text suggests). Anyone scripting strictly against the doc will break on the first parse — Step-2 should clarify the actual key.
+2. **agent `agent/hostsample` requires Linux `/proc/loadavg`** — fails silently on macOS every 30s. The systemd deploy target is unaffected, but local-dev smoke on macOS cannot complete agent host-sample collection (`latest_host_sample` stays `null`, `has_host_sample=false`).
+3. **Center `/` returns HTTP 404 when `HOUFENG_WEB_DIST_DIR` is unset** — production deploys must set it; the smoke prerequisite section already exports it, but operators reusing a long-lived dev center must verify the env var or the Step-9 visual checks cannot be performed against the center process itself.
+4. **`GET /api/events` returns a bare JSON array, not `{items:[...]}`** — internal contract; if/when an envelope is introduced, all callers and any polling scripts written against the bare-array shape will break.
+
+### Cleanup state
+
+- Agent PID `42347` killed at `2026-05-02T23:35:51+08:00` (`agent runtime stopped` logged); `ps` confirms gone.
+- Smoke resources retained in PostgreSQL (tagged `20260502T152318Z` for cleanup): node, target, probe item, incident, three events.
+- Local files retained for forensics: `/tmp/houfeng-smoke-cookies.txt`, `/tmp/houfeng-smoke-vars.sh`, `/tmp/houfeng-agent-token-smoke`, `/tmp/houfeng-agent-smoke.log`, `/tmp/houfeng-agent-smoke/sync-buffer.json`.
+- No DB rows from prior runs were modified or deleted.
