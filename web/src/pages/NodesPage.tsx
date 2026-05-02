@@ -1,8 +1,15 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
+import {
+  FilterBar,
+  FilterChip,
+  FilterMultiSelect,
+  FilterSelect,
+  FilterToggle,
+} from '../components/filters'
 import {
   ApiError,
   enterNodeMaintenance,
@@ -16,6 +23,59 @@ import {
 import { formatDateTime, formatLabelList } from '../lib/format'
 import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { NodeRecord } from '../lib/types'
+
+const NODE_LIFECYCLE_FILTER_OPTIONS = [
+  { value: '待接入', label: '待接入' },
+  { value: '在用', label: '在用' },
+  { value: '观察中', label: '观察中' },
+  { value: '不续费', label: '不续费' },
+  { value: '已退役', label: '已退役' },
+] as const
+
+const NODE_RUN_STATUS_FILTER_OPTIONS = [
+  { value: '启用', label: '启用' },
+  { value: '暂停', label: '暂停' },
+  { value: '维护中', label: '维护中' },
+] as const
+
+const NODE_HEALTH_STATUS_FILTER_OPTIONS = [
+  { value: '正常', label: '正常' },
+  { value: '关注', label: '关注' },
+  { value: '告警', label: '告警' },
+  { value: '严重', label: '严重' },
+] as const
+
+type NodeFilterState = {
+  region: string | null
+  city: string | null
+  provider: string | null
+  lifecycle: string | null
+  runStatus: string | null
+  health: string | null
+  labels: string[]
+  abnormal: boolean
+}
+
+function parseMultiValue(value: string | null): string[] {
+  if (!value) return []
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function distinctSorted(values: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const value of values) {
+    if (!value) continue
+    if (!seen.has(value)) {
+      seen.add(value)
+      out.push(value)
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+}
 
 type CreateNodeInput = {
   display_name: string
@@ -143,6 +203,7 @@ function mergeNonMetadataNodeRecord(current: NodeRecord, updated: NodeRecord): N
 
 export function NodesPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [nodes, setNodes] = useState<NodeRecord[]>([])
   const [nodeListView, setNodeListView] = useState<NodeListView>('all')
   const [loading, setLoading] = useState(true)
@@ -353,6 +414,89 @@ export function NodesPage() {
     }
   }
 
+  const bindingConflictNodes = useMemo(
+    () => nodes.filter(isBindingConflictNode),
+    [nodes],
+  )
+  const baseNodes = nodeListView === 'binding-conflict' ? bindingConflictNodes : nodes
+
+  const filterState: NodeFilterState = useMemo(
+    () => ({
+      region: searchParams.get('region'),
+      city: searchParams.get('city'),
+      provider: searchParams.get('provider'),
+      lifecycle: searchParams.get('lifecycle'),
+      runStatus: searchParams.get('run_status'),
+      health: searchParams.get('health'),
+      labels: parseMultiValue(searchParams.get('labels')),
+      abnormal: searchParams.get('abnormal') === '1',
+    }),
+    [searchParams],
+  )
+
+  const regionOptions = useMemo(
+    () =>
+      distinctSorted(nodes.map((node) => node.region)).map((value) => ({
+        value,
+        label: value,
+      })),
+    [nodes],
+  )
+
+  const cityOptions = useMemo(
+    () =>
+      distinctSorted(nodes.map((node) => node.city)).map((value) => ({
+        value,
+        label: value,
+      })),
+    [nodes],
+  )
+
+  const providerOptions = useMemo(
+    () =>
+      distinctSorted(nodes.map((node) => node.provider)).map((value) => ({
+        value,
+        label: value,
+      })),
+    [nodes],
+  )
+
+  const labelOptions = useMemo(
+    () =>
+      distinctSorted(nodes.flatMap((node) => node.labels)).map((value) => ({
+        value,
+        label: value,
+      })),
+    [nodes],
+  )
+
+  const filteredNodes = useMemo(() => {
+    return baseNodes.filter((node) => {
+      if (filterState.region && node.region !== filterState.region) return false
+      if (filterState.city && node.city !== filterState.city) return false
+      if (filterState.provider && node.provider !== filterState.provider) return false
+      if (filterState.lifecycle && node.lifecycle_status !== filterState.lifecycle) return false
+      if (filterState.runStatus && node.monitoring_status !== filterState.runStatus) return false
+      if (filterState.health && node.current_health_status !== filterState.health) return false
+      if (filterState.labels.length > 0) {
+        const hasAll = filterState.labels.every((label) => node.labels.includes(label))
+        if (!hasAll) return false
+      }
+      if (filterState.abnormal && node.current_health_status === '正常') return false
+      return true
+    })
+  }, [baseNodes, filterState])
+
+  const hasActiveFilters =
+    filterState.region !== null ||
+    filterState.city !== null ||
+    filterState.provider !== null ||
+    filterState.lifecycle !== null ||
+    filterState.runStatus !== null ||
+    filterState.health !== null ||
+    filterState.labels.length > 0 ||
+    filterState.abnormal
+
   if (loading) {
     return <section className="page-panel">正在加载节点列表…</section>
   }
@@ -366,8 +510,39 @@ export function NodesPage() {
     )
   }
 
-  const bindingConflictNodes = nodes.filter(isBindingConflictNode)
-  const visibleNodes = nodeListView === 'binding-conflict' ? bindingConflictNodes : nodes
+  function updateSearchParam(key: string, value: string | null) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        if (value === null || value === '') {
+          next.delete(key)
+        } else {
+          next.set(key, value)
+        }
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  function setSingleFilter(
+    key: 'region' | 'city' | 'provider' | 'lifecycle' | 'run_status' | 'health',
+    value: string | null,
+  ) {
+    updateSearchParam(key, value)
+  }
+
+  function setMultiFilter(key: 'labels', values: string[]) {
+    updateSearchParam(key, values.length === 0 ? null : values.join(','))
+  }
+
+  function setAbnormalFilter(checked: boolean) {
+    updateSearchParam('abnormal', checked ? '1' : null)
+  }
+
+  function clearAllFilters() {
+    setSearchParams(new URLSearchParams(), { replace: true })
+  }
 
   return (
     <section className="page-stack">
@@ -501,7 +676,7 @@ export function NodesPage() {
         </div>
       </section>
 
-      {visibleNodes.length === 0 ? (
+      {baseNodes.length === 0 ? (
         <div className="empty-state">
           <h3>{nodeListView === 'binding-conflict' ? '没有绑定异常节点' : '暂无节点'}</h3>
           <p>
@@ -510,16 +685,137 @@ export function NodesPage() {
               : '请先创建第一个节点。'}
           </p>
         </div>
-      ) : null}
-
-      <div className="resource-table">
-        <div className="resource-table__head">
-          <span>节点</span>
-          <span>状态</span>
-          <span>最近心跳 / 同步</span>
-          <span>当前主问题</span>
-        </div>
-        {visibleNodes.map((node) => (
+      ) : (
+        <>
+          <FilterBar
+            hasActiveFilters={hasActiveFilters}
+            onClearAll={clearAllFilters}
+            activeChips={
+              <>
+                {filterState.region ? (
+                  <FilterChip
+                    label={`地区: ${filterState.region}`}
+                    onRemove={() => setSingleFilter('region', null)}
+                  />
+                ) : null}
+                {filterState.city ? (
+                  <FilterChip
+                    label={`城市: ${filterState.city}`}
+                    onRemove={() => setSingleFilter('city', null)}
+                  />
+                ) : null}
+                {filterState.provider ? (
+                  <FilterChip
+                    label={`供应商: ${filterState.provider}`}
+                    onRemove={() => setSingleFilter('provider', null)}
+                  />
+                ) : null}
+                {filterState.lifecycle ? (
+                  <FilterChip
+                    label={`生命周期: ${filterState.lifecycle}`}
+                    onRemove={() => setSingleFilter('lifecycle', null)}
+                  />
+                ) : null}
+                {filterState.runStatus ? (
+                  <FilterChip
+                    label={`运行状态: ${filterState.runStatus}`}
+                    onRemove={() => setSingleFilter('run_status', null)}
+                  />
+                ) : null}
+                {filterState.health ? (
+                  <FilterChip
+                    label={`健康状态: ${filterState.health}`}
+                    onRemove={() => setSingleFilter('health', null)}
+                  />
+                ) : null}
+                {filterState.labels.map((label) => (
+                  <FilterChip
+                    key={`label-${label}`}
+                    label={`标签: ${label}`}
+                    onRemove={() =>
+                      setMultiFilter(
+                        'labels',
+                        filterState.labels.filter((item) => item !== label),
+                      )
+                    }
+                  />
+                ))}
+                {filterState.abnormal ? (
+                  <FilterChip
+                    label="仅看异常"
+                    onRemove={() => setAbnormalFilter(false)}
+                  />
+                ) : null}
+              </>
+            }
+          >
+            <FilterSelect
+              label="地区"
+              value={filterState.region}
+              options={regionOptions}
+              onChange={(value) => setSingleFilter('region', value)}
+            />
+            <FilterSelect
+              label="城市"
+              value={filterState.city}
+              options={cityOptions}
+              onChange={(value) => setSingleFilter('city', value)}
+            />
+            <FilterSelect
+              label="供应商"
+              value={filterState.provider}
+              options={providerOptions}
+              onChange={(value) => setSingleFilter('provider', value)}
+            />
+            <FilterSelect
+              label="生命周期"
+              value={filterState.lifecycle}
+              options={NODE_LIFECYCLE_FILTER_OPTIONS}
+              onChange={(value) => setSingleFilter('lifecycle', value)}
+            />
+            <FilterSelect
+              label="运行状态"
+              value={filterState.runStatus}
+              options={NODE_RUN_STATUS_FILTER_OPTIONS}
+              onChange={(value) => setSingleFilter('run_status', value)}
+            />
+            <FilterSelect
+              label="健康状态"
+              value={filterState.health}
+              options={NODE_HEALTH_STATUS_FILTER_OPTIONS}
+              onChange={(value) => setSingleFilter('health', value)}
+            />
+            <FilterMultiSelect
+              label="标签"
+              values={filterState.labels}
+              options={labelOptions}
+              onChange={(values) => setMultiFilter('labels', values)}
+            />
+            <FilterToggle
+              label="仅看异常"
+              checked={filterState.abnormal}
+              onChange={setAbnormalFilter}
+            />
+          </FilterBar>
+          {filteredNodes.length === 0 ? (
+            <div className="empty-state">
+              <h3>没有匹配当前筛选的节点</h3>
+              <p>请尝试调整筛选条件，或清空筛选恢复完整列表。</p>
+              <p>
+                <button type="button" onClick={clearAllFilters}>
+                  清空筛选
+                </button>
+              </p>
+            </div>
+          ) : (
+            <div className="resource-table">
+              <div className="resource-table__head">
+                <span>节点</span>
+                <span>状态</span>
+                <span>最近心跳 / 同步</span>
+                <span>当前主问题</span>
+              </div>
+              {filteredNodes.map((node) => (
           <article key={node.node_id} className="resource-table__row">
             <div>
               <strong>
@@ -664,8 +960,11 @@ export function NodesPage() {
               </p>
             </div>
           </article>
-        ))}
-      </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </section>
   )
 }

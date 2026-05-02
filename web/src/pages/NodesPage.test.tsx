@@ -100,7 +100,7 @@ describe('NodesPage', () => {
       expect(screen.getByRole('button', { name: '新建节点' })).toBeInTheDocument(),
     )
 
-    expect(screen.getAllByText('节点').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
     expect(screen.getAllByText('列表视图').length).toBeGreaterThanOrEqual(2)
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
@@ -995,6 +995,94 @@ describe('NodesPage', () => {
       expect(within(tokyoRow!).getByRole('alert')).toHaveTextContent('metadata write failed'),
     )
     expect(within(seoulRow!).queryByRole('textbox', { name: '标签' })).not.toBeInTheDocument()
+  })
+
+  it('filters the list by lifecycle via the FilterBar select', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_active',
+            display_name: 'Tokyo Edge',
+            lifecycle_status: '在用',
+          }),
+          nodeRecord({
+            node_id: 'nd_pending',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            lifecycle_status: '待接入',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+    expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('生命周期'), { target: { value: '在用' } })
+
+    await waitFor(() =>
+      expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
+    expect(screen.getByText('生命周期: 在用')).toBeInTheDocument()
+  })
+
+  it('toggles "仅看异常" and clears all filters via FilterBar', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_normal',
+            display_name: 'Healthy Edge',
+            current_health_status: '正常',
+          }),
+          nodeRecord({
+            node_id: 'nd_alert',
+            display_name: 'Alerting Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            current_health_status: '告警',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('switch', { name: '仅看异常' }))
+
+    await waitFor(() =>
+      expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '移除筛选 仅看异常' }),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '清空所有' }))
+
+    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
+    expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
   })
 
 })
