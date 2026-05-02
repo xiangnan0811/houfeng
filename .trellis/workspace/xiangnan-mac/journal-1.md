@@ -587,3 +587,37 @@ gap #9 closed. Single fetch wrapper (api.ts) consumed by both auth and business.
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: Split NodeDetailPage into 5 section components (gap #11 phase 1)
+
+**Date**: 2026-05-03
+**Task**: Split NodeDetailPage into 5 section components (gap #11 phase 1)
+**Branch**: `main`
+
+### Summary
+
+gap #11 phase 1: NodeDetailPage 1138 -> 868 (-270 lines, -23.7%) by extracting 5 sections (NodeHero / NodeStatusSummary / NodeLabelsAndNote / NodeHostMetrics / NodeTrendCards) into web/src/components/node-detail/. Page state / API / handlers / refs all preserved (orchestrator pattern). 296 tests pass (was 284, +12). Binding-conflict / runtime-controls / lifecycle deferred to phase 1.2 (state interlock too high). TargetDetailPage 1731-line split is gap #11 phase 2, deferred to Stage 2 per next-phase-plan.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `337034f` | (see git log) |
+| `8b765c9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
