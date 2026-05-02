@@ -26,6 +26,12 @@
 
 #### P0（阻塞 V1 收口）
 
+- **Front-end list-page filter completion** (root cause of user judgment 实现连 V0.1 都不到)：补齐 3 个 list page 的筛选功能
+  - NodesPage：补 §6.3 的 5 项缺失筛选（生命周期 / 供应商 / 地区 / 标签 / 健康，仅"仅看异常 / 运行状态" 2 toggle 已就位）
+  - TargetsPage：从零补齐 §6.4 的 6 项筛选条（当前列表是只读表）
+  - EventsPage：补 §10.9 的剩余筛选（含 backfill boolean / 时间 segmented / 时间分组 / 加载更早分页）
+  - 拆 3 个 follow-up task 推进
+
 - **重审 gap-checklist 42 个 Closed 行的真实状态**
   - 当前 Closed 标记带 `(⚠️ need-reassess)`，需逐行现场验证（跑相关代码 + 看是否真的满足设计意图，不是字面 import 通过即算 Closed）
   - 建议拆 1-2 个独立 follow-up task，按 area（产品/对象模型/运行时/UI/通知/交付/Auth/V1.x 视觉）分批
@@ -123,6 +129,19 @@
 - **本文档** ↔ `docs/design/v1-baseline/{architecture-data-model, rules-and-interaction, tech-selection, interactive-prototype-and-operation-flow}.md`：V1 业务 frozen 子集，本文档不重述、不修改
 - **本文档** ↔ `docs/design/v2-houfeng/{design-language, component-spec}.md`：v2 视觉权威，本文档不修改、不复述其约束
 - **本文档** ↔ `docs/operations/v1-smoke-run.md`：真实环境冒烟脚本，本文档把它指定为 V1 release gate 的核心证据
+
+## Reassess findings (2026-05-02)
+
+gap-checklist 42 个 Closed (⚠️ need-reassess) 行已全部现场验证完成（拆 4 batch task）：
+- 38 行 → Closed (verified 2026-05-02)：foundational + runtime + notification + delivery + auth + visual 系统全部对齐 v1-baseline 设计
+- 4 行 → Partial (was Closed)：全部聚焦在前端，已具体定位
+  - NodesPage createNode bypass lib/api.ts (gap #10)
+  - NodesPage 列表筛选缺 5/7 项
+  - TargetsPage 完全无筛选条
+  - EventsPage 高级筛选缺 4 项
+- 0 行 Not Closed / 0 Inconclusive
+
+**关键洞察**：用户判定"实现连 V0.1 都不到"的实证根因 = 前端 list-page 筛选完成度，**不是**后端 / 运行时 / 通知 / 部署 / 认证 / 视觉系统。Stage 1 收口因此应优先解决 list-page filter 工作项。
 
 ## 变更日志
 

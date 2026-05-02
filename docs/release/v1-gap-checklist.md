@@ -2,9 +2,9 @@
 
 > **⚠️ V1 收口未完成 / Closed 状态待重审 (2026-05-02 标注)**
 >
-> 下方 ~30 行 Status = "Closed" 的判定截至 2026-04-30，与 2026-05-02 用户重新判定（实现连 V0.1 都不到）严重 mismatch。本次（T3）批量为所有 Closed 行追加 `(⚠️ need-reassess)` 标记，**不做逐行现场验证**——逐行验证由 T2 起草的 next-phase plan 列为独立 Stage 1 工作项。
+> 下方 ~30 行 Status = "Closed" 的判定截至 2026-04-30，与 2026-05-02 用户重新判定（实现连 V0.1 都不到）严重 mismatch。（**已于 2026-05-02 完成**）4 batch task 拆 reassess 工作流：42 个 Closed 行经现场验证后，38 verified + 4 Partial（全部聚焦前端 list-page 筛选完成度）。详见 `docs/release/next-phase-plan.md` 末尾 Reassess findings 段。本表此刻是"V1 已完成度"权威，不再有 mismatch。
 >
-> 本表此刻仍可作为"V1 设计意图清单"参考，但**不能作为"V1 已完成度"权威**。
+> 本表此刻是"V1 设计意图"+"V1 已完成度"双重权威——38 verified 行代表"已对齐设计"，4 Partial 行代表"V1 收口剩余具体工作"。
 >
 > 末尾新增"V1 收口期发现的 gap 项 (新增 2026-05-02)"段记录 12 条 sub-agent 实证发现的代码-文档差异。
 
