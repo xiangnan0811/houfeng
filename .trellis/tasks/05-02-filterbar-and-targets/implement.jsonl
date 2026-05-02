@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "新组件命名 / props 风格 / 文件组织"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "filters.css 风格 / 设计令牌使用 / accent chip 视觉"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "URL query string + client-side filter 状态管理决策"}
