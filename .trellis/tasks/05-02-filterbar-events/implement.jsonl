@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "FilterBar 模式复用 + Tabs 复用"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "现有 useState 模式保持"}
