@@ -33,7 +33,7 @@
 
 - **解决 12 条新 gap 中的 P0 项**
   - **gap #12**：`make verify-web` 加 `npm run lint`（CI 当前抓不到 lint 失败的潜在风险，改造成本极低）
-  - **gap #3**：`db/migrations/` 0004 序号撞车修正（两份 0004 文件依赖字典序兼容；约定下一序号从 0011 起，避免再撞）
+  - **gap #3**：约定下次 migration 序号从 0011 起（0004 撞车文件**不动**——`schema_migrations` 用文件名作主键，rename 会破坏已部署环境；约定已落入 `.trellis/spec/backend/database-guidelines.md`）
   - **gap #7**：`cmd/houfeng-center/main.go` stdlib `"log"` → `slog`（与全仓 `slog` 一致）
 
 - **真实环境冒烟 V1 完整路径**

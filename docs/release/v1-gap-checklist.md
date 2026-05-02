@@ -145,7 +145,7 @@ Before tagging or declaring V1 fully release-ready, collect:
 |---|---|---|
 | 1 | CLAUDE.md handler 清单缺 `auth.go` 与 `metadata.go`，但代码均存在 | `internal/center/http/handlers/{auth.go, metadata.go}` + `router.go:35-69` 注册 `/api/auth/*` |
 | 2 | CLAUDE.md 子包清单未提 `internal/center/auth/` | 实际包含用户/会话/cookie/cleanup worker，配 0010 migration |
-| 3 | `db/migrations/` 0004 序号撞车 | `0004_add_node_onboarding_binding_state.sql` + `0004_add_observation_provenance.sql` 两份；migrate.Apply 字典序兼容，但下一序号应从 0011 起 |
+| 3 | `db/migrations/` 0004 序号撞车（**已确认无法 rename**） | `0004_add_node_onboarding_binding_state.sql` + `0004_add_observation_provenance.sql` 两份。`internal/center/store/migrate/migrate.go:16-19` 显示 `schema_migrations` 用文件名作主键，rename 会让已部署环境 re-apply 失败导致中心启动崩溃。**约定下次 migration 序号从 0011 起**（已落入 `.trellis/spec/backend/database-guidelines.md`）。字典序兼容现状不动 |
 | 4 | `0010_add_users_and_sessions.sql` 索引命名不遵循 `idx_<table>_<purpose>` 规则 | `sessions_user_idx` / `sessions_expires_idx`，与其他迁移不一致 |
 | 5 | bootstrap 实际 wire 了 3 个 worker（含 `sessionCleanup`），CLAUDE.md 只列 2 个 | `cmd/houfeng-center/bootstrap.go:146` + `bootstrap_test.go:152` 已断言 `len(workers)==3` |
 | 6 | `agentapi.ProbeKind*` 只有 `tcp/http/tls` 三常量，CLAUDE.md 列了 4 种 | `internal/contracts/agentapi/types.go:30-34`；`https` 走 http+配置区分 |
