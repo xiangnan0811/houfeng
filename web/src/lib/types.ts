@@ -41,6 +41,15 @@ export type UpdateNodeMetadataInput = {
   note: string
 }
 
+export type CreateNodeInput = {
+  display_name: string
+  region: string
+  city: string
+  provider: string
+  labels: string[]
+  note: string
+}
+
 export type NodeOnboardingState = NodeRecord & {
   phase: OnboardingPhase
   has_host_sample: boolean

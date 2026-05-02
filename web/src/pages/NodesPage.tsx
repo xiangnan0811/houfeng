@@ -12,6 +12,7 @@ import {
 } from '../components/filters'
 import {
   ApiError,
+  createNode,
   enterNodeMaintenance,
   exitNodeMaintenance,
   issueNodeEnrollmentToken,
@@ -22,7 +23,7 @@ import {
 } from '../lib/api'
 import { formatDateTime, formatLabelList } from '../lib/format'
 import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
-import type { NodeRecord } from '../lib/types'
+import type { CreateNodeInput, NodeRecord } from '../lib/types'
 
 const NODE_LIFECYCLE_FILTER_OPTIONS = [
   { value: '待接入', label: '待接入' },
@@ -77,15 +78,6 @@ function distinctSorted(values: string[]): string[] {
   return out.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
 }
 
-type CreateNodeInput = {
-  display_name: string
-  region: string
-  city: string
-  provider: string
-  labels: string[]
-  note: string
-}
-
 const initialCreateForm: CreateNodeInput = {
   display_name: '',
   region: '',
@@ -114,38 +106,6 @@ function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
-}
-
-async function createNode(input: CreateNodeInput) {
-  const response = await fetch('/api/nodes', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    cache: 'no-store',
-    credentials: 'include',
-    body: JSON.stringify({
-      ...input,
-      lifecycle_status: '待接入',
-    }),
-  })
-
-  if (!response.ok) {
-    let message = `请求失败：状态码 ${response.status}`
-    const rawBody = await response.text()
-    if (rawBody.trim()) {
-      try {
-        const errorBody = JSON.parse(rawBody) as { error?: string; message?: string }
-        message = errorBody.error ?? errorBody.message ?? rawBody
-      } catch {
-        message = rawBody
-      }
-    }
-    throw new ApiError(response.status, message)
-  }
-
-  return (await response.json()) as NodeRecord
 }
 
 function parseLabels(value: string) {

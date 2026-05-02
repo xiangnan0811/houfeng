@@ -274,7 +274,7 @@ describe('NodesPage', () => {
     expect(getOnboardingTokenCache('nd_001')).toBeNull()
   })
 
-  it('uses Chinese-first fallback when node creation fails without an error body', async () => {
+  it('surfaces the shared API fallback message when node creation fails without an error body', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -304,8 +304,8 @@ describe('NodesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '创建并生成 Token' }))
 
-    await waitFor(() => expect(screen.getByText('请求失败：状态码 500')).toBeInTheDocument())
-    expect(screen.queryByText('Request failed: 500')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Request failed: 500')).toBeInTheDocument())
+    expect(screen.queryByText('请求失败：状态码 500')).not.toBeInTheDocument()
     expect(screen.queryByText('onboarding workspace')).not.toBeInTheDocument()
   })
 

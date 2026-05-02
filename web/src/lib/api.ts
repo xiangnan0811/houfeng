@@ -1,5 +1,6 @@
 import type {
   ActiveIncidentRecord,
+  CreateNodeInput,
   CreateProbeItemInput,
   CreateTargetInput,
   UpdateProbeItemInput,
@@ -132,6 +133,13 @@ function withQuery(
 
 export function listNodes() {
   return requestJSON<NodeRecord[]>('/api/nodes')
+}
+
+export function createNode(input: CreateNodeInput): Promise<NodeRecord> {
+  return postJSONBody<NodeRecord>('/api/nodes', {
+    ...input,
+    lifecycle_status: '待接入',
+  })
 }
 
 export function getNode(nodeId: string) {
