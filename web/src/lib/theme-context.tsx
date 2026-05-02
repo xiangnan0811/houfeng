@@ -54,6 +54,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- early-stage Provider+hook colocation; split when stable
 export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext)
   if (!ctx) throw new Error('useTheme must be inside <ThemeProvider>')
@@ -61,6 +62,7 @@ export function useTheme(): ThemeContextValue {
 }
 
 /** Like useTheme but returns null when no provider is present (test ergonomics). */
+// eslint-disable-next-line react-refresh/only-export-components -- early-stage Provider+hook colocation; split when stable
 export function useThemeOptional(): ThemeContextValue | null {
   return useContext(ThemeContext)
 }

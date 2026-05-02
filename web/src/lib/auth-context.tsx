@@ -25,6 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const drop = () => setUser(null)
     setUnauthorizedHandler(drop)
     setApiUnauthorizedHandler(drop)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial-load gate: setLoading(false) runs in async .finally() after refresh() resolves, not synchronously in effect body
     refresh().finally(() => setLoading(false))
     return () => {
       setUnauthorizedHandler(undefined)
@@ -45,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={{ user, loading, login, logout, refresh }}>{children}</Ctx.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- early-stage Provider+hook colocation; split when stable
 export function useAuth(): AuthValue {
   const v = useContext(Ctx)
   if (!v) throw new Error('useAuth must be inside <AuthProvider>')
