@@ -1,6 +1,6 @@
 # 前端开发规范
 
-> **权威来源**：本文件规则来自 `CLAUDE.md` + `docs/design/v1-baseline/`，如有冲突以前者为准。
+> **权威来源**：`CLAUDE.md` + 业务/结构以 `docs/design/v1-baseline/` frozen 子集（architecture-data-model / rules-and-interaction / tech-selection / interactive-prototype-and-operation-flow）为准，视觉以 `docs/design/v2-houfeng/`（design-language / component-spec）为准。冲突时以前述顺序为准。本项目处于初始开发阶段，规则会随代码演进调整。
 
 > 候风 / Houfeng Fleet Control Plane 前端（`web/`）开发的最佳实践。
 

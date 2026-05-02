@@ -1,5 +1,13 @@
 # Houfeng V1 Gap Checklist
 
+> **⚠️ V1 收口未完成 / Closed 状态待重审 (2026-05-02 标注)**
+>
+> 下方 ~30 行 Status = "Closed" 的判定截至 2026-04-30，与 2026-05-02 用户重新判定（实现连 V0.1 都不到）严重 mismatch。本次（T3）批量为所有 Closed 行追加 `(⚠️ need-reassess)` 标记，**不做逐行现场验证**——逐行验证由 T2 起草的 next-phase plan 列为独立 Stage 1 工作项。
+>
+> 本表此刻仍可作为"V1 设计意图清单"参考，但**不能作为"V1 已完成度"权威**。
+>
+> 末尾新增"V1 收口期发现的 gap 项 (新增 2026-05-02)"段记录 12 条 sub-agent 实证发现的代码-文档差异。
+
 ## Scope
 
 This checklist compares the implementation repository against the frozen V1 baseline. It does not revise the baseline.
@@ -14,73 +22,73 @@ Status values:
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Product naming is `候风 / Houfeng Fleet Control Plane` | Closed | `README.md`, binary names, design handoff |
-| Go center + Go agent + React/Vite + PostgreSQL | Closed | `go.mod`, `cmd/houfeng-center`, `cmd/houfeng-agent`, `web/package.json`, `db/migrations` |
-| Single center process owns API/UI/background workers/notifications | Closed | `cmd/houfeng-center/bootstrap.go` |
-| systemd agent direction documented | Closed | `docs/deploy/systemd/houfeng-agent.service` |
+| Product naming is `候风 / Houfeng Fleet Control Plane` | Closed (⚠️ need-reassess) | `README.md`, binary names, design handoff |
+| Go center + Go agent + React/Vite + PostgreSQL | Closed (⚠️ need-reassess) | `go.mod`, `cmd/houfeng-center`, `cmd/houfeng-agent`, `web/package.json`, `db/migrations` |
+| Single center process owns API/UI/background workers/notifications | Closed (⚠️ need-reassess) | `cmd/houfeng-center/bootstrap.go` |
+| systemd agent direction documented | Closed (⚠️ need-reassess) | `docs/deploy/systemd/houfeng-agent.service` |
 | Docker-first deployment | Deferred outside V1 | Frozen tech selection excludes Docker as required runtime |
 
 ## Core object model
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Node persistence and UI | Closed | `internal/center/store/nodes.go`, `web/src/pages/NodesPage.tsx` |
-| Target persistence and UI | Closed | `internal/center/store/targets.go`, `web/src/pages/TargetsPage.tsx` |
-| ProbeItem persistence and UI | Closed | `internal/center/store/targets.go`, `web/src/pages/TargetDetailPage.tsx` |
-| HostSample and ProbeObservation ingestion | Closed | `internal/center/observations`, `internal/center/syncing`, `agent/hostsample`, `agent/probe` |
-| Incident and Event model | Closed | `internal/center/incidents`, `internal/center/store/dashboard.go`, `web/src/pages/EventsPage.tsx` |
+| Node persistence and UI | Closed (⚠️ need-reassess) | `internal/center/store/nodes.go`, `web/src/pages/NodesPage.tsx` |
+| Target persistence and UI | Closed (⚠️ need-reassess) | `internal/center/store/targets.go`, `web/src/pages/TargetsPage.tsx` |
+| ProbeItem persistence and UI | Closed (⚠️ need-reassess) | `internal/center/store/targets.go`, `web/src/pages/TargetDetailPage.tsx` |
+| HostSample and ProbeObservation ingestion | Closed (⚠️ need-reassess) | `internal/center/observations`, `internal/center/syncing`, `agent/hostsample`, `agent/probe` |
+| Incident and Event model | Closed (⚠️ need-reassess) | `internal/center/incidents`, `internal/center/store/dashboard.go`, `web/src/pages/EventsPage.tsx` |
 
 ## Runtime behavior
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Node enrollment and binding state | Closed | `internal/center/enrollment`, `web/src/pages/NodeOnboardingPage.tsx` |
-| Agent durable sync buffer | Closed | `agent/syncqueue`, `agent/runtime/runtime.go` |
-| Node pause/maintenance/retire sync semantics | Closed | `internal/center/store/agent_plan.go`, runtime control tests |
-| Target pause/maintenance/archive semantics | Closed | `internal/center/http/handlers/runtime_controls.go`, target page tests |
-| Retention and daily aggregation execution | Closed | `internal/center/retention`, `internal/center/store/retention.go` |
-| Trend degradation incident families | Closed | `internal/center/incidents/evaluator.go` |
+| Node enrollment and binding state | Closed (⚠️ need-reassess) | `internal/center/enrollment`, `web/src/pages/NodeOnboardingPage.tsx` |
+| Agent durable sync buffer | Closed (⚠️ need-reassess) | `agent/syncqueue`, `agent/runtime/runtime.go` |
+| Node pause/maintenance/retire sync semantics | Closed (⚠️ need-reassess) | `internal/center/store/agent_plan.go`, runtime control tests |
+| Target pause/maintenance/archive semantics | Closed (⚠️ need-reassess) | `internal/center/http/handlers/runtime_controls.go`, target page tests |
+| Retention and daily aggregation execution | Closed (⚠️ need-reassess) | `internal/center/retention`, `internal/center/store/retention.go` |
+| Trend degradation incident families | Closed (⚠️ need-reassess) | `internal/center/incidents/evaluator.go` |
 
 ## UI and interaction surfaces
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Frozen app shell and primary navigation | Closed | Implementation-level shell hierarchy and routes are aligned in `web/src/app/layout/AppShell.tsx`, `web/src/app/router.tsx`, and `web/src/index.css`; screenshot evidence remains tracked separately |
-| Dashboard abnormal summaries and event stream | Closed | `web/src/pages/DashboardPage.tsx` |
-| Nodes list filters and onboarding entry | Closed | `web/src/pages/NodesPage.tsx`, `web/src/pages/NodeOnboardingPage.tsx` |
-| Node detail operational summary and trends | Closed | `web/src/pages/NodeDetailPage.tsx` |
-| Target list/detail and ProbeItem management | Closed | `web/src/pages/TargetsPage.tsx`, `web/src/pages/TargetDetailPage.tsx` |
-| Events advanced filters | Closed | `web/src/pages/EventsPage.tsx` |
-| Settings runtime truthfulness | Closed | `web/src/pages/SettingsPage.tsx`, `internal/center/settings` |
-| Chinese-first UI copy and dense baseline hierarchy | Closed | Alignment pass recorded in `docs/operations/v1-visual-verification.md`; frontend evidence in `web/src/app/layout/AppShell.tsx`, `web/src/components/ActionConfirmationCard.tsx`, `web/src/pages/DashboardPage.tsx`, `web/src/pages/NodesPage.tsx`, `web/src/pages/NodeDetailPage.tsx`, `web/src/pages/NodeOnboardingPage.tsx`, `web/src/pages/TargetsPage.tsx`, `web/src/pages/TargetDetailPage.tsx`, `web/src/pages/EventsPage.tsx`, and `web/src/pages/SettingsPage.tsx` |
+| Frozen app shell and primary navigation | Closed (⚠️ need-reassess) | Implementation-level shell hierarchy and routes are aligned in `web/src/app/layout/AppShell.tsx`, `web/src/app/router.tsx`, and `web/src/index.css`; screenshot evidence remains tracked separately |
+| Dashboard abnormal summaries and event stream | Closed (⚠️ need-reassess) | `web/src/pages/DashboardPage.tsx` |
+| Nodes list filters and onboarding entry | Closed (⚠️ need-reassess) | `web/src/pages/NodesPage.tsx`, `web/src/pages/NodeOnboardingPage.tsx` |
+| Node detail operational summary and trends | Closed (⚠️ need-reassess) | `web/src/pages/NodeDetailPage.tsx` |
+| Target list/detail and ProbeItem management | Closed (⚠️ need-reassess) | `web/src/pages/TargetsPage.tsx`, `web/src/pages/TargetDetailPage.tsx` |
+| Events advanced filters | Closed (⚠️ need-reassess) | `web/src/pages/EventsPage.tsx` |
+| Settings runtime truthfulness | Closed (⚠️ need-reassess) | `web/src/pages/SettingsPage.tsx`, `internal/center/settings` |
+| Chinese-first UI copy and dense baseline hierarchy | Closed (⚠️ need-reassess) | Alignment pass recorded in `docs/operations/v1-visual-verification.md`; frontend evidence in `web/src/app/layout/AppShell.tsx`, `web/src/components/ActionConfirmationCard.tsx`, `web/src/pages/DashboardPage.tsx`, `web/src/pages/NodesPage.tsx`, `web/src/pages/NodeDetailPage.tsx`, `web/src/pages/NodeOnboardingPage.tsx`, `web/src/pages/TargetsPage.tsx`, `web/src/pages/TargetDetailPage.tsx`, `web/src/pages/EventsPage.tsx`, and `web/src/pages/SettingsPage.tsx` |
 | Visual screenshot comparison against baseline PNGs | Partial | Live route screenshots were captured on 2026-04-29 under `docs/operations/visual-evidence/` and indexed by `docs/operations/visual-evidence/manifest.json`; strict visual-fidelity acceptance remains pending because the captures have not been accepted as high-fidelity matches to the frozen references |
 
 ## Notifications
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Telegram notifier implementation | Closed | `internal/center/notify/telegram.go` |
-| Settings-aware notification policy | Closed | `internal/center/incidents/service.go`, settings tests |
+| Telegram notifier implementation | Closed (⚠️ need-reassess) | `internal/center/notify/telegram.go` |
+| Settings-aware notification policy | Closed (⚠️ need-reassess) | `internal/center/incidents/service.go`, settings tests |
 | Live Telegram delivery evidence | Partial | Requires operator credentials; smoke guide records evidence path |
 
 ## Delivery and operations
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Local build/test verification path | Closed | `Makefile`, `scripts/verify.sh` |
-| systemd examples for center and agent | Closed | `docs/deploy/systemd/*.service` |
-| Deployment guide | Closed | `docs/deploy/local-and-systemd.md` |
-| Fresh-install smoke procedure | Closed | `docs/operations/v1-smoke-run.md` documents the reproducible Node → agent enrollment → Target → ProbeItem → observation → incident/event/notification path |
-| Fresh-install smoke executed on live PostgreSQL | Closed | `docs/operations/v1-smoke-run.md` records the 2026-04-29 live run against PostgreSQL `192.168.100.192:5432/user_82Xkx5`: center health, Node, agent enrollment/sync, Target, ProbeItem, observation, incident start/recovery, and notification-backed event query passed. Telegram delivery and browser screenshots remain separate evidence rows. |
+| Local build/test verification path | Closed (⚠️ need-reassess) | `Makefile`, `scripts/verify.sh` |
+| systemd examples for center and agent | Closed (⚠️ need-reassess) | `docs/deploy/systemd/*.service` |
+| Deployment guide | Closed (⚠️ need-reassess) | `docs/deploy/local-and-systemd.md` |
+| Fresh-install smoke procedure | Closed (⚠️ need-reassess) | `docs/operations/v1-smoke-run.md` documents the reproducible Node → agent enrollment → Target → ProbeItem → observation → incident/event/notification path |
+| Fresh-install smoke executed on live PostgreSQL | Closed (⚠️ need-reassess) | `docs/operations/v1-smoke-run.md` records the 2026-04-29 live run against PostgreSQL `192.168.100.192:5432/user_82Xkx5`: center health, Node, agent enrollment/sync, Target, ProbeItem, observation, incident start/recovery, and notification-backed event query passed. Telegram delivery and browser screenshots remain separate evidence rows. |
 
 ## Authentication (V1.x scope add)
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Username + password login (方案 2) | Closed | `internal/center/auth/`, `internal/center/store/users.go`, `internal/center/store/sessions.go`, migration `db/migrations/0010_add_users_and_sessions.sql` |
-| All non-agent / non-health API protected by session cookie | Closed | `internal/center/http/middleware.go`, `internal/center/http/router.go`, `internal/center/http/auth_e2e_test.go` |
-| Initial user seed from env on first startup | Closed | `internal/center/auth/seed.go`, `cmd/houfeng-center/bootstrap.go` |
-| Session cleanup worker | Closed | `internal/center/auth/cleanup.go`, wired in `cmd/houfeng-center/bootstrap.go` |
+| Username + password login (方案 2) | Closed (⚠️ need-reassess) | `internal/center/auth/`, `internal/center/store/users.go`, `internal/center/store/sessions.go`, migration `db/migrations/0010_add_users_and_sessions.sql` |
+| All non-agent / non-health API protected by session cookie | Closed (⚠️ need-reassess) | `internal/center/http/middleware.go`, `internal/center/http/router.go`, `internal/center/http/auth_e2e_test.go` |
+| Initial user seed from env on first startup | Closed (⚠️ need-reassess) | `internal/center/auth/seed.go`, `cmd/houfeng-center/bootstrap.go` |
+| Session cleanup worker | Closed (⚠️ need-reassess) | `internal/center/auth/cleanup.go`, wired in `cmd/houfeng-center/bootstrap.go` |
 
 ## V1.x visual baseline (replaces frozen V1 visual portion)
 
@@ -92,14 +100,14 @@ authoritative.
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| 4-theme token system (候风原色 / 经典 × 深 / 浅) | Closed | `web/src/styles/tokens.css`, `web/src/lib/theme.ts`, `web/src/lib/theme-context.tsx` |
-| FOUC-free sync theme bootstrap | Closed | inline script in `web/index.html` |
-| 6 component atoms with tests | Closed | `web/src/components/atoms/*` |
-| Sidebar shell with user chip + sync status | Closed | `web/src/app/layout/Sidebar.tsx`, `UserChip.tsx`, `SyncStatus.tsx` |
-| Login page with backend auth (方案 2) | Closed | `web/src/pages/LoginPage.tsx`, Plan 1 backend |
-| Route guard + 401 redirect | Closed | `web/src/app/RequireAuth.tsx`, `web/src/lib/auth-context.tsx` |
-| Token-driven page chrome (8 pages) | Closed | `web/src/styles/pages.css` re-skins every page class through V1.x tokens |
-| Theme tab inside Settings | Closed | `ThemeSettingsSection` block in `web/src/pages/SettingsPage.tsx` |
+| 4-theme token system (候风原色 / 经典 × 深 / 浅) | Closed (⚠️ need-reassess) | `web/src/styles/tokens.css`, `web/src/lib/theme.ts`, `web/src/lib/theme-context.tsx` |
+| FOUC-free sync theme bootstrap | Closed (⚠️ need-reassess) | inline script in `web/index.html` |
+| 6 component atoms with tests | Closed (⚠️ need-reassess) | `web/src/components/atoms/*` |
+| Sidebar shell with user chip + sync status | Closed (⚠️ need-reassess) | `web/src/app/layout/Sidebar.tsx`, `UserChip.tsx`, `SyncStatus.tsx` |
+| Login page with backend auth (方案 2) | Closed (⚠️ need-reassess) | `web/src/pages/LoginPage.tsx`, Plan 1 backend |
+| Route guard + 401 redirect | Closed (⚠️ need-reassess) | `web/src/app/RequireAuth.tsx`, `web/src/lib/auth-context.tsx` |
+| Token-driven page chrome (8 pages) | Closed (⚠️ need-reassess) | `web/src/styles/pages.css` re-skins every page class through V1.x tokens |
+| Theme tab inside Settings | Closed (⚠️ need-reassess) | `ThemeSettingsSection` block in `web/src/pages/SettingsPage.tsx` |
 | Page-level redesign per spec §10 (身份卡, 5 Tab, 危险区, 趋势条) | Deferred — follow-up | Tracked as V1.x.1; current pages keep their pre-V1.x layouts under the new shell + tokens |
 | Visual evidence (4 themes × representative pages) | Deferred — follow-up | Operations work; legacy V1 captures preserved under `docs/operations/visual-evidence/` |
 | WCAG AA contrast verified per theme | Deferred — follow-up | Manual smoke pending |
@@ -124,3 +132,31 @@ Before tagging or declaring V1 fully release-ready, collect:
 - v2 不动后端 / 数据形状 / API / 路由 / 主题切换逻辑
 - 实施完工证据：259 web tests 全绿、`npm run build` 通过、CSS 41KB（v1=28KB，+47%）
 - 已知遗留：`agent/runtime` 的 `TestRuntimeQueuesFailedSyncAndRetriesAsBackfilled` / `TestRuntimeFlushesPersistedQueueAfterRestart` 在 main HEAD baseline 上同样失败，与 v2 重塑无关，须单独 issue 跟踪
+
+---
+
+## V1 收口期发现的 gap 项 (新增 2026-05-02)
+
+下列 gap 项由 2026-05-02 的 .trellis/spec/ bootstrap 任务（00-bootstrap-guidelines）的 sub-agent 在实证编写 spec 时累积发现。状态为新发现项的"待处理"，不计入上面 V1 release gate。
+
+### Backend (7 条)
+
+| # | 现象 | 证据 |
+|---|---|---|
+| 1 | CLAUDE.md handler 清单缺 `auth.go` 与 `metadata.go`，但代码均存在 | `internal/center/http/handlers/{auth.go, metadata.go}` + `router.go:35-69` 注册 `/api/auth/*` |
+| 2 | CLAUDE.md 子包清单未提 `internal/center/auth/` | 实际包含用户/会话/cookie/cleanup worker，配 0010 migration |
+| 3 | `db/migrations/` 0004 序号撞车 | `0004_add_node_onboarding_binding_state.sql` + `0004_add_observation_provenance.sql` 两份；migrate.Apply 字典序兼容，但下一序号应从 0011 起 |
+| 4 | `0010_add_users_and_sessions.sql` 索引命名不遵循 `idx_<table>_<purpose>` 规则 | `sessions_user_idx` / `sessions_expires_idx`，与其他迁移不一致 |
+| 5 | bootstrap 实际 wire 了 3 个 worker（含 `sessionCleanup`），CLAUDE.md 只列 2 个 | `cmd/houfeng-center/bootstrap.go:146` + `bootstrap_test.go:152` 已断言 `len(workers)==3` |
+| 6 | `agentapi.ProbeKind*` 只有 `tcp/http/tls` 三常量，CLAUDE.md 列了 4 种 | `internal/contracts/agentapi/types.go:30-34`；`https` 走 http+配置区分 |
+| 7 | `cmd/houfeng-center/main.go` 仍用 stdlib `"log"`，与全仓 `slog` 不一致 | 历史遗留 |
+
+### Web (5 条)
+
+| # | 现象 | 证据 |
+|---|---|---|
+| 8 | `web/src/components/atoms/` 子目录 CLAUDE.md 未提（事实上的设计系统原子落点） | `web/src/components/atoms/{Button, Input, Badge, Card, Tabs, Toggle, Sparkline, StatusGlyph}.tsx` 等 |
+| 9 | `web/src/lib/` 并存 `fetcher.ts`（auth）+ `api.ts`（业务）双 fetch 包装 + 双 401 钩子 | 历史遗留，可考虑合并 |
+| 10 | `pages/NodesPage.tsx:60` `createNode` 直接 `fetch('/api/nodes')` 绕 `lib/api.ts` | 已识别反模式偿还点 |
+| 11 | 多 page > 1000 行：`TargetDetailPage` 1731 / `NodeDetailPage` 1138 / `SettingsPage` 873 / `TargetsPage` 740 / `NodesPage` 671 | 技术债 |
+| 12 | `make verify-web` 不跑 `npm run lint`，CI 抓不到 lint 失败 | `Makefile:67`；潜在风险 |
