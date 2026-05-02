@@ -1,0 +1,30 @@
+{
+  "id": "docs-roadmap",
+  "name": "docs-roadmap",
+  "title": "Audit docs and plan next phase",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-mac",
+  "assignee": "xiangnan-mac",
+  "createdAt": "2026-05-02",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "05-02-docs-audit-cleanup",
+    "05-02-roadmap-and-claude-md",
+    "05-02-spec-sync"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
