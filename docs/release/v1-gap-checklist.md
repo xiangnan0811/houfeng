@@ -22,21 +22,21 @@ Status values:
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Product naming is `候风 / Houfeng Fleet Control Plane` | Closed (⚠️ need-reassess) | `README.md`, binary names, design handoff |
-| Go center + Go agent + React/Vite + PostgreSQL | Closed (⚠️ need-reassess) | `go.mod`, `cmd/houfeng-center`, `cmd/houfeng-agent`, `web/package.json`, `db/migrations` |
-| Single center process owns API/UI/background workers/notifications | Closed (⚠️ need-reassess) | `cmd/houfeng-center/bootstrap.go` |
-| systemd agent direction documented | Closed (⚠️ need-reassess) | `docs/deploy/systemd/houfeng-agent.service` |
+| Product naming is `候风 / Houfeng Fleet Control Plane` | Closed (verified 2026-05-02) | `README.md`, binary names, design handoff. **Reassessed 2026-05-02**: README.md L1+L3+L28、CLAUDE.md L7+L15、Makefile L4-L5（`CENTER_BIN := ./bin/houfeng-center`、`AGENT_BIN := ./bin/houfeng-agent`）三处命名完全一致；`cmd/houfeng-center/` 与 `cmd/houfeng-agent/` 目录均存在。 |
+| Go center + Go agent + React/Vite + PostgreSQL | Closed (verified 2026-05-02) | `go.mod`, `cmd/houfeng-center`, `cmd/houfeng-agent`, `web/package.json`, `db/migrations`. **Reassessed 2026-05-02**: `go.mod` 声明 `go 1.26.2` + `pgx/v5`；`cmd/houfeng-{center,agent}/main.go` 双入口存在；`web/package.json` 显示 React 19 + Vite 8 + Vitest 4；`db/migrations/` 含 11 个 SQL 文件 + `embed.go`。技术栈与基线 `tech-selection.md` 全部对齐。 |
+| Single center process owns API/UI/background workers/notifications | Closed (verified 2026-05-02) | `cmd/houfeng-center/bootstrap.go`. **Reassessed 2026-05-02**: `bootstrap.go:115-146` 在同一进程内 wire HTTP router（含 SPA via `WebDistDir`）+ 3 个 `app.Worker`（`incidentSvc` / `retentionWorker` / `sessionCleanup`，line 146）+ Telegram notifier（`newIncidentNotifier`，line 169-183）。`internal/center/app/app.go` 显示 worker 与 HTTP server 同进程并发执行。与设计 §3 "异常 / 健康状态 / 通知由单体内部后台处理" 一致。 |
+| systemd agent direction documented | Closed (verified 2026-05-02) | `docs/deploy/systemd/houfeng-agent.service`. **Reassessed 2026-05-02**: 单元文件包含 `[Unit]/[Service]/[Install]` 完整三段，含 `ExecStart=/usr/local/bin/houfeng-agent`、`EnvironmentFile`、`StateDirectory`、`Restart=always`、`NoNewPrivileges`/`ProtectHome`/`ProtectSystem` 等加固选项；center 侧 `houfeng-center.service` 同目录存在。 |
 | Docker-first deployment | Deferred outside V1 | Frozen tech selection excludes Docker as required runtime |
 
 ## Core object model
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Node persistence and UI | Closed (⚠️ need-reassess) | `internal/center/store/nodes.go`, `web/src/pages/NodesPage.tsx` |
-| Target persistence and UI | Closed (⚠️ need-reassess) | `internal/center/store/targets.go`, `web/src/pages/TargetsPage.tsx` |
-| ProbeItem persistence and UI | Closed (⚠️ need-reassess) | `internal/center/store/targets.go`, `web/src/pages/TargetDetailPage.tsx` |
-| HostSample and ProbeObservation ingestion | Closed (⚠️ need-reassess) | `internal/center/observations`, `internal/center/syncing`, `agent/hostsample`, `agent/probe` |
-| Incident and Event model | Closed (⚠️ need-reassess) | `internal/center/incidents`, `internal/center/store/dashboard.go`, `web/src/pages/EventsPage.tsx` |
+| Node persistence and UI | Partial (was Closed) | `internal/center/store/nodes.go`, `web/src/pages/NodesPage.tsx`. **Reassessed 2026-05-02**: 后端齐全——`store/nodes.go` 1285 行，覆盖 CRUD + 5 档生命周期状态机（待接入/在用/观察中/不续费/已退役 — `RetireNode` / `RestoreRetiredNodeToObserving` 等）+ 3 档监控状态（启用/维护中/暂停 — `SetNodeMonitoringMaintenance` / `PauseNodeMonitoring` / `ResumeNodeMonitoring`）+ 3 档绑定状态（`ConfirmNodeRebind` / `RejectPendingFingerprint` / `ResetNodeBinding`），与设计 §5.1-5.3 完全对齐。前端 `NodesPage.tsx` 671 行有筛选、创建表单、跳转 onboarding。**已知偏差**：第 138 段 gap #10 已记录 `NodesPage.tsx:60` `createNode` 直接 `fetch('/api/nodes')` 绕过 `lib/api.ts`（反模式偿还点）；本行降级 Partial 反映该已记录技术债，不影响功能。 |
+| Target persistence and UI | Closed (verified 2026-05-02) | `internal/center/store/targets.go`, `web/src/pages/TargetsPage.tsx`. **Reassessed 2026-05-02**: `store/targets.go` 700 行，覆盖 Target CRUD + 4 档运行状态机（启用/维护中/暂停/已归档 — `SetTargetMaintenance` / `PauseTargetRun` / `ResumeTargetRun` / `ArchiveTarget` / `RestoreArchivedTargetToPaused`），与设计 §5.4 完全对齐。`TargetsPage.tsx` 740 行含创建表单、ProbeItem 视角列表、暂停/归档 confirm UI；`TargetDetailPage.tsx` 1731 行处理详情页。 |
+| ProbeItem persistence and UI | Closed (verified 2026-05-02) | `internal/center/store/targets.go`, `web/src/pages/TargetDetailPage.tsx`. **Reassessed 2026-05-02**: `store/targets.go:566-685` 含 `ListProbeItems` / `CreateProbeItem` / `UpdateProbeItem` / `DeleteProbeItem` / `GetProbeMetadata`。`TargetDetailPage.tsx:12-25` import CRUD client 函数；表单支持 tcp/http/tls 三 kind（line 60-62 `PROBE_KIND_OPTIONS`），与 `agentapi.ProbeKind*` (`internal/contracts/agentapi/types.go:31-33`) 一致；含编辑 (`openProbeEditForm`)、删除、配置字段 schema 校验（`hasUnsupportedProbeConfigFields`）。 |
+| HostSample and ProbeObservation ingestion | Closed (verified 2026-05-02) | `internal/center/observations`, `internal/center/syncing`, `agent/hostsample`, `agent/probe`. **Reassessed 2026-05-02**: 端到端链路串通——`agent/hostsample/provider.go` (`Collect`) + `agent/probe/provider.go` (`CollectDue`，支持 tcp/http/tls 三 kind) → `agent/runtime/runtime.go:177-197` 构造 `SyncRequest` 并通过 `syncqueue` 缓冲后调 `/api/agent/sync` → `internal/center/http/handlers/agent.go:81` 调 `syncing.Service.SyncBatch` → `syncing/service.go:54` 写仓库并触发 `PostSyncProcessor`（即 `incidentSvc`）。`observations/service.go` 提供 `Ingest` + 探针元数据校验。 |
+| Incident and Event model | Closed (verified 2026-05-02) | `internal/center/incidents`, `internal/center/store/dashboard.go`, `web/src/pages/EventsPage.tsx`. **Reassessed 2026-05-02**: `incidents/evaluator.go` 实现 7 类判定（heartbeat-missing / disk-pressure / inode-pressure / resource-pressure / probe-failure / TLS-expiry / node-trend-degradation / target-latency-trend-degradation）；`incidents/service.go` 装配 debounce + notifier；`store/incidents.go:122-261` `ApplyIncidentMutation` 在同一事务内更新 incidents、写 state-change events、保存 notification 记录、刷新 object summary。`store/dashboard.go` 提供 24h 趋势、异常 node/target 列表、events 查询。`EventsPage.tsx` 290 行筛选丰富（object_type / severity / event_type / label / 时间范围 / notification_only / recovery_only / maintenance_only）。 |
 
 ## Runtime behavior
 
