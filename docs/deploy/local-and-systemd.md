@@ -45,6 +45,8 @@ HOUFENG_TELEGRAM_CHAT_ID=
 
 `HOUFENG_DATABASE_URL` is required. Telegram is disabled unless both Telegram values are set.
 
+> ⚠️ `HOUFENG_WEB_DIST_DIR` 必须设置——否则 center `/` 返回 404，SPA 不可访问。生产部署应指向 `web/dist`。
+
 ## Local center run
 
 ```bash

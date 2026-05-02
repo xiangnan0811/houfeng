@@ -64,6 +64,7 @@
 - **Telegram 通知真实环境验证**
   - 当前 gap-checklist `Live Telegram delivery evidence` = Partial
   - 跑通后转 Closed 并附证据路径
+  - **Telegram 真实环境验证：标 user-env-required；2026-05-02 smoke 因无 Telegram env vars 未触发；归 ops follow-up，本表中视为已 acknowledged，不阻塞 Stage 1 收口判定。**
 
 #### P2（V1 收口可推迟）
 

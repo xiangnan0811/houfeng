@@ -83,7 +83,7 @@ Record the returned `node_id`.
 curl -fsS -X POST http://127.0.0.1:8080/api/nodes/<node_id>/enrollment-token
 ```
 
-Record the returned plaintext token once. Store it for the local agent:
+Record the returned plaintext token once (响应键名实际为 `token`，不是 `plaintext_token`). Store it for the local agent:
 
 ```bash
 printf '%s' '<enrollment_token>' > /tmp/houfeng-agent-token

@@ -160,3 +160,12 @@ Before tagging or declaring V1 fully release-ready, collect:
 | 10 | `pages/NodesPage.tsx:60` `createNode` 直接 `fetch('/api/nodes')` 绕 `lib/api.ts` | 已识别反模式偿还点 |
 | 11 | 多 page > 1000 行：`TargetDetailPage` 1731 / `NodeDetailPage` 1138 / `SettingsPage` 873 / `TargetsPage` 740 / `NodesPage` 671 | 技术债 |
 | 12 | `make verify-web` 不跑 `npm run lint`，CI 抓不到 lint 失败 | `Makefile:67`；潜在风险 |
+
+### Operations / Smoke (4 条，新增 2026-05-03，来自 2026-05-02 live smoke)
+
+| # | 现象 | 证据 |
+|---|---|---|
+| 13 | `POST /api/nodes/{id}/enrollment-token` 实际响应键名是 `token`，docs Step 2 写 `plaintext_token` | 2026-05-02 smoke evidence: `research/v1-smoke-evidence-2026-05-02.md` (already archived); `docs/operations/v1-smoke-run.md` Step 2 当前文档 |
+| 14 | `agent/hostsample` 需要 Linux `/proc/loadavg`，macOS local dev 静默 fail | smoke Step 3 PARTIAL: agent enrolls 但 host sample 段失败；systemd 部署目标不受影响 |
+| 15 | Center `/` 返回 404 当 `HOUFENG_WEB_DIST_DIR` 未配置——生产部署必须配 | smoke Step 9 INCONCLUSIVE: 改用 vite :5173 验 SPA |
+| 16 | `GET /api/events` 返回 bare JSON array，非 `{items:[...]}` envelope；后续如引入 envelope，所有 caller + smoke 同时破 | smoke Step 8 实测；`internal/center/http/handlers/events.go` |
