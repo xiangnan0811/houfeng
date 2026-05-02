@@ -382,3 +382,37 @@ Child 1 complete: introduced web/src/components/filters/ with 5 reusable compone
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Apply FilterBar to NodesPage (child 2 of list-filter-completion)
+
+**Date**: 2026-05-02
+**Task**: Apply FilterBar to NodesPage (child 2 of list-filter-completion)
+**Branch**: `main`
+
+### Summary
+
+Child 2 complete: NodesPage 8 control FilterBar (7 §6.3 filters; 地区/城市 拆 2 select). Reused child 1's filters/ components and pattern (URL query string + client-side useMemo). NodesPage business preserved (createNode still has gap #10 follow-up; runtime actions / binding-conflict view / onboarding all intact). 287 web tests pass, make verify-web fully green. EventsPage child 3 remains; then list-filter-completion parent archive.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `896b22e` | (see git log) |
+| `43af18b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
