@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-05-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~247 | Active |
+| `journal-1.md` | ~281 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-05-02 | Reassess gap-checklist Closed batch 3 (UI surfaces) - found root cause | `f64c431`, `f09bdf7` | `main` |
 | 7 | 2026-05-02 | Reassess gap-checklist Closed batch 2 (Runtime + Notifications) | `3f7cca9`, `c4ecc3f` | `main` |
 | 6 | 2026-05-02 | Reassess gap-checklist Closed batch 1 (Product/arch + Core model) | `dfa32fc`, `6777c32` | `main` |
 | 5 | 2026-05-02 | Stage 1 P0 quickwins: 3 gaps + lint baseline | `75d4034`, `a613f8e`, `6a52ced`, `1704c02`, `bc7f5b2` | `main` |

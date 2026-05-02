@@ -245,3 +245,37 @@ Reassessed 8 Closed (⚠️ need-reassess) rows in v1-gap-checklist.md Runtime b
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Reassess gap-checklist Closed batch 3 (UI surfaces) - found root cause
+
+**Date**: 2026-05-02
+**Task**: Reassess gap-checklist Closed batch 3 (UI surfaces) - found root cause
+**Branch**: `main`
+
+### Summary
+
+Reassessed 8 Closed (⚠️ need-reassess) UI rows. 5 verified + 3 Partial (NodesPage / TargetsPage / EventsPage list filter incompleteness, all per §6.3/§6.4 design vs current code). Critical finding: this is the most plausible source of user judgment '实现连 V0.1 都不到' -- the list-filter pattern across 3 pages is materially missing. Backend + runtime + notifications are aligned; UI list-filter completion is the gap. Cumulative batch 1+2+3 = 25 rows: 21 verified + 4 Partial. Visual screenshot comparison row untouched. Recommend opening Stage 1 P1 follow-up tasks for the 3 Partial rows after batch 4.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f64c431` | (see git log) |
+| `f09bdf7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
