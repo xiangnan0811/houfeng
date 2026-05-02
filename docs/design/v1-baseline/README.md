@@ -32,8 +32,8 @@ status: frozen
 
 ## 当前状态
 
-> **当前结论：V1 结构层与视觉层均已冻结，整体设计包已完成。**
-> 后续仅保留实施前参数收口与实现阶段偏差修正，不再继续扩展 V1 一级设计。
+> **当前结论（2026-05-02 更新）**：V1 结构层冻结（`architecture-data-model.md` / `rules-and-interaction.md` / `tech-selection.md` / `interactive-prototype-and-operation-flow.md` 四份）；视觉层已被 `docs/design/v2-houfeng/` 取代；V1 实现仍在收口期，未达 MVP（详见 `docs/release/next-phase-plan.md`）。
+> 早期视觉文档（`ui-ux-spec.md` / `baseline-screens.md` / `visual-review-round2.md` / `handoff.md` / `stitch/*`）已 archive 至 `docs/_archive/design/v1-baseline/`，仅作历史记录。
 
 ## 项目命名（已定）
 
@@ -70,6 +70,8 @@ status: frozen
 
 
 ## 文档导航
+
+> **注**：下方部分文档已 archive 至 `docs/_archive/design/v1-baseline/`（视觉相关 4 份 + stitch），wiki link 失效仅作历史索引。Frozen 子集（结构 / 规则 / 技术选型 / 交互原型）仍在原路径权威。
 
 - [[服务器舰队控制面-v1-详细设计-架构、数据与模型]]
 - [[服务器舰队控制面-v1-详细设计-异常、交互与默认规则]]

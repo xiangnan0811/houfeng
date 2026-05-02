@@ -4,9 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project identity
 
-**候风 / Houfeng Fleet Control Plane** — a single-user, monitoring-and-probe-first fleet control plane. This repo is the V1 **implementation** repo. V1 product, interaction, and visual design are **frozen** in `docs/design/v1-baseline/`; do not redesign V1 first-class capabilities while implementing. If implementation discovers a mismatch, record the gap against the frozen baseline before changing behavior (see `docs/release/v1-gap-checklist.md`).
+**候风 / Houfeng Fleet Control Plane** — a single-user, monitoring-and-probe-first fleet control plane. This repo is the V1 **implementation** repo, currently in V1 **收口期**（V1 closing).
 
-Naming is fixed: product is `候风 / Houfeng Fleet Control Plane`; binaries are `houfeng-center` and `houfeng-agent`.
+**重要**：V1 ≠ MVP。用户判定当前实现"连 V0.1 都不到"；V1 是当前阶段目标，但用户心目中的 MVP 范围比 v1-baseline 更大（具体见 `docs/release/next-phase-plan.md`）。
+
+V1 业务结构（数据模型 / 规则 / 技术选型 / 交互原型）frozen 在 `docs/design/v1-baseline/` 的 4 份子集（`architecture-data-model.md` + `rules-and-interaction.md` + `tech-selection.md` + `interactive-prototype-and-operation-flow.md`）。视觉部分已 unfrozen，权威指向 `docs/design/v2-houfeng/`。
+
+实现阶段不重新设计 V1 一级能力。如发现实现与 frozen 业务子集 mismatch，先记录到 `docs/release/v1-gap-checklist.md`，再参考 `docs/release/next-phase-plan.md` 决定优先级。
+
+Naming 不变：product `候风 / Houfeng Fleet Control Plane`；binaries `houfeng-center` 和 `houfeng-agent`。
 
 ## Common commands
 
@@ -47,7 +53,7 @@ CI (`.github/workflows/ci.yml`) runs `make verify-go` and `make verify-web` on p
 
 V1 topology is exactly: **1 Go center + 1 PostgreSQL + N systemd Go agents**. Agents always initiate; the center never connects back to an agent. Do not add MQs, TSDBs, or microservices.
 
-Center entry: `cmd/houfeng-center/main.go` → `bootstrapCenter` (`cmd/houfeng-center/bootstrap.go`) → `internal/center/app.New`. Bootstrap wires the pgx pool, applies embedded migrations, constructs Postgres-backed repositories, the incident notifier (Telegram or no-op based on settings + env), the retention worker, and the HTTP router, then runs the app with workers (`incidentSvc`, `retentionWorker`).
+Center entry: `cmd/houfeng-center/main.go` → `bootstrapCenter` (`cmd/houfeng-center/bootstrap.go`) → `internal/center/app.New`. Bootstrap wires the pgx pool, applies embedded migrations, constructs Postgres-backed repositories, the incident notifier (Telegram or no-op based on settings + env), the retention worker, the session cleanup worker, and the HTTP router, then runs the app with workers (`incidentSvc`, `retentionWorker`, `sessionCleanup`).
 
 Agent entry: `cmd/houfeng-agent/main.go` → `agent/runtime.New(...).Run(ctx)`. Agent reads token from a file, fingerprints the host, samples, runs probes, and posts batches via the agent contract.
 
@@ -66,8 +72,9 @@ See `.env.example` and `docs/deploy/local-and-systemd.md`. Required at minimum:
 
 - `app/` — process lifecycle: HTTP server + workers (`Worker.Run(ctx)`).
 - `config/` — env loading; `CenterConfig`.
-- `http/` — `router.go` builds the chi-style routing tree from `RouterOptions`; bootstrap fills every handler explicitly so wiring is grep-able. Subpackage `http/handlers/` has one file per resource (`nodes`, `targets`, `incidents`, `events`, `dashboard`, `settings`, `agent`, `runtime_facts`, `runtime_controls`, `node_onboarding`, `health`, `spa`). JSON helpers in `handlers/json.go`.
+- `http/` — `router.go` builds the chi-style routing tree from `RouterOptions`; bootstrap fills every handler explicitly so wiring is grep-able. `http/middleware.go` carries `RequireSession` (cookie-backed auth gate) used by every non-agent / non-health route. Subpackage `http/handlers/` has one file per resource (`nodes`, `targets`, `incidents`, `events`, `dashboard`, `settings`, `agent`, `runtime_facts`, `runtime_controls`, `node_onboarding`, `health`, `spa`, `auth`, `metadata`). JSON helpers in `handlers/json.go`.
 - `store/` — Postgres repositories (one file per aggregate); migrations in `db/migrations/*.sql` are **embedded** via `db/migrations/embed.go` and applied at startup by `store/migrate.Apply`. Migrations are the single source of truth — write raw SQL, do not introduce an ORM.
+- `auth/` — username/password login, session lifecycle, password hashing, initial-user seeding, session cleanup worker (consumed by `RequireSession` middleware and the `/api/auth/*` handlers).
 - `enrollment/` — agent token issuing, fingerprint binding, binding-state transitions (未绑定 / 已绑定 / 指纹变更待确认).
 - `incidents/` — incident judgment, debounce, snapshotting; `NewSettingsBackedService` wires the runtime configurable thresholds and sweep interval.
 - `notify/` — Telegram delivery, wrapped by `incidents.NewSettingsAwareNotifier` so persisted settings can override env defaults at runtime.
@@ -79,7 +86,7 @@ See `.env.example` and `docs/deploy/local-and-systemd.md`. Required at minimum:
 Key model invariants (from `docs/design/v1-baseline/architecture-data-model.md`):
 - `Node = a specific server`. Same machine reinstall stays the same Node; new hardware needs a new Node.
 - `Target = an observable entrypoint`. `ProbeItem` only describes how to observe it; address belongs to `Target`.
-- Probe kinds in V1 are exactly `tcp`, `http`/`https`, `tls`. Do not add new kinds without baseline approval.
+- `agentapi.ProbeKind` constants are exactly three: `tcp` / `http` / `tls` (see `internal/contracts/agentapi/types.go`). `https` is not a separate kind — it runs as `http` with TLS configuration on the Target. Do not add new kinds without baseline approval (V1 business definition lives in `docs/design/v1-baseline/rules-and-interaction.md`).
 - Health state is **derived** (正常/关注/告警/严重); lifecycle is managed (待接入/在用/观察中/不续费/已退役); maintenance is a runtime control, not a health state.
 - Raw observations land first; incident/event/notification objects are produced by in-process workers, not in the request path.
 - "Backfilled" observations (`is_backfilled=true`) are stored but must not retroactively trigger Telegram.
@@ -102,15 +109,18 @@ Agents must remain "thin": observe, buffer, sync, fetch plan. They do not run ar
 
 React 19 + TypeScript + Vite SPA, Vitest + jsdom for tests, ESLint flat config. Routing in `src/app/router.tsx`, layout shell in `src/app/layout/`, page components in `src/pages/` (one `*.tsx` + colocated `*.test.tsx` per page), shared atoms in `src/components/`, API client + types + formatters in `src/lib/`.
 
-Visual authority: only the **Unified / Baseline Stitch** screens documented in `docs/design/v1-baseline/baseline-screens.md` and `ui-ux-spec.md`. Earlier concept screens are historical — do not regress to them. Dark-first, Chinese as the primary UI language, high-density engineering-tool feel.
+Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-houfeng/component-spec.md`. v2-houfeng has superseded the earlier v1-baseline visual sections (`ui-ux-spec`, `baseline-screens`, `visual-review-round2`, `stitch/*`) and the entire `v1.x-frontend-redesign/` package. Those historical materials have been moved to `docs/_archive/design/` and are kept for traceability only — do not regress to them. Dark-first, Chinese as the primary UI language, high-density engineering-tool feel.
 
 ## V1 verification artifacts
 
-These docs track real-environment evidence beyond `make verify`:
+V1 收口期间的运维与发布证据：
 
-- `docs/operations/v1-smoke-run.md` — fresh-install smoke against a real Postgres.
-- `docs/operations/v1-visual-verification.md` and `docs/operations/visual-evidence/` — screenshot comparison vs. baseline.
-- `docs/release/v1-gap-checklist.md` — implementation-vs-design gap log.
-- `docs/deploy/local-and-systemd.md` and `docs/deploy/systemd/*.service` — canonical deployment recipe.
+- `docs/operations/v1-smoke-run.md` — fresh-install smoke against a real Postgres (V1 release gate 的核心证据).
+- `docs/release/v1-gap-checklist.md` — implementation-vs-design gap 清单（含 V1 release gate 与 12 条 2026-05-02 新增 gap）.
+- `docs/release/docs-audit.md` — docs 审计与 archive 决策（T1 落地，决定哪些 docs 是 keep / archive）.
+- `docs/release/next-phase-plan.md` — 下一阶段开发计划（Stage 1 V1 收口 / Stage 2 post-V1 → MVP / Stage 3+ 远期）.
+- `docs/deploy/local-and-systemd.md` 与 `docs/deploy/systemd/*.service` — canonical 部署 recipe.
 
-When changing user-visible behavior, copy/adjust evidence into `docs/operations/visual-evidence/` and update the gap checklist rather than editing the frozen baseline docs.
+注：早期的 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，stitch 已 archive 后这两份也已迁至 `docs/_archive/operations/`，仅作历史记录。v2 视觉证据收集流程待 V1 收口后另议（参考 `docs/release/next-phase-plan.md` Stage 1 P2 段）。
+
+When changing user-visible behavior, first record the gap in `docs/release/v1-gap-checklist.md` and consult `docs/release/next-phase-plan.md` for prioritization, rather than editing the frozen baseline docs.
