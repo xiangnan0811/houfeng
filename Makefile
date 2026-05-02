@@ -64,7 +64,7 @@ verify-go: fmt-go vet-go test-go
 
 verify-web:
 	@if [ -f web/package.json ]; then \
-		cd web && $(NPM) ci && $(NPM) run test -- --run && $(NPM) run build; \
+		cd web && $(NPM) ci && $(NPM) run lint && $(NPM) run test -- --run && $(NPM) run build; \
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi
