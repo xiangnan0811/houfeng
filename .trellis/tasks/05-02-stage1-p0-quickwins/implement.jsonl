@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "gap #3 涉及 migration ledger 机制理解；不动 sql 文件的约束依据"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "gap #7 main.go logger 替换需符合全仓 slog 约定"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "gap #12 verify-web 流程修订 + 提供 verify / commit 风格约定"}
