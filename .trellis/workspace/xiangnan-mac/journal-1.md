@@ -72,3 +72,37 @@ Started docs-roadmap parent (Stage 1/2/3 framing, V1 收口 direction, V1 != MVP
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: T3 spec-sync: align spec authority + merge V1 gap items
+
+**Date**: 2026-05-02
+**Task**: T3 spec-sync: align spec authority + merge V1 gap items
+**Branch**: `main`
+
+### Summary
+
+Completed T3: replaced authority-source line in 11 .trellis/spec/*.md (5 backend + 5 web + web/index.md) with unified clause (CLAUDE.md > v1-baseline frozen subset > v2-houfeng). Merged 12 newly-found gap items (7 backend + 5 web) into docs/release/v1-gap-checklist.md as new section. Tagged all 42 existing Closed rows with (⚠️ need-reassess) + added top-of-file banner explaining 2026-04-30 vs 2026-05-02 mismatch (实现连 V0.1 都不到). Per-row Closed reassessment deferred to T2 next-phase plan.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `103b23d` | (see git log) |
+| `64d7a87` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
