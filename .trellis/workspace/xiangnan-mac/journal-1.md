@@ -519,3 +519,37 @@ Stage 1 P1 quickwins complete. gap #4: new 0011 migration ALTER INDEX renames se
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: Docs sync: merge 4 smoke caveats + Telegram mark deferred
+
+**Date**: 2026-05-03
+**Task**: Docs sync: merge 4 smoke caveats + Telegram mark deferred
+**Branch**: `main`
+
+### Summary
+
+Stage 1 P1 docs sync: 4 caveats from 2026-05-02 V1 smoke now landed in canonical docs. v1-gap-checklist gains gaps #13-#16 (Operations/Smoke section). v1-smoke-run Step 2 token key name fixed. local-and-systemd warns HOUFENG_WEB_DIST_DIR required. next-phase-plan Telegram marked user-env-required + acknowledged. Pure docs, no code changes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d7de734` | (see git log) |
+| `92e5b6f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
