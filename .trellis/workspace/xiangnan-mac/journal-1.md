@@ -347,3 +347,38 @@ Captured gap-reassess workstream root-cause finding into next-phase-plan.md (new
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: Build shared FilterBar + apply to TargetsPage (child 1 of list-filter-completion)
+
+**Date**: 2026-05-02
+**Task**: Build shared FilterBar + apply to TargetsPage (child 1 of list-filter-completion)
+**Branch**: `main`
+
+### Summary
+
+Child 1 complete: introduced web/src/components/filters/ with 5 reusable components (FilterBar / FilterSelect / FilterMultiSelect / FilterToggle / FilterChip) + 13 unit tests + token-driven CSS. Applied to TargetsPage with §6.4 6 filters (类型 / 运行状态 / 健康状态 / 标签 / 执行节点标签 / 仅看异常); client-side filter via useMemo, URL query string state via useSearchParams. 285 web tests pass, make verify-web fully green. TargetsPage business behavior preserved. Sets the pattern for child 2 (NodesPage) + child 3 (EventsPage).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `05cb274` | (see git log) |
+| `7cbf8d6` | (see git log) |
+| `746994c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

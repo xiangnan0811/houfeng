@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-05-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~349 | Active |
+| `journal-1.md` | ~384 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-05-02 | Build shared FilterBar + apply to TargetsPage (child 1 of list-filter-completion) | `05cb274`, `7cbf8d6`, `746994c` | `main` |
 | 10 | 2026-05-02 | Reframe next-phase-plan + gap-checklist banner with reassess root cause | `2ff1670`, `4cbbed9` | `main` |
 | 9 | 2026-05-02 | Reassess gap-checklist Closed batch 4 (Delivery + Auth + V1.x visual) - workstream complete | `dbdb383`, `227537d` | `main` |
 | 8 | 2026-05-02 | Reassess gap-checklist Closed batch 3 (UI surfaces) - found root cause | `f64c431`, `f09bdf7` | `main` |
