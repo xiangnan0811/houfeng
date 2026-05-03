@@ -26,45 +26,53 @@
 
 #### P0（阻塞 V1 收口）
 
-- **Front-end list-page filter completion** (root cause of user judgment 实现连 V0.1 都不到)：补齐 3 个 list page 的筛选功能
-  - NodesPage：补 §6.3 的 5 项缺失筛选（生命周期 / 供应商 / 地区 / 标签 / 健康，仅"仅看异常 / 运行状态" 2 toggle 已就位）
-  - TargetsPage：从零补齐 §6.4 的 6 项筛选条（当前列表是只读表）
-  - EventsPage：补 §10.9 的剩余筛选（含 backfill boolean / 时间 segmented / 时间分组 / 加载更早分页）
-  - 拆 3 个 follow-up task 推进
+**✅ Stage 1 P0 全部完成 (2026-05-03)**
 
-- **重审 gap-checklist 42 个 Closed 行的真实状态**
-  - 当前 Closed 标记带 `(⚠️ need-reassess)`，需逐行现场验证（跑相关代码 + 看是否真的满足设计意图，不是字面 import 通过即算 Closed）
-  - 建议拆 1-2 个独立 follow-up task，按 area（产品/对象模型/运行时/UI/通知/交付/Auth/V1.x 视觉）分批
-  - 关联：`docs/release/v1-gap-checklist.md` 全表 + 顶部 banner
+- ✅ **Front-end list-page filter completion** (root cause of user judgment 实现连 V0.1 都不到)：补齐 3 个 list page 的筛选功能
+  - ✅ NodesPage：补 §6.3 的 5 项缺失筛选（生命周期 / 供应商 / 地区 / 标签 / 健康，仅"仅看异常 / 运行状态" 2 toggle 已就位）—— commit `7cbf8d6`
+  - ✅ TargetsPage：从零补齐 §6.4 的 6 项筛选条（当前列表是只读表）—— commit `43af18b`
+  - ✅ EventsPage：补 §10.9 的剩余筛选（含 backfill boolean / 时间 segmented / 时间分组 / 加载更早分页）—— commit `e8c6908`
+  - ✅ FilterBar 抽离公共组件 —— commit `05cb274`
+  - ✅ 拆 3 个 follow-up task 推进
 
-- **解决 12 条新 gap 中的 P0 项**
-  - **gap #12**：`make verify-web` 加 `npm run lint`（CI 当前抓不到 lint 失败的潜在风险，改造成本极低）
-  - **gap #3**：约定下次 migration 序号从 0011 起（0004 撞车文件**不动**——`schema_migrations` 用文件名作主键，rename 会破坏已部署环境；约定已落入 `.trellis/spec/backend/database-guidelines.md`）
-  - **gap #7**：`cmd/houfeng-center/main.go` stdlib `"log"` → `slog`（与全仓 `slog` 一致）
+- ✅ **重审 gap-checklist 42 个 Closed 行的真实状态**
+  - ✅ 已拆 4 batch 完成全部 42 行重审 —— commits `dfa32fc` / `3f7cca9` / `f09bdf7` / `227537d`
+  - 结果：38 行 → Closed (verified)；4 行 → Partial（前端 list-page 筛选完成度），均已在 P0 完成项中闭合
+  - 关联：`docs/release/v1-gap-checklist.md` 顶部 banner + 末尾 Reassess findings 段
 
-- **真实环境冒烟 V1 完整路径**
+- ✅ **解决 12 条新 gap 中的 P0 项**
+  - ✅ **gap #12**：`make verify-web` 加 `npm run lint` —— commit `1704c02`；先建 lint baseline（4 errors）`75d4034`
+  - ✅ **gap #3**：约定下次 migration 序号从 0011 起，落入 `.trellis/spec/backend/database-guidelines.md` —— commit `6a52ced`
+  - ✅ **gap #7**：`cmd/houfeng-center/main.go` stdlib `"log"` → `slog` —— commit `a613f8e`
+
+- ✅ **真实环境冒烟 V1 完整路径**
+  - ✅ 2026-05-02 live smoke 真实跑通 —— commit `6394b29`
   - 路径：Node 接入 → Target 创建 → ProbeItem → 异常发生 → 通知 → 恢复
-  - 脚本：`docs/operations/v1-smoke-run.md`（已记录 2026-04-29 一次跑通；本阶段需要在每次 P0 修完后追加新一次）
-  - Telegram 真发：开 bot token 后跑一遍异常 → 恢复，证据进入 smoke-run 文档
+  - 4 caveats（gap #13-#16）已入 gap-checklist —— commit `92e5b6f`
+  - 🔲 Telegram 真发：deferred to ops follow-up（user-env-required，无 bot token 时不阻塞 Stage 1 收口）
 
 #### P1（V1 收口质量门）
 
-- **解决 12 条新 gap 中的 P1 项**
-  - **gap #9**：双 fetch wrapper 合并（`web/src/lib/fetcher.ts` + `web/src/lib/api.ts` → 单一封装，统一 401 处理）
-  - **gap #10**：`pages/NodesPage.tsx:60` `createNode` 重构进 `lib/api.ts`（消灭裸 `fetch('/api/nodes')` 反模式）
-  - **gap #4**：修正 `0010_add_users_and_sessions.sql` 索引命名（`sessions_user_idx` / `sessions_expires_idx` → `idx_sessions_user` / `idx_sessions_expires`，与其他迁移一致）
+**✅ Stage 1 P1 实质完成 (2026-05-03)；剩余项推 Stage 2 / phase 2.2**
 
-- **CLAUDE.md 文档断层修补**
-  - 已在 T2（本任务）落地；后续若发现新断层，按 gap-checklist 流程登记
+- ✅ **解决 12 条新 gap 中的 P1 项**
+  - ✅ **gap #9**：双 fetch wrapper 合并 —— commit `b354f3f`
+  - ✅ **gap #10**：`pages/NodesPage.tsx:60` `createNode` 重构进 `lib/api.ts` —— commit `d78ef0f`
+  - ✅ **gap #4**：修正 `0010_add_users_and_sessions.sql` sessions 索引命名 —— commit `8cbae4d`
 
-- **长 page 文件初步拆分**（gap #11 的子集）
-  - 选 1-2 个最大的拆（`TargetDetailPage` 1731 / `NodeDetailPage` 1138）
-  - 其他延后到 P2 或下一阶段；拆分目标是可读性 + 可测性，不是为了上抽象层
+- ✅ **CLAUDE.md 文档断层修补**
+  - 已在 T2 落地；本 session 通过 next-phase-plan reframe 进一步收敛（commit `4cbbed9`）
 
-- **Telegram 通知真实环境验证**
-  - 当前 gap-checklist `Live Telegram delivery evidence` = Partial
-  - 跑通后转 Closed 并附证据路径
-  - **Telegram 真实环境验证：标 user-env-required；2026-05-02 smoke 因无 Telegram env vars 未触发；归 ops follow-up，本表中视为已 acknowledged，不阻塞 Stage 1 收口判定。**
+- ✅ **长 page 文件初步拆分**（gap #11 的子集）
+  - ✅ Phase 1 NodeDetailPage 拆分 —— commit `8b765c9`
+  - ✅ Phase 2 TargetDetailPage 拆分 —— commit `9bcc779`
+  - 🔲 phase 2.2 long-page helpers extract（剩余 `SettingsPage` 873 / `TargetsPage` 740 / `NodesPage` 671 拆分）—— deferred to Stage 2
+  - 🔲 NodeDetailPage phase 1.2 剩余 sections —— deferred to Stage 2
+
+- 🔲 **Telegram 通知真实环境验证** —— deferred to ops follow-up
+  - user-env-required；2026-05-02 smoke 因无 Telegram env vars 未触发
+  - 已在 gap-checklist `Live Telegram delivery evidence` 行标 Partial / acknowledged
+  - **不阻塞 Stage 1 收口判定**
 
 #### P2（V1 收口可推迟）
 

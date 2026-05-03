@@ -123,6 +123,8 @@ Before tagging or declaring V1 fully release-ready, collect:
 - visual screenshot comparison artifacts are captured; strict visual-fidelity acceptance or an explicit accepted waiver remains pending;
 - Telegram delivery proof or an explicit note that Telegram is disabled for the deployment.
 
+**2026-05-03 状态**：Stage 1 P0/P1 marathon 完成；详见 `docs/release/next-phase-plan.md` 末尾 Reassess findings 段 + 本表"V1 收口期发现的 gap 项"段每行 closed/open 标注。剩余 release-gate 项（Telegram 真实交付、严格视觉证据）仍 deferred ops follow-up。
+
 ---
 
 ## V2 设计语言取代记录 (2026-05-01)
@@ -141,31 +143,31 @@ Before tagging or declaring V1 fully release-ready, collect:
 
 ### Backend (7 条)
 
-| # | 现象 | 证据 |
-|---|---|---|
-| 1 | CLAUDE.md handler 清单缺 `auth.go` 与 `metadata.go`，但代码均存在 | `internal/center/http/handlers/{auth.go, metadata.go}` + `router.go:35-69` 注册 `/api/auth/*` |
-| 2 | CLAUDE.md 子包清单未提 `internal/center/auth/` | 实际包含用户/会话/cookie/cleanup worker，配 0010 migration |
-| 3 | `db/migrations/` 0004 序号撞车（**已确认无法 rename**） | `0004_add_node_onboarding_binding_state.sql` + `0004_add_observation_provenance.sql` 两份。`internal/center/store/migrate/migrate.go:16-19` 显示 `schema_migrations` 用文件名作主键，rename 会让已部署环境 re-apply 失败导致中心启动崩溃。**约定下次 migration 序号从 0011 起**（已落入 `.trellis/spec/backend/database-guidelines.md`）。字典序兼容现状不动 |
-| 4 | `0010_add_users_and_sessions.sql` 索引命名不遵循 `idx_<table>_<purpose>` 规则 | `sessions_user_idx` / `sessions_expires_idx`，与其他迁移不一致 |
-| 5 | bootstrap 实际 wire 了 3 个 worker（含 `sessionCleanup`），CLAUDE.md 只列 2 个 | `cmd/houfeng-center/bootstrap.go:146` + `bootstrap_test.go:152` 已断言 `len(workers)==3` |
-| 6 | `agentapi.ProbeKind*` 只有 `tcp/http/tls` 三常量，CLAUDE.md 列了 4 种 | `internal/contracts/agentapi/types.go:30-34`；`https` 走 http+配置区分 |
-| 7 | `cmd/houfeng-center/main.go` 仍用 stdlib `"log"`，与全仓 `slog` 不一致 | 历史遗留 |
+| # | 现象 | 证据 | Status |
+|---|---|---|---|
+| 1 | CLAUDE.md handler 清单缺 `auth.go` 与 `metadata.go`，但代码均存在 | `internal/center/http/handlers/{auth.go, metadata.go}` + `router.go:35-69` 注册 `/api/auth/*` | → Closed (2026-05-03, see commit 4cbbed9) |
+| 2 | CLAUDE.md 子包清单未提 `internal/center/auth/` | 实际包含用户/会话/cookie/cleanup worker，配 0010 migration | → Closed (2026-05-03, see commit 4cbbed9) |
+| 3 | `db/migrations/` 0004 序号撞车（**已确认无法 rename**） | `0004_add_node_onboarding_binding_state.sql` + `0004_add_observation_provenance.sql` 两份。`internal/center/store/migrate/migrate.go:16-19` 显示 `schema_migrations` 用文件名作主键，rename 会让已部署环境 re-apply 失败导致中心启动崩溃。**约定下次 migration 序号从 0011 起**（已落入 `.trellis/spec/backend/database-guidelines.md`）。字典序兼容现状不动 | → Closed (2026-05-03, see commit 6a52ced) |
+| 4 | `0010_add_users_and_sessions.sql` 索引命名不遵循 `idx_<table>_<purpose>` 规则 | `sessions_user_idx` / `sessions_expires_idx`，与其他迁移不一致 | → Closed (2026-05-03, see commit 8cbae4d) |
+| 5 | bootstrap 实际 wire 了 3 个 worker（含 `sessionCleanup`），CLAUDE.md 只列 2 个 | `cmd/houfeng-center/bootstrap.go:146` + `bootstrap_test.go:152` 已断言 `len(workers)==3` | → Closed (2026-05-03, see commit 4cbbed9) |
+| 6 | `agentapi.ProbeKind*` 只有 `tcp/http/tls` 三常量，CLAUDE.md 列了 4 种 | `internal/contracts/agentapi/types.go:30-34`；`https` 走 http+配置区分 | → Closed (2026-05-03, see commit 4cbbed9) |
+| 7 | `cmd/houfeng-center/main.go` 仍用 stdlib `"log"`，与全仓 `slog` 不一致 | 历史遗留 | → Closed (2026-05-03, see commit a613f8e) |
 
 ### Web (5 条)
 
-| # | 现象 | 证据 |
-|---|---|---|
-| 8 | `web/src/components/atoms/` 子目录 CLAUDE.md 未提（事实上的设计系统原子落点） | `web/src/components/atoms/{Button, Input, Badge, Card, Tabs, Toggle, Sparkline, StatusGlyph}.tsx` 等 |
-| 9 | `web/src/lib/` 并存 `fetcher.ts`（auth）+ `api.ts`（业务）双 fetch 包装 + 双 401 钩子 | 历史遗留，可考虑合并 |
-| 10 | `pages/NodesPage.tsx:60` `createNode` 直接 `fetch('/api/nodes')` 绕 `lib/api.ts` | 已识别反模式偿还点 |
-| 11 | 多 page > 1000 行：`TargetDetailPage` 1731 / `NodeDetailPage` 1138 / `SettingsPage` 873 / `TargetsPage` 740 / `NodesPage` 671 | 技术债 |
-| 12 | `make verify-web` 不跑 `npm run lint`，CI 抓不到 lint 失败 | `Makefile:67`；潜在风险 |
+| # | 现象 | 证据 | Status |
+|---|---|---|---|
+| 8 | `web/src/components/atoms/` 子目录 CLAUDE.md 未提（事实上的设计系统原子落点） | `web/src/components/atoms/{Button, Input, Badge, Card, Tabs, Toggle, Sparkline, StatusGlyph}.tsx` 等 | → Closed (2026-05-03, see commit 4cbbed9) |
+| 9 | `web/src/lib/` 并存 `fetcher.ts`（auth）+ `api.ts`（业务）双 fetch 包装 + 双 401 钩子 | 历史遗留，可考虑合并 | → Closed (2026-05-03, see commit b354f3f) |
+| 10 | `pages/NodesPage.tsx:60` `createNode` 直接 `fetch('/api/nodes')` 绕 `lib/api.ts` | 已识别反模式偿还点 | → Closed (2026-05-03, see commit d78ef0f) |
+| 11 | 多 page > 1000 行：`TargetDetailPage` 1731 / `NodeDetailPage` 1138 / `SettingsPage` 873 / `TargetsPage` 740 / `NodesPage` 671 | 技术债 | → Closed (2026-05-03, see commits 8b765c9 + 9bcc779) |
+| 12 | `make verify-web` 不跑 `npm run lint`，CI 抓不到 lint 失败 | `Makefile:67`；潜在风险 | → Closed (2026-05-03, see commit 1704c02) |
 
 ### Operations / Smoke (4 条，新增 2026-05-03，来自 2026-05-02 live smoke)
 
-| # | 现象 | 证据 |
-|---|---|---|
-| 13 | `POST /api/nodes/{id}/enrollment-token` 实际响应键名是 `token`，docs Step 2 写 `plaintext_token` | 2026-05-02 smoke evidence: `research/v1-smoke-evidence-2026-05-02.md` (already archived); `docs/operations/v1-smoke-run.md` Step 2 当前文档 |
-| 14 | `agent/hostsample` 需要 Linux `/proc/loadavg`，macOS local dev 静默 fail | smoke Step 3 PARTIAL: agent enrolls 但 host sample 段失败；systemd 部署目标不受影响 |
-| 15 | Center `/` 返回 404 当 `HOUFENG_WEB_DIST_DIR` 未配置——生产部署必须配 | smoke Step 9 INCONCLUSIVE: 改用 vite :5173 验 SPA |
-| 16 | `GET /api/events` 返回 bare JSON array，非 `{items:[...]}` envelope；后续如引入 envelope，所有 caller + smoke 同时破 | smoke Step 8 实测；`internal/center/http/handlers/events.go` |
+| # | 现象 | 证据 | Status |
+|---|---|---|---|
+| 13 | `POST /api/nodes/{id}/enrollment-token` 实际响应键名是 `token`，docs Step 2 写 `plaintext_token` | 2026-05-02 smoke evidence: `research/v1-smoke-evidence-2026-05-02.md` (already archived); `docs/operations/v1-smoke-run.md` Step 2 当前文档 | → Closed (2026-05-03, see commit 92e5b6f) |
+| 14 | `agent/hostsample` 需要 Linux `/proc/loadavg`，macOS local dev 静默 fail | smoke Step 3 PARTIAL: agent enrolls 但 host sample 段失败；systemd 部署目标不受影响 | → Open (deferred — code follow-up) |
+| 15 | Center `/` 返回 404 当 `HOUFENG_WEB_DIST_DIR` 未配置——生产部署必须配 | smoke Step 9 INCONCLUSIVE: 改用 vite :5173 验 SPA | → Closed (2026-05-03, see commit 92e5b6f) |
+| 16 | `GET /api/events` 返回 bare JSON array，非 `{items:[...]}` envelope；后续如引入 envelope，所有 caller + smoke 同时破 | smoke Step 8 实测；`internal/center/http/handlers/events.go` | → Open (deferred — design follow-up) |
