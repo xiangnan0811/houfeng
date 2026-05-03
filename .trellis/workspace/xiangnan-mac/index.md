@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
+- **Total Sessions**: 20
 - **Last Active**: 2026-05-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~657 | Active |
+| `journal-1.md` | ~691 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-05-03 | Sync Stage 1 完成度 to next-phase-plan + gap-checklist | `1446f53`, `f9ecb47` | `main` |
 | 19 | 2026-05-03 | Split TargetDetailPage into 9 section components (gap #11 phase 2) | `2a6f5e6`, `9bcc779` | `main` |
 | 18 | 2026-05-03 | Split NodeDetailPage into 5 section components (gap #11 phase 1) | `337034f`, `8b765c9` | `main` |
 | 17 | 2026-05-03 | Merge fetcher.ts into api.ts with single 401 hook (gap #9) | `2a61c80`, `b354f3f` | `main` |

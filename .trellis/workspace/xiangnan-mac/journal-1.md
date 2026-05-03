@@ -655,3 +655,37 @@ gap #11 phase 2: TargetDetailPage 1731 -> 1127 (-604, -35%) by extracting 9 sect
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: Sync Stage 1 完成度 to next-phase-plan + gap-checklist
+
+**Date**: 2026-05-03
+**Task**: Sync Stage 1 完成度 to next-phase-plan + gap-checklist
+**Branch**: `main`
+
+### Summary
+
+Project-facing release docs now reflect actual Stage 1 完成度. next-phase-plan P0 + P1 each prefixed ✅ with commit hashes; deferred items 🔲 explicit. v1-gap-checklist '收口期发现的 gap 项' Backend/Web/Operations 16 rows now carry closed/open Status with commit refs (14 Closed + 2 Open: #14 agent macOS, #16 events bare array contract). Final V1 release gate adds 2026-05-03 status summary. Pure docs sync. V1 收口 marathon 真正自然完结。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1446f53` | (see git log) |
+| `f9ecb47` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
