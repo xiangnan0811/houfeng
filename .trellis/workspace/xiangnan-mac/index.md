@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 21
+- **Total Sessions**: 22
 - **Last Active**: 2026-05-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~725 | Active |
+| `journal-1.md` | ~758 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 22 | 2026-05-03 | Fix macOS agent host sampling | `b1edb66` | `main` |
 | 21 | 2026-05-03 | Trellis post-init cleanup | `aec1c60`, `3f07848` | `main` |
 | 20 | 2026-05-03 | Sync Stage 1 完成度 to next-phase-plan + gap-checklist | `1446f53`, `f9ecb47` | `main` |
 | 19 | 2026-05-03 | Split TargetDetailPage into 9 section components (gap #11 phase 2) | `2a6f5e6`, `9bcc779` | `main` |

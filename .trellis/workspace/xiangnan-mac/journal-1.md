@@ -723,3 +723,36 @@ Cleaned up Trellis post-init metadata, aligned the backend spec index with popul
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: Fix macOS agent host sampling
+
+**Date**: 2026-05-03
+**Task**: Fix macOS agent host sampling
+**Branch**: `main`
+
+### Summary
+
+Added a Darwin hostsample collector for local macOS agent runs, kept Linux procfs behavior intact, verified agent/runtime/build/go checks, and updated smoke/gap documentation plus backend hostsample platform-boundary spec.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1edb66` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
