@@ -621,3 +621,37 @@ gap #11 phase 1: NodeDetailPage 1138 -> 868 (-270 lines, -23.7%) by extracting 5
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: Split TargetDetailPage into 9 section components (gap #11 phase 2)
+
+**Date**: 2026-05-03
+**Task**: Split TargetDetailPage into 9 section components (gap #11 phase 2)
+**Branch**: `main`
+
+### Summary
+
+gap #11 phase 2: TargetDetailPage 1731 -> 1127 (-604, -35%) by extracting 9 sections (TargetHero / TargetStatusSummary / TargetLabelsAndNote / TargetRuntimeControls / TargetLatencyTrends / TargetActiveIncidents / TargetRecentEvents / TargetProbeForm / TargetProbeList) into web/src/components/target-detail/. Mirrors NodeDetailPage phase 1 pattern. ProbeItem CRUD extracted as presentational shells (state stays on page). 324 tests pass (+28 new). gap #11 effectively closed for both detail pages; remaining helpers move to sibling file is phase 2.2 candidate.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2a6f5e6` | (see git log) |
+| `9bcc779` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
