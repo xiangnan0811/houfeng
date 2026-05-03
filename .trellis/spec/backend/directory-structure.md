@@ -138,6 +138,41 @@ agent 子包扁平化拆分，每个职责一个包：
 - `runtime/` 是装配中心，把其余子包按 `collect → buffer → sync → apply plan` 串起来
 - agent 必须保持"thin"：不执行任意脚本、不跑 Docker、不本地评估规则
 
+#### Scenario: `agent/hostsample` 平台采集边界
+
+1. **Scope / Trigger**
+   - 触发：修改主机采样实现，尤其是 Linux `/proc`、macOS local dev、文件系统统计、rate-based 指标。
+   - 目标：`agent/runtime` 只依赖 `hostsample.Provider.Collect`，平台差异必须收敛在 `agent/hostsample/` 内。
+
+2. **Signatures**
+   - 生产入口：`hostsample.New() *Provider`，按 `runtime.GOOS` 选择采集路径。
+   - 测试入口：`hostsample.NewWithDeps(readFile, statFS) *Provider`，固定走 Linux/procfs collector，便于注入 `/proc/*` fixture。
+   - `Provider.Collect(observedAt time.Time) (agentapi.HostSamplePayload, error)` 是唯一对外采样方法。
+
+3. **Contracts**
+   - Linux: 读取 `/proc/loadavg`、`/proc/meminfo`、`/proc/uptime`、`/proc/stat`、`/proc/net/dev`、`/proc/diskstats`，并用 `statfs("/")` 计算磁盘/inode。
+   - Darwin: 不读取 `/proc/*`；用 `sysctl -n vm.loadavg`、`sysctl -n hw.memsize`、`sysctl -n vm.swapusage`、`sysctl -n kern.boottime` 和 `vm_stat` 生成本地开发可用的 host sample。
+   - 不新增 agent env key，不改变 `internal/contracts/agentapi.HostSamplePayload` JSON contract。
+
+4. **Validation & Error Matrix**
+   - 必需来源读取失败 -> `Collect` 返回带上下文的 wrapped error，例如 `darwin sysctl vm.loadavg: %w` 或 `read /proc/loadavg: %w`。
+   - Darwin `vm.swapusage` 读取失败 -> `swap_used_pct=0`，不得阻塞整条 host sample，因为部分 macOS 环境可能禁用 swap。
+   - Darwin rate-based 字段没有稳定来源时保持零值，不得让 center 拒收 host sample。
+
+5. **Good / Base / Bad Cases**
+   - Good: macOS 本地 agent 能完成 `host_samples` 上报，Linux systemd agent 仍走完整 procfs 指标。
+   - Base: 首个 sample 的 CPU/net/disk rate 字段为零，后续 Linux sample 根据 previous snapshot 推导 rate。
+   - Bad: 在 Darwin 分支 fallback 读取 `/proc/loadavg`，会让 macOS smoke 重新出现 `no such file or directory`。
+
+6. **Tests Required**
+   - Linux/procfs fixture tests: `agent/hostsample/provider_test.go` 覆盖 load/mem/uptime/rate/diskstats。
+   - Darwin regression test: `agent/hostsample/provider_darwin_test.go` 必须断言不读取 `/proc/*`，并检查 load、mem、swap、disk、uptime 的核心字段。
+   - Runtime safety: `go test ./agent/runtime` 必须继续通过，确保 host sample 仍被 `buildSyncRequest` 串入 sync batch。
+
+7. **Wrong vs Correct**
+   - Wrong: 在 `agent/runtime` 里按 OS 分支，或让 runtime 感知 `sysctl` / `/proc` 文件名。
+   - Correct: 在 `hostsample.New()` / `Provider.Collect` 内选择平台 collector，runtime 只消费 `HostSamplePayload`。
+
 ### `internal/contracts/agentapi/`
 
 center 与 agent 同时引用的唯一契约包。内容：

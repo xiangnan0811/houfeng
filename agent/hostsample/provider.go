@@ -3,6 +3,8 @@ package hostsample
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,26 +34,51 @@ type snapshot struct {
 }
 
 type Provider struct {
-	readFile func(string) ([]byte, error)
-	statFS   func(string) (FilesystemStats, error)
-	previous *snapshot
+	readFile      func(string) ([]byte, error)
+	statFS        func(string) (FilesystemStats, error)
+	commandOutput func(string, ...string) ([]byte, error)
+	goos          string
+	previous      *snapshot
 }
 
 func New() *Provider {
-	return NewWithDeps(os.ReadFile, defaultStatFS)
+	return newWithPlatformDeps(runtime.GOOS, os.ReadFile, defaultStatFS, defaultCommandOutput)
 }
 
+// NewWithDeps builds a procfs collector with injected dependencies for tests.
 func NewWithDeps(readFile func(string) ([]byte, error), statFS func(string) (FilesystemStats, error)) *Provider {
+	return newWithPlatformDeps("linux", readFile, statFS, defaultCommandOutput)
+}
+
+func newWithPlatformDeps(goos string, readFile func(string) ([]byte, error), statFS func(string) (FilesystemStats, error), commandOutput func(string, ...string) ([]byte, error)) *Provider {
 	if readFile == nil {
 		readFile = os.ReadFile
 	}
 	if statFS == nil {
 		statFS = defaultStatFS
 	}
-	return &Provider{readFile: readFile, statFS: statFS}
+	if commandOutput == nil {
+		commandOutput = defaultCommandOutput
+	}
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	return &Provider{
+		readFile:      readFile,
+		statFS:        statFS,
+		commandOutput: commandOutput,
+		goos:          goos,
+	}
 }
 
 func (p *Provider) Collect(observedAt time.Time) (agentapi.HostSamplePayload, error) {
+	if p.goos == "darwin" {
+		return p.collectDarwin(observedAt)
+	}
+	return p.collectProcFS(observedAt)
+}
+
+func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePayload, error) {
 	loadavgRaw, err := p.readFile("/proc/loadavg")
 	if err != nil {
 		return agentapi.HostSamplePayload{}, fmt.Errorf("read /proc/loadavg: %w", err)
@@ -155,6 +182,76 @@ func (p *Provider) Collect(observedAt time.Time) (agentapi.HostSamplePayload, er
 	return sample, nil
 }
 
+func (p *Provider) collectDarwin(observedAt time.Time) (agentapi.HostSamplePayload, error) {
+	loadavgRaw, err := p.commandOutput("sysctl", "-n", "vm.loadavg")
+	if err != nil {
+		return agentapi.HostSamplePayload{}, fmt.Errorf("darwin sysctl vm.loadavg: %w", err)
+	}
+	load1, load5, load15, err := parseDarwinLoadAvg(loadavgRaw)
+	if err != nil {
+		return agentapi.HostSamplePayload{}, err
+	}
+
+	memsizeRaw, err := p.commandOutput("sysctl", "-n", "hw.memsize")
+	if err != nil {
+		return agentapi.HostSamplePayload{}, fmt.Errorf("darwin sysctl hw.memsize: %w", err)
+	}
+	memTotalBytes, err := parseDarwinMemSize(memsizeRaw)
+	if err != nil {
+		return agentapi.HostSamplePayload{}, err
+	}
+
+	vmStatRaw, err := p.commandOutput("vm_stat")
+	if err != nil {
+		return agentapi.HostSamplePayload{}, fmt.Errorf("darwin vm_stat: %w", err)
+	}
+	memUsedPct, memAvailableBytes, err := parseDarwinVMStat(vmStatRaw, memTotalBytes)
+	if err != nil {
+		return agentapi.HostSamplePayload{}, err
+	}
+
+	swapRaw, err := p.commandOutput("sysctl", "-n", "vm.swapusage")
+	swapUsedPct := 0.0
+	if err == nil {
+		swapUsedPct, err = parseDarwinSwapUsage(swapRaw)
+		if err != nil {
+			return agentapi.HostSamplePayload{}, err
+		}
+	}
+
+	bootTimeRaw, err := p.commandOutput("sysctl", "-n", "kern.boottime")
+	if err != nil {
+		return agentapi.HostSamplePayload{}, fmt.Errorf("darwin sysctl kern.boottime: %w", err)
+	}
+	uptimeSeconds, err := parseDarwinUptime(bootTimeRaw, observedAt)
+	if err != nil {
+		return agentapi.HostSamplePayload{}, err
+	}
+
+	fsStats, err := p.statFS("/")
+	if err != nil {
+		return agentapi.HostSamplePayload{}, fmt.Errorf("statfs /: %w", err)
+	}
+	diskUsedPct, inodeUsedPct := deriveUsagePercents(fsStats)
+
+	return agentapi.HostSamplePayload{
+		ObservedAt:        observedAt,
+		Load1:             load1,
+		Load5:             load5,
+		Load15:            load15,
+		MemUsedPct:        memUsedPct,
+		MemAvailableBytes: memAvailableBytes,
+		SwapUsedPct:       swapUsedPct,
+		DiskUsedPct:       diskUsedPct,
+		InodeUsedPct:      inodeUsedPct,
+		UptimeSeconds:     uptimeSeconds,
+	}, nil
+}
+
+func defaultCommandOutput(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).Output()
+}
+
 func defaultStatFS(path string) (FilesystemStats, error) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
@@ -186,6 +283,137 @@ func parseLoadAvg(raw []byte) (float64, float64, float64, error) {
 		return 0, 0, 0, fmt.Errorf("parse load15: %w", err)
 	}
 	return load1, load5, load15, nil
+}
+
+func parseDarwinLoadAvg(raw []byte) (float64, float64, float64, error) {
+	normalized := strings.NewReplacer("{", " ", "}", " ").Replace(string(raw))
+	fields := strings.Fields(normalized)
+	if len(fields) < 3 {
+		return 0, 0, 0, fmt.Errorf("parse darwin loadavg: insufficient fields")
+	}
+	load1, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("parse darwin load1: %w", err)
+	}
+	load5, err := strconv.ParseFloat(fields[1], 64)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("parse darwin load5: %w", err)
+	}
+	load15, err := strconv.ParseFloat(fields[2], 64)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("parse darwin load15: %w", err)
+	}
+	return load1, load5, load15, nil
+}
+
+func parseDarwinMemSize(raw []byte) (uint64, error) {
+	value, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse darwin hw.memsize: %w", err)
+	}
+	if value == 0 {
+		return 0, fmt.Errorf("parse darwin hw.memsize: zero value")
+	}
+	return value, nil
+}
+
+func parseDarwinVMStat(raw []byte, memTotalBytes uint64) (float64, int64, error) {
+	pageSize, counts, err := parseDarwinVMStatCounts(raw)
+	if err != nil {
+		return 0, 0, err
+	}
+	availablePages := counts["Pages free"] + counts["Pages inactive"] + counts["Pages speculative"]
+	memAvailableBytes := availablePages * pageSize
+	if memAvailableBytes > memTotalBytes {
+		memAvailableBytes = memTotalBytes
+	}
+	memUsedPct := float64(memTotalBytes-memAvailableBytes) / float64(memTotalBytes) * 100
+	return memUsedPct, int64(memAvailableBytes), nil
+}
+
+func parseDarwinVMStatCounts(raw []byte) (uint64, map[string]uint64, error) {
+	counts := map[string]uint64{}
+	var pageSize uint64
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "page size of") {
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "of" && i+1 < len(fields) {
+					value, err := strconv.ParseUint(fields[i+1], 10, 64)
+					if err != nil {
+						return 0, nil, fmt.Errorf("parse darwin vm_stat page size: %w", err)
+					}
+					pageSize = value
+					break
+				}
+			}
+			continue
+		}
+		name, valueText, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		valueText = strings.TrimSpace(strings.TrimSuffix(valueText, "."))
+		value, err := strconv.ParseUint(valueText, 10, 64)
+		if err != nil {
+			continue
+		}
+		counts[strings.Trim(name, `"`)] = value
+	}
+	if pageSize == 0 {
+		return 0, nil, fmt.Errorf("parse darwin vm_stat: page size missing")
+	}
+	return pageSize, counts, nil
+}
+
+func parseDarwinSwapUsage(raw []byte) (float64, error) {
+	normalized := strings.NewReplacer("=", " ", "M", " ", "G", " ").Replace(string(raw))
+	fields := strings.Fields(normalized)
+	var total, used float64
+	for i := 0; i+1 < len(fields); i++ {
+		switch fields[i] {
+		case "total":
+			value, err := strconv.ParseFloat(fields[i+1], 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse darwin swap total: %w", err)
+			}
+			total = value
+		case "used":
+			value, err := strconv.ParseFloat(fields[i+1], 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse darwin swap used: %w", err)
+			}
+			used = value
+		}
+	}
+	if total == 0 {
+		return 0, nil
+	}
+	return used / total * 100, nil
+}
+
+func parseDarwinUptime(raw []byte, observedAt time.Time) (int64, error) {
+	normalized := strings.NewReplacer("{", " ", "}", " ", "=", " ", ",", " ").Replace(string(raw))
+	fields := strings.Fields(normalized)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] != "sec" {
+			continue
+		}
+		bootUnix, err := strconv.ParseInt(fields[i+1], 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse darwin boottime sec: %w", err)
+		}
+		uptimeSeconds := observedAt.Unix() - bootUnix
+		if uptimeSeconds < 0 {
+			return 0, nil
+		}
+		return uptimeSeconds, nil
+	}
+	return 0, fmt.Errorf("parse darwin boottime: sec missing")
 }
 
 func parseMemInfo(raw []byte) (float64, int64, float64, error) {

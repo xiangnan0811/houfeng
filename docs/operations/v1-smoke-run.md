@@ -262,8 +262,11 @@ Most recent live PostgreSQL smoke: **2026-05-02** against
 `192.168.100.192:5432/houfeng` with the V1.x auth middleware in place
 (admin login successful → cookie reused for protected endpoints).
 End-to-end Step 1-2, 4-8 PASSED on first run; Step 3 (agent host sample)
-PARTIAL because the local box is macOS and `agent/hostsample` requires
-Linux `/proc/loadavg` (does not affect the systemd deploy target);
+was PARTIAL because the local box was macOS and `agent/hostsample` required
+Linux `/proc/loadavg` at the time (does not affect the systemd deploy target).
+Follow-up 2026-05-03: `agent/hostsample` now has a Darwin collector backed by
+`sysctl` / `vm_stat`; a short macOS rerun against the same node produced
+`latest_host_sample.observed_at=2026-05-03T14:50:01.228739+08:00`;
 Step 9 INCONCLUSIVE because the running center process has no
 `HOUFENG_WEB_DIST_DIR` set and serves SPA via the parallel vite dev
 server instead.
@@ -299,7 +302,7 @@ comparison.
 | 0. Login | PASS | session cookie reused for all protected calls |
 | 1. Create Node | PASS | initial `binding_status=未绑定`, `lifecycle_status=待接入` |
 | 2. Issue token | PASS | response key is `token`, not `plaintext_token` (see caveat below) |
-| 3. Enroll + run agent | PARTIAL | enroll/sync/plan delivery OK; macOS host-sample fails (Darwin lacks `/proc/loadavg`) |
+| 3. Enroll + run agent | PARTIAL | enroll/sync/plan delivery OK; macOS host-sample failed in this run because Darwin lacks `/proc/loadavg`; fixed after the run on 2026-05-03 and pending next-smoke verification |
 | 4. Create Target | PASS | self-probe target against running center |
 | 5. Add ProbeItem | PASS | first observation ~50s after creation |
 | 6. Trigger incident | PASS | `PUT` updates ProbeItem `config.path` to `/api/__nonexistent__`; full body required |
@@ -310,7 +313,7 @@ comparison.
 ### Caveats / new findings (consider for v1-gap-checklist follow-ups)
 
 1. **`POST /api/nodes/{id}/enrollment-token` response key is `token`** (not `plaintext_token` as the Step-2 doc text suggests). Anyone scripting strictly against the doc will break on the first parse — Step-2 should clarify the actual key.
-2. **agent `agent/hostsample` requires Linux `/proc/loadavg`** — fails silently on macOS every 30s. The systemd deploy target is unaffected, but local-dev smoke on macOS cannot complete agent host-sample collection (`latest_host_sample` stays `null`, `has_host_sample=false`).
+2. **agent `agent/hostsample` required Linux `/proc/loadavg` during this run** — it failed on macOS every 30s, so `latest_host_sample` stayed `null` and `has_host_sample=false`. Follow-up 2026-05-03 added a Darwin collector backed by `sysctl` / `vm_stat`; a short rerun against `nd_cc1c47a6803a648c` produced `latest_host_sample.observed_at=2026-05-03T14:50:01.228739+08:00`.
 3. **Center `/` returns HTTP 404 when `HOUFENG_WEB_DIST_DIR` is unset** — production deploys must set it; the smoke prerequisite section already exports it, but operators reusing a long-lived dev center must verify the env var or the Step-9 visual checks cannot be performed against the center process itself.
 4. **`GET /api/events` returns a bare JSON array, not `{items:[...]}`** — internal contract; if/when an envelope is introduced, all callers and any polling scripts written against the bare-array shape will break.
 
