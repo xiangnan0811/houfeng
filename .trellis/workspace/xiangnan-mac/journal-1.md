@@ -756,3 +756,36 @@ Added a Darwin hostsample collector for local macOS agent runs, kept Linux procf
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: 重设计节点列表与详情页（DataTable + interactive sparkline）
+
+**Date**: 2026-05-03
+**Task**: 重设计节点列表与详情页（DataTable + interactive sparkline）
+**Branch**: `main`
+
+### Summary
+
+把节点列表 / 详情页从低密度数字阵列重做成高密度趋势化视图。NodesPage 迁移到 DataTable（紧凑 36px 行高、segmented view tabs、hover 才显操作按钮、行点击跳详情）。NodeDetailPage 删除冗余的近期趋势 section，主机指标 4 卡每张配 240×60 interactive sparkline（hover tooltip 显时间+值），section aside 显示采样元信息（24h N 样本 · 最早/最新 · backfill M），维护态自动加 ribbon。Sparkline 原子升级 samples / interactive / expand / formatValue props + 边界态（无样本/单样本/维护态），仍然纯 SVG，未引图表库（守 design-language §12 硬约束）。Mono 字体（MonoDigits / Hostname / Timestamp）在两个页面全面落地，含 NodeHero 与绑定冲突 cells。component-spec.md §五同步；v1-gap-checklist 新增 4 条 follow-up（接入工作台 stepper / TargetsPage 镜像 / Dashboard 节点块对齐 / 其他页面 mono 字体）。333/333 测试 pass，build 447KB / 128.68KB gz。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a8da262` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

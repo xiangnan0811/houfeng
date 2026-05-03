@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
+- **Total Sessions**: 23
 - **Last Active**: 2026-05-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~758 | Active |
+| `journal-1.md` | ~791 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-05-03 | 重设计节点列表与详情页（DataTable + interactive sparkline） | `a8da262` | `main` |
 | 22 | 2026-05-03 | Fix macOS agent host sampling | `b1edb66` | `main` |
 | 21 | 2026-05-03 | Trellis post-init cleanup | `aec1c60`, `3f07848` | `main` |
 | 20 | 2026-05-03 | Sync Stage 1 完成度 to next-phase-plan + gap-checklist | `1446f53`, `f9ecb47` | `main` |
