@@ -1,5 +1,6 @@
 import { StatusBadge } from '../StatusBadge'
-import { formatDateTime, formatLabelList } from '../../lib/format'
+import { Timestamp } from '../atoms'
+import { formatLabelList } from '../../lib/format'
 import type { NodeRecord } from '../../lib/types'
 
 type NodeHeroProps = {
@@ -29,11 +30,15 @@ export function NodeHero({ node }: NodeHeroProps) {
         </div>
         <div className="hero-meta-card">
           <span>最近心跳</span>
-          <strong>{formatDateTime(node.last_heartbeat_at)}</strong>
+          <strong>
+            <Timestamp value={node.last_heartbeat_at} mode="both" />
+          </strong>
         </div>
         <div className="hero-meta-card">
           <span>最近同步</span>
-          <strong>{formatDateTime(node.last_sync_at)}</strong>
+          <strong>
+            <Timestamp value={node.last_sync_at} mode="both" />
+          </strong>
         </div>
         <div className="hero-meta-card">
           <span>当前主问题</span>

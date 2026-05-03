@@ -171,3 +171,14 @@ Before tagging or declaring V1 fully release-ready, collect:
 | 14 | `agent/hostsample` 曾依赖 Linux `/proc/loadavg`，macOS local dev 无法完成 host sample | 2026-05-02 smoke Step 3 PARTIAL: agent enrolls 但 host sample 段失败；2026-05-03 已增加 Darwin collector（`sysctl` / `vm_stat`），Linux procfs 路径保持不变；macOS rerun 收到 `latest_host_sample.observed_at=2026-05-03T14:50:01.228739+08:00` | → Closed (2026-05-03, task `05-03-fix-agent-macos-host-sampling`) |
 | 15 | Center `/` 返回 404 当 `HOUFENG_WEB_DIST_DIR` 未配置——生产部署必须配 | smoke Step 9 INCONCLUSIVE: 改用 vite :5173 验 SPA | → Closed (2026-05-03, see commit 92e5b6f) |
 | 16 | `GET /api/events` 返回 bare JSON array，非 `{items:[...]}` envelope；后续如引入 envelope，所有 caller + smoke 同时破 | smoke Step 8 实测；`internal/center/http/handlers/events.go` | → Open (deferred — design follow-up) |
+
+### V2 spec 实施 follow-up (4 条，新增 2026-05-03，来自 05-03-redesign-node-pages 任务)
+
+下列 4 条由 `05-03-redesign-node-pages` 任务（节点列表 + 详情页 v2 spec 实施）的范围决策（PRD Q3/Q4/Out of Scope）拆出，作为后续独立任务跟踪。本次任务已完成节点列表 + 详情页的 DataTable / Sparkline interactive / Mono 包装收口（PR1+PR2+PR3）；下列条目是该收口的延伸面。
+
+| # | 现象 | 证据 | Status |
+|---|---|---|---|
+| 17 | 接入工作台 (NodeOnboardingPage) 未对齐 v2 spec：缺 4-phase stepper 进度可视化、token 一次性显示 + 倒计时 + 复制按钮、安装步骤未按节点替换 `enrollment_token` / `server_url` 模板 | `web/src/pages/NodeOnboardingPage.tsx` 当前 445 行，phase 仅以 3 KPI 卡描述；安装步骤为静态 markdown；token 区块在已接入完成后仍占大半屏。来源：05-03-redesign-node-pages PRD Q3 决策（拆 follow-up） | → Open (deferred — follow-up task) |
+| 18 | TargetsPage / TargetDetailPage 未镜像节点页面 v2 spec 实施：列表仍用 `.resource-table` 自渲染（应迁 DataTable），详情页主指标卡未含 sparkline，Mono 包装未落地 | `web/src/pages/TargetsPage.tsx` 740 行 / `TargetDetailPage.tsx` 1731 行；component-spec.md §五"TargetsPage / TargetDetailPage 镜像 NodesPage / NodeDetailPage 的 DataTable + 详情结构"未实施。来源：05-03-redesign-node-pages PRD Out of Scope | → Open (deferred — follow-up task) |
+| 19 | Dashboard 节点概览块（异常节点行）风格未与新版节点列表对齐：缺 `<StatusGlyph>` / `<Hostname>` / `<Timestamp>` 组合 | `web/src/pages/DashboardPage.tsx:92-168` `AbnormalNodeList` 当前自渲染，未消费 v2 atoms。来源：05-03-redesign-node-pages PRD Out of Scope | → Open (deferred — follow-up task) |
+| 20 | 其他页面 Mono 字体全面落地缺失：Targets / Dashboard / Events / Settings 的 `<MonoDigits>` / `<Hostname>` / `<Timestamp>` 包装尚未实施（设计语言 §3.2 强制约束） | `grep -rn "MonoDigits\|Hostname\|Timestamp" web/src/pages/{Targets,Dashboard,Events,Settings}*` 返回近零；formatter 调用 (`formatPercent` / `formatBytes` / `formatDateTime`) 仍未包 wrapper。来源：05-03-redesign-node-pages PRD Q4 决策 | → Open (deferred — follow-up task) |

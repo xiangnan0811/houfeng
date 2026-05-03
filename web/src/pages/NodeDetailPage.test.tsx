@@ -199,9 +199,9 @@ describe('NodeDetailPage', () => {
 
     expect(screen.getByText('节点详情')).toBeInTheDocument()
     expect(screen.getByText('当前运行事实')).toBeInTheDocument()
-    expect(screen.getAllByText('近期趋势')[0]).toBeInTheDocument()
     expect(screen.getByText('当前主机指标')).toBeInTheDocument()
-    expect(screen.getByText('12.5%')).toBeInTheDocument()
+    // CPU value renders both in the card head MonoDigits and the load detail
+    expect(screen.getAllByText('12.5%').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText(/2.0 GB/i)).toBeInTheDocument()
     expect(screen.getByText('2小时 0分钟')).toBeInTheDocument()
     expect(screen.getAllByText('当前异常')[0]).toBeInTheDocument()
@@ -241,7 +241,7 @@ describe('NodeDetailPage', () => {
   })
 
 
-  it('renders recent trend metrics from recent host samples', async () => {
+  it('renders sparklines and a sample-count meta line when recent host samples are present', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -357,7 +357,7 @@ describe('NodeDetailPage', () => {
         .mockResolvedValueOnce(mockJSONResponse([])),
     )
 
-    render(
+    const { container } = render(
       <MemoryRouter initialEntries={['/nodes/nd_trend']}>
         <Routes>
           <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
@@ -369,15 +369,13 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Trend Node' })).toBeInTheDocument(),
     )
 
-    expect(screen.getAllByText('近期趋势')[0]).toBeInTheDocument()
-    expect(screen.getByText('近 24h 样本')).toBeInTheDocument()
-    expect(screen.getByText('2')).toBeInTheDocument()
-    expect(screen.getByText('Load5 平均')).toBeInTheDocument()
-    expect(screen.getByText('1.4')).toBeInTheDocument()
-    expect(screen.getByText('iowait 平均')).toBeInTheDocument()
-    expect(screen.getByText('5.0%')).toBeInTheDocument()
-    expect(screen.getByText('steal 平均')).toBeInTheDocument()
-    expect(screen.getByText('1.3%')).toBeInTheDocument()
+    // Host metrics section meta line surfaces the sample count
+    const meta = container.querySelector('.detail-section__aside-meta')
+    expect(meta?.textContent ?? '').toContain('24h 2 样本')
+
+    // Each of the four primary metric cards plus the dual network sparklines
+    // produce polylines (5 in total: cpu, mem, disk, net-in, net-out).
+    expect(container.querySelectorAll('polyline').length).toBeGreaterThanOrEqual(4)
   })
 
   it('renders an empty state when no recent host samples are available', async () => {
@@ -397,7 +395,7 @@ describe('NodeDetailPage', () => {
         .mockResolvedValueOnce(mockJSONResponse([])),
     )
 
-    render(
+    const { container } = render(
       <MemoryRouter initialEntries={['/nodes/nd_empty']}>
         <Routes>
           <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
@@ -409,8 +407,10 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Empty Trend Node' })).toBeInTheDocument(),
     )
 
-    expect(screen.getAllByText('近期趋势')[0]).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '近 24h 暂无样本' })).toBeInTheDocument()
+    // Sample is null → host metrics shows the no-sample empty state, no sparklines.
+    expect(screen.getByRole('heading', { name: '尚未收到主机样本' })).toBeInTheDocument()
+    const meta = container.querySelector('.detail-section__aside-meta')
+    expect(meta?.textContent ?? '').toContain('近 24h 暂无样本')
   })
 
   it('renders first-sync, incident, and event empty states when no related records exist yet', async () => {
@@ -460,9 +460,6 @@ describe('NodeDetailPage', () => {
     )
     expect(
       screen.getByText('该节点已存在，但首批主机采样（HostSample）还未到达。请等待下一次 agent 同步。'),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText('近期趋势需要近 24h 主机采样数据，当前还没有可用样本。'),
     ).toBeInTheDocument()
     expect(screen.getByText('当前没有活跃异常')).toBeInTheDocument()
     expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument()

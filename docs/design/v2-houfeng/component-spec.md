@@ -193,10 +193,9 @@ parent: docs/design/v2-houfeng/design-language.md
 4. DetailSection `标签与备注`（编辑/查看切换）
 5. DetailSection `运行控制` + ActionConfirmationCard
 6. DetailSection `生命周期`（退役按钮 + ActionConfirmationCard）
-7. DetailSection `当前主机指标`：4 metric-card 各含 [label · MonoDigits · Sparkline (12-24h)]
-8. DetailSection `近期趋势`：4 卡 + 各自 Sparkline
-9. DetailSection `当前异常`：IncidentList
-10. DetailSection `事件`：EventList timeline
+7. DetailSection `当前主机指标`：4 metric-card 各含 [卡头 (label · MonoDigits 当前值) · Sparkline (interactive · 12-24h · hover tooltip 显时间与值) · 次指标 dl]。section aside 显示采样元信息（24h N 样本 · 最早 ... · 最新 ... · backfill M）。维护态时整张 section 加 maintenance ribbon。
+8. DetailSection `当前异常`：IncidentList
+9. DetailSection `事件`：EventList timeline
 
 ### EventsPage
 1. Hero panel

@@ -160,6 +160,17 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
+/* Multi-piece meta line (e.g. host-metrics aside): mono + wraps gracefully. */
+.detail-section__aside-meta {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+  white-space: normal;
+  text-align: right;
+  max-width: 480px;
+}
 .detail-section__body {
   padding: var(--space-5);
   display: flex;
@@ -341,6 +352,15 @@
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-3);
 }
+/* Force a 4-column layout on quad metric grids (host-metrics with sparklines).
+ * Falls back to 2 columns when the page area is narrower than ~880px so cards
+ * don't squeeze the sparklines. Aligns with the desktop-only stance. */
+.metric-grid--quad {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 1080px) {
+  .metric-grid--quad { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .metric-card {
   background: var(--surface-elevated);
   border: 1px solid var(--border);
@@ -348,7 +368,7 @@
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 .metric-card > h3 {
   font-family: var(--font-sans);
@@ -357,6 +377,61 @@
   color: var(--text-primary);
   letter-spacing: 0.02em;
 }
+.metric-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.metric-card__head h3 {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+.metric-card__current {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+.metric-card__current-sub {
+  font-family: var(--font-sans);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.metric-card__sparkline-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.metric-card__sparkline-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.metric-card__sparkline-tag {
+  font-family: var(--font-sans);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  width: 28px;
+  flex-shrink: 0;
+}
+.metric-card__sparkline-row .sparkline-shell { flex: 1; }
 .metric-card > dl {
   display: flex;
   flex-direction: column;
@@ -691,4 +766,167 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* ============================================================
+ * NodesPage v2: section heading inline variant + DataTable layout.
+ * ============================================================ */
+
+/* section-heading variant: title block on the left, primary action on the right */
+.section-heading--inline {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.section-heading--inline > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* Toolbar row: view tabs on the left (room for future filters/sort) */
+.nodes-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Collapsible creation panel (existing page-panel + tighter top spacing) */
+.nodes-create-panel { /* room for future visual tightening */ }
+
+/* DataTable customizations for NodesPage rows. Hover-only action column
+ * leverages CSS opacity (no React state) so the table doesn't re-render
+ * when the cursor moves between rows. */
+.nodes-table .nodes-table__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.nodes-table .nodes-table__name {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.nodes-table .nodes-table__name:hover { color: var(--accent-strong); }
+.nodes-table .nodes-table__id {
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+}
+.nodes-table .nodes-table__location {
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+}
+.nodes-table .nodes-table__labels {
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+}
+.nodes-table .nodes-table__labels-more { color: var(--text-muted); }
+
+.nodes-table .nodes-table__issue {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.nodes-table .nodes-table__issue-count {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.nodes-table .nodes-table__issue-summary {
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.nodes-table .nodes-table__heartbeat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--type-small-size);
+}
+.nodes-table .nodes-table__heartbeat-sync {
+  display: inline-flex;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--type-small-size);
+}
+.nodes-table .nodes-table__heartbeat-sync-label { color: var(--text-muted); }
+
+/* Hover-revealed action column. Default opacity 0; row hover or focus
+ * within the actions cell promotes opacity to 1 so keyboard users can
+ * still tab into the buttons. */
+.nodes-table .nodes-table__actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-calm);
+}
+.nodes-table .data-table__row:hover .nodes-table__actions,
+.nodes-table .data-table__row:focus-within .nodes-table__actions {
+  opacity: 1;
+}
+/* Always reveal when an inline editor is active so the user can confirm/cancel */
+.nodes-table .nodes-table__label-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 200px;
+}
+.nodes-table .nodes-table__label-editor-field {
+  display: flex;
+  flex-direction: column;
+}
+.nodes-table .nodes-table__label-editor-field input {
+  width: 100%;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+}
+.nodes-table .nodes-table__label-editor-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.nodes-table .nodes-table__label-editor-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.nodes-table__inline-error {
+  color: var(--color-state-critical);
+  font-size: var(--type-small-size);
+}
+
+.nodes-table__row-overlay {
+  /* Renders pause confirmation / runtime errors below the table for the
+   * affected row. Anchored visually to the table by the surrounding
+   * page-stack gap. */
+}
+
+/* Screen-reader only label helper for inline editors that hide the visual <label>. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }

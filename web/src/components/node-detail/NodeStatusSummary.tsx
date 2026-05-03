@@ -1,3 +1,4 @@
+import { MonoDigits } from '../atoms'
 import type { NodeRecord } from '../../lib/types'
 
 type NodeStatusSummaryProps = {
@@ -13,7 +14,9 @@ export function NodeStatusSummary({ node }: NodeStatusSummaryProps) {
       </article>
       <article className="summary-card">
         <p className="summary-card__label">活跃异常数</p>
-        <p className="summary-card__value">{node.current_active_incident_count}</p>
+        <p className="summary-card__value">
+          <MonoDigits>{node.current_active_incident_count}</MonoDigits>
+        </p>
       </article>
       <article className="summary-card">
         <p className="summary-card__label">当前主问题</p>

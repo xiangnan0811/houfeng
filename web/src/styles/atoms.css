@@ -322,8 +322,61 @@
 .sparkline { display: inline-block; vertical-align: middle; }
 .sparkline--empty {
   background: var(--surface-elevated);
+  border: 1px dashed var(--border-dashed);
   border-radius: 2px;
-  opacity: 0.6;
+}
+.sparkline__placeholder {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.sparkline-shell {
+  position: relative;
+}
+.sparkline-shell--interactive .sparkline { transition: opacity var(--dur-micro, 120ms) var(--ease-calm, ease); }
+.sparkline-shell--interactive:hover .sparkline { opacity: 0.95; }
+.sparkline__hint {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+.sparkline__tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 8px;
+  background: var(--surface-pressed, var(--surface-elevated));
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.sparkline__tooltip-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sparkline__tooltip-time {
+  color: var(--text-muted);
+  font-size: 10px;
 }
 
 /* ============== TrendArrow ============== */

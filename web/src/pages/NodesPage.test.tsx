@@ -101,7 +101,7 @@ describe('NodesPage', () => {
     )
 
     expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
-    expect(screen.getAllByText('列表视图').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('tab', { name: /全部节点/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
     expect(screen.getByText('节点创建')).toBeInTheDocument()
@@ -384,8 +384,8 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    expect(screen.getByRole('button', { name: '绑定异常 1' })).toBeInTheDocument()
-    const conflictRow = screen.getByText('Tokyo Edge').closest('article')
+    expect(screen.getByRole('tab', { name: /绑定异常/ })).toBeInTheDocument()
+    const conflictRow = screen.getByText('Tokyo Edge').closest('tr')
     expect(conflictRow).not.toBeNull()
     expect(within(conflictRow!).getByText('指纹变更待确认')).toBeInTheDocument()
     expect(within(conflictRow!).getByText('等待绑定确认')).toBeInTheDocument()
@@ -393,16 +393,16 @@ describe('NodesPage', () => {
     expect(screen.queryByRole('button', { name: '拒绝新指纹' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重置绑定' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '绑定异常 1' }))
+    fireEvent.click(screen.getByRole('tab', { name: /绑定异常/ }))
 
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
     expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '绑定异常 1' })).toHaveAttribute(
-      'aria-pressed',
+    expect(screen.getByRole('tab', { name: /绑定异常/ })).toHaveAttribute(
+      'aria-selected',
       'true',
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '全部节点 2' }))
+    fireEvent.click(screen.getByRole('tab', { name: /全部节点/ }))
     expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
   })
 
@@ -431,7 +431,7 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Seoul Edge')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '绑定异常 0' }))
+    fireEvent.click(screen.getByRole('tab', { name: /绑定异常/ }))
 
     expect(screen.getByText('没有绑定异常节点')).toBeInTheDocument()
     expect(screen.getByText('当前没有等待绑定确认的节点。')).toBeInTheDocument()
@@ -529,8 +529,8 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    const enabledRow = screen.getByText('Tokyo Edge').closest('article')
-    const pausedRow = screen.getByText('Seoul Edge').closest('article')
+    const enabledRow = screen.getByText('Tokyo Edge').closest('tr')
+    const pausedRow = screen.getByText('Seoul Edge').closest('tr')
     expect(enabledRow).not.toBeNull()
     expect(pausedRow).not.toBeNull()
 
@@ -699,7 +699,7 @@ describe('NodesPage', () => {
 
     expect(confirmMock).not.toHaveBeenCalled()
     await waitFor(() =>
-      expect(screen.getByText('invalid runtime transition')).toBeInTheDocument(),
+      expect(screen.getByText(/invalid runtime transition/)).toBeInTheDocument(),
     )
     expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认暂停监控' })).toBeInTheDocument()
@@ -747,21 +747,23 @@ describe('NodesPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-    expect(screen.getByText('标签：edge')).toBeInTheDocument()
+    const tokyoRow = screen.getByText('Tokyo Edge').closest('tr')
+    expect(tokyoRow).not.toBeNull()
+    expect(within(tokyoRow!).getByText('edge')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '快速编辑标签' }))
-    const editor = screen.getByRole('textbox', { name: '标签' })
+    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
+    const editor = within(tokyoRow!).getByRole('textbox', { name: '标签' })
     fireEvent.change(editor, { target: { value: 'edge, core, edge' } })
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '取消' }))
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: '保存标签' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
+    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
+    fireEvent.change(within(tokyoRow!).getByRole('textbox', { name: '标签' }), {
       target: { value: 'edge, core, edge' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '保存标签' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001', {
@@ -776,7 +778,7 @@ describe('NodesPage', () => {
         body: JSON.stringify({ labels: ['edge', 'core'], note: 'keep me' }),
       }),
     )
-    expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
+    expect(within(tokyoRow!).getByText('edge · core')).toBeInTheDocument()
   })
 
 
@@ -811,10 +813,8 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    const row = screen.getAllByRole('article').find((item) =>
-      within(item).queryByText('Tokyo Edge'),
-    )
-    expect(row).toBeDefined()
+    const row = screen.getByText('Tokyo Edge').closest('tr')
+    expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
     fireEvent.change(within(row!).getByRole('textbox', { name: '标签' }), {
@@ -837,7 +837,7 @@ describe('NodesPage', () => {
       ),
     )
 
-    await waitFor(() => expect(within(row!).getByText('标签：edge · core')).toBeInTheDocument())
+    await waitFor(() => expect(within(row!).getByText('edge · core')).toBeInTheDocument())
 
     runtimeUpdate.resolve(
       mockJSONResponse(
@@ -855,8 +855,8 @@ describe('NodesPage', () => {
     await waitFor(() =>
       expect(within(row!).getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
     )
-    expect(within(row!).getByText('标签：edge · core')).toBeInTheDocument()
-    expect(within(row!).queryByText('标签：edge')).not.toBeInTheDocument()
+    expect(within(row!).getByText('edge · core')).toBeInTheDocument()
+    expect(within(row!).queryByText(/^edge$/)).not.toBeInTheDocument()
   })
 
   it('preserves newer runtime fields when a stale metadata save resolves later', async () => {
@@ -890,10 +890,8 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    const row = screen.getAllByRole('article').find((item) =>
-      within(item).queryByText('Tokyo Edge'),
-    )
-    expect(row).toBeDefined()
+    const row = screen.getByText('Tokyo Edge').closest('tr')
+    expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
     fireEvent.change(within(row!).getByRole('textbox', { name: '标签' }), {
@@ -933,7 +931,7 @@ describe('NodesPage', () => {
       ),
     )
 
-    await waitFor(() => expect(within(row!).getByText('标签：edge · core')).toBeInTheDocument())
+    await waitFor(() => expect(within(row!).getByText('edge · core')).toBeInTheDocument())
     expect(within(row!).getByRole('button', { name: '退出维护' })).toBeInTheDocument()
     expect(within(row!).queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
   })
@@ -974,11 +972,10 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    const rows = screen.getAllByRole('article')
-    const tokyoRow = rows.find((row) => within(row).queryByText('Tokyo Edge'))
-    const seoulRow = rows.find((row) => within(row).queryByText('Seoul Edge'))
-    expect(tokyoRow).toBeDefined()
-    expect(seoulRow).toBeDefined()
+    const tokyoRow = screen.getByText('Tokyo Edge').closest('tr')
+    const seoulRow = screen.getByText('Seoul Edge').closest('tr')
+    expect(tokyoRow).not.toBeNull()
+    expect(seoulRow).not.toBeNull()
 
     fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
     fireEvent.change(within(tokyoRow!).getByRole('textbox', { name: '标签' }), {
@@ -1083,6 +1080,146 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
     expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
+  })
+
+  it('navigates to the node detail page when a row is clicked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_click',
+            display_name: 'Tokyo Edge',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+          <Route path="/nodes/:nodeId" element={<div>node detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    const row = screen.getByText('Tokyo Edge').closest('tr')
+    expect(row).not.toBeNull()
+
+    fireEvent.click(row!)
+    await waitFor(() => expect(screen.getByText('node detail')).toBeInTheDocument())
+  })
+
+  it('does not navigate when a row action button is clicked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            nodeRecord({
+              node_id: 'nd_actions',
+              display_name: 'Tokyo Edge',
+              labels: ['edge'],
+            }),
+          ]),
+        ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+          <Route path="/nodes/:nodeId" element={<div>node detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    const row = screen.getByText('Tokyo Edge').closest('tr')
+    expect(row).not.toBeNull()
+
+    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
+    // Inline editor opened on the same row, navigation must NOT have triggered.
+    expect(within(row!).getByRole('textbox', { name: '标签' })).toBeInTheDocument()
+    expect(screen.queryByText('node detail')).not.toBeInTheDocument()
+  })
+
+  it('toggles binding-conflict view via the segmented control tabs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_normal_seg',
+            display_name: 'Normal Edge',
+          }),
+          nodeRecord({
+            node_id: 'nd_conflict_seg',
+            display_name: 'Conflict Edge',
+            binding_status: '指纹变更待确认',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Normal Edge')).toBeInTheDocument())
+    expect(screen.getByText('Conflict Edge')).toBeInTheDocument()
+
+    const allTab = screen.getByRole('tab', { name: /全部节点/ })
+    const conflictTab = screen.getByRole('tab', { name: /绑定异常/ })
+    expect(allTab).toHaveAttribute('aria-selected', 'true')
+    expect(conflictTab).toHaveAttribute('aria-selected', 'false')
+
+    fireEvent.click(conflictTab)
+
+    await waitFor(() =>
+      expect(screen.queryByText('Normal Edge')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Conflict Edge')).toBeInTheDocument()
+    expect(conflictTab).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(allTab)
+    await waitFor(() => expect(screen.getByText('Normal Edge')).toBeInTheDocument())
+  })
+
+  it('toggles the create node form panel via the section heading button', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '新建节点' })).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByText('节点创建')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
+    expect(screen.getByText('节点创建')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
+    expect(screen.queryByText('节点创建')).not.toBeInTheDocument()
   })
 
 })

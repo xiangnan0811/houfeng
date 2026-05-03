@@ -6,11 +6,15 @@ import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { IncidentList } from '../components/IncidentList'
 import {
+  Hostname,
+  MonoDigits,
+  Timestamp,
+} from '../components/atoms'
+import {
   NodeHero,
   NodeHostMetrics,
   NodeLabelsAndNote,
   NodeStatusSummary,
-  NodeTrendCards,
 } from '../components/node-detail'
 import {
   ApiError,
@@ -30,10 +34,8 @@ import {
   resumeNodeMonitoring,
   updateNodeMetadata,
 } from '../lib/api'
-import { formatDateTime } from '../lib/format'
 import type {
   ActiveIncidentRecord,
-  HostSample,
   NodeOnboardingState,
   NodeRecord,
   NodeRuntimeFacts,
@@ -149,38 +151,6 @@ function mergeNonMetadataNodeRecord<T extends NodeRecord>(current: NodeRecord, u
     ...updated,
     labels: current.labels,
     note: current.note,
-  }
-}
-
-function averageOf(values: number[]) {
-  if (values.length === 0) return null
-  return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
-function summarizeRecentHostSamples(samples: HostSample[]) {
-  if (samples.length === 0) return null
-
-  // Ascending by observed_at: oldest left, newest right — required for
-  // Sparkline to read left-to-right as a forward time line.
-  const ascending = [...samples].sort(
-    (left, right) => new Date(left.observed_at).getTime() - new Date(right.observed_at).getTime(),
-  )
-  const oldest = ascending[0]
-  const newest = ascending[ascending.length - 1]
-
-  return {
-    count: ascending.length,
-    newestObservedAt: newest.observed_at,
-    oldestObservedAt: oldest.observed_at,
-    averageLoad5: averageOf(ascending.map((sample) => sample.load_5)),
-    averageIowait: averageOf(ascending.map((sample) => sample.cpu_iowait_pct)),
-    averageSteal: averageOf(ascending.map((sample) => sample.cpu_steal_pct)),
-    latestLoad5: newest.load_5,
-    latestIowait: newest.cpu_iowait_pct,
-    latestSteal: newest.cpu_steal_pct,
-    load5Series: ascending.map((sample) => sample.load_5),
-    iowaitSeries: ascending.map((sample) => sample.cpu_iowait_pct),
-    stealSeries: ascending.map((sample) => sample.cpu_steal_pct),
   }
 }
 
@@ -578,7 +548,8 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   }
 
   const sample = runtimeFacts?.latest_host_sample ?? null
-  const recentTrend = summarizeRecentHostSamples(runtimeFacts?.recent_host_samples ?? [])
+  const recentSamples = runtimeFacts?.recent_host_samples ?? []
+  const isMaintenance = node.monitoring_status === '维护中'
   const showBindingConflict = node.binding_status === NODE_BINDING_CONFLICT_STATUS
   const isRetiredNode = node.lifecycle_status === NODE_LIFECYCLE_RETIRED
   const hasCurrentBindingConflictState = bindingConflictState.requestedNodeId === nodeId
@@ -660,23 +631,43 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
             <dl>
               <div>
                 <dt>当前已绑定指纹</dt>
-                <dd>{currentFingerprintSummary(bindingConflict)}</dd>
+                <dd>
+                  <Hostname>{currentFingerprintSummary(bindingConflict)}</Hostname>
+                </dd>
               </div>
               <div>
                 <dt>待确认指纹</dt>
-                <dd>{maskFingerprint(pendingBindingMetadata(bindingConflict)?.fingerprint)}</dd>
+                <dd>
+                  <Hostname>
+                    {maskFingerprint(pendingBindingMetadata(bindingConflict)?.fingerprint)}
+                  </Hostname>
+                </dd>
               </div>
               <div>
                 <dt>首次出现</dt>
-                <dd>{formatDateTime(pendingBindingMetadata(bindingConflict)?.first_seen_at)}</dd>
+                <dd>
+                  <Timestamp
+                    value={pendingBindingMetadata(bindingConflict)?.first_seen_at}
+                    mode="absolute"
+                  />
+                </dd>
               </div>
               <div>
                 <dt>最近出现</dt>
-                <dd>{formatDateTime(pendingBindingMetadata(bindingConflict)?.last_seen_at)}</dd>
+                <dd>
+                  <Timestamp
+                    value={pendingBindingMetadata(bindingConflict)?.last_seen_at}
+                    mode="absolute"
+                  />
+                </dd>
               </div>
               <div>
                 <dt>尝试次数</dt>
-                <dd>{pendingBindingMetadata(bindingConflict)?.attempt_count ?? 0}</dd>
+                <dd>
+                  <MonoDigits>
+                    {pendingBindingMetadata(bindingConflict)?.attempt_count ?? 0}
+                  </MonoDigits>
+                </dd>
               </div>
             </dl>
             {bindingConflictLoading ? <p>正在加载绑定冲突详情…</p> : null}
@@ -828,9 +819,11 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         </div>
       </DetailSection>
 
-      <NodeHostMetrics sample={sample} />
-
-      <NodeTrendCards recentTrend={recentTrend} />
+      <NodeHostMetrics
+        sample={sample}
+        samples={recentSamples}
+        isMaintenance={isMaintenance}
+      />
 
       <DetailSection eyebrow="当前异常" title="当前异常">
         {!hasCurrentActivity ? (

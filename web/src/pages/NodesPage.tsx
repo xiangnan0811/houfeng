@@ -1,8 +1,19 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
+import {
+  Button,
+  DataTable,
+  type DataTableColumn,
+  Hostname,
+  type HealthState,
+  MonoDigits,
+  StatusGlyph,
+  Tabs,
+  Timestamp,
+} from '../components/atoms'
 import {
   FilterBar,
   FilterChip,
@@ -21,7 +32,6 @@ import {
   resumeNodeMonitoring,
   updateNodeMetadata,
 } from '../lib/api'
-import { formatDateTime, formatLabelList } from '../lib/format'
 import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { CreateNodeInput, NodeRecord } from '../lib/types'
 
@@ -102,6 +112,26 @@ type FocusRestoreRequest = {
   preferredAction: NodeRuntimeAction
 }
 
+/** Map backend Chinese health-status into the StatusGlyph state vocabulary.
+ *  Health is derived (正常/关注/告警/严重) per architecture-data-model §node;
+ *  monitoring 维护中/暂停 visually outranks health for at-a-glance scanning. */
+function nodeGlyphState(node: NodeRecord): HealthState {
+  if (node.monitoring_status === '维护中') return 'maintenance'
+  if (node.monitoring_status === '暂停') return 'offline'
+  switch (node.current_health_status) {
+    case '正常':
+      return 'normal'
+    case '关注':
+      return 'notice'
+    case '告警':
+      return 'alert'
+    case '严重':
+      return 'critical'
+    default:
+      return 'offline'
+  }
+}
+
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
@@ -159,6 +189,20 @@ function mergeNonMetadataNodeRecord(current: NodeRecord, updated: NodeRecord): N
     labels: current.labels,
     note: current.note,
   }
+}
+
+function renderLabelsCell(node: NodeRecord): ReactNode {
+  if (node.labels.length === 0) return <span className="empty-inline">—</span>
+  const visible = node.labels.slice(0, 3)
+  const overflow = node.labels.length - visible.length
+  return (
+    <span className="nodes-table__labels">
+      {visible.join(' · ')}
+      {overflow > 0 ? (
+        <span className="nodes-table__labels-more"> +{overflow}</span>
+      ) : null}
+    </span>
+  )
 }
 
 export function NodesPage() {
@@ -504,9 +548,231 @@ export function NodesPage() {
     setSearchParams(new URLSearchParams(), { replace: true })
   }
 
+  const viewTabs = [
+    { value: 'all' as const, label: '全部节点', count: nodes.length },
+    {
+      value: 'binding-conflict' as const,
+      label: '绑定异常',
+      count: bindingConflictNodes.length,
+    },
+  ]
+
+  const columns: DataTableColumn<NodeRecord>[] = [
+    {
+      key: 'glyph',
+      label: '',
+      width: 32,
+      align: 'center',
+      render: (node) => (
+        <StatusGlyph
+          state={nodeGlyphState(node)}
+          size="md"
+          ariaLabel={`${node.display_name} 健康 ${node.current_health_status}`}
+        />
+      ),
+    },
+    {
+      key: 'identity',
+      label: '节点',
+      render: (node) => (
+        <div className="nodes-table__identity">
+          <Link
+            className="text-link nodes-table__name"
+            to={`/nodes/${node.node_id}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {node.display_name}
+          </Link>
+          <Hostname truncate maxChars={14} className="nodes-table__id">
+            {node.node_id}
+          </Hostname>
+        </div>
+      ),
+    },
+    {
+      key: 'location',
+      label: '位置',
+      render: (node) => (
+        <span className="nodes-table__location">
+          {node.region} · {node.city} · {node.provider}
+        </span>
+      ),
+    },
+    {
+      key: 'labels',
+      label: '标签',
+      render: (node) => {
+        if (editingLabelNodeId === node.node_id) {
+          return (
+            <div
+              className="nodes-table__label-editor"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.stopPropagation()
+                }
+              }}
+            >
+              <label className="nodes-table__label-editor-field">
+                <span className="visually-hidden">标签</span>
+                <input
+                  name={`labels-${node.node_id}`}
+                  value={labelDraft}
+                  onChange={(event) => setLabelDraft(event.target.value)}
+                  aria-label="标签"
+                />
+              </label>
+              <div className="nodes-table__label-editor-actions">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={metadataBusyNodeId === node.node_id}
+                  onClick={() => void handleSaveLabels(node)}
+                >
+                  {metadataBusyNodeId === node.node_id ? '正在保存…' : '保存标签'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={metadataBusyNodeId === node.node_id}
+                  onClick={() => {
+                    setEditingLabelNodeId((current) =>
+                      current === node.node_id ? null : current,
+                    )
+                    setLabelDraft('')
+                    setMetadataErrors((current) => {
+                      if (!current[node.node_id]) return current
+                      const next = { ...current }
+                      delete next[node.node_id]
+                      return next
+                    })
+                  }}
+                >
+                  取消
+                </Button>
+              </div>
+              {metadataErrors[node.node_id] ? (
+                <p className="nodes-table__inline-error" role="alert">
+                  {metadataErrors[node.node_id]}
+                </p>
+              ) : null}
+            </div>
+          )
+        }
+        return renderLabelsCell(node)
+      },
+    },
+    {
+      key: 'issue',
+      label: '当前主问题',
+      render: (node) => {
+        const summary = isBindingConflictNode(node)
+          ? NODE_BINDING_CONFLICT_SUMMARY
+          : node.current_primary_issue_summary || '暂无明显异常'
+        return (
+          <div className="nodes-table__issue">
+            <MonoDigits className="nodes-table__issue-count">
+              {node.current_active_incident_count}
+            </MonoDigits>
+            <span className="nodes-table__issue-summary">{summary}</span>
+            {isBindingConflictNode(node) ? (
+              <StatusBadge label={NODE_BINDING_CONFLICT_STATUS} />
+            ) : null}
+          </div>
+        )
+      },
+    },
+    {
+      key: 'heartbeat',
+      label: '心跳 / 同步',
+      render: (node) => (
+        <div className="nodes-table__heartbeat">
+          <Timestamp value={node.last_heartbeat_at} mode="relative" />
+          <span className="nodes-table__heartbeat-sync">
+            <span className="nodes-table__heartbeat-sync-label">同步</span>
+            <Timestamp value={node.last_sync_at} mode="relative" />
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '操作',
+      align: 'right',
+      render: (node) => {
+        const actions = nodeRuntimeActions(node)
+        return (
+          <div
+            className="nodes-table__actions"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.stopPropagation()
+              }
+            }}
+          >
+            {editingLabelNodeId === node.node_id ? null : (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={metadataBusyNodeId !== null}
+                onClick={() => {
+                  if (metadataBusyNodeId !== null) return
+                  setEditingLabelNodeId(node.node_id)
+                  setLabelDraft(node.labels.join(', '))
+                  setMetadataErrors((current) => {
+                    if (!current[node.node_id]) return current
+                    const next = { ...current }
+                    delete next[node.node_id]
+                    return next
+                  })
+                }}
+              >
+                快速编辑标签
+              </Button>
+            )}
+            <Link
+              className="btn btn--ghost btn--sm"
+              to={`/nodes/${node.node_id}/onboarding`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              接入工作台
+            </Link>
+            {actions.map(({ action, label }) => (
+              <button
+                key={action}
+                type="button"
+                className="btn btn--ghost btn--sm"
+                ref={(element) => {
+                  actionButtonRefs.current[actionButtonKey(node.node_id, action)] = element
+                }}
+                disabled={runtimeBusyNodeId === node.node_id}
+                onClick={() => {
+                  if (action === 'pause') {
+                    queueFocusRestore(node.node_id, action)
+                  }
+                  void handleRuntimeAction(node, action)
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )
+      },
+    },
+  ]
+
+  function shouldNavigateOnRowClick(node: NodeRecord): boolean {
+    // Block navigation while the row is in edit mode or has a pending pause confirmation.
+    if (editingLabelNodeId === node.node_id) return false
+    if (pendingConfirmation?.nodeId === node.node_id) return false
+    return true
+  }
+
   return (
     <section className="page-stack">
-      <header className="section-heading">
+      <header className="section-heading section-heading--inline">
         <div>
           <p className="section-heading__eyebrow">节点</p>
           <h2 className="section-heading__title">节点列表</h2>
@@ -514,8 +780,9 @@ export function NodesPage() {
             当前以“当前问题优先、最近运行事实次之”的冻结 V1 层级展示节点状态。
           </p>
         </div>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="md"
           onClick={() =>
             setCreateOpen((current) => {
               if (current) {
@@ -526,11 +793,11 @@ export function NodesPage() {
           }
         >
           新建节点
-        </button>
+        </Button>
       </header>
 
       {createOpen ? (
-        <section className="page-panel">
+        <section className="page-panel nodes-create-panel">
           <p className="page-panel__eyebrow">节点创建</p>
           <h3 className="page-panel__title">创建节点并进入接入工作台</h3>
           <p className="page-panel__description">创建完成后将立即生成接入 Token，并跳转到节点接入准备页。</p>
@@ -615,26 +882,14 @@ export function NodesPage() {
         </section>
       ) : null}
 
-      <section className="page-panel">
-        <p className="page-panel__eyebrow">列表视图</p>
-        <h3 className="page-panel__title">列表视图</h3>
-        <div className="badge-row badge-row--wrap">
-          <button
-            type="button"
-            aria-pressed={nodeListView === 'all'}
-            onClick={() => setNodeListView('all')}
-          >
-            全部节点 {nodes.length}
-          </button>
-          <button
-            type="button"
-            aria-pressed={nodeListView === 'binding-conflict'}
-            onClick={() => setNodeListView('binding-conflict')}
-          >
-            绑定异常 {bindingConflictNodes.length}
-          </button>
-        </div>
-      </section>
+      <div className="nodes-toolbar">
+        <Tabs<NodeListView>
+          variant="pill"
+          items={viewTabs}
+          value={nodeListView}
+          onChange={setNodeListView}
+        />
+      </div>
 
       {baseNodes.length === 0 ? (
         <div className="empty-state">
@@ -768,161 +1023,53 @@ export function NodesPage() {
               </p>
             </div>
           ) : (
-            <div className="resource-table">
-              <div className="resource-table__head">
-                <span>节点</span>
-                <span>状态</span>
-                <span>最近心跳 / 同步</span>
-                <span>当前主问题</span>
-              </div>
-              {filteredNodes.map((node) => (
-          <article key={node.node_id} className="resource-table__row">
-            <div>
-              <strong>
-                <Link className="text-link" to={`/nodes/${node.node_id}`}>
-                  {node.display_name}
-                </Link>
-              </strong>
-              <p>
-                {node.region} · {node.city} · {node.provider}
-              </p>
-              <p>
-                <Link className="text-link" to={`/nodes/${node.node_id}/onboarding`}>
-                  接入工作台
-                </Link>
-              </p>
-              <p>
-                <Link className="text-link" to={`/nodes/${node.node_id}`}>
-                  查看详情
-                </Link>
-              </p>
-              <p>标签：{formatLabelList(node.labels)}</p>
-              {editingLabelNodeId === node.node_id ? (
-                <div className="page-stack">
-                  <p>
-                    <label>
-                      标签
-                      <input
-                        name={`labels-${node.node_id}`}
-                        value={labelDraft}
-                        onChange={(event) => setLabelDraft(event.target.value)}
-                      />
-                    </label>
-                  </p>
-                  <div className="badge-row badge-row--wrap">
-                    <button
-                      type="button"
-                      disabled={metadataBusyNodeId === node.node_id}
-                      onClick={() => void handleSaveLabels(node)}
-                    >
-                      {metadataBusyNodeId === node.node_id ? '正在保存…' : '保存标签'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={metadataBusyNodeId === node.node_id}
-                      onClick={() => {
-                        setEditingLabelNodeId((current) =>
-                          current === node.node_id ? null : current,
-                        )
-                        setLabelDraft('')
-                        setMetadataErrors((current) => {
-                          if (!current[node.node_id]) return current
-                          const next = { ...current }
-                          delete next[node.node_id]
-                          return next
-                        })
-                      }}
-                    >
-                      取消
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  disabled={metadataBusyNodeId !== null}
-                  onClick={() => {
-                    if (metadataBusyNodeId !== null) return
-                    setEditingLabelNodeId(node.node_id)
-                    setLabelDraft(node.labels.join(', '))
-                    setMetadataErrors((current) => {
-                      if (!current[node.node_id]) return current
-                      const next = { ...current }
-                      delete next[node.node_id]
-                      return next
-                    })
-                  }}
-                >
-                  快速编辑标签
-                </button>
-              )}
-              <div className="badge-row badge-row--wrap">
-                {nodeRuntimeActions(node).map(({ action, label }) => (
-                  <button
-                    key={action}
-                    ref={(element) => {
-                      actionButtonRefs.current[actionButtonKey(node.node_id, action)] = element
-                    }}
-                    type="button"
-                    disabled={runtimeBusyNodeId === node.node_id}
-                    onClick={() => {
-                      if (action === 'pause') {
-                        queueFocusRestore(node.node_id, action)
-                      }
-                      void handleRuntimeAction(node, action)
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {pendingConfirmation?.nodeId === node.node_id && pendingConfirmation.action === 'pause' ? (
-                <ActionConfirmationCard
-                  title="确认暂停节点监控"
-                  current={pauseConfirmationCurrent(node)}
-                  result="操作后：监控运行状态变为暂停。"
-                  impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
-                  unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
-                  confirmLabel="确认暂停监控"
-                  disabled={runtimeBusyNodeId === node.node_id}
-                  onConfirm={() => void handleRuntimeAction(node, 'pause', true)}
-                  onCancel={() => {
-                    queueFocusRestore(node.node_id, 'pause')
-                    setPendingConfirmation((current) =>
-                      current?.nodeId === node.node_id ? null : current,
-                    )
-                  }}
-                />
-              ) : null}
-              {runtimeErrors[node.node_id] ? <p>{runtimeErrors[node.node_id]}</p> : null}
-              {metadataErrors[node.node_id] ? (
-                <p role="alert">{metadataErrors[node.node_id]}</p>
-              ) : null}
-            </div>
-            <div className="badge-row badge-row--wrap">
-              <StatusBadge label={node.lifecycle_status} />
-              <StatusBadge label={node.monitoring_status} />
-              <StatusBadge label={node.current_health_status} />
-              {isBindingConflictNode(node) ? (
-                <StatusBadge label={NODE_BINDING_CONFLICT_STATUS} />
-              ) : null}
-            </div>
-            <div>
-              <strong>{formatDateTime(node.last_heartbeat_at)}</strong>
-              <p>同步：{formatDateTime(node.last_sync_at)}</p>
-            </div>
-            <div>
-              <strong>{node.current_active_incident_count}</strong>
-              <p>
-                {isBindingConflictNode(node)
-                  ? NODE_BINDING_CONFLICT_SUMMARY
-                  : node.current_primary_issue_summary || '暂无明显异常'}
-              </p>
-            </div>
-          </article>
-              ))}
-            </div>
+            <DataTable<NodeRecord>
+              columns={columns}
+              rows={filteredNodes}
+              rowKey={(node) => node.node_id}
+              density="compact"
+              className="nodes-table"
+              onRowClick={(node) => {
+                if (!shouldNavigateOnRowClick(node)) return
+                navigate(`/nodes/${node.node_id}`)
+              }}
+            />
           )}
+
+          {filteredNodes.map((node) => {
+            const runtimeError = runtimeErrors[node.node_id]
+            const showPauseConfirmation =
+              pendingConfirmation?.nodeId === node.node_id &&
+              pendingConfirmation.action === 'pause'
+            if (!runtimeError && !showPauseConfirmation) return null
+            return (
+              <div key={`runtime-${node.node_id}`} className="nodes-table__row-overlay">
+                {showPauseConfirmation ? (
+                  <ActionConfirmationCard
+                    title="确认暂停节点监控"
+                    current={pauseConfirmationCurrent(node)}
+                    result="操作后：监控运行状态变为暂停。"
+                    impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
+                    unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
+                    confirmLabel="确认暂停监控"
+                    disabled={runtimeBusyNodeId === node.node_id}
+                    onConfirm={() => void handleRuntimeAction(node, 'pause', true)}
+                    onCancel={() => {
+                      queueFocusRestore(node.node_id, 'pause')
+                      setPendingConfirmation((current) =>
+                        current?.nodeId === node.node_id ? null : current,
+                      )
+                    }}
+                  />
+                ) : null}
+                {runtimeError ? (
+                  <p className="nodes-table__inline-error" role="alert">
+                    {node.display_name}：{runtimeError}
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
         </>
       )}
     </section>
