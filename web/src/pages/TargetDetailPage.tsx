@@ -1,11 +1,23 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { DetailSection } from '../components/DetailSection'
-import { EventList } from '../components/EventList'
-import { IncidentList } from '../components/IncidentList'
-import { StatusBadge } from '../components/StatusBadge'
+import {
+  TargetActiveIncidents,
+  TargetHero,
+  TargetLabelsAndNote,
+  TargetLatencyTrends,
+  type TargetLatencyTrend,
+  TargetProbeForm,
+  type ProbeCreateFormState,
+  type ProbeFormMode,
+  TargetProbeList,
+  type PendingProbeConfirmation,
+  TargetRecentEvents,
+  TargetRuntimeControls,
+  type TargetRuntimeAction,
+  TargetStatusSummary,
+} from '../components/target-detail'
 import {
   ApiError,
   archiveTarget,
@@ -24,12 +36,7 @@ import {
   updateTargetMetadata,
   updateProbeItem,
 } from '../lib/api'
-import {
-  formatConfigSummary,
-  formatDateTime,
-  formatLabelList,
-  formatLatency,
-} from '../lib/format'
+import { formatConfigSummary } from '../lib/format'
 import type {
   ActiveIncidentRecord,
   CreateProbeItemInput,
@@ -56,19 +63,6 @@ type State = {
   eventsError: string | null
 }
 
-const PROBE_KIND_OPTIONS = [
-  { value: 'tcp', label: 'TCP' },
-  { value: 'http', label: 'HTTP' },
-  { value: 'tls', label: 'TLS' },
-] as const
-
-const FREQUENCY_TIER_OPTIONS = [
-  { value: '1m', label: '1 分钟' },
-  { value: '5m', label: '5 分钟' },
-  { value: '15m', label: '15 分钟' },
-  { value: '6h', label: '6 小时' },
-] as const
-
 const DEFAULT_FREQUENCY_BY_PROBE_KIND: Record<ProbeKind, FrequencyTier> = {
   tcp: '5m',
   http: '5m',
@@ -80,22 +74,6 @@ const PROBE_CONFIG_KEYS: Record<ProbeKind, Set<string>> = {
   http: new Set(['scheme', 'path', 'method', 'expected_status_range']),
   tls: new Set(['port', 'expiry_warning_days']),
 }
-
-type ProbeCreateFormState = {
-  probeKind: ProbeKind
-  enabled: boolean
-  frequencyTier: FrequencyTier
-  timeoutSeconds: string
-  port: string
-  httpScheme: string
-  httpPath: string
-  httpMethod: 'GET' | 'HEAD'
-  expectedStatusStart: string
-  expectedStatusEnd: string
-  tlsExpiryWarningDays: string
-}
-
-type ProbeFormMode = { kind: 'create' } | { kind: 'edit'; probeItemId: string }
 
 const initialProbeCreateForm: ProbeCreateFormState = {
   probeKind: 'tcp',
@@ -111,21 +89,8 @@ const initialProbeCreateForm: ProbeCreateFormState = {
   tlsExpiryWarningDays: '14',
 }
 
-type TargetRuntimeAction =
-  | 'enter-maintenance'
-  | 'exit-maintenance'
-  | 'pause'
-  | 'resume'
-  | 'archive'
-  | 'restore-to-paused'
-
 type PendingRuntimeConfirmation = {
   action: 'pause' | 'archive'
-}
-
-type PendingProbeConfirmation = {
-  probeItemId: string
-  action: 'delete'
 }
 
 type ProbeFocusRestoreRequest = {
@@ -286,14 +251,6 @@ function hasUnsupportedProbeConfigFields(probeItem: ProbeItemRecord): boolean {
   return Object.keys(config).some((key) => !allowedKeys.has(key))
 }
 
-function probeActionAccessibleName(action: string, probeItem: ProbeItemRecord): string {
-  return `${action} ProbeItem ${probeItem.probe_item_id} ${probeItem.probe_kind.toUpperCase()} ${formatConfigSummary(probeItem.config)}`
-}
-
-function pauseConfirmationCurrent() {
-  return '当前：目标运行状态为启用或维护中。'
-}
-
 function focusRestoreActionAfterSuccess(action: TargetRuntimeAction): TargetRuntimeAction {
   switch (action) {
     case 'enter-maintenance':
@@ -311,7 +268,7 @@ function focusRestoreActionAfterSuccess(action: TargetRuntimeAction): TargetRunt
   }
 }
 
-function summarizeRecentLatencyTrends(observations: ProbeObservation[]) {
+function summarizeRecentLatencyTrends(observations: ProbeObservation[]): TargetLatencyTrend[] {
   const grouped = new Map<
     string,
     {
@@ -373,39 +330,6 @@ function summarizeRecentLatencyTrends(observations: ProbeObservation[]) {
       (left, right) =>
         new Date(right.newestObservedAt).getTime() - new Date(left.newestObservedAt).getTime(),
     )
-}
-
-function targetRuntimeActions(
-  target: TargetRecord,
-): Array<{ action: TargetRuntimeAction; label: string }> {
-  if (target.run_status === '启用') {
-    return [
-      { action: 'enter-maintenance', label: '进入维护' },
-      { action: 'pause', label: '暂停' },
-      { action: 'archive', label: '归档' },
-    ]
-  }
-
-  if (target.run_status === '维护中') {
-    return [
-      { action: 'exit-maintenance', label: '退出维护' },
-      { action: 'pause', label: '暂停' },
-      { action: 'archive', label: '归档' },
-    ]
-  }
-
-  if (target.run_status === '暂停') {
-    return [
-      { action: 'resume', label: '恢复' },
-      { action: 'archive', label: '归档' },
-    ]
-  }
-
-  if (target.run_status === '已归档') {
-    return [{ action: 'restore-to-paused', label: '恢复到暂停' }]
-  }
-
-  return []
 }
 
 function mergeRuntimeTargetRecord(current: TargetRecord, updated: TargetRecord): TargetRecord {
@@ -1072,254 +996,56 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
 
   return (
     <div className="page-stack">
-      <section className="hero-panel">
-        <div className="hero-panel__content">
-          <p className="hero-panel__eyebrow">目标详情</p>
-          <h2 className="hero-panel__title">{target.name}</h2>
-          <p className="hero-panel__description">
-            {target.target_type} · {target.host}
-            {target.base_port ? `:${target.base_port}` : ''}
-          </p>
-          <div className="badge-row">
-            <StatusBadge label={target.run_status} />
-            <StatusBadge label={target.current_health_status} />
-            <StatusBadge label={target.target_type} />
-          </div>
-        </div>
-        <div className="hero-panel__meta">
-          <div className="hero-meta-card">
-            <span>标签</span>
-            <strong>{formatLabelList(target.labels)}</strong>
-          </div>
-          <div className="hero-meta-card">
-            <span>执行节点标签</span>
-            <strong>{formatLabelList(target.execution_node_labels)}</strong>
-          </div>
-          <div className="hero-meta-card">
-            <span>最近成功</span>
-            <strong>{formatDateTime(target.last_success_at)}</strong>
-          </div>
-          <div className="hero-meta-card">
-            <span>最近失败</span>
-            <strong>{formatDateTime(target.last_failure_at)}</strong>
-          </div>
-        </div>
-      </section>
+      <TargetHero target={target} />
 
-      <div className="summary-grid">
-        <article className="summary-card">
-          <p className="summary-card__label">健康状态</p>
-          <p className="summary-card__value">{target.current_health_status}</p>
-        </article>
-        <article className="summary-card">
-          <p className="summary-card__label">ProbeItem 数量</p>
-          <p className="summary-card__value">{probeItems.length}</p>
-        </article>
-        <article className="summary-card">
-          <p className="summary-card__label">当前主问题</p>
-          <p className="summary-card__value summary-card__value--text">
-            {target.current_primary_issue_summary || '暂无明显异常'}
-          </p>
-        </article>
-      </div>
+      <TargetStatusSummary target={target} probeItemCount={probeItems.length} />
 
-      <DetailSection eyebrow="标签与备注" title="标签与备注">
-        <div className="page-stack">
-          {metadataEditing ? (
-            <form onSubmit={handleMetadataSave} className="page-stack">
-              <label>
-                标签
-                <input
-                  name="metadata-labels"
-                  value={metadataForm.labels}
-                  onChange={(event) => updateMetadataField('labels', event.target.value)}
-                />
-              </label>
-              <label>
-                备注
-                <textarea
-                  name="metadata-note"
-                  value={metadataForm.note}
-                  onChange={(event) => updateMetadataField('note', event.target.value)}
-                  rows={3}
-                />
-              </label>
-              <div className="badge-row badge-row--wrap">
-                <button type="submit" disabled={metadataSubmitting}>
-                  {metadataSubmitting ? '正在保存…' : '保存标签与备注'}
-                </button>
-                <button
-                  type="button"
-                  disabled={metadataSubmitting}
-                  onClick={() => {
-                    setMetadataEditing(false)
-                    setMetadataError(null)
-                    setMetadataForm({
-                      labels: target.labels.join(', '),
-                      note: target.note,
-                    })
-                  }}
-                >
-                  取消
-                </button>
-              </div>
-            </form>
-          ) : (
-            <>
-              <p>标签：{formatLabelList(target.labels)}</p>
-              <p>备注：{target.note.trim() || '暂无备注'}</p>
-              <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMetadataEditing(true)
-                    setMetadataError(null)
-                    setMetadataForm({
-                      labels: target.labels.join(', '),
-                      note: target.note,
-                    })
-                  }}
-                >
-                  编辑标签与备注
-                </button>
-              </div>
-            </>
-          )}
-          {metadataError ? (
-            <p role="alert" aria-live="assertive">
-              {metadataError}
-            </p>
-          ) : null}
-        </div>
-      </DetailSection>
+      <TargetLabelsAndNote
+        target={target}
+        editing={metadataEditing}
+        labelDraft={metadataForm.labels}
+        noteDraft={metadataForm.note}
+        submitting={metadataSubmitting}
+        error={metadataError}
+        onLabelDraftChange={(value) => updateMetadataField('labels', value)}
+        onNoteDraftChange={(value) => updateMetadataField('note', value)}
+        onStartEdit={() => {
+          setMetadataEditing(true)
+          setMetadataError(null)
+          setMetadataForm({
+            labels: target.labels.join(', '),
+            note: target.note,
+          })
+        }}
+        onCancelEdit={() => {
+          setMetadataEditing(false)
+          setMetadataError(null)
+          setMetadataForm({
+            labels: target.labels.join(', '),
+            note: target.note,
+          })
+        }}
+        onSubmit={handleMetadataSave}
+      />
 
-      <DetailSection eyebrow="运行控制" title="运行控制">
-        <div className="page-stack">
-          <p>维护会继续采集，但不解释结果。暂停会停止采集并产生数据空档。归档会退出当前工作集并保留历史。</p>
-          <div className="badge-row badge-row--wrap">
-            {targetRuntimeActions(target).map(({ action, label }) => (
-              <button
-                key={action}
-                ref={(element) => {
-                  runtimeActionButtonRefs.current[action] = element
-                }}
-                type="button"
-                disabled={runtimeActionsDisabled}
-                onClick={() => void handleRuntimeAction(action)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {pendingRuntimeConfirmation ? (
-            <ActionConfirmationCard
-              title={
-                pendingRuntimeConfirmation.action === 'pause'
-                  ? '确认暂停目标监控'
-                  : '确认归档目标'
-              }
-              current={
-                pendingRuntimeConfirmation.action === 'pause'
-                  ? pauseConfirmationCurrent()
-                  : '当前：目标仍在当前工作集中。'
-              }
-              result={
-                pendingRuntimeConfirmation.action === 'pause'
-                  ? '操作后：目标运行状态变为暂停。'
-                  : '操作后：目标退出当前工作集，运行状态变为已归档。'
-              }
-              impact={
-                pendingRuntimeConfirmation.action === 'pause'
-                  ? '会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。'
-                  : '归档后不会继续作为活跃目标参与观测、异常判定或通知。'
-              }
-              unchanged={
-                pendingRuntimeConfirmation.action === 'pause'
-                  ? '不会删除历史事件、观测记录或 ProbeItem 配置。'
-                  : '不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'
-              }
-              confirmLabel={
-                pendingRuntimeConfirmation.action === 'pause' ? '确认暂停目标' : '确认归档'
-              }
-              disabled={runtimeSubmitting}
-              onConfirm={() => void handleRuntimeAction(pendingRuntimeConfirmation.action, true)}
-              onCancel={() => {
-                pendingRuntimeFocusRestoreRef.current = pendingRuntimeConfirmation.action
-                setPendingRuntimeConfirmation(null)
-              }}
-            />
-          ) : null}
-          {runtimeError ? <p>{runtimeError}</p> : null}
-        </div>
-      </DetailSection>
+      <TargetRuntimeControls
+        target={target}
+        disabled={runtimeActionsDisabled}
+        submitting={runtimeSubmitting}
+        error={runtimeError}
+        pendingConfirmation={pendingRuntimeConfirmation}
+        onAction={(action) => void handleRuntimeAction(action)}
+        onConfirm={(action) => void handleRuntimeAction(action, true)}
+        onCancelConfirmation={(action) => {
+          pendingRuntimeFocusRestoreRef.current = action
+          setPendingRuntimeConfirmation(null)
+        }}
+        registerActionButtonRef={(action, element) => {
+          runtimeActionButtonRefs.current[action] = element
+        }}
+      />
 
-
-      <DetailSection
-        eyebrow="近期延迟"
-        title="近期延迟趋势"
-        aside={recentLatencyTrends.length > 0 ? `最近样本更新到：${formatDateTime(recentLatencyTrends[0].newestObservedAt)}` : '暂无可用延迟样本'}
-      >
-        {recentLatencyTrends.length > 0 ? (
-          <div className="probe-list">
-            {recentLatencyTrends.map((trend) => {
-              const probeItem = probeItemsById.get(trend.probeItemId)
-              return (
-                <article key={trend.probeItemId} className="probe-card">
-                  <header className="probe-card__header">
-                    <div>
-                      <h3>{probeItem?.probe_kind.toUpperCase() ?? trend.probeKind.toUpperCase()}</h3>
-                      <p>{trend.probeItemId}</p>
-                    </div>
-                    <div className="badge-row">
-                      <StatusBadge label={`${trend.count} 次观测`} tone="cyan" />
-                      <StatusBadge label={`${trend.distinctNodeCount} 个节点`} />
-                    </div>
-                  </header>
-
-                  <dl className="probe-card__meta">
-                    <div>
-                      <dt>平均延迟</dt>
-                      <dd>{formatLatency(Math.round(trend.averageLatency))}</dd>
-                    </div>
-                    <div>
-                      <dt>最新延迟</dt>
-                      <dd>{formatLatency(trend.latestLatency)}</dd>
-                    </div>
-                    <div>
-                      <dt>最大延迟</dt>
-                      <dd>{formatLatency(trend.maxLatency)}</dd>
-                    </div>
-                    <div>
-                      <dt>样本窗口</dt>
-                      <dd>
-                        {formatDateTime(trend.oldestObservedAt)} →{' '}
-                        {formatDateTime(trend.newestObservedAt)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>观测次数</dt>
-                      <dd>{trend.count}</dd>
-                    </div>
-                    <div>
-                      <dt>覆盖节点</dt>
-                      <dd>{trend.distinctNodeCount}</dd>
-                    </div>
-                    <div>
-                      <dt>最近样本</dt>
-                      <dd>{formatDateTime(trend.newestObservedAt)}</dd>
-                    </div>
-                  </dl>
-                </article>
-              )
-            })}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <h3>暂无可用延迟样本</h3>
-            <p>近期延迟趋势仅统计已返回成功且带延迟值的近期探测观测。</p>
-          </div>
-        )}
-      </DetailSection>
+      <TargetLatencyTrends trends={recentLatencyTrends} probeItemsById={probeItemsById} />
 
       <DetailSection eyebrow="ProbeItem 列表" title="ProbeItem 列表">
         <div className="page-stack">
@@ -1343,389 +1069,59 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           </div>
           {probeMutationError ? <p>{probeMutationError}</p> : null}
           {probeCreateOpen ? (
-            <section className="page-panel">
-              <p className="page-panel__eyebrow">
-                {probeFormMode.kind === 'edit' ? 'ProbeItem 编辑' : 'ProbeItem 创建'}
-              </p>
-              <h3 className="page-panel__title">
-                {probeFormMode.kind === 'edit' ? '编辑 ProbeItem' : '创建 ProbeItem'}
-              </h3>
-              <form onSubmit={handleProbeCreate}>
-                <p>
-                  <label>
-                    Probe 类型
-                    <select
-                      name="probeKind"
-                      value={probeCreateForm.probeKind}
-                      onChange={(event) => {
-                        const selectedKind = event.target.value as ProbeCreateFormState['probeKind']
-                        if (probeFormMode.kind === 'edit') {
-                          updateProbeCreateField('probeKind', selectedKind)
-                          return
-                        }
-                        setProbeCreateForm((current) =>
-                          probeCreateFormForKind(current, selectedKind),
-                        )
-                      }}
-                    >
-                      {PROBE_KIND_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </p>
-                <p>
-                  <label>
-                    <input
-                      name="enabled"
-                      type="checkbox"
-                      checked={probeCreateForm.enabled}
-                      onChange={(event) =>
-                        updateProbeCreateField('enabled', event.target.checked)
-                      }
-                    />
-                    启用 ProbeItem
-                  </label>
-                </p>
-                <p>
-                  <label>
-                    频率档位
-                    <select
-                      name="frequencyTier"
-                      value={probeCreateForm.frequencyTier}
-                      onChange={(event) =>
-                        updateProbeCreateField(
-                          'frequencyTier',
-                          event.target.value as ProbeCreateFormState['frequencyTier'],
-                        )
-                      }
-                    >
-                      {FREQUENCY_TIER_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </p>
-                <p>
-                  <label>
-                    超时秒数
-                    <input
-                      name="timeoutSeconds"
-                      inputMode="numeric"
-                      value={probeCreateForm.timeoutSeconds}
-                      onChange={(event) =>
-                        updateProbeCreateField('timeoutSeconds', event.target.value)
-                      }
-                    />
-                  </label>
-                </p>
-                {probeCreateForm.probeKind !== 'http' ? (
-                  <p>
-                    <label>
-                      端口
-                      <input
-                        name="port"
-                        inputMode="numeric"
-                        value={probeCreateForm.port}
-                        onChange={(event) =>
-                          updateProbeCreateField('port', event.target.value)
-                        }
-                      />
-                    </label>
-                  </p>
-                ) : null}
-                {probeCreateForm.probeKind === 'http' ? (
-                  <>
-                    <p>
-                      <label>
-                        HTTP 协议
-                        <select
-                          name="httpScheme"
-                          value={probeCreateForm.httpScheme}
-                          onChange={(event) =>
-                            updateProbeCreateField('httpScheme', event.target.value)
-                          }
-                        >
-                          <option value="http">http</option>
-                          <option value="https">https</option>
-                        </select>
-                      </label>
-                    </p>
-                    <p>
-                      <label>
-                        HTTP 路径
-                        <input
-                          name="httpPath"
-                          value={probeCreateForm.httpPath}
-                          onChange={(event) =>
-                            updateProbeCreateField('httpPath', event.target.value)
-                          }
-                        />
-                      </label>
-                    </p>
-                    <p>
-                      <label>
-                        HTTP 方法
-                        <select
-                          name="httpMethod"
-                          value={probeCreateForm.httpMethod}
-                          onChange={(event) =>
-                            updateProbeCreateField(
-                              'httpMethod',
-                              event.target.value as ProbeCreateFormState['httpMethod'],
-                            )
-                          }
-                        >
-                          <option value="GET">GET</option>
-                          <option value="HEAD">HEAD</option>
-                        </select>
-                      </label>
-                    </p>
-                    <p>
-                      <label>
-                        期望状态码起点
-                        <input
-                          name="expectedStatusStart"
-                          inputMode="numeric"
-                          value={probeCreateForm.expectedStatusStart}
-                          onChange={(event) =>
-                            updateProbeCreateField(
-                              'expectedStatusStart',
-                              event.target.value,
-                            )
-                          }
-                        />
-                      </label>
-                    </p>
-                    <p>
-                      <label>
-                        期望状态码终点
-                        <input
-                          name="expectedStatusEnd"
-                          inputMode="numeric"
-                          value={probeCreateForm.expectedStatusEnd}
-                          onChange={(event) =>
-                            updateProbeCreateField(
-                              'expectedStatusEnd',
-                              event.target.value,
-                            )
-                          }
-                        />
-                      </label>
-                    </p>
-                  </>
-                ) : null}
-                {probeCreateForm.probeKind === 'tls' ? (
-                  <p>
-                    <label>
-                      证书预警天数
-                      <input
-                        name="tlsExpiryWarningDays"
-                        inputMode="numeric"
-                        value={probeCreateForm.tlsExpiryWarningDays}
-                        onChange={(event) =>
-                          updateProbeCreateField(
-                            'tlsExpiryWarningDays',
-                            event.target.value,
-                          )
-                        }
-                      />
-                    </label>
-                  </p>
-                ) : null}
-                {probeCreateError ? <p>{probeCreateError}</p> : null}
-                <div>
-                  <button type="submit" disabled={probeCreateSubmitting}>
-                    {probeCreateSubmitting
-                      ? probeFormMode.kind === 'edit'
-                        ? '正在保存…'
-                        : '正在创建…'
-                      : probeFormMode.kind === 'edit'
-                        ? '保存 ProbeItem'
-                        : '创建 ProbeItem'}
-                  </button>
-                </div>
-              </form>
-            </section>
+            <TargetProbeForm
+              mode={probeFormMode}
+              form={probeCreateForm}
+              submitting={probeCreateSubmitting}
+              error={probeCreateError}
+              onSubmit={handleProbeCreate}
+              onProbeKindChange={(probeKind) => {
+                if (probeFormMode.kind === 'edit') {
+                  updateProbeCreateField('probeKind', probeKind)
+                  return
+                }
+                setProbeCreateForm((current) => probeCreateFormForKind(current, probeKind))
+              }}
+              onFieldChange={updateProbeCreateField}
+            />
           ) : null}
-          {probeItems.length === 0 ? (
-            <div className="empty-state">
-              <h3>当前还没有 ProbeItem</h3>
-              <p>当前还没有 ProbeItem，请为该入口添加至少一种观测方式。</p>
-            </div>
-          ) : (
-            <div className="probe-list">
-              {probeItems.map((probeItem) => {
-                const observations = observationsByProbe.get(probeItem.probe_item_id) ?? []
-                return (
-                  <article key={probeItem.probe_item_id} className="probe-card">
-                    <header className="probe-card__header">
-                      <div>
-                        <h3>{probeItem.probe_kind.toUpperCase()}</h3>
-                        <p>{formatConfigSummary(probeItem.config)}</p>
-                      </div>
-                      <div className="badge-row">
-                        <StatusBadge label={probeItem.enabled ? '启用' : '停用'} />
-                        <StatusBadge label={probeItem.frequency_tier} tone="cyan" />
-                      </div>
-                    </header>
-
-                    <div className="badge-row badge-row--wrap">
-                      <button
-                        type="button"
-                        aria-label={probeActionAccessibleName('编辑', probeItem)}
-                        disabled={probeActionsDisabled}
-                        onClick={() => openProbeEditForm(probeItem)}
-                      >
-                        编辑
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={probeActionAccessibleName(
-                          probeItem.enabled ? '停用' : '启用',
-                          probeItem,
-                        )}
-                        disabled={probeActionsDisabled}
-                        onClick={() => void handleToggleProbeItem(probeItem)}
-                      >
-                        {probeItem.enabled ? '停用' : '启用'}
-                      </button>
-                      <button
-                        ref={(element) => {
-                          probeDeleteButtonRefs.current[probeItem.probe_item_id] = element
-                        }}
-                        type="button"
-                        aria-label={probeActionAccessibleName('删除', probeItem)}
-                        disabled={probeActionsDisabled}
-                        onClick={() => void handleDeleteProbeItem(probeItem)}
-                      >
-                        删除
-                      </button>
-                    </div>
-                    {pendingProbeConfirmation?.probeItemId === probeItem.probe_item_id ? (
-                      <div ref={pendingProbeConfirmationCardRef}>
-                        <ActionConfirmationCard
-                          title="确认删除 ProbeItem"
-                          current="当前：这条 ProbeItem 仍属于当前目标。"
-                          result="操作后：这条观测方式会被移除。"
-                          impact="仅用于误建场景。删除后该 ProbeItem 不再产生新的观测记录。"
-                          unchanged="不会删除目标，也不会删除既有事件或历史观测记录。"
-                          confirmLabel="确认删除 ProbeItem"
-                          disabled={probeCreateSubmitting || probeRowMutationBusy}
-                          onConfirm={() => void handleDeleteProbeItem(probeItem, true)}
-                          onCancel={() => {
-                            pendingProbeFocusRestoreRef.current = {
-                              probeItemId: probeItem.probe_item_id,
-                            }
-                            setPendingProbeConfirmation((current) =>
-                              current?.probeItemId === probeItem.probe_item_id ? null : current,
-                            )
-                          }}
-                        />
-                      </div>
-                    ) : null}
-
-                    <dl className="probe-card__meta">
-                      <div>
-                        <dt>超时</dt>
-                        <dd>{probeItem.timeout_seconds}s</dd>
-                      </div>
-                      <div>
-                        <dt>最近观测</dt>
-                        <dd>
-                          {observations.length > 0
-                            ? formatDateTime(observations[0].observed_at)
-                            : '尚无观测结果'}
-                        </dd>
-                      </div>
-                    </dl>
-
-                    {observations.length > 0 ? (
-                      <div className="observation-list">
-                        {observations.map((observation) => (
-                          <div
-                            key={`${observation.probe_item_id}-${observation.node_id}`}
-                            className="observation-row"
-                          >
-                            <div>
-                              <strong>{observation.node_id}</strong>
-                              <p>{formatDateTime(observation.observed_at)}</p>
-                            </div>
-                            <div>
-                              <StatusBadge
-                                label={
-                                  observation.result_kind === 'success' ? '成功' : '失败'
-                                }
-                                tone={
-                                  observation.result_kind === 'success' ? 'green' : 'red'
-                                }
-                              />
-                            </div>
-                            <div>
-                              <span>延迟</span>
-                              <strong>{formatLatency(observation.latency_ms)}</strong>
-                            </div>
-                            <div>
-                              <span>HTTP / TLS</span>
-                              <strong>
-                                {observation.http_status ?? observation.tls_expiry_days ?? '—'}
-                              </strong>
-                            </div>
-                            <div>
-                              <span>错误摘要</span>
-                              <strong>
-                                {observation.error_summary || observation.error_code || '—'}
-                              </strong>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="empty-inline">尚无观测结果</div>
-                    )}
-                  </article>
-                )
-              })}
-            </div>
-          )}
+          <TargetProbeList
+            probeItems={probeItems}
+            observationsByProbe={observationsByProbe}
+            actionsDisabled={probeActionsDisabled}
+            pendingProbeConfirmation={pendingProbeConfirmation}
+            confirmationCardDisabled={probeCreateSubmitting || probeRowMutationBusy}
+            pendingProbeConfirmationCardRef={pendingProbeConfirmationCardRef}
+            registerDeleteButtonRef={(probeItemId, element) => {
+              probeDeleteButtonRefs.current[probeItemId] = element
+            }}
+            onEdit={(probeItem) => openProbeEditForm(probeItem)}
+            onToggle={(probeItem) => void handleToggleProbeItem(probeItem)}
+            onDelete={(probeItem) => void handleDeleteProbeItem(probeItem)}
+            onConfirmDelete={(probeItem) => void handleDeleteProbeItem(probeItem, true)}
+            onCancelDeleteConfirmation={(probeItem) => {
+              pendingProbeFocusRestoreRef.current = {
+                probeItemId: probeItem.probe_item_id,
+              }
+              setPendingProbeConfirmation((current) =>
+                current?.probeItemId === probeItem.probe_item_id ? null : current,
+              )
+            }}
+          />
         </div>
       </DetailSection>
 
-      <DetailSection eyebrow="当前异常" title="当前异常">
-        {!hasCurrentActivity ? (
-          <div className="empty-state">
-            <h3>正在加载活跃异常…</h3>
-            <p>等待目标相关的异常读模型返回最新结果。</p>
-          </div>
-        ) : incidentsError ? (
-          <div className="empty-state">
-            <h3>活跃异常暂不可用</h3>
-            <p>{incidentsError}</p>
-          </div>
-        ) : (
-          <IncidentList incidents={incidents} />
-        )}
-      </DetailSection>
+      <TargetActiveIncidents
+        loaded={hasCurrentActivity}
+        incidents={incidents}
+        error={incidentsError}
+      />
 
-      <DetailSection eyebrow="事件" title="事件">
-        {!hasCurrentActivity ? (
-          <div className="empty-state">
-            <h3>正在加载相关事件…</h3>
-            <p>等待目标相关的事件流返回最新记录。</p>
-          </div>
-        ) : eventsError ? (
-          <div className="empty-state">
-            <h3>相关事件暂不可用</h3>
-            <p>{eventsError}</p>
-          </div>
-        ) : (
-          <EventList events={events} />
-        )}
-      </DetailSection>
+      <TargetRecentEvents
+        loaded={hasCurrentActivity}
+        events={events}
+        error={eventsError}
+      />
     </div>
   )
 }
