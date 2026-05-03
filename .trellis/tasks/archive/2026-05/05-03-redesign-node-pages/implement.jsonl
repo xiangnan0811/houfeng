@@ -1,0 +1,14 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层 spec 总入口，了解前端整体规范地图"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "确定新组件 / 测试落到 components/atoms/、components/node-detail/、pages/ 哪里"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "命名导出、不滥用 memo/useMemo、单文件单组件等强制约定，本任务要新写 + 大改组件必须遵守"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "纯 CSS + token + BEM 的硬约束；本任务新增的 sparkline tooltip / DataTable 行 hover 操作列等样式必须按这套写，禁止 Tailwind / styled-components"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client 在 lib/api.ts 集中、不在 page/component 里 fetch；NodesPage 现存 createNode 直 fetch 是已知偿还点，本次顺便迁移"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "make verify-web 是唯一质量门，本任务结束前必须全绿；ESLint / TS strict / vitest 等约束"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Sparkline / Mono / DataTable 都已有原子，本任务核心是复用而非重写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "前端消费的 HostSample 字段必须与后端 contracts/agentapi 一致（25 字段），不能臆造字段名"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "视觉权威：色板 / 字体角色 / 密度 / 状态优先级 / §12 不引入图表库的硬约束"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五已规约 NodesPage（DataTable / segmented control / hover 操作列）和 NodeDetailPage（4 metric-card 含 sparkline）的目标形态，本任务直接落地"}
+{"file": "docs/design/v1-baseline/architecture-data-model.md", "reason": "Node 业务定义 / 健康状态派生规则 / 生命周期 / 维护语义 — 改 UI 不能歪曲这些业务事实"}
+{"file": "docs/design/v1-baseline/rules-and-interaction.md", "reason": "节点生命周期 / 监控 / 健康 / 维护各状态下页面应如何表现的源头规则"}
+{"file": ".trellis/tasks/05-03-redesign-node-pages/research/codebase-frontend.md", "reason": "本任务前置研究：现有文件清单、数据契约、v2 漂移点 8 项、共享原子盘点"}
+{"file": ".trellis/tasks/05-03-redesign-node-pages/prd.md", "reason": "本任务的 spec 本体：决策、需求、AC、Out of Scope、Technical Approach"}

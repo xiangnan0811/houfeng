@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/05-03-redesign-node-pages/prd.md", "reason": "AC 与 Out of Scope 的核对清单 — check 阶段必须逐项过"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "make verify-web / npm run build / tsc -b / vitest / ESLint 全绿是唯一质量门"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "审查新增/改动组件是否符合命名导出 / 不滥用 memo / 单文件单组件等约定"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "确认未引入图表库 / 未引入 Tailwind 等；样式仍在 atoms.css / pages.css / token 体系内"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "确认数据获取仍走 lib/api.ts，NodesPage 的 createNode 直 fetch 偿还点是否处理"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用度自检：Sparkline / Mono / DataTable / Formatter 是否被实际消费而非新写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "前端消费的 HostSample 字段名 / 类型是否与 contracts/agentapi 完全一致"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体角色（mono 强制）/ 密度（行高 36px / padding 12-16）/ 状态优先级 / 不做的事 §12 全部要核"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 NodesPage / NodeDetailPage 的目标形态是否被实现匹配"}
+{"file": ".trellis/tasks/05-03-redesign-node-pages/research/codebase-frontend.md", "reason": "v2 漂移点清单（8 项）作为回归核对：每项是否被关闭"}
