@@ -689,3 +689,37 @@ Project-facing release docs now reflect actual Stage 1 完成度. next-phase-pla
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: Trellis post-init cleanup
+
+**Date**: 2026-05-03
+**Task**: Trellis post-init cleanup
+**Branch**: `main`
+
+### Summary
+
+Cleaned up Trellis post-init metadata, aligned the backend spec index with populated guidelines, added shared Trellis agent skills, and archived the post-init cleanup task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aec1c60` | (see git log) |
+| `3f07848` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
