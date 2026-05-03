@@ -1,0 +1,29 @@
+{
+  "id": "trellis-post-init-cleanup",
+  "name": "trellis-post-init-cleanup",
+  "title": "Trellis post-init cleanup",
+  "description": "Clean up Trellis post-init metadata and align backend spec index with populated guidelines.",
+  "status": "in_progress",
+  "dev_type": "docs",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-mac",
+  "assignee": "xiangnan-mac",
+  "createdAt": "2026-05-03",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/spec/backend/index.md",
+    ".trellis/.template-hashes.json"
+  ],
+  "notes": "Post-init consistency cleanup after bootstrap guidelines were already archived.",
+  "meta": {}
+}
