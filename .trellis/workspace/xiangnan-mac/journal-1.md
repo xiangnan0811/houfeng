@@ -822,3 +822,36 @@ Added a Darwin hostsample collector for local macOS agent runs, kept Linux procf
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: Dashboard v2 对齐（DataTable 迁移 + Hostname）
+
+**Date**: 2026-05-04
+**Task**: Dashboard v2 对齐（DataTable 迁移 + Hostname）
+**Branch**: `main`
+
+### Summary
+
+Dashboard 首页的 AbnormalNodeList / AbnormalTargetList 从自渲 probe-card 迁到 <DataTable density="compact">，6 列定义对齐节点列表风格（StatusGlyph / Hostname identity / 位置或类型 / MonoDigits 异常计数+摘要 / Timestamp / hover 操作 link）。AbnormalNodeList 节点身份列补 <Hostname truncate maxChars=14> 显示 node_id（关闭 v1-gap-checklist 中 #20-Dashboard 部分的唯一漂移）。行点击 useNavigate 跳详情页，操作列 link stopPropagation 防双触发，操作列纯 CSS opacity hover-only 模式（复用 NodesPage 同款）。StatTile / Stat strip / Hero / EventList / 加载/错误/fresh-install 三态零修改。354/354 测试 pass（+3 用例：节点行 navigate / link stopPropagation / 目标行 navigate）。Build 455.27 KB / 58.66 KB CSS。trellis-check 自修了 v1-gap-checklist：#19 标 Closed 附实施摘要，#20 追注 Dashboard 部分已闭。后端零改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5a85db5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
