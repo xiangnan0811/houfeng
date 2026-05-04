@@ -921,3 +921,36 @@ TargetsPage（985 行）+ TargetDetailPage（1127 行）三 PR 全套对齐 v2 �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 28: SettingsPage UX 收尾（紧凑 grid + JSON 预览 + 单位后缀）
+
+**Date**: 2026-05-04
+**Task**: SettingsPage UX 收尾（紧凑 grid + JSON 预览 + 单位后缀）
+**Branch**: `main`
+
+### Summary
+
+SettingsPage 3 项 UX polish 单 PR 收尾，关闭前置 mono 任务备忘的 3 项非 mono 类 v2 漂移。(a) 频率档位 + 保留策略 section 迁紧凑 grid（新建 summary-grid--numeric variant：固定 4 列 + 紧 padding/gap + 1080px 降 2 列），Telegram / IncidentDefaultsEditor / 覆盖规则保留原 grid 避免长 label 折行。(b) OverrideTextarea 加 <details> 可折叠 JSON 预览（valid 时 JSON.stringify(parsed, null, 2) 输出，invalid 或空白静默隐藏；不引高亮库，零新依赖）。(c) RetentionInput 加 .input-with-suffix flex 容器 + ' 天' unit suffix（aria-label 不变，零回归）。3 项都按 research 推荐方案 B（最小风险 + 最佳投入产出比）。新 5 个 BEM CSS class，2 新测试用例（valid JSON 显 3 个预览 / 改 invalid + 空各一减到 1 个）。366/366 测试 pass（基线 364 + 2）。build 458.82 KB JS / 63.23 KB CSS。后端零改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `32b6418` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

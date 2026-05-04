@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 27
+- **Total Sessions**: 28
 - **Last Active**: 2026-05-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~923 | Active |
+| `journal-1.md` | ~956 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 28 | 2026-05-04 | SettingsPage UX 收尾（紧凑 grid + JSON 预览 + 单位后缀） | `32b6418` | `main` |
 | 27 | 2026-05-04 | Events + Settings Mono 字体落地（关闭 v1-gap-checklist #20 整条） | `24fd997` | `main` |
 | 26 | 2026-05-04 | 目标列表与详情页 v2 对齐（DataTable + Sparkline + observation 内嵌表） | `bba86ff` | `main` |
 | 25 | 2026-05-04 | Dashboard v2 对齐（DataTable 迁移 + Hostname） | `5a85db5` | `main` |
