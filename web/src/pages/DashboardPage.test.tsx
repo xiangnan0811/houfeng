@@ -1,8 +1,17 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
+
+const navigateMock = vi.fn()
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  }
+})
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -22,6 +31,7 @@ function expectSummaryCard(label: string, value: string) {
 describe('DashboardPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    navigateMock.mockReset()
   })
 
   it('renders loading then aggregate overview counts and recent events from /api/dashboard', async () => {
@@ -125,6 +135,8 @@ describe('DashboardPage', () => {
     expect(screen.getAllByText('最近事件').length).toBeGreaterThanOrEqual(2)
     expect(screen.getAllByText('HTTPS 探测连续失败').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('tg_001').length).toBeGreaterThanOrEqual(1)
+    // gap #20-Dashboard: AbnormalNodeList must surface node_id via Hostname
+    expect(screen.getAllByText('nd_001').length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders an explicit error state when the dashboard request fails', async () => {
@@ -185,5 +197,155 @@ describe('DashboardPage', () => {
     expect(screen.getByText('添加第一个 ProbeItem')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '创建第一个节点' })).toHaveAttribute('href', '/nodes')
     expect(screen.queryByText('异常对象总数')).not.toBeInTheDocument()
+  })
+
+  it('navigates to the node detail page when an abnormal node row is clicked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          total_node_count: 5,
+          total_target_count: 4,
+          abnormal_node_count: 1,
+          abnormal_target_count: 0,
+          severe_node_count: 0,
+          severe_target_count: 0,
+          maintenance_node_count: 0,
+          maintenance_target_count: 0,
+          recent_new_incident_count: 0,
+          recent_recovery_count: 0,
+          recent_events: [],
+          abnormal_nodes: [
+            {
+              node_id: 'nd_042',
+              display_name: 'Osaka Edge',
+              region: 'ap-northeast-3',
+              city: 'Osaka',
+              provider: 'aws',
+              lifecycle_status: '在用',
+              monitoring_status: '启用',
+              current_health_status: '告警',
+              last_heartbeat_at: '2026-04-25T08:05:00Z',
+              current_active_incident_count: 1,
+              current_primary_issue_summary: 'CPU 使用率 95%',
+            },
+          ],
+          abnormal_targets: [],
+        }),
+      ),
+    )
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Osaka Edge')).toBeInTheDocument())
+
+    const row = screen.getByText('Osaka Edge').closest('tr')
+    expect(row).not.toBeNull()
+    fireEvent.click(row as HTMLElement)
+    expect(navigateMock).toHaveBeenCalledWith('/nodes/nd_042')
+  })
+
+  it('does not navigate when the row action link is clicked (stopPropagation)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          total_node_count: 5,
+          total_target_count: 4,
+          abnormal_node_count: 1,
+          abnormal_target_count: 0,
+          severe_node_count: 0,
+          severe_target_count: 0,
+          maintenance_node_count: 0,
+          maintenance_target_count: 0,
+          recent_new_incident_count: 0,
+          recent_recovery_count: 0,
+          recent_events: [],
+          abnormal_nodes: [
+            {
+              node_id: 'nd_077',
+              display_name: 'Singapore Edge',
+              region: 'ap-southeast-1',
+              city: 'Singapore',
+              provider: 'aws',
+              lifecycle_status: '在用',
+              monitoring_status: '启用',
+              current_health_status: '严重',
+              last_heartbeat_at: '2026-04-25T08:05:00Z',
+              current_active_incident_count: 3,
+              current_primary_issue_summary: '磁盘使用率 99%',
+            },
+          ],
+          abnormal_targets: [],
+        }),
+      ),
+    )
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Singapore Edge')).toBeInTheDocument())
+
+    const link = screen.getByRole('link', { name: '查看节点 Singapore Edge' })
+    fireEvent.click(link)
+    // stopPropagation: row's onClick must not fire when the action link is clicked
+    expect(navigateMock).not.toHaveBeenCalled()
+  })
+
+  it('navigates to the target detail page when an abnormal target row is clicked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          total_node_count: 5,
+          total_target_count: 4,
+          abnormal_node_count: 0,
+          abnormal_target_count: 1,
+          severe_node_count: 0,
+          severe_target_count: 0,
+          maintenance_node_count: 0,
+          maintenance_target_count: 0,
+          recent_new_incident_count: 0,
+          recent_recovery_count: 0,
+          recent_events: [],
+          abnormal_nodes: [],
+          abnormal_targets: [
+            {
+              target_id: 'tg_555',
+              name: 'Payments API',
+              target_type: 'service',
+              host: 'pay.example.com',
+              base_port: 443,
+              run_status: '启用',
+              current_health_status: '严重',
+              last_success_at: '2026-04-25T07:50:00Z',
+              last_failure_at: '2026-04-25T08:09:00Z',
+              current_active_incident_count: 2,
+              current_primary_issue_summary: 'TLS 探测连续失败',
+            },
+          ],
+        }),
+      ),
+    )
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Payments API')).toBeInTheDocument())
+
+    const row = screen.getByText('Payments API').closest('tr')
+    expect(row).not.toBeNull()
+    fireEvent.click(row as HTMLElement)
+    expect(navigateMock).toHaveBeenCalledWith('/targets/tg_555')
   })
 })

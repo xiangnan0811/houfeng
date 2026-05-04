@@ -1036,3 +1036,70 @@
   text-align: right;
   margin: var(--space-2) 0 0 0;
 }
+
+/* DataTable customizations for DashboardPage abnormal-node / abnormal-target
+ * summary tables. Mirrors the NodesPage pattern: identity column stacks the
+ * mono node_id / hostname above a sans display name, action column hides
+ * until row hover/focus-within so the dense summary view stays clean. */
+.dashboard-table .dashboard-table__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.dashboard-table .dashboard-table__id {
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+}
+.dashboard-table .dashboard-table__display-name {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dashboard-table .dashboard-table__location {
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+}
+.dashboard-table .dashboard-table__type {
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+}
+.dashboard-table .dashboard-table__issue {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.dashboard-table .dashboard-table__issue-count {
+  color: var(--text-primary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.dashboard-table .dashboard-table__issue-summary {
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.dashboard-table .dashboard-table__actions-cell {
+  text-align: right;
+}
+.dashboard-table .dashboard-table__actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-calm);
+}
+.dashboard-table .data-table__row:hover .dashboard-table__actions,
+.dashboard-table .data-table__row:focus-within .dashboard-table__actions {
+  opacity: 1;
+}

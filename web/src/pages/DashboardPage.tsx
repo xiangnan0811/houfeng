@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import {
+  DataTable,
+  type DataTableColumn,
   Hostname,
   MonoDigits,
   Sparkline,
@@ -12,7 +14,6 @@ import {
 } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
-import { StatusBadge } from '../components/StatusBadge'
 import { ApiError, getDashboard } from '../lib/api'
 import type { DashboardNodeSummary, DashboardOverview, DashboardTargetSummary } from '../lib/types'
 
@@ -63,13 +64,6 @@ function StatTile({
   )
 }
 
-function statusTone(value: string) {
-  if (value === '正常') return 'green'
-  if (value === '严重') return 'red'
-  if (value === '告警' || value === '关注') return 'yellow'
-  return 'slate'
-}
-
 function statusGlyph(value: string): HealthState {
   if (value === '正常') return 'normal'
   if (value === '关注') return 'notice'
@@ -90,6 +84,8 @@ function hostPortSummary(target: DashboardTargetSummary) {
 }
 
 function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
+  const navigate = useNavigate()
+
   if (nodes.length === 0) {
     return (
       <div className="empty-state">
@@ -104,70 +100,97 @@ function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
       severityWeight(a.current_health_status) - severityWeight(b.current_health_status),
   )
 
+  const columns: DataTableColumn<DashboardNodeSummary>[] = [
+    {
+      key: 'glyph',
+      label: '',
+      width: 32,
+      align: 'center',
+      render: (node) => (
+        <StatusGlyph
+          state={statusGlyph(node.current_health_status)}
+          size="md"
+          ariaLabel={`${node.display_name} 健康 ${node.current_health_status}`}
+        />
+      ),
+    },
+    {
+      key: 'identity',
+      label: '节点',
+      render: (node) => (
+        <div className="dashboard-table__identity">
+          <Hostname truncate maxChars={14} className="dashboard-table__id">
+            {node.node_id}
+          </Hostname>
+          <span className="dashboard-table__display-name">{node.display_name}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'location',
+      label: '位置',
+      render: (node) => (
+        <span className="dashboard-table__location">
+          {[node.region, node.city, node.provider].filter(Boolean).join(' · ')}
+        </span>
+      ),
+    },
+    {
+      key: 'issue',
+      label: '当前主问题',
+      render: (node) => (
+        <div className="dashboard-table__issue">
+          <MonoDigits className="dashboard-table__issue-count">
+            {node.current_active_incident_count}
+          </MonoDigits>
+          <span className="dashboard-table__issue-summary">
+            {node.current_primary_issue_summary || '暂无关键异常摘要'}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'heartbeat',
+      label: '心跳',
+      render: (node) => (
+        <Timestamp value={node.last_heartbeat_at ?? null} mode="relative" />
+      ),
+    },
+    {
+      key: 'actions',
+      label: '',
+      align: 'right',
+      cellClassName: 'dashboard-table__actions-cell',
+      render: (node) => (
+        <span className="dashboard-table__actions">
+          <Link
+            className="text-link"
+            to={`/nodes/${node.node_id}`}
+            aria-label={`查看节点 ${node.display_name}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            查看节点
+          </Link>
+        </span>
+      ),
+    },
+  ]
+
   return (
-    <div className="probe-list probe-list--rows">
-      {sorted.map((node) => (
-        <article key={node.node_id} className="probe-card probe-card--row">
-          <div className="probe-card__lead">
-            <StatusGlyph state={statusGlyph(node.current_health_status)} />
-          </div>
-          <div className="probe-card__body">
-            <header className="probe-card__header">
-              <div>
-                <h3>{node.display_name}</h3>
-                <p>{node.current_primary_issue_summary || '暂无关键异常摘要'}</p>
-              </div>
-              <div className="badge-row badge-row--wrap">
-                <StatusBadge
-                  label={node.current_health_status}
-                  tone={statusTone(node.current_health_status)}
-                />
-                <StatusBadge label={node.monitoring_status} tone="cyan" />
-              </div>
-            </header>
-            <dl className="probe-card__meta">
-              <div>
-                <dt>位置</dt>
-                <dd>
-                  {node.region} / {node.city}
-                </dd>
-              </div>
-              <div>
-                <dt>供应商</dt>
-                <dd>{node.provider}</dd>
-              </div>
-              <div>
-                <dt>生命周期</dt>
-                <dd>{node.lifecycle_status}</dd>
-              </div>
-              <div>
-                <dt>活跃异常</dt>
-                <dd>
-                  <MonoDigits>{node.current_active_incident_count}</MonoDigits>
-                </dd>
-              </div>
-              <div>
-                <dt>最近心跳</dt>
-                <dd>
-                  <Timestamp value={node.last_heartbeat_at ?? null} mode="relative" />
-                </dd>
-              </div>
-            </dl>
-            <Link
-              className="text-link"
-              to={`/nodes/${node.node_id}`}
-              aria-label={`查看节点 ${node.display_name}`}
-            >
-              查看节点
-            </Link>
-          </div>
-        </article>
-      ))}
-    </div>
+    <DataTable<DashboardNodeSummary>
+      columns={columns}
+      rows={sorted}
+      rowKey={(node) => node.node_id}
+      density="compact"
+      className="dashboard-table"
+      onRowClick={(node) => navigate(`/nodes/${node.node_id}`)}
+    />
   )
 }
 
 function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) {
+  const navigate = useNavigate()
+
   if (targets.length === 0) {
     return (
       <div className="empty-state">
@@ -182,68 +205,87 @@ function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) 
       severityWeight(a.current_health_status) - severityWeight(b.current_health_status),
   )
 
+  const columns: DataTableColumn<DashboardTargetSummary>[] = [
+    {
+      key: 'glyph',
+      label: '',
+      width: 32,
+      align: 'center',
+      render: (target) => (
+        <StatusGlyph
+          state={statusGlyph(target.current_health_status)}
+          size="md"
+          ariaLabel={`${target.name} 健康 ${target.current_health_status}`}
+        />
+      ),
+    },
+    {
+      key: 'identity',
+      label: '目标',
+      render: (target) => (
+        <div className="dashboard-table__identity">
+          <Hostname className="dashboard-table__id">{hostPortSummary(target)}</Hostname>
+          <span className="dashboard-table__display-name">{target.name}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'type',
+      label: '类型',
+      render: (target) => (
+        <span className="dashboard-table__type">{target.target_type}</span>
+      ),
+    },
+    {
+      key: 'issue',
+      label: '当前主问题',
+      render: (target) => (
+        <div className="dashboard-table__issue">
+          <MonoDigits className="dashboard-table__issue-count">
+            {target.current_active_incident_count}
+          </MonoDigits>
+          <span className="dashboard-table__issue-summary">
+            {target.current_primary_issue_summary || '暂无关键异常摘要'}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'last-success',
+      label: '最近成功',
+      render: (target) => (
+        <Timestamp value={target.last_success_at ?? null} mode="relative" />
+      ),
+    },
+    {
+      key: 'actions',
+      label: '',
+      align: 'right',
+      cellClassName: 'dashboard-table__actions-cell',
+      render: (target) => (
+        <span className="dashboard-table__actions">
+          <Link
+            className="text-link"
+            to={`/targets/${target.target_id}`}
+            aria-label={`查看目标 ${target.name}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            查看目标
+          </Link>
+        </span>
+      ),
+    },
+  ]
+
   return (
-    <div className="probe-list probe-list--rows">
-      {sorted.map((target) => (
-        <article key={target.target_id} className="probe-card probe-card--row">
-          <div className="probe-card__lead">
-            <StatusGlyph state={statusGlyph(target.current_health_status)} />
-          </div>
-          <div className="probe-card__body">
-            <header className="probe-card__header">
-              <div>
-                <h3>{target.name}</h3>
-                <p>{target.current_primary_issue_summary || '暂无关键异常摘要'}</p>
-              </div>
-              <div className="badge-row badge-row--wrap">
-                <StatusBadge
-                  label={target.current_health_status}
-                  tone={statusTone(target.current_health_status)}
-                />
-                <StatusBadge label={target.run_status} tone="cyan" />
-              </div>
-            </header>
-            <dl className="probe-card__meta">
-              <div>
-                <dt>类型</dt>
-                <dd>{target.target_type}</dd>
-              </div>
-              <div>
-                <dt>地址</dt>
-                <dd>
-                  <Hostname>{hostPortSummary(target)}</Hostname>
-                </dd>
-              </div>
-              <div>
-                <dt>活跃异常</dt>
-                <dd>
-                  <MonoDigits>{target.current_active_incident_count}</MonoDigits>
-                </dd>
-              </div>
-              <div>
-                <dt>最近成功</dt>
-                <dd>
-                  <Timestamp value={target.last_success_at ?? null} mode="relative" />
-                </dd>
-              </div>
-              <div>
-                <dt>最近失败</dt>
-                <dd>
-                  <Timestamp value={target.last_failure_at ?? null} mode="relative" />
-                </dd>
-              </div>
-            </dl>
-            <Link
-              className="text-link"
-              to={`/targets/${target.target_id}`}
-              aria-label={`查看目标 ${target.name}`}
-            >
-              查看目标
-            </Link>
-          </div>
-        </article>
-      ))}
-    </div>
+    <DataTable<DashboardTargetSummary>
+      columns={columns}
+      rows={sorted}
+      rowKey={(target) => target.target_id}
+      density="compact"
+      className="dashboard-table"
+      onRowClick={(target) => navigate(`/targets/${target.target_id}`)}
+    />
   )
 }
 
