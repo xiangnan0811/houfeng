@@ -299,12 +299,15 @@ function RetentionInput({
   return (
     <label className="summary-card">
       <span className="summary-card__label">{ariaLabel}</span>
-      <input
-        aria-label={ariaLabel}
-        inputMode="numeric"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
+      <span className="input-with-suffix">
+        <input
+          aria-label={ariaLabel}
+          inputMode="numeric"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <span className="input-with-suffix__unit">天</span>
+      </span>
     </label>
   )
 }
@@ -397,17 +400,34 @@ function OverrideTextarea({
   value: string
   onChange: (value: string) => void
 }) {
+  let previewContent: string | null = null
+  if (value.trim()) {
+    try {
+      previewContent = JSON.stringify(JSON.parse(value), null, 2)
+    } catch {
+      previewContent = null
+    }
+  }
+
   return (
-    <label>
-      <span>{ariaLabel}</span>
-      <textarea
-        aria-label={ariaLabel}
-        className="mono"
-        rows={10}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
+    <div className="override-rule-field">
+      <label>
+        <span>{ariaLabel}</span>
+        <textarea
+          aria-label={ariaLabel}
+          className="mono"
+          rows={10}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+      {previewContent ? (
+        <details className="override-rule-preview">
+          <summary>预览</summary>
+          <pre><code>{previewContent}</code></pre>
+        </details>
+      ) : null}
+    </div>
   )
 }
 
@@ -621,7 +641,7 @@ export function SettingsPage() {
 
       <DetailSection eyebrow="频率档位" title="默认频率档位">
         <SectionIntro>当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。</SectionIntro>
-        <div className="summary-grid">
+        <div className="summary-grid summary-grid--numeric">
           <FrequencySelect
             ariaLabel="当前节点主机样本频率"
             value={form.hostSampleFrequencyTier}
@@ -748,7 +768,7 @@ export function SettingsPage() {
       </DetailSection>
 
       <DetailSection eyebrow="保留策略" title="数据保留策略">
-        <div className="summary-grid">
+        <div className="summary-grid summary-grid--numeric">
           <RetentionInput
             ariaLabel="原始层保留天数"
             value={form.retentionPolicy.rawLayerDays}

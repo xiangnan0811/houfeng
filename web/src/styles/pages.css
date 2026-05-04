@@ -1278,3 +1278,63 @@
   border: 1px dashed var(--border-dashed);
   border-radius: var(--radius-2);
 }
+
+/* SettingsPage UX polish — numeric form density variant
+ * Used by 频率档位 + 保留策略 sections to align with the high-density
+ * engineering-tool feel from v2 (mirrors metric-grid--quad). */
+.summary-grid--numeric {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.summary-grid--numeric .summary-card {
+  padding: var(--space-2) var(--space-3);
+  gap: 4px;
+}
+@media (max-width: 1080px) {
+  .summary-grid--numeric { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* SettingsPage UX polish — collapsible JSON preview for OverrideTextarea */
+.override-rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.override-rule-preview {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-2) var(--space-3);
+}
+.override-rule-preview > summary {
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+  user-select: none;
+}
+.override-rule-preview > pre {
+  margin: var(--space-2) 0 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* SettingsPage UX polish — input + unit suffix (used by RetentionInput) */
+.input-with-suffix {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.input-with-suffix > input { flex: 1; min-width: 0; }
+.input-with-suffix__unit {
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+  white-space: nowrap;
+}

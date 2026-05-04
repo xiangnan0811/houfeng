@@ -366,6 +366,59 @@ describe('SettingsPage', () => {
     })
   })
 
+  it('renders a collapsible JSON preview when override textarea contains valid JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)),
+    )
+
+    render(<SettingsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument(),
+    )
+
+    // Three OverrideTextarea instances (node labels / target types / target labels)
+    // each load with valid JSON from the persisted settings, so each renders a 预览 summary.
+    const previewSummaries = screen.getAllByText('预览')
+    expect(previewSummaries.length).toBe(3)
+
+    // The node-label preview should contain the formatted JSON of the persisted rule.
+    expect(
+      screen.getAllByText(
+        (_, node) => node?.tagName === 'CODE' && (node.textContent ?? '').includes('"label": "edge"'),
+      ).length,
+    ).toBeGreaterThan(0)
+  })
+
+  it('hides the JSON preview when the override textarea contains invalid JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)),
+    )
+
+    render(<SettingsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument(),
+    )
+
+    // Initially three valid previews appear.
+    expect(screen.getAllByText('预览').length).toBe(3)
+
+    // Make the node-label textarea invalid JSON; its preview should disappear.
+    fireEvent.change(screen.getByLabelText('节点标签覆盖规则 JSON'), {
+      target: { value: 'not valid json {' },
+    })
+    expect(screen.getAllByText('预览').length).toBe(2)
+
+    // Clearing the textarea should also drop its preview (empty string is treated as no preview).
+    fireEvent.change(screen.getByLabelText('目标类型覆盖规则 JSON'), {
+      target: { value: '   ' },
+    })
+    expect(screen.getAllByText('预览').length).toBe(1)
+  })
+
   it('rejects malformed integer text instead of silently coercing it', async () => {
     const fetchMock = vi
       .fn()
