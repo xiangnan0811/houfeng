@@ -789,3 +789,36 @@ Added a Darwin hostsample collector for local macOS agent runs, kept Linux procf
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: 重设计接入工作台（Stepper + Token UX + 安装步骤模板）
+
+**Date**: 2026-05-04
+**Task**: 重设计接入工作台（Stepper + Token UX + 安装步骤模板）
+**Branch**: `main`
+
+### Summary
+
+把节点接入工作台 (NodeOnboardingPage) 从 3 KPI + 静态文字 + 纯文本 token 改造为 v2 spec 形态。新增 Stepper 原子（4 状态、6 测试、SVG dot + connector，可复用到未来 wizard 流程）+ Phase 进度区（derivePhaseSteps 从 binding_status × has_accepted_observation 派生 4-phase 状态，含绑定冲突 error 分支）。新增 useCopyToClipboard hook（navigator.clipboard 主路径 + textarea/execCommand fallback for non-secure contexts）。Token 区块拆 4 状态：明文展开（warning Card + mono token + 复制按钮 + 已保存关闭）、折叠（dim Card + critical 警示 + 重新展开 ghost；cache 不清避免误点代价）、错误（warning Card + mono 错误摘要 + 重试）、未生成（empty-state + primary 生成）。安装步骤静态 markdown 改为模板化 ol，server_url 用 window.location.origin 派生，token 占位 ###TOKEN### 在生成/展开时填真值，每段 shell 配复制按钮。绑定冲突 3 动作从裸 button 改两步式（ghost 触发 → ActionConfirmationCard 二次确认），fingerprint/timestamp/count 全部 mono 包装。删除冗余的状态反馈 section；底部加数据快照时间 mono 行明确不实时 polling。component-spec.md §五 NodeOnboardingPage 段落同步实施细节并修订 token 倒计时为会话级一次性语义（ADR-lite：后端无 TTL，window.location.origin 替代后端 server_url）。v1-gap-checklist gap #17 标 Closed。351/351 测试 pass，build 455.60 KB / 131.11 KB gz。后端零改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `db37320` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
