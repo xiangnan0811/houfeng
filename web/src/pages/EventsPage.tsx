@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { Button, Tabs, type TabItem } from '../components/atoms'
+import { Button, MonoDigits, Tabs, type TabItem } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { ApiError, listEvents } from '../lib/api'
@@ -325,6 +325,7 @@ export function EventsPage() {
               <span className="summary-card__label">数量</span>
               <select
                 aria-label="数量"
+                className="mono"
                 value={filters.limit}
                 onChange={(event) =>
                   setFilters((current) => ({ ...current, limit: event.target.value }))
@@ -468,7 +469,9 @@ export function EventsPage() {
                   <h3 className="section-heading__title" style={{ margin: 0 }}>
                     {EVENT_GROUP_LABELS[group.key]}
                   </h3>
-                  <span className="section-heading__eyebrow">{group.events.length}</span>
+                  <span className="section-heading__eyebrow">
+                    <MonoDigits>{group.events.length}</MonoDigits>
+                  </span>
                 </header>
                 <EventList events={group.events} />
               </div>

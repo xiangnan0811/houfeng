@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
 import { DetailSection } from '../components/DetailSection'
-import { Tabs } from '../components/atoms'
+import { MonoDigits, Tabs } from '../components/atoms'
 import { useThemeOptional, type Preset, type Mode } from '../lib/theme-context'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
 import type {
@@ -402,6 +402,7 @@ function OverrideTextarea({
       <span>{ariaLabel}</span>
       <textarea
         aria-label={ariaLabel}
+        className="mono"
         rows={10}
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -575,9 +576,14 @@ export function SettingsPage() {
           <article className="summary-card">
             <span className="summary-card__label">当前持久化状态</span>
             <strong className="summary-card__value summary-card__value--text">
-              {settings.telegram.token_present
-                ? `已配置 Telegram Bot Token：${settings.telegram.token_masked_summary}`
-                : '当前未保存 Telegram Bot Token'}
+              {settings.telegram.token_present ? (
+                <>
+                  已配置 Telegram Bot Token：
+                  <MonoDigits>{settings.telegram.token_masked_summary}</MonoDigits>
+                </>
+              ) : (
+                '当前未保存 Telegram Bot Token'
+              )}
             </strong>
           </article>
 

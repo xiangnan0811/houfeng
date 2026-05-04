@@ -103,7 +103,13 @@ describe('SettingsPage', () => {
       '"label": "edge"',
     )
 
-    expect(screen.getByText('已配置 Telegram Bot Token：****************oken')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        (_, node) =>
+          node?.textContent === '已配置 Telegram Bot Token：****************oken',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('****************oken')).toBeInTheDocument()
     expect(screen.queryByText('bot-token')).not.toBeInTheDocument()
     expect(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器')).not.toBeChecked()
     expect(screen.getByText('当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。')).toBeInTheDocument()
