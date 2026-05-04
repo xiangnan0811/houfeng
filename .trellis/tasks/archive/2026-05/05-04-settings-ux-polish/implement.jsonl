@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层 spec 总入口"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "命名导出 / 不滥用 memo"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "纯 CSS + token + BEM；新增 5 个 class 必须按这套写"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "make verify-web 是唯一质量门"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 details/pre/code 原生 HTML、既有 .summary-grid/.summary-card/.mono、参考 metric-grid--quad 模式"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "§4 密度规范 / §3.2 字体 / §12 不引图表库"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 SettingsPage 段（实施细化，spec 文字不变）"}
+{"file": ".trellis/tasks/05-04-settings-ux-polish/research/codebase-settings-ux.md", "reason": "3 项现状审计 + 方案对比 + 推荐方案 B"}
+{"file": ".trellis/tasks/05-04-settings-ux-polish/prd.md", "reason": "本任务 spec 本体"}

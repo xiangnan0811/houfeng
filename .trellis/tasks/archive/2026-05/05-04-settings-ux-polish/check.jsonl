@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/05-04-settings-ux-polish/prd.md", "reason": "AC 核对清单"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / test / build 全绿"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "新增 5 个 class 纯 CSS + token + BEM"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "确认 details/pre/code 原生复用，未引依赖"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "§4 密度 / §12 不引图表库"}
+{"file": ".trellis/tasks/05-04-settings-ux-polish/research/codebase-settings-ux.md", "reason": "3 项审计作为回归核对"}
