@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/05-03-redesign-node-onboarding/prd.md", "reason": "AC 与 Out of Scope 与 ADR-lite 的核对清单"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / tsc / vitest / build 全绿是唯一质量门"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Stepper 与 NodeOnboardingPage 的命名导出 / 不滥用 memo / 单文件单组件审查"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Stepper 与 token 折叠态新样式必须纯 CSS + token + BEM；未引图表库 / Tailwind"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API 调用走 lib/api.ts；onboardingTokenCache 改动审查"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Stepper 是新原子，但 ActionConfirmationCard / Card cardRole='warning|dim' / Mono 族必须复用而非重写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "OnboardingState / EnrollmentTokenIssue / PendingBindingMetadata 字段消费与 internal/center/nodes/types.go 完全一致"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体强制 / 状态优先级 / Error-Empty 三态 / 不做的事（特别是不引图表库 / 不响应式）"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 NodeOnboardingPage 段落必须被同步更新（token 倒计时修订为折叠/展开 + Stepper 加入 §二 atoms 列表如适用）"}
+{"file": ".trellis/tasks/05-03-redesign-node-onboarding/research/codebase-onboarding.md", "reason": "P0/P1/P2 缺口清单 8 项作为回归核对"}

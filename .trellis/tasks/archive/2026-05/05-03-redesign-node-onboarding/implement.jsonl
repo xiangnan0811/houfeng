@@ -1,0 +1,14 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层 spec 总入口"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "确定新 Stepper 原子落到 components/atoms/，新增 hook 落到 lib/"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "命名导出、不滥用 memo、单文件单组件等强制约定 — Stepper 与改造的 NodeOnboardingPage 必须遵守"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "纯 CSS + token + BEM；Stepper 圆点 + 连接线 + label 样式必须按这套写"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API 调用走 lib/api.ts；onboardingTokenCache 已有缓存策略，本次不改"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "make verify-web 是唯一质量门"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 Card cardRole='warning'/'dim' / ActionConfirmationCard / Mono 族 / DetailSection ribbon — 不要重写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "前端消费 OnboardingState / EnrollmentTokenIssue 字段必须与 internal/center/nodes/types.go 一致；本任务不改后端 contract"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体角色 §3.2 强制 / 状态优先级 §6.3 / Loading-Error-Empty §7 / §12 不引图表库 / §12 不响应式"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 NodeOnboardingPage 段落（本任务对其做局部修订）+ §一 Card cardRole='warning'/'dim' 用法 + Stepper 暂未规范，本任务确立"}
+{"file": "docs/design/v1-baseline/architecture-data-model.md", "reason": "节点 / agent / token / fingerprint 业务模型 — 影响 phase 计算与绑定冲突语义"}
+{"file": "docs/design/v1-baseline/rules-and-interaction.md", "reason": "§7.1 Node 创建后接入流程；接入工作台的业务定位"}
+{"file": ".trellis/tasks/05-03-redesign-node-onboarding/research/codebase-onboarding.md", "reason": "现状审计 / 后端契约 / 缺失原子清单 / token 安全分析"}
+{"file": ".trellis/tasks/05-03-redesign-node-onboarding/prd.md", "reason": "本任务 spec 本体：决策、需求、AC、Out of Scope、Technical Approach、ADR-lite"}
