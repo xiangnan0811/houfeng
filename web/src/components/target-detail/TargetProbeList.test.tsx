@@ -123,4 +123,129 @@ describe('TargetProbeList', () => {
     expect(screen.getByRole('heading', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
   })
+
+  it('renders observations as a DataTable with status glyph, hostname, latency and http columns', () => {
+    render(
+      <TargetProbeList
+        probeItems={[probeItem()]}
+        observationsByProbe={
+          new Map([
+            [
+              'pb_001',
+              [
+                observation({ node_id: 'nd_alpha', latency_ms: 42, http_status: 200 }),
+                observation({
+                  node_id: 'nd_beta',
+                  observed_at: '2026-04-24T08:55:00Z',
+                  result_kind: 'failure',
+                  latency_ms: null,
+                  http_status: null,
+                  error_summary: 'connect: timeout',
+                }),
+              ],
+            ],
+          ])
+        }
+        actionsDisabled={false}
+        pendingProbeConfirmation={null}
+        confirmationCardDisabled={false}
+        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
+        {...noopHandlers}
+      />,
+    )
+
+    // DataTable rendered as a real <table>
+    const table = screen.getByRole('table')
+    expect(table).toBeInTheDocument()
+    expect(table).toHaveClass('probe-observations')
+
+    // Column headers
+    expect(screen.getByRole('columnheader', { name: '执行节点' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '观测时间' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '延迟' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'HTTP / TLS' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '错误摘要' })).toBeInTheDocument()
+
+    // Row content
+    expect(screen.getByText('nd_alpha')).toBeInTheDocument()
+    expect(screen.getByText('nd_beta')).toBeInTheDocument()
+    expect(screen.getByText('42 ms')).toBeInTheDocument()
+    expect(screen.getByText('200')).toBeInTheDocument()
+    expect(screen.getByText('connect: timeout')).toBeInTheDocument()
+
+    // Status glyph: success → 成功 ; failure → 失败
+    expect(screen.getByLabelText('成功')).toBeInTheDocument()
+    expect(screen.getByLabelText('失败')).toBeInTheDocument()
+  })
+
+  it('shows the per-card empty state when a probe item has no observations yet', () => {
+    render(
+      <TargetProbeList
+        probeItems={[probeItem({ probe_item_id: 'pb_quiet' })]}
+        observationsByProbe={new Map()}
+        actionsDisabled={false}
+        pendingProbeConfirmation={null}
+        confirmationCardDisabled={false}
+        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
+        {...noopHandlers}
+      />,
+    )
+
+    // No DataTable rendered
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    // Inline empty placeholder
+    expect(screen.getByText('尚未收到观测')).toBeInTheDocument()
+    // dl meta also reflects "尚无观测结果"
+    expect(screen.getByText('尚无观测结果')).toBeInTheDocument()
+  })
+
+  it('renders an "添加第一个 Probe" CTA button in the empty state when onAddProbe is provided', () => {
+    const onAddProbe = vi.fn()
+    render(
+      <TargetProbeList
+        probeItems={[]}
+        observationsByProbe={new Map()}
+        actionsDisabled={false}
+        pendingProbeConfirmation={null}
+        confirmationCardDisabled={false}
+        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
+        {...noopHandlers}
+        onAddProbe={onAddProbe}
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: '添加第一个 Probe' })
+    expect(button).toBeInTheDocument()
+    fireEvent.click(button)
+    expect(onAddProbe).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders TLS observation meta column with day suffix', () => {
+    render(
+      <TargetProbeList
+        probeItems={[probeItem({ probe_kind: 'tls' })]}
+        observationsByProbe={
+          new Map([
+            [
+              'pb_001',
+              [
+                observation({
+                  probe_kind: 'tls',
+                  http_status: null,
+                  tls_expiry_days: 13,
+                }),
+              ],
+            ],
+          ])
+        }
+        actionsDisabled={false}
+        pendingProbeConfirmation={null}
+        confirmationCardDisabled={false}
+        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
+        {...noopHandlers}
+      />,
+    )
+
+    expect(screen.getByText('13 天')).toBeInTheDocument()
+  })
 })

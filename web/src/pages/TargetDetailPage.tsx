@@ -7,7 +7,6 @@ import {
   TargetHero,
   TargetLabelsAndNote,
   TargetLatencyTrends,
-  type TargetLatencyTrend,
   TargetProbeForm,
   type ProbeCreateFormState,
   type ProbeFormMode,
@@ -268,70 +267,6 @@ function focusRestoreActionAfterSuccess(action: TargetRuntimeAction): TargetRunt
   }
 }
 
-function summarizeRecentLatencyTrends(observations: ProbeObservation[]): TargetLatencyTrend[] {
-  const grouped = new Map<
-    string,
-    {
-      probeKind: ProbeKind
-      count: number
-      nodeIds: Set<string>
-      totalLatency: number
-      maxLatency: number
-      latestLatency: number
-      newestObservedAt: string
-      oldestObservedAt: string
-    }
-  >()
-
-  for (const observation of observations) {
-    if (observation.result_kind !== 'success' || observation.latency_ms == null) continue
-
-    const current = grouped.get(observation.probe_item_id)
-    if (current) {
-      current.count += 1
-      current.nodeIds.add(observation.node_id)
-      current.totalLatency += observation.latency_ms
-      current.maxLatency = Math.max(current.maxLatency, observation.latency_ms)
-      if (new Date(observation.observed_at).getTime() > new Date(current.newestObservedAt).getTime()) {
-        current.newestObservedAt = observation.observed_at
-        current.latestLatency = observation.latency_ms
-      }
-      if (new Date(observation.observed_at).getTime() < new Date(current.oldestObservedAt).getTime()) {
-        current.oldestObservedAt = observation.observed_at
-      }
-      continue
-    }
-
-    grouped.set(observation.probe_item_id, {
-      probeKind: observation.probe_kind,
-      count: 1,
-      nodeIds: new Set([observation.node_id]),
-      totalLatency: observation.latency_ms,
-      maxLatency: observation.latency_ms,
-      latestLatency: observation.latency_ms,
-      newestObservedAt: observation.observed_at,
-      oldestObservedAt: observation.observed_at,
-    })
-  }
-
-  return Array.from(grouped.entries())
-    .map(([probeItemId, summary]) => ({
-      probeItemId,
-      probeKind: summary.probeKind,
-      count: summary.count,
-      distinctNodeCount: summary.nodeIds.size,
-      averageLatency: summary.totalLatency / summary.count,
-      maxLatency: summary.maxLatency,
-      latestLatency: summary.latestLatency,
-      newestObservedAt: summary.newestObservedAt,
-      oldestObservedAt: summary.oldestObservedAt,
-    }))
-    .sort(
-      (left, right) =>
-        new Date(right.newestObservedAt).getTime() - new Date(left.newestObservedAt).getTime(),
-    )
-}
-
 function mergeRuntimeTargetRecord(current: TargetRecord, updated: TargetRecord): TargetRecord {
   return {
     ...updated,
@@ -559,10 +494,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     }
     return map
   }, [state.runtimeFacts])
-  const recentLatencyTrends = useMemo(
-    () => summarizeRecentLatencyTrends(state.runtimeFacts?.recent_probe_observations ?? []),
-    [state.runtimeFacts],
-  )
+  const recentObservations = state.runtimeFacts?.recent_probe_observations ?? []
 
   const missingTargetId = !targetId
   const isCurrentTarget = state.requestedTargetId === targetId
@@ -570,7 +502,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const error = isCurrentTarget ? state.error : null
   const target = isCurrentTarget ? state.target : null
   const probeItems = isCurrentTarget ? state.probeItems : []
-  const probeItemsById = new Map(probeItems.map((probeItem) => [probeItem.probe_item_id, probeItem]))
   const incidents = hasCurrentActivity ? state.incidents : []
   const incidentsError = hasCurrentActivity ? state.incidentsError : null
   const events = hasCurrentActivity ? state.events : []
@@ -1045,7 +976,11 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         }}
       />
 
-      <TargetLatencyTrends trends={recentLatencyTrends} probeItemsById={probeItemsById} />
+      <TargetLatencyTrends
+        probeItems={probeItems}
+        recentObservations={recentObservations}
+        isMaintenance={target.run_status === '维护中'}
+      />
 
       <DetailSection eyebrow="ProbeItem 列表" title="ProbeItem 列表">
         <div className="page-stack">
@@ -1095,6 +1030,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
             registerDeleteButtonRef={(probeItemId, element) => {
               probeDeleteButtonRefs.current[probeItemId] = element
             }}
+            onAddProbe={() => openProbeCreateForm(target)}
             onEdit={(probeItem) => openProbeEditForm(probeItem)}
             onToggle={(probeItem) => void handleToggleProbeItem(probeItem)}
             onDelete={(probeItem) => void handleDeleteProbeItem(probeItem)}

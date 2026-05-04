@@ -2,7 +2,15 @@ import type { RefObject } from 'react'
 
 import { ActionConfirmationCard } from '../ActionConfirmationCard'
 import { StatusBadge } from '../StatusBadge'
-import { formatConfigSummary, formatDateTime, formatLatency } from '../../lib/format'
+import {
+  DataTable,
+  type DataTableColumn,
+  Hostname,
+  MonoDigits,
+  StatusGlyph,
+  Timestamp,
+} from '../atoms'
+import { formatConfigSummary, formatLatency } from '../../lib/format'
 import type { ProbeItemRecord, ProbeObservation } from '../../lib/types'
 
 export type PendingProbeConfirmation = {
@@ -13,6 +21,73 @@ export type PendingProbeConfirmation = {
 function probeActionAccessibleName(action: string, probeItem: ProbeItemRecord): string {
   return `${action} ProbeItem ${probeItem.probe_item_id} ${probeItem.probe_kind.toUpperCase()} ${formatConfigSummary(probeItem.config)}`
 }
+
+const observationColumns: DataTableColumn<ProbeObservation>[] = [
+  {
+    key: 'glyph',
+    label: '',
+    width: 36,
+    cellClassName: 'probe-observations__glyph-cell',
+    render: (obs) => (
+      <StatusGlyph
+        state={obs.result_kind === 'success' ? 'normal' : 'critical'}
+        size="md"
+        ariaLabel={obs.result_kind === 'success' ? '成功' : '失败'}
+      />
+    ),
+  },
+  {
+    key: 'node',
+    label: '执行节点',
+    render: (obs) => (
+      <Hostname truncate maxChars={14}>
+        {obs.node_id}
+      </Hostname>
+    ),
+  },
+  {
+    key: 'time',
+    label: '观测时间',
+    render: (obs) => <Timestamp value={obs.observed_at} mode="relative" />,
+  },
+  {
+    key: 'latency',
+    label: '延迟',
+    align: 'right',
+    render: (obs) =>
+      obs.latency_ms != null ? (
+        <MonoDigits>{formatLatency(obs.latency_ms)}</MonoDigits>
+      ) : (
+        <span className="probe-observations__muted">—</span>
+      ),
+  },
+  {
+    key: 'meta',
+    label: 'HTTP / TLS',
+    align: 'right',
+    render: (obs) => {
+      if (obs.http_status != null) return <MonoDigits>{obs.http_status}</MonoDigits>
+      if (obs.tls_expiry_days != null)
+        return <MonoDigits>{obs.tls_expiry_days} 天</MonoDigits>
+      return <span className="probe-observations__muted">—</span>
+    },
+  },
+  {
+    key: 'error',
+    label: '错误摘要',
+    render: (obs) =>
+      obs.error_summary || obs.error_code ? (
+        <span
+          className="probe-observations__error"
+          title={obs.error_summary ?? obs.error_code ?? ''}
+        >
+          {obs.error_summary ?? obs.error_code}
+        </span>
+      ) : (
+        <span className="probe-observations__muted">—</span>
+      ),
+  },
+]
 
 type TargetProbeListProps = {
   probeItems: ProbeItemRecord[]
@@ -27,6 +102,7 @@ type TargetProbeListProps = {
   onDelete: (probeItem: ProbeItemRecord) => void
   onConfirmDelete: (probeItem: ProbeItemRecord) => void
   onCancelDeleteConfirmation: (probeItem: ProbeItemRecord) => void
+  onAddProbe?: () => void
 }
 
 export function TargetProbeList({
@@ -42,12 +118,20 @@ export function TargetProbeList({
   onDelete,
   onConfirmDelete,
   onCancelDeleteConfirmation,
+  onAddProbe,
 }: TargetProbeListProps) {
   if (probeItems.length === 0) {
     return (
       <div className="empty-state">
         <h3>当前还没有 ProbeItem</h3>
         <p>当前还没有 ProbeItem，请为该入口添加至少一种观测方式。</p>
+        {onAddProbe ? (
+          <div>
+            <button type="button" onClick={() => onAddProbe()}>
+              添加第一个 Probe
+            </button>
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -56,6 +140,7 @@ export function TargetProbeList({
     <div className="probe-list">
       {probeItems.map((probeItem) => {
         const observations = observationsByProbe.get(probeItem.probe_item_id) ?? []
+        const latestObservedAt = observations.length > 0 ? observations[0].observed_at : null
         return (
           <article key={probeItem.probe_item_id} className="probe-card">
             <header className="probe-card__header">
@@ -120,56 +205,32 @@ export function TargetProbeList({
             <dl className="probe-card__meta">
               <div>
                 <dt>超时</dt>
-                <dd>{probeItem.timeout_seconds}s</dd>
+                <dd>
+                  <MonoDigits>{probeItem.timeout_seconds}</MonoDigits>s
+                </dd>
               </div>
               <div>
                 <dt>最近观测</dt>
                 <dd>
-                  {observations.length > 0
-                    ? formatDateTime(observations[0].observed_at)
-                    : '尚无观测结果'}
+                  {latestObservedAt ? (
+                    <Timestamp value={latestObservedAt} mode="both" />
+                  ) : (
+                    <span className="probe-observations__muted">尚无观测结果</span>
+                  )}
                 </dd>
               </div>
             </dl>
 
             {observations.length > 0 ? (
-              <div className="observation-list">
-                {observations.map((observation) => (
-                  <div
-                    key={`${observation.probe_item_id}-${observation.node_id}`}
-                    className="observation-row"
-                  >
-                    <div>
-                      <strong>{observation.node_id}</strong>
-                      <p>{formatDateTime(observation.observed_at)}</p>
-                    </div>
-                    <div>
-                      <StatusBadge
-                        label={observation.result_kind === 'success' ? '成功' : '失败'}
-                        tone={observation.result_kind === 'success' ? 'green' : 'red'}
-                      />
-                    </div>
-                    <div>
-                      <span>延迟</span>
-                      <strong>{formatLatency(observation.latency_ms)}</strong>
-                    </div>
-                    <div>
-                      <span>HTTP / TLS</span>
-                      <strong>
-                        {observation.http_status ?? observation.tls_expiry_days ?? '—'}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>错误摘要</span>
-                      <strong>
-                        {observation.error_summary || observation.error_code || '—'}
-                      </strong>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <DataTable<ProbeObservation>
+                className="probe-observations"
+                density="compact"
+                columns={observationColumns}
+                rows={observations}
+                rowKey={(obs) => `${obs.probe_item_id}-${obs.node_id}-${obs.observed_at}`}
+              />
             ) : (
-              <div className="empty-inline">尚无观测结果</div>
+              <div className="probe-card__observations-empty">尚未收到观测</div>
             )}
           </article>
         )

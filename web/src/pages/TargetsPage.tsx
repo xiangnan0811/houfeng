@@ -1,8 +1,18 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { StatusBadge } from '../components/StatusBadge'
+import {
+  Button,
+  DataTable,
+  type DataTableColumn,
+  type HealthState,
+  Hostname,
+  MonoDigits,
+  StatusGlyph,
+  Timestamp,
+} from '../components/atoms'
 import {
   FilterBar,
   FilterChip,
@@ -22,7 +32,7 @@ import {
   resumeTarget,
   updateTargetMetadata,
 } from '../lib/api'
-import { formatDateTime, formatLabelList } from '../lib/format'
+import { formatLabelList } from '../lib/format'
 import type { CreateTargetInput, TargetRecord } from '../lib/types'
 
 const TARGET_TYPE_OPTIONS = [
@@ -117,6 +127,26 @@ type PendingTargetConfirmation = {
 type FocusRestoreRequest = {
   targetId: string
   preferredAction: TargetRuntimeAction
+}
+
+/** Map target run_status + health into the StatusGlyph state vocabulary.
+ *  v1 baseline: maintenance / 暂停 / 已归档 outrank health for at-a-glance scanning. */
+function targetGlyphState(target: TargetRecord): HealthState {
+  if (target.run_status === '已归档') return 'offline'
+  if (target.run_status === '维护中') return 'maintenance'
+  if (target.run_status === '暂停') return 'offline'
+  switch (target.current_health_status) {
+    case '正常':
+      return 'normal'
+    case '关注':
+      return 'notice'
+    case '告警':
+      return 'alert'
+    case '严重':
+      return 'critical'
+    default:
+      return 'offline'
+  }
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -237,6 +267,19 @@ function mergeMetadataTargetRecord(current: TargetRecord, updated: TargetRecord)
     note: updated.note,
     updated_at: updated.updated_at,
   }
+}
+
+function renderLabelsContent(target: TargetRecord): ReactNode {
+  if (target.labels.length === 0) return '—'
+  const visible = target.labels.slice(0, 3)
+  const overflow = target.labels.length - visible.length
+  if (overflow === 0) return visible.join(' · ')
+  return (
+    <>
+      {visible.join(' · ')}
+      <span className="targets-table__labels-more"> +{overflow}</span>
+    </>
+  )
 }
 
 export function TargetsPage() {
@@ -567,9 +610,209 @@ export function TargetsPage() {
     )
   }
 
+  const columns: DataTableColumn<TargetRecord>[] = [
+    {
+      key: 'glyph',
+      label: '',
+      width: 32,
+      align: 'center',
+      render: (target) => (
+        <StatusGlyph
+          state={targetGlyphState(target)}
+          size="md"
+          ariaLabel={`${target.name} 健康 ${target.current_health_status}`}
+        />
+      ),
+    },
+    {
+      key: 'identity',
+      label: '目标',
+      render: (target) => (
+        <div className="targets-table__identity">
+          <span className="targets-table__name">{target.name}</span>
+          <Hostname truncate maxChars={14} className="targets-table__id">
+            {target.target_id}
+          </Hostname>
+        </div>
+      ),
+    },
+    {
+      key: 'type',
+      label: '类型',
+      render: (target) => <span className="targets-table__type">{target.target_type}</span>,
+    },
+    {
+      key: 'host',
+      label: 'Host',
+      render: (target) => (
+        <Hostname>
+          {target.base_port ? `${target.host}:${target.base_port}` : target.host}
+        </Hostname>
+      ),
+    },
+    {
+      key: 'labels',
+      label: '标签',
+      render: (target) => {
+        if (metadataEditingTargetId === target.target_id) {
+          return (
+            <div
+              className="targets-table__label-editor"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.stopPropagation()
+                }
+              }}
+            >
+              <label className="targets-table__label-editor-field">
+                <span className="visually-hidden">标签</span>
+                <input
+                  name={`target-labels-${target.target_id}`}
+                  value={metadataLabelInput}
+                  onChange={(event) => setMetadataLabelInput(event.target.value)}
+                  aria-label="标签"
+                />
+              </label>
+              <div className="targets-table__label-editor-actions">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={metadataSavingTargetId === target.target_id}
+                  onClick={() => void saveMetadataLabels(target)}
+                >
+                  {metadataSavingTargetId === target.target_id ? '正在保存…' : '保存标签'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={metadataSavingTargetId === target.target_id}
+                  onClick={() => cancelMetadataEdit(target.target_id)}
+                >
+                  取消
+                </Button>
+              </div>
+              {metadataErrors[target.target_id] ? (
+                <p className="targets-table__inline-error" role="alert">
+                  {metadataErrors[target.target_id]}
+                </p>
+              ) : null}
+            </div>
+          )
+        }
+        // Test fixture compatibility: existing tests assert on
+        // "标签：alpha · beta" formatted text ("标签：" prefix + dotted list).
+        // Keep the visible labels contiguous in a single text node so RTL's
+        // exact-text matcher resolves it; the overflow "+N" suffix is in a
+        // sibling span and never appears together with that exact assertion.
+        return (
+          <span className="targets-table__labels-cell">
+            标签：{renderLabelsContent(target)}
+          </span>
+        )
+      },
+    },
+    {
+      key: 'status',
+      label: '状态',
+      render: (target) => (
+        <span className="targets-table__status">
+          <StatusBadge label={target.run_status} />
+          <StatusBadge label={target.current_health_status} />
+          {target.execution_node_labels.length > 0 ? (
+            <span className="targets-table__exec-labels">
+              {formatLabelList(target.execution_node_labels)}
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      key: 'observation',
+      label: '最近成功 / 失败',
+      render: (target) => (
+        <div className="targets-table__observation">
+          <span className="targets-table__observation-row">
+            <span className="targets-table__observation-label">成功</span>
+            <Timestamp value={target.last_success_at ?? null} mode="relative" />
+          </span>
+          <span className="targets-table__observation-row">
+            <span className="targets-table__observation-label">失败</span>
+            <Timestamp value={target.last_failure_at ?? null} mode="relative" />
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'issue',
+      label: '当前主问题',
+      render: (target) => (
+        <div className="targets-table__issue">
+          <MonoDigits className="targets-table__issue-count">
+            {target.current_active_incident_count}
+          </MonoDigits>
+          <span className="targets-table__issue-summary">
+            {target.current_primary_issue_summary || '暂无明显异常'}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '操作',
+      align: 'right',
+      cellClassName: 'targets-table__actions-cell',
+      render: (target) => {
+        const actions = targetRuntimeActions(target)
+        return (
+          <div
+            className="targets-table__actions"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.stopPropagation()
+              }
+            }}
+          >
+            {metadataEditingTargetId === target.target_id ? null : (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={metadataSavingTargetId !== null}
+                onClick={() => beginMetadataEdit(target)}
+              >
+                快速编辑标签
+              </Button>
+            )}
+            {actions.map(({ action, label }) => (
+              <button
+                key={action}
+                ref={(element) => {
+                  actionButtonRefs.current[actionButtonKey(target.target_id, action)] = element
+                }}
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={runtimeBusyTargetId === target.target_id}
+                onClick={() => void handleRuntimeAction(target, action)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )
+      },
+    },
+  ]
+
+  function shouldNavigateOnRowClick(target: TargetRecord): boolean {
+    if (metadataEditingTargetId === target.target_id) return false
+    if (pendingConfirmation?.targetId === target.target_id) return false
+    return true
+  }
+
   return (
     <section className="page-stack">
-      <header className="section-heading">
+      <header className="section-heading section-heading--inline">
         <div>
           <p className="section-heading__eyebrow">目标</p>
           <h2 className="section-heading__title">目标列表</h2>
@@ -577,8 +820,9 @@ export function TargetsPage() {
             以 ProbeItem 视角组织目标状态，并保留执行节点标签与最近成功/失败摘要。
           </p>
         </div>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="md"
           onClick={() =>
             setCreateOpen((current) => {
               if (current) {
@@ -589,7 +833,7 @@ export function TargetsPage() {
           }
         >
           新建目标
-        </button>
+        </Button>
       </header>
 
       {createOpen ? (
@@ -833,83 +1077,27 @@ export function TargetsPage() {
               </p>
             </div>
           ) : (
-            <div className="resource-table">
-              <div className="resource-table__head">
-                <span>目标</span>
-                <span>执行与状态</span>
-                <span>最近成功 / 失败</span>
-                <span>当前主问题</span>
-              </div>
-              {filteredTargets.map((target) => (
-            <article key={target.target_id} className="resource-table__row">
-              <div>
-                <strong>{target.name}</strong>
-                <p>
-                  {target.target_type} · {target.host}
-                  {target.base_port ? `:${target.base_port}` : ''}
-                </p>
-                {metadataEditingTargetId === target.target_id ? (
-                  <div className="page-stack">
-                    <label>
-                      标签
-                      <input
-                        name={`target-labels-${target.target_id}`}
-                        value={metadataLabelInput}
-                        onChange={(event) => setMetadataLabelInput(event.target.value)}
-                      />
-                    </label>
-                    <div className="badge-row badge-row--wrap">
-                      <button
-                        type="button"
-                        disabled={metadataSavingTargetId === target.target_id}
-                        onClick={() => void saveMetadataLabels(target)}
-                      >
-                        {metadataSavingTargetId === target.target_id ? '正在保存…' : '保存标签'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={metadataSavingTargetId === target.target_id}
-                        onClick={() => cancelMetadataEdit(target.target_id)}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <p>标签：{formatLabelList(target.labels)}</p>
-                )}
-                <p>
-                  <Link className="text-link" to={`/targets/${target.target_id}`}>
-                    查看详情
-                  </Link>
-                </p>
-                {metadataEditingTargetId !== target.target_id ? (
-                  <p>
-                    <button
-                      type="button"
-                      disabled={metadataSavingTargetId !== null}
-                      onClick={() => beginMetadataEdit(target)}
-                    >
-                      快速编辑标签
-                    </button>
-                  </p>
-                ) : null}
-                <div className="badge-row badge-row--wrap">
-                  {targetRuntimeActions(target).map(({ action, label }) => (
-                    <button
-                      key={action}
-                      ref={(element) => {
-                        actionButtonRefs.current[actionButtonKey(target.target_id, action)] = element
-                      }}
-                      type="button"
-                      disabled={runtimeBusyTargetId === target.target_id}
-                      onClick={() => void handleRuntimeAction(target, action)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {pendingConfirmation?.targetId === target.target_id ? (
+            <DataTable<TargetRecord>
+              columns={columns}
+              rows={filteredTargets}
+              rowKey={(target) => target.target_id}
+              density="compact"
+              className="targets-table"
+              onRowClick={(target) => {
+                if (!shouldNavigateOnRowClick(target)) return
+                navigate(`/targets/${target.target_id}`)
+              }}
+            />
+          )}
+
+          {filteredTargets.map((target) => {
+            const runtimeError = runtimeErrors[target.target_id]
+            const showConfirmation =
+              pendingConfirmation?.targetId === target.target_id
+            if (!runtimeError && !showConfirmation) return null
+            return (
+              <div key={`runtime-${target.target_id}`} className="targets-table__row-overlay">
+                {showConfirmation ? (
                   <ActionConfirmationCard
                     title={
                       pendingConfirmation.action === 'pause' ? '确认暂停目标监控' : '确认归档目标'
@@ -952,32 +1140,14 @@ export function TargetsPage() {
                     }}
                   />
                 ) : null}
-                {runtimeErrors[target.target_id] ? <p>{runtimeErrors[target.target_id]}</p> : null}
-                {metadataErrors[target.target_id] ? (
-                  <p role="alert" aria-live="assertive">
-                    {metadataErrors[target.target_id]}
+                {runtimeError ? (
+                  <p className="targets-table__inline-error" role="alert" aria-live="assertive">
+                    {runtimeError}
                   </p>
                 ) : null}
               </div>
-              <div>
-                <div className="badge-row badge-row--wrap">
-                  <StatusBadge label={target.run_status} />
-                  <StatusBadge label={target.current_health_status} />
-                </div>
-                <p>{formatLabelList(target.execution_node_labels)}</p>
-              </div>
-              <div>
-                <strong>{formatDateTime(target.last_success_at)}</strong>
-                <p>失败：{formatDateTime(target.last_failure_at)}</p>
-              </div>
-              <div>
-                <strong>{target.current_active_incident_count}</strong>
-                <p>{target.current_primary_issue_summary || '暂无明显异常'}</p>
-              </div>
-            </article>
-              ))}
-            </div>
-          )}
+            )
+          })}
         </>
       )}
     </section>

@@ -442,8 +442,8 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
-    const enabledRow = screen.getByText('Blog').closest('article')
-    const archivedRow = screen.getByText('Legacy API').closest('article')
+    const enabledRow = screen.getByText('Blog').closest('tr')
+    const archivedRow = screen.getByText('Legacy API').closest('tr')
     expect(enabledRow).not.toBeNull()
     expect(archivedRow).not.toBeNull()
 
@@ -557,8 +557,8 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
-    const pauseRow = screen.getByText('Blog').closest('article')
-    const maintenanceRow = screen.getByText('Storefront').closest('article')
+    const pauseRow = screen.getByText('Blog').closest('tr')
+    const maintenanceRow = screen.getByText('Storefront').closest('tr')
     expect(pauseRow).not.toBeNull()
     expect(maintenanceRow).not.toBeNull()
 
@@ -571,7 +571,11 @@ describe('TargetsPage', () => {
     await waitFor(() =>
       expect(within(maintenanceRow!).getByRole('button', { name: '退出维护' })).toHaveFocus(),
     )
-    expect(within(pauseRow!).getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
+    // v2 layout: confirmation card renders below the DataTable as a row-overlay
+    // sibling, no longer inside the row's <tr>. The behavioural guarantee
+    // (Blog's pause confirmation persists while Storefront completes its light
+    // action) is asserted at page scope rather than within the table row.
+    expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
   })
 
   it('keeps a pause confirmation open when another action succeeds on the same target', async () => {
@@ -732,7 +736,7 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
-    const row = screen.getByText('Blog').closest('article')
+    const row = screen.getByText('Blog').closest('tr')
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
@@ -790,8 +794,8 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
-    const blogRow = screen.getByText('Blog').closest('article')
-    const cacheRow = screen.getByText('Cache').closest('article')
+    const blogRow = screen.getByText('Blog').closest('tr')
+    const cacheRow = screen.getByText('Cache').closest('tr')
     expect(blogRow).not.toBeNull()
     expect(cacheRow).not.toBeNull()
 
@@ -841,8 +845,8 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
-    const blogRow = screen.getByText('Blog').closest('article')
-    const cacheRow = screen.getByText('Cache').closest('article')
+    const blogRow = screen.getByText('Blog').closest('tr')
+    const cacheRow = screen.getByText('Cache').closest('tr')
     expect(blogRow).not.toBeNull()
     expect(cacheRow).not.toBeNull()
 
@@ -909,7 +913,7 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
-    const row = screen.getByText('Blog').closest('article')
+    const row = screen.getByText('Blog').closest('tr')
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
@@ -991,7 +995,7 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
-    const row = screen.getByText('Blog').closest('article')
+    const row = screen.getByText('Blog').closest('tr')
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
@@ -1144,7 +1148,7 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
-    const row = screen.getByText('Blog').closest('article')
+    const row = screen.getByText('Blog').closest('tr')
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
@@ -1157,4 +1161,90 @@ describe('TargetsPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  // ─── PR1: DataTable 迁移新增覆盖 ──────────────────────────────────────────
+
+  it('navigates to the target detail page when a row is clicked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({ target_id: 'tg_click', name: 'Blog' }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+          <Route path="/targets/:targetId" element={<div>target detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const row = screen.getByText('Blog').closest('tr')
+    expect(row).not.toBeNull()
+
+    fireEvent.click(row!)
+    await waitFor(() => expect(screen.getByText('target detail')).toBeInTheDocument())
+  })
+
+  it('does not navigate when a row action button is clicked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({ target_id: 'tg_actions', name: 'Blog' }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+          <Route path="/targets/:targetId" element={<div>target detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    const row = screen.getByText('Blog').closest('tr')
+    expect(row).not.toBeNull()
+
+    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
+    // Inline editor opened on the same row, navigation must NOT have triggered.
+    expect(within(row!).getByRole('textbox', { name: '标签' })).toBeInTheDocument()
+    expect(screen.queryByText('target detail')).not.toBeInTheDocument()
+  })
+
+  it('toggles the create target form panel via the section heading button', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(mockJSONResponse([targetRecord()])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '新建目标' })).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByText('目标创建')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
+    expect(screen.getByText('目标创建')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
+    expect(screen.queryByText('目标创建')).not.toBeInTheDocument()
+  })
 })

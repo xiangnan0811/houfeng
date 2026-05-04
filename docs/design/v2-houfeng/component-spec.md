@@ -212,9 +212,29 @@ parent: docs/design/v2-houfeng/design-language.md
 7. DetailSection `保留策略`（ribbon notice）：4 个 retention 输入
 8. 底部统一保存按钮 + 错误/成功就地展示
 
-### TargetsPage / TargetDetailPage
-- 镜像 NodesPage / NodeDetailPage 的 DataTable + 详情结构
-- 列略不同：`[StatusGlyph, 名字, 类型, host, 标签, 状态, 操作]`
+### TargetsPage
+1. Section heading + 「新建目标」按钮（右对齐，primary）
+2. （可选）创建目标表单（page-panel，可折叠）
+3. 筛选栏：6 项（type / run_status / health / labels / execution_node_labels / abnormal toggle）
+4. **DataTable**（density compact）：列 `[StatusGlyph, 目标(名字 + Hostname target_id), 类型, Host(Hostname host[:base_port]), 标签(截断+overflow+inline 编辑), 状态(StatusBadge run_status + health + 执行节点标签), 最近成功/失败(Timestamp relative), 当前主问题(MonoDigits incident_count + 摘要), 操作]`
+5. 行 hover：操作列显示「快速编辑标签 / 进入维护 / 暂停 / 归档 / 恢复」等条件性 ghost 按钮（hover-only opacity 模式）
+6. 行点击：导航到目标详情；操作列内部 `event.stopPropagation()` 防误触发
+
+### TargetDetailPage
+1. Hero：目标名 (display_name) + 4 个 hero meta card（标签 / 执行节点标签 / 最近成功 Timestamp / 最近失败 Timestamp，全部 mono 包装）
+2. Summary grid：3 KPI 卡（健康状态 / ProbeItem 数量 MonoDigits / 当前主问题）
+3. DetailSection `标签与备注`（编辑/查看切换）
+4. DetailSection `运行控制` + ActionConfirmationCard（pause/archive 二次确认）
+5. DetailSection `近期延迟趋势`：每 enabled ProbeItem 一张 metric-card 含 [卡头 (kindLabel `<KIND> · <config 摘要>` · MonoDigits 当前延迟) · Sparkline 240×60 interactive (hover tooltip 显时间 + formatLatency 值) · 次指标 dl (平均 / 最大 / 样本数 / 覆盖节点)]。section aside 显采样元信息（`24h N 样本 · 最早 ... · 最新 ... · backfill M`）。维护态 → 整张 section 加 `ribbon='maintenance'`
+6. DetailSection `ProbeItem 列表`：每 ProbeItem 一张卡（保留卡片栈，适合 TCP/HTTP/TLS 多样配置）
+   - 卡 header：`<KIND>` 大标题 + config 摘要 + Badge 行（启用 / 频率档位）
+   - 卡操作行：编辑 / 启用停用 / 删除（删除走 ActionConfirmationCard 二次确认）
+   - 卡 meta dl：超时（MonoDigits 秒数）+ 最近观测（Timestamp mode="both"）
+   - 卡内嵌 observation `<DataTable density="compact">` 6 列：`[StatusGlyph result_kind, Hostname node_id, Timestamp 观测时间(relative), MonoDigits 延迟, MonoDigits HTTP/TLS, mono 错误摘要]`
+   - 0 ProbeItem 空态：empty-state + ghost CTA「添加第一个 Probe」（trigger `onAddProbe`）
+   - 0 observations 空态：dashed 占位 + "尚未收到观测"
+7. DetailSection `当前异常`：IncidentList
+8. DetailSection `事件`：EventList timeline
 
 ### NodeOnboardingPage
 - 顶部 hero：节点身份卡（display_name + region/city/provider + 状态 badges + node_id 用 `<Hostname truncate>`）

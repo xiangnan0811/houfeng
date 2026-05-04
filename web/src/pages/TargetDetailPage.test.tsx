@@ -3,7 +3,6 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { TargetDetailPage } from './TargetDetailPage'
-import { formatDateTime } from '../lib/format'
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -322,19 +321,18 @@ describe('TargetDetailPage', () => {
     )
 
     expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
-    expect(screen.getByText('pb_http')).toBeInTheDocument()
-    expect(screen.getByText('平均延迟')).toBeInTheDocument()
-    expect(screen.getByText('100 ms')).toBeInTheDocument()
-    expect(screen.getByText('最新延迟')).toBeInTheDocument()
+    // metric-card heading shows kind label "HTTP · <config summary>"
+    const trendCardHeading = screen
+      .getAllByRole('heading')
+      .find((heading) => /^HTTP · /.test(heading.textContent ?? ''))
+    expect(trendCardHeading).toBeDefined()
+    // latest latency 120 ms appears in metric-card head; mean 100 ms appears in stats
     expect(screen.getAllByText('120 ms').length).toBeGreaterThan(0)
-    expect(screen.getByText('样本窗口')).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        `${formatDateTime('2026-04-24T09:05:00Z')} → ${formatDateTime('2026-04-24T09:10:00Z')}`,
-      ),
-    ).toBeInTheDocument()
-    expect(screen.getByText('观测次数')).toBeInTheDocument()
-    expect(screen.getByText('2 次观测')).toBeInTheDocument()
+    expect(screen.getByText('100 ms')).toBeInTheDocument()
+    expect(screen.getByText('平均')).toBeInTheDocument()
+    expect(screen.getByText('最大')).toBeInTheDocument()
+    expect(screen.getByText('样本数')).toBeInTheDocument()
+    expect(screen.getByText('覆盖节点')).toBeInTheDocument()
   })
 
   it('renders an empty state when no recent latency samples are available', async () => {
@@ -384,9 +382,13 @@ describe('TargetDetailPage', () => {
     )
 
     expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '暂无可用延迟样本' })).toBeInTheDocument()
     expect(
-      screen.getByText('近期延迟趋势仅统计已返回成功且带延迟值的近期探测观测。'),
+      screen.getByRole('heading', { name: '近 24h 暂无可用延迟样本' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '该目标尚未收到带有 latency_ms 的成功观测，或所有 ProbeItem 当前均处于停用状态。',
+      ),
     ).toBeInTheDocument()
   })
 
@@ -856,7 +858,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument(),
     )
-    expect(screen.getByText(/path: \/ready/)).toBeInTheDocument()
+    expect(screen.getAllByText(/path: \/ready/).length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
       method: 'PUT',
       headers: {

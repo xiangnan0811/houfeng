@@ -1,3 +1,4 @@
+import { MonoDigits } from '../atoms'
 import type { TargetRecord } from '../../lib/types'
 
 type TargetStatusSummaryProps = {
@@ -14,7 +15,9 @@ export function TargetStatusSummary({ target, probeItemCount }: TargetStatusSumm
       </article>
       <article className="summary-card">
         <p className="summary-card__label">ProbeItem 数量</p>
-        <p className="summary-card__value">{probeItemCount}</p>
+        <p className="summary-card__value">
+          <MonoDigits>{probeItemCount}</MonoDigits>
+        </p>
       </article>
       <article className="summary-card">
         <p className="summary-card__label">当前主问题</p>

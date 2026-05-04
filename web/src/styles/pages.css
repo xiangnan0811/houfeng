@@ -1103,3 +1103,178 @@
 .dashboard-table .data-table__row:focus-within .dashboard-table__actions {
   opacity: 1;
 }
+
+/* DataTable customizations for TargetsPage rows. Mirrors NodesPage structure
+ * (identity stack, hover-revealed actions, inline label editor) so the v2
+ * list visuals stay coherent across the resource pages. */
+.targets-table .targets-table__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.targets-table .targets-table__name {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.targets-table .targets-table__id {
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+}
+.targets-table .targets-table__type {
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+}
+.targets-table .targets-table__labels-cell {
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+}
+.targets-table .targets-table__labels {
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+}
+.targets-table .targets-table__labels-more { color: var(--text-muted); }
+
+.targets-table .targets-table__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.targets-table .targets-table__exec-labels {
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+}
+
+.targets-table .targets-table__observation {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--type-small-size);
+}
+.targets-table .targets-table__observation-row {
+  display: inline-flex;
+  gap: 4px;
+  color: var(--text-muted);
+}
+.targets-table .targets-table__observation-label { color: var(--text-muted); }
+
+.targets-table .targets-table__issue {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.targets-table .targets-table__issue-count {
+  color: var(--text-primary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.targets-table .targets-table__issue-summary {
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Hover-revealed action column. Default opacity 0; row hover or focus
+ * within the actions cell promotes opacity to 1 so keyboard users can
+ * still tab into the buttons. */
+.targets-table .targets-table__actions-cell {
+  text-align: right;
+}
+.targets-table .targets-table__actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-calm);
+}
+.targets-table .data-table__row:hover .targets-table__actions,
+.targets-table .data-table__row:focus-within .targets-table__actions {
+  opacity: 1;
+}
+
+.targets-table .targets-table__label-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 200px;
+}
+.targets-table .targets-table__label-editor-field {
+  display: flex;
+  flex-direction: column;
+}
+.targets-table .targets-table__label-editor-field input {
+  width: 100%;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+}
+.targets-table .targets-table__label-editor-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.targets-table .targets-table__label-editor-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.targets-table__inline-error {
+  color: var(--color-state-critical);
+  font-size: var(--type-small-size);
+}
+
+.targets-table__row-overlay {
+  /* Renders pause/archive confirmation cards & runtime errors below the
+   * table for the affected row. Spaced via the page-stack gap. */
+}
+
+/* ============== Probe observations table (inside probe-card) ============== */
+.probe-observations {
+  margin-top: var(--space-3);
+}
+.probe-observations__glyph-cell {
+  width: 36px;
+  padding-left: var(--space-3);
+  padding-right: 0;
+}
+.probe-observations__muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.probe-observations__error {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-state-critical) 70%, white 30%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  max-width: 200px;
+  vertical-align: bottom;
+}
+.probe-card__observations-empty {
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px dashed var(--border-dashed);
+  border-radius: var(--radius-2);
+}

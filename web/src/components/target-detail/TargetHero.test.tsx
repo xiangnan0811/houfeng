@@ -32,7 +32,7 @@ describe('TargetHero', () => {
 
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
     expect(screen.getByText('目标详情')).toBeInTheDocument()
-    expect(screen.getByText('service · blog.example.com:443')).toBeInTheDocument()
+    expect(screen.getByText('blog.example.com:443')).toBeInTheDocument()
     expect(screen.getByText('启用')).toBeInTheDocument()
     expect(screen.getByText('正常')).toBeInTheDocument()
   })
@@ -40,6 +40,6 @@ describe('TargetHero', () => {
   it('omits the port suffix when base_port is missing', () => {
     render(<TargetHero target={targetRecord({ base_port: undefined })} />)
 
-    expect(screen.getByText('service · blog.example.com')).toBeInTheDocument()
+    expect(screen.getByText('blog.example.com')).toBeInTheDocument()
   })
 })
