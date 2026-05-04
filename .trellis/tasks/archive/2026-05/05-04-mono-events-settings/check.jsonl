@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/05-04-mono-events-settings/prd.md", "reason": "AC 核对清单"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / test / build 全绿"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "确认 MonoDigits 复用而非新写"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "§3.2 字体强制是否完全覆盖"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 SettingsPage 实施是否对齐 spec 字面"}
+{"file": ".trellis/tasks/05-04-mono-events-settings/research/codebase-events-settings.md", "reason": "6 处漂移点 + 范围外 3 项作为回归核对"}

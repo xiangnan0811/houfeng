@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层 spec 总入口"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "命名导出 / 单文件单组件等约定"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "纯 CSS + token + BEM；mono className 复用 atoms.css 既有 .mono 类"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / test / build 全绿是唯一质量门"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 MonoDigits / mono className，禁止新写"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "§3.2 字体强制 / §12 不响应式"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 SettingsPage 段明示 'token-masked mono' 与 '覆盖规则 3 textarea mono 字体'"}
+{"file": ".trellis/tasks/05-04-mono-events-settings/research/codebase-events-settings.md", "reason": "6 处漂移完整清单"}
+{"file": ".trellis/tasks/05-04-mono-events-settings/prd.md", "reason": "本任务 spec 本体"}
