@@ -855,3 +855,36 @@ Dashboard 首页的 AbnormalNodeList / AbnormalTargetList 从自渲 probe-card �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: 目标列表与详情页 v2 对齐（DataTable + Sparkline + observation 内嵌表）
+
+**Date**: 2026-05-04
+**Task**: 目标列表与详情页 v2 对齐（DataTable + Sparkline + observation 内嵌表）
+**Branch**: `main`
+
+### Summary
+
+TargetsPage（985 行）+ TargetDetailPage（1127 行）三 PR 全套对齐 v2 节点页面模式：PR1 TargetsPage 自渲 .resource-table 迁 DataTable 9 列（StatusGlyph 行首 + Hostname target_id+name + Host Hostname + 标签截断 + 状态 Badge 组 + hover 操作列 + Mono 全栈 + targetGlyphState mapper 维护/暂停/已归档 outrank 健康），行点击导航 + stopPropagation + section heading 右侧 primary 新建按钮。PR2 TargetHero/StatusSummary host 与时间 Mono；TargetProbeList 保留 ProbeKind 卡片栈但卡内 observation-list 改 DataTable 6 列（StatusGlyph result_kind + Hostname node_id + Timestamp + MonoDigits 延迟 + MonoDigits HTTP/TLS + mono 错误摘要），新增 0-Probe 空态 ghost CTA 与 0-observations dashed 占位。PR3 TargetLatencyTrends 重构为 metric-card grid，每 enabled probe_item 一张卡含 Sparkline 240×60 interactive（hover tooltip 显时间+formatLatency 值）+ 平均/最大/样本数/覆盖节点 dl + section aside 24h 样本元信息 + 维护 ribbon。component-spec.md §五 TargetsPage / TargetDetailPage 段从 2 行扩到 25 行实施细则。v1-gap-checklist gap #18 标 Closed 附 PR 摘要；#20 追注 Targets 部分已闭。364/364 测试 pass（+10 用例）。Build 458.20 KB / 62.11 KB CSS。后端零改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bba86ff` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
