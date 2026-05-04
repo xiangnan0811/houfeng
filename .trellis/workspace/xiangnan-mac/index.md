@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
+- **Total Sessions**: 27
 - **Last Active**: 2026-05-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~890 | Active |
+| `journal-1.md` | ~923 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-05-04 | Events + Settings Mono 字体落地（关闭 v1-gap-checklist #20 整条） | `24fd997` | `main` |
 | 26 | 2026-05-04 | 目标列表与详情页 v2 对齐（DataTable + Sparkline + observation 内嵌表） | `bba86ff` | `main` |
 | 25 | 2026-05-04 | Dashboard v2 对齐（DataTable 迁移 + Hostname） | `5a85db5` | `main` |
 | 24 | 2026-05-04 | 重设计接入工作台（Stepper + Token UX + 安装步骤模板） | `db37320` | `main` |

@@ -888,3 +888,36 @@ TargetsPage（985 行）+ TargetDetailPage（1127 行）三 PR 全套对齐 v2 �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 27: Events + Settings Mono 字体落地（关闭 v1-gap-checklist #20 整条）
+
+**Date**: 2026-05-04
+**Task**: Events + Settings Mono 字体落地（关闭 v1-gap-checklist #20 整条）
+**Branch**: `main`
+
+### Summary
+
+用 6 处 mono 包装关闭 v1-gap-checklist gap #20 全条，全站 mono 字体合规收尾。EventsPage：事件分组计数 <MonoDigits>；数量 select 用 className="mono"（PRD fallback：浏览器原生 select 忽略 option 子元素 styling）。SettingsPage：Telegram token_masked_summary <MonoDigits>（spec §五明示）；OverrideTextarea 单点 className="mono" → 3 处覆盖规则 textarea 共享 mono 字体（spec §五明示）。SettingsPage.test.tsx 一处 getByText 改 textContent matcher 适配包装后 DOM 拆分。EventList 共享组件早已 v2 合规零改动。v1-gap-checklist gap #20 标 Closed (Dashboard/Targets/Events/Settings 4 子页面全闭)；范围外 3 项 v2 漂移（密度/textarea code 容器/RetentionInput 旁注）记入 research/codebase-events-settings.md 备忘。364/364 测试 pass 基线不动；build 458.32 KB / 62.11 KB CSS（+0.12 KB JS）。后端零改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `24fd997` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
