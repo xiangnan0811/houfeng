@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/05-04-redesign-dashboard/prd.md", "reason": "AC + Out of Scope + ADR-lite 核对清单"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / tsc / vitest / build 全绿是唯一质量门"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "改造的 Dashboard 函数遵守命名导出 / 不滥用 memo 等约定"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "新增 .dashboard-table__actions 类应纯 CSS + token + BEM"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "确认 DataTable / Mono 族 / StatusGlyph 全部复用，未自写"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体强制 / 状态优先级 / §12 不引图表库"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 DashboardPage 实施是否对齐"}
+{"file": ".trellis/tasks/05-04-redesign-dashboard/research/codebase-dashboard.md", "reason": "缺口清单（1 处 P0）作为回归核对"}

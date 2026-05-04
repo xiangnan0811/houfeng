@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层 spec 总入口"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "命名导出 / 不滥用 memo / 单文件单组件等强制约定"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "纯 CSS + token + BEM；新增 .dashboard-table__actions 必须按这套写"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API 调用走 lib/api.ts；getDashboard 不改"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "make verify-web 是唯一质量门"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "DataTable / Hostname / Timestamp / MonoDigits / StatusGlyph 全部已有原子，直接消费"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体角色强制 / 状态优先级 / §12 不引图表库 / 不响应式"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 DashboardPage 段为权威 + §二 DataTable atom"}
+{"file": ".trellis/tasks/05-04-redesign-dashboard/research/codebase-dashboard.md", "reason": "现状审计：当前已 9/10 v2 对齐，唯一显著漂移点（node_id Hostname 缺失）+ 改造优先级"}
+{"file": ".trellis/tasks/05-04-redesign-dashboard/prd.md", "reason": "本任务 spec 本体：决策、需求、AC、Out of Scope、Technical Approach"}
