@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/05-04-redesign-targets-pages/prd.md", "reason": "AC + Out of Scope + ADR-lite 核对清单（PR1/PR2/PR3 各自 AC 段）"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / tsc / vitest / build 全绿是唯一质量门"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "改造的组件遵守命名导出 / 不滥用 memo / 单文件单组件等约定"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "新增 .targets-table__* 类应纯 CSS + token + BEM；未引图表库 / Tailwind"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API 调用仍走 lib/api.ts，未在 page/component 直接 fetch"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "确认 DataTable / Sparkline / Mono / StatusGlyph / ActionConfirmationCard 全部复用，未自写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "TargetRecord / ProbeItemRecord / ProbeObservation 字段消费与后端 contract 一致"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体强制 / 状态优先级 / 不做的事（§12 图表库 / 响应式）全部要核"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 TargetsPage / TargetDetailPage 段实施是否对齐 + 本任务对 spec 的细化是否落到文档"}
+{"file": ".trellis/tasks/05-04-redesign-targets-pages/research/codebase-targets.md", "reason": "12+ Mono 漂移点 + 缺口清单作为回归核对"}

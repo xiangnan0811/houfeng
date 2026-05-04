@@ -1,0 +1,14 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层 spec 总入口"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "新增/改造文件落点：pages/ 与 components/target-detail/"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "命名导出 / 不滥用 memo / 单文件单组件等强制约定"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "纯 CSS + token + BEM；新增 .targets-table__* 必须按这套写"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API 调用走 lib/api.ts；getTargets / getTarget / getTargetRuntimeFacts / getTargetProbes 不改"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "make verify-web 是唯一质量门"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "DataTable / Sparkline / Mono 族 / StatusGlyph / ActionConfirmationCard 全部已有原子，禁止重写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "TargetRecord / ProbeItemRecord / ProbeObservation 字段消费必须与 internal/center/targets 与 contracts/agentapi 一致"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体强制 §3.2 / 状态优先级 §6 / Loading-Error-Empty §7 / §12 不引图表库 / 不响应式"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 TargetsPage / TargetDetailPage 段（本任务做细化）+ §一 Card / §二 DataTable / Sparkline atoms"}
+{"file": "docs/design/v1-baseline/architecture-data-model.md", "reason": "Target / ProbeItem 业务模型（TCP/HTTP/TLS 三种 ProbeKind）"}
+{"file": "docs/design/v1-baseline/rules-and-interaction.md", "reason": "§6.4 目标列表字段建议 / §7.2 Target 创建 / §7.3 ProbeItem 创建 / §8 默认频率档位"}
+{"file": ".trellis/tasks/05-04-redesign-targets-pages/research/codebase-targets.md", "reason": "现状 / 数据契约 / Mono 漂移点 / 改造体量预估"}
+{"file": ".trellis/tasks/05-04-redesign-targets-pages/prd.md", "reason": "本任务 spec 本体"}
