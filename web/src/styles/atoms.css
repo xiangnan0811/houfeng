@@ -497,3 +497,62 @@
   text-align: center;
   color: var(--text-muted);
 }
+
+/* ============== Stepper ============== */
+.stepper {
+  display: grid;
+  grid-auto-flow: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  gap: 0;
+}
+.stepper__step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  text-align: center;
+  min-width: 0;
+}
+.stepper__connector {
+  position: absolute;
+  top: 13px;
+  left: 50%;
+  width: 100%;
+  height: 1px;
+  background: var(--color-state-offline);
+  z-index: 0;
+  pointer-events: none;
+}
+.stepper__dot {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.stepper__label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 var(--space-1);
+}
+.stepper__step--pending .stepper__label { color: var(--text-muted); }
+.stepper__step--current .stepper__label {
+  color: var(--accent);
+  font-weight: 600;
+}
+.stepper__step--done .stepper__label { color: var(--color-state-normal); }
+.stepper__step--error .stepper__label {
+  color: var(--color-state-critical);
+  font-weight: 600;
+}

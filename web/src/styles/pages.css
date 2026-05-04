@@ -930,3 +930,109 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* ============== Node onboarding ============== */
+.onboarding-token__hint {
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-3) 0;
+}
+.onboarding-token__hint--critical {
+  color: color-mix(in srgb, var(--color-state-critical) 70%, var(--text-primary) 30%);
+}
+.onboarding-token__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-pressed);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+}
+.onboarding-token__value {
+  flex: 1;
+  font-size: 13px;
+  word-break: break-all;
+  user-select: all;
+  color: var(--text-primary);
+}
+.onboarding-token__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+.onboarding-token__actions--center {
+  justify-content: center;
+}
+.onboarding-token__error-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: var(--space-2) 0 0 0;
+  word-break: break-all;
+}
+.onboarding-completed-link {
+  margin: var(--space-3) 0 0 0;
+  font-size: var(--type-small-size);
+}
+.onboarding-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-left: var(--space-5);
+  margin: 0;
+}
+.onboarding-steps li {
+  padding-left: var(--space-2);
+  color: var(--text-primary);
+}
+.onboarding-steps p {
+  margin: 0 0 var(--space-2) 0;
+  color: var(--text-primary);
+}
+.onboarding-steps code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: var(--surface-pressed);
+  color: var(--text-primary);
+}
+.onboarding-steps__hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.onboarding-snippet {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.onboarding-snippet pre {
+  flex: 1;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.onboarding-snippet code {
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+.onboarding-snapshot-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  margin: var(--space-2) 0 0 0;
+}

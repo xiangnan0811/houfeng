@@ -217,9 +217,17 @@ parent: docs/design/v2-houfeng/design-language.md
 - 列略不同：`[StatusGlyph, 名字, 类型, host, 标签, 状态, 操作]`
 
 ### NodeOnboardingPage
-- 安全感重：cardRole='warning' ribbon top 用 critical
-- token 一次性显示：mono + 复制按钮 + 倒计时 + 「已保存，关闭」按钮
-- 关闭后无法再获取：用 dim card + critical 文案再次警示
+- 顶部 hero：节点身份卡（display_name + region/city/provider + 状态 badges + node_id 用 `<Hostname truncate>`）
+- 接入进度：DetailSection 包 `<Stepper>` 4-phase 横向进度条（未开始接入 / 等待绑定 / 等待稳定观测 / 接入完成）。当前 phase 由 `binding_status × has_accepted_observation` 派生（`derivePhaseSteps`）；绑定冲突走 error 分支
+- 绑定冲突（条件性，最高优先）：DetailSection ribbon='critical'，metric-card 展示指纹/时间/尝试次数（`<Hostname>` / `<Timestamp mode="absolute">` / `<MonoDigits>` 包装），三个动作（确认重绑 / 拒绝 / 重置）采用**两步式**——默认仅显示 ghost button「确认重新绑定…」「拒绝新指纹…」「重置绑定…」；点击后展开对应的 `<ActionConfirmationCard>`，描述当前→之后的状态迁移、「会发生」「不变」两行 callout，再二次确认才真正调 API
+- 接入凭证：DetailSection ribbon='accent' 包 token 区块。token 是会话级一次性（localStorage cache + issued_at 匹配检查）：
+  - 明文展开态：`Card cardRole='warning'`，token 用 `<MonoDigits>` + 复制按钮（`navigator.clipboard.writeText` + `document.execCommand` fallback），底部「已保存，关闭」secondary button
+  - 折叠态：`Card cardRole='dim'` + critical 文案"已隐藏，本会话内可重新展开"+ ghost「重新展开 token 明文」。**注：本会话内 cache 不清，避免误点导致旧 token 作废 + agent 重发的高代价**
+  - 错误态：`Card cardRole='warning'` + mono 错误摘要 + 重试按钮（design-language §7.2）
+  - 未生成态：`.empty-state` + primary button「重新生成接入 Token」
+  - 关于"倒计时"：当前后端 enrollment token 无 TTL（会话级一次性语义无法支撑倒计时），不实现倒计时；如未来引入 token TTL 再加（详见 task `05-03-redesign-node-onboarding` ADR-lite）
+- 安装步骤：步骤 ol，env 行 / shell 命令在 mono `<pre><code>` 容器内 + 各自复制按钮；`server_url` 用 `window.location.origin` 派生（reverse proxy 场景需手动调整，页面有 hint）；token 占位 `###TOKEN###` 在 token 已生成且未折叠时自动填真值
+- 接入完成：在 Phase 进度区下方一行小字 link「查看节点详情 →」
 
 ### LoginPage
 - 全屏居中
