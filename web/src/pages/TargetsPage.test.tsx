@@ -2,7 +2,17 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type * as ApiModule from '../lib/api'
+import { listTargetSparklines } from '../lib/api'
 import { TargetsPage } from './TargetsPage'
+
+vi.mock('../lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof ApiModule>()
+  return {
+    ...actual,
+    listTargetSparklines: vi.fn().mockResolvedValue({ targets: {} }),
+  }
+})
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -1246,5 +1256,79 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
     expect(screen.queryByText('目标创建')).not.toBeInTheDocument()
+  })
+
+  // ─── PR2: sparkline strip ──────────────────────────────────────────────
+
+  it('renders latency sparkline in trends column when sparklines data is loaded', async () => {
+    const make24 = (base: number, jitter: number) =>
+      Array.from({ length: 24 }, (_, i) => base + Math.sin(i * 0.5) * jitter)
+    const mocked = vi.mocked(listTargetSparklines)
+    mocked.mockResolvedValueOnce({
+      targets: {
+        tg_001: { latency: make24(25, 10) },
+        tg_002: { latency: make24(150, 30) },
+      },
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({ target_id: 'tg_001', name: 'API A' }),
+          targetRecord({ target_id: 'tg_002', name: 'API B' }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('API A')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('API B')).toBeInTheDocument())
+
+    // Each Sparkline with >1 point renders a <polyline> element
+    const polylines = document.querySelectorAll('polyline')
+    expect(polylines.length).toBe(2)
+
+    // Each row should have the trend column visible
+    const trendCells = document.querySelectorAll('.targets-table__trends')
+    expect(trendCells.length).toBe(2)
+
+    // Trend values should show latency in ms (at least one value per row)
+    const msValues = screen.getAllByText(/\.\d ms/)
+    expect(msValues.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('shows placeholder dash in trends column when sparklines data is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          targetRecord({ target_id: 'tg_no_data', name: 'New Target' }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('New Target')).toBeInTheDocument())
+
+    // Default mock for listTargetSparklines returns { targets: {} },
+    // so the row should show placeholder dash in trends column.
+    const trendCells = document.querySelectorAll('.targets-table__trends')
+    expect(trendCells.length).toBe(1)
+    expect(trendCells[0].textContent).toContain('—')
   })
 })

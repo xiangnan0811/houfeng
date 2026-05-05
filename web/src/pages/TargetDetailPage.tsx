@@ -1,10 +1,8 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { DetailSection } from '../components/DetailSection'
+import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import {
-  TargetActiveIncidents,
-  TargetHero,
   TargetLabelsAndNote,
   TargetLatencyTrends,
   TargetProbeForm,
@@ -12,11 +10,20 @@ import {
   type ProbeFormMode,
   TargetProbeList,
   type PendingProbeConfirmation,
-  TargetRecentEvents,
-  TargetRuntimeControls,
+  TargetWatchtowerHeader,
   type TargetRuntimeAction,
-  TargetStatusSummary,
 } from '../components/target-detail'
+import { EventList } from '../components/EventList'
+import { IncidentList } from '../components/IncidentList'
+import { Card } from '../components/atoms/Card'
+import {
+  Drawer,
+  MonoDigits,
+  Tabs,
+  Timestamp,
+} from '../components/atoms'
+import { Button } from '../components/atoms/Button'
+import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
   archiveTarget,
@@ -27,6 +34,7 @@ import {
   getTarget,
   getTargetRuntimeFacts,
   listEvents,
+  listHistoricalIncidents,
   listIncidents,
   listTargetProbeItems,
   pauseTarget,
@@ -297,6 +305,13 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] =
     useState<PendingRuntimeConfirmation | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyTab, setHistoryTab] = useState<'events' | 'incidents'>('events')
+  const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(
+    null,
+  )
+  const [historyIncidentsLoading, setHistoryIncidentsLoading] = useState(false)
+  const [historyIncidentsError, setHistoryIncidentsError] = useState<string | null>(null)
   const [probeCreateOpen, setProbeCreateOpen] = useState(false)
   const [probeFormMode, setProbeFormMode] = useState<ProbeFormMode>({ kind: 'create' })
   const [probeCreateSubmitting, setProbeCreateSubmitting] = useState(false)
@@ -485,6 +500,67 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     }
   }, [targetId])
 
+  const historyFetchRef = useRef<{
+    targetId: string | null
+    inFlight: boolean
+    fetched: boolean
+  }>({ targetId: null, inFlight: false, fetched: false })
+
+  useEffect(() => {
+    if (historyFetchRef.current.targetId !== targetId) {
+      historyFetchRef.current = {
+        targetId: targetId ?? null,
+        inFlight: false,
+        fetched: false,
+      }
+    }
+  }, [targetId])
+
+  const wantsHistoryIncidents = historyOpen && historyTab === 'incidents'
+
+  useEffect(() => {
+    if (!targetId) return
+    if (!wantsHistoryIncidents) return
+    if (historyFetchRef.current.inFlight || historyFetchRef.current.fetched) return
+
+    let cancelled = false
+    const actionTargetId = targetId
+    historyFetchRef.current = {
+      targetId: actionTargetId,
+      inFlight: true,
+      fetched: false,
+    }
+    setHistoryIncidentsLoading(true)
+    setHistoryIncidentsError(null)
+
+    listHistoricalIncidents('target', actionTargetId)
+      .then((records) => {
+        if (cancelled) return
+        setHistoryIncidents(records)
+        historyFetchRef.current = {
+          targetId: actionTargetId,
+          inFlight: false,
+          fetched: true,
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setHistoryIncidentsError(describeError(error, '加载历史异常失败'))
+        historyFetchRef.current = {
+          targetId: actionTargetId,
+          inFlight: false,
+          fetched: false,
+        }
+      })
+      .finally(() => {
+        if (cancelled) return
+        setHistoryIncidentsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [targetId, wantsHistoryIncidents])
+
   const observationsByProbe = useMemo(() => {
     const map = new Map<string, ProbeObservation[]>()
     for (const observation of state.runtimeFacts?.latest_probe_observations ?? []) {
@@ -503,11 +579,42 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const target = isCurrentTarget ? state.target : null
   const probeItems = isCurrentTarget ? state.probeItems : []
   const incidents = hasCurrentActivity ? state.incidents : []
-  const incidentsError = hasCurrentActivity ? state.incidentsError : null
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
   const runtimeConfirmationActive = pendingRuntimeConfirmation !== null
   const probeConfirmationActive = pendingProbeConfirmation !== null
+
+  const showDangerZone = target ? target.current_active_incident_count > 0 : false
+  const firstIncident =
+    incidents.length > 0
+      ? [...incidents].sort(
+          (a, b) =>
+            new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+        )[0]
+      : null
+
+  function openHistory(tab: 'events' | 'incidents' = 'events') {
+    setHistoryTab(tab)
+    setHistoryOpen(true)
+  }
+
+  function retryHistoryIncidents() {
+    if (!targetId) return
+    historyFetchRef.current = {
+      targetId,
+      inFlight: false,
+      fetched: false,
+    }
+    setHistoryIncidents(null)
+    setHistoryIncidentsError(null)
+  }
+
+  function registerActionRef(
+    action: TargetRuntimeAction,
+    element: HTMLButtonElement | null,
+  ) {
+    runtimeActionButtonRefs.current[action] = element
+  }
 
   function updateMetadataField<K extends keyof MetadataFormState>(
     field: K,
@@ -921,105 +1028,153 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   }
 
   const probeRowMutationBusy = probeMutationBusyId !== null
-  const runtimeActionsDisabled = runtimeSubmitting || probeConfirmationActive || runtimeConfirmationActive
   const probeActionsDisabled =
     probeCreateSubmitting || probeRowMutationBusy || runtimeConfirmationActive || probeConfirmationActive
+  const isArchived = target.run_status === '已归档'
 
   return (
     <div className="page-stack">
-      <TargetHero target={target} />
-
-      <TargetStatusSummary target={target} probeItemCount={probeItems.length} />
-
-      <TargetLabelsAndNote
+      <TargetWatchtowerHeader
         target={target}
-        editing={metadataEditing}
-        labelDraft={metadataForm.labels}
-        noteDraft={metadataForm.note}
-        submitting={metadataSubmitting}
-        error={metadataError}
-        onLabelDraftChange={(value) => updateMetadataField('labels', value)}
-        onNoteDraftChange={(value) => updateMetadataField('note', value)}
-        onStartEdit={() => {
-          setMetadataEditing(true)
-          setMetadataError(null)
-          setMetadataForm({
-            labels: target.labels.join(', '),
-            note: target.note,
-          })
-        }}
-        onCancelEdit={() => {
-          setMetadataEditing(false)
-          setMetadataError(null)
-          setMetadataForm({
-            labels: target.labels.join(', '),
-            note: target.note,
-          })
-        }}
-        onSubmit={handleMetadataSave}
+        runtimeSubmitting={runtimeSubmitting}
+        disabled={probeConfirmationActive}
+        onRuntimeAction={(action) => void handleRuntimeAction(action)}
+        registerActionRef={registerActionRef}
+        onOpenHistory={() => openHistory('events')}
       />
 
-      <TargetRuntimeControls
-        target={target}
-        disabled={runtimeActionsDisabled}
-        submitting={runtimeSubmitting}
-        error={runtimeError}
-        pendingConfirmation={pendingRuntimeConfirmation}
-        onAction={(action) => void handleRuntimeAction(action)}
-        onConfirm={(action) => void handleRuntimeAction(action, true)}
-        onCancelConfirmation={(action) => {
-          pendingRuntimeFocusRestoreRef.current = action
-          setPendingRuntimeConfirmation(null)
-        }}
-        registerActionButtonRef={(action, element) => {
-          runtimeActionButtonRefs.current[action] = element
-        }}
-      />
+      {showDangerZone ? (
+        <Card cardRole="warning" className="watchtower-danger" aria-label="当前主问题">
+          <p className="watchtower-danger__eyebrow">当前主问题</p>
+          <h2 className="watchtower-danger__summary">
+            {target.current_primary_issue_summary || '存在活跃异常'}
+          </h2>
+          <p className="watchtower-danger__meta">
+            共{' '}
+            <MonoDigits>{target.current_active_incident_count}</MonoDigits>{' '}
+            个活跃异常 · 健康状态{' '}
+            <StatusBadge label={target.current_health_status} />
+            {firstIncident?.started_at ? (
+              <>
+                {' '}
+                · 持续 <Timestamp value={firstIncident.started_at} mode="relative" />
+              </>
+            ) : null}
+          </p>
+          <div className="watchtower-danger__actions">
+            <Button variant="ghost" size="sm" onClick={() => openHistory('events')}>
+              查看完整时间线 →
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      {pendingRuntimeConfirmation?.action === 'pause' ? (
+        <ActionConfirmationCard
+          title="确认暂停目标监控"
+          current={
+            target.run_status === '维护中'
+              ? '当前：目标运行状态为维护中。'
+              : '当前：目标运行状态为启用。'
+          }
+          result="操作后：目标运行状态变为暂停。"
+          impact="会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。"
+          unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。"
+          confirmLabel="确认暂停目标"
+          disabled={runtimeSubmitting}
+          onConfirm={() => void handleRuntimeAction('pause', true)}
+          onCancel={() => {
+            pendingRuntimeFocusRestoreRef.current = 'pause'
+            setPendingRuntimeConfirmation(null)
+          }}
+        />
+      ) : null}
+      {runtimeError ? (
+        <p className="watchtower-runtime-error" role="alert">
+          {runtimeError}
+        </p>
+      ) : null}
 
       <TargetLatencyTrends
         probeItems={probeItems}
         recentObservations={recentObservations}
         isMaintenance={target.run_status === '维护中'}
+        watchtower
       />
 
-      <DetailSection eyebrow="ProbeItem 列表" title="ProbeItem 列表">
-        <div className="page-stack">
-          <div>
-            <button
-              ref={addProbeButtonRef}
-              type="button"
-              disabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
-              onClick={() => {
-                if (probeCreateSubmitting) return
-                if (probeCreateOpen && probeFormMode.kind === 'create') {
-                  probeFormRequestRef.current += 1
-                  setProbeCreateOpen(false)
-                  return
-                }
-                openProbeCreateForm(target)
-              }}
-            >
-              添加 ProbeItem
-            </button>
-          </div>
-          {probeMutationError ? <p>{probeMutationError}</p> : null}
-          {probeCreateOpen ? (
-            <TargetProbeForm
-              mode={probeFormMode}
-              form={probeCreateForm}
-              submitting={probeCreateSubmitting}
-              error={probeCreateError}
-              onSubmit={handleProbeCreate}
-              onProbeKindChange={(probeKind) => {
-                if (probeFormMode.kind === 'edit') {
-                  updateProbeCreateField('probeKind', probeKind)
-                  return
-                }
-                setProbeCreateForm((current) => probeCreateFormForKind(current, probeKind))
-              }}
-              onFieldChange={updateProbeCreateField}
-            />
-          ) : null}
+      <div>
+        <button
+          ref={addProbeButtonRef}
+          type="button"
+          disabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
+          onClick={() => {
+            if (probeCreateSubmitting) return
+            if (probeCreateOpen && probeFormMode.kind === 'create') {
+              probeFormRequestRef.current += 1
+              setProbeCreateOpen(false)
+              return
+            }
+            openProbeCreateForm(target)
+          }}
+        >
+          添加 ProbeItem
+        </button>
+        {probeMutationError ? <p>{probeMutationError}</p> : null}
+        {probeCreateOpen ? (
+          <TargetProbeForm
+            mode={probeFormMode}
+            form={probeCreateForm}
+            submitting={probeCreateSubmitting}
+            error={probeCreateError}
+            onSubmit={handleProbeCreate}
+            onProbeKindChange={(probeKind) => {
+              if (probeFormMode.kind === 'edit') {
+                updateProbeCreateField('probeKind', probeKind)
+                return
+              }
+              setProbeCreateForm((current) => probeCreateFormForKind(current, probeKind))
+            }}
+            onFieldChange={updateProbeCreateField}
+          />
+        ) : null}
+      </div>
+
+      <details className="watchtower-secondary">
+        <summary>标签与备注</summary>
+        <div className="watchtower-secondary__body">
+          <TargetLabelsAndNote
+            target={target}
+            editing={metadataEditing}
+            labelDraft={metadataForm.labels}
+            noteDraft={metadataForm.note}
+            submitting={metadataSubmitting}
+            error={metadataError}
+            onLabelDraftChange={(value) => updateMetadataField('labels', value)}
+            onNoteDraftChange={(value) => updateMetadataField('note', value)}
+            onStartEdit={() => {
+              setMetadataEditing(true)
+              setMetadataError(null)
+              setMetadataForm({
+                labels: target.labels.join(', '),
+                note: target.note,
+              })
+            }}
+            onCancelEdit={() => {
+              setMetadataEditing(false)
+              setMetadataError(null)
+              setMetadataForm({
+                labels: target.labels.join(', '),
+                note: target.note,
+              })
+            }}
+            onSubmit={handleMetadataSave}
+          />
+        </div>
+      </details>
+
+      <details className="watchtower-secondary">
+        <summary>ProbeItem 列表</summary>
+        <div className="watchtower-secondary__body">
           <TargetProbeList
             probeItems={probeItems}
             observationsByProbe={observationsByProbe}
@@ -1045,19 +1200,122 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
             }}
           />
         </div>
-      </DetailSection>
+      </details>
 
-      <TargetActiveIncidents
-        loaded={hasCurrentActivity}
-        incidents={incidents}
-        error={incidentsError}
-      />
+      <details className="watchtower-secondary">
+        <summary>生命周期</summary>
+        <div className="watchtower-secondary__body">
+          <div className="page-stack">
+            {isArchived ? (
+              <div>
+                <p>目标处于已归档状态，可恢复至暂停以重新纳入工作集。</p>
+                <button
+                  type="button"
+                  ref={(element) => {
+                    runtimeActionButtonRefs.current['restore-to-paused'] = element
+                  }}
+                  disabled={runtimeSubmitting}
+                  onClick={() => void handleRuntimeAction('restore-to-paused')}
+                >
+                  {runtimeSubmitting ? '正在恢复…' : '恢复到暂停'}
+                </button>
+              </div>
+            ) : (
+              <>
+                <p>归档会退出当前工作集并保留历史。这不是删除，也不会清空事件、观测记录或 ProbeItem 配置。</p>
+                {pendingRuntimeConfirmation?.action === 'archive' ? (
+                  <ActionConfirmationCard
+                    title="确认归档目标"
+                    current="当前：目标仍在当前工作集中。"
+                    result="操作后：目标退出当前工作集，运行状态变为已归档。"
+                    impact="归档后不会继续作为活跃目标参与观测、异常判定或通知。"
+                    unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。"
+                    confirmLabel="确认归档"
+                    disabled={runtimeSubmitting}
+                    onConfirm={() => void handleRuntimeAction('archive', true)}
+                    onCancel={() => {
+                      pendingRuntimeFocusRestoreRef.current = 'archive'
+                      setPendingRuntimeConfirmation(null)
+                    }}
+                  />
+                ) : (
+                  <div className="badge-row badge-row--wrap">
+                    <button
+                      type="button"
+                      ref={(element) => {
+                        runtimeActionButtonRefs.current.archive = element
+                      }}
+                      disabled={runtimeSubmitting || probeConfirmationActive}
+                      onClick={() => void handleRuntimeAction('archive')}
+                    >
+                      归档
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </details>
 
-      <TargetRecentEvents
-        loaded={hasCurrentActivity}
-        events={events}
-        error={eventsError}
-      />
+      <p className="watchtower-snapshot-meta">
+        数据快照时间：<Timestamp value={new Date().toISOString()} mode="absolute" />
+        ，刷新页面获取最新。
+      </p>
+
+      <Drawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        title={`${target.name} · 历史`}
+        ariaLabel="目标历史抽屉"
+      >
+        <Tabs<'events' | 'incidents'>
+          variant="pill"
+          value={historyTab}
+          onChange={setHistoryTab}
+          items={[
+            { value: 'events', label: '事件时间线' },
+            { value: 'incidents', label: '历史异常' },
+          ]}
+        />
+        {historyTab === 'events' ? (
+          eventsError ? (
+            <div className="empty-state">
+              <h3>事件时间线暂不可用</h3>
+              <p>{eventsError}</p>
+            </div>
+          ) : events.length === 0 ? (
+            <div className="empty-state">
+              <h3>近期无状态变更事件</h3>
+              <p>该目标近期没有发生过被记录的状态变更事件。</p>
+            </div>
+          ) : (
+            <EventList events={events} />
+          )
+        ) : historyIncidentsLoading ? (
+          <p>正在加载历史异常…</p>
+        ) : historyIncidentsError ? (
+          <Card cardRole="warning">
+            <p>
+              加载历史异常失败：<MonoDigits>{historyIncidentsError}</MonoDigits>
+            </p>
+            <Button variant="secondary" size="sm" onClick={retryHistoryIncidents}>
+              重试
+            </Button>
+          </Card>
+        ) : historyIncidents && historyIncidents.length > 0 ? (
+          <IncidentList
+            incidents={historyIncidents}
+            emptyTitle="近期无异常发生"
+            emptyDescription="该目标近期没有触发过被记录的异常。"
+          />
+        ) : (
+          <div className="empty-state">
+            <h3>近期无异常发生</h3>
+            <p>该目标近期没有触发过被记录的异常。</p>
+          </div>
+        )}
+      </Drawer>
     </div>
   )
 }

@@ -217,6 +217,31 @@ func TestRouterDoesNotFallBackToSPAForUnknownTargetSubtree(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsTargetSparklinesOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		TargetSparklinesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"targets":{"tg_001":{"latency":[12.5,13.0]}}}`))
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/targets/sparklines?metrics=latency&window=24h&downsample=24", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"targets"`) {
+		t.Fatalf("expected sparklines payload, got %q", body)
+	}
+}
+
 func TestRouterKeepsNodeRuntimeFactsOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",

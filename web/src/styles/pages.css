@@ -1241,6 +1241,46 @@
 }
 .targets-table .targets-table__observation-label { color: var(--text-muted); }
 
+.targets-table__freshness {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.targets-table__trends {
+  width: 120px;
+  min-width: 120px;
+}
+
+.targets-table__trend-strip {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.targets-table__trend-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.targets-table__trend-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+.targets-table__trends-empty {
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .targets-table .targets-table__issue {
   display: flex;
   align-items: center;
@@ -1675,4 +1715,10 @@
   color: var(--text-muted);
   text-align: center;
   margin-top: var(--space-4);
+}
+.watchtower-metrics-meta {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-2);
 }

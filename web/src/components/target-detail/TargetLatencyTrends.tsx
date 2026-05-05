@@ -28,6 +28,7 @@ type TargetLatencyTrendsProps = {
   probeItems: ProbeItemRecord[]
   recentObservations: ProbeObservation[]
   isMaintenance?: boolean
+  watchtower?: boolean
 }
 
 type LatencyTrendCard = {
@@ -107,11 +108,93 @@ export function TargetLatencyTrends({
   probeItems,
   recentObservations,
   isMaintenance = false,
+  watchtower = false,
 }: TargetLatencyTrendsProps) {
   const trends = deriveLatencyTrends(probeItems, recentObservations)
   const meta = describeMeta(recentObservations)
-  const ribbon = isMaintenance ? 'maintenance' : undefined
   const tone = isMaintenance ? 'maintenance' : 'accent'
+
+  if (watchtower) {
+    return (
+      <section aria-label="近期延迟趋势">
+        {trends.length === 0 ? (
+          <div className="empty-state">
+            <h3>近 24h 暂无可用延迟样本</h3>
+            <p>
+              该目标尚未收到带有 latency_ms 的成功观测，或所有 ProbeItem 当前均处于停用状态。
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="watchtower-metrics-meta">{meta}</p>
+            <div className="watchtower-metrics">
+              {trends.map((trend) => (
+                <article key={trend.probeItemId} className="watchtower-metric-card">
+                  <header className="watchtower-metric-card__head">
+                    <h3>{trend.kindLabel}</h3>
+                    <span className="watchtower-metric-card__current">
+                      {trend.latestLatency != null ? (
+                        <MonoDigits>{formatLatency(trend.latestLatency)}</MonoDigits>
+                      ) : (
+                        '—'
+                      )}
+                    </span>
+                  </header>
+                  <Sparkline
+                    samples={trend.samples}
+                    tone={tone}
+                    height={60}
+                    expand
+                    interactive
+                    ariaLabel={`${trend.kindLabel} 延迟近 24h 趋势`}
+                    formatValue={(v) => formatLatency(v)}
+                  />
+                  <dl className="watchtower-metric-card__sub">
+                    <div>
+                      <dt>平均</dt>
+                      <dd>
+                        {trend.averageLatency != null ? (
+                          <MonoDigits>
+                            {formatLatency(Math.round(trend.averageLatency))}
+                          </MonoDigits>
+                        ) : (
+                          '—'
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>最大</dt>
+                      <dd>
+                        {trend.maxLatency != null ? (
+                          <MonoDigits>{formatLatency(trend.maxLatency)}</MonoDigits>
+                        ) : (
+                          '—'
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>样本数</dt>
+                      <dd>
+                        <MonoDigits>{trend.sampleCount}</MonoDigits>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>覆盖节点</dt>
+                      <dd>
+                        <MonoDigits>{trend.distinctNodeCount}</MonoDigits>
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+    )
+  }
+
+  const ribbon = isMaintenance ? 'maintenance' : undefined
 
   return (
     <DetailSection

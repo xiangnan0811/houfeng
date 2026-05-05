@@ -234,6 +234,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.TargetRuntimeControlHandler == nil {
 		t.Fatal("router target runtime control handler = nil, want non-nil")
 	}
+	if gotOpts.TargetSparklinesHandler == nil {
+		t.Fatal("router target sparklines handler = nil, want non-nil")
+	}
 	if gotOpts.AgentEnrollHandler == nil {
 		t.Fatal("router agent enroll handler = nil, want non-nil")
 	}

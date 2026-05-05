@@ -420,6 +420,10 @@ export type NodeSparklinesResponse = {
   nodes: Record<string, Record<string, (number | null)[]>>
 }
 
+export type TargetSparklinesResponse = {
+  targets: Record<string, { latency: (number | null)[] }>
+}
+
 export type SettingsUpdateInput = {
   telegram: SettingsTelegramInput
   host_sample_frequency_tier: string

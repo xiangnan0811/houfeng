@@ -31,6 +31,7 @@ type RouterOptions struct {
 	TargetProbeItemsHandler         stdhttp.Handler
 	TargetRuntimeFactsHandler       stdhttp.Handler
 	TargetRuntimeControlHandler     stdhttp.Handler
+	TargetSparklinesHandler         stdhttp.Handler
 	AgentEnrollHandler              stdhttp.Handler
 	AgentSyncHandler                stdhttp.Handler
 	AuthLoginHandler                stdhttp.Handler
@@ -167,10 +168,10 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.AgentSyncHandler != nil {
 		mux.Handle(agentapi.SyncPath, opts.AgentSyncHandler)
 	}
-	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil || opts.TargetRuntimeFactsHandler != nil || opts.TargetRuntimeControlHandler != nil {
+	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil || opts.TargetRuntimeFactsHandler != nil || opts.TargetRuntimeControlHandler != nil || opts.TargetSparklinesHandler != nil {
 		mux.Handle("/api/targets/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			targetID, subtree := targetSubtreePath(r.URL.Path)
-			if targetID == "" {
+			if targetID == "" && subtree != targetSubtreeSparklines {
 				stdhttp.NotFound(w, r)
 				return
 			}
@@ -200,6 +201,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.TargetRuntimeControlHandler.ServeHTTP(w, r)
+			case targetSubtreeSparklines:
+				if opts.TargetSparklinesHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.TargetSparklinesHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -279,6 +286,7 @@ const (
 	targetSubtreeProbeItems     targetSubtree = "probe-items"
 	targetSubtreeRuntimeFacts   targetSubtree = "runtime-facts"
 	targetSubtreeRuntimeControl targetSubtree = "runtime-control"
+	targetSubtreeSparklines     targetSubtree = "sparklines"
 )
 
 func targetSubtreePath(path string) (targetID string, subtree targetSubtree) {
@@ -290,6 +298,9 @@ func targetSubtreePath(path string) (targetID string, subtree targetSubtree) {
 	segments := strings.Split(relative, "/")
 	if len(segments) == 0 || segments[0] == "" {
 		return "", targetSubtreeUnknown
+	}
+	if segments[0] == "sparklines" && len(segments) == 1 {
+		return "", targetSubtreeSparklines
 	}
 	if len(segments) == 1 {
 		return segments[0], targetSubtreeItem

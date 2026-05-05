@@ -10,6 +10,7 @@ import {
   type HealthState,
   Hostname,
   MonoDigits,
+  Sparkline,
   StatusGlyph,
   Timestamp,
 } from '../components/atoms'
@@ -26,6 +27,7 @@ import {
   createTarget,
   enterTargetMaintenance,
   exitTargetMaintenance,
+  listTargetSparklines,
   listTargets,
   pauseTarget,
   restoreTargetToPaused,
@@ -33,7 +35,7 @@ import {
   updateTargetMetadata,
 } from '../lib/api'
 import { formatLabelList } from '../lib/format'
-import type { CreateTargetInput, TargetRecord } from '../lib/types'
+import type { CreateTargetInput, TargetRecord, TargetSparklinesResponse } from '../lib/types'
 
 const TARGET_TYPE_OPTIONS = [
   { value: 'service', label: 'service' },
@@ -303,6 +305,7 @@ export function TargetsPage() {
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingTargetConfirmation | null>(null)
   const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
+  const [sparklines, setSparklines] = useState<TargetSparklinesResponse | null>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -328,6 +331,14 @@ export function TargetsPage() {
     return () => {
       cancelled = true
     }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    listTargetSparklines()
+      .then(data => { if (!cancelled) setSparklines(data) })
+      .catch(() => {}) // silent fail
+    return () => { cancelled = true }
   }, [])
 
   function resetCreateFlow() {
@@ -633,6 +644,12 @@ export function TargetsPage() {
           <Hostname truncate maxChars={14} className="targets-table__id">
             {target.target_id}
           </Hostname>
+          <span className="targets-table__freshness">
+            成功{' '}
+            <Timestamp value={target.last_success_at ?? null} mode="relative" />
+            {' '}· 失败{' '}
+            <Timestamp value={target.last_failure_at ?? null} mode="relative" />
+          </span>
         </div>
       ),
     },
@@ -728,20 +745,40 @@ export function TargetsPage() {
       ),
     },
     {
-      key: 'observation',
-      label: '最近成功 / 失败',
-      render: (target) => (
-        <div className="targets-table__observation">
-          <span className="targets-table__observation-row">
-            <span className="targets-table__observation-label">成功</span>
-            <Timestamp value={target.last_success_at ?? null} mode="relative" />
+      key: 'trends',
+      label: '近 24h',
+      cellClassName: 'targets-table__trends',
+      render: (target) => {
+        const series = sparklines?.targets?.[target.target_id]
+        if (!series || !series.latency) {
+          return <span className="targets-table__trends-empty">—</span>
+        }
+        const vals = series.latency.filter((v): v is number => v != null)
+        const latest = vals.length > 0 ? vals[vals.length - 1] : null
+        const tone = !latest
+          ? 'default'
+          : latest > 1000
+            ? 'critical'
+            : latest > 200
+              ? 'alert'
+              : latest > 10
+                ? 'notice'
+                : 'accent'
+        return (
+          <span className="targets-table__trend-strip">
+            <span className="targets-table__trend-item">
+              <span className="targets-table__trend-value">
+                {latest != null ? <MonoDigits>{latest.toFixed(1)} ms</MonoDigits> : '—'}
+              </span>
+              {vals.length > 0 ? (
+                <Sparkline values={vals} tone={tone} width={64} height={14} />
+              ) : (
+                <span className="targets-table__trends-empty">—</span>
+              )}
+            </span>
           </span>
-          <span className="targets-table__observation-row">
-            <span className="targets-table__observation-label">失败</span>
-            <Timestamp value={target.last_failure_at ?? null} mode="relative" />
-          </span>
-        </div>
-      ),
+        )
+      },
     },
     {
       key: 'issue',

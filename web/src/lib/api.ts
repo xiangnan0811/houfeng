@@ -18,6 +18,7 @@ import type {
   SettingsUpdateInput,
   TargetRecord,
   TargetRuntimeFacts,
+  TargetSparklinesResponse,
   UpdateNodeMetadataInput,
   UpdateTargetMetadataInput,
 } from './types'
@@ -220,6 +221,15 @@ export function resetNodeBinding(nodeId: string) {
 
 export function listTargets() {
   return requestJSON<TargetRecord[]>('/api/targets')
+}
+
+export function listTargetSparklines() {
+  const qs = new URLSearchParams({
+    metrics: 'latency',
+    window: '24h',
+    downsample: '24',
+  })
+  return requestJSON<TargetSparklinesResponse>(`/api/targets/sparklines?${qs}`)
 }
 
 export function createTarget(input: CreateTargetInput): Promise<TargetRecord> {

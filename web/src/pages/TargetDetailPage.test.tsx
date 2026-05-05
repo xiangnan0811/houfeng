@@ -153,20 +153,13 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
-    expect(screen.getByText('目标详情')).toBeInTheDocument()
     expect(screen.getAllByText('标签与备注')[0]).toBeInTheDocument()
-    expect(screen.getAllByText('运行控制')[0]).toBeInTheDocument()
-    expect(screen.getAllByText('近期延迟')[0]).toBeInTheDocument()
     expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByText('HTTP')).toBeInTheDocument()
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
     expect(screen.getByText('nd_001')).toBeInTheDocument()
-    expect(screen.getByText('延迟')).toBeInTheDocument()
-    expect(screen.getAllByText('当前异常')[0]).toBeInTheDocument()
-    expect(screen.getByText('HTTP 探测在多个节点上失败')).toBeInTheDocument()
-    expect(screen.getAllByText('事件')[0]).toBeInTheDocument()
-    expect(screen.getByText('HTTPS 探测连续失败')).toBeInTheDocument()
+    expect(screen.queryByText('当前还没有 ProbeItem')).not.toBeInTheDocument()
     expect(screen.queryByText('事件与 incident 仍由后续切片接入，这里先保留版位。')).not.toBeInTheDocument()
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/targets/tg_001', {
@@ -320,8 +313,7 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Trend Target' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
-    // metric-card heading shows kind label "HTTP · <config summary>"
+    // watchtower metric-card heading shows kind label "HTTP · <config summary>"
     const trendCardHeading = screen
       .getAllByRole('heading')
       .find((heading) => /^HTTP · /.test(heading.textContent ?? ''))
@@ -381,7 +373,6 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Empty Trend Target' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
     expect(
       screen.getByRole('heading', { name: '近 24h 暂无可用延迟样本' }),
     ).toBeInTheDocument()
@@ -439,8 +430,6 @@ describe('TargetDetailPage', () => {
     expect(
       screen.getByText('当前还没有 ProbeItem，请为该入口添加至少一种观测方式。'),
     ).toBeInTheDocument()
-    expect(screen.getByText('当前没有活跃异常')).toBeInTheDocument()
-    expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument()
   })
 
   it('creates an HTTP ProbeItem from the empty state and appends it to the list', async () => {
@@ -1868,10 +1857,8 @@ describe('TargetDetailPage', () => {
 
     expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByText('origin timeout')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
-    expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
-    expect(screen.getByText('events unavailable')).toBeInTheDocument()
+    // Danger zone is rendered because current_active_incident_count > 0
+    expect(screen.getByText('HTTP 探测失败')).toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: '目标详情不可用' }),
     ).not.toBeInTheDocument()
@@ -1978,9 +1965,6 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
     )
     expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
-    expect(screen.getByText('正在加载活跃异常…')).toBeInTheDocument()
-    expect(screen.getByText('等待目标相关的异常读模型返回最新结果。')).toBeInTheDocument()
-    expect(screen.getByText('正在加载相关事件…')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Blog' })).not.toBeInTheDocument()
 
     tg001Target.resolve(
@@ -2085,9 +2069,8 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('新目标异常摘要')).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
     )
-    expect(screen.getByText('新目标事件')).toBeInTheDocument()
     expect(screen.queryByText('旧目标异常摘要')).not.toBeInTheDocument()
     expect(screen.queryByText('旧目标事件')).not.toBeInTheDocument()
   })
@@ -2156,13 +2139,11 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Legacy API' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByRole('heading', { name: '运行控制' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '恢复到暂停' }))
 
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '恢复' })).toBeInTheDocument(),
     )
-    expect(screen.queryByRole('button', { name: '直接启用' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_archived/runtime/restore-to-paused', {
       method: 'POST',
       headers: { Accept: 'application/json' },
@@ -2241,7 +2222,7 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '暂停' }))
 
     expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
-    expect(screen.getByText('当前：目标运行状态为启用或维护中。')).toBeInTheDocument()
+    expect(screen.getByText('当前：目标运行状态为启用。')).toBeInTheDocument()
     expect(screen.getByText('操作后：目标运行状态变为暂停。')).toBeInTheDocument()
     expect(
       screen.getByText('会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。'),
@@ -3372,8 +3353,207 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('维护中')).toBeInTheDocument())
     expect(screen.getByText('alpha · beta')).toBeInTheDocument()
-    expect(screen.getByText('备注：新的备注')).toBeInTheDocument()
     expect(screen.queryByText('备注：现网入口')).not.toBeInTheDocument()
+  })
+
+  it('does not render the danger zone when current_active_incident_count is 0', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_dz_no',
+            name: 'No Issues',
+            target_type: 'service',
+            host: 'no-issues.example.com',
+            execution_node_labels: [],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({ target_id: 'tg_dz_no', latest_probe_observations: [] }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_dz_no']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'No Issues' })).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByText('当前主问题')).not.toBeInTheDocument()
+    expect(
+      document.querySelector('.watchtower-danger'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('renders the danger zone with summary and status badge when active incidents exist', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_dz_yes',
+            name: 'Has Issues',
+            target_type: 'service',
+            host: 'has-issues.example.com',
+            execution_node_labels: [],
+            run_status: '启用',
+            labels: [],
+            note: '',
+            current_health_status: '告警',
+            current_active_incident_count: 3,
+            current_primary_issue_summary: 'HTTP 探测持续失败',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(
+          mockJSONResponse({ target_id: 'tg_dz_yes', latest_probe_observations: [] }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              incident_id: 'inc_dz',
+              incident_class: 'target_probe_failure',
+              object_type: 'target',
+              object_id: 'tg_dz_yes',
+              severity: '告警',
+              started_at: '2026-04-24T08:00:00Z',
+              last_evaluated_at: '2026-04-24T09:00:00Z',
+              source_summary: 'HTTP 探测持续失败',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_dz_yes']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Has Issues' })).toBeInTheDocument(),
+    )
+
+    const dangerZone = document.querySelector('.watchtower-danger')
+    expect(dangerZone).toBeInTheDocument()
+    expect(
+      within(dangerZone as HTMLElement).getByText('当前主问题'),
+    ).toBeInTheDocument()
+    expect(
+      within(dangerZone as HTMLElement).getByText('HTTP 探测持续失败'),
+    ).toBeInTheDocument()
+    expect(within(dangerZone as HTMLElement).getByText('3')).toBeInTheDocument()
+    expect(within(dangerZone as HTMLElement).getByText('告警')).toBeInTheDocument()
+  })
+
+  it('renders secondary details sections collapsed by default', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_collapsed',
+            name: 'Collapsed Target',
+            target_type: 'service',
+            host: 'collapsed.example.com',
+            execution_node_labels: ['edge'],
+            run_status: '启用',
+            labels: ['test'],
+            note: '',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse([
+            {
+              probe_item_id: 'pb_collapsed',
+              target_id: 'tg_collapsed',
+              probe_kind: 'tcp',
+              enabled: true,
+              frequency_tier: '5m',
+              timeout_seconds: 3,
+              config: { port: 443 },
+              created_at: '2026-04-20T00:00:00Z',
+              updated_at: '2026-04-24T09:05:00Z',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            target_id: 'tg_collapsed',
+            latest_probe_observations: [
+              {
+                node_id: 'nd_col',
+                target_id: 'tg_collapsed',
+                probe_item_id: 'pb_collapsed',
+                probe_kind: 'tcp',
+                observed_at: '2026-04-24T09:05:00Z',
+                received_at: '2026-04-24T09:05:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-col',
+                result_kind: 'success',
+                latency_ms: 10,
+                http_status: null,
+                tls_expiry_days: null,
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-col',
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_collapsed']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Collapsed Target' })).toBeInTheDocument(),
+    )
+
+    const secondaryDetails = document.querySelectorAll('.watchtower-secondary')
+    expect(secondaryDetails.length).toBeGreaterThanOrEqual(3)
+
+    for (const details of secondaryDetails) {
+      expect(details).not.toHaveAttribute('open')
+    }
   })
 
 })
