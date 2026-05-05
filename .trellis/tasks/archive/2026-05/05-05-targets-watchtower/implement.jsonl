@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层总入口"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "TargetWatchtowerHeader 命名导出 / 不滥用 memo"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "样式纯 CSS + token + BEM"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "listTargetSparklines 落在 lib/api.ts"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / test / build 全绿"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "make verify-go；target sparklines handler 新 Go 测试"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "MetricChart / Drawer / Sparkline / Mono / DataTable 复用不重写"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体强制 / §12 不引图表库"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 TargetDetailPage / TargetsPage 同步新模板（PR2 后同步）"}
