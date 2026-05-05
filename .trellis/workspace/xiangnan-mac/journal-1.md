@@ -987,3 +987,36 @@ SettingsPage 3 项 UX polish 单 PR 收尾，关闭前置 mono 任务备忘的 3
 ### Next Steps
 
 - None - task complete
+
+
+## Session 30: 节点列表对齐 watchtower（sparklines 接口 + 3 指标趋势 strip）
+
+**Date**: 2026-05-05
+**Task**: 节点列表对齐 watchtower（sparklines 接口 + 3 指标趋势 strip）
+**Branch**: `main`
+
+### Summary
+
+2 PR 完成 C 卡点收尾（跨服务器对比）。PR1 后端新增 GET /api/nodes/sparklines 聚合接口（24h × 24 点 hourly avg 下采样自 host_observations 表，3 metric 固定，4 Go handler 表驱动测试 + router 注册 + bootstrap wiring）+ listNodeSparklines API client + NodeSparklinesResponse 前端 type。PR2 前端 NodesPage 列改造：节点身份列 2→3 行（Hostname / display_name / 心跳·同步 mono 小字 freshness 行）+ 删除旧心跳独立列 + 新增趋势列 mini sparkline strip（CPU usage / Mem used / Disk used 各 64×14 + mono 当前值 + 阈值 tone alert/critical）+ deferred sparklines 加载 + silent fail placeholder。trellis-check 自修 4 处（router critical bug: nodeSubtreePath 拒绝空 nodeID 导致 sparklines 404 + bootstrap_test 补齐 NodeSparklinesHandler 断言 + router_api_test 加上 SPA fallback guard + component-spec.md §五 NodesPage 段同步新 7 列）。380/380 测试 pass（+3 用例）。build 成功。make verify-go 全绿（sparklines handler 4 tests + router 22 tests）。pre-existing agent/runtime flaky test 无关。C 卡点完全关闭 — 跨服务器 CPU/Mem/Disk 趋势对比现在可在列表内完成。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `78fbfb4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

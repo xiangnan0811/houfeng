@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 29
+- **Total Sessions**: 30
 - **Last Active**: 2026-05-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~989 | Active |
+| `journal-1.md` | ~1022 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 30 | 2026-05-05 | 节点列表对齐 watchtower（sparklines 接口 + 3 指标趋势 strip） | `78fbfb4` | `main` |
 | 29 | 2026-05-05 | 节点详情 watchtower 重设计（ops-first：异常前置 + 8 张主图 + 历史抽屉） | `67cd668` | `main` |
 | 28 | 2026-05-04 | SettingsPage UX 收尾（紧凑 grid + JSON 预览 + 单位后缀） | `32b6418` | `main` |
 | 27 | 2026-05-04 | Events + Settings Mono 字体落地（关闭 v1-gap-checklist #20 整条） | `24fd997` | `main` |
