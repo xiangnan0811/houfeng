@@ -430,7 +430,6 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const node = isCurrentNode ? state.node : null
   const runtimeFacts = isCurrentNode ? state.runtimeFacts : null
   const incidents = hasCurrentActivity ? state.incidents : []
-  const incidentsError = hasCurrentActivity ? state.incidentsError : null
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
 
@@ -629,6 +628,12 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const bindingActionsDisabled = bindingAction !== null || bindingConflictLoading || !bindingConflict
   const runtimeActions = nodeRuntimeActions(node)
   const showDangerZone = node.current_active_incident_count > 0
+  const firstIncident =
+    incidents.length > 0
+      ? [...incidents].sort(
+          (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+        )[0]
+      : null
 
   function registerActionRef(action: NodeRuntimeAction, element: HTMLButtonElement | null) {
     actionButtonRefs.current[action] = element
@@ -805,6 +810,9 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           <p className="watchtower-danger__meta">
             活跃异常 <MonoDigits>{node.current_active_incident_count}</MonoDigits> 个 · 健康状态{' '}
             <StatusBadge label={node.current_health_status} />
+            {firstIncident?.started_at ? (
+              <> · 持续 <Timestamp value={firstIncident.started_at} mode="relative" /></>
+            ) : null}
           </p>
           <div className="watchtower-danger__actions">
             <Button variant="ghost" size="sm" onClick={() => openHistory('events')}>
@@ -838,37 +846,6 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       ) : null}
       {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
 
-      <DetailSection eyebrow="当前异常" title="当前异常">
-        {!hasCurrentActivity ? (
-          <div className="empty-state">
-            <h3>正在加载活跃异常…</h3>
-            <p>等待节点相关的异常读模型返回最新结果。</p>
-          </div>
-        ) : incidentsError ? (
-          <div className="empty-state">
-            <h3>活跃异常暂不可用</h3>
-            <p>{incidentsError}</p>
-          </div>
-        ) : (
-          <IncidentList incidents={incidents} />
-        )}
-      </DetailSection>
-
-      <DetailSection eyebrow="事件" title="事件">
-        {!hasCurrentActivity ? (
-          <div className="empty-state">
-            <h3>正在加载相关事件…</h3>
-            <p>等待节点相关的事件流返回最新记录。</p>
-          </div>
-        ) : eventsError ? (
-          <div className="empty-state">
-            <h3>相关事件暂不可用</h3>
-            <p>{eventsError}</p>
-          </div>
-        ) : (
-          <EventList events={events} />
-        )}
-      </DetailSection>
 
       <details className="watchtower-secondary">
         <summary>标签与备注</summary>

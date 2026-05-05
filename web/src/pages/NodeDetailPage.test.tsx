@@ -226,10 +226,6 @@ describe('NodeDetailPage', () => {
     // Each metric card head renders the current value via MonoDigits
     expect(screen.getAllByText('12.5%').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText(/2.0 GB/i)).toBeInTheDocument()
-    expect(screen.getAllByText('当前异常')[0]).toBeInTheDocument()
-    expect(screen.getByText('磁盘使用率持续超过阈值')).toBeInTheDocument()
-    expect(screen.getAllByText('事件')[0]).toBeInTheDocument()
-    expect(screen.getByText('磁盘压力已升级为严重')).toBeInTheDocument()
     expect(screen.queryByText('将在 incidents / events 切片接入后替换为真实内容。')).not.toBeInTheDocument()
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_001', {
@@ -480,8 +476,6 @@ describe('NodeDetailPage', () => {
     expect(
       screen.getByText('该节点已存在，但首批主机采样（HostSample）还未到达。请等待下一次 agent 同步。'),
     ).toBeInTheDocument()
-    expect(screen.getByText('当前没有活跃异常')).toBeInTheDocument()
-    expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument()
   })
 
   it('keeps node details visible when incidents and events fail to load', async () => {
@@ -564,10 +558,6 @@ describe('NodeDetailPage', () => {
 
     // Watchtower main view still renders metric cards even when incidents/events fail
     expect(screen.getAllByText('18.0%').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
-    expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
-    expect(screen.getByText('events unavailable')).toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: '节点详情不可用' }),
     ).not.toBeInTheDocument()
@@ -930,9 +920,6 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
     )
     // Watchtower main view has 8 metric cards (sample is non-null for nd_002)
-    expect(screen.getByText('正在加载活跃异常…')).toBeInTheDocument()
-    expect(screen.getByText('等待节点相关的异常读模型返回最新结果。')).toBeInTheDocument()
-    expect(screen.getByText('正在加载相关事件…')).toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: 'Tokyo Edge' }),
     ).not.toBeInTheDocument()
@@ -1024,10 +1011,6 @@ describe('NodeDetailPage', () => {
       ]),
     )
 
-    await waitFor(() =>
-      expect(screen.getByText('新节点异常摘要')).toBeInTheDocument(),
-    )
-    expect(screen.getByText('新节点事件')).toBeInTheDocument()
     expect(screen.queryByText('旧节点异常摘要')).not.toBeInTheDocument()
     expect(screen.queryByText('旧节点事件')).not.toBeInTheDocument()
   })
@@ -2846,8 +2829,7 @@ describe('NodeDetailPage', () => {
     // Drawer opens; "事件时间线" tab is the default selection.
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveAttribute('aria-modal', 'true')
-    // The event text appears twice (in-page DetailSection + drawer EventList);
-    // make sure the drawer surface includes it.
+    // The event text surfaces inside the drawer EventList.
     expect(dialog).toHaveTextContent('事件抽屉里的事件文案')
 
     // Switching to 历史异常 triggers the incidents?include_resolved=true fetch.
