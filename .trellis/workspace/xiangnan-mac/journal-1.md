@@ -954,3 +954,36 @@ SettingsPage 3 项 UX polish 单 PR 收尾，关闭前置 mono 任务备忘的 3
 ### Next Steps
 
 - None - task complete
+
+
+## Session 29: 节点详情 watchtower 重设计（ops-first：异常前置 + 8 张主图 + 历史抽屉）
+
+**Date**: 2026-05-05
+**Task**: 节点详情 watchtower 重设计（ops-first：异常前置 + 8 张主图 + 历史抽屉）
+**Branch**: `main`
+
+### Summary
+
+战略转向：候风从'美学优先'调整为'监控工具优先'，设计语言原料保留但信息架构 + 视觉层级重排。三 PR 完成节点详情页 watchtower 重做：PR1 新建 <MetricChart> 原子（纯 SVG 完整时序图，X/Y 轴 + 阈值线 + 维护窗口阴影 + 十字线 hover tooltip + 边界态，与 Sparkline 240×60 配角并存不互替；§12 不引图表库硬约束保留 + §12.x 加注未来评估路径）。PR2 NodeDetailPage 重构 5 块：① 身份条 2 行（行 1 大字名 + 状态 badges + 数据新鲜度；行 2 mono 元数据条）+ 右上 ghost 查看历史 + ... 操作 popover；② 危险区前置（条件性 Card cardRole=warning，仅 active_incident_count>0 显示）；③ 主视图 8 张 MetricChart 4×2 栅格（CPU/Load5/内存/磁盘/Inode/网络入/网络出/IOWait + 阈值线 + 次指标 dl）；④ 次要信息默认 collapsed details 折叠；底部数据快照行（不做实时 polling）。删除旧 NodeHero/NodeStatusSummary/NodeHostMetrics 组件 + 测试。PR3 新原子 <Drawer>（portal + ESC + overlay 关闭 + ariaModal）+ NodeDetailPage 接入 Drawer + Tabs（事件/历史异常 lazy-load）+ 后端 /api/incidents 加 include_resolved query 参数（默认 false 向后兼容，repo 加 SQL where 分支 + 5+ Go 单测）+ component-spec.md §五 重写 watchtower 7-段契约 + design-language.md §12.x 加注。377/377 测试 pass（+11 净增：MetricChart 7 + Drawer 7 + watchtower section ~6 - 删除子组件测试 9）；make verify-go 全绿；build 469.94 KB JS / 71.28 KB CSS。业务零回归（metadata 编辑 / 维护暂停退役恢复 / 绑定冲突 / 接入跳转 / focus 恢复 / stale 路由防护 全保留）。trellis-check 自修 1 处 inline style 移到 CSS class。剩余 follow-up 已在 check 报告中标注（主页面 IncidentList/EventList 是否清理 / sticky header / 危险区 wireframe 完整化），不阻塞 commit，等用户视觉走查后定。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `67cd668` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
