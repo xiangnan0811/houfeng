@@ -1053,3 +1053,36 @@ SettingsPage 3 项 UX polish 单 PR 收尾，关闭前置 mono 任务备忘的 3
 ### Next Steps
 
 - None - task complete
+
+
+## Session 32: watchtower 3 项小 follow-up（清冗余/粘性头/持续时长）
+
+**Date**: 2026-05-05
+**Task**: watchtower 3 项小 follow-up（清冗余/粘性头/持续时长）
+**Branch**: `main`
+
+### Summary
+
+清掉 watchtower trellis-check 报告 3 项小债。(1) 删除主页面冗余 IncidentList / EventList DetailSections（信息已完整在抽屉呈现），API 获取逻辑保留不破。(2) .watchtower-header 加 position:sticky;top:0;z-index:10 让操作菜单/查看历史按钮在滚动时保持可见。(3) 危险区 meta 行补 duration，从 incidents 取 started_at 最早（=持续最久）的那个显示 持续 Timestamp relative。382/382 测试不变基线。3 文件 +14 -51 行。半小时清债。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `87ea954` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
