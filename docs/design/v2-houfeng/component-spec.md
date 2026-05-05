@@ -182,7 +182,11 @@ parent: docs/design/v2-houfeng/design-language.md
 1. Section heading + 「新建节点」按钮
 2. （可选）创建节点表单（page-panel）
 3. 视图切换：segmented control 「全部节点 N」/「绑定异常 M」
-4. **DataTable**（density compact）：列 `[StatusGlyph, 节点(Hostname + 名字), 位置, 标签, 当前主问题, 心跳(Timestamp), 操作]`
+4. **DataTable**（density compact）：列 `[StatusGlyph, 节点(Hostname + 名字 + 心跳/同步 mono), 位置, 标签, 当前主问题, 近 24h 趋势(sparkline strip), 操作 hover]`
+   - 节点身份列三行：第 1 行 `<Hostname truncate>` node_id（mono 小字）、第 2 行 display_name（sans 粗体 link）、第 3 行 `心跳 X 分钟前 · 同步 Y 分钟前`（mono 10px `--text-muted`）
+   - 趋势列（~220px）：CPU / Mem / Disk 三指标 mini sparkline strip，每项含上方 mono 当前值（9px）+ 下方 `<Sparkline>` 64×14，tone 按阈值择色（CPU 80/95、Mem 85/95、Disk 80/95）
+   - Sparklines 延迟加载（不阻塞列表首屏），缺失 / 加载中 / 失败均显示 "—"
+   - 原"心跳·同步"独立列已删除，信息合并入节点身份列第三行
 5. 行 hover：操作列显示「快速编辑标签」「进入维护」「暂停监控」三个 ghost 按钮
 6. 行点击：导航到节点详情
 

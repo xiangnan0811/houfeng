@@ -11,6 +11,7 @@ import type {
   NodeOnboardingState,
   NodeRecord,
   NodeRuntimeFacts,
+  NodeSparklinesResponse,
   ProbeItemRecord,
   SettingsRecord,
   StateChangeEventRecord,
@@ -162,6 +163,15 @@ export function updateNodeMetadata(
 
 export function getNodeRuntimeFacts(nodeId: string) {
   return requestJSON<NodeRuntimeFacts>(`/api/nodes/${nodeId}/runtime-facts`)
+}
+
+export function listNodeSparklines(metrics: string[]) {
+  const qs = new URLSearchParams({
+    metrics: metrics.join(','),
+    window: '24h',
+    downsample: '24',
+  })
+  return requestJSON<NodeSparklinesResponse>(`/api/nodes/sparklines?${qs}`)
 }
 
 export function enterNodeMaintenance(nodeId: string) {

@@ -3,8 +3,17 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { getOnboardingTokenCache } from '../lib/onboardingTokenCache'
+import { listNodeSparklines } from '../lib/api'
 import { NodeOnboardingPage } from './NodeOnboardingPage'
 import { NodesPage } from './NodesPage'
+
+vi.mock('../lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/api')>()
+  return {
+    ...actual,
+    listNodeSparklines: vi.fn().mockResolvedValue({ nodes: {} }),
+  }
+})
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -1220,6 +1229,134 @@ describe('NodesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
     expect(screen.queryByText('节点创建')).not.toBeInTheDocument()
+  })
+
+  it('renders three mini sparklines per row when sparklines data is loaded', async () => {
+    const make24 = (base: number, jitter: number) =>
+      Array.from({ length: 24 }, (_, i) => base + Math.sin(i * 0.5) * jitter)
+    const mocked = vi.mocked(listNodeSparklines)
+    mocked.mockResolvedValueOnce({
+      nodes: {
+        nd_001: {
+          cpu_usage_pct: make24(50, 15),
+          mem_used_pct: make24(70, 8),
+          disk_used_pct: make24(55, 5),
+        },
+        nd_002: {
+          cpu_usage_pct: make24(30, 10),
+          mem_used_pct: make24(60, 6),
+          disk_used_pct: make24(45, 4),
+        },
+      },
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+          }),
+          nodeRecord({
+            node_id: 'nd_002',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            provider: 'Hetzner',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Seoul Edge')).toBeInTheDocument())
+
+    // Each Sparkline with >1 point renders a <polyline> element
+    const polylines = document.querySelectorAll('polyline')
+    // 2 nodes x 3 metrics = 6 polylines
+    expect(polylines.length).toBe(6)
+
+    // Each row should have the trend column visible
+    const trendCells = document.querySelectorAll('.nodes-table__trends')
+    expect(trendCells.length).toBe(2)
+
+    // Trend strip should have 3 trend items per row
+    const trendItems = trendCells[0].querySelectorAll('.nodes-table__trend-item')
+    expect(trendItems.length).toBe(3)
+  })
+
+  it('shows placeholder dash in trends column when sparklines data is missing for a node', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_no_data',
+            display_name: 'New Node',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('New Node')).toBeInTheDocument())
+
+    // Default mock for listNodeSparklines returns { nodes: {} }, so nd_no_data won't have data
+    const trendCells = document.querySelectorAll('.nodes-table__trends')
+    expect(trendCells.length).toBe(1)
+    // The placeholder should be rendered
+    const placeholder = trendCells[0].querySelector('.nodes-table__trends-empty')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder!.textContent).toBe('—')
+  })
+
+  it('renders heartbeat and sync timestamps inside the identity column freshness row', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            last_heartbeat_at: '2026-04-26T09:00:00Z',
+            last_sync_at: '2026-04-26T08:55:00Z',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    const freshnessEl = document.querySelector('.nodes-table__freshness')
+    expect(freshnessEl).not.toBeNull()
+    // Should contain "心跳" label and timestamp content
+    expect(freshnessEl!.textContent).toMatch(/心跳/)
+    // Should contain "同步" label when last_sync_at is present
+    expect(freshnessEl!.textContent).toMatch(/同步/)
   })
 
 })

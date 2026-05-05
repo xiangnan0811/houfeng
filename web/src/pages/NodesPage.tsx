@@ -10,6 +10,7 @@ import {
   Hostname,
   type HealthState,
   MonoDigits,
+  Sparkline,
   StatusGlyph,
   Tabs,
   Timestamp,
@@ -28,12 +29,14 @@ import {
   exitNodeMaintenance,
   issueNodeEnrollmentToken,
   listNodes,
+  listNodeSparklines,
   pauseNodeMonitoring,
   resumeNodeMonitoring,
   updateNodeMetadata,
 } from '../lib/api'
 import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
-import type { CreateNodeInput, NodeRecord } from '../lib/types'
+import type { CreateNodeInput, NodeRecord, NodeSparklinesResponse } from '../lib/types'
+import { formatPercent } from '../lib/format'
 
 const NODE_LIFECYCLE_FILTER_OPTIONS = [
   { value: '待接入', label: '待接入' },
@@ -226,6 +229,7 @@ export function NodesPage() {
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingNodeConfirmation | null>(null)
   const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
+  const [sparklines, setSparklines] = useState<NodeSparklinesResponse | null>(null)
 
   function resetCreateFlow() {
     setCreateError(null)
@@ -250,6 +254,14 @@ export function NodesPage() {
     return () => {
       cancelled = true
     }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    listNodeSparklines(['cpu_usage_pct', 'mem_used_pct', 'disk_used_pct'])
+      .then(data => { if (!cancelled) setSparklines(data) })
+      .catch(() => {}) // silent fail
+    return () => { cancelled = true }
   }, [])
 
   function updateField<K extends keyof CreateNodeInput>(field: K, value: CreateNodeInput[K]) {
@@ -576,6 +588,9 @@ export function NodesPage() {
       label: '节点',
       render: (node) => (
         <div className="nodes-table__identity">
+          <Hostname truncate maxChars={14} className="nodes-table__id">
+            {node.node_id}
+          </Hostname>
           <Link
             className="text-link nodes-table__name"
             to={`/nodes/${node.node_id}`}
@@ -583,9 +598,10 @@ export function NodesPage() {
           >
             {node.display_name}
           </Link>
-          <Hostname truncate maxChars={14} className="nodes-table__id">
-            {node.node_id}
-          </Hostname>
+          <span className="nodes-table__freshness">
+            心跳 <Timestamp value={node.last_heartbeat_at} mode="relative" />
+            {node.last_sync_at ? <> · 同步 <Timestamp value={node.last_sync_at} mode="relative" /></> : null}
+          </span>
         </div>
       ),
     },
@@ -683,17 +699,60 @@ export function NodesPage() {
       },
     },
     {
-      key: 'heartbeat',
-      label: '心跳 / 同步',
-      render: (node) => (
-        <div className="nodes-table__heartbeat">
-          <Timestamp value={node.last_heartbeat_at} mode="relative" />
-          <span className="nodes-table__heartbeat-sync">
-            <span className="nodes-table__heartbeat-sync-label">同步</span>
-            <Timestamp value={node.last_sync_at} mode="relative" />
+      key: 'trends',
+      label: '近 24h',
+      cellClassName: 'nodes-table__trends',
+      render: (node) => {
+        const series = sparklines?.nodes?.[node.node_id]
+        if (!series) {
+          return <span className="nodes-table__trends-empty">—</span>
+        }
+        const cpu = series.cpu_usage_pct
+        const mem = series.mem_used_pct
+        const disk = series.disk_used_pct
+        const latestCpu = cpu?.[cpu.length - 1] ?? null
+        const latestMem = mem?.[mem.length - 1] ?? null
+        const latestDisk = disk?.[disk.length - 1] ?? null
+
+        const cpuTone = !latestCpu ? 'default' : latestCpu >= 95 ? 'critical' : latestCpu >= 80 ? 'alert' : 'accent'
+        const memTone = !latestMem ? 'default' : latestMem >= 95 ? 'critical' : latestMem >= 85 ? 'alert' : 'accent'
+        const diskTone = !latestDisk ? 'default' : latestDisk >= 95 ? 'critical' : latestDisk >= 80 ? 'alert' : 'accent'
+
+        return (
+          <span className="nodes-table__trend-strip">
+            <span className="nodes-table__trend-item">
+              <span className="nodes-table__trend-value">
+                {latestCpu != null ? <MonoDigits>{formatPercent(latestCpu)}</MonoDigits> : '—'}
+              </span>
+              {cpu && cpu.length > 0 ? (
+                <Sparkline values={cpu.filter((v): v is number => v != null)} tone={cpuTone} width={64} height={14} />
+              ) : (
+                <span className="nodes-table__trends-empty">—</span>
+              )}
+            </span>
+            <span className="nodes-table__trend-item">
+              <span className="nodes-table__trend-value">
+                {latestMem != null ? <MonoDigits>{formatPercent(latestMem)}</MonoDigits> : '—'}
+              </span>
+              {mem && mem.length > 0 ? (
+                <Sparkline values={mem.filter((v): v is number => v != null)} tone={memTone} width={64} height={14} />
+              ) : (
+                <span className="nodes-table__trends-empty">—</span>
+              )}
+            </span>
+            <span className="nodes-table__trend-item">
+              <span className="nodes-table__trend-value">
+                {latestDisk != null ? <MonoDigits>{formatPercent(latestDisk)}</MonoDigits> : '—'}
+              </span>
+              {disk && disk.length > 0 ? (
+                <Sparkline values={disk.filter((v): v is number => v != null)} tone={diskTone} width={64} height={14} />
+              ) : (
+                <span className="nodes-table__trends-empty">—</span>
+              )}
+            </span>
           </span>
-        </div>
-      ),
+        )
+      },
     },
     {
       key: 'actions',

@@ -416,6 +416,10 @@ export type SettingsRecord = {
   retention_policy: RetentionPolicy
 }
 
+export type NodeSparklinesResponse = {
+  nodes: Record<string, Record<string, (number | null)[]>>
+}
+
 export type SettingsUpdateInput = {
   telegram: SettingsTelegramInput
   host_sample_frequency_tier: string

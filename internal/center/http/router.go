@@ -25,6 +25,7 @@ type RouterOptions struct {
 	NodeBindingConfirmRebindHandler stdhttp.Handler
 	NodeBindingRejectPendingHandler stdhttp.Handler
 	NodeBindingResetHandler         stdhttp.Handler
+	NodeSparklinesHandler           stdhttp.Handler
 	TargetsCollectionHandler        stdhttp.Handler
 	TargetItemHandler               stdhttp.Handler
 	TargetProbeItemsHandler         stdhttp.Handler
@@ -83,10 +84,10 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", protect(opts.NodesCollectionHandler))
 	}
-	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil {
+	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil || opts.NodeSparklinesHandler != nil {
 		mux.Handle("/api/nodes/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			nodeID, subtree := nodeSubtreePath(r.URL.Path)
-			if nodeID == "" {
+			if nodeID == "" && subtree != nodeSubtreeSparklines {
 				stdhttp.NotFound(w, r)
 				return
 			}
@@ -146,6 +147,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.NodeBindingResetHandler.ServeHTTP(w, r)
+			case nodeSubtreeSparklines:
+				if opts.NodeSparklinesHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeSparklinesHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -217,6 +224,7 @@ const (
 	nodeSubtreeBindingConfirmRebind nodeSubtree = "binding-confirm-rebind"
 	nodeSubtreeBindingRejectPending nodeSubtree = "binding-reject-pending"
 	nodeSubtreeBindingReset         nodeSubtree = "binding-reset"
+	nodeSubtreeSparklines           nodeSubtree = "sparklines"
 )
 
 func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
@@ -228,6 +236,9 @@ func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
 	segments := strings.Split(relative, "/")
 	if len(segments) == 0 || segments[0] == "" {
 		return "", nodeSubtreeUnknown
+	}
+	if segments[0] == "sparklines" && len(segments) == 1 {
+		return "", nodeSubtreeSparklines
 	}
 	if len(segments) == 1 {
 		return segments[0], nodeSubtreeItem

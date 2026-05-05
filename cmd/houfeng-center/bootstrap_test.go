@@ -216,6 +216,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.NodeBindingResetHandler == nil {
 		t.Fatal("router node binding reset handler = nil, want non-nil")
 	}
+	if gotOpts.NodeSparklinesHandler == nil {
+		t.Fatal("router node sparklines handler = nil, want non-nil")
+	}
 	if gotOpts.TargetsCollectionHandler == nil {
 		t.Fatal("router targets collection handler = nil, want non-nil")
 	}
