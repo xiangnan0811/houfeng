@@ -1,0 +1,11 @@
+{"file": ".trellis/tasks/05-05-node-detail-watchtower/prd.md", "reason": "AC + Out of Scope + ADR-lite 核对清单（PR1/PR2/PR3 各自 AC 段）"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / tsc / vitest / build 全绿"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "MetricChart / Drawer 新原子 + NodeDetailPage 重构遵守命名导出 / 单文件单组件 / 不滥用 memo"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "新增 .watchtower-* / .drawer / .metric-chart 全部纯 CSS + token + BEM；MetricChart 不引图表库（守 §12 约束）"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API 调用走 lib/api.ts；listHistoricalIncidents 检查"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "make verify-go；后端 incidents include_resolved 改动质量门"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "确认 Sparkline / Mono / EventList / IncidentList / ActionConfirmationCard 复用而非重写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "HostSample / ActiveIncidentRecord 字段消费与后端 contract 一致；include_resolved 参数新增 contract"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体强制 / 状态优先级 / 三态 / §12 不引图表库（本任务自研 MetricChart 是否守住）"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 NodeDetailPage 段是否被同步重写为 watchtower 形态"}
+{"file": "docs/design/v1-baseline/rules-and-interaction.md", "reason": "节点生命周期 / 健康派生 / 维护语义 — 危险区前置和操作菜单条件显示是否符合"}

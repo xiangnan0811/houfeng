@@ -1,0 +1,16 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层 spec 总入口"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "新原子 MetricChart / Drawer 落 components/atoms/，新 hook 落 lib/"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "命名导出 / 不滥用 memo / 单文件单组件等强制约定 — 新原子 + 大改组件必须遵守"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "纯 CSS + token + BEM；新增 .watchtower-* / .drawer / .metric-chart 样式族必须按这套写"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API 调用走 lib/api.ts；新增 listHistoricalIncidents 必须在 lib/api.ts；不在 page/component 直接 fetch"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "make verify-web 是唯一前端质量门"}
+{"file": ".trellis/spec/backend/index.md", "reason": "后端层 spec 总入口（PR3 后端改动需要）"}
+{"file": ".trellis/spec/backend/component-conventions.md", "reason": "后端 incidents handler / repo 改动遵守约定"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "make verify-go 是后端质量门"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Sparkline / Mono / DataTable / EventList / IncidentList / ActionConfirmationCard 已有原子直接复用，不重写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "前端消费 HostSample / ActiveIncidentRecord / StateChangeEventRecord 字段必须与 internal/contracts agentapi 一致；后端 handler 改动需保持前后端契约同步"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体角色 §3 / 状态优先级 §6 / Loading-Error-Empty §7 / §12 不做的事（特别是不引图表库的硬约束 — 本任务靠 MetricChart 自研守住）"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 NodeDetailPage 段（本任务大幅重写）+ §一 Card 用法 + §二 atoms 列表（MetricChart / Drawer 加入）"}
+{"file": "docs/design/v1-baseline/architecture-data-model.md", "reason": "节点 / agent / HostSample / Incident / StateChangeEvent 业务模型 — 影响 watchtower 视图的字段消费"}
+{"file": "docs/design/v1-baseline/rules-and-interaction.md", "reason": "§4 节点生命周期 / §健康状态派生 / §维护语义 — 影响危险区前置 / 维护态 ribbon / 操作菜单条件性显示"}
+{"file": ".trellis/tasks/05-05-node-detail-watchtower/prd.md", "reason": "本任务 spec 本体：决策、需求、AC、Out of Scope、Technical Approach、ADR-lite"}
