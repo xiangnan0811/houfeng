@@ -1020,3 +1020,36 @@ SettingsPage 3 项 UX polish 单 PR 收尾，关闭前置 mono 任务备忘的 3
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: Dashboard 异常节点行对齐 watchtower（3 行身份列 + 趋势 sparkline strip）
+
+**Date**: 2026-05-05
+**Task**: Dashboard 异常节点行对齐 watchtower（3 行身份列 + 趋势 sparkline strip）
+**Branch**: `main`
+
+### Summary
+
+实施顺序 3️⃣ 最终收尾（单 PR）。Dashboard AbnormalNodeList 身份列 2→3 行（Hostname / display_name / 心跳 freshness）+ 删除原 heartbeat 独立列 + 新趋势列 3×64×14 sparkline strip（CPU/Mem/Disk + mono 当前值 + 阈值 tone），复用 NodesPage 同款 template + /api/nodes/sparklines 接口。Dashboard AbnormalTargetList / stat strip / Hero / Events 不动（Dashboard 摘要视图完成）。382/382 测试 pass（+2 用例）。build 成功。5 卡点全闭 + 3-step 实施顺序闭环。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cf7d45b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
