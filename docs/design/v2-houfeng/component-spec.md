@@ -186,16 +186,30 @@ parent: docs/design/v2-houfeng/design-language.md
 5. 行 hover：操作列显示「快速编辑标签」「进入维护」「暂停监控」三个 ghost 按钮
 6. 行点击：导航到节点详情
 
-### NodeDetailPage
-1. Hero：节点名 (display_name) + 状态 Badge + 4 个 hero meta card（标签 / 最近心跳 / 最近同步 / 当前主问题）
-2. （可选）绑定冲突 DetailSection（critical 风格 + 三个动作按钮）
-3. Summary grid：3 卡（健康状态 / 活跃异常数 / 当前主问题）
-4. DetailSection `标签与备注`（编辑/查看切换）
-5. DetailSection `运行控制` + ActionConfirmationCard
-6. DetailSection `生命周期`（退役按钮 + ActionConfirmationCard）
-7. DetailSection `当前主机指标`：4 metric-card 各含 [卡头 (label · MonoDigits 当前值) · Sparkline (interactive · 12-24h · hover tooltip 显时间与值) · 次指标 dl]。section aside 显示采样元信息（24h N 样本 · 最早 ... · 最新 ... · backfill M）。维护态时整张 section 加 maintenance ribbon。
-8. DetailSection `当前异常`：IncidentList
-9. DetailSection `事件`：EventList timeline
+### NodeDetailPage（watchtower）
+
+ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主体，砍装饰、折叠次要、历史进抽屉。
+
+1. ① 身份条（2 行 + 右上 sticky 操作）：
+   - 行 1：display_name h1 + 4 状态 Badge（lifecycle / monitoring / binding / current_health）+ "数据新鲜度" mono 行（心跳 `<Timestamp mode="relative">` + 运行 `formatUptime(uptime_seconds)`）
+   - 行 2：mono 元数据条 — `<Hostname truncate>` (node_id) · 位置 (region · city · provider) · 标签 (`labels.join(' · ')`) · agent_version (`<MonoDigits>`)
+   - 右上：「查看历史」ghost button + "…" 操作 popover（`<details><summary>` 原生，按 monitoring_status 条件性显示 进入/退出维护、暂停/恢复 按钮，复用既有 `nodeRuntimeActions`）
+2. ② 危险区前置（条件性 — 仅 `current_active_incident_count > 0` 才渲染，**不有异常时整块不渲染**）：
+   - `<Card cardRole="warning" className="watchtower-danger">` 包；eyebrow "当前主问题" + 大字 h2 摘要 (`current_primary_issue_summary`) + meta 行（活跃异常 `<MonoDigits>` 个 · 健康状态 `<StatusBadge>`） + ghost button「查看完整时间线 →」（触发抽屉，默认事件 tab）
+3. （最高优先 / 条件性）绑定冲突 DetailSection（仅 `binding_status === '指纹变更待确认'`，在 ② 之上）：保留既有"高优先级：绑定冲突待处理"卡片 + 当前/待确认指纹 + 三个动作按钮（确认重绑 / 拒绝 / 重置）
+4. ③ 主视图栅格 `.watchtower-metrics`：8 张 `.watchtower-metric-card` 4×2 栅格（≤ 1280px 自动 2×4），每张含
+   - 卡头：`<h3>` eyebrow 标签 + `<MonoDigits>` 当前值大字
+   - `<MetricChart width={360} height={140}>` 含 X/Y 轴 + 阈值线（CPU/Mem/Disk/Inode 80/95；IOWait 20/50；Load5 4.0/8.0；Net 不画阈值）+ 维护窗口阴影（按 sample.maintenance_context 派生）+ 十字线 hover tooltip
+   - 次指标 dl（CPU 卡含 steal%；Memory 卡含 Swap used%；Disk 卡含 disk_busy% / read+write；其他单值）
+5. ④ 次要信息默认 collapsed `<details className="watchtower-secondary">` 折叠：
+   - 「标签与备注」（NodeLabelsAndNote 子组件，编辑/查看切换 + 乐观锁）
+   - 「生命周期」（退役按钮 + 二次确认；已退役时显示「恢复到观察中」）
+   - 「接入凭证状态」（当前 binding_status `<StatusBadge>` + `<Link>` 到 `/nodes/:id/onboarding` 接入工作台）
+6. 页面底部 mono 小字：数据快照时间 (`<Timestamp value={now} mode="absolute">`)，刷新页面获取最新（不做实时 polling，保留"页面打开 = 静态快照"模型）
+7. 历史抽屉（右侧 `min(440px, 40vw)` `<Drawer>`）：标题 `${display_name} · 历史`；抽屉内 `<Tabs variant="pill">` 切换 [事件时间线] / [历史异常]；
+   - 事件 tab：复用 `<EventList>`，数据来自 page 已加载的 `state.events`（节点详情主入口已拉取）
+   - 历史异常 tab：调 `listHistoricalIncidents('node', nodeId)`（`/api/incidents?...&include_resolved=true`）懒加载；首次切换时触发 fetch；通过 ref 防止 setState 引起 effect 重入；切换节点 (nodeId 变化) 时清缓存以免显示前一节点的数据
+   - 抽屉支持 Esc 关闭 / overlay 点击关闭 / × 按钮关闭；当 `open=false` 时不渲染 children，避免 DOM 中事件文案重复
 
 ### EventsPage
 1. Hero panel

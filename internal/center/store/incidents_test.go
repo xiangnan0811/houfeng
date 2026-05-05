@@ -35,8 +35,34 @@ func TestPostgresIncidentRepositoryListActiveIncidentsUsesDefaultLimit(t *testin
 	if !containsSQL([]string{capturedSQL}, "started_at desc") || !containsSQL([]string{capturedSQL}, "incident_id asc") {
 		t.Fatalf("capturedSQL = %q, want stable ordering", capturedSQL)
 	}
-	if len(capturedArgs) != 1 || capturedArgs[0] != 50 {
-		t.Fatalf("capturedArgs = %#v, want default limit 50", capturedArgs)
+	if !containsSQL([]string{capturedSQL}, "status = $1") {
+		t.Fatalf("capturedSQL = %q, want default status = active filter", capturedSQL)
+	}
+	if len(capturedArgs) != 2 || capturedArgs[0] != incidents.IncidentStatusActive || capturedArgs[1] != 50 {
+		t.Fatalf("capturedArgs = %#v, want [active, 50]", capturedArgs)
+	}
+}
+
+func TestPostgresIncidentRepositoryListActiveIncidentsIncludeResolved(t *testing.T) {
+	var (
+		capturedSQL  string
+		capturedArgs []any
+	)
+	repo := &PostgresIncidentRepository{query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+		capturedSQL = sql
+		capturedArgs = args
+		return &fakeDashboardRows{}, nil
+	}}
+
+	_, err := repo.ListActiveIncidents(context.Background(), IncidentsFilter{IncludeResolved: true, Limit: 25})
+	if err != nil {
+		t.Fatalf("ListActiveIncidents() error = %v", err)
+	}
+	if containsSQL([]string{capturedSQL}, "status =") {
+		t.Fatalf("capturedSQL = %q, want no status filter when include_resolved=true", capturedSQL)
+	}
+	if len(capturedArgs) != 1 || capturedArgs[0] != 25 {
+		t.Fatalf("capturedArgs = %#v, want only [limit]", capturedArgs)
 	}
 }
 
@@ -50,20 +76,20 @@ func TestPostgresIncidentRepositoryListActiveIncidentsBuildsOptionalFilters(t *t
 		{
 			name:      "object type",
 			filter:    IncidentsFilter{ObjectType: incidents.ObjectTypeNode, Limit: 25},
-			wantParts: []string{"object_type = $1"},
-			wantArgs:  []any{string(incidents.ObjectTypeNode), 25},
+			wantParts: []string{"object_type = $1", "status = $2"},
+			wantArgs:  []any{string(incidents.ObjectTypeNode), incidents.IncidentStatusActive, 25},
 		},
 		{
 			name:      "object id",
 			filter:    IncidentsFilter{ObjectID: "nd_001", Limit: 25},
-			wantParts: []string{"object_id = $1"},
-			wantArgs:  []any{"nd_001", 25},
+			wantParts: []string{"object_id = $1", "status = $2"},
+			wantArgs:  []any{"nd_001", incidents.IncidentStatusActive, 25},
 		},
 		{
 			name:      "severity",
 			filter:    IncidentsFilter{Severity: incidents.SeverityAlert, Limit: 25},
-			wantParts: []string{"severity = $1"},
-			wantArgs:  []any{string(incidents.SeverityAlert), 25},
+			wantParts: []string{"severity = $1", "status = $2"},
+			wantArgs:  []any{string(incidents.SeverityAlert), incidents.IncidentStatusActive, 25},
 		},
 		{
 			name:   "combined filters",
@@ -72,8 +98,15 @@ func TestPostgresIncidentRepositoryListActiveIncidentsBuildsOptionalFilters(t *t
 				"object_type = $1",
 				"object_id = $2",
 				"severity = $3",
+				"status = $4",
 			},
-			wantArgs: []any{string(incidents.ObjectTypeTarget), "tg_001", string(incidents.SeverityCritical), 25},
+			wantArgs: []any{string(incidents.ObjectTypeTarget), "tg_001", string(incidents.SeverityCritical), incidents.IncidentStatusActive, 25},
+		},
+		{
+			name:      "include resolved drops status filter",
+			filter:    IncidentsFilter{ObjectID: "nd_001", IncludeResolved: true, Limit: 25},
+			wantParts: []string{"object_id = $1"},
+			wantArgs:  []any{"nd_001", 25},
 		},
 	}
 

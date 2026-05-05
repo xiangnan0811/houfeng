@@ -34,10 +34,11 @@ type ActiveIncidentListItem struct {
 }
 
 type IncidentsFilter struct {
-	ObjectType incidents.ObjectType
-	ObjectID   string
-	Severity   incidents.Severity
-	Limit      int
+	ObjectType      incidents.ObjectType
+	ObjectID        string
+	Severity        incidents.Severity
+	Limit           int
+	IncludeResolved bool
 }
 
 type PostgresIncidentRepository struct {
@@ -73,6 +74,16 @@ func (r *PostgresIncidentRepository) ListActiveIncidents(ctx context.Context, fi
 	if filter.Severity != "" {
 		args = append(args, string(filter.Severity))
 		conditions = append(conditions, fmt.Sprintf("severity = $%d", len(args)))
+	}
+	// Default behavior keeps the current contract: only return rows whose status
+	// is "active". When IncludeResolved is true (e.g. node detail history drawer),
+	// drop the status filter so historical/resolved rows are also returned.
+	// Note: with V1's "delete on resolve" persistence, the active_incidents table
+	// only contains active rows today; this contract change is forward-compatible
+	// for a future schema that retains resolved rows.
+	if !filter.IncludeResolved {
+		args = append(args, incidents.IncidentStatusActive)
+		conditions = append(conditions, fmt.Sprintf("status = $%d", len(args)))
 	}
 	args = append(args, limit)
 	limitArg := len(args)

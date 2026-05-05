@@ -335,3 +335,16 @@ export function listEvents(filter?: EventListFilter) {
 export function listIncidents(filter?: IncidentListFilter) {
   return requestJSON<ActiveIncidentRecord[]>(withQuery('/api/incidents', filter))
 }
+
+/**
+ * Used by the node detail history drawer. Returns both active and resolved
+ * incidents (the backend currently only retains active rows in
+ * `active_incidents`, so the resolved set is forward-compatible).
+ */
+export function listHistoricalIncidents(objectType: string, objectId: string) {
+  return requestJSON<ActiveIncidentRecord[]>(
+    `/api/incidents?object_type=${encodeURIComponent(objectType)}&object_id=${encodeURIComponent(
+      objectId,
+    )}&include_resolved=true`,
+  )
+}

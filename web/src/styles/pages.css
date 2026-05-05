@@ -1338,3 +1338,262 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+/* ============== Node detail — watchtower ============== */
+.watchtower-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.watchtower-header__row1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.watchtower-header__title-block {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.watchtower-header__title-block h1 {
+  font-family: var(--font-sans);
+  font-size: var(--type-h1-size);
+  font-weight: var(--type-h1-weight);
+  margin: 0;
+}
+.watchtower-header__actions-block {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.watchtower-header__freshness {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.watchtower-header__row2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.watchtower-header__meta-sep {
+  color: var(--text-disabled);
+}
+.watchtower-header__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  position: relative;
+}
+.watchtower-actions-menu {
+  position: relative;
+}
+.watchtower-actions-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-1);
+  background: var(--surface);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--text-primary);
+  user-select: none;
+  line-height: 1;
+}
+.watchtower-actions-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.watchtower-actions-menu[open] > summary {
+  background: var(--surface-elevated);
+}
+.watchtower-actions-menu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.watchtower-actions-menu__panel button {
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+.watchtower-actions-menu__panel button:hover:not(:disabled) {
+  background: var(--surface-pressed);
+}
+.watchtower-actions-menu__panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.watchtower-danger {
+  margin: var(--space-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.watchtower-danger__eyebrow {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-state-critical);
+  margin: 0;
+}
+.watchtower-danger__summary {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.watchtower-danger__meta {
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.watchtower-danger__actions {
+  margin-top: var(--space-2);
+}
+.watchtower-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+@media (max-width: 1280px) {
+  .watchtower-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.watchtower-metric-card {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.watchtower-metric-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.watchtower-metric-card__head h3 {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0;
+}
+.watchtower-metric-card__current {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.watchtower-metric-card__sub {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.watchtower-metric-card__sub div {
+  display: inline;
+}
+.watchtower-metric-card__sub dt {
+  display: inline;
+}
+.watchtower-metric-card__sub dd {
+  display: inline;
+  margin: 0 0 0 4px;
+}
+.watchtower-secondary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.watchtower-secondary > summary {
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  list-style: none;
+  user-select: none;
+}
+.watchtower-secondary > summary::-webkit-details-marker {
+  display: none;
+}
+.watchtower-secondary > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: var(--space-2);
+  color: var(--text-muted);
+  transition: transform var(--dur-micro) var(--ease-calm);
+}
+.watchtower-secondary[open] > summary::before {
+  transform: rotate(90deg);
+}
+.watchtower-secondary__body {
+  margin-top: var(--space-3);
+}
+.watchtower-runtime-error {
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--color-state-critical);
+  background: var(--surface);
+  border: 1px solid var(--color-state-critical);
+  border-radius: var(--radius-2);
+  padding: var(--space-2) var(--space-3);
+  margin: 0;
+}
+.watchtower-snapshot-meta {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: var(--space-4);
+}

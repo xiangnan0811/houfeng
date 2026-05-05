@@ -5,17 +5,22 @@ import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { IncidentList } from '../components/IncidentList'
+import { Card } from '../components/atoms/Card'
 import {
+  Drawer,
   Hostname,
   MonoDigits,
+  Tabs,
   Timestamp,
 } from '../components/atoms'
+import { Button } from '../components/atoms/Button'
 import {
-  NodeHero,
-  NodeHostMetrics,
   NodeLabelsAndNote,
-  NodeStatusSummary,
+  NodeWatchtowerHeader,
+  NodeWatchtowerMetrics,
+  type NodeRuntimeAction,
 } from '../components/node-detail'
+import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
   confirmNodeRebind,
@@ -25,6 +30,7 @@ import {
   getNodeOnboarding,
   getNodeRuntimeFacts,
   listEvents,
+  listHistoricalIncidents,
   listIncidents,
   pauseNodeMonitoring,
   rejectPendingNodeBinding,
@@ -66,7 +72,6 @@ const NODE_LIFECYCLE_RETIRED = '已退役'
 const NODE_LIFECYCLE_V1_LIMITATION_COPY =
   '已退役节点在 V1 中只能先恢复到观察中，不能直接恢复为在用。'
 
-type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
 type BindingConflictState = {
   requestedNodeId: string | null
   onboarding: NodeOnboardingState | null
@@ -190,6 +195,11 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const [metadataNoteDraft, setMetadataNoteDraft] = useState('')
   const [metadataSubmitting, setMetadataSubmitting] = useState(false)
   const [metadataError, setMetadataError] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyTab, setHistoryTab] = useState<'events' | 'incidents'>('events')
+  const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(null)
+  const [historyIncidentsLoading, setHistoryIncidentsLoading] = useState(false)
+  const [historyIncidentsError, setHistoryIncidentsError] = useState<string | null>(null)
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
@@ -353,6 +363,65 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       cancelled = true
     }
   }, [nodeId])
+
+  // Reset historical incidents when navigating between nodes so the drawer never
+  // shows stale data from the previous node when reopened.
+  useEffect(() => {
+    setHistoryIncidents(null)
+    setHistoryIncidentsError(null)
+    setHistoryIncidentsLoading(false)
+  }, [nodeId])
+
+  // Lazy-load historical incidents the first time the user opens the drawer
+  // and switches to the "历史异常" tab. Subsequent opens reuse the cached set
+  // (cleared on node id change via the reset effect above). We use refs so
+  // setState calls inside the effect do not re-trigger it (which would cancel
+  // the in-flight promise).
+  const historyFetchRef = useRef<{
+    nodeId: string | null
+    inFlight: boolean
+    fetched: boolean
+  }>({ nodeId: null, inFlight: false, fetched: false })
+
+  useEffect(() => {
+    if (historyFetchRef.current.nodeId !== nodeId) {
+      historyFetchRef.current = { nodeId: nodeId ?? null, inFlight: false, fetched: false }
+    }
+  }, [nodeId])
+
+  const wantsHistoryIncidents = historyOpen && historyTab === 'incidents'
+
+  useEffect(() => {
+    if (!nodeId) return
+    if (!wantsHistoryIncidents) return
+    if (historyFetchRef.current.inFlight || historyFetchRef.current.fetched) return
+
+    let cancelled = false
+    const targetNodeId = nodeId
+    historyFetchRef.current = { nodeId: targetNodeId, inFlight: true, fetched: false }
+    setHistoryIncidentsLoading(true)
+    setHistoryIncidentsError(null)
+
+    listHistoricalIncidents('node', targetNodeId)
+      .then((records) => {
+        if (cancelled) return
+        setHistoryIncidents(records)
+        historyFetchRef.current = { nodeId: targetNodeId, inFlight: false, fetched: true }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setHistoryIncidentsError(describeError(error, '加载历史异常失败'))
+        historyFetchRef.current = { nodeId: targetNodeId, inFlight: false, fetched: false }
+      })
+      .finally(() => {
+        if (cancelled) return
+        setHistoryIncidentsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [nodeId, wantsHistoryIncidents])
 
   const missingNodeId = !nodeId
   const isCurrentNode = state.requestedNodeId === nodeId
@@ -558,6 +627,23 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const bindingConflictLoading =
     hasCurrentBindingConflictState && bindingConflictState.loading && !bindingConflict
   const bindingActionsDisabled = bindingAction !== null || bindingConflictLoading || !bindingConflict
+  const runtimeActions = nodeRuntimeActions(node)
+  const showDangerZone = node.current_active_incident_count > 0
+
+  function registerActionRef(action: NodeRuntimeAction, element: HTMLButtonElement | null) {
+    actionButtonRefs.current[action] = element
+  }
+
+  function retryHistoryIncidents() {
+    historyFetchRef.current = { nodeId: nodeId ?? null, inFlight: false, fetched: false }
+    setHistoryIncidents(null)
+    setHistoryIncidentsError(null)
+  }
+
+  function openHistory(tab: 'events' | 'incidents' = 'events') {
+    setHistoryTab(tab)
+    setHistoryOpen(true)
+  }
 
   async function handleMetadataSave() {
     if (!node) return
@@ -621,7 +707,15 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
 
   return (
     <div className="page-stack">
-      <NodeHero node={node} />
+      <NodeWatchtowerHeader
+        node={node}
+        latestSample={sample}
+        runtimeActions={runtimeActions}
+        runtimeSubmitting={runtimeSubmitting}
+        onRuntimeAction={(action) => void handleRuntimeAction(action)}
+        registerActionRef={registerActionRef}
+        onOpenHistory={() => openHistory('events')}
+      />
 
       {showBindingConflict ? (
         <DetailSection eyebrow="绑定冲突" title="绑定冲突处置" aside="高优先级">
@@ -702,128 +796,47 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         </DetailSection>
       ) : null}
 
-      <NodeStatusSummary node={node} />
-
-      <NodeLabelsAndNote
-        node={node}
-        editing={metadataEditing}
-        labelDraft={metadataLabelDraft}
-        noteDraft={metadataNoteDraft}
-        submitting={metadataSubmitting}
-        error={metadataError}
-        onLabelDraftChange={setMetadataLabelDraft}
-        onNoteDraftChange={setMetadataNoteDraft}
-        onStartEdit={() => {
-          setMetadataEditing(true)
-          setMetadataLabelDraft(node.labels.join(', '))
-          setMetadataNoteDraft(node.note)
-          setMetadataError(null)
-        }}
-        onCancelEdit={() => {
-          setMetadataEditing(false)
-          setMetadataLabelDraft('')
-          setMetadataNoteDraft('')
-          setMetadataError(null)
-        }}
-        onSave={() => void handleMetadataSave()}
-      />
-
-      <DetailSection eyebrow="运行控制" title="运行控制">
-        <div className="page-stack">
-          <p>维护会继续采集，但不解释结果。暂停会停止采集并产生数据空档。</p>
-          <div className="badge-row badge-row--wrap">
-            {nodeRuntimeActions(node).map(({ action, label }) => (
-              <button
-                key={action}
-                ref={(element) => {
-                  actionButtonRefs.current[action] = element
-                }}
-                type="button"
-                disabled={runtimeSubmitting}
-                onClick={() => void handleRuntimeAction(action)}
-              >
-                {label}
-              </button>
-            ))}
+      {showDangerZone ? (
+        <Card cardRole="warning" className="watchtower-danger" aria-label="当前主问题">
+          <p className="watchtower-danger__eyebrow">当前主问题</p>
+          <h2 className="watchtower-danger__summary">
+            {node.current_primary_issue_summary || '存在活跃异常'}
+          </h2>
+          <p className="watchtower-danger__meta">
+            活跃异常 <MonoDigits>{node.current_active_incident_count}</MonoDigits> 个 · 健康状态{' '}
+            <StatusBadge label={node.current_health_status} />
+          </p>
+          <div className="watchtower-danger__actions">
+            <Button variant="ghost" size="sm" onClick={() => openHistory('events')}>
+              查看完整时间线 →
+            </Button>
           </div>
-          {pendingRuntimeConfirmation?.action === 'pause' ? (
-            <ActionConfirmationCard
-              title="确认暂停节点监控"
-              current={pauseConfirmationCurrent(node)}
-              result="操作后：监控运行状态变为暂停。"
-              impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
-              unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
-              confirmLabel="确认暂停监控"
-              disabled={runtimeSubmitting}
-              onConfirm={() => void handleRuntimeAction('pause', true)}
-              onCancel={() => {
-                pendingFocusRestoreRef.current = 'pause'
-                setPendingRuntimeConfirmation(null)
-              }}
-            />
-          ) : null}
-          {runtimeError ? <p>{runtimeError}</p> : null}
-        </div>
-      </DetailSection>
+        </Card>
+      ) : null}
 
-      <DetailSection eyebrow="生命周期" title="生命周期">
-        <div className="page-stack">
-          {isRetiredNode ? <p>{NODE_LIFECYCLE_V1_LIMITATION_COPY}</p> : null}
-          <div className="badge-row badge-row--wrap">
-            {isRetiredNode ? (
-              <button
-                type="button"
-                disabled={lifecycleSubmitting !== null}
-                onClick={() => void handleLifecycleAction('restore-to-observing')}
-              >
-                {lifecycleSubmitting === 'restore-to-observing' ? '正在恢复…' : '恢复到观察中'}
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={lifecycleSubmitting !== null}
-                onClick={() => {
-                  setShowRetireConfirmation(true)
-                  setLifecycleError(null)
-                }}
-              >
-                退役节点
-              </button>
-            )}
-          </div>
-          {!isRetiredNode && showRetireConfirmation ? (
-            <div className="page-stack">
-              <p>退役会让节点退出当前工作集，但会保留历史记录。这不是删除，也不会清空事件、观测记录或 agent 绑定历史。</p>
-              <div className="badge-row badge-row--wrap">
-                <button
-                  type="button"
-                  disabled={lifecycleSubmitting !== null}
-                  onClick={() => void handleLifecycleAction('retire')}
-                >
-                  {lifecycleSubmitting === 'retire' ? '正在退役…' : '确认退役'}
-                </button>
-                <button
-                  type="button"
-                  disabled={lifecycleSubmitting !== null}
-                  onClick={() => {
-                    setShowRetireConfirmation(false)
-                    setLifecycleError(null)
-                  }}
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {lifecycleError ? <p role="alert">{lifecycleError}</p> : null}
-        </div>
-      </DetailSection>
-
-      <NodeHostMetrics
+      <NodeWatchtowerMetrics
         sample={sample}
         samples={recentSamples}
         isMaintenance={isMaintenance}
       />
+
+      {pendingRuntimeConfirmation?.action === 'pause' ? (
+        <ActionConfirmationCard
+          title="确认暂停节点监控"
+          current={pauseConfirmationCurrent(node)}
+          result="操作后：监控运行状态变为暂停。"
+          impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
+          unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
+          confirmLabel="确认暂停监控"
+          disabled={runtimeSubmitting}
+          onConfirm={() => void handleRuntimeAction('pause', true)}
+          onCancel={() => {
+            pendingFocusRestoreRef.current = 'pause'
+            setPendingRuntimeConfirmation(null)
+          }}
+        />
+      ) : null}
+      {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
 
       <DetailSection eyebrow="当前异常" title="当前异常">
         {!hasCurrentActivity ? (
@@ -856,6 +869,164 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           <EventList events={events} />
         )}
       </DetailSection>
+
+      <details className="watchtower-secondary">
+        <summary>标签与备注</summary>
+        <div className="watchtower-secondary__body">
+          <NodeLabelsAndNote
+            node={node}
+            editing={metadataEditing}
+            labelDraft={metadataLabelDraft}
+            noteDraft={metadataNoteDraft}
+            submitting={metadataSubmitting}
+            error={metadataError}
+            onLabelDraftChange={setMetadataLabelDraft}
+            onNoteDraftChange={setMetadataNoteDraft}
+            onStartEdit={() => {
+              setMetadataEditing(true)
+              setMetadataLabelDraft(node.labels.join(', '))
+              setMetadataNoteDraft(node.note)
+              setMetadataError(null)
+            }}
+            onCancelEdit={() => {
+              setMetadataEditing(false)
+              setMetadataLabelDraft('')
+              setMetadataNoteDraft('')
+              setMetadataError(null)
+            }}
+            onSave={() => void handleMetadataSave()}
+          />
+        </div>
+      </details>
+
+      <details className="watchtower-secondary">
+        <summary>生命周期</summary>
+        <div className="watchtower-secondary__body">
+          <div className="page-stack">
+            {isRetiredNode ? <p>{NODE_LIFECYCLE_V1_LIMITATION_COPY}</p> : null}
+            <div className="badge-row badge-row--wrap">
+              {isRetiredNode ? (
+                <button
+                  type="button"
+                  disabled={lifecycleSubmitting !== null}
+                  onClick={() => void handleLifecycleAction('restore-to-observing')}
+                >
+                  {lifecycleSubmitting === 'restore-to-observing' ? '正在恢复…' : '恢复到观察中'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={lifecycleSubmitting !== null}
+                  onClick={() => {
+                    setShowRetireConfirmation(true)
+                    setLifecycleError(null)
+                  }}
+                >
+                  退役节点
+                </button>
+              )}
+            </div>
+            {!isRetiredNode && showRetireConfirmation ? (
+              <div className="page-stack">
+                <p>退役会让节点退出当前工作集，但会保留历史记录。这不是删除，也不会清空事件、观测记录或 agent 绑定历史。</p>
+                <div className="badge-row badge-row--wrap">
+                  <button
+                    type="button"
+                    disabled={lifecycleSubmitting !== null}
+                    onClick={() => void handleLifecycleAction('retire')}
+                  >
+                    {lifecycleSubmitting === 'retire' ? '正在退役…' : '确认退役'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={lifecycleSubmitting !== null}
+                    onClick={() => {
+                      setShowRetireConfirmation(false)
+                      setLifecycleError(null)
+                    }}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {lifecycleError ? <p role="alert">{lifecycleError}</p> : null}
+          </div>
+        </div>
+      </details>
+
+      <details className="watchtower-secondary">
+        <summary>接入凭证状态</summary>
+        <div className="watchtower-secondary__body">
+          <p>
+            当前绑定状态：<StatusBadge label={node.binding_status} />
+          </p>
+          <p>
+            <Link className="text-link" to={`/nodes/${node.node_id}/onboarding`}>
+              查看接入工作台 →
+            </Link>
+          </p>
+        </div>
+      </details>
+
+      <p className="watchtower-snapshot-meta">
+        数据快照时间：<Timestamp value={new Date().toISOString()} mode="absolute" />
+        ，刷新页面获取最新。
+      </p>
+
+      <Drawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        title={`${node.display_name} · 历史`}
+        ariaLabel="节点历史抽屉"
+      >
+        <Tabs<'events' | 'incidents'>
+          variant="pill"
+          value={historyTab}
+          onChange={setHistoryTab}
+          items={[
+            { value: 'events', label: '事件时间线' },
+            { value: 'incidents', label: '历史异常' },
+          ]}
+        />
+        {historyTab === 'events' ? (
+          eventsError ? (
+            <div className="empty-state">
+              <h3>事件时间线暂不可用</h3>
+              <p>{eventsError}</p>
+            </div>
+          ) : events.length === 0 ? (
+            <div className="empty-state">
+              <h3>近期无状态变更事件</h3>
+              <p>该节点近期没有发生过被记录的状态变更事件。</p>
+            </div>
+          ) : (
+            <EventList events={events} />
+          )
+        ) : historyIncidentsLoading ? (
+          <p>正在加载历史异常…</p>
+        ) : historyIncidentsError ? (
+          <Card cardRole="warning">
+            <p>
+              加载历史异常失败：<MonoDigits>{historyIncidentsError}</MonoDigits>
+            </p>
+            <Button variant="secondary" size="sm" onClick={retryHistoryIncidents}>
+              重试
+            </Button>
+          </Card>
+        ) : historyIncidents && historyIncidents.length > 0 ? (
+          <IncidentList
+            incidents={historyIncidents}
+            emptyTitle="近期无异常发生"
+            emptyDescription="该节点近期没有触发过被记录的异常。"
+          />
+        ) : (
+          <div className="empty-state">
+            <h3>近期无异常发生</h3>
+            <p>该节点近期没有触发过被记录的异常。</p>
+          </div>
+        )}
+      </Drawer>
     </div>
   )
 }

@@ -88,3 +88,42 @@ func TestIncidentsHandlerRejectsInvalidLimit(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 }
+
+func TestIncidentsHandlerForwardsIncludeResolved(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "default omitted", url: "/api/incidents", want: false},
+		{name: "explicit false", url: "/api/incidents?include_resolved=false", want: false},
+		{name: "explicit true", url: "/api/incidents?include_resolved=true", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeIncidentsRepository{}
+			handler := handlers.Incidents(repo)
+			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d (body=%s)", recorder.Code, http.StatusOK, recorder.Body.String())
+			}
+			if repo.filter.IncludeResolved != tt.want {
+				t.Fatalf("filter.IncludeResolved = %v, want %v", repo.filter.IncludeResolved, tt.want)
+			}
+		})
+	}
+}
+
+func TestIncidentsHandlerRejectsInvalidIncludeResolved(t *testing.T) {
+	handler := handlers.Incidents(&fakeIncidentsRepository{})
+	req := httptest.NewRequest(http.MethodGet, "/api/incidents?include_resolved=maybe", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}

@@ -23,11 +23,17 @@ func Incidents(repo IncidentsRepository) http.Handler {
 			writeError(w, http.StatusBadRequest, "invalid limit")
 			return
 		}
+		includeResolved, err := parseOptionalBool(r, "include_resolved")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid include_resolved")
+			return
+		}
 		records, err := repo.ListActiveIncidents(r.Context(), store.IncidentsFilter{
-			ObjectType: incidents.ObjectType(r.URL.Query().Get("object_type")),
-			ObjectID:   r.URL.Query().Get("object_id"),
-			Severity:   incidents.Severity(r.URL.Query().Get("severity")),
-			Limit:      limit,
+			ObjectType:      incidents.ObjectType(r.URL.Query().Get("object_type")),
+			ObjectID:        r.URL.Query().Get("object_id"),
+			Severity:        incidents.Severity(r.URL.Query().Get("severity")),
+			Limit:           limit,
+			IncludeResolved: includeResolved,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
