@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/05-05-nodes-list-watchtower-align/prd.md", "reason": "AC + Out of Scope + ADR-lite 核对清单（PR1 / PR2 各自 AC 段）"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint / tsc / vitest / build 全绿"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "NodesPage 改动遵守命名导出 / 不滥用 memo"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "新增 .nodes-table__freshness / .nodes-table__trend-* 类纯 CSS + token + BEM"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "listNodeSparklines 落在 lib/api.ts"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "make verify-go；新增 Go 单测"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Sparkline / Mono / DataTable 复用不重写"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "metrics 参数名对应 host_observations 列名；sparklines response 与后端一致"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "字体强制 / §12 不引图表库"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "§五 NodesPage 段同步新列定义"}
