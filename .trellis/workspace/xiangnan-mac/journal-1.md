@@ -1086,3 +1086,36 @@ SettingsPage 3 项 UX polish 单 PR 收尾，关闭前置 mono 任务备忘的 3
 ### Next Steps
 
 - None - task complete
+
+
+## Session 33: Targets 全栈 watchtower 改造（核心二阶段）
+
+**Date**: 2026-05-06
+**Task**: Targets 全栈 watchtower 改造（核心二阶段）
+**Branch**: `main`
+
+### Summary
+
+2 PR 把 TargetDetailPage + TargetsPage 对齐节点线 watchtower 模板。PR1 TargetDetailPage：新建 TargetWatchtowerHeader（2行身份条 mirror NodeWatchtowerHeader）+ 条件性危险区（Card cardRole=warning，摘要 + 异常计数 + 持续时长）+ LatencyTrends 对齐 .watchtower-metrics/.watchtower-metric-card 布局 + 3个 details 折叠次要（标签/ProbeItem列表/生命周期）+ 历史抽屉 Drawer+Tabs 含 lazy-load 历史 incident + 删 TargetHero/TargetStatusSummary 旧组件 + 数据快照行。PR2 后端：新建 /api/targets/sparklines（GET probe_observations 按 target_id group 24 点 hourly avg latency_ms）+ 3 Go handler 测试 + router 注册 + bootstrap wiring。前端 TargetsPage：删除观察列改趋势列（1个 64×14 latency sparkline + mono 当前值 + 阈值 tone accent≤10ms/notice≤200ms/alert≤1000ms/critical>1000ms）+ 身份列加第 3 行 freshness（最近成功/失败 Timestamp）。所有业务逻辑零回归。383/383 测试 pass（+2）。make verify-go 全绿。Dashboard AbnormalTargetList 跳过（已 90% 对齐度）。节点线（详情/列表/Dashboard）+ 目标线（详情/列表）watchtower 全栈完成。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `65500b5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

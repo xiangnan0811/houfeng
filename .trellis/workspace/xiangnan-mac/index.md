@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 32
-- **Last Active**: 2026-05-05
+- **Total Sessions**: 33
+- **Last Active**: 2026-05-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1088 | Active |
+| `journal-1.md` | ~1121 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 33 | 2026-05-06 | Targets 全栈 watchtower 改造（核心二阶段） | `65500b5` | `main` |
 | 32 | 2026-05-05 | watchtower 3 项小 follow-up（清冗余/粘性头/持续时长） | `87ea954` | `main` |
 | 31 | 2026-05-05 | Dashboard 异常节点行对齐 watchtower（3 行身份列 + 趋势 sparkline strip） | `cf7d45b` | `main` |
 | 30 | 2026-05-05 | 节点列表对齐 watchtower（sparklines 接口 + 3 指标趋势 strip） | `78fbfb4` | `main` |
