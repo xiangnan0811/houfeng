@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { listNodeSparklines } from '../lib/api'
 import { DashboardPage } from './DashboardPage'
 
 const navigateMock = vi.fn()
@@ -10,6 +11,14 @@ vi.mock('react-router-dom', async () => {
   return {
     ...actual,
     useNavigate: () => navigateMock,
+  }
+})
+
+vi.mock('../lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/api')>()
+  return {
+    ...actual,
+    listNodeSparklines: vi.fn().mockResolvedValue({ nodes: {} }),
   }
 })
 
@@ -347,5 +356,123 @@ describe('DashboardPage', () => {
     expect(row).not.toBeNull()
     fireEvent.click(row as HTMLElement)
     expect(navigateMock).toHaveBeenCalledWith('/targets/tg_555')
+  })
+
+  it('renders heartbeat timestamp in the freshness row of the abnormal node identity column', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          total_node_count: 5,
+          total_target_count: 4,
+          abnormal_node_count: 1,
+          abnormal_target_count: 0,
+          severe_node_count: 0,
+          severe_target_count: 0,
+          maintenance_node_count: 0,
+          maintenance_target_count: 0,
+          recent_new_incident_count: 0,
+          recent_recovery_count: 0,
+          recent_events: [],
+          abnormal_nodes: [
+            {
+              node_id: 'nd_042',
+              display_name: 'Osaka Edge',
+              region: 'ap-northeast-3',
+              city: 'Osaka',
+              provider: 'aws',
+              lifecycle_status: '在用',
+              monitoring_status: '启用',
+              current_health_status: '告警',
+              last_heartbeat_at: '2026-04-25T08:05:00Z',
+              current_active_incident_count: 1,
+              current_primary_issue_summary: 'CPU 使用率 95%',
+            },
+          ],
+          abnormal_targets: [],
+        }),
+      ),
+    )
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Osaka Edge')).toBeInTheDocument())
+
+    // The freshness row must contain the heartbeat label text
+    const freshnessCell = document.querySelector('.dashboard-table__freshness')
+    expect(freshnessCell).not.toBeNull()
+    expect(freshnessCell!.textContent).toContain('心跳')
+  })
+
+  it('renders sparkline SVG polyline in the trends column when sparklines data is available', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          total_node_count: 5,
+          total_target_count: 4,
+          abnormal_node_count: 1,
+          abnormal_target_count: 0,
+          severe_node_count: 1,
+          severe_target_count: 0,
+          maintenance_node_count: 0,
+          maintenance_target_count: 0,
+          recent_new_incident_count: 0,
+          recent_recovery_count: 0,
+          recent_events: [],
+          abnormal_nodes: [
+            {
+              node_id: 'nd_001',
+              display_name: 'Tokyo Edge',
+              region: 'ap-northeast-1',
+              city: 'Tokyo',
+              provider: 'aws',
+              lifecycle_status: '在用',
+              monitoring_status: '启用',
+              current_health_status: '告警',
+              last_heartbeat_at: '2026-04-25T08:05:00Z',
+              current_active_incident_count: 2,
+              current_primary_issue_summary: '磁盘使用率 92.0%',
+            },
+          ],
+          abnormal_targets: [],
+        }),
+      ),
+    )
+
+    // Mock sparklines with real data so a polyline renders
+    vi.mocked(listNodeSparklines).mockResolvedValue({
+      nodes: {
+        nd_001: {
+          cpu_usage_pct: [12, 18, 25, 30, 28, 35, 40, 38, 42, 50, 55, 60, 58, 62, 65,
+            70, 68, 72, 75, 80, 78, 82, 85, 88],
+          mem_used_pct: [45, 48, 50, 52, 55, 58, 60, 57, 55, 60, 62, 65, 68, 70, 72,
+            75, 78, 76, 80, 82, 85, 87, 88, 90],
+          disk_used_pct: [70, 71, 72, 71, 73, 74, 75, 76, 77, 78, 79, 80, 79, 81, 82,
+            81, 83, 84, 85, 84, 86, 87, 88, 89],
+        },
+      },
+    })
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    // The trends column is rendered inside .dashboard-table__trends cells
+    await waitFor(() => {
+      const trendsCells = document.querySelectorAll('.dashboard-table__trends')
+      expect(trendsCells.length).toBeGreaterThanOrEqual(1)
+      // Sparkline loads asynchronously; wait until the polyline appears
+      const polylines = trendsCells[0].querySelectorAll('polyline')
+      expect(polylines.length).toBeGreaterThanOrEqual(1)
+    })
   })
 })

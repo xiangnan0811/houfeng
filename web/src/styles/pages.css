@@ -1144,6 +1144,41 @@
   opacity: 1;
 }
 
+.dashboard-table__freshness {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+.dashboard-table__trends {
+  width: 220px;
+  min-width: 220px;
+}
+.dashboard-table__trend-strip {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.dashboard-table__trend-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.dashboard-table__trend-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+  color: var(--text-secondary);
+  line-height: 1;
+}
+.dashboard-table__trends-empty {
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* DataTable customizations for TargetsPage rows. Mirrors NodesPage structure
  * (identity stack, hover-revealed actions, inline label editor) so the v2
  * list visuals stay coherent across the resource pages. */

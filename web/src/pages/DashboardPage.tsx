@@ -14,8 +14,9 @@ import {
 } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
-import { ApiError, getDashboard } from '../lib/api'
-import type { DashboardNodeSummary, DashboardOverview, DashboardTargetSummary } from '../lib/types'
+import { ApiError, getDashboard, listNodeSparklines } from '../lib/api'
+import type { DashboardNodeSummary, DashboardOverview, DashboardTargetSummary, NodeSparklinesResponse } from '../lib/types'
+import { formatPercent } from '../lib/format'
 
 type State = {
   loading: boolean
@@ -85,6 +86,16 @@ function hostPortSummary(target: DashboardTargetSummary) {
 
 function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
   const navigate = useNavigate()
+  const [sparklines, setSparklines] = useState<NodeSparklinesResponse | null>(null)
+
+  useEffect(() => {
+    if (nodes.length === 0) return
+    let cancelled = false
+    listNodeSparklines(['cpu_usage_pct', 'mem_used_pct', 'disk_used_pct'])
+      .then(data => { if (!cancelled) setSparklines(data) })
+      .catch(() => {}) // silent fail
+    return () => { cancelled = true }
+  }, [nodes.length])
 
   if (nodes.length === 0) {
     return (
@@ -123,6 +134,9 @@ function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
             {node.node_id}
           </Hostname>
           <span className="dashboard-table__display-name">{node.display_name}</span>
+          <span className="dashboard-table__freshness">
+            心跳 <Timestamp value={node.last_heartbeat_at ?? null} mode="relative" />
+          </span>
         </div>
       ),
     },
@@ -150,11 +164,60 @@ function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
       ),
     },
     {
-      key: 'heartbeat',
-      label: '心跳',
-      render: (node) => (
-        <Timestamp value={node.last_heartbeat_at ?? null} mode="relative" />
-      ),
+      key: 'trends',
+      label: '近 24h',
+      cellClassName: 'dashboard-table__trends',
+      render: (node) => {
+        const series = sparklines?.nodes?.[node.node_id]
+        if (!series) {
+          return <span className="dashboard-table__trends-empty">—</span>
+        }
+        const cpu = series.cpu_usage_pct
+        const mem = series.mem_used_pct
+        const disk = series.disk_used_pct
+        const latestCpu = cpu?.[cpu.length - 1] ?? null
+        const latestMem = mem?.[mem.length - 1] ?? null
+        const latestDisk = disk?.[disk.length - 1] ?? null
+
+        const cpuTone = !latestCpu ? 'default' : latestCpu >= 95 ? 'critical' : latestCpu >= 80 ? 'alert' : 'accent'
+        const memTone = !latestMem ? 'default' : latestMem >= 95 ? 'critical' : latestMem >= 85 ? 'alert' : 'accent'
+        const diskTone = !latestDisk ? 'default' : latestDisk >= 95 ? 'critical' : latestDisk >= 80 ? 'alert' : 'accent'
+
+        return (
+          <span className="dashboard-table__trend-strip">
+            <span className="dashboard-table__trend-item">
+              <span className="dashboard-table__trend-value">
+                {latestCpu != null ? <MonoDigits>{formatPercent(latestCpu)}</MonoDigits> : '—'}
+              </span>
+              {cpu && cpu.length > 0 ? (
+                <Sparkline values={cpu.filter((v): v is number => v != null)} tone={cpuTone} width={64} height={14} />
+              ) : (
+                <span className="dashboard-table__trends-empty">—</span>
+              )}
+            </span>
+            <span className="dashboard-table__trend-item">
+              <span className="dashboard-table__trend-value">
+                {latestMem != null ? <MonoDigits>{formatPercent(latestMem)}</MonoDigits> : '—'}
+              </span>
+              {mem && mem.length > 0 ? (
+                <Sparkline values={mem.filter((v): v is number => v != null)} tone={memTone} width={64} height={14} />
+              ) : (
+                <span className="dashboard-table__trends-empty">—</span>
+              )}
+            </span>
+            <span className="dashboard-table__trend-item">
+              <span className="dashboard-table__trend-value">
+                {latestDisk != null ? <MonoDigits>{formatPercent(latestDisk)}</MonoDigits> : '—'}
+              </span>
+              {disk && disk.length > 0 ? (
+                <Sparkline values={disk.filter((v): v is number => v != null)} tone={diskTone} width={64} height={14} />
+              ) : (
+                <span className="dashboard-table__trends-empty">—</span>
+              )}
+            </span>
+          </span>
+        )
+      },
     },
     {
       key: 'actions',
