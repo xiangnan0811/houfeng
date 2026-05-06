@@ -18,11 +18,20 @@ var (
 
 type HeartbeatPayload = enrollment.HeartbeatPayload
 
+// CommandResult carries the output of an executed pending action back from the agent.
+type CommandResult struct {
+	ActionID string
+	Stdout   string
+	Stderr   string
+	ExitCode int
+}
+
 type Batch struct {
-	NodeID       string
-	SyncToken    string
-	Heartbeats   []HeartbeatPayload
-	Observations observations.BatchWrite
+	NodeID         string
+	SyncToken      string
+	Heartbeats     []HeartbeatPayload
+	Observations   observations.BatchWrite
+	CommandResults []CommandResult
 }
 
 type Result struct {

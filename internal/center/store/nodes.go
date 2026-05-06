@@ -20,6 +20,10 @@ import (
 	"houfeng/internal/center/nodes"
 )
 
+var _ nodes.Repository = (*PostgresNodeRepository)(nil)
+var _ enrollment.Repository = (*PostgresNodeRepository)(nil)
+var _ nodes.OnboardingRepository = (*PostgresNodeRepository)(nil)
+
 type nodeDB interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -60,16 +64,15 @@ const nodeSelectColumns = `
 	last_sync_at,
 	current_active_incident_count,
 	current_primary_issue_summary,
+	pending_action_id,
+	pending_action_command_id,
+	last_action,
 	created_at,
 	updated_at`
 
 type nodeScanner interface {
 	Scan(dest ...any) error
 }
-
-var _ nodes.Repository = (*PostgresNodeRepository)(nil)
-var _ enrollment.Repository = (*PostgresNodeRepository)(nil)
-var _ nodes.OnboardingRepository = (*PostgresNodeRepository)(nil)
 
 const (
 	nodeMonitoringStatusMaintenance = "维护中"
@@ -104,12 +107,16 @@ var nodeSelectColumnNames = []string{
 	"last_sync_at",
 	"current_active_incident_count",
 	"current_primary_issue_summary",
+	"pending_action_id",
+	"pending_action_command_id",
+	"last_action",
 	"created_at",
 	"updated_at",
 }
 
 func scanNode(row nodeScanner) (nodes.Record, error) {
 	var record nodes.Record
+	var pendingActionID, pendingActionCommandID *string
 	if err := row.Scan(
 		&record.NodeID,
 		&record.DisplayName,
@@ -135,12 +142,27 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 		&record.LastSyncAt,
 		&record.CurrentActiveIncidentCount,
 		&record.CurrentPrimaryIssueSummary,
+		&pendingActionID,
+		&pendingActionCommandID,
+		&record.LastActionRaw,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 	); err != nil {
 		return nodes.Record{}, err
 	}
+	record.LastAction = lastActionFromRaw(record.LastActionRaw)
 	return record, nil
+}
+
+func lastActionFromRaw(raw json.RawMessage) *nodes.LastAction {
+	if len(raw) == 0 {
+		return nil
+	}
+	var action nodes.LastAction
+	if err := json.Unmarshal(raw, &action); err != nil {
+		return nil
+	}
+	return &action
 }
 
 func qualifiedNodeSelectColumns(alias string) string {
@@ -164,8 +186,10 @@ func qualifiedNodeSelectColumns(alias string) string {
 
 func scanNodeWithPreviousMonitoringStatus(row nodeScanner) (nodes.Record, string, error) {
 	var (
-		record     nodes.Record
-		priorState string
+		record                 nodes.Record
+		priorState             string
+		pendingActionID        *string
+		pendingActionCommandID *string
 	)
 	if err := row.Scan(
 		&record.NodeID,
@@ -192,12 +216,16 @@ func scanNodeWithPreviousMonitoringStatus(row nodeScanner) (nodes.Record, string
 		&record.LastSyncAt,
 		&record.CurrentActiveIncidentCount,
 		&record.CurrentPrimaryIssueSummary,
+		&pendingActionID,
+		&pendingActionCommandID,
+		&record.LastActionRaw,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 		&priorState,
 	); err != nil {
 		return nodes.Record{}, "", err
 	}
+	record.LastAction = lastActionFromRaw(record.LastActionRaw)
 	return record, priorState, nil
 }
 
@@ -206,6 +234,8 @@ func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
 		record                 nodes.Record
 		hasHostSample          bool
 		hasAcceptedObservation bool
+		pendingActionID        *string
+		pendingActionCommandID *string
 	)
 	if err := row.Scan(
 		&record.NodeID,
@@ -232,6 +262,9 @@ func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
 		&record.LastSyncAt,
 		&record.CurrentActiveIncidentCount,
 		&record.CurrentPrimaryIssueSummary,
+		&pendingActionID,
+		&pendingActionCommandID,
+		&record.LastActionRaw,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 		&hasHostSample,
@@ -239,6 +272,7 @@ func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
 	); err != nil {
 		return nodes.OnboardingState{}, err
 	}
+	record.LastAction = lastActionFromRaw(record.LastActionRaw)
 
 	state := nodes.OnboardingState{
 		Record:                           record,
@@ -1280,6 +1314,60 @@ func (r *PostgresNodeRepository) RecordAcceptedHeartbeats(ctx context.Context, s
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit heartbeat transaction for node %q: %w", nodeID, err)
+	}
+	return nil
+}
+
+// SetPendingAction queues a command for the agent to execute on its next sync.
+// It also clears any previous last_action so the frontend can distinguish
+// "waiting for result" from "has result".
+func (r *PostgresNodeRepository) SetPendingAction(ctx context.Context, nodeID, actionID, commandID string) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE nodes SET pending_action_id = $1, pending_action_command_id = $2, last_action = NULL, updated_at = now() WHERE node_id = $3`,
+		actionID, commandID, nodeID)
+	if err != nil {
+		return fmt.Errorf("set pending action for node %q: %w", nodeID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nodes.ErrNodeNotFound
+	}
+	return nil
+}
+
+// GetPendingAction returns the queued pending action for a node, or empty
+// strings if none is queued.
+func (r *PostgresNodeRepository) GetPendingAction(ctx context.Context, nodeID string) (actionID, commandID string, err error) {
+	err = r.db.QueryRow(ctx,
+		`SELECT pending_action_id, pending_action_command_id FROM nodes WHERE node_id = $1 AND pending_action_id IS NOT NULL`,
+		nodeID).Scan(&actionID, &commandID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("get pending action for node %q: %w", nodeID, err)
+	}
+	return actionID, commandID, nil
+}
+
+// ClearPendingAction removes the queued pending action for a node without
+// storing a result. Used when the action has been dispatched to the agent.
+func (r *PostgresNodeRepository) ClearPendingAction(ctx context.Context, nodeID string) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE nodes SET pending_action_id = NULL, pending_action_command_id = NULL WHERE node_id = $1`,
+		nodeID)
+	if err != nil {
+		return fmt.Errorf("clear pending action for node %q: %w", nodeID, err)
+	}
+	return nil
+}
+
+// StoreActionResult writes the command execution result into the node record.
+func (r *PostgresNodeRepository) StoreActionResult(ctx context.Context, nodeID string, raw []byte) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE nodes SET last_action = $1, updated_at = now() WHERE node_id = $2`,
+		raw, nodeID)
+	if err != nil {
+		return fmt.Errorf("store action result for node %q: %w", nodeID, err)
 	}
 	return nil
 }

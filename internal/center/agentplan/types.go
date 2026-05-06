@@ -17,10 +17,17 @@ type ProbeAssignment struct {
 	Config             json.RawMessage
 }
 
+// PendingAction describes a command the center wants the agent to execute.
+type PendingAction struct {
+	CommandID string
+	ActionID  string
+}
+
 type SyncPlan struct {
 	HostSampleFrequencyTier      string
 	HostSampleMaintenanceContext bool
 	ProbeAssignments             []ProbeAssignment
+	PendingAction                *PendingAction
 }
 
 type Repository interface {

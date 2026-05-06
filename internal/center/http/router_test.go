@@ -151,6 +151,22 @@ func (f *fakeNodeRepository) UpdateNodeMetadata(context.Context, string, nodes.U
 	return nodes.Record{}, nil
 }
 
+func (f *fakeNodeRepository) SetPendingAction(context.Context, string, string, string) error {
+	return nil
+}
+
+func (f *fakeNodeRepository) GetPendingAction(context.Context, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (f *fakeNodeRepository) ClearPendingAction(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeNodeRepository) StoreActionResult(context.Context, string, []byte) error {
+	return nil
+}
+
 func TestRouterDispatchesAgentEndpointsBeforeSPAFallback(t *testing.T) {
 	t.Run("enroll", func(t *testing.T) {
 		var called bool

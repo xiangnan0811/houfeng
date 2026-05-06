@@ -1725,3 +1725,56 @@
   color: var(--text-muted);
   margin: 0 0 var(--space-2);
 }
+
+/* ============== Command picker ============== */
+.command-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.command-picker__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+}
+.command-picker__name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.command-picker__desc {
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+}
+.command-result {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.command-result h4 {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-2) 0;
+}
+.command-output {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 480px;
+  overflow: auto;
+  color: var(--text-primary);
+}
+.command-pending {
+  font-size: var(--type-small-size);
+  color: var(--text-muted);
+  font-style: italic;
+}

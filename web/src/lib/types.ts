@@ -14,8 +14,18 @@ export type NodeRecord = {
   last_sync_at?: string
   current_active_incident_count: number
   current_primary_issue_summary: string
+  last_action?: LastAction | null
   created_at: string
   updated_at: string
+}
+
+export type LastAction = {
+  action_id: string
+  command_id: string
+  status: 'pending' | 'done'
+  stdout?: string
+  stderr?: string
+  exit_code?: number
 }
 
 export type OnboardingPhase =

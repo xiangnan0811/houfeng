@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -39,33 +40,47 @@ var allowedLifecycleStatuses = map[string]struct{}{
 	LifecycleRetired:           {},
 }
 
+// LastAction describes the outcome of the most recent pending action
+// executed on the node. It is nil when no action has ever been requested
+// or when a new pending action is queued (clearing the previous result).
+type LastAction struct {
+	ActionID  string `json:"action_id"`
+	CommandID string `json:"command_id"`
+	Status    string `json:"status"`
+	Stdout    string `json:"stdout,omitempty"`
+	Stderr    string `json:"stderr,omitempty"`
+	ExitCode  int    `json:"exit_code,omitempty"`
+}
+
 type Record struct {
-	NodeID                     string     `json:"node_id"`
-	DisplayName                string     `json:"display_name"`
-	Region                     string     `json:"region"`
-	City                       string     `json:"city"`
-	Provider                   string     `json:"provider"`
-	LifecycleStatus            string     `json:"lifecycle_status"`
-	MonitoringStatus           string     `json:"monitoring_status"`
-	BindingStatus              string     `json:"binding_status"`
-	EnrollmentTokenHash        string     `json:"-"`
-	EnrollmentTokenIssuedAt    *time.Time `json:"-"`
-	SyncTokenHash              string     `json:"-"`
-	BindingFingerprint         string     `json:"-"`
-	BindingEpochStartedAt      *time.Time `json:"-"`
-	PendingBindingFingerprint  string     `json:"-"`
-	PendingBindingFirstSeenAt  *time.Time `json:"-"`
-	PendingBindingLastSeenAt   *time.Time `json:"-"`
-	PendingBindingAttemptCount int        `json:"-"`
-	Labels                     []string   `json:"labels"`
-	Note                       string     `json:"note"`
-	CurrentHealthStatus        string     `json:"current_health_status"`
-	LastHeartbeatAt            *time.Time `json:"last_heartbeat_at,omitempty"`
-	LastSyncAt                 *time.Time `json:"last_sync_at,omitempty"`
-	CurrentActiveIncidentCount int        `json:"current_active_incident_count"`
-	CurrentPrimaryIssueSummary string     `json:"current_primary_issue_summary"`
-	CreatedAt                  time.Time  `json:"created_at"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
+	NodeID                     string          `json:"node_id"`
+	DisplayName                string          `json:"display_name"`
+	Region                     string          `json:"region"`
+	City                       string          `json:"city"`
+	Provider                   string          `json:"provider"`
+	LifecycleStatus            string          `json:"lifecycle_status"`
+	MonitoringStatus           string          `json:"monitoring_status"`
+	BindingStatus              string          `json:"binding_status"`
+	EnrollmentTokenHash        string          `json:"-"`
+	EnrollmentTokenIssuedAt    *time.Time      `json:"-"`
+	SyncTokenHash              string          `json:"-"`
+	BindingFingerprint         string          `json:"-"`
+	BindingEpochStartedAt      *time.Time      `json:"-"`
+	PendingBindingFingerprint  string          `json:"-"`
+	PendingBindingFirstSeenAt  *time.Time      `json:"-"`
+	PendingBindingLastSeenAt   *time.Time      `json:"-"`
+	PendingBindingAttemptCount int             `json:"-"`
+	Labels                     []string        `json:"labels"`
+	Note                       string          `json:"note"`
+	CurrentHealthStatus        string          `json:"current_health_status"`
+	LastHeartbeatAt            *time.Time      `json:"last_heartbeat_at,omitempty"`
+	LastSyncAt                 *time.Time      `json:"last_sync_at,omitempty"`
+	CurrentActiveIncidentCount int             `json:"current_active_incident_count"`
+	CurrentPrimaryIssueSummary string          `json:"current_primary_issue_summary"`
+	LastAction                 *LastAction     `json:"last_action,omitempty"`
+	LastActionRaw              json.RawMessage `json:"-"`
+	CreatedAt                  time.Time       `json:"created_at"`
+	UpdatedAt                  time.Time       `json:"updated_at"`
 }
 
 type CreateInput struct {
@@ -89,6 +104,10 @@ type Repository interface {
 	GetNode(context.Context, string) (Record, error)
 	CreateNode(context.Context, CreateInput) (Record, error)
 	UpdateNodeMetadata(context.Context, string, UpdateMetadataInput) (Record, error)
+	SetPendingAction(context.Context, string, string, string) error
+	GetPendingAction(context.Context, string) (actionID, commandID string, err error)
+	ClearPendingAction(context.Context, string) error
+	StoreActionResult(context.Context, string, []byte) error
 }
 
 type EnrollmentTokenIssue struct {

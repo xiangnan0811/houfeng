@@ -33,6 +33,7 @@ import {
   listHistoricalIncidents,
   listIncidents,
   pauseNodeMonitoring,
+  postNodeAction,
   rejectPendingNodeBinding,
   resetNodeBinding,
   restoreRetiredNodeToObserving,
@@ -159,6 +160,21 @@ function mergeNonMetadataNodeRecord<T extends NodeRecord>(current: NodeRecord, u
   }
 }
 
+const COMMAND_LIST = [
+  { id: 'df_h', name: 'df -h', description: '磁盘使用概览' },
+  { id: 'free_m', name: 'free -m', description: '内存使用情况' },
+  { id: 'uptime', name: 'uptime', description: '系统运行时间与负载' },
+  { id: 'top_head', name: 'top -bn1', description: '进程 CPU/内存排序快照' },
+  { id: 'journalctl_u', name: 'journalctl --lines=50', description: '系统日志最近 50 行' },
+  { id: 'systemctl_status', name: 'systemctl status', description: '所有 systemd unit 状态概览' },
+  { id: 'dmesg_err', name: 'dmesg --level=err', description: '内核错误日志' },
+  { id: 'docker_ps', name: 'docker ps', description: '运行中的 Docker 容器' },
+]
+
+const COMMAND_LABELS: Record<string, string> = Object.fromEntries(
+  COMMAND_LIST.map((c) => [c.id, c.name]),
+)
+
 export function NodeDetailPage() {
   const { nodeId } = useParams()
   return <NodeDetailPageContent key={nodeId ?? 'missing-node'} nodeId={nodeId} />
@@ -200,6 +216,9 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(null)
   const [historyIncidentsLoading, setHistoryIncidentsLoading] = useState(false)
   const [historyIncidentsError, setHistoryIncidentsError] = useState<string | null>(null)
+  const [commandOpen, setCommandOpen] = useState(false)
+  const [commandSubmitting, setCommandSubmitting] = useState(false)
+  const [commandError, setCommandError] = useState<string | null>(null)
   const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d'>('24h')
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
@@ -455,6 +474,35 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       cancelled = true
     }
   }, [nodeId, wantsHistoryIncidents])
+
+  // Poll node data while command drawer is open and a pending action is
+  // in-flight, so the user sees the result without a manual page refresh.
+  useEffect(() => {
+    if (!commandOpen || !nodeId) return
+    if (state.node?.last_action?.status !== 'pending') return
+
+    let cancelled = false
+    const interval = setInterval(() => {
+      if (cancelled) return
+      getNode(nodeId)
+        .then((updated) => {
+          if (cancelled) return
+          setState((prev) =>
+            prev.requestedNodeId === nodeId && prev.node
+              ? { ...prev, node: mergeNonMetadataNodeRecord(prev.node, updated) }
+              : prev,
+          )
+        })
+        .catch(() => {
+          // Silent — polling failures should not surface to the user.
+        })
+    }, 3000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [commandOpen, state.node?.last_action?.status, nodeId])
 
   const missingNodeId = !nodeId
   const isCurrentNode = state.requestedNodeId === nodeId
@@ -743,6 +791,33 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     }
   }
 
+  async function handleCommandExecute(cmdId: string) {
+    if (!node) return
+    const actionNodeId = node.node_id
+    setCommandSubmitting(true)
+    setCommandError(null)
+
+    try {
+      await postNodeAction(actionNodeId, cmdId)
+      // Polling effect will pick up last_action when status='pending'.
+    } catch (error: unknown) {
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
+      setCommandError(describeError(error, '下发命令失败'))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteNodeIdRef.current === actionNodeId
+      ) {
+        setCommandSubmitting(false)
+      }
+    }
+  }
+
   return (
     <div className="page-stack">
       <NodeWatchtowerHeader
@@ -753,6 +828,10 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         onRuntimeAction={(action) => void handleRuntimeAction(action)}
         registerActionRef={registerActionRef}
         onOpenHistory={() => openHistory('events')}
+        onOpenCommands={() => {
+          setCommandOpen(true)
+          setCommandError(null)
+        }}
       />
 
       {showBindingConflict ? (
@@ -1049,6 +1128,73 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
             <p>该节点近期没有触发过被记录的异常。</p>
           </div>
         )}
+      </Drawer>
+
+      <Drawer
+        open={commandOpen}
+        onClose={() => {
+          setCommandOpen(false)
+          setCommandError(null)
+        }}
+        title="执行命令"
+        ariaLabel="执行命令抽屉"
+      >
+        <div className="command-picker">
+          {COMMAND_LIST.map((cmd) => (
+            <button
+              key={cmd.id}
+              className="btn btn--secondary btn--md command-picker__item"
+              disabled={
+                commandSubmitting || node?.last_action?.status === 'pending'
+              }
+              onClick={() => void handleCommandExecute(cmd.id)}
+            >
+              <span className="command-picker__name">{cmd.name}</span>
+              <span className="command-picker__desc">{cmd.description}</span>
+            </button>
+          ))}
+        </div>
+
+        {commandError ? (
+          <p className="watchtower-runtime-error" role="alert">
+            {commandError}
+          </p>
+        ) : null}
+
+        {node?.last_action ? (
+          <div className="command-result">
+            <h4>
+              {COMMAND_LABELS[node.last_action.command_id] ??
+                node.last_action.command_id}
+              {' '}
+              {node.last_action.status === 'pending'
+                ? '· 等待 agent 执行…'
+                : '· 已完成'}
+            </h4>
+            {node.last_action.status === 'done' ? (
+              <pre className="command-output">
+                <code>
+                  {[
+                    node.last_action.stdout ?? '',
+                    node.last_action.stderr
+                      ? `\n\n[stderr]\n${node.last_action.stderr}`
+                      : '',
+                    node.last_action.exit_code !== 0 &&
+                    node.last_action.exit_code != null
+                      ? `\n\nexit code: ${node.last_action.exit_code}`
+                      : '',
+                  ]
+                    .filter(Boolean)
+                    .join('')}
+                </code>
+              </pre>
+            ) : (
+              <p className="command-pending">
+                已下发，等待 agent 执行…（约 30s-60s，取决于 sync 间隔）
+              </p>
+            )}
+          </div>
+        ) : null}
       </Drawer>
     </div>
   )

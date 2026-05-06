@@ -224,6 +224,19 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 		batch.Observations = observationBatch
 	}
 
+	if len(req.CommandResults) > 0 {
+		results := make([]syncing.CommandResult, 0, len(req.CommandResults))
+		for _, cr := range req.CommandResults {
+			results = append(results, syncing.CommandResult{
+				ActionID: cr.ActionID,
+				Stdout:   cr.Stdout,
+				Stderr:   cr.Stderr,
+				ExitCode: cr.ExitCode,
+			})
+		}
+		batch.CommandResults = results
+	}
+
 	return batch
 }
 
@@ -242,9 +255,19 @@ func syncPlanToAPI(plan agentplan.SyncPlan) *agentapi.SyncPlan {
 			Config:             append([]byte(nil), assignment.Config...),
 		})
 	}
-	return &agentapi.SyncPlan{
+
+	apiPlan := &agentapi.SyncPlan{
 		HostSampleFrequencyTier:      plan.HostSampleFrequencyTier,
 		HostSampleMaintenanceContext: plan.HostSampleMaintenanceContext,
 		ProbeAssignments:             assignments,
 	}
+
+	if plan.PendingAction != nil {
+		apiPlan.PendingAction = &agentapi.PendingAction{
+			CommandID: plan.PendingAction.CommandID,
+			ActionID:  plan.PendingAction.ActionID,
+		}
+	}
+
+	return apiPlan
 }

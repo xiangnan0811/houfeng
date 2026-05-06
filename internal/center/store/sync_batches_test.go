@@ -209,6 +209,9 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 			*(dest[0].(*[]string)) = append([]string(nil), f.nodeLabels...)
 			return nil
 		}}
+	case strings.Contains(sql, "pending_action_id"):
+		// Simulate no pending action queued.
+		return fakeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 	case strings.Contains(sql, "from nodes"):
 		return fakeRow{scan: func(dest ...any) error {
 			*(dest[0].(*string)) = f.nodeBindingStatus

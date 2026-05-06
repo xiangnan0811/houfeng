@@ -2954,4 +2954,101 @@ describe('NodeDetailPage', () => {
     )
   })
 
+  // ── Command execution ──
+
+  it('shows 执行命令… button in the watchtower header operations popover', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_cmd',
+              binding_status: '已绑定',
+              monitoring_status: '启用',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_cmd')))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_cmd']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    openRuntimeMenu()
+
+    // The 执行命令… button must render inside the operations popover.
+    expect(screen.getByRole('button', { name: '执行命令…' })).toBeInTheDocument()
+  })
+
+  it('opens command drawer with 8 preset command options', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_cmd2',
+              binding_status: '已绑定',
+              monitoring_status: '启用',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_cmd2')))
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_cmd2']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    // Drawer is closed by default.
+    expect(screen.queryByRole('dialog', { name: '执行命令抽屉' })).not.toBeInTheDocument()
+
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+
+    // Drawer opens.
+    const drawer = await screen.findByRole('dialog', { name: '执行命令抽屉' })
+    expect(drawer).toBeInTheDocument()
+
+    // 8 preset command buttons render.
+    expect(screen.getByRole('button', { name: /df -h/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /free -m/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /uptime/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /top -bn1/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /journalctl --lines=50/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /systemctl status/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /dmesg --level=err/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /docker ps/ })).toBeInTheDocument()
+  })
+
 })

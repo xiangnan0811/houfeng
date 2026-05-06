@@ -26,6 +26,7 @@ type RouterOptions struct {
 	NodeBindingRejectPendingHandler stdhttp.Handler
 	NodeBindingResetHandler         stdhttp.Handler
 	NodeSparklinesHandler           stdhttp.Handler
+	NodeActionsHandler              stdhttp.Handler
 	TargetsCollectionHandler        stdhttp.Handler
 	TargetItemHandler               stdhttp.Handler
 	TargetProbeItemsHandler         stdhttp.Handler
@@ -85,7 +86,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", protect(opts.NodesCollectionHandler))
 	}
-	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil || opts.NodeSparklinesHandler != nil {
+	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil || opts.NodeSparklinesHandler != nil || opts.NodeActionsHandler != nil {
 		mux.Handle("/api/nodes/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			nodeID, subtree := nodeSubtreePath(r.URL.Path)
 			if nodeID == "" && subtree != nodeSubtreeSparklines {
@@ -232,6 +233,7 @@ const (
 	nodeSubtreeBindingRejectPending nodeSubtree = "binding-reject-pending"
 	nodeSubtreeBindingReset         nodeSubtree = "binding-reset"
 	nodeSubtreeSparklines           nodeSubtree = "sparklines"
+	nodeSubtreeActions              nodeSubtree = "actions"
 )
 
 func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
@@ -261,6 +263,9 @@ func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
 	}
 	if segments[1] == "onboarding" && len(segments) == 2 {
 		return segments[0], nodeSubtreeOnboarding
+	}
+	if segments[1] == "actions" && len(segments) == 2 {
+		return segments[0], nodeSubtreeActions
 	}
 	if segments[1] == "enrollment-token" && len(segments) == 2 {
 		return segments[0], nodeSubtreeEnrollmentToken

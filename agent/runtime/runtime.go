@@ -9,6 +9,7 @@ import (
 
 	agentconfig "houfeng/agent/config"
 	"houfeng/agent/enroll"
+	agentexec "houfeng/agent/exec"
 	"houfeng/agent/hostsample"
 	"houfeng/agent/probe"
 	"houfeng/agent/syncqueue"
@@ -76,6 +77,7 @@ type Runtime struct {
 	syncQueue          SyncQueue
 	currentPlan        *agentapi.SyncPlan
 	lastHostSampleAt   time.Time
+	pendingResults     []agentexec.Result
 }
 
 func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSource, fingerprintSource FingerprintSource) *Runtime {
@@ -223,6 +225,17 @@ func (r *Runtime) buildSyncRequest(ctx context.Context, nodeID, syncToken string
 		request.ProbeObservations = append(request.ProbeObservations, probeObservations...)
 	}
 
+	// Flush any pending command results from executed actions.
+	for _, pr := range r.pendingResults {
+		request.CommandResults = append(request.CommandResults, agentapi.CommandResult{
+			ActionID: pr.ActionID,
+			Stdout:   pr.Stdout,
+			Stderr:   pr.Stderr,
+			ExitCode: pr.ExitCode,
+		})
+	}
+	r.pendingResults = nil
+
 	return request
 }
 
@@ -275,6 +288,22 @@ func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, curren
 func (r *Runtime) applySyncPlan(response *agentapi.SyncResponse) {
 	if response != nil && response.Plan != nil {
 		r.currentPlan = cloneSyncPlan(response.Plan)
+
+		// Execute any pending action from the center.
+		if response.Plan.PendingAction != nil {
+			action := response.Plan.PendingAction
+			bin, args, ok := agentexec.Lookup(action.CommandID)
+			if ok {
+				result := agentexec.Run(context.Background(), bin, args)
+				result.ActionID = action.ActionID
+				r.pendingResults = append(r.pendingResults, result)
+			}
+			// Unknown command ID is silently ignored — the center
+			// should not send IDs the agent doesn't know, but we
+			// never block the sync loop on it.
+		}
+	} else {
+		r.currentPlan = nil
 	}
 }
 
@@ -358,6 +387,12 @@ func cloneSyncPlan(plan *agentapi.SyncPlan) *agentapi.SyncPlan {
 		HostSampleFrequencyTier:      plan.HostSampleFrequencyTier,
 		HostSampleMaintenanceContext: plan.HostSampleMaintenanceContext,
 		ProbeAssignments:             make([]agentapi.ProbeAssignment, 0, len(plan.ProbeAssignments)),
+	}
+	if plan.PendingAction != nil {
+		cloned.PendingAction = &agentapi.PendingAction{
+			CommandID: plan.PendingAction.CommandID,
+			ActionID:  plan.PendingAction.ActionID,
+		}
 	}
 	for _, assignment := range plan.ProbeAssignments {
 		var basePort *int

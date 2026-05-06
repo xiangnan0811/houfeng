@@ -577,4 +577,94 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 	}
 }
 
+func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	actionID := "act_001"
+	client := &fakeClient{
+		syncResponses: []agentapi.SyncResponse{
+			{
+				AcceptedAt: time.Now().UTC(),
+				Status:     "accepted",
+				Plan: &agentapi.SyncPlan{
+					HostSampleFrequencyTier: agentapi.FrequencyTier1m,
+					PendingAction: &agentapi.PendingAction{
+						CommandID: "uptime",
+						ActionID:  actionID,
+					},
+				},
+			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+		},
+	}
+
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	defer cancel()
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if client.syncCalls < 2 {
+		t.Fatalf("Sync() calls = %d, want at least 2", client.syncCalls)
+	}
+
+	// First sync gets the plan with pending action; result should appear in
+	// the second sync request.
+	secondSync := client.syncRequests[1]
+	if len(secondSync.CommandResults) == 0 {
+		t.Fatalf("secondSync.CommandResults empty, want at least 1")
+	}
+	cr := secondSync.CommandResults[0]
+	if cr.ActionID != actionID {
+		t.Fatalf("CommandResult.ActionID = %q, want %q", cr.ActionID, actionID)
+	}
+	if cr.ExitCode != 0 {
+		t.Fatalf("CommandResult.ExitCode = %d, want 0 for uptime", cr.ExitCode)
+	}
+	if cr.Stdout == "" {
+		t.Fatal("CommandResult.Stdout is empty, want uptime output")
+	}
+}
+
+func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{
+		syncResponses: []agentapi.SyncResponse{
+			{
+				AcceptedAt: time.Now().UTC(),
+				Status:     "accepted",
+				Plan: &agentapi.SyncPlan{
+					HostSampleFrequencyTier: agentapi.FrequencyTier1m,
+					PendingAction: &agentapi.PendingAction{
+						CommandID: "nonexistent_cmd",
+						ActionID:  "act_bad",
+					},
+				},
+			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+		},
+	}
+
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	defer cancel()
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if client.syncCalls < 2 {
+		t.Fatalf("Sync() calls = %d, want at least 2", client.syncCalls)
+	}
+
+	// Unknown command ID should not produce any command results.
+	secondSync := client.syncRequests[1]
+	if len(secondSync.CommandResults) != 0 {
+		t.Fatalf("secondSync.CommandResults = %d, want 0 for unknown command ID", len(secondSync.CommandResults))
+	}
+}
+
 func intPtr(value int) *int { return &value }

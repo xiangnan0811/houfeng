@@ -56,6 +56,22 @@ func (f *fakeNodeRepository) UpdateNodeMetadata(_ context.Context, nodeID string
 	return f.updateNodeMetadataResult, nil
 }
 
+func (f *fakeNodeRepository) SetPendingAction(context.Context, string, string, string) error {
+	return nil
+}
+
+func (f *fakeNodeRepository) GetPendingAction(context.Context, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (f *fakeNodeRepository) ClearPendingAction(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeNodeRepository) StoreActionResult(context.Context, string, []byte) error {
+	return nil
+}
+
 func TestListNodesHandlerReturnsJSON(t *testing.T) {
 	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
 	repo := &fakeNodeRepository{

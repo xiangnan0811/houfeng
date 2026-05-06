@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/nodes"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
@@ -75,10 +77,23 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 	if err := advanceNodeSyncState(ctx, tx, batch.NodeID, lastHeartbeatAt, receivedAt); err != nil {
 		return syncing.Result{}, err
 	}
+
+	// Dispatch pending action (if any) as part of the SyncPlan.
+	pendingAction, err := dispatchPendingAction(ctx, tx, batch.NodeID)
+	if err != nil {
+		return syncing.Result{}, err
+	}
+
+	// Store command results from the agent.
+	if err := storeCommandResults(ctx, tx, batch); err != nil {
+		return syncing.Result{}, err
+	}
+
 	plan, err := buildSyncPlan(ctx, tx, batch.NodeID)
 	if err != nil {
 		return syncing.Result{}, err
 	}
+	plan.PendingAction = pendingAction
 
 	if err := tx.Commit(ctx); err != nil {
 		return syncing.Result{}, fmt.Errorf("commit sync batch transaction for node %q: %w", batch.NodeID, err)
@@ -252,4 +267,65 @@ func batchWithReceivedAt(batch observations.BatchWrite, receivedAt time.Time) ob
 	}
 
 	return out
+}
+
+// dispatchPendingAction reads and clears the pending action for a node
+// within the sync transaction, returning it so it can be attached to the
+// SyncPlan sent back to the agent.
+func dispatchPendingAction(ctx context.Context, tx syncBatchTx, nodeID string) (*agentplan.PendingAction, error) {
+	var actionID, commandID *string
+	if err := tx.QueryRow(ctx,
+		`SELECT pending_action_id, pending_action_command_id FROM nodes WHERE node_id = $1 AND pending_action_id IS NOT NULL`,
+		nodeID).Scan(&actionID, &commandID); errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("query pending action for node %q: %w", nodeID, err)
+	}
+	if actionID == nil || commandID == nil {
+		return nil, nil
+	}
+
+	// Clear immediately so the action is only dispatched once.
+	if _, err := tx.Exec(ctx,
+		`UPDATE nodes SET pending_action_id = NULL, pending_action_command_id = NULL WHERE node_id = $1`,
+		nodeID); err != nil {
+		return nil, fmt.Errorf("clear pending action for node %q: %w", nodeID, err)
+	}
+
+	return &agentplan.PendingAction{
+		CommandID: *commandID,
+		ActionID:  *actionID,
+	}, nil
+}
+
+// storeCommandResults persists command execution results from the agent
+// into the node's last_action JSONB column.
+func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batch) error {
+	if len(batch.CommandResults) == 0 {
+		return nil
+	}
+
+	// Only the last result is stored (single last_action column).
+	last := batch.CommandResults[len(batch.CommandResults)-1]
+	payload := map[string]interface{}{
+		"action_id":  last.ActionID,
+		"command_id": "",
+		"status":     "done",
+		"stdout":     last.Stdout,
+		"stderr":     last.Stderr,
+		"exit_code":  last.ExitCode,
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal command result for node %q: %w", batch.NodeID, err)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE nodes SET last_action = $1, updated_at = now() WHERE node_id = $2`,
+		raw, batch.NodeID); err != nil {
+		return fmt.Errorf("store command result for node %q: %w", batch.NodeID, err)
+	}
+
+	return nil
 }

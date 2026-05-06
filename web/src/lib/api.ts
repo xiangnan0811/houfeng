@@ -361,6 +361,12 @@ export function listIncidents(filter?: IncidentListFilter) {
  * incidents (the backend currently only retains active rows in
  * `active_incidents`, so the resolved set is forward-compatible).
  */
+export function postNodeAction(nodeId: string, commandId: string) {
+  return postJSONBody<{ action_id: string; status: string }>(`/api/nodes/${nodeId}/actions`, {
+    command_id: commandId,
+  })
+}
+
 export function listHistoricalIncidents(objectType: string, objectId: string) {
   return requestJSON<ActiveIncidentRecord[]>(
     `/api/incidents?object_type=${encodeURIComponent(objectType)}&object_id=${encodeURIComponent(

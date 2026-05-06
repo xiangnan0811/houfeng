@@ -121,12 +121,15 @@ type ProbeObservationPayload struct {
 
 // SyncRequest keeps heartbeat sync as the canonical carrier; host_samples and
 // probe_observations are optional adjunct facts attached to the same sync batch.
+// CommandResults carries back outputs from pending actions that were executed
+// since the last sync.
 type SyncRequest struct {
 	NodeID            string                    `json:"node_id"`
 	SyncToken         string                    `json:"sync_token"`
 	Heartbeats        []NodeHeartbeat           `json:"heartbeats,omitempty"`
 	HostSamples       []HostSamplePayload       `json:"host_samples,omitempty"`
 	ProbeObservations []ProbeObservationPayload `json:"probe_observations,omitempty"`
+	CommandResults    []CommandResult           `json:"command_results,omitempty"`
 }
 
 type ProbeAssignment struct {
@@ -146,6 +149,24 @@ type SyncPlan struct {
 	HostSampleFrequencyTier      string            `json:"host_sample_frequency_tier"`
 	HostSampleMaintenanceContext bool              `json:"host_sample_maintenance_context"`
 	ProbeAssignments             []ProbeAssignment `json:"probe_assignments,omitempty"`
+	PendingAction                *PendingAction    `json:"pending_action,omitempty"`
+}
+
+// PendingAction describes a command the center wants the agent to execute.
+// The agent validates the CommandID against its compiled-in whitelist before
+// running anything.
+type PendingAction struct {
+	CommandID string `json:"command_id"`
+	ActionID  string `json:"action_id"`
+}
+
+// CommandResult carries the output of an executed pending action back to
+// the center in the next SyncRequest.
+type CommandResult struct {
+	ActionID string `json:"action_id"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
 }
 
 type SyncResponse struct {

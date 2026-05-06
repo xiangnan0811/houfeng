@@ -1,0 +1,3 @@
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS pending_action_id TEXT;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS pending_action_command_id TEXT;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_action JSONB;

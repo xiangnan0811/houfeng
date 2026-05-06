@@ -272,8 +272,8 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 					CurrentHealthStatus:        nodes.HealthNormal,
 					LastHeartbeatAt:            &heartbeatAt,
 				})
-				*(dest[26].(*bool)) = true
-				*(dest[27].(*bool)) = false
+				*(dest[29].(*bool)) = true
+				*(dest[30].(*bool)) = false
 				return nil
 			}}
 		},
@@ -333,8 +333,8 @@ func TestNodeOnboardingGetStateScopesEvidenceToCurrentBindingGeneration(t *testi
 					BindingEpochStartedAt: &bindingEpochStartedAt,
 					LastHeartbeatAt:       &staleHeartbeatAt,
 				})
-				*(dest[26].(*bool)) = false
-				*(dest[27].(*bool)) = false
+				*(dest[29].(*bool)) = false
+				*(dest[30].(*bool)) = false
 				return nil
 			}}
 		},
@@ -1199,8 +1199,8 @@ func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
 					}
 					return fakeNodeRow{scan: func(dest ...any) error {
 						scanNodeRecordDestinations(dest, nodes.Record{NodeID: tt.nodeID, MonitoringStatus: tt.returnedStatus})
-						if len(dest) > 26 {
-							*(dest[26].(*string)) = tt.sourceStatus
+						if len(dest) > 29 {
+							*(dest[29].(*string)) = tt.sourceStatus
 						}
 						return nil
 					}}
@@ -1280,7 +1280,7 @@ func TestNodeRuntimeControlResumePreservesNullSafeSelectColumns(t *testing.T) {
 					}
 				}
 				scanNodeRecordDestinations(dest, nodes.Record{NodeID: "nd_resume_nulls", MonitoringStatus: nodes.MonitoringEnabled})
-				*(dest[26].(*string)) = nodeMonitoringStatusMaintenance
+				*(dest[29].(*string)) = nodeMonitoringStatusMaintenance
 				return nil
 			}}
 		},
@@ -1457,8 +1457,12 @@ func scanNodeRecordDestinations(dest []any, record nodes.Record) {
 	*(dest[21].(**time.Time)) = cloneTimePtr(record.LastSyncAt)
 	*(dest[22].(*int)) = record.CurrentActiveIncidentCount
 	*(dest[23].(*string)) = record.CurrentPrimaryIssueSummary
-	*(dest[24].(*time.Time)) = record.CreatedAt
-	*(dest[25].(*time.Time)) = record.UpdatedAt
+	// pending_action_id (24), pending_action_command_id (25), last_action (26)
+	if record.LastAction != nil {
+		*(dest[26].(*[]byte)) = []byte(record.LastActionRaw)
+	}
+	*(dest[27].(*time.Time)) = record.CreatedAt
+	*(dest[28].(*time.Time)) = record.UpdatedAt
 }
 
 func cloneTimePtr(value *time.Time) *time.Time {

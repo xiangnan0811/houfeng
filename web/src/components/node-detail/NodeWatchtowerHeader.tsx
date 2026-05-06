@@ -14,6 +14,7 @@ type Props = {
   onRuntimeAction: (action: NodeRuntimeAction) => void
   registerActionRef: (action: NodeRuntimeAction, element: HTMLButtonElement | null) => void
   onOpenHistory: () => void
+  onOpenCommands: () => void
 }
 
 function locationLine(node: NodeRecord): string {
@@ -29,6 +30,7 @@ export function NodeWatchtowerHeader({
   onRuntimeAction,
   registerActionRef,
   onOpenHistory,
+  onOpenCommands,
 }: Props) {
   const labelText = formatLabelList(node.labels)
   const agentVersion = latestSample?.agent_version || '—'
@@ -71,6 +73,16 @@ export function NodeWatchtowerHeader({
                       {label}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onOpenCommands()
+                    }}
+                  >
+                    执行命令…
+                  </button>
                 </div>
               </details>
             ) : null}
