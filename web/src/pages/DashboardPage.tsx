@@ -14,8 +14,8 @@ import {
 } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
-import { ApiError, getDashboard, listNodeSparklines } from '../lib/api'
-import type { DashboardNodeSummary, DashboardOverview, DashboardTargetSummary, NodeSparklinesResponse } from '../lib/types'
+import { ApiError, getDashboard, listNodeSparklines, listTargetSparklines } from '../lib/api'
+import type { DashboardNodeSummary, DashboardOverview, DashboardTargetSummary, NodeSparklinesResponse, TargetSparklinesResponse } from '../lib/types'
 import { formatPercent } from '../lib/format'
 
 type State = {
@@ -253,6 +253,14 @@ function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
 
 function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) {
   const navigate = useNavigate()
+  const [sparklines, setSparklines] = useState<TargetSparklinesResponse | null>(null)
+
+  useEffect(() => {
+    if (targets.length === 0) return
+    let cancelled = false
+    listTargetSparklines().then(data => { if (!cancelled) setSparklines(data) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [targets.length])
 
   if (targets.length === 0) {
     return (
@@ -289,6 +297,10 @@ function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) 
         <div className="dashboard-table__identity">
           <Hostname className="dashboard-table__id">{hostPortSummary(target)}</Hostname>
           <span className="dashboard-table__display-name">{target.name}</span>
+          <span className="dashboard-table__freshness">
+            最近成功 <Timestamp value={target.last_success_at} mode="relative" />
+            {target.last_failure_at ? <> · 最近失败 <Timestamp value={target.last_failure_at} mode="relative" /></> : null}
+          </span>
         </div>
       ),
     },
@@ -314,11 +326,38 @@ function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) 
       ),
     },
     {
-      key: 'last-success',
-      label: '最近成功',
-      render: (target) => (
-        <Timestamp value={target.last_success_at ?? null} mode="relative" />
-      ),
+      key: 'trends',
+      label: '近 24h',
+      cellClassName: 'dashboard-table__trends',
+      render: (target) => {
+        const series = sparklines?.targets?.[target.target_id]?.latency
+        if (!series) {
+          return <span className="dashboard-table__trends-empty">—</span>
+        }
+        const latest = series.length > 0 ? (series[series.length - 1] ?? null) : null
+
+        const tone: SparklineTone =
+          latest == null ? 'default'
+          : latest <= 10 ? 'accent'
+          : latest <= 200 ? 'notice'
+          : latest <= 1000 ? 'alert'
+          : 'critical'
+
+        return (
+          <span className="dashboard-table__trend-strip">
+            <span className="dashboard-table__trend-item">
+              <span className="dashboard-table__trend-value">
+                {latest != null ? <MonoDigits>{latest.toFixed(1)}ms</MonoDigits> : '—'}
+              </span>
+              {series.length > 0 ? (
+                <Sparkline values={series.filter((v): v is number => v != null)} tone={tone} width={64} height={14} />
+              ) : (
+                <span className="dashboard-table__trends-empty">—</span>
+              )}
+            </span>
+          </span>
+        )
+      },
     },
     {
       key: 'actions',

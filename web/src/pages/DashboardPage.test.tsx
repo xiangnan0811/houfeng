@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { listNodeSparklines } from '../lib/api'
+import { listNodeSparklines, listTargetSparklines } from '../lib/api'
 import { DashboardPage } from './DashboardPage'
 
 const navigateMock = vi.fn()
@@ -19,6 +19,7 @@ vi.mock('../lib/api', async (importOriginal) => {
   return {
     ...actual,
     listNodeSparklines: vi.fn().mockResolvedValue({ nodes: {} }),
+    listTargetSparklines: vi.fn().mockResolvedValue({ targets: {} }),
   }
 })
 
@@ -471,6 +472,120 @@ describe('DashboardPage', () => {
       const trendsCells = document.querySelectorAll('.dashboard-table__trends')
       expect(trendsCells.length).toBeGreaterThanOrEqual(1)
       // Sparkline loads asynchronously; wait until the polyline appears
+      const polylines = trendsCells[0].querySelectorAll('polyline')
+      expect(polylines.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  it('renders freshness timestamp in the abnormal target identity column', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          total_node_count: 5,
+          total_target_count: 4,
+          abnormal_node_count: 0,
+          abnormal_target_count: 1,
+          severe_node_count: 0,
+          severe_target_count: 1,
+          maintenance_node_count: 0,
+          maintenance_target_count: 0,
+          recent_new_incident_count: 0,
+          recent_recovery_count: 0,
+          recent_events: [],
+          abnormal_nodes: [],
+          abnormal_targets: [
+            {
+              target_id: 'tg_001',
+              name: 'Blog',
+              target_type: 'service',
+              host: 'blog.example.com',
+              base_port: 443,
+              run_status: '启用',
+              current_health_status: '严重',
+              last_success_at: '2026-04-25T07:50:00Z',
+              last_failure_at: '2026-04-25T08:09:00Z',
+              current_active_incident_count: 1,
+              current_primary_issue_summary: 'HTTPS 探测连续失败',
+            },
+          ],
+        }),
+      ),
+    )
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    // The freshness row must contain the 成功 label text
+    const freshnessCell = document.querySelector('.dashboard-table__freshness')
+    expect(freshnessCell).not.toBeNull()
+    expect(freshnessCell!.textContent).toContain('成功')
+  })
+
+  it('renders target sparkline SVG polyline in the trends column when latency data is available', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          total_node_count: 5,
+          total_target_count: 4,
+          abnormal_node_count: 0,
+          abnormal_target_count: 1,
+          severe_node_count: 0,
+          severe_target_count: 1,
+          maintenance_node_count: 0,
+          maintenance_target_count: 0,
+          recent_new_incident_count: 0,
+          recent_recovery_count: 0,
+          recent_events: [],
+          abnormal_nodes: [],
+          abnormal_targets: [
+            {
+              target_id: 'tg_001',
+              name: 'Blog',
+              target_type: 'service',
+              host: 'blog.example.com',
+              base_port: 443,
+              run_status: '启用',
+              current_health_status: '严重',
+              last_success_at: '2026-04-25T07:50:00Z',
+              last_failure_at: '2026-04-25T08:09:00Z',
+              current_active_incident_count: 1,
+              current_primary_issue_summary: 'HTTPS 探测连续失败',
+            },
+          ],
+        }),
+      ),
+    )
+
+    // Mock target sparklines with real data so a polyline renders
+    vi.mocked(listTargetSparklines).mockResolvedValue({
+      targets: {
+        tg_001: {
+          latency: [45, 52, 38, 41, 55, 48, 62, 58, 51, 47, 59, 53, 44, 49, 56,
+            50, 46, 54, 60, 57, 52, 48, 55, 50],
+        },
+      },
+    })
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    // The trends column is rendered inside .dashboard-table__trends cells
+    // Wait for sparkline polylines to appear (both node and target sparklines are loaded)
+    await waitFor(() => {
+      const trendsCells = document.querySelectorAll('.dashboard-table__trends')
+      expect(trendsCells.length).toBeGreaterThanOrEqual(1)
       const polylines = trendsCells[0].querySelectorAll('polyline')
       expect(polylines.length).toBeGreaterThanOrEqual(1)
     })
