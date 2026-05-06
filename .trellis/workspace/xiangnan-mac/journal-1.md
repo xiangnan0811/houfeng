@@ -1350,3 +1350,36 @@ Stage 2 Phase 6 完成。新建 FeishuNotifier（POST JSON 到飞书群机器人
 ### Next Steps
 
 - None - task complete
+
+
+## Session 41: Docker 容器信息采集与展示
+
+**Date**: 2026-05-06
+**Task**: Docker 容器信息采集与展示
+**Branch**: `main`
+
+### Summary
+
+Stage 2 Phase 7 完成（最终 Phase）。Agent containersample package：纯 CLI 采集 Docker 信息（docker ps --all + docker stats --no-stream），normalize 为 ContainerInfo{ID,Name,Image,Status,CPUPct,MemPct}。Docker 不可用静默跳过，不 block host sample。HostSamplePayload 加 Containers 字段；host_samples 表加 containers JSONB 列（migration 0015）；全数据流打通（Agent→Contract→Handler→Observations→Store→RuntimeFacts→API→Frontend）。NodeDetailPage ④折叠区加第 4 个 details「容器列表」：DataTable 5 列（StatusGlyph running/exited/other + Hostname + Image + MonoDigits CPU%/Mem%）。394/394 tests（+2）。10 containersample tests。Go 全绿。Stage 2 全 7 Phase 闭环。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5a58769` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
