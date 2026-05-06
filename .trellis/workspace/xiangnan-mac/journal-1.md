@@ -1218,3 +1218,36 @@ Stage 2 Phase 2 完成——候风从'监控工具'质变为'运维工具'。PR1
 ### Next Steps
 
 - None - task complete
+
+
+## Session 37: 视图分组（group 字段）
+
+**Date**: 2026-05-06
+**Task**: 视图分组（group 字段）
+**Branch**: `main`
+
+### Summary
+
+Stage 2 Phase 3 完成。Node / Target 加 group 自由文本字段（migration 0013 + Go models + store scan/INSERT/UPDATE + metadata PATCH 接受 group + 前端 types）。列表页：group 合入 location/identity 列 + Group 筛选 FilterSelect 自动聚合 + 创建/编辑表单含 group 输入。详情页：watchtower header row 2 元数据条加 group + LabelsAndNote 内联编辑支持 group。Dashboard：AbnormalNodeList location 列 + AbnormalTargetList 独立 Group 列 + 新增 '按 Group 分布' DetailSection summary cards（node/target/abnormal 计数按 group 聚合）。390/390 测试（零净增，但 selector 更新多处）。Go 全绿。25 文件 +384 -109。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `321aef9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
