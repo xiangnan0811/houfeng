@@ -1185,3 +1185,36 @@ Stage 2 MVP 第一期完成。PR1 后端：/runtime-facts (node+target) 与 /spa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 36: 远程命令执行（sync-based + whitelist 安全防线）
+
+**Date**: 2026-05-06
+**Task**: 远程命令执行（sync-based + whitelist 安全防线）
+**Branch**: `main`
+
+### Summary
+
+Stage 2 Phase 2 完成——候风从'监控工具'质变为'运维工具'。PR1 Agent：新建 agent/exec/ package——8 命令硬编码白名单（df/free/uptime/top/journalctl/systemctl/dmesg/docker）+ runner（exec.CommandContext 无 Shell + 30s timeout + 64KB output cap）+ runtime applySyncPlan 执行 PendingAction + buildSyncRequest 回传 CommandResult。白名单是唯一闸门——未知 commandID 静默忽略。agentapi types SyncPlan/SyncRequest 扩展字段向后兼容。9 agent/exec tests + 2 runtime tests。PR2 Center：POST /api/nodes/{id}/actions handler（验证节点存在+agent 已绑定+非暂停态）+ DB migration 0012 加 3 nullable columns（pending_action_id/pending_action_command_id/last_action JSONB）+ syncing pipeline ApplyBatch 同事务下发+清除（exactly-once）+ CommandResult 存储 last_action + NodeRecord 前后端类型同步 + router bootstrap wiring。PR3 Frontend：watchtower popover 加「执行命令…」→ Drawer 命令列表 8 按钮 + 执行 + 结果 pre code 渲染 stdout/stderr/exit_code + 3s polling 等待 agent 执行完成。390/390 tests（+2）。Go 全绿（agent/exec 9 + runtime 12 + handler/store/router 通过）。migration 编译验证。26 文件 +1116 -47。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `de2a718` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

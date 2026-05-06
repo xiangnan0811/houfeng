@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 35
+- **Total Sessions**: 36
 - **Last Active**: 2026-05-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1187 | Active |
+| `journal-1.md` | ~1220 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 36 | 2026-05-06 | 远程命令执行（sync-based + whitelist 安全防线） | `de2a718` | `main` |
 | 35 | 2026-05-06 | Stage 2 历史数据突破 24h 窗口（7d/30d 时间选择器） | `2665cdf` | `main` |
 | 34 | 2026-05-06 | Dashboard AbnormalTargetList watchtower 对齐 | `4ed7407` | `main` |
 | 33 | 2026-05-06 | Targets 全栈 watchtower 改造（核心二阶段） | `65500b5` | `main` |
