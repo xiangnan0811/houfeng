@@ -39,11 +39,13 @@ HOUFENG_HTTP_ADDR=:8080
 HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
 HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+HOUFENG_INITIAL_USERNAME=admin
+HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
 HOUFENG_TELEGRAM_BOT_TOKEN=
 HOUFENG_TELEGRAM_CHAT_ID=
 ```
 
-`HOUFENG_DATABASE_URL` is required. Telegram is disabled unless both Telegram values are set.
+`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, and `HOUFENG_INITIAL_PASSWORD` are required. Telegram is disabled unless both Telegram values are set. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
 
 > ⚠️ `HOUFENG_WEB_DIST_DIR` 必须设置——否则 center `/` 返回 404，SPA 不可访问。生产部署应指向 `web/dist`。
 
@@ -53,6 +55,8 @@ HOUFENG_TELEGRAM_CHAT_ID=
 export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
+export HOUFENG_INITIAL_USERNAME=admin
+export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
 make build-center
 ./bin/houfeng-center
 ```
@@ -104,6 +108,8 @@ HOUFENG_HTTP_ADDR=:8080
 HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
 HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+HOUFENG_INITIAL_USERNAME=admin
+HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
 HOUFENG_TELEGRAM_BOT_TOKEN=
 HOUFENG_TELEGRAM_CHAT_ID=
 EOF

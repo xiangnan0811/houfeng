@@ -33,6 +33,8 @@ Required environment:
 export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
+export HOUFENG_INITIAL_USERNAME=admin
+export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
 ```
 
 Run the center and agent in separate terminals, or use the background commands below from one shell. If using the background form, stop both processes at the end with `kill "$CENTER_PID" "$AGENT_PID"` after `AGENT_PID` has been set.
@@ -60,13 +62,34 @@ curl -fsS http://127.0.0.1:8080/api/healthz
 
 Expected: HTTP 200 JSON response containing service/version health metadata.
 
+## Step 0: Login and keep a session cookie
+
+All `/api/*` routes except `/api/healthz` and `/api/agent/*` require the
+session cookie. Log in once and reuse the cookie jar for every protected center
+API call below.
+
+```bash
+COOKIE_JAR=/tmp/houfeng-smoke-cookie.txt
+curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST http://127.0.0.1:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "username": "'"$HOUFENG_INITIAL_USERNAME"'",
+    "password": "'"$HOUFENG_INITIAL_PASSWORD"'"
+  }'
+```
+
+Expected: HTTP 200 JSON response with the current user and a `houfeng_session`
+cookie in `$COOKIE_JAR`.
+
 ## Step 1: Create a Node
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8080/api/nodes \
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/nodes \
   -H 'Content-Type: application/json' \
   -d '{
     "display_name": "smoke-node-01",
+    "group": "smoke",
     "provider": "local",
     "region": "local",
     "city": "local",
@@ -80,7 +103,7 @@ Record the returned `node_id`.
 ## Step 2: Issue an enrollment token
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8080/api/nodes/<node_id>/enrollment-token
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/nodes/<node_id>/enrollment-token
 ```
 
 Record the returned plaintext token once (响应键名实际为 `token`，不是 `plaintext_token`). Store it for the local agent:
@@ -110,14 +133,14 @@ Expected:
 Check:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/api/nodes/<node_id>/onboarding
-curl -fsS http://127.0.0.1:8080/api/nodes/<node_id>/runtime-facts
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/nodes/<node_id>/onboarding
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/nodes/<node_id>/runtime-facts
 ```
 
 ## Step 4: Create a Target
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8080/api/targets \
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "smoke-target-localhost",
@@ -125,6 +148,7 @@ curl -fsS -X POST http://127.0.0.1:8080/api/targets \
     "host": "127.0.0.1",
     "base_port": 8080,
     "run_status": "启用",
+    "group": "smoke",
     "labels": ["smoke", "v1"],
     "execution_node_labels": ["smoke"],
     "note": "V1 smoke target"
@@ -136,7 +160,7 @@ Record the returned `target_id`.
 ## Step 5: Add a ProbeItem
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8080/api/targets/<target_id>/probe-items \
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets/<target_id>/probe-items \
   -H 'Content-Type: application/json' \
   -d '{
     "probe_kind": "http",
@@ -157,7 +181,7 @@ Expected: the target detail page and runtime facts eventually show probe observa
 Check:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/api/targets/<target_id>/runtime-facts
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/targets/<target_id>/runtime-facts
 ```
 
 ## Step 6: Trigger an incident
@@ -167,8 +191,8 @@ One safe local method is to change the ProbeItem to a failing path or stop the s
 Check active incidents:
 
 ```bash
-curl -fsS 'http://127.0.0.1:8080/api/incidents?object_type=target&object_id=<target_id>&limit=10'
-curl -fsS 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&event_type=incident_started&limit=10'
+curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/incidents?object_type=target&object_id=<target_id>&limit=10'
+curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&event_type=incident_started&limit=10'
 ```
 
 Expected:
@@ -182,8 +206,8 @@ Expected:
 Restore the ProbeItem or checked service, wait for successful observations and the incident sweep interval, then check:
 
 ```bash
-curl -fsS 'http://127.0.0.1:8080/api/incidents?object_type=target&object_id=<target_id>&limit=10'
-curl -fsS 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&event_type=incident_recovered&limit=10'
+curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/incidents?object_type=target&object_id=<target_id>&limit=10'
+curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&event_type=incident_recovered&limit=10'
 ```
 
 Expected:
@@ -197,7 +221,7 @@ Expected:
 Notification-backed event records are visible through the event surface whenever an incident transition created a `notification_records` row. This includes sent, failed, and policy-suppressed notification records; `notification_only=true` does not mean “Telegram send succeeded”.
 
 ```bash
-curl -fsS 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&notification_only=true&limit=10'
+curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&notification_only=true&limit=10'
 ```
 
 Expected:
@@ -235,7 +259,7 @@ Open `http://127.0.0.1:8080/` and check:
 | incident recovered | Local PostgreSQL required | Active incident count returned to `0`; recovered event `evt_b7416f1f3da1f506` |
 | notification-backed event query checked | Local PostgreSQL / Telegram policy dependent | `notification_only=true` returned 2 event rows for the incident start/recovery transitions |
 | Telegram notification sent or intentionally disabled | Manual / Telegram required | Telegram env vars were intentionally empty for this smoke; outbound Telegram delivery was not attempted |
-| primary UI pages checked | Manual | Not checked in browser during this live PostgreSQL run; screenshot/visual evidence remains tracked in `docs/operations/v1-visual-verification.md` |
+| primary UI pages checked | Manual | Not checked in browser during this live PostgreSQL run; current v2 screenshot evidence is kept directly under `docs/operations/*.jpg` |
 
 ### 2026-05-02 Run Evidence
 

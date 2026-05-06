@@ -369,8 +369,8 @@ light 主题不是次要主题。它必须独立打磨到同等可用：
 ## 14. 文档导航
 
 - [`component-spec.md`](./component-spec.md) — 每个原语 / atom / 共享组件 / 页面壳的视觉契约
-- [v1-baseline 已被 v2 取代](../v1-baseline/README.md) — 仅保留架构 / 数据模型 / 交互规则等结构层
-- [v1.x-frontend-redesign 已被 v2 取代](../v1.x-frontend-redesign/README.md) — 历史
+- [v1-baseline 已被 v2 取代](../v1-baseline/README.md) — active 路径仅保留架构 / 数据模型 / 交互规则等结构层；视觉历史在 `docs/_archive/design/v1-baseline/`
+- [v1.x-frontend-redesign 已被 v2 取代](../../_archive/design/v1.x-frontend-redesign/README.md) — 历史
 
 ## 15. 一句话
 

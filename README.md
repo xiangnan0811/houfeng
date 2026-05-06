@@ -52,7 +52,7 @@ V1 业务结构 frozen 在 v1-baseline 的 4 份子集（加 README，共 5 份�
 - docs 审计与 archive 决策：`docs/release/docs-audit.md`
 - 下一阶段开发计划（Stage 1/2/3）：`docs/release/next-phase-plan.md`
 
-注：早期 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，已迁至 `docs/_archive/operations/`。v2 视觉证据流程待 V1 收口后另议（参考 `next-phase-plan.md` Stage 1 P2 段）。
+注：早期 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，已迁至 `docs/_archive/operations/`。当前已有一次性 v2 截图证据直接存放在 `docs/operations/*.jpg`；正式、可重复的 v2 视觉证据流程仍待后续建立。
 
 Automated verification:
 

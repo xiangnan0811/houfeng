@@ -65,7 +65,7 @@ The center also serves the built React SPA from `HOUFENG_WEB_DIST_DIR` (handler 
 
 See `.env.example` and `docs/deploy/local-and-systemd.md`. Required at minimum:
 
-- Center: `HOUFENG_HTTP_ADDR`, `HOUFENG_DATABASE_URL`, `HOUFENG_WEB_DIST_DIR`, `HOUFENG_INCIDENT_SWEEP_INTERVAL`. Telegram is disabled unless **both** `HOUFENG_TELEGRAM_BOT_TOKEN` and `HOUFENG_TELEGRAM_CHAT_ID` are set; runtime overrides via `center_settings` table can switch to runtime-managed Telegram (`telegram_runtime_managed`).
+- Center: `HOUFENG_HTTP_ADDR`, `HOUFENG_DATABASE_URL`, `HOUFENG_WEB_DIST_DIR`, `HOUFENG_INCIDENT_SWEEP_INTERVAL`, `HOUFENG_INITIAL_USERNAME`, `HOUFENG_INITIAL_PASSWORD`. Telegram is disabled unless **both** `HOUFENG_TELEGRAM_BOT_TOKEN` and `HOUFENG_TELEGRAM_CHAT_ID` are set; runtime overrides via `center_settings` table can switch to runtime-managed Telegram (`telegram_runtime_managed`). Initial username/password seed the first admin user when the users table is empty, but the env vars are still required by config load.
 - Agent: `HOUFENG_AGENT_SERVER_URL`, `HOUFENG_AGENT_TOKEN_FILE`, `HOUFENG_AGENT_BUFFER_FILE`, `HOUFENG_AGENT_BUFFER_MAX_ENTRIES`, `HOUFENG_AGENT_BUFFER_MAX_AGE`. Token file must contain an enrollment token issued from the Node onboarding flow.
 
 ## Backend architecture (`internal/center/`)
@@ -99,17 +99,18 @@ When adding a new endpoint: add the handler in `http/handlers/`, register it in 
 - `token/` — file-backed token source.
 - `fingerprint/` — host identity.
 - `enroll/` — first-run enrollment against `/api/agent/enroll`.
-- `hostsample/`, `probe/` — collection and probe execution (TCP/HTTP/TLS).
+- `hostsample/`, `probe/`, `containersample/` — host collection, probe execution (TCP/HTTP/TLS), and opportunistic Docker container facts when the local `docker` CLI is available.
+- `exec/` — compiled-in whitelist for node actions; the center sends `command_id`, and the agent maps it to fixed binary/args without accepting user-supplied shell text.
 - `syncqueue/` — durable on-disk buffer (single JSON file at `HOUFENG_AGENT_BUFFER_FILE`, bounded by `MAX_ENTRIES` and `MAX_AGE`). Stays pure-Go; no embedded DB.
 - `runtime/` — main loop: collect → buffer → sync to `/api/agent/sync` → apply returned plan.
 
-Agents must remain "thin": observe, buffer, sync, fetch plan. They do not run arbitrary scripts, run Docker, or evaluate rules locally — all interpretation happens in the center.
+Agents must remain "thin": observe, buffer, sync, fetch plan, and apply center-issued plans. They must not accept arbitrary scripts, user-supplied command args, or local rule evaluation. Current exceptions are intentionally bounded but still early: whitelisted node actions (`agent/exec`) and best-effort Docker CLI sampling (`agent/containersample`). Command-result durability, channel/audit semantics, and the product boundary for these post-V1 surfaces remain tracked follow-ups, not closed V1 guarantees.
 
 ## Frontend (`web/`)
 
 React 19 + TypeScript + Vite SPA, Vitest + jsdom for tests, ESLint flat config. Routing in `src/app/router.tsx`, layout shell in `src/app/layout/`, page components in `src/pages/` (one `*.tsx` + colocated `*.test.tsx` per page), shared atoms in `src/components/atoms/`, composite components in `src/components/`, API client + types + formatters in `src/lib/`.
 
-Atoms (`web/src/components/atoms/`): `Badge` / `Button` / `Card` / `Input` / `Toggle` / `Tabs` / `Sparkline` (SVG 64×16 mini chart) / `TrendArrow` / `StatusGlyph` (6-state shape indicator) / `Mono` (`MonoDigits` / `Hostname` / `Timestamp`) / `DataTable` (compact 36px / standard 44px) / `MetricChart` (SVG 360×140 full chart — X/Y axes, thresholds, maintenance windows, crosshair tooltip) / `Drawer` (right/left slide-in panel, portal + ESC) / `Stepper` (horizontal 4-step progress bar). All pure CSS + BEM + design tokens; no Tailwind / CSS-in-JS / chart library introduced (per `design-language.md` §12).
+Atoms (`web/src/components/atoms/`): `Badge` / `Button` / `Card` / `Input` / `Toggle` / `Tabs` / `Sparkline` (SVG 64×16 mini chart) / `TrendArrow` / `StatusGlyph` (6-state shape indicator) / `Mono` (`MonoDigits` / `Hostname` / `Timestamp`) / `DataTable` (compact 36px / standard 44px) / `MetricChart` (SVG 360×140 full chart — X/Y axes, thresholds, maintenance windows, crosshair tooltip) / `Drawer` (right/left slide-in panel, fixed-position inline render + overlay + ESC; portal/focus-trap hardening is still a follow-up) / `Stepper` (horizontal 4-step progress bar). All pure CSS + BEM + design tokens; no Tailwind / CSS-in-JS / chart library introduced (per `design-language.md` §12).
 
 Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-houfeng/component-spec.md`. v2-houfeng has superseded the earlier v1-baseline visual sections (`ui-ux-spec`, `baseline-screens`, `visual-review-round2`, `stitch/*`) and the entire `v1.x-frontend-redesign/` package. Those historical materials have been moved to `docs/_archive/design/` and are kept for traceability only — do not regress to them. Dark-first, Chinese as the primary UI language, high-density engineering-tool feel.
 
@@ -124,6 +125,6 @@ V1 收口期间的运维与发布证据：
 - `docs/release/next-phase-plan.md` — 下一阶段开发计划（Stage 1 V1 收口 / Stage 2 post-V1 → MVP / Stage 3+ 远期）.
 - `docs/deploy/local-and-systemd.md` 与 `docs/deploy/systemd/*.service` — canonical 部署 recipe.
 
-注：早期的 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，stitch 已 archive 后这两份也已迁至 `docs/_archive/operations/`，仅作历史记录。v2 视觉证据收集流程待 V1 收口后另议（参考 `docs/release/next-phase-plan.md` Stage 1 P2 段）。
+注：早期的 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，stitch 已 archive 后这两份也已迁至 `docs/_archive/operations/`，仅作历史记录。当前已有一次性 v2 截图证据直接存放在 `docs/operations/*.jpg`；正式、可重复的 v2 视觉证据收集流程仍待后续建立。
 
 When changing user-visible behavior, first record the gap in `docs/release/v1-gap-checklist.md` and consult `docs/release/next-phase-plan.md` for prioritization, rather than editing the frozen baseline docs.

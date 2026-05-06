@@ -104,7 +104,7 @@ parent: docs/design/v2-houfeng/design-language.md
 
 ### Drawer
 - 右侧/左侧滑入面板（`side: 'right'|'left'`，default `'right'`，width `min(440px, 40vw)`）
-- React portal + ESC 关闭 + overlay 点击关闭 + `aria-modal="true"`
+- 当前实现：fixed-position inline render + ESC 关闭 + overlay 点击关闭 + `aria-modal="true"`；React portal、初始焦点、Tab containment、触发器焦点恢复仍是可访问性 hardening follow-up，未在本轮视为已完成
 - header：title + × 关闭按钮 / body：scroll-y auto
 - 类名：`.drawer-overlay` `.drawer` `.drawer--right/--left` `.drawer--open`
 
@@ -301,4 +301,4 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
 ## 六、文档导航
 
 - 上层：[design-language.md](./design-language.md)
-- 旧版：[v1-baseline/ui-ux-spec.md](../v1-baseline/ui-ux-spec.md)（仅参考）
+- 旧版：[v1-baseline/ui-ux-spec.md](../../_archive/design/v1-baseline/ui-ux-spec.md)（仅历史参考）
