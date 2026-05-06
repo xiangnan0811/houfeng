@@ -159,6 +159,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.NodeSparklinesHandler.ServeHTTP(w, r)
+			case nodeSubtreeActions:
+				if opts.NodeActionsHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeActionsHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}

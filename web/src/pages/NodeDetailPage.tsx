@@ -1110,9 +1110,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
                   key: 'image',
                   label: 'Image',
                   render: (c: ContainerInfo) => (
-                    <span style={{ fontSize: 'var(--fs-sm)', wordBreak: 'break-all' }}>
-                      {c.image}
-                    </span>
+                    <span className="watchtower-container-image">{c.image}</span>
                   ),
                 },
                 {

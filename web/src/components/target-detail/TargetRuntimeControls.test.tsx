@@ -12,6 +12,7 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
     host: 'blog.example.com',
     execution_node_labels: [],
     run_status: '启用',
+    group: '',
     labels: [],
     note: '',
     current_health_status: '正常',

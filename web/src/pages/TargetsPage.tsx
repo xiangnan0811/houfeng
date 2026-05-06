@@ -755,12 +755,16 @@ export function TargetsPage() {
     {
       key: 'host',
       label: 'Host',
-      render: (target) => (
-        <Hostname>
-          {target.base_port ? `${target.host}:${target.base_port}` : target.host}
-          {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
-        </Hostname>
-      ),
+      render: (target) => {
+        const hostDisplay = target.base_port ? `${target.host}:${target.base_port}` : target.host
+
+        return (
+          <span className="targets-table__host">
+            {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
+            <Hostname>{hostDisplay}</Hostname>
+          </span>
+        )
+      },
     },
     {
       key: 'labels',

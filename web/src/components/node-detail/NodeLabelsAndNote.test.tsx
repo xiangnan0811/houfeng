@@ -8,6 +8,7 @@ function nodeRecord(overrides: Partial<NodeRecord> = {}): NodeRecord {
   return {
     node_id: 'nd_001',
     display_name: 'Tokyo Edge',
+    group: 'edge-group',
     region: 'ap-northeast-1',
     city: 'Tokyo',
     provider: 'Vultr',
@@ -26,6 +27,7 @@ function nodeRecord(overrides: Partial<NodeRecord> = {}): NodeRecord {
 }
 
 const noopHandlers = {
+  onGroupDraftChange: () => {},
   onLabelDraftChange: () => {},
   onNoteDraftChange: () => {},
   onStartEdit: () => {},
@@ -39,6 +41,7 @@ describe('NodeLabelsAndNote', () => {
       <NodeLabelsAndNote
         node={nodeRecord()}
         editing={false}
+        groupDraft=""
         labelDraft=""
         noteDraft=""
         submitting={false}
@@ -58,6 +61,7 @@ describe('NodeLabelsAndNote', () => {
       <NodeLabelsAndNote
         node={nodeRecord({ note: '' })}
         editing={false}
+        groupDraft=""
         labelDraft=""
         noteDraft=""
         submitting={false}
@@ -75,6 +79,7 @@ describe('NodeLabelsAndNote', () => {
       <NodeLabelsAndNote
         node={nodeRecord()}
         editing
+        groupDraft="edge-group"
         labelDraft="edge"
         noteDraft="hello"
         submitting={false}
@@ -85,6 +90,7 @@ describe('NodeLabelsAndNote', () => {
     )
 
     expect(screen.getByRole('textbox', { name: '标签' })).toHaveValue('edge')
+    expect(screen.getByRole('textbox', { name: 'Group' })).toHaveValue('edge-group')
     expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('hello')
     fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
     expect(onSave).toHaveBeenCalledTimes(1)
@@ -95,6 +101,7 @@ describe('NodeLabelsAndNote', () => {
       <NodeLabelsAndNote
         node={nodeRecord()}
         editing
+        groupDraft=""
         labelDraft=""
         noteDraft=""
         submitting={false}

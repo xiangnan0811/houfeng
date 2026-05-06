@@ -219,6 +219,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.NodeSparklinesHandler == nil {
 		t.Fatal("router node sparklines handler = nil, want non-nil")
 	}
+	if gotOpts.NodeActionsHandler == nil {
+		t.Fatal("router node actions handler = nil, want non-nil")
+	}
 	if gotOpts.TargetsCollectionHandler == nil {
 		t.Fatal("router targets collection handler = nil, want non-nil")
 	}

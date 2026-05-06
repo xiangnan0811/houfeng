@@ -21,6 +21,8 @@ type fakeClient struct {
 	forceEmptySyncToken bool
 	syncResponses       []agentapi.SyncResponse
 	syncErrs            []error
+	cancelAfterSyncs    int
+	cancel              context.CancelFunc
 
 	lastEnroll   agentapi.EnrollmentRequest
 	lastSync     agentapi.SyncRequest
@@ -53,6 +55,10 @@ func (f *fakeClient) Sync(_ context.Context, request agentapi.SyncRequest) (*age
 	f.syncCalls++
 	f.lastSync = request
 	f.syncRequests = append(f.syncRequests, request)
+	if f.cancel != nil && f.cancelAfterSyncs > 0 && f.syncCalls >= f.cancelAfterSyncs {
+		f.cancel()
+		f.cancel = nil
+	}
 	if len(f.syncErrs) >= f.syncCalls && f.syncErrs[f.syncCalls-1] != nil {
 		return nil, f.syncErrs[f.syncCalls-1]
 	}
@@ -175,6 +181,25 @@ func (f *fakeSyncQueue) MarkAttempt(_ context.Context, id string) error {
 
 func (f *fakeSyncQueue) Prune(context.Context) error {
 	return f.pruneErr
+}
+
+type cancelAfterDeleteQueue struct {
+	*syncqueue.FileStore
+	afterDeletes int
+	cancel       context.CancelFunc
+	deleteCalls  int
+}
+
+func (q *cancelAfterDeleteQueue) Delete(ctx context.Context, id string) error {
+	if err := q.FileStore.Delete(ctx, id); err != nil {
+		return err
+	}
+	q.deleteCalls++
+	if q.cancel != nil && q.deleteCalls >= q.afterDeletes {
+		q.cancel()
+		q.cancel = nil
+	}
+	return nil
 }
 
 func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
@@ -399,7 +424,11 @@ func TestRuntimeLogsHostSampleFailureAndContinuesHeartbeatSync(t *testing.T) {
 
 func TestRuntimeReplacesCurrentPlanWithExplicitEmptyPlan(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
 	client := &fakeClient{
+		cancelAfterSyncs: 3,
+		cancel:           cancel,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -447,9 +476,6 @@ func TestRuntimeReplacesCurrentPlanWithExplicitEmptyPlan(t *testing.T) {
 
 	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Millisecond)
-	defer cancel()
-
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -474,17 +500,22 @@ func TestRuntimeQueuesFailedSyncAndRetriesAsBackfilled(t *testing.T) {
 			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 		},
 	}
-	store := syncqueue.NewFileStore(t.TempDir()+"/buffer.json", syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	fileStore := syncqueue.NewFileStore(t.TempDir()+"/buffer.json", syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	store := &cancelAfterDeleteQueue{
+		FileStore:    fileStore,
+		afterDeletes: 3,
+		cancel:       cancel,
+	}
 	hostProvider := &fakeHostSampleProvider{result: agentapi.HostSamplePayload{CPUUsagePct: 12.5}}
 	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, &fakeProbeProvider{}, 10*time.Millisecond, store)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Millisecond)
-	defer cancel()
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if client.syncCalls < 3 {
-		t.Fatalf("syncCalls = %d, want at least 3", client.syncCalls)
+	if client.syncCalls < 4 {
+		t.Fatalf("syncCalls = %d, want at least 4", client.syncCalls)
 	}
 	var retried *agentapi.SyncRequest
 	for i := range client.syncRequests {

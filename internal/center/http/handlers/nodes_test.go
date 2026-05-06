@@ -22,6 +22,10 @@ type fakeNodeRepository struct {
 	createNodeResult         nodes.Record
 	createNodeErr            error
 	createNodeInput          nodes.CreateInput
+	setPendingActionErr      error
+	setPendingActionNodeID   string
+	setPendingActionID       string
+	setPendingActionCommand  string
 	updateNodeMetadataResult nodes.Record
 	updateNodeMetadataErr    error
 	updateNodeMetadataID     string
@@ -56,8 +60,11 @@ func (f *fakeNodeRepository) UpdateNodeMetadata(_ context.Context, nodeID string
 	return f.updateNodeMetadataResult, nil
 }
 
-func (f *fakeNodeRepository) SetPendingAction(context.Context, string, string, string) error {
-	return nil
+func (f *fakeNodeRepository) SetPendingAction(_ context.Context, nodeID, actionID, commandID string) error {
+	f.setPendingActionNodeID = nodeID
+	f.setPendingActionID = actionID
+	f.setPendingActionCommand = commandID
+	return f.setPendingActionErr
 }
 
 func (f *fakeNodeRepository) GetPendingAction(context.Context, string) (string, string, error) {
@@ -229,6 +236,149 @@ func TestNodeItemRejectsDeeperPaths(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+}
+
+func TestNodeActionsQueuesPendingAction(t *testing.T) {
+	repo := &fakeNodeRepository{
+		getNodeResult: nodes.Record{
+			NodeID:           "nd_001",
+			BindingStatus:    nodes.BindingBound,
+			MonitoringStatus: nodes.MonitoringEnabled,
+		},
+	}
+
+	handler := handlers.NodeActions(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.setPendingActionNodeID != "nd_001" {
+		t.Fatalf("queued node id = %q, want nd_001", repo.setPendingActionNodeID)
+	}
+	if repo.setPendingActionID == "" {
+		t.Fatal("queued action id = empty, want generated id")
+	}
+	if repo.setPendingActionCommand != "systemd_status" {
+		t.Fatalf("queued command = %q, want systemd_status", repo.setPendingActionCommand)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body["status"] != "pending" || body["action_id"] == "" {
+		t.Fatalf("body = %#v, want pending action response", body)
+	}
+}
+
+func TestNodeActionsRejectsInvalidBody(t *testing.T) {
+	handler := handlers.NodeActions(&fakeNodeRepository{})
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/actions", strings.NewReader(`{}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestNodeActionsReturnsNotFoundForUnknownNode(t *testing.T) {
+	repo := &fakeNodeRepository{getNodeErr: nodes.ErrNodeNotFound}
+	handler := handlers.NodeActions(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+	if repo.setPendingActionID != "" {
+		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionID)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body["error"] != "node not found" {
+		t.Fatalf("error = %q, want node not found", body["error"])
+	}
+}
+
+func TestNodeActionsReturnsInternalErrorForRepositoryFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		repo *fakeNodeRepository
+	}{
+		{
+			name: "get node",
+			repo: &fakeNodeRepository{getNodeErr: errors.New("lookup failed")},
+		},
+		{
+			name: "set pending action",
+			repo: &fakeNodeRepository{
+				getNodeResult: nodes.Record{
+					NodeID:           "nd_001",
+					BindingStatus:    nodes.BindingBound,
+					MonitoringStatus: nodes.MonitoringEnabled,
+				},
+				setPendingActionErr: errors.New("queue failed"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := handlers.NodeActions(tt.repo)
+			req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+			}
+		})
+	}
+}
+
+func TestNodeActionsRejectsUnavailableNodeStates(t *testing.T) {
+	tests := []struct {
+		name string
+		node nodes.Record
+	}{
+		{
+			name: "unbound",
+			node: nodes.Record{NodeID: "nd_001", BindingStatus: nodes.BindingUnbound, MonitoringStatus: nodes.MonitoringEnabled},
+		},
+		{
+			name: "paused",
+			node: nodes.Record{NodeID: "nd_001", BindingStatus: nodes.BindingBound, MonitoringStatus: nodes.MonitoringPaused},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeNodeRepository{getNodeResult: tt.node}
+			handler := handlers.NodeActions(repo)
+			req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+			}
+			if repo.setPendingActionID != "" {
+				t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionID)
+			}
+		})
 	}
 }
 

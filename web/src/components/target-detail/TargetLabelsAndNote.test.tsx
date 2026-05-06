@@ -12,6 +12,7 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
     host: 'blog.example.com',
     execution_node_labels: [],
     run_status: '启用',
+    group: 'prod-group',
     labels: ['公开', '生产'],
     note: '现网入口',
     current_health_status: '正常',
@@ -24,6 +25,7 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
 }
 
 const noopHandlers = {
+  onGroupDraftChange: () => {},
   onLabelDraftChange: () => {},
   onNoteDraftChange: () => {},
   onStartEdit: () => {},
@@ -37,6 +39,7 @@ describe('TargetLabelsAndNote', () => {
       <TargetLabelsAndNote
         target={targetRecord()}
         editing={false}
+        groupDraft=""
         labelDraft=""
         noteDraft=""
         submitting={false}
@@ -56,6 +59,7 @@ describe('TargetLabelsAndNote', () => {
       <TargetLabelsAndNote
         target={targetRecord({ note: '' })}
         editing={false}
+        groupDraft=""
         labelDraft=""
         noteDraft=""
         submitting={false}
@@ -75,6 +79,7 @@ describe('TargetLabelsAndNote', () => {
       <TargetLabelsAndNote
         target={targetRecord()}
         editing
+        groupDraft="prod-group"
         labelDraft="edge"
         noteDraft="hello"
         submitting={false}
@@ -84,6 +89,7 @@ describe('TargetLabelsAndNote', () => {
       />,
     )
 
+    expect(screen.getByLabelText('Group')).toHaveValue('prod-group')
     expect(screen.getByLabelText('标签')).toHaveValue('edge')
     expect(screen.getByLabelText('备注')).toHaveValue('hello')
     fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
@@ -95,6 +101,7 @@ describe('TargetLabelsAndNote', () => {
       <TargetLabelsAndNote
         target={targetRecord()}
         editing
+        groupDraft=""
         labelDraft=""
         noteDraft=""
         submitting={false}

@@ -262,6 +262,30 @@ describe('EventsPage', () => {
     )
   })
 
+  it('marks the backfilled event toggle as pending backend support', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EventsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+    )
+
+    const backfilledToggle = screen.getByLabelText('包含补传事件')
+    expect(backfilledToggle).toBeDisabled()
+    expect(screen.getByText('待后端支持')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith('/api/events?limit=50', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      }),
+    )
+  })
+
   it('renders an explicit empty state when no events exist', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse([])))
 

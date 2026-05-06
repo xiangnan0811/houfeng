@@ -24,10 +24,8 @@ type FilterState = {
   notification_only: boolean
   recovery_only: boolean
   maintenance_only: boolean
-  // 4th boolean per PRD §requirements 1. Backend currently does not expose
-  // is_backfilled on state_change_events, so this toggle has no actual
-  // filtering effect today. UI is wired and `include_backfilled` is forwarded
-  // as a query param so future backend support is a one-line drop-in.
+  // Current backend events query has no backfill dimension; keep the UI
+  // truthful by disabling this until the handler/store contract exists.
   include_backfilled: boolean
   // Time range segmented control. 'custom' preserves the original behavior
   // (user-controlled date inputs) — keep that as default so first load keeps
@@ -57,7 +55,7 @@ const DEFAULT_FILTERS: FilterState = {
   notification_only: false,
   recovery_only: false,
   maintenance_only: false,
-  include_backfilled: true,
+  include_backfilled: false,
   time_range: 'custom',
 }
 
@@ -191,12 +189,6 @@ export function EventsPage() {
     listEvents(buildFilterQuery(appliedFilters, effectiveLimit))
       .then((events) => {
         if (cancelled) return
-        // Note: appliedFilters.include_backfilled is intentionally not used
-        // for client-side filtering — state_change_events do not expose
-        // is_backfilled in the payload today, so there is no field to filter
-        // on. The toggle is wired through state for future server-side
-        // support; once backend accepts include_backfilled this becomes a
-        // request-side filter automatically.
         setState({
           loading: false,
           error: null,
@@ -420,16 +412,14 @@ export function EventsPage() {
 
             <label className="summary-card">
               <span className="summary-card__label">包含补传事件</span>
+              <span className="summary-card__value">待后端支持</span>
               <input
                 aria-label="包含补传事件"
                 type="checkbox"
                 checked={filters.include_backfilled}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    include_backfilled: event.target.checked,
-                  }))
-                }
+                disabled
+                title="当前事件 API 尚未暴露补传维度"
+                onChange={() => {}}
               />
             </label>
           </div>

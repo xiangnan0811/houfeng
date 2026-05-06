@@ -63,6 +63,10 @@ const settingsResponseBody = {
     runtime_managed: false,
     runtime_apply_active: false,
   },
+  feishu: {
+    enabled: false,
+    webhook_url: '',
+  },
   host_sample_frequency_tier: '5m',
   probe_frequency_defaults: {
     tcp: '5m',
@@ -128,6 +132,10 @@ const settingsUpdateBody = {
   telegram: {
     bot_token: 'bot-token',
     chat_id: 'chat-id',
+  },
+  feishu: {
+    enabled: false,
+    webhook_url: '',
   },
   host_sample_frequency_tier: '1m',
   probe_frequency_defaults: {
@@ -299,6 +307,7 @@ describe('api helpers', () => {
     const responseBody = {
       node_id: 'nd_001',
       display_name: 'Tokyo Edge',
+      group: 'edge-group',
       region: 'ap-northeast-1',
       city: 'Tokyo',
       provider: 'aws',
@@ -337,6 +346,7 @@ describe('api helpers', () => {
     const responseBody = {
       node_id: 'nd_001',
       display_name: 'Tokyo Edge',
+      group: 'edge-group',
       region: 'ap-northeast-1',
       city: 'Tokyo',
       provider: 'aws',
@@ -384,6 +394,7 @@ describe('api helpers', () => {
       base_port: 443,
       execution_node_labels: ['edge'],
       run_status: '启用',
+      group: 'prod-group',
       labels: ['public', 'external'],
       note: 'updated target note',
       current_health_status: '正常',
@@ -421,6 +432,7 @@ describe('api helpers', () => {
       base_port: 443,
       execution_node_labels: ['edge'],
       run_status: '启用',
+      group: 'prod-group',
       labels: ['public'],
       note: 'updated target note',
       current_health_status: '正常',
@@ -457,6 +469,7 @@ describe('api helpers', () => {
       base_port: 443,
       execution_node_labels: ['edge', 'core'],
       run_status: '启用',
+      group: 'prod-group',
       labels: ['public'],
       note: 'primary blog',
     } satisfies CreateTargetInput

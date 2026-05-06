@@ -340,6 +340,36 @@ func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsNodeActionsOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		NodeActionsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"action_id":"act_001","status":"pending"}`))
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	body, err := io.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if strings.TrimSpace(string(body)) == spaShell {
+		t.Fatalf("expected node action API response, got SPA fallback body %q", string(body))
+	}
+	if !strings.Contains(string(body), `"action_id":"act_001"`) {
+		t.Fatalf("expected node action payload, got %q", string(body))
+	}
+}
+
 func TestRouterKeepsNodeLifecycleRoutesOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
