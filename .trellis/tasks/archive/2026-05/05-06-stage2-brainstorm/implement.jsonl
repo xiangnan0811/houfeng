@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web 层入口"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client 更新 runtime-facts + sparklines 加 window 参数"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "lint/test/build"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go 测试 verify-go"}
+{"file": "docs/release/next-phase-plan.md", "reason": "Stage 2 历史数据为第一期方向"}
