@@ -1284,3 +1284,36 @@ Stage 2 Phase 4 完成。后端 POST /api/nodes/batch（node_ids[] + action 白�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 39: 自定义阈值（可配 CPU/Mem/Disk/Inode 告警阈值）
+
+**Date**: 2026-05-06
+**Task**: 自定义阈值（可配 CPU/Mem/Disk/Inode 告警阈值）
+**Branch**: `main`
+
+### Summary
+
+Stage 2 Phase 5 完成。Settings IncidentDefaults 加 12 个指标阈值字段（CPU/Mem/Disk/Inode 各 2-3 档），默认值精确匹配之前硬编码值（向后兼容）。Incidents 包新建 MetricThresholds struct（与 settings 包解耦），evaluator 从 struct 读阈值替代硬编码，service 从 settings 构建+传入，nil fallback DefaultMetricThresholds。SettingsPage IncidentDefaultsEditor 加 4 组阈值 input（summary-grid--numeric + % suffix）。392/392 tests pass。Go 全绿。10 文件 +660 -89。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d0fb20` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 38
+- **Total Sessions**: 39
 - **Last Active**: 2026-05-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1286 | Active |
+| `journal-1.md` | ~1319 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 39 | 2026-05-06 | 自定义阈值（可配 CPU/Mem/Disk/Inode 告警阈值） | `3d0fb20` | `main` |
 | 38 | 2026-05-06 | 批量操作（select-all + action bar） | `554cbfd` | `main` |
 | 37 | 2026-05-06 | 视图分组（group 字段） | `321aef9` | `main` |
 | 36 | 2026-05-06 | 远程命令执行（sync-based + whitelist 安全防线） | `de2a718` | `main` |
