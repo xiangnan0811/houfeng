@@ -31,6 +31,8 @@ import {
   listNodes,
   listNodeSparklines,
   pauseNodeMonitoring,
+  postNodeAction,
+  postNodeBatch,
   resumeNodeMonitoring,
   updateNodeMetadata,
 } from '../lib/api'
@@ -233,6 +235,12 @@ export function NodesPage() {
   const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
   const [sparklines, setSparklines] = useState<NodeSparklinesResponse | null>(null)
+  const [selectAll, setSelectAll] = useState(false)
+  const [batchSubmitting, setBatchSubmitting] = useState(false)
+  const [pendingBatchAction, setPendingBatchAction] = useState<string | null>(null)
+  const [batchError, setBatchError] = useState<string | null>(null)
+  const [commandOpen, setCommandOpen] = useState(false)
+  const [commandID, setCommandID] = useState('')
 
   function resetCreateFlow() {
     setCreateError(null)
@@ -531,6 +539,71 @@ export function NodesPage() {
     filterState.health !== null ||
     filterState.labels.length > 0 ||
     filterState.abnormal
+
+  const groupFilterActive = filterState.group !== null
+
+  async function executeBatchAction(action: string) {
+    if (action === 'pause') {
+      setPendingBatchAction('pause')
+      return
+    }
+    setBatchSubmitting(true)
+    setBatchError(null)
+    const nodeIDs = filteredNodes.map((n) => n.node_id)
+    try {
+      const res = await postNodeBatch(nodeIDs, action)
+      const failed = res.results.filter((r) => !r.ok)
+      if (failed.length > 0) {
+        setBatchError(`${failed.length}/${nodeIDs.length} 个节点失败`)
+      }
+    } catch (e) {
+      setBatchError(describeError(e, '批量操作失败'))
+    } finally {
+      setBatchSubmitting(false)
+      setSelectAll(false)
+    }
+  }
+
+  async function executeBatchPauseConfirmed() {
+    setPendingBatchAction(null)
+    setBatchSubmitting(true)
+    setBatchError(null)
+    const nodeIDs = filteredNodes.map((n) => n.node_id)
+    try {
+      const res = await postNodeBatch(nodeIDs, 'pause')
+      const failed = res.results.filter((r) => !r.ok)
+      if (failed.length > 0) {
+        setBatchError(`${failed.length}/${nodeIDs.length} 个节点失败`)
+      }
+    } catch (e) {
+      setBatchError(describeError(e, '批量暂停失败'))
+    } finally {
+      setBatchSubmitting(false)
+      setSelectAll(false)
+    }
+  }
+
+  async function executeBatchCommand() {
+    if (!commandID.trim()) return
+    setCommandOpen(false)
+    setBatchSubmitting(true)
+    setBatchError(null)
+    const nodeIDs = filteredNodes.map((n) => n.node_id)
+    let failCount = 0
+    for (const nodeID of nodeIDs) {
+      try {
+        await postNodeAction(nodeID, commandID.trim())
+      } catch {
+        failCount++
+      }
+    }
+    setBatchSubmitting(false)
+    setSelectAll(false)
+    if (failCount > 0) {
+      setBatchError(`${nodeIDs.length - failCount} 个节点已下发，${failCount} 个失败，等待 agent 执行`)
+    }
+    setCommandID('')
+  }
 
   if (loading) {
     return <section className="page-panel">正在加载节点列表…</section>
@@ -1124,6 +1197,111 @@ export function NodesPage() {
               onChange={setAbnormalFilter}
             />
           </FilterBar>
+          {groupFilterActive && filteredNodes.length > 0 ? (
+            <div className="batch-bar">
+              <label className="batch-bar__toggle">
+                <input
+                  type="checkbox"
+                  checked={selectAll}
+                  onChange={(e) => setSelectAll(e.target.checked)}
+                />
+                全选 ({filteredNodes.length})
+              </label>
+              {selectAll ? (
+                <div className="batch-bar__actions">
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => executeBatchAction('enter-maintenance')}
+                  >
+                    进入维护
+                  </button>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => executeBatchAction('exit-maintenance')}
+                  >
+                    退出维护
+                  </button>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => executeBatchAction('pause')}
+                  >
+                    暂停监控
+                  </button>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => executeBatchAction('resume')}
+                  >
+                    恢复监控
+                  </button>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => setCommandOpen(true)}
+                  >
+                    执行命令…
+                  </button>
+                </div>
+              ) : null}
+              {batchError ? (
+                <span className="batch-bar__error">{batchError}</span>
+              ) : null}
+              {batchSubmitting ? <span>批量操作中…</span> : null}
+            </div>
+          ) : null}
+          {commandOpen ? (
+            <div className="page-panel">
+              <p className="page-panel__eyebrow">批量命令执行</p>
+              <h3 className="page-panel__title">下发命令到已选节点</h3>
+              <p className="page-panel__description">
+                将对 {filteredNodes.length} 个节点下发命令。请输入命令 ID。
+              </p>
+              <p>
+                <label>
+                  命令 ID
+                  <input
+                    value={commandID}
+                    onChange={(e) => setCommandID(e.target.value)}
+                    placeholder="例如：whoami"
+                  />
+                </label>
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                <button
+                  className="btn btn--primary btn--md"
+                  disabled={!commandID.trim() || batchSubmitting}
+                  onClick={() => void executeBatchCommand()}
+                >
+                  下发命令
+                </button>
+                <button
+                  className="btn btn--ghost btn--md"
+                  onClick={() => {
+                    setCommandOpen(false)
+                    setCommandID('')
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {pendingBatchAction === 'pause' ? (
+            <ActionConfirmationCard
+              title="确认批量暂停节点监控"
+              current={`将对 ${filteredNodes.length} 个节点执行暂停操作。`}
+              result="操作后：所有已选节点的监控运行状态变为暂停。"
+              impact="会停止主机指标采集，并停止这些节点承担的探针执行。趋势图会从此开始出现数据空档。"
+              unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
+              confirmLabel="确认批量暂停监控"
+              disabled={batchSubmitting}
+              onConfirm={() => void executeBatchPauseConfirmed()}
+              onCancel={() => setPendingBatchAction(null)}
+            />
+          ) : null}
           {filteredNodes.length === 0 ? (
             <div className="empty-state">
               <h3>没有匹配当前筛选的节点</h3>

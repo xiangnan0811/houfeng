@@ -312,6 +312,10 @@ export function TargetsPage() {
   const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
   const [sparklines, setSparklines] = useState<TargetSparklinesResponse | null>(null)
+  const [selectAll, setSelectAll] = useState(false)
+  const [batchSubmitting, setBatchSubmitting] = useState(false)
+  const [pendingBatchAction, setPendingBatchAction] = useState<string | null>(null)
+  const [batchError, setBatchError] = useState<string | null>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -598,6 +602,74 @@ export function TargetsPage() {
     filterState.labels.length > 0 ||
     filterState.executionLabels.length > 0 ||
     filterState.abnormal
+
+  const groupFilterActive = filterState.group !== null
+
+  async function executeBatchTargetAction(action: TargetRuntimeAction) {
+    if (action === 'pause' || action === 'archive') {
+      setPendingBatchAction(action)
+      return
+    }
+    setBatchSubmitting(true)
+    setBatchError(null)
+    const targetIDs = filteredTargets.map((t) => t.target_id)
+    let failCount = 0
+    for (const targetID of targetIDs) {
+      try {
+        switch (action) {
+          case 'enter-maintenance':
+            await enterTargetMaintenance(targetID)
+            break
+          case 'exit-maintenance':
+            await exitTargetMaintenance(targetID)
+            break
+          case 'resume':
+            await resumeTarget(targetID)
+            break
+        }
+      } catch {
+        failCount++
+      }
+    }
+    if (failCount > 0) {
+      setBatchError(`${failCount}/${targetIDs.length} 个目标失败`)
+    }
+    setBatchSubmitting(false)
+    setSelectAll(false)
+    // Refresh the targets list
+    try {
+      const updated = await listTargets()
+      setTargets(updated)
+    } catch {
+      // silent
+    }
+  }
+
+  async function executeBatchTargetPauseConfirmed() {
+    setPendingBatchAction(null)
+    setBatchSubmitting(true)
+    setBatchError(null)
+    const targetIDs = filteredTargets.map((t) => t.target_id)
+    let failCount = 0
+    for (const targetID of targetIDs) {
+      try {
+        await pauseTarget(targetID)
+      } catch {
+        failCount++
+      }
+    }
+    if (failCount > 0) {
+      setBatchError(`${failCount}/${targetIDs.length} 个目标失败`)
+    }
+    setBatchSubmitting(false)
+    setSelectAll(false)
+    try {
+      const updated = await listTargets()
+      setTargets(updated)
+    } catch {
+      // silent
+    }
+  }
 
   function updateSearchParam(key: string, value: string | null) {
     setSearchParams(
@@ -1158,6 +1230,67 @@ export function TargetsPage() {
               onChange={setAbnormalFilter}
             />
           </FilterBar>
+          {groupFilterActive && filteredTargets.length > 0 ? (
+            <div className="batch-bar">
+              <label className="batch-bar__toggle">
+                <input
+                  type="checkbox"
+                  checked={selectAll}
+                  onChange={(e) => setSelectAll(e.target.checked)}
+                />
+                全选 ({filteredTargets.length})
+              </label>
+              {selectAll ? (
+                <div className="batch-bar__actions">
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => executeBatchTargetAction('enter-maintenance')}
+                  >
+                    进入维护
+                  </button>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => executeBatchTargetAction('exit-maintenance')}
+                  >
+                    退出维护
+                  </button>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => executeBatchTargetAction('pause')}
+                  >
+                    暂停
+                  </button>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    disabled={batchSubmitting}
+                    onClick={() => executeBatchTargetAction('resume')}
+                  >
+                    恢复
+                  </button>
+                </div>
+              ) : null}
+              {batchError ? (
+                <span className="batch-bar__error">{batchError}</span>
+              ) : null}
+              {batchSubmitting ? <span>批量操作中…</span> : null}
+            </div>
+          ) : null}
+          {pendingBatchAction === 'pause' ? (
+            <ActionConfirmationCard
+              title="确认批量暂停目标"
+              current={`将对 ${filteredTargets.length} 个目标执行暂停操作。`}
+              result="操作后：所有已选目标运行状态变为暂停。"
+              impact="会停止这些目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。"
+              unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。"
+              confirmLabel="确认批量暂停"
+              disabled={batchSubmitting}
+              onConfirm={() => void executeBatchTargetPauseConfirmed()}
+              onCancel={() => setPendingBatchAction(null)}
+            />
+          ) : null}
           {filteredTargets.length === 0 ? (
             <div className="empty-state">
               <h3>没有匹配当前筛选的目标</h3>

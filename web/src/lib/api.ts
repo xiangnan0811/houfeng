@@ -367,6 +367,19 @@ export function postNodeAction(nodeId: string, commandId: string) {
   })
 }
 
+export type BatchActionResult = {
+  node_id: string
+  ok: boolean
+  error?: string
+}
+
+export function postNodeBatch(nodeIDs: string[], action: string) {
+  return postJSONBody<{ results: BatchActionResult[] }>('/api/nodes/batch', {
+    node_ids: nodeIDs,
+    action,
+  })
+}
+
 export function listHistoricalIncidents(objectType: string, objectId: string) {
   return requestJSON<ActiveIncidentRecord[]>(
     `/api/incidents?object_type=${encodeURIComponent(objectType)}&object_id=${encodeURIComponent(

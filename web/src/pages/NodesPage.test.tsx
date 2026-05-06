@@ -1327,6 +1327,89 @@ describe('NodesPage', () => {
     expect(placeholder!.textContent).toBe('—')
   })
 
+  it('shows the batch bar with select-all toggle when a group filter is active', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_003',
+            display_name: 'Batch Node 1',
+            group: 'staging',
+            monitoring_status: '暂停',
+          }),
+          nodeRecord({
+            node_id: 'nd_004',
+            display_name: 'Batch Node 2',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            provider: 'Hetzner',
+            group: 'staging',
+            monitoring_status: '暂停',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes?group=staging']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Batch Node 1')).toBeInTheDocument())
+
+    // Batch bar should be visible when group filter is active
+    const batchBarEl = document.querySelector('.batch-bar')
+    expect(batchBarEl).not.toBeNull()
+    expect(screen.getByText('全选 (2)')).toBeInTheDocument()
+
+    // Click the select-all checkbox within the batch bar
+    const checkbox = batchBarEl!.querySelector('input[type="checkbox"]') as HTMLInputElement
+    fireEvent.click(checkbox)
+
+    // Action buttons should appear after select-all within batch bar
+    await waitFor(() => {
+      const buttons = batchBarEl!.querySelectorAll('.batch-bar__actions button')
+      expect(buttons.length).toBe(5)
+      expect(buttons[0].textContent).toBe('进入维护')
+      expect(buttons[1].textContent).toBe('退出维护')
+      expect(buttons[2].textContent).toBe('暂停监控')
+      expect(buttons[3].textContent).toBe('恢复监控')
+      expect(buttons[4].textContent).toBe('执行命令…')
+    })
+  })
+
+  it('does not show batch bar when group filter is not active', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_001',
+            display_name: 'Tokyo Edge',
+            group: 'production',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    // Batch bar should NOT be visible without group filter
+    expect(screen.queryByText(/全选/)).not.toBeInTheDocument()
+  })
+
   it('renders heartbeat and sync timestamps inside the identity column freshness row', async () => {
     vi.stubGlobal(
       'fetch',

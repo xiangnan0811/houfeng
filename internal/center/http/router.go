@@ -27,6 +27,7 @@ type RouterOptions struct {
 	NodeBindingResetHandler         stdhttp.Handler
 	NodeSparklinesHandler           stdhttp.Handler
 	NodeActionsHandler              stdhttp.Handler
+	NodeBatchHandler                stdhttp.Handler
 	TargetsCollectionHandler        stdhttp.Handler
 	TargetItemHandler               stdhttp.Handler
 	TargetProbeItemsHandler         stdhttp.Handler
@@ -85,6 +86,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", protect(opts.NodesCollectionHandler))
+	}
+	if opts.NodeBatchHandler != nil {
+		mux.Handle("/api/nodes/batch", protect(opts.NodeBatchHandler))
 	}
 	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil || opts.NodeSparklinesHandler != nil || opts.NodeActionsHandler != nil {
 		mux.Handle("/api/nodes/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {

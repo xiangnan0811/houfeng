@@ -132,6 +132,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		NodeBindingRejectPendingHandler: handlers.NodeBindingRejectPending(nodeRepo),
 		NodeBindingResetHandler:         handlers.NodeBindingReset(nodeRepo),
 		NodeSparklinesHandler:           handlers.NodeSparklines(sparklinesRepo),
+		NodeActionsHandler:              handlers.NodeActions(nodeRepo),
+		NodeBatchHandler:                handlers.NodeBatch(nodeRepo),
 		TargetsCollectionHandler:        handlers.TargetsCollection(targetRepo),
 		TargetItemHandler:               handlers.TargetItem(targetRepo),
 		TargetProbeItemsHandler:         handlers.TargetProbeItems(targetRepo),
