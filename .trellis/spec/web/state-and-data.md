@@ -26,7 +26,7 @@
   - 业务函数使用动词 + 资源命名（`listNodes` / `getNode` / `createTarget` / `updateNodeMetadata` / `enterNodeMaintenance` / `getDashboard` 等），返回 `Promise<T>`，T 来自 `lib/types.ts`。
   - `If-Match` 乐观锁通过 `patchJSONBody(path, body, { ifMatch })` 表达（`web/src/lib/api.ts:98-112`），传入的是上一次拿到的 `updated_at`。
 - **`/api/auth/*` 走 `web/src/lib/auth-client.ts` + `web/src/lib/fetcher.ts`**。这是历史遗留的第二条 fetch 包装，仅服务认证；**不要把新业务请求加到 `fetcher`**。
-- **不要在 page / component 里直接 `fetch()`**。已知偿还点：`web/src/pages/NodesPage.tsx:60` 的 `createNode` 仍直接调 `fetch('/api/nodes', ...)`，新代码不要复制这条路径，请把 `createNode` 加到 `lib/api.ts`。
+- **不要在 page / component 里直接 `fetch()`**。业务请求必须加到 `web/src/lib/api.ts` 再由 page / component 调用；`NodesPage` 的历史直连 `fetch('/api/nodes')` 已偿还为 `createNode` API helper，新代码不要恢复这条路径。
 
 ### 类型对齐
 
@@ -125,7 +125,7 @@
 
 > 这些是当前代码已经回避（或承认偿还）的写法，**新代码不要做**。
 
-- ❌ **page / component 里直接 `fetch()`**：业务请求必须走 `web/src/lib/api.ts`，认证请求走 `web/src/lib/auth-client.ts`。已知违例：`web/src/pages/NodesPage.tsx:60`。
+- ❌ **page / component 里直接 `fetch()`**：业务请求必须走 `web/src/lib/api.ts`，认证请求走 `web/src/lib/auth-client.ts`。
 - ❌ **手抄后端字段名 / 自己拼 URL 格式化**：从 `lib/types.ts` import 类型 + 用 `lib/api.ts` 里的 `withQuery` 模式构造查询参数。
 - ❌ **驼峰化后端字段**：保持 snake_case（`node_id`、`current_health_status`），便于和 center 端 grep 对齐。
 - ❌ **跨 page 共享 mutable 全局变量**：除 `onboardingTokenCache` 这种受控、单用途、即用即清的例外，不要建模块级 `let`。
@@ -142,9 +142,8 @@
 > 用于喂 `docs/release/v1-gap-checklist.md`。
 
 1. **`fetcher.ts` 与 `api.ts` 双 fetch 包装并存**（`web/src/lib/fetcher.ts` + `web/src/lib/api.ts`），分别注册 `setUnauthorizedHandler` 与 `setApiUnauthorizedHandler`，由 `auth-context.tsx` 同时挂钩。这是历史遗留，新代码不要再加第三套。
-2. **`pages/NodesPage.tsx` 内 `createNode` 直接 `fetch`**（line 60），未走 `lib/api.ts`，与本规范冲突。属待偿还的反模式样本。
-3. **类型与 Go contract 全靠手维护**——没有 codegen。前后端字段如有漂移，依赖测试 + 运行期 `unknown` 解析报错暴露。
-4. **当前没有任何状态库 / 数据缓存层**：CLAUDE.md 也没要求引入。本 spec 把"暂不引入"作为现行约束写明。
+2. **类型与 Go contract 全靠手维护**——没有 codegen。前后端字段如有漂移，依赖测试 + 运行期 `unknown` 解析报错暴露。
+3. **当前没有任何状态库 / 数据缓存层**：CLAUDE.md 也没要求引入。本 spec 把"暂不引入"作为现行约束写明。
 
 ---
 

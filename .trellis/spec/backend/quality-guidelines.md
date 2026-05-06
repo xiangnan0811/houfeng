@@ -29,7 +29,7 @@
 | `make verify-go` | `fmt-go + vet-go + test-go` | `Makefile:63` |
 | `make build-center` | 当 `cmd/houfeng-center/*.go` 存在时 `go build -o ./bin/houfeng-center ./cmd/houfeng-center` | `Makefile:47-53` |
 | `make build-agent` | 同上，输出 `./bin/houfeng-agent` | `Makefile:55-61` |
-| `make verify-web` | `cd web && npm ci && npm run test -- --run && npm run build` | `Makefile:65-70` |
+| `make verify-web` | `cd web && npm ci && npm run lint && npm run test -- --run && npm run build` | `Makefile:65-70` |
 | `make verify` | `./scripts/verify.sh` 即 `verify-go + verify-web` | `Makefile:72-73`、`scripts/verify.sh` |
 
 **注意**：
@@ -86,7 +86,7 @@ for _, tt := range tests {
 
 模式 = `httptest.NewRequest` + `httptest.NewRecorder` + `handler.ServeHTTP(recorder, req)` + 直接断言 `recorder.Code` / `recorder.Body`。**不启动真实 HTTP server**。仓库依赖通过手写 `fake<X>Repository` struct 实现领域接口，例如 `internal/center/http/handlers/nodes_test.go:17-57` 的 `fakeNodeRepository`。
 
-**路由级**测试用 `centerhttp.New(centerhttp.RouterOptions{...})` 真实拼装 mux，但所有 handler 字段塞 `http.HandlerFunc(...)` 假实现，仅校验 SPA fallback / 路由优先级（参见 `router_api_test.go` 全文）。
+**路由级**测试用 `centerhttp.New(centerhttp.RouterOptions{...})` 真实拼装 mux，但所有 handler 字段塞 `http.HandlerFunc(...)` 假实现，仅校验 SPA fallback / 路由优先级（参见 `router_api_test.go` 全文）。给既有 subtree 增加 handler 时，必须同时检查 `/api/<resource>/` 外层注册条件、`<resource>SubtreePath` classifier 和 `switch subtree` dispatch 三处；只让 classifier 返回新 enum 但不在 switch 里转发 handler，会让已实现 endpoint 继续 404。
 
 ### Store 测试
 
@@ -159,7 +159,7 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 2. [ ] **改了 `web/` 里任何文件 → `cd web && npm run lint && npm run test`**（CLAUDE.md 第 31 行）。
 3. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完。
 4. [ ] **改了迁移 / 表结构** → 跑一次 `docs/operations/v1-smoke-run.md` 的 fresh-install，补 `docs/release/v1-gap-checklist.md`。
-5. [ ] **改了 user-visible 的 UI** → 按 `docs/operations/v1-visual-verification.md` 录截图到 `docs/operations/visual-evidence/`，**不要回写 `docs/design/v1-baseline/`**（基线已冻结）。
+5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，必要时补 `docs/operations/*.jpg` 或在任务 / release gap 中记录待补证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。早期 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 已 archive，不是 active workflow。
 6. [ ] 如果 worker / 调度类改动，本地用注入的小间隔跑 `go test -count=10` 看下抖动。
 
 ---
@@ -171,6 +171,7 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 | 改动 | 必须连带的修改 |
 |------|----------------|
 | 新增 HTTP endpoint | 1) `internal/center/http/handlers/<resource>.go` handler 工厂；2) `internal/center/http/router.go` 的 `RouterOptions` 字段 + mux 注册；3) `cmd/houfeng-center/bootstrap.go` `bootstrapCenter` 显式构造并塞进 `RouterOptions`；4) `cmd/houfeng-center/bootstrap_test.go` 的 `TestBootstrapCenterBuildsAppOnSuccess` 增 nil 断言；5) `internal/center/http/handlers/<resource>_test.go` 增 table-driven handler 测试；6) `internal/center/http/router_api_test.go` 增 SPA fallback 隔离测试 |
+| 修复或接入既有 subtree endpoint | 1) 确认 `/api/<resource>/` 外层 mux 注册条件包含对应 `RouterOptions` handler；2) `<resource>SubtreePath` 能识别目标 path；3) `switch subtree` 有对应 dispatch case；4) `router_api_test.go` 用 fake handler 断言不会落到 SPA fallback / 404；5) handler 测试覆盖 method、invalid body、not found、domain state conflict、repo failure |
 | 新增/修改 agent ↔ center 字段 | 1) `internal/contracts/agentapi/types.go` 改 DTO；2) center 端在 `internal/center/syncing/` 或对应 handler 处理；3) **agent 端在 `agent/runtime/` 或采集子包同 PR 内改完**；4) 两侧测试同 PR 通过 |
 | 新增领域 sentinel error | 1) `internal/center/<domain>/types.go` 加 `Err...`；2) handler 加 `errors.Is` case + `agentapi.ErrorCode*` 映射（如属 agent endpoint） |
 | 新增持久化字段 / 表 | 走 `database-guidelines.md` 的 4 步流程；reviewer 在 PR 内确认迁移序号未撞车 |

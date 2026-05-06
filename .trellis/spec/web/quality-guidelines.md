@@ -37,7 +37,7 @@
 ```make
 verify-web:
 	@if [ -f web/package.json ]; then \
-		cd web && $(NPM) ci && $(NPM) run test -- --run && $(NPM) run build; \
+		cd web && $(NPM) ci && $(NPM) run lint && $(NPM) run test -- --run && $(NPM) run build; \
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi
@@ -45,7 +45,7 @@ verify-web:
 
 注意：
 
-- **`make verify-web` 不跑 `npm run lint`**——它只跑 `npm ci && test --run && build`。所以 lint 失败 CI 不会自动抓；提交前必须本地手工 `cd web && npm run lint`。这是已知 gap（见下文）。
+- **`make verify-web` 会跑 `npm run lint`**，然后跑 `npm run test -- --run` 与 `npm run build`。CI 与本地通过同一个 target 覆盖 lint / Vitest / TS+Vite build。
 - `npm ci` 每次清空 `node_modules` 重装，本地反复跑会比较慢；本地速度优先时直接 `cd web && npm run test -- --run` / `npm run build` 即可，CI 仍走完整 `verify-web`。
 - CI 用 `actions/setup-node@v4 with node-version: 22 cache: npm`（`.github/workflows/ci.yml:24-28`）锁 Node 22.x；本地 Node 必须 ≥ 22（`web/package.json:6-8` 的 `engines.node = "22.x"`）。
 
@@ -160,7 +160,7 @@ it('applies variant class', () => {
 
 ### 不在 verify 链路里的东西
 
-- **可视化回归 / 截图对比**不在 `make verify-web`，由 `docs/operations/v1-visual-verification.md` 的人工流程 + `docs/operations/visual-evidence/` 截图归档承担。改动 user-visible UI 后按这条流程补图。
+- **可视化回归 / 截图对比**不在 `make verify-web`。当前 active visual authority 是 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`；已有一次性 v2 截图证据在 `docs/operations/*.jpg`。正式、可重复的 v2 截图流程尚未建立，改动 user-visible UI 时应在任务 PRD / `docs/release/v1-gap-checklist.md` 记录证据需求，不要再使用 archived 的 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 作为 active workflow。
 - **真实 center 烟囱**由 `docs/operations/v1-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
 ---
@@ -204,11 +204,11 @@ export default defineConfig([
 
 下面这条清单是 happy-path，按顺序勾：
 
-1. [ ] **`cd web && npm run lint`** —— `make verify-web` 不跑 lint，必须本地手跑。
+1. [ ] **`cd web && npm run lint`** —— 快速本地 lint；完整 `make verify-web` 也会跑这一项。
 2. [ ] **`cd web && npm run test -- --run`** —— 跑 vitest 一遍。
 3. [ ] **`cd web && npm run build`** —— 跑 `tsc -b && vite build`，确保 TS strict + Vite 产物都干净。
 4. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完（前后端都过）。
-5. [ ] **改了 user-visible 的 UI** → 按 `docs/operations/v1-visual-verification.md` 录截图到 `docs/operations/visual-evidence/`，**不要回写 `docs/design/v1-baseline/`**（基线已冻结）。
+5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，必要时补 `docs/operations/*.jpg` 或在任务 / release gap 中记录待补证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。
 6. [ ] **改了 API 形状（增减字段 / 改命名 / 改可选性）** → 同 PR 把 `web/src/lib/types.ts` + `web/src/lib/api.ts` 改完，并补 page / 测试断言。
 
 ---
@@ -220,7 +220,7 @@ export default defineConfig([
 | 改动 | 必须连带的修改 |
 |------|----------------|
 | 新增 / 修改 center HTTP 端点的请求 / 响应字段 | 1) 后端按 `.trellis/spec/backend/` 改完；2) `web/src/lib/types.ts` 加 / 改 `*Record` `*Input`，**保持 snake_case 与 Go JSON tag 一致**；3) `web/src/lib/api.ts` 加 / 改函数；4) page / component 调用方更新；5) 必要时 page 测试的 `toHaveBeenLastCalledWith` 断言一起更新 |
-| 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/api.ts`，**不要**在 page / component 里直接 `fetch()`（已知偿还点：`web/src/pages/NodesPage.tsx:60` 的 `createNode`，新代码不要复制） |
+| 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/api.ts`，**不要**在 page / component 里直接 `fetch()`；历史直连创建节点 API 已偿还，reviewer 不要让这类请求回流到 page |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/atoms.css` 加样式（用令牌） |
 | 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步改 4 个主题块（`:root` / `theme-houfeng-light` / `theme-classic-dark` / `theme-classic-light`），见 `.trellis/spec/web/styling-guidelines.md` |
@@ -247,8 +247,7 @@ export default defineConfig([
 
 > 用于喂 `docs/release/v1-gap-checklist.md`。
 
-1. **`make verify-web` 不跑 `npm run lint`**（`Makefile:67`）。lint 失败不会被 CI 自动抓——目前靠开发者本地 `cd web && npm run lint`。如果要修，可以把 verify-web 改为 `npm ci && npm run lint && npm run test -- --run && npm run build`，并对应更新本文件与 `.trellis/spec/backend/quality-guidelines.md` 的命令门户表。
-2. **没有 coverage 阈值 / coverage 上传**：当前不强制；如未来引入 `vitest --coverage` 与阈值，需同步更新 `.github/workflows/ci.yml` + 本文件。
-3. **没有 e2e 框架**（Playwright / Cypress）：当前由人工烟囱 + 手动截图回归覆盖，CI 不跑浏览器自动化。如未来引入，需独立技术决策。
+1. **没有 coverage 阈值 / coverage 上传**：当前不强制；如未来引入 `vitest --coverage` 与阈值，需同步更新 `.github/workflows/ci.yml` + 本文件。
+2. **没有 e2e 框架**（Playwright / Cypress）：当前由人工烟囱 + 手动截图回归覆盖，CI 不跑浏览器自动化。如未来引入，需独立技术决策。
+3. **正式、可重复的 v2 视觉截图流程尚未建立**：当前只有 `docs/operations/*.jpg` 的一次性 v2 证据。不要恢复使用 archived v1/stitch visual verification。
 4. **`web/src/lib/types.ts` 与 Go contract 全靠人工同步**：没有 codegen。reviewer 在 contract 改动 PR 里必须同时检查 `lib/types.ts`。
-5. **`web/src/pages/NodesPage.tsx:60` 的 `createNode` 直接 `fetch()`**，未走 `lib/api.ts`——已知反模式偿还点。

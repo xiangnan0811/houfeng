@@ -134,9 +134,9 @@ targets.go         users.go         migrate/
 
 agent 子包扁平化拆分，每个职责一个包：
 
-- `config/`、`token/`、`fingerprint/`、`enroll/`、`hostsample/`、`probe/`、`syncqueue/`、`runtime/`
+- `config/`、`token/`、`fingerprint/`、`enroll/`、`hostsample/`、`probe/`、`containersample/`、`exec/`、`syncqueue/`、`runtime/`
 - `runtime/` 是装配中心，把其余子包按 `collect → buffer → sync → apply plan` 串起来
-- agent 必须保持"thin"：不执行任意脚本、不跑 Docker、不本地评估规则
+- agent 必须保持"thin"：不接受任意脚本 / 用户自定义参数、不本地评估规则；当前仅允许 `exec/` 中编译期白名单命令，以及 `containersample/` 对本机 Docker CLI 的 best-effort 采样（Docker 不存在时静默跳过）。这两类 post-V1 面的产品边界与审计/耐久语义仍需后续任务收敛。
 
 #### Scenario: `agent/hostsample` 平台采集边界
 

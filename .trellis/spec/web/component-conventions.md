@@ -6,7 +6,7 @@
 
 ## Overview
 
-候风前端组件统一采用 **函数式组件 + React 19 hooks**，TypeScript 严格 props（`tsconfig.app.json` 启用 strict）。视觉权威是 `docs/design/v1-baseline/baseline-screens.md` 与 `docs/design/v1-baseline/ui-ux-spec.md` 描述的 **Unified / Baseline Stitch** 屏；新组件**只参考这两份文档与现有 `components/atoms/`**，不要从历史概念稿复活旧样式。
+候风前端组件统一采用 **函数式组件 + React 19 hooks**，TypeScript 严格 props（`tsconfig.app.json` 启用 strict）。视觉权威是 `docs/design/v2-houfeng/design-language.md` 与 `docs/design/v2-houfeng/component-spec.md`；新组件只参考这两份 v2 文档与现有 `components/atoms/` / `components/filters/` 实现。早期 v1-baseline 视觉稿、stitch 截图和 `v1.x-frontend-redesign/` 已 archive，仅作历史记录，不再作为 active implementation authority。
 
 实读约束（来自 `web/src/components/`、`web/src/pages/`）：
 
@@ -118,7 +118,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 
 > 这些当前代码已经回避或承认为偿还点，**新代码不要做**。
 
-- ❌ **page 内手写 `fetch()`**：必须走 `lib/api.ts`。已知违例：`web/src/pages/NodesPage.tsx:60` 的 `createNode`，新代码不要复制这条路径。
+- ❌ **page 内手写 `fetch()`**：必须走 `lib/api.ts`。历史上 `NodesPage` 曾直连创建节点 API，已偿还为 `createNode` helper；新代码不要恢复直连请求。
 - ❌ **components/ 内调 API client**：组合组件保持纯展示 / 受控，数据由 page 拉好后 props 传入。
 - ❌ **atoms/ 引用 `lib/types.ts`**：业务无关原则。
 - ❌ **`React.FC` / `React.memo` / `defaultProps`**：当前代码风格未用，新代码也别引入。

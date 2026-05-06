@@ -20,17 +20,18 @@
 
 ## 视觉权威
 
-视觉权威**只有两份文档**：
+视觉权威**只有两份 active 文档**：
 
-1. `docs/design/v1-baseline/baseline-screens.md` —— Unified / Baseline Stitch 屏幕清单。
-2. `docs/design/v1-baseline/ui-ux-spec.md` —— 交互 / 排版 / 信息密度规范。
+1. `docs/design/v2-houfeng/design-language.md` —— v2 候风设计语言、主题、密度、状态色、排版与反模式。
+2. `docs/design/v2-houfeng/component-spec.md` —— 原语、atoms、共享组件、页面壳和关键页面的视觉契约。
 
-补充资料 `docs/design/v2-houfeng/design-language.md` 描述当前实现的 **v2 候风设计语言**（玄夜青 + 晨晖金主题），是 `web/src/styles/tokens.css` 注释里直接引用的实现侧基线。
+早期 `docs/design/v1-baseline/{ui-ux-spec,baseline-screens,visual-review-round2,handoff}.md`、`docs/design/v1-baseline/stitch/` 和 `docs/design/v1.x-frontend-redesign/` 已迁到 `docs/_archive/design/`，仅作历史记录。业务结构仍以 v1-baseline frozen 子集为准，但视觉实现不再回归 v1/stitch。
 
 **禁止**：
 
-- 不要回归 `docs/design/v1-baseline/` 之外（早期 concept 屏 / `stitch/` 子目录的旧稿）的视觉风格——这些是历史素材。
-- 不要修改 `docs/design/v1-baseline/` 下的文档；视觉确实需要变更时，按 `CLAUDE.md` "V1 verification artifacts" 段把差异写进 `docs/release/v1-gap-checklist.md`，并在 `docs/operations/visual-evidence/` 留对比截图。
+- 不要回归早期 concept 屏 / `stitch/` 子目录视觉——这些是历史素材。
+- 不要修改 `docs/design/v1-baseline/` frozen 业务结构文档来承载视觉变更；视觉确实需要变更时，先在 `docs/release/v1-gap-checklist.md` 或当前任务 PRD 记录差异，再更新 v2 文档 / 代码。
+- 当前已有一次性 v2 截图证据直接存放在 `docs/operations/*.jpg`（Dashboard / 节点列表 / 节点详情 / 目标列表 / 目标详情，2026-05-06）。正式、可重复的 v2 截图流程尚未建立；不要再引用 archived 的 `docs/operations/v1-visual-verification.md` 或 `docs/operations/visual-evidence/` 作为 active workflow。
 
 ---
 
@@ -138,7 +139,7 @@
 
 - ❌ **硬编码颜色 / 像素值**：颜色一律 `var(--color-state-*)` / `var(--accent*)` / `var(--surface*)`；间距走 `--space-N`；圆角走 `--radius-N`。
 - ❌ **`style={{ color/background/border/font: ... }}` 写业务样式**：内联只用于运行时计算尺寸（Sparkline / StatusGlyph）。
-- ❌ **回归早期 concept 屏 / `stitch/` 子目录视觉**：视觉权威只有 `baseline-screens.md` + `ui-ux-spec.md`。
+- ❌ **回归早期 concept 屏 / `stitch/` 子目录视觉**：视觉权威只有 `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-houfeng/component-spec.md`。
 - ❌ **`@media (prefers-color-scheme: dark)`**：主题切换走 `theme-*` class，不监听系统偏好分支（用户可在 system / dark / light 三档显式选）。
 - ❌ **新建 `.css` 文件给单个组件 / page 用**：LoginPage 是历史例外；新增样式落 `styles/pages.css` 或 `styles/atoms.css`，靠 BEM 隔离。
 - ❌ **CSS-in-JS / Tailwind / styled-components**：当前不用；要引入需独立技术决策与整体迁移。
@@ -152,10 +153,9 @@
 
 > 用于喂 `docs/release/v1-gap-checklist.md`。
 
-1. **`tokens.css` 顶部注释直接引用 `docs/design/v2-houfeng/design-language.md`**，但 `CLAUDE.md` 的视觉权威只列了 `v1-baseline/`。实际上 v2 设计语言是 v1 baseline 的实施侧细化，二者并不冲突，但 spec 层面值得在下次基线评审时把 v2 设计语言纳入"权威列表"或明确其从属关系。
-2. **`SettingsPage.tsx:853 / :862` 用 `style={{ marginBottom: 8 }}`** 表达间距，绕过了令牌 + BEM 的规则。属已知小额偿还，新代码不要复制。
-3. **`web/src/pages/LoginPage.css` 是 page 局部 CSS 唯一例外**，与"组件文件不 import css"的规则冲突。当前合理（首屏前 AppShell 未挂），不打算回头消除。
-4. **`atoms.css` 内某些渐变 / 阴影直接用 `rgba(255,255,255,0.x)`**（如 `atoms.css:149` `background: rgba(255, 255, 255, 0.08);`），未走令牌——这是为高光 / 镜面层效果保留的允许例外，写新原子时如果需要类似效果可参考。
+1. **SettingsPage 仍有少量 inline spacing/layout style**，绕过了令牌 + BEM 的规则。属已知小额偿还，新代码不要复制。
+2. **`web/src/pages/LoginPage.css` 是 page 局部 CSS 唯一例外**，与"组件文件不 import css"的规则冲突。当前合理（首屏前 AppShell 未挂），不打算回头消除。
+3. **`atoms.css` 内某些渐变 / 阴影直接用 `rgba(255,255,255,0.x)`**（如 `atoms.css:149` `background: rgba(255, 255, 255, 0.08);`），未走令牌——这是为高光 / 镜面层效果保留的允许例外，写新原子时如果需要类似效果可参考。
 
 ---
 

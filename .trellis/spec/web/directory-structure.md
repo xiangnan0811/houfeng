@@ -181,7 +181,7 @@ web/
 
 > 这些是当前代码库已经回避（或正在偿还）的写法，**新代码不要做**。
 
-- ❌ 在 `pages/` 或 `components/` 里直接 `fetch()`：必须走 `lib/api.ts`（已知例外见下文 *已知 gap*）。
+- ❌ 在 `pages/` 或 `components/` 里直接 `fetch()`：必须走 `lib/api.ts`。
 - ❌ `components/` 反向 import `pages/`：组件层不该感知具体路由页。
 - ❌ 在 `lib/` 里写 React 组件 / JSX（context Provider 例外）：`lib/` 是无 UI 数据/工具层。
 - ❌ 绕过 `app/router.tsx` 私自加路由（如手写 `<BrowserRouter>`）：路由唯一入口是 `createBrowserRouter(appRoutes)`。
@@ -199,8 +199,7 @@ web/
 1. **`components/atoms/` 子目录未被 `CLAUDE.md` "Frontend (`web/`)" 段提及**，但实际已是设计系统原子的稳定落点（`Button` / `Card` / `Sparkline` / `Mono` / `Hostname` / `Timestamp` 等都在此）。本 spec 把它写进官方目录布局。
 2. **`app/layout/`、`app/RequireAuth.tsx`、`app/metadata.ts` 也在 `CLAUDE.md` 简述之外**，是当前实际的应用壳组织方式。
 3. **`lib/` 下当前并存两套 fetch 包装**：`fetcher.ts`（仅 auth-client 使用）+ `api.ts`（业务用）。它们的 401 钩子分别注册：`setUnauthorizedHandler` 给 `fetcher`、`setApiUnauthorizedHandler` 给 `api`，由 `auth-context.tsx` 同时绑定（`web/src/lib/auth-context.tsx:24-33`）。这是历史遗留，新代码不应再增第三套。
-4. **`pages/NodesPage.tsx` 内的 `createNode` 仍直接 `fetch('/api/nodes', ...)`**（`web/src/pages/NodesPage.tsx:60`），未走 `lib/api.ts`。这是已知反模式偿还点；新增 API 一律走 `api.ts`。
-5. **当前未使用 React Query / SWR / Redux / Zustand 等状态库**（`web/package.json` 无依赖）；详见 `state-and-data.md`。
+4. **当前未使用 React Query / SWR / Redux / Zustand 等状态库**（`web/package.json` 无依赖）；详见 `state-and-data.md`。
 
 ---
 
