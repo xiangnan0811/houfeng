@@ -172,7 +172,7 @@ describe('TargetDetailPage', () => {
       cache: 'no-store',
         credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/targets/tg_001/runtime-facts', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/targets/tg_001/runtime-facts?window=24h', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
         credentials: 'include',
@@ -3554,6 +3554,67 @@ describe('TargetDetailPage', () => {
     for (const details of secondaryDetails) {
       expect(details).not.toHaveAttribute('open')
     }
+  })
+
+  // ── Time window Tabs ──
+
+  it('renders time window Tabs with 24h / 7d / 30d options', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: ['公开'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: null,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          latest_probe_observations: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          latest_probe_observations: [],
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
+    )
+
+    const tablist = screen.getByRole('tablist')
+    expect(tablist).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '24h' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: '30d' })).toHaveAttribute('aria-selected', 'false')
   })
 
 })

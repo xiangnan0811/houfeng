@@ -200,6 +200,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(null)
   const [historyIncidentsLoading, setHistoryIncidentsLoading] = useState(false)
   const [historyIncidentsError, setHistoryIncidentsError] = useState<string | null>(null)
+  const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d'>('24h')
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
@@ -239,6 +240,38 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     },
     [],
   )
+
+  // Refetch runtime facts when time window changes (keep old data visible).
+  // The mounted ref skips the initial invocation so the main load effect handles
+  // the first fetch. It resets on nodeId change for the same reason.
+  const timeWindowMountedRef = useRef(false)
+  useEffect(() => {
+    timeWindowMountedRef.current = false
+  }, [nodeId])
+
+  useEffect(() => {
+    if (!timeWindowMountedRef.current) {
+      timeWindowMountedRef.current = true
+      return
+    }
+
+    let cancelled = false
+    if (!nodeId) return
+
+    getNodeRuntimeFacts(nodeId, timeWindow)
+      .then((runtimeFacts) => {
+        if (cancelled) return
+        setState((current) => {
+          if (current.requestedNodeId !== nodeId) return current
+          return { ...current, runtimeFacts }
+        })
+      })
+      .catch(() => {
+        // On window-switch fetch error, keep old data visible — no-op.
+      })
+
+    return () => { cancelled = true }
+  }, [nodeId, timeWindow])
 
   useEffect(() => {
     let cancelled = false
@@ -821,6 +854,19 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           </div>
         </Card>
       ) : null}
+
+      <div className="watchtower-window-tabs">
+        <Tabs<'24h' | '7d' | '30d'>
+          variant="pill"
+          value={timeWindow}
+          onChange={setTimeWindow}
+          items={[
+            { value: '24h', label: '24h' },
+            { value: '7d', label: '7d' },
+            { value: '30d', label: '30d' },
+          ]}
+        />
+      </div>
 
       <NodeWatchtowerMetrics
         sample={sample}

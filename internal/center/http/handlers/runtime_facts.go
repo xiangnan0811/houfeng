@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"houfeng/internal/center/nodes"
 	"houfeng/internal/center/runtimefacts"
@@ -23,7 +24,14 @@ func NodeRuntimeFacts(repo runtimefacts.Repository) http.Handler {
 			return
 		}
 
-		record, err := repo.GetNodeRuntimeFacts(r.Context(), nodeID)
+		window, limit, err := parseWindow(r.URL.Query().Get("window"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid window: "+err.Error())
+			return
+		}
+		since := time.Now().Add(-window)
+
+		record, err := repo.GetNodeRuntimeFacts(r.Context(), nodeID, since, limit)
 		if errors.Is(err, nodes.ErrNodeNotFound) {
 			writeError(w, http.StatusNotFound, "node not found")
 			return
@@ -50,7 +58,14 @@ func TargetRuntimeFacts(repo runtimefacts.Repository) http.Handler {
 			return
 		}
 
-		record, err := repo.GetTargetRuntimeFacts(r.Context(), targetID)
+		window, limit, err := parseWindow(r.URL.Query().Get("window"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid window: "+err.Error())
+			return
+		}
+		since := time.Now().Add(-window)
+
+		record, err := repo.GetTargetRuntimeFacts(r.Context(), targetID, since, limit)
 		if errors.Is(err, targets.ErrTargetNotFound) {
 			writeError(w, http.StatusNotFound, "target not found")
 			return

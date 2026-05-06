@@ -30,7 +30,7 @@ func TargetSparklines(repo store.TargetSparklinesRepository) http.Handler {
 			return
 		}
 
-		window, err := parseWindow(q.Get("window"))
+		window, _, err := parseWindow(q.Get("window"))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid window: "+err.Error())
 			return

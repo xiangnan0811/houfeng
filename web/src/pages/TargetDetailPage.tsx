@@ -312,6 +312,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   )
   const [historyIncidentsLoading, setHistoryIncidentsLoading] = useState(false)
   const [historyIncidentsError, setHistoryIncidentsError] = useState<string | null>(null)
+  const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d'>('24h')
   const [probeCreateOpen, setProbeCreateOpen] = useState(false)
   const [probeFormMode, setProbeFormMode] = useState<ProbeFormMode>({ kind: 'create' })
   const [probeCreateSubmitting, setProbeCreateSubmitting] = useState(false)
@@ -363,6 +364,38 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     },
     [],
   )
+
+  // Refetch runtime facts when time window changes (keep old data visible).
+  // The mounted ref skips the initial invocation so the main load effect handles
+  // the first fetch. It resets on targetId change for the same reason.
+  const timeWindowMountedRef = useRef(false)
+  useEffect(() => {
+    timeWindowMountedRef.current = false
+  }, [targetId])
+
+  useEffect(() => {
+    if (!timeWindowMountedRef.current) {
+      timeWindowMountedRef.current = true
+      return
+    }
+
+    let cancelled = false
+    if (!targetId) return
+
+    getTargetRuntimeFacts(targetId, timeWindow)
+      .then((runtimeFacts) => {
+        if (cancelled) return
+        setState((current) => {
+          if (current.requestedTargetId !== targetId) return current
+          return { ...current, runtimeFacts }
+        })
+      })
+      .catch(() => {
+        // On window-switch fetch error, keep old data visible — no-op.
+      })
+
+    return () => { cancelled = true }
+  }, [targetId, timeWindow])
 
   useEffect(() => {
     if (pendingRuntimeConfirmation) return
@@ -1094,6 +1127,19 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           {runtimeError}
         </p>
       ) : null}
+
+      <div className="watchtower-window-tabs">
+        <Tabs<'24h' | '7d' | '30d'>
+          variant="pill"
+          value={timeWindow}
+          onChange={setTimeWindow}
+          items={[
+            { value: '24h', label: '24h' },
+            { value: '7d', label: '7d' },
+            { value: '30d', label: '30d' },
+          ]}
+        />
+      </div>
 
       <TargetLatencyTrends
         probeItems={probeItems}

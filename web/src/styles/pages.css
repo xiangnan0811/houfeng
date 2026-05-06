@@ -1605,6 +1605,9 @@
 .watchtower-danger__actions {
   margin-top: var(--space-2);
 }
+.watchtower-window-tabs {
+  margin: var(--space-3) 0;
+}
 .watchtower-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

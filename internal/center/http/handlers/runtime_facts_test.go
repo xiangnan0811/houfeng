@@ -22,14 +22,14 @@ type fakeRuntimeFactsRepository struct {
 	getTargetRuntimeFactsErr    error
 }
 
-func (f *fakeRuntimeFactsRepository) GetNodeRuntimeFacts(context.Context, string) (runtimefacts.NodeRuntimeFacts, error) {
+func (f *fakeRuntimeFactsRepository) GetNodeRuntimeFacts(_ context.Context, _ string, _ time.Time, _ int) (runtimefacts.NodeRuntimeFacts, error) {
 	if f.getNodeRuntimeFactsErr != nil {
 		return runtimefacts.NodeRuntimeFacts{}, f.getNodeRuntimeFactsErr
 	}
 	return f.getNodeRuntimeFactsResult, nil
 }
 
-func (f *fakeRuntimeFactsRepository) GetTargetRuntimeFacts(context.Context, string) (runtimefacts.TargetRuntimeFacts, error) {
+func (f *fakeRuntimeFactsRepository) GetTargetRuntimeFacts(context.Context, string, time.Time, int) (runtimefacts.TargetRuntimeFacts, error) {
 	if f.getTargetRuntimeFactsErr != nil {
 		return runtimefacts.TargetRuntimeFacts{}, f.getTargetRuntimeFactsErr
 	}
@@ -191,5 +191,108 @@ func TestTargetRuntimeFactsRejectsDeeperPaths(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+}
+
+func TestNodeRuntimeFactsDefaultWindowIs24h(t *testing.T) {
+	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
+	repo := &fakeRuntimeFactsRepository{
+		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
+			NodeID: "nd_001",
+			LatestHostSample: &runtimefacts.HostSample{
+				NodeID:       "nd_001",
+				ObservedAt:   now,
+				ReceivedAt:   now,
+				AgentVersion: "1.0.0",
+			},
+		},
+	}
+
+	handler := handlers.NodeRuntimeFacts(repo)
+	// No window query param — should default to 24h.
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestNodeRuntimeFactsWith7dWindow(t *testing.T) {
+	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
+	repo := &fakeRuntimeFactsRepository{
+		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
+			NodeID: "nd_001",
+			LatestHostSample: &runtimefacts.HostSample{
+				NodeID:       "nd_001",
+				ObservedAt:   now,
+				ReceivedAt:   now,
+				AgentVersion: "1.0.0",
+			},
+		},
+	}
+
+	handler := handlers.NodeRuntimeFacts(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts?window=7d", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestNodeRuntimeFactsWith30dWindow(t *testing.T) {
+	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
+	repo := &fakeRuntimeFactsRepository{
+		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
+			NodeID: "nd_001",
+			LatestHostSample: &runtimefacts.HostSample{
+				NodeID:       "nd_001",
+				ObservedAt:   now,
+				ReceivedAt:   now,
+				AgentVersion: "1.0.0",
+			},
+		},
+	}
+
+	handler := handlers.NodeRuntimeFacts(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts?window=30d", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestNodeRuntimeFactsRejectsInvalidWindow(t *testing.T) {
+	repo := &fakeRuntimeFactsRepository{}
+
+	tests := []struct {
+		name   string
+		window string
+	}{
+		{name: "arbitrary duration", window: "1h"},
+		{name: "unsupported duration", window: "5d"},
+		{name: "empty but parseable string", window: "0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := handlers.NodeRuntimeFacts(repo)
+			req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts?window="+tt.window, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d; body=%s", http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			}
+		})
 	}
 }

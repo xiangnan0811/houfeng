@@ -30,7 +30,7 @@ func NodeSparklines(repo store.NodeSparklinesRepository) http.Handler {
 			return
 		}
 
-		window, err := parseWindow(q.Get("window"))
+		window, _, err := parseWindow(q.Get("window"))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid window: "+err.Error())
 			return
@@ -95,19 +95,22 @@ func parseMetricList(raw string) ([]string, error) {
 	return out, nil
 }
 
-func parseWindow(raw string) (time.Duration, error) {
+// parseWindow parses a window query parameter into a duration and a
+// recommended row limit for the runtime-facts endpoint.  Accepted values
+// are "24h", "7d", and "30d" (case-sensitive).  An empty string defaults
+// to "24h" for backward compatibility.
+func parseWindow(raw string) (time.Duration, int, error) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 24 * time.Hour, nil
+	switch raw {
+	case "", "24h":
+		return 24 * time.Hour, 288, nil
+	case "7d":
+		return 7 * 24 * time.Hour, 2016, nil
+	case "30d":
+		return 30 * 24 * time.Hour, 8640, nil
+	default:
+		return 0, 0, errMetric("invalid window: must be 24h, 7d, or 30d")
 	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, err
-	}
-	if d <= 0 {
-		return 0, errMetric("window must be positive")
-	}
-	return d, nil
 }
 
 func parseDownsample(raw string) (int, error) {

@@ -82,7 +82,7 @@ const runtimeFactsRecentHostSamplesSQL = `
 	where node_id = $1
 		and observed_at >= $2
 	order by observed_at desc, id desc
-	limit 288`
+	limit $3`
 
 const runtimeFactsTargetExistsSQL = `
 	select 1
@@ -159,7 +159,7 @@ const runtimeFactsRecentProbeObservationsSQL = `
 	where po.target_id = $1
 		and po.observed_at >= $2
 	order by po.observed_at desc, po.id desc
-	limit 500`
+	limit $3`
 
 type runtimeFactsQueryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -176,7 +176,7 @@ func NewPostgresRuntimeFactsRepository(db *pgxpool.Pool) *PostgresRuntimeFactsRe
 
 var _ runtimefacts.Repository = (*PostgresRuntimeFactsRepository)(nil)
 
-func (r *PostgresRuntimeFactsRepository) GetNodeRuntimeFacts(ctx context.Context, nodeID string) (runtimefacts.NodeRuntimeFacts, error) {
+func (r *PostgresRuntimeFactsRepository) GetNodeRuntimeFacts(ctx context.Context, nodeID string, since time.Time, limit int) (runtimefacts.NodeRuntimeFacts, error) {
 	var exists int
 	if err := r.db.QueryRow(ctx, runtimeFactsNodeExistsSQL, nodeID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
 		return runtimefacts.NodeRuntimeFacts{}, nodes.ErrNodeNotFound
@@ -184,7 +184,6 @@ func (r *PostgresRuntimeFactsRepository) GetNodeRuntimeFacts(ctx context.Context
 		return runtimefacts.NodeRuntimeFacts{}, fmt.Errorf("query node %q existence: %w", nodeID, err)
 	}
 
-	since := time.Now().Add(-24 * time.Hour)
 	facts := runtimefacts.NodeRuntimeFacts{
 		NodeID:            nodeID,
 		RecentHostSamples: make([]runtimefacts.HostSample, 0),
@@ -197,7 +196,7 @@ func (r *PostgresRuntimeFactsRepository) GetNodeRuntimeFacts(ctx context.Context
 	}
 	facts.LatestHostSample = &latest
 
-	rows, err := r.db.Query(ctx, runtimeFactsRecentHostSamplesSQL, nodeID, since)
+	rows, err := r.db.Query(ctx, runtimeFactsRecentHostSamplesSQL, nodeID, since, limit)
 	if err != nil {
 		return runtimefacts.NodeRuntimeFacts{}, fmt.Errorf("query recent host samples for node %q: %w", nodeID, err)
 	}
@@ -216,7 +215,7 @@ func (r *PostgresRuntimeFactsRepository) GetNodeRuntimeFacts(ctx context.Context
 	return facts, nil
 }
 
-func (r *PostgresRuntimeFactsRepository) GetTargetRuntimeFacts(ctx context.Context, targetID string) (runtimefacts.TargetRuntimeFacts, error) {
+func (r *PostgresRuntimeFactsRepository) GetTargetRuntimeFacts(ctx context.Context, targetID string, since time.Time, limit int) (runtimefacts.TargetRuntimeFacts, error) {
 	var exists int
 	if err := r.db.QueryRow(ctx, runtimeFactsTargetExistsSQL, targetID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
 		return runtimefacts.TargetRuntimeFacts{}, targets.ErrTargetNotFound
@@ -246,7 +245,7 @@ func (r *PostgresRuntimeFactsRepository) GetTargetRuntimeFacts(ctx context.Conte
 		return runtimefacts.TargetRuntimeFacts{}, fmt.Errorf("iterate latest probe observations for target %q: %w", targetID, err)
 	}
 
-	recentRows, err := r.db.Query(ctx, runtimeFactsRecentProbeObservationsSQL, targetID, time.Now().Add(-24*time.Hour))
+	recentRows, err := r.db.Query(ctx, runtimeFactsRecentProbeObservationsSQL, targetID, since, limit)
 	if err != nil {
 		return runtimefacts.TargetRuntimeFacts{}, fmt.Errorf("query recent probe observations for target %q: %w", targetID, err)
 	}

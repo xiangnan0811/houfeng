@@ -135,7 +135,7 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 		},
 	}}
 
-	facts, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_001")
+	facts, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_001", time.Now().Add(-24*time.Hour), 288)
 	if err != nil {
 		t.Fatalf("GetNodeRuntimeFacts() error = %v", err)
 	}
@@ -181,7 +181,7 @@ func TestGetNodeRuntimeFactsReturnsNilHostSampleWhenNodeHasNoFactsYet(t *testing
 		},
 	}}
 
-	facts, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_001")
+	facts, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_001", time.Now().Add(-24*time.Hour), 288)
 	if err != nil {
 		t.Fatalf("GetNodeRuntimeFacts() error = %v", err)
 	}
@@ -205,7 +205,7 @@ func TestGetNodeRuntimeFactsReturnsNodeNotFound(t *testing.T) {
 		},
 	}}
 
-	_, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_missing")
+	_, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_missing", time.Now().Add(-24*time.Hour), 288)
 	if !errors.Is(err, nodes.ErrNodeNotFound) {
 		t.Fatalf("GetNodeRuntimeFacts() error = %v, want ErrNodeNotFound", err)
 	}
@@ -306,7 +306,7 @@ func TestGetTargetRuntimeFactsReturnsLatestProbeObservationsAndRecentProbeObserv
 		},
 	}}
 
-	facts, err := repo.GetTargetRuntimeFacts(context.Background(), "tg_001")
+	facts, err := repo.GetTargetRuntimeFacts(context.Background(), "tg_001", time.Now().Add(-24*time.Hour), 500)
 	if err != nil {
 		t.Fatalf("GetTargetRuntimeFacts() error = %v", err)
 	}
@@ -360,7 +360,7 @@ func TestGetTargetRuntimeFactsReturnsEmptyFactsForKnownTarget(t *testing.T) {
 		},
 	}}
 
-	facts, err := repo.GetTargetRuntimeFacts(context.Background(), "tg_001")
+	facts, err := repo.GetTargetRuntimeFacts(context.Background(), "tg_001", time.Now().Add(-24*time.Hour), 500)
 	if err != nil {
 		t.Fatalf("GetTargetRuntimeFacts() error = %v", err)
 	}
@@ -384,7 +384,7 @@ func TestGetTargetRuntimeFactsReturnsTargetNotFound(t *testing.T) {
 		},
 	}}
 
-	_, err := repo.GetTargetRuntimeFacts(context.Background(), "tg_missing")
+	_, err := repo.GetTargetRuntimeFacts(context.Background(), "tg_missing", time.Now().Add(-24*time.Hour), 500)
 	if !errors.Is(err, targets.ErrTargetNotFound) {
 		t.Fatalf("GetTargetRuntimeFacts() error = %v, want ErrTargetNotFound", err)
 	}
@@ -405,7 +405,7 @@ func TestRuntimeFactSQLLocksLatestAndRecentOrderingAndProbeJoinShape(t *testing.
 	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "where node_id = $1") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "observed_at >= $2") {
 		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want node_id and observed_at lower bound filters", runtimeFactsRecentHostSamplesSQL)
 	}
-	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "order by observed_at desc, id desc") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "limit 288") {
+	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "order by observed_at desc, id desc") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "limit $3") {
 		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want recent host ordering and limit", runtimeFactsRecentHostSamplesSQL)
 	}
 	if !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "join probe_items") {
@@ -414,7 +414,7 @@ func TestRuntimeFactSQLLocksLatestAndRecentOrderingAndProbeJoinShape(t *testing.
 	if !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "where po.target_id = $1") || !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "po.observed_at >= $2") {
 		t.Fatalf("runtimeFactsRecentProbeObservationsSQL = %q, want target_id and observed_at lower bound filters", runtimeFactsRecentProbeObservationsSQL)
 	}
-	if !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "order by po.observed_at desc, po.id desc") || !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "limit 500") {
+	if !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "order by po.observed_at desc, po.id desc") || !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "limit $3") {
 		t.Fatalf("runtimeFactsRecentProbeObservationsSQL = %q, want recent probe ordering and limit", runtimeFactsRecentProbeObservationsSQL)
 	}
 }

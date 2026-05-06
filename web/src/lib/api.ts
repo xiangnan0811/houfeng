@@ -162,8 +162,8 @@ export function updateNodeMetadata(
   })
 }
 
-export function getNodeRuntimeFacts(nodeId: string) {
-  return requestJSON<NodeRuntimeFacts>(`/api/nodes/${nodeId}/runtime-facts`)
+export function getNodeRuntimeFacts(nodeId: string, timeWindow = '24h') {
+  return requestJSON<NodeRuntimeFacts>(`/api/nodes/${nodeId}/runtime-facts?window=${timeWindow}`)
 }
 
 export function listNodeSparklines(metrics: string[]) {
@@ -282,8 +282,8 @@ export function deleteProbeItem(targetId: string, probeItemId: string): Promise<
   })
 }
 
-export function getTargetRuntimeFacts(targetId: string) {
-  return requestJSON<TargetRuntimeFacts>(`/api/targets/${targetId}/runtime-facts`)
+export function getTargetRuntimeFacts(targetId: string, timeWindow = '24h') {
+  return requestJSON<TargetRuntimeFacts>(`/api/targets/${targetId}/runtime-facts?window=${timeWindow}`)
 }
 
 export function enterTargetMaintenance(targetId: string) {

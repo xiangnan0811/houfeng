@@ -66,6 +66,6 @@ type TargetRuntimeFacts struct {
 }
 
 type Repository interface {
-	GetNodeRuntimeFacts(context.Context, string) (NodeRuntimeFacts, error)
-	GetTargetRuntimeFacts(context.Context, string) (TargetRuntimeFacts, error)
+	GetNodeRuntimeFacts(context.Context, string, time.Time, int) (NodeRuntimeFacts, error)
+	GetTargetRuntimeFacts(context.Context, string, time.Time, int) (TargetRuntimeFacts, error)
 }

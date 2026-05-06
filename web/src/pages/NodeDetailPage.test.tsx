@@ -233,7 +233,7 @@ describe('NodeDetailPage', () => {
       cache: 'no-store',
         credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime-facts', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime-facts?window=24h', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
         credentials: 'include',
@@ -2850,6 +2850,108 @@ describe('NodeDetailPage', () => {
     // Closing the drawer removes the dialog from the DOM.
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  // ── Time window Tabs ──
+
+  it('renders time window Tabs with 24h selected by default', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_calm',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_calm',
+            latest_host_sample: null,
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_calm']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    const tablist = screen.getByRole('tablist')
+    expect(tablist).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '24h' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: '30d' })).toHaveAttribute('aria-selected', 'false')
+  })
+
+  it('switches to 7d window and fetches runtime facts with window=7d', async () => {
+    const runtimeResponse = mockJSONResponse({
+      node_id: 'nd_calm',
+      latest_host_sample: null,
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_calm',
+            binding_status: '已绑定',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(runtimeResponse)
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(runtimeResponse)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_calm']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    // Initial load fetches runtime facts with default 24h window.
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_calm/runtime-facts?window=24h', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+
+    // Switch to 7d.
+    fireEvent.click(screen.getByRole('tab', { name: '7d' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_calm/runtime-facts?window=7d', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      }),
+    )
   })
 
 })
