@@ -16,55 +16,63 @@ import (
 )
 
 const getCenterSettingsSQL = `
-	select
-		settings_id,
-		telegram_bot_token,
-		telegram_chat_id,
-		telegram_runtime_managed,
-		host_sample_frequency_tier,
-		probe_frequency_defaults,
-		incident_defaults,
-		override_rules,
-		retention_policy,
-		created_at,
-		updated_at
-	from center_settings
-	where settings_id = $1`
+		select
+			settings_id,
+			telegram_bot_token,
+			telegram_chat_id,
+			telegram_runtime_managed,
+			feishu_enabled,
+			feishu_webhook_url,
+			host_sample_frequency_tier,
+			probe_frequency_defaults,
+			incident_defaults,
+			override_rules,
+			retention_policy,
+			created_at,
+			updated_at
+		from center_settings
+		where settings_id = $1`
 
 const upsertCenterSettingsSQL = `
-	insert into center_settings (
-		settings_id,
-		telegram_bot_token,
-		telegram_chat_id,
-		telegram_runtime_managed,
-		host_sample_frequency_tier,
-		probe_frequency_defaults,
-		incident_defaults,
-		override_rules,
-		retention_policy
-	) values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb)
-	on conflict (settings_id) do update
-	set telegram_bot_token = excluded.telegram_bot_token,
-		telegram_chat_id = excluded.telegram_chat_id,
-		telegram_runtime_managed = excluded.telegram_runtime_managed,
-		host_sample_frequency_tier = excluded.host_sample_frequency_tier,
-		probe_frequency_defaults = excluded.probe_frequency_defaults,
-		incident_defaults = excluded.incident_defaults,
-		override_rules = excluded.override_rules,
-		retention_policy = excluded.retention_policy,
-		updated_at = now()
-	returning
-		settings_id,
-		telegram_bot_token,
-		telegram_chat_id,
-		telegram_runtime_managed,
-		host_sample_frequency_tier,
-		probe_frequency_defaults,
-		incident_defaults,
-		override_rules,
-		retention_policy,
-		created_at,
-		updated_at`
+		insert into center_settings (
+			settings_id,
+			telegram_bot_token,
+			telegram_chat_id,
+			telegram_runtime_managed,
+			feishu_enabled,
+			feishu_webhook_url,
+			host_sample_frequency_tier,
+			probe_frequency_defaults,
+			incident_defaults,
+			override_rules,
+			retention_policy
+		) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb)
+		on conflict (settings_id) do update
+		set telegram_bot_token = excluded.telegram_bot_token,
+			telegram_chat_id = excluded.telegram_chat_id,
+			telegram_runtime_managed = excluded.telegram_runtime_managed,
+			feishu_enabled = excluded.feishu_enabled,
+			feishu_webhook_url = excluded.feishu_webhook_url,
+			host_sample_frequency_tier = excluded.host_sample_frequency_tier,
+			probe_frequency_defaults = excluded.probe_frequency_defaults,
+			incident_defaults = excluded.incident_defaults,
+			override_rules = excluded.override_rules,
+			retention_policy = excluded.retention_policy,
+			updated_at = now()
+		returning
+			settings_id,
+			telegram_bot_token,
+			telegram_chat_id,
+			telegram_runtime_managed,
+			feishu_enabled,
+			feishu_webhook_url,
+			host_sample_frequency_tier,
+			probe_frequency_defaults,
+			incident_defaults,
+			override_rules,
+			retention_policy,
+			created_at,
+			updated_at`
 
 type settingsQueryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -129,6 +137,8 @@ func (r *PostgresSettingsRepository) putSettings(ctx context.Context, input cent
 		normalized.Telegram.BotToken,
 		normalized.Telegram.ChatID,
 		normalized.Telegram.RuntimeManaged,
+		normalized.FeishuEnabled,
+		normalized.FeishuWebhookURL,
 		normalized.HostSampleFrequencyTier,
 		probeDefaults,
 		incidentDefaults,
@@ -147,6 +157,8 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 		telegramBotToken        string
 		telegramChatID          string
 		telegramRuntimeManaged  bool
+		feishuEnabled           bool
+		feishuWebhookURL        string
 		hostSampleFrequencyTier string
 		probeFrequencyDefaults  []byte
 		incidentDefaults        []byte
@@ -161,6 +173,8 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 		&telegramBotToken,
 		&telegramChatID,
 		&telegramRuntimeManaged,
+		&feishuEnabled,
+		&feishuWebhookURL,
 		&hostSampleFrequencyTier,
 		&probeFrequencyDefaults,
 		&incidentDefaults,
@@ -182,6 +196,8 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 			ChatID:         telegramChatID,
 			RuntimeManaged: telegramRuntimeManaged,
 		},
+		FeishuEnabled:           feishuEnabled,
+		FeishuWebhookURL:        feishuWebhookURL,
 		HostSampleFrequencyTier: hostSampleFrequencyTier,
 	}
 

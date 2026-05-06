@@ -20,6 +20,8 @@ type Repository interface {
 
 type CenterSettings struct {
 	Telegram                TelegramSettings       `json:"telegram"`
+	FeishuEnabled           bool                   `json:"feishu_enabled"`
+	FeishuWebhookURL        string                 `json:"feishu_webhook_url"`
 	HostSampleFrequencyTier string                 `json:"host_sample_frequency_tier"`
 	ProbeFrequencyDefaults  ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
 	IncidentDefaults        IncidentDefaults       `json:"incident_defaults"`
@@ -172,6 +174,7 @@ func Default() CenterSettings {
 func Validate(input CenterSettings) (CenterSettings, error) {
 	input.Telegram.BotToken = strings.TrimSpace(input.Telegram.BotToken)
 	input.Telegram.ChatID = strings.TrimSpace(input.Telegram.ChatID)
+	input.FeishuWebhookURL = strings.TrimSpace(input.FeishuWebhookURL)
 	input.HostSampleFrequencyTier = strings.TrimSpace(input.HostSampleFrequencyTier)
 
 	if (input.Telegram.BotToken == "") != (input.Telegram.ChatID == "") {

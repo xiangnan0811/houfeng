@@ -18,6 +18,7 @@ type SettingsRepository interface {
 
 type settingsResponse struct {
 	Telegram                telegramSettingsResponse              `json:"telegram"`
+	Feishu                  feishuSettingsResponse                `json:"feishu"`
 	HostSampleFrequencyTier string                                `json:"host_sample_frequency_tier"`
 	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
 	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
@@ -35,11 +36,22 @@ type telegramSettingsResponse struct {
 
 type settingsUpdateRequest struct {
 	Telegram                telegramSettingsUpdateRequest         `json:"telegram"`
+	Feishu                  feishuSettingsUpdateRequest           `json:"feishu"`
 	HostSampleFrequencyTier string                                `json:"host_sample_frequency_tier"`
 	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
 	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
 	OverrideRules           centersettings.OverrideRules          `json:"override_rules"`
 	RetentionPolicy         centersettings.RetentionPolicy        `json:"retention_policy"`
+}
+
+type feishuSettingsResponse struct {
+	Enabled    bool   `json:"enabled"`
+	WebhookURL string `json:"webhook_url"`
+}
+
+type feishuSettingsUpdateRequest struct {
+	Enabled    *bool   `json:"enabled,omitempty"`
+	WebhookURL *string `json:"webhook_url,omitempty"`
 }
 
 type telegramSettingsUpdateRequest struct {
@@ -98,6 +110,8 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 			ChatID:         strings.TrimSpace(input.Telegram.ChatID),
 			RuntimeManaged: current.Telegram.RuntimeManaged,
 		},
+		FeishuEnabled:           current.FeishuEnabled,
+		FeishuWebhookURL:        current.FeishuWebhookURL,
 		HostSampleFrequencyTier: input.HostSampleFrequencyTier,
 		ProbeFrequencyDefaults:  input.ProbeFrequencyDefaults,
 		IncidentDefaults:        input.IncidentDefaults,
@@ -114,6 +128,12 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 	if merged.Telegram.ChatID == "" {
 		merged.Telegram.BotToken = ""
 	}
+	if input.Feishu.Enabled != nil {
+		merged.FeishuEnabled = *input.Feishu.Enabled
+	}
+	if input.Feishu.WebhookURL != nil {
+		merged.FeishuWebhookURL = strings.TrimSpace(*input.Feishu.WebhookURL)
+	}
 
 	return merged
 }
@@ -127,6 +147,10 @@ func newSettingsResponse(record centersettings.CenterSettings) settingsResponse 
 			TokenMaskedSummary: maskTelegramBotToken(record.Telegram.BotToken),
 			RuntimeManaged:     record.Telegram.RuntimeManaged,
 			RuntimeApplyActive: record.Telegram.RuntimeManaged && record.Telegram.Enabled(),
+		},
+		Feishu: feishuSettingsResponse{
+			Enabled:    record.FeishuEnabled,
+			WebhookURL: record.FeishuWebhookURL,
 		},
 		HostSampleFrequencyTier: record.HostSampleFrequencyTier,
 		ProbeFrequencyDefaults:  record.ProbeFrequencyDefaults,

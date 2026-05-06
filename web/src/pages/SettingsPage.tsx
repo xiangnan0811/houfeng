@@ -5,6 +5,7 @@ import { MonoDigits, Tabs } from '../components/atoms'
 import { useThemeOptional, type Preset, type Mode } from '../lib/theme-context'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
 import type {
+  FeishuSettingsInput,
   NodeLabelOverrideRule,
   ProbeFrequencyDefaults,
   SettingsRecord,
@@ -29,6 +30,8 @@ type FormState = {
   telegramBotToken: string
   telegramChatId: string
   telegramRuntimeManaged: boolean
+  feishuEnabled: boolean
+  feishuWebhookUrl: string
   hostSampleFrequencyTier: string
   probeFrequencyDefaults: ProbeFrequencyDefaults
   incidentDefaults: {
@@ -87,6 +90,8 @@ function buildFormState(settings: SettingsRecord): FormState {
     telegramBotToken: '',
     telegramChatId: settings.telegram.chat_id,
     telegramRuntimeManaged: settings.telegram.runtime_managed,
+    feishuEnabled: settings.feishu.enabled,
+    feishuWebhookUrl: settings.feishu.webhook_url,
     hostSampleFrequencyTier: settings.host_sample_frequency_tier,
     probeFrequencyDefaults: {
       tcp: settings.probe_frequency_defaults.tcp,
@@ -145,12 +150,13 @@ function parseOverrideRuleArray<T>(value: string, label: string): T[] {
   }
 }
 
-type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram'> & {
+type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram' | 'feishu'> & {
   telegram: {
     chat_id: string
     runtime_managed: boolean
     bot_token?: string
   }
+  feishu: FeishuSettingsInput
 }
 
 function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): SettingsUpdateDraft {
@@ -170,6 +176,10 @@ function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): Set
     }
     return {
       telegram: { chat_id: chatId, runtime_managed: runtimeManaged },
+      feishu: {
+        enabled: form.feishuEnabled,
+        webhook_url: form.feishuWebhookUrl.trim(),
+      },
       host_sample_frequency_tier: form.hostSampleFrequencyTier,
       probe_frequency_defaults: {
         tcp: form.probeFrequencyDefaults.tcp,
@@ -243,6 +253,10 @@ function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): Set
       ...(replacementTokenProvided ? { bot_token: botToken } : {}),
       chat_id: chatId,
       runtime_managed: runtimeManaged,
+    },
+    feishu: {
+      enabled: form.feishuEnabled,
+      webhook_url: form.feishuWebhookUrl.trim(),
     },
     host_sample_frequency_tier: form.hostSampleFrequencyTier,
     probe_frequency_defaults: {
@@ -814,6 +828,60 @@ export function SettingsPage() {
         </SectionIntro>
         <SectionIntro>
           接口不会回显明文 Token。留空会继续保留当前已保存的 Token；只有在需要替换时才输入新的 Token。
+        </SectionIntro>
+      </DetailSection>
+
+      <DetailSection
+        eyebrow="飞书"
+        title="飞书通知设置"
+        ribbon="accent-2"
+        aside={form.feishuEnabled && form.feishuWebhookUrl.trim() ? '已配置' : '未配置'}
+      >
+        <div className="summary-grid">
+          <label className="summary-card">
+            <span className="summary-card__label">启用飞书通知</span>
+            <input
+              aria-label="启用飞书通知"
+              type="checkbox"
+              checked={form.feishuEnabled}
+              onChange={(event) =>
+                setState((current) => ({
+                  ...current,
+                  form: current.form
+                    ? { ...current.form, feishuEnabled: event.target.checked }
+                    : current.form,
+                  saveError: null,
+                  saveSuccess: null,
+                }))
+              }
+            />
+          </label>
+
+          <label className="summary-card">
+            <span className="summary-card__label">Webhook URL</span>
+            <input
+              aria-label="飞书 Webhook URL"
+              type="text"
+              placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+              value={form.feishuWebhookUrl}
+              onChange={(event) =>
+                setState((current) => ({
+                  ...current,
+                  form: current.form
+                    ? { ...current.form, feishuWebhookUrl: event.target.value }
+                    : current.form,
+                  saveError: null,
+                  saveSuccess: null,
+                }))
+              }
+            />
+          </label>
+        </div>
+
+        <SectionIntro>
+          {form.feishuEnabled && form.feishuWebhookUrl.trim()
+            ? '飞书通知已启用，incident 发生时将同时通过飞书群机器人推送消息。'
+            : '当前未配置飞书通知。填写 Webhook URL 并启用后，incident 推送将同时投递到飞书群。'}
         </SectionIntro>
       </DetailSection>
 

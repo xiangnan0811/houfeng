@@ -20,6 +20,10 @@ const settingsResponseBody = {
     runtime_managed: false,
     runtime_apply_active: false,
   },
+  feishu: {
+    enabled: false,
+    webhook_url: '',
+  },
   host_sample_frequency_tier: '5m',
   probe_frequency_defaults: {
     tcp: '5m',
@@ -210,6 +214,10 @@ describe('SettingsPage', () => {
         chat_id: 'chat-id',
         runtime_managed: false,
       },
+      feishu: {
+        enabled: false,
+        webhook_url: '',
+      },
       host_sample_frequency_tier: '1m',
       probe_frequency_defaults: {
         tcp: '5m',
@@ -307,6 +315,10 @@ describe('SettingsPage', () => {
         chat_id: 'chat-id',
         runtime_managed: true,
       },
+      feishu: {
+        enabled: false,
+        webhook_url: '',
+      },
       host_sample_frequency_tier: '1m',
       probe_frequency_defaults: {
         tcp: '5m',
@@ -382,6 +394,10 @@ describe('SettingsPage', () => {
       telegram: {
         chat_id: 'new-chat-id',
         runtime_managed: true,
+      },
+      feishu: {
+        enabled: false,
+        webhook_url: '',
       },
       host_sample_frequency_tier: '5m',
       probe_frequency_defaults: {

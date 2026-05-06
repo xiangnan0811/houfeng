@@ -284,6 +284,12 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if got.IncidentDefaults.InodeWarningPct != 80 {
 		t.Fatalf("InodeWarningPct = %d, want 80", got.IncidentDefaults.InodeWarningPct)
 	}
+	if got.FeishuEnabled {
+		t.Fatal("FeishuEnabled = true, want false by default")
+	}
+	if got.FeishuWebhookURL != "" {
+		t.Fatalf("FeishuWebhookURL = %q, want empty by default", got.FeishuWebhookURL)
+	}
 }
 
 func TestSettingsValidateRejectsOutOfRangeThreshold(t *testing.T) {

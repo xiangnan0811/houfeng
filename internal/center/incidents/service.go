@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/notify"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
 	centersettings "houfeng/internal/center/settings"
@@ -81,28 +82,77 @@ func NewSettingsAwareNotifier(settingsRepo SettingsRepository, newNotifier Setti
 }
 
 func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error {
+	var telegramTelegram *centersettings.TelegramSettings
+	var telegramExists bool
+
+	// If the repo supports the optimized persisted Telegram path, pre-load
+	// Telegram settings via that path (avoids decoding full JSONB columns).
 	if source, ok := n.settingsRepo.(persistedTelegramSettingsSource); ok {
-		telegram, exists, err := source.GetPersistedTelegramSettings(ctx)
-		if err != nil {
-			if n.fallback == nil {
-				return fmt.Errorf("get persisted telegram settings: %w", err)
-			}
-			return n.fallback.Send(ctx, summary)
+		t, exists, err := source.GetPersistedTelegramSettings(ctx)
+		if err == nil {
+			telegramTelegram = &t
+			telegramExists = exists
 		}
-		return n.sendWithTelegramSettings(ctx, summary, telegram, exists)
 	}
 
+	// Load full settings for the unified send path (needed for Feishu).
 	settings, err := n.settingsRepo.GetSettings(ctx)
 	if err != nil {
-		if n.fallback == nil {
-			return fmt.Errorf("get persisted center settings: %w", err)
+		// If we have Telegram-only settings from the persisted path, send just
+		// Telegram and return.
+		if telegramTelegram != nil {
+			return n.sendTelegram(ctx, summary, *telegramTelegram, telegramExists)
 		}
-		return n.fallback.Send(ctx, summary)
+		if n.fallback != nil {
+			return n.fallback.Send(ctx, summary)
+		}
+		return fmt.Errorf("get persisted center settings: %w", err)
 	}
-	return n.sendWithTelegramSettings(ctx, summary, settings.Telegram, true)
+
+	// Override Telegram settings with persisted-telegram source if available.
+	if telegramTelegram != nil {
+		settings.Telegram = *telegramTelegram
+	}
+
+	var lastErr error
+	anyChannel := false
+	settingsSuppressed := false
+
+	// Telegram: let sendTelegram decide whether to send or suppress.
+	telegramErr := n.sendTelegram(ctx, summary, settings.Telegram, true)
+	if telegramErr == nil {
+		anyChannel = true
+	} else if errors.Is(telegramErr, errNotificationSuppressed) {
+		settingsSuppressed = true
+	} else {
+		lastErr = telegramErr
+		anyChannel = true
+	}
+
+	// Feishu
+	if settings.FeishuEnabled && settings.FeishuWebhookURL != "" {
+		anyChannel = true
+		feishu := notify.NewFeishuNotifier(settings.FeishuWebhookURL)
+		if err := feishu.Send(ctx, summary); err != nil {
+			lastErr = err
+		}
+	}
+
+	if !anyChannel {
+		// If settings explicitly suppressed notification, do not fallback to env.
+		if settingsSuppressed {
+			return errNotificationSuppressed
+		}
+		if n.fallback != nil {
+			return n.fallback.Send(ctx, summary)
+		}
+		return errNotificationSuppressed
+	}
+
+	return lastErr
 }
 
-func (n *settingsAwareNotifier) sendWithTelegramSettings(ctx context.Context, summary string, telegram centersettings.TelegramSettings, exists bool) error {
+func (n *settingsAwareNotifier) sendTelegram(ctx context.Context, summary string, telegram centersettings.TelegramSettings, exists bool) error {
 	if !exists || !telegram.RuntimeManaged {
 		if n.fallback != nil {
 			return n.fallback.Send(ctx, summary)

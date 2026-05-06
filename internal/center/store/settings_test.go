@@ -93,8 +93,8 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 			seenArgs = append([]any(nil), args...)
 			return fakeSettingsRow{scan: func(dest ...any) error {
 				scanCenterSettingsRow(dest, input)
-				*(dest[9].(*time.Time)) = now
-				*(dest[10].(*time.Time)) = now
+				*(dest[11].(*time.Time)) = now
+				*(dest[12].(*time.Time)) = now
 				return nil
 			}}
 		},
@@ -110,8 +110,8 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 	if len(got.OverrideRules.NodeLabels) != 1 {
 		t.Fatalf("len(NodeLabels) = %d, want 1", len(got.OverrideRules.NodeLabels))
 	}
-	if len(seenArgs) != 9 {
-		t.Fatalf("len(args) = %d, want 9", len(seenArgs))
+	if len(seenArgs) != 11 {
+		t.Fatalf("len(args) = %d, want 11", len(seenArgs))
 	}
 	if seenArgs[0] != centersettings.SingletonID {
 		t.Fatalf("settings_id = %#v, want %q", seenArgs[0], centersettings.SingletonID)
@@ -119,8 +119,8 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 	if got, ok := seenArgs[3].(bool); !ok || !got {
 		t.Fatalf("telegram_runtime_managed = %#v, want true", seenArgs[3])
 	}
-	assertJSONArgContains(t, seenArgs[7], `"node_labels":[{"label":"core"`)
-	assertJSONArgContains(t, seenArgs[8], `"raw_layer_days":14`)
+	assertJSONArgContains(t, seenArgs[9], `"node_labels":[{"label":"core"`)
+	assertJSONArgContains(t, seenArgs[10], `"raw_layer_days":14`)
 }
 
 func TestCenterSettingsRepositoryPutSettingsValidatesBeforeWriting(t *testing.T) {
@@ -157,7 +157,10 @@ func TestCenterSettingsRepositorySQLUsesSingletonUpsertAndJSONBSections(t *testi
 	if !strings.Contains(upsertCenterSettingsSQL, "telegram_runtime_managed") {
 		t.Fatalf("upsertCenterSettingsSQL = %q, want telegram_runtime_managed column", upsertCenterSettingsSQL)
 	}
-	if !strings.Contains(upsertCenterSettingsSQL, "$6::jsonb") {
+	if !strings.Contains(upsertCenterSettingsSQL, "feishu_enabled") {
+		t.Fatalf("upsertCenterSettingsSQL = %q, want feishu_enabled column", upsertCenterSettingsSQL)
+	}
+	if !strings.Contains(upsertCenterSettingsSQL, "$8::jsonb") {
 		t.Fatalf("upsertCenterSettingsSQL = %q, want jsonb cast for probe defaults", upsertCenterSettingsSQL)
 	}
 	if !strings.Contains(getCenterSettingsSQL, "where settings_id = $1") {
@@ -189,15 +192,17 @@ func scanCenterSettingsRow(dest []any, value centersettings.CenterSettings) {
 	*(dest[1].(*string)) = value.Telegram.BotToken
 	*(dest[2].(*string)) = value.Telegram.ChatID
 	*(dest[3].(*bool)) = value.Telegram.RuntimeManaged
-	*(dest[4].(*string)) = value.HostSampleFrequencyTier
-	*(dest[5].(*[]byte)) = probeJSON
-	*(dest[6].(*[]byte)) = incidentJSON
-	*(dest[7].(*[]byte)) = overrideJSON
-	*(dest[8].(*[]byte)) = retentionJSON
+	*(dest[4].(*bool)) = value.FeishuEnabled
+	*(dest[5].(*string)) = value.FeishuWebhookURL
+	*(dest[6].(*string)) = value.HostSampleFrequencyTier
+	*(dest[7].(*[]byte)) = probeJSON
+	*(dest[8].(*[]byte)) = incidentJSON
+	*(dest[9].(*[]byte)) = overrideJSON
+	*(dest[10].(*[]byte)) = retentionJSON
 	createdAt := time.Date(2026, time.April, 26, 8, 0, 0, 0, time.UTC)
 	updatedAt := createdAt.Add(time.Minute)
-	*(dest[9].(*time.Time)) = createdAt
-	*(dest[10].(*time.Time)) = updatedAt
+	*(dest[11].(*time.Time)) = createdAt
+	*(dest[12].(*time.Time)) = updatedAt
 }
 
 func assertJSONArgContains(t *testing.T, value any, snippet string) {

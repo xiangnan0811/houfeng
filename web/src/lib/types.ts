@@ -355,6 +355,16 @@ export type SettingsTelegramResponse = {
   runtime_apply_active: boolean
 }
 
+export type FeishuSettingsResponse = {
+  enabled: boolean
+  webhook_url: string
+}
+
+export type FeishuSettingsInput = {
+  enabled?: boolean
+  webhook_url?: string
+}
+
 export type SettingsTelegramInput = {
   bot_token?: string
   chat_id: string
@@ -451,6 +461,7 @@ export type RetentionPolicy = {
 
 export type SettingsRecord = {
   telegram: SettingsTelegramResponse
+  feishu: FeishuSettingsResponse
   host_sample_frequency_tier: string
   probe_frequency_defaults: ProbeFrequencyDefaults
   incident_defaults: IncidentDefaults
@@ -468,6 +479,7 @@ export type TargetSparklinesResponse = {
 
 export type SettingsUpdateInput = {
   telegram: SettingsTelegramInput
+  feishu: FeishuSettingsInput
   host_sample_frequency_tier: string
   probe_frequency_defaults: ProbeFrequencyDefaults
   incident_defaults: IncidentDefaults
