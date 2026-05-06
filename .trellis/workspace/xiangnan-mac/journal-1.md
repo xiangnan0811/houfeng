@@ -1383,3 +1383,39 @@ Stage 2 Phase 7 完成（最终 Phase）。Agent containersample package：纯 C
 ### Next Steps
 
 - None - task complete
+
+
+## Session 42: Comprehensive audit repair
+
+**Date**: 2026-05-06
+**Task**: Comprehensive audit repair
+**Branch**: `main`
+
+### Summary
+
+Completed a repo-wide early audit repair: fixed node actions routing and regression coverage, restored web build truth, aligned deploy/smoke/release docs, refreshed Trellis specs, and recorded follow-up risks for command durability, notification channel semantics, product-boundary drift, and modal accessibility.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `27eb325` | (see git log) |
+| `69e8c56` | (see git log) |
+| `8098614` | (see git log) |
+| `52253f3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
