@@ -1119,3 +1119,36 @@ SettingsPage 3 项 UX polish 单 PR 收尾，关闭前置 mono 任务备忘的 3
 ### Next Steps
 
 - None - task complete
+
+
+## Session 34: Dashboard AbnormalTargetList watchtower 对齐
+
+**Date**: 2026-05-06
+**Task**: Dashboard AbnormalTargetList watchtower 对齐
+**Branch**: `main`
+
+### Summary
+
+Dashboard 最后的 watchtower 拼图。AbnormalTargetList 身份列 2→3 行（Hostname host:port / name / freshness 最近成功+最近失败 Timestamp）。原 last-success 独立列删除，原位放 latency sparkline strip（64×14 + mono 当前值 + 阈值 tone）。数据从 /api/targets/sparklines 加载。零新 CSS。385/385 测试 pass（+2 用例）。Dashboard 节点+目标双行全 watchtower 闭环。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4ed7407` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
