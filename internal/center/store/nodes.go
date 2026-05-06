@@ -85,7 +85,7 @@ var ErrInvalidNodeLifecycleTransition = errors.New("invalid node lifecycle trans
 
 var nodeSelectColumnNames = []string{
 	"node_id",
-		"group",
+	"group",
 	"display_name",
 	"region",
 	"city",
@@ -122,7 +122,7 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 	if err := row.Scan(
 		&record.NodeID,
 		&record.DisplayName,
-			&record.Group,
+		&record.Group,
 		&record.Region,
 		&record.City,
 		&record.Provider,
@@ -197,7 +197,7 @@ func scanNodeWithPreviousMonitoringStatus(row nodeScanner) (nodes.Record, string
 	if err := row.Scan(
 		&record.NodeID,
 		&record.DisplayName,
-			&record.Group,
+		&record.Group,
 		&record.Region,
 		&record.City,
 		&record.Provider,
@@ -244,7 +244,7 @@ func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
 	if err := row.Scan(
 		&record.NodeID,
 		&record.DisplayName,
-			&record.Group,
+		&record.Group,
 		&record.Region,
 		&record.City,
 		&record.Provider,
@@ -433,7 +433,7 @@ func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input nodes.Cre
 		returning `+nodeSelectColumns,
 		nodeID,
 		input.DisplayName,
-			input.Group,
+		input.Group,
 		input.Region,
 		input.City,
 		input.Provider,

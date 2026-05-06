@@ -67,7 +67,7 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					*(dest[0].(*string)) = "nd_001"
 					*(dest[1].(*string)) = "Tokyo Edge"
 					*(dest[2].(*string)) = "production"
-						*(dest[3].(*string)) = "ap-northeast-1"
+					*(dest[3].(*string)) = "ap-northeast-1"
 					*(dest[4].(*string)) = "Tokyo"
 					*(dest[5].(*string)) = "aws"
 					*(dest[6].(*string)) = "在用"
@@ -87,7 +87,7 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					*(dest[3].(*string)) = "blog.example.com"
 					*(dest[4].(**int)) = &basePort
 					*(dest[5].(*string)) = "启用"
-						*(dest[6].(*string)) = "production"
+					*(dest[6].(*string)) = "production"
 					*(dest[7].(*string)) = string(incidents.SeverityCritical)
 					*(dest[8].(**time.Time)) = &lastSuccess
 					*(dest[9].(**time.Time)) = &lastFailure
