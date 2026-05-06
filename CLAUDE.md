@@ -107,7 +107,9 @@ Agents must remain "thin": observe, buffer, sync, fetch plan. They do not run ar
 
 ## Frontend (`web/`)
 
-React 19 + TypeScript + Vite SPA, Vitest + jsdom for tests, ESLint flat config. Routing in `src/app/router.tsx`, layout shell in `src/app/layout/`, page components in `src/pages/` (one `*.tsx` + colocated `*.test.tsx` per page), shared atoms in `src/components/`, API client + types + formatters in `src/lib/`.
+React 19 + TypeScript + Vite SPA, Vitest + jsdom for tests, ESLint flat config. Routing in `src/app/router.tsx`, layout shell in `src/app/layout/`, page components in `src/pages/` (one `*.tsx` + colocated `*.test.tsx` per page), shared atoms in `src/components/atoms/`, composite components in `src/components/`, API client + types + formatters in `src/lib/`.
+
+Atoms (`web/src/components/atoms/`): `Badge` / `Button` / `Card` / `Input` / `Toggle` / `Tabs` / `Sparkline` (SVG 64×16 mini chart) / `TrendArrow` / `StatusGlyph` (6-state shape indicator) / `Mono` (`MonoDigits` / `Hostname` / `Timestamp`) / `DataTable` (compact 36px / standard 44px) / `MetricChart` (SVG 360×140 full chart — X/Y axes, thresholds, maintenance windows, crosshair tooltip) / `Drawer` (right/left slide-in panel, portal + ESC) / `Stepper` (horizontal 4-step progress bar). All pure CSS + BEM + design tokens; no Tailwind / CSS-in-JS / chart library introduced (per `design-language.md` §12).
 
 Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-houfeng/component-spec.md`. v2-houfeng has superseded the earlier v1-baseline visual sections (`ui-ux-spec`, `baseline-screens`, `visual-review-round2`, `stitch/*`) and the entire `v1.x-frontend-redesign/` package. Those historical materials have been moved to `docs/_archive/design/` and are kept for traceability only — do not regress to them. Dark-first, Chinese as the primary UI language, high-density engineering-tool feel.
 
@@ -116,6 +118,7 @@ Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-
 V1 收口期间的运维与发布证据：
 
 - `docs/operations/v1-smoke-run.md` — fresh-install smoke against a real Postgres (V1 release gate 的核心证据).
+- `docs/operations/` — v2 visual evidence screenshots (Dashboard / 节点列表 / 节点详情 / 目标列表 / 目标详情，2026-05-06)。
 - `docs/release/v1-gap-checklist.md` — implementation-vs-design gap 清单（含 V1 release gate 与 12 条 2026-05-02 新增 gap）.
 - `docs/release/docs-audit.md` — docs 审计与 archive 决策（T1 落地，决定哪些 docs 是 keep / archive）.
 - `docs/release/next-phase-plan.md` — 下一阶段开发计划（Stage 1 V1 收口 / Stage 2 post-V1 → MVP / Stage 3+ 远期）.

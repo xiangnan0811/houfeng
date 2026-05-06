@@ -92,6 +92,28 @@ parent: docs/design/v2-houfeng/design-language.md
 - 不内置：排序 / 分页 / 虚拟滚动（YAGNI；< 100 行场景足够）
 - 类名：`.data-table` `.data-table__row`
 
+### MetricChart
+- 纯 SVG 完整时序图（360×140 default），与 `<Sparkline>`（240×60 配角）并存不互替
+- X 轴时间格式化（`HH:mm` / `dd HH:mm`）+ Y 轴值标尺 4 刻度 + 网格虚线
+- 阈值线（`thresholds: {value, tone, label}[]`）— 水平虚线 + tone 颜色 + 右侧标签
+- 维护窗口阴影（`maintenanceWindows: {startedAt, endedAt}[]`）— 竖向半透明带 + 三角 marker
+- 十字线 hover tooltip（垂直 hairline + 值 + 时间浮窗）
+- 边界态：0 sample → "暂无观测数据" / 1 sample → "样本不足"
+- 不引图表库（纯 SVG 自研，守 §12 硬约束）
+- 类名：`.metric-chart` `.metric-chart--empty` `.metric-chart-shell`
+
+### Drawer
+- 右侧/左侧滑入面板（`side: 'right'|'left'`，default `'right'`，width `min(440px, 40vw)`）
+- React portal + ESC 关闭 + overlay 点击关闭 + `aria-modal="true"`
+- header：title + × 关闭按钮 / body：scroll-y auto
+- 类名：`.drawer-overlay` `.drawer` `.drawer--right/--left` `.drawer--open`
+
+### Stepper
+- 水平 4 步进度条（`steps: {label, state: 'pending'|'current'|'done'|'error'}[]`）
+- 圆点 SVG + 连接线 + label / 状态色（pending→offline / current→accent / done→normal / error→critical）
+- 不内置 vertical / clickable（YAGNI；未来扩 props）
+- 类名：`.stepper` `.stepper__step--{state}`
+
 ---
 
 ## 三、共享组件

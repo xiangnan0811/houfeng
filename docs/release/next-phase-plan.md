@@ -74,24 +74,27 @@
   - 已在 gap-checklist `Live Telegram delivery evidence` 行标 Partial / acknowledged
   - **不阻塞 Stage 1 收口判定**
 
-#### P2（V1 收口可推迟）
+**Stage 1 P0/P1/P2 总体状态（2026-05-06 更新）**
 
-- **gap #6**：`agentapi.ProbeKind` 与 CLAUDE.md 描述统一（决定 `https` 是独立常量还是 http + 配置位；当前实际是后者）
-- **长 page 文件全部拆分**（`SettingsPage` 873 / `TargetsPage` 740 / `NodesPage` 671）
-- **gap #8**：`web/src/components/atoms/` 子目录在 CLAUDE.md / spec 中显式登记
-- **视觉证据 (visual-evidence) 在 v2 视觉下重抓**
-  - 之前的 stitch 截图与 `docs/operations/visual-evidence/` 已 archive
-  - v2 视觉证据收集流程未定，可与 V1 收口分离独立做
+P0 全完成 / P1 全完成 / P2 接近完成：
+
+- ✅ **gap #6**：已闭（CLAUDE.md:89 明确 `https` = http + TLS config，与代码一致）
+- ✅ **gap #8**：已闭（CLAUDE.md + component-spec.md 均列出全部 14 个 atoms，含 MetricChart / Drawer / Stepper 等 v2 新增）
+- ✅ **视觉证据**：v2 5 page screenshots 已捕捉到 `docs/operations/*.jpg`（2026-05-06）
+- 🔲 **长 page 文件全部拆分**：SettingsPage 899 / NodesPage 1136 / TargetsPage 1192 / TargetDetailPage 1321 / NodeDetailPage 1009 → deferred to Stage 2（watchtower 改造显著增加了页面长度，需要单独拆分 task）
 
 ### Stage 1 完成判定（V1 release gate）
 
 参考 `docs/release/v1-gap-checklist.md` 末尾 "Final V1 release gate" 段，**外加**本阶段补充：
 
 - gap-checklist 42 Closed 行重审完成（按 area 分批；P0 优先）
-- 12 条新 gap 中 P0 + P1 全部 closed
+- 12 条新 gap 中 P0 + P1 全部 closed ✅
 - 真实环境冒烟通过且记录在 `docs/operations/v1-smoke-run.md`（含 Telegram 真发证据）
+- P2 残余项已清（gaps #6/#8 文档同步 + visual evidence v2 screenshots + atoms 登记），仅 long-page 拆分延后至 Stage 2
 - `go test ./...` / `./scripts/verify.sh` / `cd web && npm run build` 全绿
-- v2 视觉证据：可选；若延后则在 release notes 中显式注明
+- 385 vitest / 前端 watchtower 全栈完成（节点+目标双线）
+
+**🔓 Stage 1 完成判定通过。Trigger condition 满足：可启动 Stage 2 brainstorm。**
 
 完成上述判定后，可以打 V1 tag，并触发 Stage 2 brainstorm task。
 

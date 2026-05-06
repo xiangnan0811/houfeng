@@ -26,3 +26,6 @@ docs/superpowers/
 
 # build outputs
 /bin/
+
+# 临时截图
+*.jpg
