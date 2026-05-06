@@ -1152,3 +1152,36 @@ Dashboard 最后的 watchtower 拼图。AbnormalTargetList 身份列 2→3 行�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 35: Stage 2 历史数据突破 24h 窗口（7d/30d 时间选择器）
+
+**Date**: 2026-05-06
+**Task**: Stage 2 历史数据突破 24h 窗口（7d/30d 时间选择器）
+**Branch**: `main`
+
+### Summary
+
+Stage 2 MVP 第一期完成。PR1 后端：/runtime-facts (node+target) 与 /sparklines (node+target) 4 个端点加 window query param（24h default/288点，7d/2016点，30d/8640点），parseWindow 白名单 + 向后兼容，Go 测试覆盖 default/7d/30d/invalid。PR2 前端：NodeDetailPage + TargetDetailPage 主视图上方 Tabs pill (24h|7d|30d)，切换 refetch 不闪白，mounted guard 防双 fetch。Dashboard stat strip/列表 sparkline 保持 24h 不动。388/388 测试 pass（+3）。Build clean。路线 A 历史数据扩容完成；效果好的话未来升级 B（日聚合表）。Stage 2 后续方向（脚本执行/分组管理/灵活规则/多通知/容器）待后续 brainstorm。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2665cdf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
