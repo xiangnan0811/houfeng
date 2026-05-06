@@ -60,6 +60,7 @@ const NODE_HEALTH_STATUS_FILTER_OPTIONS = [
 ] as const
 
 type NodeFilterState = {
+  group: string | null
   region: string | null
   city: string | null
   provider: string | null
@@ -93,6 +94,7 @@ function distinctSorted(values: string[]): string[] {
 
 const initialCreateForm: CreateNodeInput = {
   display_name: '',
+  group: '',
   region: '',
   city: '',
   provider: '',
@@ -224,6 +226,7 @@ export function NodesPage() {
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
   const [editingLabelNodeId, setEditingLabelNodeId] = useState<string | null>(null)
   const [labelDraft, setLabelDraft] = useState('')
+  const [groupDraft, setGroupDraft] = useState('')
   const [metadataBusyNodeId, setMetadataBusyNodeId] = useState<string | null>(null)
   const [metadataErrors, setMetadataErrors] = useState<Record<string, string>>({})
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingNodeConfirmation | null>(null)
@@ -370,6 +373,7 @@ export function NodesPage() {
       const updated = await updateNodeMetadata(
         node.node_id,
         {
+          group: groupDraft.trim() || undefined,
           labels: parseLabels(labelDraft),
           note: node.note,
         },
@@ -382,6 +386,7 @@ export function NodesPage() {
           item.node_id === updated.node_id
             ? {
                 ...item,
+                group: updated.group,
                 labels: updated.labels,
                 note: updated.note,
                 updated_at: updated.updated_at,
@@ -391,6 +396,7 @@ export function NodesPage() {
       )
       setEditingLabelNodeId((current) => (current === node.node_id ? null : current))
       setLabelDraft('')
+      setGroupDraft('')
     } catch (metadataError) {
       setMetadataErrors((current) => ({
         ...current,
@@ -409,6 +415,7 @@ export function NodesPage() {
     const payload: CreateNodeInput = {
       ...createForm,
       display_name: createForm.display_name.trim(),
+      group: createForm.group.trim(),
       region: createForm.region.trim(),
       city: createForm.city.trim(),
       provider: createForm.provider.trim(),
@@ -438,6 +445,7 @@ export function NodesPage() {
 
   const filterState: NodeFilterState = useMemo(
     () => ({
+      group: searchParams.get('group'),
       region: searchParams.get('region'),
       city: searchParams.get('city'),
       provider: searchParams.get('provider'),
@@ -477,6 +485,15 @@ export function NodesPage() {
     [nodes],
   )
 
+  const groupOptions = useMemo(
+    () =>
+      distinctSorted(nodes.map((node) => node.group).filter(Boolean)).map((value) => ({
+        value,
+        label: value,
+      })),
+    [nodes],
+  )
+
   const labelOptions = useMemo(
     () =>
       distinctSorted(nodes.flatMap((node) => node.labels)).map((value) => ({
@@ -488,6 +505,7 @@ export function NodesPage() {
 
   const filteredNodes = useMemo(() => {
     return baseNodes.filter((node) => {
+      if (filterState.group && node.group !== filterState.group) return false
       if (filterState.region && node.region !== filterState.region) return false
       if (filterState.city && node.city !== filterState.city) return false
       if (filterState.provider && node.provider !== filterState.provider) return false
@@ -504,6 +522,7 @@ export function NodesPage() {
   }, [baseNodes, filterState])
 
   const hasActiveFilters =
+    filterState.group !== null ||
     filterState.region !== null ||
     filterState.city !== null ||
     filterState.provider !== null ||
@@ -542,7 +561,7 @@ export function NodesPage() {
   }
 
   function setSingleFilter(
-    key: 'region' | 'city' | 'provider' | 'lifecycle' | 'run_status' | 'health',
+    key: 'group' | 'region' | 'city' | 'provider' | 'lifecycle' | 'run_status' | 'health',
     value: string | null,
   ) {
     updateSearchParam(key, value)
@@ -610,7 +629,7 @@ export function NodesPage() {
       label: '位置',
       render: (node) => (
         <span className="nodes-table__location">
-          {node.region} · {node.city} · {node.provider}
+          {[node.group, node.region, node.city, node.provider].filter(Boolean).join(' · ') || '—'}
         </span>
       ),
     },
@@ -629,6 +648,16 @@ export function NodesPage() {
                 }
               }}
             >
+              <label className="nodes-table__label-editor-field">
+                <span className="visually-hidden">Group</span>
+                <input
+                  name={`group-${node.node_id}`}
+                  value={groupDraft}
+                  onChange={(event) => setGroupDraft(event.target.value)}
+                  aria-label="Group"
+                  placeholder="Group"
+                />
+              </label>
               <label className="nodes-table__label-editor-field">
                 <span className="visually-hidden">标签</span>
                 <input
@@ -656,6 +685,7 @@ export function NodesPage() {
                       current === node.node_id ? null : current,
                     )
                     setLabelDraft('')
+                    setGroupDraft('')
                     setMetadataErrors((current) => {
                       if (!current[node.node_id]) return current
                       const next = { ...current }
@@ -779,6 +809,7 @@ export function NodesPage() {
                   if (metadataBusyNodeId !== null) return
                   setEditingLabelNodeId(node.node_id)
                   setLabelDraft(node.labels.join(', '))
+                  setGroupDraft(node.group || '')
                   setMetadataErrors((current) => {
                     if (!current[node.node_id]) return current
                     const next = { ...current }
@@ -869,6 +900,16 @@ export function NodesPage() {
                   value={createForm.display_name}
                   onChange={(event) => updateField('display_name', event.target.value)}
                   required
+                />
+              </label>
+            </p>
+            <p>
+              <label>
+                Group
+                <input
+                  name="group"
+                  value={createForm.group}
+                  onChange={(event) => updateField('group', event.target.value)}
                 />
               </label>
             </p>
@@ -966,6 +1007,12 @@ export function NodesPage() {
             onClearAll={clearAllFilters}
             activeChips={
               <>
+                {filterState.group ? (
+                  <FilterChip
+                    label={`Group: ${filterState.group}`}
+                    onRemove={() => setSingleFilter('group', null)}
+                  />
+                ) : null}
                 {filterState.region ? (
                   <FilterChip
                     label={`地区: ${filterState.region}`}
@@ -1023,6 +1070,12 @@ export function NodesPage() {
               </>
             }
           >
+            <FilterSelect
+              label="Group"
+              value={filterState.group}
+              options={groupOptions}
+              onChange={(value) => setSingleFilter('group', value)}
+            />
             <FilterSelect
               label="地区"
               value={filterState.region}

@@ -90,6 +90,14 @@ export function NodeWatchtowerHeader({
         </div>
       </div>
       <div className="watchtower-header__row2">
+        {node.group ? (
+          <>
+            <span className="watchtower-header__meta-item">{node.group}</span>
+            <span className="watchtower-header__meta-sep" aria-hidden>
+              ·
+            </span>
+          </>
+        ) : null}
         <span className="watchtower-header__meta-item">
           <Hostname>{node.node_id}</Hostname>
         </span>

@@ -65,6 +65,7 @@ type TargetRecord struct {
 	BasePort                   *int       `json:"base_port,omitempty"`
 	ExecutionNodeLabels        []string   `json:"execution_node_labels"`
 	RunStatus                  string     `json:"run_status"`
+	Group                      string     `json:"group"`
 	Labels                     []string   `json:"labels"`
 	Note                       string     `json:"note"`
 	CurrentHealthStatus        string     `json:"current_health_status"`
@@ -95,6 +96,7 @@ type CreateTargetInput struct {
 	BasePort            *int     `json:"base_port,omitempty"`
 	ExecutionNodeLabels []string `json:"execution_node_labels"`
 	RunStatus           string   `json:"run_status"`
+	Group               string   `json:"group"`
 	Labels              []string `json:"labels"`
 	Note                string   `json:"note"`
 }
@@ -108,6 +110,7 @@ type CreateProbeItemInput struct {
 }
 
 type UpdateMetadataInput struct {
+	Group             *string    `json:"group,omitempty"`
 	Labels            []string   `json:"labels"`
 	Note              string     `json:"note"`
 	ExpectedUpdatedAt *time.Time `json:"-"`

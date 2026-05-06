@@ -139,6 +139,7 @@ describe('NodesPage', () => {
         credentials: 'include',
       body: JSON.stringify({
         display_name: 'Tokyo Edge',
+        group: '',
         region: 'ap-northeast-1',
         city: 'Tokyo',
         provider: 'Vultr',

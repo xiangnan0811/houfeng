@@ -105,6 +105,7 @@ type ProbeFocusRestoreRequest = {
 }
 
 type MetadataFormState = {
+  group: string
   labels: string
   note: string
 }
@@ -322,7 +323,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const [metadataEditing, setMetadataEditing] = useState(false)
   const [metadataSubmitting, setMetadataSubmitting] = useState(false)
   const [metadataError, setMetadataError] = useState<string | null>(null)
-  const [metadataForm, setMetadataForm] = useState<MetadataFormState>({ labels: '', note: '' })
+  const [metadataForm, setMetadataForm] = useState<MetadataFormState>({ group: '', labels: '', note: '' })
   const [pendingProbeConfirmation, setPendingProbeConfirmation] =
     useState<PendingProbeConfirmation | null>(null)
   const [probeCreateForm, setProbeCreateForm] = useState<ProbeCreateFormState>(
@@ -477,6 +478,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         setMetadataSubmitting(false)
         setMetadataError(null)
         setMetadataForm({
+          group: target.group || '',
           labels: target.labels.join(', '),
           note: target.note,
         })
@@ -670,6 +672,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       const updated = await updateTargetMetadata(
         actionTargetId,
         {
+          group: metadataForm.group.trim() || undefined,
           labels: dedupeLabels(parseLabels(metadataForm.labels)),
           note: metadataForm.note.trim(),
         },
@@ -698,6 +701,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
             : current.target,
       }))
       setMetadataForm({
+        group: updated.group || '',
         labels: updated.labels.join(', '),
         note: updated.note,
       })
@@ -1191,16 +1195,19 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           <TargetLabelsAndNote
             target={target}
             editing={metadataEditing}
+            groupDraft={metadataForm.group}
             labelDraft={metadataForm.labels}
             noteDraft={metadataForm.note}
             submitting={metadataSubmitting}
             error={metadataError}
+            onGroupDraftChange={(value) => updateMetadataField('group', value)}
             onLabelDraftChange={(value) => updateMetadataField('labels', value)}
             onNoteDraftChange={(value) => updateMetadataField('note', value)}
             onStartEdit={() => {
               setMetadataEditing(true)
               setMetadataError(null)
               setMetadataForm({
+                group: target.group || '',
                 labels: target.labels.join(', '),
                 note: target.note,
               })
@@ -1209,6 +1216,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
               setMetadataEditing(false)
               setMetadataError(null)
               setMetadataForm({
+                group: target.group || '',
                 labels: target.labels.join(', '),
                 note: target.note,
               })

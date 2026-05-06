@@ -66,7 +66,7 @@ func NodeItem(repo nodes.Repository) http.Handler {
 
 			writeJSON(w, http.StatusOK, record)
 		case http.MethodPatch:
-			labels, note, ok, err := decodeUpdateMetadataRequest(r)
+			group, labels, note, ok, err := decodeUpdateMetadataRequest(r)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
@@ -76,7 +76,7 @@ func NodeItem(repo nodes.Repository) http.Handler {
 				return
 			}
 
-			input := nodes.UpdateMetadataInput{Labels: labels, Note: note}
+			input := nodes.UpdateMetadataInput{Group: group, Labels: labels, Note: note}
 			expectedUpdatedAt, ok := parseMetadataPrecondition(r.Header.Get("If-Match"))
 			if !ok {
 				writeError(w, http.StatusBadRequest, "invalid input")
@@ -112,6 +112,7 @@ func NodeItem(repo nodes.Repository) http.Handler {
 
 func normalizeCreateInput(input nodes.CreateInput) nodes.CreateInput {
 	input.DisplayName = strings.TrimSpace(input.DisplayName)
+	input.Group = strings.TrimSpace(input.Group)
 	input.Region = strings.TrimSpace(input.Region)
 	input.City = strings.TrimSpace(input.City)
 	input.Provider = strings.TrimSpace(input.Provider)
@@ -128,6 +129,10 @@ func isValidCreateInput(input nodes.CreateInput) bool {
 }
 
 func normalizeUpdateMetadataInput(input nodes.UpdateMetadataInput) nodes.UpdateMetadataInput {
+	if input.Group != nil {
+		v := strings.TrimSpace(*input.Group)
+		input.Group = &v
+	}
 	input.Labels, input.Note = normalizeMetadata(input.Labels, input.Note)
 	return input
 }

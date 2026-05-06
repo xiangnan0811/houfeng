@@ -66,15 +66,16 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "nd_001"
 					*(dest[1].(*string)) = "Tokyo Edge"
-					*(dest[2].(*string)) = "ap-northeast-1"
-					*(dest[3].(*string)) = "Tokyo"
-					*(dest[4].(*string)) = "aws"
-					*(dest[5].(*string)) = "在用"
-					*(dest[6].(*string)) = "启用"
-					*(dest[7].(*string)) = string(incidents.SeverityAlert)
-					*(dest[8].(**time.Time)) = &lastHeartbeat
-					*(dest[9].(*int)) = 2
-					*(dest[10].(*string)) = "磁盘使用率 92.0%"
+					*(dest[2].(*string)) = "production"
+						*(dest[3].(*string)) = "ap-northeast-1"
+					*(dest[4].(*string)) = "Tokyo"
+					*(dest[5].(*string)) = "aws"
+					*(dest[6].(*string)) = "在用"
+					*(dest[7].(*string)) = "启用"
+					*(dest[8].(*string)) = string(incidents.SeverityAlert)
+					*(dest[9].(**time.Time)) = &lastHeartbeat
+					*(dest[10].(*int)) = 2
+					*(dest[11].(*string)) = "磁盘使用率 92.0%"
 					return nil
 				}}}}, nil
 			case strings.Contains(sql, "from targets"):
@@ -86,11 +87,12 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					*(dest[3].(*string)) = "blog.example.com"
 					*(dest[4].(**int)) = &basePort
 					*(dest[5].(*string)) = "启用"
-					*(dest[6].(*string)) = string(incidents.SeverityCritical)
-					*(dest[7].(**time.Time)) = &lastSuccess
-					*(dest[8].(**time.Time)) = &lastFailure
-					*(dest[9].(*int)) = 1
-					*(dest[10].(*string)) = "HTTPS 探测连续失败"
+						*(dest[6].(*string)) = "production"
+					*(dest[7].(*string)) = string(incidents.SeverityCritical)
+					*(dest[8].(**time.Time)) = &lastSuccess
+					*(dest[9].(**time.Time)) = &lastFailure
+					*(dest[10].(*int)) = 1
+					*(dest[11].(*string)) = "HTTPS 探测连续失败"
 					return nil
 				}}}}, nil
 			default:

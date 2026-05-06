@@ -7,10 +7,12 @@ import type { TargetRecord } from '../../lib/types'
 type TargetLabelsAndNoteProps = {
   target: TargetRecord
   editing: boolean
+  groupDraft: string
   labelDraft: string
   noteDraft: string
   submitting: boolean
   error: string | null
+  onGroupDraftChange: (value: string) => void
   onLabelDraftChange: (value: string) => void
   onNoteDraftChange: (value: string) => void
   onStartEdit: () => void
@@ -21,10 +23,12 @@ type TargetLabelsAndNoteProps = {
 export function TargetLabelsAndNote({
   target,
   editing,
+  groupDraft,
   labelDraft,
   noteDraft,
   submitting,
   error,
+  onGroupDraftChange,
   onLabelDraftChange,
   onNoteDraftChange,
   onStartEdit,
@@ -36,6 +40,14 @@ export function TargetLabelsAndNote({
       <div className="page-stack">
         {editing ? (
           <form onSubmit={onSubmit} className="page-stack">
+            <label>
+              Group
+              <input
+                name="metadata-group"
+                value={groupDraft}
+                onChange={(event) => onGroupDraftChange(event.target.value)}
+              />
+            </label>
             <label>
               标签
               <input
@@ -68,6 +80,7 @@ export function TargetLabelsAndNote({
           </form>
         ) : (
           <>
+            {target.group ? <p>Group：{target.group}</p> : null}
             <p>标签：{formatLabelList(target.labels)}</p>
             <p>备注：{target.note.trim() || '暂无备注'}</p>
             <div>

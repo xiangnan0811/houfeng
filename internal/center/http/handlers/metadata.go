@@ -14,19 +14,20 @@ const (
 )
 
 type updateMetadataRequest struct {
+	Group  *string   `json:"group,omitempty"`
 	Labels *[]string `json:"labels"`
 	Note   *string   `json:"note"`
 }
 
-func decodeUpdateMetadataRequest(r *http.Request) ([]string, string, bool, error) {
+func decodeUpdateMetadataRequest(r *http.Request) (*string, []string, string, bool, error) {
 	var request updateMetadataRequest
 	if err := decodeJSON(r, &request); err != nil {
-		return nil, "", false, err
+		return nil, nil, "", false, err
 	}
 	if request.Labels == nil || request.Note == nil {
-		return nil, "", false, nil
+		return nil, nil, "", false, nil
 	}
-	return *request.Labels, *request.Note, true, nil
+	return request.Group, *request.Labels, *request.Note, true, nil
 }
 
 func parseMetadataPrecondition(value string) (*time.Time, bool) {

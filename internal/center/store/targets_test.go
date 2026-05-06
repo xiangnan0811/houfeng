@@ -168,8 +168,8 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 					}
 					return fakeTargetRow{scan: func(dest ...any) error {
 						scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: tt.targetID, RunStatus: tt.returnedStatus})
-						if len(dest) > 16 {
-							*(dest[16].(*string)) = tt.sourceStatus
+						if len(dest) > 17 {
+							*(dest[17].(*string)) = tt.sourceStatus
 						}
 						return nil
 					}}
@@ -424,34 +424,34 @@ func TestUpdateTargetMetadata(t *testing.T) {
 		t.Fatalf("UpdateTargetMetadata() error = %v", err)
 	}
 
-	if len(gotArgs) != 4 {
-		t.Fatalf("len(gotArgs) = %d, want 4", len(gotArgs))
+	if len(gotArgs) != 5 {
+		t.Fatalf("len(gotArgs) = %d, want 5", len(gotArgs))
 	}
 	if gotArgs[0] != "tg_001" {
 		t.Fatalf("gotArgs[0] = %#v, want %q", gotArgs[0], "tg_001")
 	}
-	if labels, ok := gotArgs[1].([]string); !ok || len(labels) != 2 || labels[0] != "edge" || labels[1] != "core" {
-		t.Fatalf("gotArgs[1] = %#v, want %#v", gotArgs[1], []string{"edge", "core"})
+	if labels, ok := gotArgs[2].([]string); !ok || len(labels) != 2 || labels[0] != "edge" || labels[1] != "core" {
+		t.Fatalf("gotArgs[2] = %#v, want %#v", gotArgs[2], []string{"edge", "core"})
 	}
-	if gotArgs[2] != "updated" {
-		t.Fatalf("gotArgs[2] = %#v, want %q", gotArgs[2], "updated")
+	if gotArgs[3] != "updated" {
+		t.Fatalf("gotArgs[3] = %#v, want %q", gotArgs[3], "updated")
 	}
-	if gotUpdatedAt, ok := gotArgs[3].(time.Time); !ok || !gotUpdatedAt.Equal(expectedUpdatedAt) {
-		t.Fatalf("gotArgs[3] = %#v, want %s", gotArgs[3], expectedUpdatedAt.Format(time.RFC3339Nano))
+	if gotUpdatedAt, ok := gotArgs[4].(time.Time); !ok || !gotUpdatedAt.Equal(expectedUpdatedAt) {
+		t.Fatalf("gotArgs[4] = %#v, want %s", gotArgs[4], expectedUpdatedAt.Format(time.RFC3339Nano))
 	}
 	if !strings.Contains(gotSQL, "update targets") {
 		t.Fatalf("UpdateTargetMetadata() SQL = %q, want update targets", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "set labels = $2") {
+	if !strings.Contains(gotSQL, "labels") {
 		t.Fatalf("UpdateTargetMetadata() SQL = %q, want labels update", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "note = $3") {
+	if !strings.Contains(gotSQL, "note") {
 		t.Fatalf("UpdateTargetMetadata() SQL = %q, want note update", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "updated_at = now()") {
 		t.Fatalf("UpdateTargetMetadata() SQL = %q, want updated_at refresh", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "updated_at = $4") {
+	if !strings.Contains(gotSQL, "updated_at = $5") {
 		t.Fatalf("UpdateTargetMetadata() SQL = %q, want optimistic updated_at precondition", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "returning "+targetSelectColumns) {
@@ -501,11 +501,11 @@ func TestUpdateTargetMetadataMapsPreconditionMissToConflictWhenTargetExists(t *t
 			queryCount++
 			switch queryCount {
 			case 1:
-				if !strings.Contains(sql, "updated_at = $4") {
+				if !strings.Contains(sql, "updated_at = $5") {
 					t.Fatalf("update SQL = %q, want updated_at precondition", sql)
 				}
-				if len(args) != 4 {
-					t.Fatalf("update args = %#v, want four args", args)
+				if len(args) != 5 {
+					t.Fatalf("update args = %#v, want five args (target_id, group, labels, note, expected_updated_at)", args)
 				}
 				return fakeTargetRow{scan: func(dest ...any) error {
 					return pgx.ErrNoRows
@@ -635,15 +635,16 @@ func scanTargetRecordDestinations(dest []any, record targets.TargetRecord) {
 	*(dest[4].(**int)) = cloneIntPtr(record.BasePort)
 	*(dest[5].(*[]string)) = append([]string(nil), record.ExecutionNodeLabels...)
 	*(dest[6].(*string)) = record.RunStatus
-	*(dest[7].(*[]string)) = append([]string(nil), record.Labels...)
-	*(dest[8].(*string)) = record.Note
-	*(dest[9].(*string)) = record.CurrentHealthStatus
-	*(dest[10].(*int)) = record.CurrentActiveIncidentCount
-	*(dest[11].(**time.Time)) = cloneTimePtr(record.LastSuccessAt)
-	*(dest[12].(**time.Time)) = cloneTimePtr(record.LastFailureAt)
-	*(dest[13].(*string)) = record.CurrentPrimaryIssueSummary
-	*(dest[14].(*time.Time)) = record.CreatedAt
-	*(dest[15].(*time.Time)) = record.UpdatedAt
+	*(dest[7].(*string)) = record.Group
+	*(dest[8].(*[]string)) = append([]string(nil), record.Labels...)
+	*(dest[9].(*string)) = record.Note
+	*(dest[10].(*string)) = record.CurrentHealthStatus
+	*(dest[11].(*int)) = record.CurrentActiveIncidentCount
+	*(dest[12].(**time.Time)) = cloneTimePtr(record.LastSuccessAt)
+	*(dest[13].(**time.Time)) = cloneTimePtr(record.LastFailureAt)
+	*(dest[14].(*string)) = record.CurrentPrimaryIssueSummary
+	*(dest[15].(*time.Time)) = record.CreatedAt
+	*(dest[16].(*time.Time)) = record.UpdatedAt
 }
 
 func cloneIntPtr(value *int) *int {

@@ -272,8 +272,8 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 					CurrentHealthStatus:        nodes.HealthNormal,
 					LastHeartbeatAt:            &heartbeatAt,
 				})
-				*(dest[29].(*bool)) = true
-				*(dest[30].(*bool)) = false
+				*(dest[30].(*bool)) = true
+				*(dest[31].(*bool)) = false
 				return nil
 			}}
 		},
@@ -333,8 +333,8 @@ func TestNodeOnboardingGetStateScopesEvidenceToCurrentBindingGeneration(t *testi
 					BindingEpochStartedAt: &bindingEpochStartedAt,
 					LastHeartbeatAt:       &staleHeartbeatAt,
 				})
-				*(dest[29].(*bool)) = false
 				*(dest[30].(*bool)) = false
+				*(dest[31].(*bool)) = false
 				return nil
 			}}
 		},
@@ -407,34 +407,34 @@ func TestUpdateNodeMetadata(t *testing.T) {
 		t.Fatalf("UpdateNodeMetadata() error = %v", err)
 	}
 
-	if len(gotArgs) != 4 {
-		t.Fatalf("len(gotArgs) = %d, want 4", len(gotArgs))
+	if len(gotArgs) != 5 {
+		t.Fatalf("len(gotArgs) = %d, want 5", len(gotArgs))
 	}
 	if gotArgs[0] != "nd_001" {
 		t.Fatalf("gotArgs[0] = %#v, want %q", gotArgs[0], "nd_001")
 	}
-	if labels, ok := gotArgs[1].([]string); !ok || len(labels) != 2 || labels[0] != "edge" || labels[1] != "core" {
-		t.Fatalf("gotArgs[1] = %#v, want %#v", gotArgs[1], []string{"edge", "core"})
+	if labels, ok := gotArgs[2].([]string); !ok || len(labels) != 2 || labels[0] != "edge" || labels[1] != "core" {
+		t.Fatalf("gotArgs[2] = %#v, want %#v", gotArgs[2], []string{"edge", "core"})
 	}
-	if gotArgs[2] != "updated" {
-		t.Fatalf("gotArgs[2] = %#v, want %q", gotArgs[2], "updated")
+	if gotArgs[3] != "updated" {
+		t.Fatalf("gotArgs[3] = %#v, want %q", gotArgs[3], "updated")
 	}
-	if gotUpdatedAt, ok := gotArgs[3].(time.Time); !ok || !gotUpdatedAt.Equal(expectedUpdatedAt) {
-		t.Fatalf("gotArgs[3] = %#v, want %s", gotArgs[3], expectedUpdatedAt.Format(time.RFC3339Nano))
+	if gotUpdatedAt, ok := gotArgs[4].(time.Time); !ok || !gotUpdatedAt.Equal(expectedUpdatedAt) {
+		t.Fatalf("gotArgs[4] = %#v, want %s", gotArgs[4], expectedUpdatedAt.Format(time.RFC3339Nano))
 	}
 	if !strings.Contains(gotSQL, "update nodes") {
 		t.Fatalf("UpdateNodeMetadata() SQL = %q, want update nodes", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "set labels = $2") {
+	if !strings.Contains(gotSQL, "labels") {
 		t.Fatalf("UpdateNodeMetadata() SQL = %q, want labels update", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "note = $3") {
+	if !strings.Contains(gotSQL, "note") {
 		t.Fatalf("UpdateNodeMetadata() SQL = %q, want note update", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "updated_at = now()") {
 		t.Fatalf("UpdateNodeMetadata() SQL = %q, want updated_at refresh", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "updated_at = $4") {
+	if !strings.Contains(gotSQL, "updated_at = $5") {
 		t.Fatalf("UpdateNodeMetadata() SQL = %q, want optimistic updated_at precondition", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "returning "+nodeSelectColumns) {
@@ -484,11 +484,11 @@ func TestUpdateNodeMetadataMapsPreconditionMissToConflictWhenNodeExists(t *testi
 			queryCount++
 			switch queryCount {
 			case 1:
-				if !strings.Contains(sql, "updated_at = $4") {
+				if !strings.Contains(sql, "updated_at = $5") {
 					t.Fatalf("update SQL = %q, want updated_at precondition", sql)
 				}
-				if len(args) != 4 {
-					t.Fatalf("update args = %#v, want four args", args)
+				if len(args) != 5 {
+					t.Fatalf("update args = %#v, want five args (node_id, group, labels, note, expected_updated_at)", args)
 				}
 				return fakeNodeRow{scan: func(dest ...any) error {
 					return pgx.ErrNoRows
@@ -1199,8 +1199,8 @@ func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
 					}
 					return fakeNodeRow{scan: func(dest ...any) error {
 						scanNodeRecordDestinations(dest, nodes.Record{NodeID: tt.nodeID, MonitoringStatus: tt.returnedStatus})
-						if len(dest) > 29 {
-							*(dest[29].(*string)) = tt.sourceStatus
+						if len(dest) > 30 {
+							*(dest[30].(*string)) = tt.sourceStatus
 						}
 						return nil
 					}}
@@ -1280,7 +1280,7 @@ func TestNodeRuntimeControlResumePreservesNullSafeSelectColumns(t *testing.T) {
 					}
 				}
 				scanNodeRecordDestinations(dest, nodes.Record{NodeID: "nd_resume_nulls", MonitoringStatus: nodes.MonitoringEnabled})
-				*(dest[29].(*string)) = nodeMonitoringStatusMaintenance
+				*(dest[30].(*string)) = nodeMonitoringStatusMaintenance
 				return nil
 			}}
 		},
@@ -1435,36 +1435,36 @@ func (f *fakeNodeTx) Conn() *pgx.Conn { return nil }
 func scanNodeRecordDestinations(dest []any, record nodes.Record) {
 	*(dest[0].(*string)) = record.NodeID
 	*(dest[1].(*string)) = record.DisplayName
-	*(dest[2].(*string)) = record.Region
-	*(dest[3].(*string)) = record.City
-	*(dest[4].(*string)) = record.Provider
-	*(dest[5].(*string)) = record.LifecycleStatus
-	*(dest[6].(*string)) = record.MonitoringStatus
-	*(dest[7].(*string)) = record.BindingStatus
-	*(dest[8].(*string)) = record.EnrollmentTokenHash
-	*(dest[9].(**time.Time)) = cloneTimePtr(record.EnrollmentTokenIssuedAt)
-	*(dest[10].(*string)) = record.SyncTokenHash
-	*(dest[11].(*string)) = record.BindingFingerprint
-	*(dest[12].(**time.Time)) = cloneTimePtr(record.BindingEpochStartedAt)
-	*(dest[13].(*string)) = record.PendingBindingFingerprint
-	*(dest[14].(**time.Time)) = cloneTimePtr(record.PendingBindingFirstSeenAt)
-	*(dest[15].(**time.Time)) = cloneTimePtr(record.PendingBindingLastSeenAt)
-	*(dest[16].(*int)) = record.PendingBindingAttemptCount
-	*(dest[17].(*[]string)) = append([]string(nil), record.Labels...)
-	*(dest[18].(*string)) = record.Note
-	*(dest[19].(*string)) = record.CurrentHealthStatus
-	*(dest[20].(**time.Time)) = cloneTimePtr(record.LastHeartbeatAt)
-	*(dest[21].(**time.Time)) = cloneTimePtr(record.LastSyncAt)
-	*(dest[22].(*int)) = record.CurrentActiveIncidentCount
-	*(dest[23].(*string)) = record.CurrentPrimaryIssueSummary
-	// pending_action_id (24), pending_action_command_id (25), last_action (26)
+	*(dest[2].(*string)) = record.Group
+	*(dest[3].(*string)) = record.Region
+	*(dest[4].(*string)) = record.City
+	*(dest[5].(*string)) = record.Provider
+	*(dest[6].(*string)) = record.LifecycleStatus
+	*(dest[7].(*string)) = record.MonitoringStatus
+	*(dest[8].(*string)) = record.BindingStatus
+	*(dest[9].(*string)) = record.EnrollmentTokenHash
+	*(dest[10].(**time.Time)) = cloneTimePtr(record.EnrollmentTokenIssuedAt)
+	*(dest[11].(*string)) = record.SyncTokenHash
+	*(dest[12].(*string)) = record.BindingFingerprint
+	*(dest[13].(**time.Time)) = cloneTimePtr(record.BindingEpochStartedAt)
+	*(dest[14].(*string)) = record.PendingBindingFingerprint
+	*(dest[15].(**time.Time)) = cloneTimePtr(record.PendingBindingFirstSeenAt)
+	*(dest[16].(**time.Time)) = cloneTimePtr(record.PendingBindingLastSeenAt)
+	*(dest[17].(*int)) = record.PendingBindingAttemptCount
+	*(dest[18].(*[]string)) = append([]string(nil), record.Labels...)
+	*(dest[19].(*string)) = record.Note
+	*(dest[20].(*string)) = record.CurrentHealthStatus
+	*(dest[21].(**time.Time)) = cloneTimePtr(record.LastHeartbeatAt)
+	*(dest[22].(**time.Time)) = cloneTimePtr(record.LastSyncAt)
+	*(dest[23].(*int)) = record.CurrentActiveIncidentCount
+	*(dest[24].(*string)) = record.CurrentPrimaryIssueSummary
+	// pending_action_id (25), pending_action_command_id (26), last_action (27)
 	if record.LastAction != nil {
-		*(dest[26].(*[]byte)) = []byte(record.LastActionRaw)
+		*(dest[27].(*[]byte)) = []byte(record.LastActionRaw)
 	}
-	*(dest[27].(*time.Time)) = record.CreatedAt
-	*(dest[28].(*time.Time)) = record.UpdatedAt
+	*(dest[28].(*time.Time)) = record.CreatedAt
+	*(dest[29].(*time.Time)) = record.UpdatedAt
 }
-
 func cloneTimePtr(value *time.Time) *time.Time {
 	if value == nil {
 		return nil

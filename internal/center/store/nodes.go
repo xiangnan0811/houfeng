@@ -42,6 +42,7 @@ func NewPostgresNodeRepository(db *pgxpool.Pool) *PostgresNodeRepository {
 const nodeSelectColumns = `
 	node_id,
 	display_name,
+	"group",
 	region,
 	city,
 	provider,
@@ -84,6 +85,7 @@ var ErrInvalidNodeLifecycleTransition = errors.New("invalid node lifecycle trans
 
 var nodeSelectColumnNames = []string{
 	"node_id",
+		"group",
 	"display_name",
 	"region",
 	"city",
@@ -120,6 +122,7 @@ func scanNode(row nodeScanner) (nodes.Record, error) {
 	if err := row.Scan(
 		&record.NodeID,
 		&record.DisplayName,
+			&record.Group,
 		&record.Region,
 		&record.City,
 		&record.Provider,
@@ -194,6 +197,7 @@ func scanNodeWithPreviousMonitoringStatus(row nodeScanner) (nodes.Record, string
 	if err := row.Scan(
 		&record.NodeID,
 		&record.DisplayName,
+			&record.Group,
 		&record.Region,
 		&record.City,
 		&record.Provider,
@@ -240,6 +244,7 @@ func scanNodeOnboarding(row nodeScanner) (nodes.OnboardingState, error) {
 	if err := row.Scan(
 		&record.NodeID,
 		&record.DisplayName,
+			&record.Group,
 		&record.Region,
 		&record.City,
 		&record.Provider,
@@ -347,18 +352,25 @@ func (r *PostgresNodeRepository) GetNode(ctx context.Context, nodeID string) (no
 }
 
 func (r *PostgresNodeRepository) UpdateNodeMetadata(ctx context.Context, nodeID string, input nodes.UpdateMetadataInput) (nodes.Record, error) {
-	args := []any{nodeID, input.Labels, input.Note}
+	args := []any{nodeID}
+	if input.Group != nil {
+		args = append(args, *input.Group)
+	} else {
+		args = append(args, nil)
+	}
+	args = append(args, input.Labels, input.Note)
 	precondition := ""
 	if input.ExpectedUpdatedAt != nil {
 		args = append(args, *input.ExpectedUpdatedAt)
 		precondition = `
-		  and updated_at = $4`
+		  and updated_at = $5`
 	}
 
 	record, err := scanNode(r.db.QueryRow(ctx, `
 		update nodes
-		set labels = $2,
-		    note = $3,
+		set "group" = coalesce($2, "group"),
+		    labels = $3,
+		    note = $4,
 		    updated_at = now()
 		where node_id = $1`+precondition+`
 		returning `+nodeSelectColumns, args...))
@@ -390,6 +402,7 @@ func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input nodes.Cre
 		insert into nodes (
 			node_id,
 			display_name,
+			"group",
 			region,
 			city,
 			provider,
@@ -413,12 +426,14 @@ func (r *PostgresNodeRepository) CreateNode(ctx context.Context, input nodes.Cre
 			$9,
 			$10,
 			$11,
+			$12,
 			0,
 			''
 		)
 		returning `+nodeSelectColumns,
 		nodeID,
 		input.DisplayName,
+			input.Group,
 		input.Region,
 		input.City,
 		input.Provider,

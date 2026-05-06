@@ -1,6 +1,7 @@
 export type NodeRecord = {
   node_id: string
   display_name: string
+  group: string
   region: string
   city: string
   provider: string
@@ -48,11 +49,13 @@ export type NodeEnrollmentTokenIssue = {
 
 export type UpdateNodeMetadataInput = {
   labels: string[]
+  group?: string
   note: string
 }
 
 export type CreateNodeInput = {
   display_name: string
+  group: string
   region: string
   city: string
   provider: string
@@ -115,6 +118,7 @@ export type TargetRecord = {
   base_port?: number
   execution_node_labels: string[]
   run_status: TargetRunStatus
+  group: string
   labels: string[]
   note: string
   current_health_status: string
@@ -127,6 +131,7 @@ export type TargetRecord = {
 }
 
 export type UpdateTargetMetadataInput = {
+  group?: string
   labels: string[]
   note: string
 }
@@ -138,6 +143,7 @@ export type CreateTargetInput = {
   base_port?: number
   execution_node_labels: string[]
   run_status: TargetRunStatus
+  group: string
   labels: string[]
   note: string
 }
@@ -282,6 +288,7 @@ export type DashboardOverview = {
 export type DashboardNodeSummary = {
   node_id: string
   display_name: string
+  group: string
   region: string
   city: string
   provider: string
@@ -300,6 +307,7 @@ export type DashboardTargetSummary = {
   host: string
   base_port?: number
   run_status: string
+  group: string
   current_health_status: IncidentSeverity
   last_success_at?: string
   last_failure_at?: string

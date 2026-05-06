@@ -71,6 +71,7 @@ type DashboardOverview struct {
 type DashboardNodeSummary struct {
 	NodeID                     string     `json:"node_id"`
 	DisplayName                string     `json:"display_name"`
+	Group                      string     `json:"group"`
 	Region                     string     `json:"region"`
 	City                       string     `json:"city"`
 	Provider                   string     `json:"provider"`
@@ -89,6 +90,7 @@ type DashboardTargetSummary struct {
 	Host                       string     `json:"host"`
 	BasePort                   *int       `json:"base_port,omitempty"`
 	RunStatus                  string     `json:"run_status"`
+	Group                      string     `json:"group"`
 	CurrentHealthStatus        string     `json:"current_health_status"`
 	LastSuccessAt              *time.Time `json:"last_success_at,omitempty"`
 	LastFailureAt              *time.Time `json:"last_failure_at,omitempty"`

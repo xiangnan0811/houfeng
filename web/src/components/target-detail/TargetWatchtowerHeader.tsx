@@ -98,6 +98,14 @@ export function TargetWatchtowerHeader({
         </div>
       </div>
       <div className="watchtower-header__row2">
+        {target.group ? (
+          <>
+            <span className="watchtower-header__meta-item">{target.group}</span>
+            <span className="watchtower-header__meta-sep" aria-hidden>
+              ·
+            </span>
+          </>
+        ) : null}
         <span className="watchtower-header__meta-item">
           <Hostname truncate maxChars={14}>{target.target_id}</Hostname>
         </span>

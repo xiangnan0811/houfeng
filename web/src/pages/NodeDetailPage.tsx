@@ -209,6 +209,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const [metadataEditing, setMetadataEditing] = useState(false)
   const [metadataLabelDraft, setMetadataLabelDraft] = useState('')
   const [metadataNoteDraft, setMetadataNoteDraft] = useState('')
+  const [metadataGroupDraft, setMetadataGroupDraft] = useState('')
   const [metadataSubmitting, setMetadataSubmitting] = useState(false)
   const [metadataError, setMetadataError] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -742,6 +743,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       const updated = await updateNodeMetadata(
         actionNodeId,
         {
+          group: metadataGroupDraft.trim() || undefined,
           labels: parseLabels(metadataLabelDraft),
           note: metadataNoteDraft.trim(),
         },
@@ -978,20 +980,24 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           <NodeLabelsAndNote
             node={node}
             editing={metadataEditing}
+            groupDraft={metadataGroupDraft}
             labelDraft={metadataLabelDraft}
             noteDraft={metadataNoteDraft}
             submitting={metadataSubmitting}
             error={metadataError}
+            onGroupDraftChange={setMetadataGroupDraft}
             onLabelDraftChange={setMetadataLabelDraft}
             onNoteDraftChange={setMetadataNoteDraft}
             onStartEdit={() => {
               setMetadataEditing(true)
+              setMetadataGroupDraft(node.group || '')
               setMetadataLabelDraft(node.labels.join(', '))
               setMetadataNoteDraft(node.note)
               setMetadataError(null)
             }}
             onCancelEdit={() => {
               setMetadataEditing(false)
+              setMetadataGroupDraft('')
               setMetadataLabelDraft('')
               setMetadataNoteDraft('')
               setMetadataError(null)

@@ -55,6 +55,7 @@ type LastAction struct {
 type Record struct {
 	NodeID                     string          `json:"node_id"`
 	DisplayName                string          `json:"display_name"`
+	Group                      string          `json:"group"`
 	Region                     string          `json:"region"`
 	City                       string          `json:"city"`
 	Provider                   string          `json:"provider"`
@@ -85,6 +86,7 @@ type Record struct {
 
 type CreateInput struct {
 	DisplayName     string   `json:"display_name"`
+	Group           string   `json:"group"`
 	Region          string   `json:"region"`
 	City            string   `json:"city"`
 	Provider        string   `json:"provider"`
@@ -94,6 +96,7 @@ type CreateInput struct {
 }
 
 type UpdateMetadataInput struct {
+	Group             *string    `json:"group,omitempty"`
 	Labels            []string   `json:"labels"`
 	Note              string     `json:"note"`
 	ExpectedUpdatedAt *time.Time `json:"-"`

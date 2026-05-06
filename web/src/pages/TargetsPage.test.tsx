@@ -128,6 +128,7 @@ describe('TargetsPage', () => {
         base_port: 443,
         execution_node_labels: ['edge', 'core'],
         run_status: '启用',
+        group: '',
         labels: ['public'],
         note: 'primary blog',
       }),

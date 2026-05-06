@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import {
@@ -145,7 +145,7 @@ function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
       label: '位置',
       render: (node) => (
         <span className="dashboard-table__location">
-          {[node.region, node.city, node.provider].filter(Boolean).join(' · ')}
+          {[node.group, node.region, node.city, node.provider].filter(Boolean).join(' · ') || '—'}
         </span>
       ),
     },
@@ -305,6 +305,13 @@ function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) 
       ),
     },
     {
+      key: 'group',
+      label: 'Group',
+      render: (target) => (
+        <span className="dashboard-table__group">{target.group || '—'}</span>
+      ),
+    },
+    {
       key: 'type',
       label: '类型',
       render: (target) => (
@@ -417,6 +424,26 @@ export function DashboardPage() {
     }
   }, [])
 
+  const groupSummaries = useMemo(() => {
+    if (!state.overview) return []
+    const map = new Map<string, { nodeCount: number; targetCount: number; abnormalCount: number }>()
+    const get = (g: string) => {
+      if (!map.has(g)) map.set(g, { nodeCount: 0, targetCount: 0, abnormalCount: 0 })
+      return map.get(g)!
+    }
+    for (const n of state.overview.abnormal_nodes ?? []) {
+      const s = get(n.group || '未分组')
+      s.nodeCount++
+      s.abnormalCount++
+    }
+    for (const t of state.overview.abnormal_targets ?? []) {
+      const s = get(t.group || '未分组')
+      s.targetCount++
+      s.abnormalCount++
+    }
+    return Array.from(map.entries()).map(([group, s]) => ({ group, ...s }))
+  }, [state.overview])
+
   if (state.loading) {
     return <section className="page-panel">正在加载首页 / Dashboard…</section>
   }
@@ -436,6 +463,7 @@ export function DashboardPage() {
   const abnormalTotal = overview.abnormal_node_count + overview.abnormal_target_count
   const severeTotal = overview.severe_node_count + overview.severe_target_count
   const maintenanceTotal = overview.maintenance_node_count + overview.maintenance_target_count
+
 
   if (isFreshInstall) {
     return (
@@ -467,6 +495,7 @@ export function DashboardPage() {
       </div>
     )
   }
+
 
   return (
     <div className="page-stack">
@@ -512,6 +541,20 @@ export function DashboardPage() {
           <StatTile label="维护目标" value={overview.maintenance_target_count} />
         </div>
         <AbnormalTargetList targets={overview.abnormal_targets} />
+      </DetailSection>
+
+      <DetailSection eyebrow="分组视图" title="按 Group 分布">
+        <div className="summary-grid">
+          {groupSummaries.map((g) => (
+            <article className="summary-card" key={g.group}>
+              <p className="summary-card__label">{g.group || '未分组'}</p>
+              <p className="summary-card__value">
+                节点 {g.nodeCount} / 目标 {g.targetCount}
+                {g.abnormalCount > 0 ? ` · 异常 ${g.abnormalCount}` : ''}
+              </p>
+            </article>
+          ))}
+        </div>
       </DetailSection>
 
       <DetailSection eyebrow="最近事件" title="最近事件">

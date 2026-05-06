@@ -5,10 +5,12 @@ import type { NodeRecord } from '../../lib/types'
 type NodeLabelsAndNoteProps = {
   node: NodeRecord
   editing: boolean
+  groupDraft: string
   labelDraft: string
   noteDraft: string
   submitting: boolean
   error: string | null
+  onGroupDraftChange: (value: string) => void
   onLabelDraftChange: (value: string) => void
   onNoteDraftChange: (value: string) => void
   onStartEdit: () => void
@@ -19,10 +21,12 @@ type NodeLabelsAndNoteProps = {
 export function NodeLabelsAndNote({
   node,
   editing,
+  groupDraft,
   labelDraft,
   noteDraft,
   submitting,
   error,
+  onGroupDraftChange,
   onLabelDraftChange,
   onNoteDraftChange,
   onStartEdit,
@@ -34,6 +38,16 @@ export function NodeLabelsAndNote({
       <div className="page-stack">
         {editing ? (
           <>
+            <p>
+              <label>
+                Group
+                <input
+                  name="metadata-group"
+                  value={groupDraft}
+                  onChange={(event) => onGroupDraftChange(event.target.value)}
+                />
+              </label>
+            </p>
             <p>
               <label>
                 标签
@@ -74,6 +88,7 @@ export function NodeLabelsAndNote({
           </>
         ) : (
           <>
+            {node.group ? <p>Group：{node.group}</p> : null}
             <p>标签：{formatLabelList(node.labels)}</p>
             <p>备注：{node.note.trim() || '暂无备注'}</p>
             <div>

@@ -63,6 +63,7 @@ const TARGET_HEALTH_STATUS_FILTER_OPTIONS = [
 ] as const
 
 type TargetFilterState = {
+  group: string | null
   type: string | null
   runStatus: string | null
   health: string | null
@@ -98,6 +99,7 @@ type CreateTargetFormState = {
   basePort: string
   executionNodeLabels: string
   runStatus: CreateTargetInput['run_status']
+  group: string
   labels: string
   note: string
 }
@@ -109,6 +111,7 @@ const initialCreateForm: CreateTargetFormState = {
   basePort: '',
   executionNodeLabels: '',
   runStatus: '启用',
+  group: '',
   labels: '',
   note: '',
 }
@@ -191,6 +194,7 @@ function buildCreateTargetInput(form: CreateTargetFormState): CreateTargetInput 
     ...(basePort == null ? {} : { base_port: basePort }),
     execution_node_labels: executionNodeLabels,
     run_status: form.runStatus,
+    group: form.group.trim(),
     labels: parseLabels(form.labels),
     note: form.note.trim(),
   }
@@ -265,6 +269,7 @@ function mergeRuntimeTargetRecord(current: TargetRecord, updated: TargetRecord):
 function mergeMetadataTargetRecord(current: TargetRecord, updated: TargetRecord): TargetRecord {
   return {
     ...current,
+    group: updated.group,
     labels: updated.labels,
     note: updated.note,
     updated_at: updated.updated_at,
@@ -300,6 +305,7 @@ export function TargetsPage() {
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
   const [metadataEditingTargetId, setMetadataEditingTargetId] = useState<string | null>(null)
   const [metadataLabelInput, setMetadataLabelInput] = useState('')
+  const [metadataGroupInput, setMetadataGroupInput] = useState('')
   const [metadataSavingTargetId, setMetadataSavingTargetId] = useState<string | null>(null)
   const [metadataErrors, setMetadataErrors] = useState<Record<string, string>>({})
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingTargetConfirmation | null>(null)
@@ -463,6 +469,7 @@ export function TargetsPage() {
     if (metadataSavingTargetId) return
     setMetadataEditingTargetId(target.target_id)
     setMetadataLabelInput(target.labels.join(', '))
+    setMetadataGroupInput(target.group || '')
     setMetadataErrors((current) => {
       if (!current[target.target_id]) return current
       const next = { ...current }
@@ -474,6 +481,7 @@ export function TargetsPage() {
   function cancelMetadataEdit(targetId: string) {
     setMetadataEditingTargetId((current) => (current === targetId ? null : current))
     setMetadataLabelInput('')
+    setMetadataGroupInput('')
     setMetadataSavingTargetId((current) => (current === targetId ? null : current))
     setMetadataErrors((current) => {
       if (!current[targetId]) return current
@@ -496,6 +504,7 @@ export function TargetsPage() {
       const updated = await updateTargetMetadata(
         target.target_id,
         {
+          group: metadataGroupInput.trim() || undefined,
           labels: dedupeLabels(parseLabels(metadataLabelInput)),
           note: target.note,
         },
@@ -510,6 +519,7 @@ export function TargetsPage() {
       )
       setMetadataEditingTargetId((current) => (current === target.target_id ? null : current))
       setMetadataLabelInput('')
+      setMetadataGroupInput('')
     } catch (metadataError) {
       setMetadataErrors((current) => ({
         ...current,
@@ -522,6 +532,7 @@ export function TargetsPage() {
 
   const filterState: TargetFilterState = useMemo(
     () => ({
+      group: searchParams.get('group'),
       type: searchParams.get('type'),
       runStatus: searchParams.get('run_status'),
       health: searchParams.get('health'),
@@ -530,6 +541,15 @@ export function TargetsPage() {
       abnormal: searchParams.get('abnormal') === '1',
     }),
     [searchParams],
+  )
+
+  const groupOptions = useMemo(
+    () =>
+      distinctSorted(targets.map((target) => target.group).filter(Boolean)).map((value) => ({
+        value,
+        label: value,
+      })),
+    [targets],
   )
 
   const labelOptions = useMemo(
@@ -551,6 +571,7 @@ export function TargetsPage() {
 
   const filteredTargets = useMemo(() => {
     return targets.filter((target) => {
+      if (filterState.group && target.group !== filterState.group) return false
       if (filterState.type && target.target_type !== filterState.type) return false
       if (filterState.runStatus && target.run_status !== filterState.runStatus) return false
       if (filterState.health && target.current_health_status !== filterState.health) return false
@@ -570,6 +591,7 @@ export function TargetsPage() {
   }, [targets, filterState])
 
   const hasActiveFilters =
+    filterState.group !== null ||
     filterState.type !== null ||
     filterState.runStatus !== null ||
     filterState.health !== null ||
@@ -592,7 +614,7 @@ export function TargetsPage() {
     )
   }
 
-  function setSingleFilter(key: 'type' | 'run_status' | 'health', value: string | null) {
+  function setSingleFilter(key: 'group' | 'type' | 'run_status' | 'health', value: string | null) {
     updateSearchParam(key, value)
   }
 
@@ -664,6 +686,7 @@ export function TargetsPage() {
       render: (target) => (
         <Hostname>
           {target.base_port ? `${target.host}:${target.base_port}` : target.host}
+          {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
         </Hostname>
       ),
     },
@@ -682,6 +705,16 @@ export function TargetsPage() {
                 }
               }}
             >
+              <label className="targets-table__label-editor-field">
+                <span className="visually-hidden">Group</span>
+                <input
+                  name={`target-group-${target.target_id}`}
+                  value={metadataGroupInput}
+                  onChange={(event) => setMetadataGroupInput(event.target.value)}
+                  aria-label="Group"
+                  placeholder="Group"
+                />
+              </label>
               <label className="targets-table__label-editor-field">
                 <span className="visually-hidden">标签</span>
                 <input
@@ -970,6 +1003,16 @@ export function TargetsPage() {
             </p>
             <p>
               <label>
+                Group
+                <input
+                  name="group"
+                  value={createForm.group}
+                  onChange={(event) => updateCreateField('group', event.target.value)}
+                />
+              </label>
+            </p>
+            <p>
+              <label>
                 目标标签
                 <input
                   name="labels"
@@ -1016,6 +1059,12 @@ export function TargetsPage() {
             onClearAll={clearAllFilters}
             activeChips={
               <>
+                {filterState.group ? (
+                  <FilterChip
+                    label={`Group: ${filterState.group}`}
+                    onRemove={() => setSingleFilter('group', null)}
+                  />
+                ) : null}
                 {filterState.type ? (
                   <FilterChip
                     label={`类型: ${filterState.type}`}
@@ -1067,6 +1116,12 @@ export function TargetsPage() {
               </>
             }
           >
+            <FilterSelect
+              label="Group"
+              value={filterState.group}
+              options={groupOptions}
+              onChange={(value) => setSingleFilter('group', value)}
+            />
             <FilterSelect
               label="类型"
               value={filterState.type}

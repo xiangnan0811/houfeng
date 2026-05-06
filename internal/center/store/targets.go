@@ -43,6 +43,7 @@ var targetSelectColumnNames = []string{
 	"base_port",
 	"execution_node_labels",
 	"run_status",
+	"group",
 	"labels",
 	"note",
 	"current_health_status",
@@ -62,6 +63,7 @@ const targetSelectColumns = `
 	base_port,
 	execution_node_labels,
 	run_status,
+	"group",
 	labels,
 	note,
 	current_health_status,
@@ -100,6 +102,7 @@ func scanTarget(row targetScanner) (targets.TargetRecord, error) {
 		&record.BasePort,
 		&record.ExecutionNodeLabels,
 		&record.RunStatus,
+		&record.Group,
 		&record.Labels,
 		&record.Note,
 		&record.CurrentHealthStatus,
@@ -136,6 +139,7 @@ func scanTargetWithPreviousRunStatus(row targetScanner) (targets.TargetRecord, s
 		&record.BasePort,
 		&record.ExecutionNodeLabels,
 		&record.RunStatus,
+		&record.Group,
 		&record.Labels,
 		&record.Note,
 		&record.CurrentHealthStatus,
@@ -198,19 +202,26 @@ func (r *PostgresTargetRepository) ListTargets(ctx context.Context) ([]targets.T
 }
 
 func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, targetID string, input targets.UpdateMetadataInput) (targets.TargetRecord, error) {
-	args := []any{targetID, input.Labels, input.Note}
+	args := []any{targetID}
+	if input.Group != nil {
+		args = append(args, *input.Group)
+	} else {
+		args = append(args, nil)
+	}
+	args = append(args, input.Labels, input.Note)
 	precondition := ""
 	if input.ExpectedUpdatedAt != nil {
 		args = append(args, *input.ExpectedUpdatedAt)
 		precondition = `
-		  and updated_at = $4`
+		  and updated_at = $5`
 	}
 
 	record, err := scanTarget(r.db.QueryRow(ctx, `
 		update targets
-		set labels = $2,
-		    note = $3,
-		    updated_at = now()
+		set "group" = coalesce($2, "group"),
+		    labels = $3,
+		    note = $4,
+			    updated_at = now()
 		where target_id = $1`+precondition+`
 		returning `+targetSelectColumns, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -260,6 +271,7 @@ func (r *PostgresTargetRepository) CreateTarget(ctx context.Context, input targe
 			base_port,
 			execution_node_labels,
 			run_status,
+			"group",
 			labels,
 			note,
 			current_health_status,
@@ -287,6 +299,7 @@ func (r *PostgresTargetRepository) CreateTarget(ctx context.Context, input targe
 		input.BasePort,
 		input.ExecutionNodeLabels,
 		input.RunStatus,
+		input.Group,
 		input.Labels,
 		input.Note,
 		targets.HealthNormal,
