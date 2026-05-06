@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend PR3"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Center PR2"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go tests"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "SyncPlan/SyncRequest contract 扩展前后端一致"}
