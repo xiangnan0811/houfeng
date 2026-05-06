@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -345,6 +346,10 @@ func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testi
 	if !secondSync.HostSamples[0].MaintenanceContext {
 		t.Fatal("HostSamples[0].MaintenanceContext = false, want true")
 	}
+	// Containers field is populated by containersample (nil when Docker unavailable).
+	if secondSync.HostSamples[0].Containers != nil {
+		t.Logf("containers attached: %d container(s)", len(secondSync.HostSamples[0].Containers))
+	}
 	if len(secondSync.ProbeObservations) != 1 {
 		t.Fatalf("len(secondSync.ProbeObservations) = %d, want 1", len(secondSync.ProbeObservations))
 	}
@@ -664,6 +669,70 @@ func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
 	secondSync := client.syncRequests[1]
 	if len(secondSync.CommandResults) != 0 {
 		t.Fatalf("secondSync.CommandResults = %d, want 0 for unknown command ID", len(secondSync.CommandResults))
+	}
+}
+
+func TestRuntimeCollectHostSampleAttachesContainers(t *testing.T) {
+	// Set up a fake docker so containersample.Collect returns real data.
+	dir := t.TempDir()
+	script := dir + "/docker"
+	psOut := "abc123\tmy-app\tnginx:latest\tUp 2 hours\n"
+	statsOut := "0.50%\t1.23%\tmy-app\n"
+	content := "#!/bin/sh\ncase \"$1\" in\n  ps) cat <<'DOCKERPS'\n" + psOut + "DOCKERPS\n    ;;\n  stats) cat <<'DOCKERSTATS'\n" + statsOut + "DOCKERSTATS\n    ;;\n  *) exit 1 ;;\nesac\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake docker script: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	os.Setenv("PATH", dir+":"+origPath)
+	defer os.Setenv("PATH", origPath)
+
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{
+		syncResponses: []agentapi.SyncResponse{
+			{
+				AcceptedAt: time.Now().UTC(),
+				Status:     "accepted",
+				Plan: &agentapi.SyncPlan{
+					HostSampleFrequencyTier: agentapi.FrequencyTier1m,
+				},
+			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+		},
+	}
+	hostProvider := &fakeHostSampleProvider{
+		result: agentapi.HostSamplePayload{CPUUsagePct: 12.5},
+	}
+
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, &fakeProbeProvider{}, 10*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	defer cancel()
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if client.syncCalls < 2 {
+		t.Fatalf("Sync() calls = %d, want at least 2", client.syncCalls)
+	}
+
+	secondSync := client.syncRequests[1]
+	if len(secondSync.HostSamples) != 1 {
+		t.Fatalf("len(secondSync.HostSamples) = %d, want 1", len(secondSync.HostSamples))
+	}
+
+	containers := secondSync.HostSamples[0].Containers
+	if len(containers) != 1 {
+		t.Fatalf("len(Containers) = %d, want 1", len(containers))
+	}
+	if containers[0].Name != "my-app" {
+		t.Errorf("container name = %q, want 'my-app'", containers[0].Name)
+	}
+	if containers[0].Image != "nginx:latest" {
+		t.Errorf("container image = %q, want 'nginx:latest'", containers[0].Image)
+	}
+	if containers[0].Status != "running" {
+		t.Errorf("container status = %q, want 'running'", containers[0].Status)
 	}
 }
 

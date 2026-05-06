@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -51,6 +52,10 @@ type sqlExec interface {
 
 func recordObservationBatch(ctx context.Context, exec sqlExec, batch observations.BatchWrite) error {
 	for _, sample := range batch.HostSamples {
+		containersJSON, err := marshalContainers(sample.Containers)
+		if err != nil {
+			return fmt.Errorf("marshal containers for host sample: %w", err)
+		}
 		if _, err := exec.Exec(ctx, `
 			insert into host_samples (
 				node_id,
@@ -77,9 +82,10 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 				uptime_seconds,
 				maintenance_context,
 				is_backfilled,
-				sync_batch_id
+				sync_batch_id,
+				containers
 			) values (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
 			)`,
 			sample.NodeID,
 			sample.ObservedAt,
@@ -106,6 +112,7 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 			sample.MaintenanceContext,
 			sample.IsBackfilled,
 			sample.SyncBatchID,
+			containersJSON,
 		); err != nil {
 			return fmt.Errorf("insert host sample: %w", err)
 		}
@@ -162,4 +169,18 @@ func derefInt(value *int) any {
 		return nil
 	}
 	return *value
+}
+
+// marshalContainers serializes container info to a JSON byte slice suitable
+// for a JSONB column. Returns nil when the result would be null or an empty
+// array, so the column stores SQL NULL rather than empty JSON.
+func marshalContainers(containers any) ([]byte, error) {
+	b, err := json.Marshal(containers)
+	if err != nil {
+		return nil, err
+	}
+	if string(b) == "null" || string(b) == "[]" {
+		return nil, nil
+	}
+	return b, nil
 }

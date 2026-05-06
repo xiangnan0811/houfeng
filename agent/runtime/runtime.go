@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agentconfig "houfeng/agent/config"
+	"houfeng/agent/containersample"
 	"houfeng/agent/enroll"
 	agentexec "houfeng/agent/exec"
 	"houfeng/agent/hostsample"
@@ -333,6 +334,14 @@ func (r *Runtime) collectHostSample(observedAt time.Time, fingerprint, syncBatch
 	sample.SyncBatchID = syncBatchID
 	sample.MaintenanceContext = r.currentPlan.HostSampleMaintenanceContext
 	r.lastHostSampleAt = observedAt
+
+	// Attach Docker container info if available. Failure is silent
+	// — container collection is best-effort and must not block host
+	// sample delivery.
+	if containers, ccErr := containersample.Collect(context.Background()); ccErr == nil && len(containers) > 0 {
+		sample.Containers = containers
+	}
+
 	return &sample
 }
 

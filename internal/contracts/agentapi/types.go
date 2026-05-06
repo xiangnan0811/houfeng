@@ -72,30 +72,42 @@ type NodeHeartbeat struct {
 	IsBackfilled bool      `json:"is_backfilled,omitempty"`
 }
 
+// ContainerInfo is a lightweight snapshot of a single Docker container as
+// observed by the agent during host sample collection.
+type ContainerInfo struct {
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Image  string   `json:"image"`
+	Status string   `json:"status"` // "running" / "exited" / etc.
+	CPUPct *float64 `json:"cpu_pct,omitempty"`
+	MemPct *float64 `json:"mem_pct,omitempty"`
+}
+
 type HostSamplePayload struct {
-	ObservedAt           time.Time `json:"observed_at"`
-	AgentVersion         string    `json:"agent_version"`
-	Fingerprint          string    `json:"fingerprint"`
-	SyncBatchID          string    `json:"sync_batch_id"`
-	CPUUsagePct          float64   `json:"cpu_usage_pct"`
-	Load1                float64   `json:"load_1"`
-	Load5                float64   `json:"load_5"`
-	Load15               float64   `json:"load_15"`
-	MemUsedPct           float64   `json:"mem_used_pct"`
-	MemAvailableBytes    int64     `json:"mem_available_bytes"`
-	SwapUsedPct          float64   `json:"swap_used_pct"`
-	DiskUsedPct          float64   `json:"disk_used_pct"`
-	InodeUsedPct         float64   `json:"inode_used_pct"`
-	NetInBytesPerSec     int64     `json:"net_in_bytes_per_sec"`
-	NetOutBytesPerSec    int64     `json:"net_out_bytes_per_sec"`
-	CPUIOWaitPct         float64   `json:"cpu_iowait_pct"`
-	CPUStealPct          float64   `json:"cpu_steal_pct"`
-	DiskReadBytesPerSec  int64     `json:"disk_read_bytes_per_sec"`
-	DiskWriteBytesPerSec int64     `json:"disk_write_bytes_per_sec"`
-	DiskBusyPct          float64   `json:"disk_busy_pct"`
-	UptimeSeconds        int64     `json:"uptime_seconds"`
-	MaintenanceContext   bool      `json:"maintenance_context,omitempty"`
-	IsBackfilled         bool      `json:"is_backfilled,omitempty"`
+	ObservedAt           time.Time       `json:"observed_at"`
+	AgentVersion         string          `json:"agent_version"`
+	Fingerprint          string          `json:"fingerprint"`
+	SyncBatchID          string          `json:"sync_batch_id"`
+	CPUUsagePct          float64         `json:"cpu_usage_pct"`
+	Load1                float64         `json:"load_1"`
+	Load5                float64         `json:"load_5"`
+	Load15               float64         `json:"load_15"`
+	MemUsedPct           float64         `json:"mem_used_pct"`
+	MemAvailableBytes    int64           `json:"mem_available_bytes"`
+	SwapUsedPct          float64         `json:"swap_used_pct"`
+	DiskUsedPct          float64         `json:"disk_used_pct"`
+	InodeUsedPct         float64         `json:"inode_used_pct"`
+	NetInBytesPerSec     int64           `json:"net_in_bytes_per_sec"`
+	NetOutBytesPerSec    int64           `json:"net_out_bytes_per_sec"`
+	CPUIOWaitPct         float64         `json:"cpu_iowait_pct"`
+	CPUStealPct          float64         `json:"cpu_steal_pct"`
+	DiskReadBytesPerSec  int64           `json:"disk_read_bytes_per_sec"`
+	DiskWriteBytesPerSec int64           `json:"disk_write_bytes_per_sec"`
+	DiskBusyPct          float64         `json:"disk_busy_pct"`
+	UptimeSeconds        int64           `json:"uptime_seconds"`
+	MaintenanceContext   bool            `json:"maintenance_context,omitempty"`
+	IsBackfilled         bool            `json:"is_backfilled,omitempty"`
+	Containers           []ContainerInfo `json:"containers,omitempty"`
 }
 
 type ProbeObservationPayload struct {

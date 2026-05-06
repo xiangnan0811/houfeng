@@ -1,6 +1,10 @@
 package observations
 
-import "time"
+import (
+	"time"
+
+	"houfeng/internal/contracts/agentapi"
+)
 
 type HostSampleWrite struct {
 	NodeID               string
@@ -28,6 +32,7 @@ type HostSampleWrite struct {
 	MaintenanceContext   bool
 	IsBackfilled         bool
 	SyncBatchID          string
+	Containers           []agentapi.ContainerInfo
 }
 
 type ProbeObservationWrite struct {

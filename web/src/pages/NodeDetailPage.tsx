@@ -7,9 +7,11 @@ import { EventList } from '../components/EventList'
 import { IncidentList } from '../components/IncidentList'
 import { Card } from '../components/atoms/Card'
 import {
+  DataTable,
   Drawer,
   Hostname,
   MonoDigits,
+  StatusGlyph,
   Tabs,
   Timestamp,
 } from '../components/atoms'
@@ -43,6 +45,7 @@ import {
 } from '../lib/api'
 import type {
   ActiveIncidentRecord,
+  ContainerInfo,
   NodeOnboardingState,
   NodeRecord,
   NodeRuntimeFacts,
@@ -1074,6 +1077,70 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
               查看接入工作台 →
             </Link>
           </p>
+        </div>
+      </details>
+
+      <details className="watchtower-secondary">
+        <summary>容器列表</summary>
+        <div className="watchtower-secondary__body">
+          {sample?.containers && sample.containers.length > 0 ? (
+            <DataTable<ContainerInfo>
+              density="compact"
+              columns={[
+                {
+                  key: 'status',
+                  label: '状态',
+                  width: 60,
+                  render: (c: ContainerInfo) => {
+                    const state =
+                      c.status === 'running'
+                        ? 'normal'
+                        : c.status === 'exited'
+                          ? 'offline'
+                          : 'notice'
+                    return <StatusGlyph state={state} size="sm" ariaLabel={c.status} />
+                  },
+                },
+                {
+                  key: 'name',
+                  label: '容器名',
+                  render: (c: ContainerInfo) => <Hostname>{c.name}</Hostname>,
+                },
+                {
+                  key: 'image',
+                  label: 'Image',
+                  render: (c: ContainerInfo) => (
+                    <span style={{ fontSize: 'var(--fs-sm)', wordBreak: 'break-all' }}>
+                      {c.image}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'cpu',
+                  label: 'CPU%',
+                  align: 'right',
+                  width: 72,
+                  cellClassName: 'mono',
+                  render: (c: ContainerInfo) =>
+                    c.cpu_pct != null ? <MonoDigits>{c.cpu_pct.toFixed(1)}%</MonoDigits> : '—',
+                },
+                {
+                  key: 'mem',
+                  label: 'Mem%',
+                  align: 'right',
+                  width: 72,
+                  cellClassName: 'mono',
+                  render: (c: ContainerInfo) =>
+                    c.mem_pct != null ? <MonoDigits>{c.mem_pct.toFixed(1)}%</MonoDigits> : '—',
+                },
+              ]}
+              rows={sample.containers}
+              rowKey={(c: ContainerInfo) => c.id}
+              emptyContent="暂无容器数据"
+            />
+          ) : (
+            <p>暂无容器数据</p>
+          )}
         </div>
       </details>
 

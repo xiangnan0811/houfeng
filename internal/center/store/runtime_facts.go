@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -15,101 +16,130 @@ import (
 )
 
 const runtimeFactsNodeExistsSQL = `
-	select 1
-	from nodes
-	where node_id = $1`
+		select 1
+		from nodes
+		where node_id = $1`
 
 const runtimeFactsLatestHostSampleSQL = `
-	select
-		node_id,
-		observed_at,
-		received_at,
-		agent_version,
-		fingerprint,
-		cpu_usage_pct,
-		load_1,
-		load_5,
-		load_15,
-		mem_used_pct,
-		mem_available_bytes,
-		swap_used_pct,
-		disk_used_pct,
-		inode_used_pct,
-		net_in_bytes_per_sec,
-		net_out_bytes_per_sec,
-		cpu_iowait_pct,
-		cpu_steal_pct,
-		disk_read_bytes_per_sec,
-		disk_write_bytes_per_sec,
-		disk_busy_pct,
-		uptime_seconds,
-		maintenance_context,
-		is_backfilled,
-		sync_batch_id
-	from host_samples
-	where node_id = $1
-	order by observed_at desc, id desc
-	limit 1`
+		select
+			node_id,
+			observed_at,
+			received_at,
+			agent_version,
+			fingerprint,
+			cpu_usage_pct,
+			load_1,
+			load_5,
+			load_15,
+			mem_used_pct,
+			mem_available_bytes,
+			swap_used_pct,
+			disk_used_pct,
+			inode_used_pct,
+			net_in_bytes_per_sec,
+			net_out_bytes_per_sec,
+			cpu_iowait_pct,
+			cpu_steal_pct,
+			disk_read_bytes_per_sec,
+			disk_write_bytes_per_sec,
+			disk_busy_pct,
+			uptime_seconds,
+			maintenance_context,
+			is_backfilled,
+			sync_batch_id,
+			containers
+		from host_samples
+		where node_id = $1
+		order by observed_at desc, id desc
+		limit 1`
 
 const runtimeFactsRecentHostSamplesSQL = `
-	select
-		node_id,
-		observed_at,
-		received_at,
-		agent_version,
-		fingerprint,
-		cpu_usage_pct,
-		load_1,
-		load_5,
-		load_15,
-		mem_used_pct,
-		mem_available_bytes,
-		swap_used_pct,
-		disk_used_pct,
-		inode_used_pct,
-		net_in_bytes_per_sec,
-		net_out_bytes_per_sec,
-		cpu_iowait_pct,
-		cpu_steal_pct,
-		disk_read_bytes_per_sec,
-		disk_write_bytes_per_sec,
-		disk_busy_pct,
-		uptime_seconds,
-		maintenance_context,
-		is_backfilled,
-		sync_batch_id
-	from host_samples
-	where node_id = $1
-		and observed_at >= $2
-	order by observed_at desc, id desc
-	limit $3`
+		select
+			node_id,
+			observed_at,
+			received_at,
+			agent_version,
+			fingerprint,
+			cpu_usage_pct,
+			load_1,
+			load_5,
+			load_15,
+			mem_used_pct,
+			mem_available_bytes,
+			swap_used_pct,
+			disk_used_pct,
+			inode_used_pct,
+			net_in_bytes_per_sec,
+			net_out_bytes_per_sec,
+			cpu_iowait_pct,
+			cpu_steal_pct,
+			disk_read_bytes_per_sec,
+			disk_write_bytes_per_sec,
+			disk_busy_pct,
+			uptime_seconds,
+			maintenance_context,
+			is_backfilled,
+			sync_batch_id,
+			containers
+		from host_samples
+		where node_id = $1
+			and observed_at >= $2
+		order by observed_at desc, id desc
+		limit $3`
 
 const runtimeFactsTargetExistsSQL = `
-	select 1
-	from targets
-	where target_id = $1`
+		select 1
+		from targets
+		where target_id = $1`
 
 const runtimeFactsLatestProbeObservationsSQL = `
-	select
-		latest.node_id,
-		latest.target_id,
-		latest.probe_item_id,
-		latest.probe_kind,
-		latest.observed_at,
-		latest.received_at,
-		latest.agent_version,
-		latest.fingerprint,
-		latest.result_kind,
-		latest.latency_ms,
-		latest.http_status,
-		latest.tls_expiry_days,
-		latest.error_code,
-		latest.error_summary,
-		latest.maintenance_context,
-		latest.is_backfilled,
-		latest.sync_batch_id
-	from (
-		select distinct on (po.probe_item_id, po.node_id)
+		select
+			latest.node_id,
+			latest.target_id,
+			latest.probe_item_id,
+			latest.probe_kind,
+			latest.observed_at,
+			latest.received_at,
+			latest.agent_version,
+			latest.fingerprint,
+			latest.result_kind,
+			latest.latency_ms,
+			latest.http_status,
+			latest.tls_expiry_days,
+			latest.error_code,
+			latest.error_summary,
+			latest.maintenance_context,
+			latest.is_backfilled,
+			latest.sync_batch_id
+		from (
+			select distinct on (po.probe_item_id, po.node_id)
+				po.node_id,
+				po.target_id,
+				po.probe_item_id,
+				pi.probe_kind,
+				po.observed_at,
+				po.received_at,
+				po.agent_version,
+				po.fingerprint,
+				po.result_kind,
+				po.latency_ms,
+				po.http_status,
+				po.tls_expiry_days,
+				coalesce(po.error_code, '') as error_code,
+				coalesce(po.error_summary, '') as error_summary,
+				po.maintenance_context,
+				po.is_backfilled,
+				po.sync_batch_id,
+				po.id
+			from probe_observations po
+			join probe_items pi on pi.probe_item_id = po.probe_item_id
+			where po.target_id = $1
+			order by po.probe_item_id, po.node_id, po.observed_at desc, po.id desc
+		) latest
+		order by latest.observed_at desc, latest.probe_item_id, latest.node_id`
+
+const runtimeFactsRecentProbeObservationsSQL = `
+		select
 			po.node_id,
 			po.target_id,
 			po.probe_item_id,
@@ -126,40 +156,13 @@ const runtimeFactsLatestProbeObservationsSQL = `
 			coalesce(po.error_summary, '') as error_summary,
 			po.maintenance_context,
 			po.is_backfilled,
-			po.sync_batch_id,
-			po.id
+			po.sync_batch_id
 		from probe_observations po
 		join probe_items pi on pi.probe_item_id = po.probe_item_id
 		where po.target_id = $1
-		order by po.probe_item_id, po.node_id, po.observed_at desc, po.id desc
-	) latest
-	order by latest.observed_at desc, latest.probe_item_id, latest.node_id`
-
-const runtimeFactsRecentProbeObservationsSQL = `
-	select
-		po.node_id,
-		po.target_id,
-		po.probe_item_id,
-		pi.probe_kind,
-		po.observed_at,
-		po.received_at,
-		po.agent_version,
-		po.fingerprint,
-		po.result_kind,
-		po.latency_ms,
-		po.http_status,
-		po.tls_expiry_days,
-		coalesce(po.error_code, '') as error_code,
-		coalesce(po.error_summary, '') as error_summary,
-		po.maintenance_context,
-		po.is_backfilled,
-		po.sync_batch_id
-	from probe_observations po
-	join probe_items pi on pi.probe_item_id = po.probe_item_id
-	where po.target_id = $1
-		and po.observed_at >= $2
-	order by po.observed_at desc, po.id desc
-	limit $3`
+			and po.observed_at >= $2
+		order by po.observed_at desc, po.id desc
+		limit $3`
 
 type runtimeFactsQueryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -269,7 +272,8 @@ type runtimeFactsScanner interface {
 }
 
 func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample) error {
-	return scanner.Scan(
+	var containersJSON []byte
+	if err := scanner.Scan(
 		&sample.NodeID,
 		&sample.ObservedAt,
 		&sample.ReceivedAt,
@@ -295,7 +299,14 @@ func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample
 		&sample.MaintenanceContext,
 		&sample.IsBackfilled,
 		&sample.SyncBatchID,
-	)
+		&containersJSON,
+	); err != nil {
+		return err
+	}
+	if len(containersJSON) > 0 {
+		_ = json.Unmarshal(containersJSON, &sample.Containers)
+	}
+	return nil
 }
 
 func scanProbeObservation(scanner runtimeFactsScanner, observation *runtimefacts.ProbeObservation) error {

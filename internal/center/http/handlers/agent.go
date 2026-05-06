@@ -176,6 +176,7 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 			MaintenanceContext:   sample.MaintenanceContext,
 			IsBackfilled:         sample.IsBackfilled,
 			SyncBatchID:          sample.SyncBatchID,
+			Containers:           sample.Containers,
 		})
 	}
 

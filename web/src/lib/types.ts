@@ -72,6 +72,15 @@ export type NodeOnboardingState = NodeRecord & {
   pending_binding?: PendingBindingMetadata
 }
 
+export type ContainerInfo = {
+  id: string
+  name: string
+  image: string
+  status: string
+  cpu_pct?: number
+  mem_pct?: number
+}
+
 export type HostSample = {
   node_id: string
   observed_at: string
@@ -98,6 +107,7 @@ export type HostSample = {
   maintenance_context: boolean
   is_backfilled: boolean
   sync_batch_id: string
+  containers?: ContainerInfo[]
 }
 
 export type NodeRuntimeFacts = {

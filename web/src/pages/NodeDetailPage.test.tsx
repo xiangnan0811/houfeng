@@ -2681,13 +2681,180 @@ describe('NodeDetailPage', () => {
     )
 
     const secondaryDetails = Array.from(container.querySelectorAll('details.watchtower-secondary'))
-    expect(secondaryDetails.length).toBe(3)
+    expect(secondaryDetails.length).toBe(4)
     // Each section is collapsed by default (no `open` attribute)
     secondaryDetails.forEach((details) => {
       expect((details as HTMLDetailsElement).open).toBe(false)
     })
     // Page footer surfaces the snapshot meta line
     expect(container.querySelector('.watchtower-snapshot-meta')).not.toBeNull()
+  })
+
+  it('renders container list when latest_host_sample contains containers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_ctr',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_ctr',
+            latest_host_sample: {
+              node_id: 'nd_ctr',
+              observed_at: '2026-04-24T10:05:00Z',
+              received_at: '2026-04-24T10:05:01Z',
+              agent_version: 'dev',
+              fingerprint: 'fp-ctr',
+              cpu_usage_pct: 10,
+              load_1: 0.1,
+              load_5: 0.2,
+              load_15: 0.3,
+              mem_used_pct: 40,
+              mem_available_bytes: 8589934592,
+              swap_used_pct: 0,
+              disk_used_pct: 30,
+              inode_used_pct: 5,
+              net_in_bytes_per_sec: 0,
+              net_out_bytes_per_sec: 0,
+              cpu_iowait_pct: 0,
+              cpu_steal_pct: 0,
+              disk_read_bytes_per_sec: 0,
+              disk_write_bytes_per_sec: 0,
+              disk_busy_pct: 0,
+              uptime_seconds: 3600,
+              maintenance_context: false,
+              is_backfilled: false,
+              sync_batch_id: 'sync-ctr',
+              containers: [
+                {
+                  id: 'abc123',
+                  name: 'nginx-prod',
+                  image: 'nginx:1.25-alpine',
+                  status: 'running',
+                  cpu_pct: 0.5,
+                  mem_pct: 1.2,
+                },
+                {
+                  id: 'def456',
+                  name: 'redis-cache',
+                  image: 'redis:7-alpine',
+                  status: 'exited',
+                },
+              ],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_ctr']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    // Open the 容器列表 section.
+    openSecondary('容器列表')
+
+    // Verify container names appear.
+    expect(screen.getByText('nginx-prod')).toBeInTheDocument()
+    expect(screen.getByText('redis-cache')).toBeInTheDocument()
+
+    // Verify image names.
+    expect(screen.getByText('nginx:1.25-alpine')).toBeInTheDocument()
+    expect(screen.getByText('redis:7-alpine')).toBeInTheDocument()
+
+    // Verify CPU/Mem percentages (mono digits).
+    expect(screen.getByText('0.5%')).toBeInTheDocument()
+    expect(screen.getByText('1.2%')).toBeInTheDocument()
+
+    // Exited container should have dash for missing stats.
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('shows 暂无容器数据 when latest_host_sample has no containers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_noctr',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_noctr',
+            latest_host_sample: {
+              node_id: 'nd_noctr',
+              observed_at: '2026-04-24T10:05:00Z',
+              received_at: '2026-04-24T10:05:01Z',
+              agent_version: 'dev',
+              fingerprint: 'fp-noctr',
+              cpu_usage_pct: 5,
+              load_1: 0.1,
+              load_5: 0.1,
+              load_15: 0.1,
+              mem_used_pct: 30,
+              mem_available_bytes: 10737418240,
+              swap_used_pct: 0,
+              disk_used_pct: 20,
+              inode_used_pct: 3,
+              net_in_bytes_per_sec: 0,
+              net_out_bytes_per_sec: 0,
+              cpu_iowait_pct: 0,
+              cpu_steal_pct: 0,
+              disk_read_bytes_per_sec: 0,
+              disk_write_bytes_per_sec: 0,
+              disk_busy_pct: 0,
+              uptime_seconds: 1800,
+              maintenance_context: false,
+              is_backfilled: false,
+              sync_batch_id: 'sync-noctr',
+            },
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_noctr']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    openSecondary('容器列表')
+    expect(screen.getByText('暂无容器数据')).toBeInTheDocument()
   })
 
   it('triggers runtime maintenance via the watchtower header operations menu', async () => {
