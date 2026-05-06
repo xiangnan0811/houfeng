@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 39
+- **Total Sessions**: 40
 - **Last Active**: 2026-05-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1319 | Active |
+| `journal-1.md` | ~1352 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 40 | 2026-05-06 | 飞书 Webhook 通知通道 | `7ed5700` | `main` |
 | 39 | 2026-05-06 | 自定义阈值（可配 CPU/Mem/Disk/Inode 告警阈值） | `3d0fb20` | `main` |
 | 38 | 2026-05-06 | 批量操作（select-all + action bar） | `554cbfd` | `main` |
 | 37 | 2026-05-06 | 视图分组（group 字段） | `321aef9` | `main` |

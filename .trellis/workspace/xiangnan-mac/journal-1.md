@@ -1317,3 +1317,36 @@ Stage 2 Phase 5 完成。Settings IncidentDefaults 加 12 个指标阈值字段�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 40: 飞书 Webhook 通知通道
+
+**Date**: 2026-05-06
+**Task**: 飞书 Webhook 通知通道
+**Branch**: `main`
+
+### Summary
+
+Stage 2 Phase 6 完成。新建 FeishuNotifier（POST JSON 到飞书群机器人 webhook，实现 Notifier 接口）。Settings 加 feishu_enabled + feishu_webhook_url（migration 0014 + Go model + store scan/upsert + handler JSON）。SettingsAwareNotifier.Send() 改为多通道遍历（Telegram + Feishu），单通道失败不 block 其他。SettingsPage 加 Feishu DetailSection（toggle + webhook URL input + 状态卡）。392/392 tests pass。Go 3 feishu tests + settings/store 更新。12 files +394 -74。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ed5700` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
