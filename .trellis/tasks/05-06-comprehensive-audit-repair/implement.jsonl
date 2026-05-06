@@ -1,0 +1,13 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/index.md", "reason": "web spec index for frontend build/test and active visual authority repair"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "web file ownership and API/client/page layout conventions"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "component props/test fixture conventions and stale visual authority repair target"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "frontend API types and cross-layer field consistency"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "visual authority and screenshot guidance repair target"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "web lint/test/build expectations and stale verification guidance repair target"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec index for docs/config truth checks"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "backend quality and stale UI verification checklist repair target"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "field additions touch backend/frontend/docs boundaries"}
+{"file": ".trellis/tasks/05-06-comprehensive-audit-repair/research/docs-ops-audit.md", "reason": "docs ops release verification audit findings to repair"}
+{"file": ".trellis/tasks/05-06-comprehensive-audit-repair/research/backend-agent-audit.md", "reason": "backend agent audit findings including node action route blocker"}
+{"file": ".trellis/tasks/05-06-comprehensive-audit-repair/research/web-ui-audit.md", "reason": "frontend UI audit findings including inert backfill filter and undefined token"}

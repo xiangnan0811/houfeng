@@ -1,0 +1,12 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/index.md", "reason": "web spec index for final review"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "verify component/test fixture changes follow conventions"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "verify frontend type/API fixture consistency"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "verify active visual authority guidance is current"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "verify web lint/test/build guidance and results"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec index for docs/config review"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify backend quality checklist guidance remains current"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify boundary consistency across docs/backend/frontend"}
+{"file": ".trellis/tasks/05-06-comprehensive-audit-repair/research/docs-ops-audit.md", "reason": "verify docs ops audit findings were addressed or classified"}
+{"file": ".trellis/tasks/05-06-comprehensive-audit-repair/research/backend-agent-audit.md", "reason": "verify backend agent audit findings addressed or classified"}
+{"file": ".trellis/tasks/05-06-comprehensive-audit-repair/research/web-ui-audit.md", "reason": "verify frontend UI audit findings addressed or classified"}
