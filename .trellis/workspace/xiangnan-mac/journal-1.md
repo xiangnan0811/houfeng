@@ -1251,3 +1251,36 @@ Stage 2 Phase 3 完成。Node / Target 加 group 自由文本字段（migration 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 38: 批量操作（select-all + action bar）
+
+**Date**: 2026-05-06
+**Task**: 批量操作（select-all + action bar）
+**Branch**: `main`
+
+### Summary
+
+Stage 2 Phase 4 完成。后端 POST /api/nodes/batch（node_ids[] + action 白名单 4 个动作，独立执行互不 block，6 handler tests）。前端 NodesPage + TargetsPage：仅 group 筛选激活时显示 batch-bar，select-all checkbox + 4 action 按钮（维护进/出/暂停/恢复）+ 暂停 ConfirmationCard + 批量命令执行逐调 postNodeAction。392/392 tests（+2）。Go 全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `554cbfd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
