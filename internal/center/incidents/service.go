@@ -269,10 +269,11 @@ func (s *Service) evaluateNode(ctx context.Context, nodeID string, now time.Time
 	if len(hostSamples) > 0 {
 		latest := &hostSamples[0]
 		resourceSamples := nodeResourceSamplesFromHostSamples(hostSamples)
+		thresholds := s.metricThresholdsFor(ctx)
 		evaluations = append(evaluations,
-			classEvaluation{class: IncidentNodeDiskPressure, result: EvaluateNodeDiskPressure(previousByClass[IncidentNodeDiskPressure], nodeID, latest)},
-			classEvaluation{class: IncidentNodeInodePressure, result: EvaluateNodeInodePressure(previousByClass[IncidentNodeInodePressure], nodeID, latest)},
-			classEvaluation{class: IncidentNodeResourcePressure, result: EvaluateNodeResourcePressure(previousByClass[IncidentNodeResourcePressure], nodeID, resourceSamples)},
+			classEvaluation{class: IncidentNodeDiskPressure, result: EvaluateNodeDiskPressure(previousByClass[IncidentNodeDiskPressure], nodeID, latest, thresholds)},
+			classEvaluation{class: IncidentNodeInodePressure, result: EvaluateNodeInodePressure(previousByClass[IncidentNodeInodePressure], nodeID, latest, thresholds)},
+			classEvaluation{class: IncidentNodeResourcePressure, result: EvaluateNodeResourcePressure(previousByClass[IncidentNodeResourcePressure], nodeID, resourceSamples, thresholds)},
 		)
 	}
 
@@ -347,6 +348,49 @@ func defaultNotificationPolicy() notificationPolicy {
 	return notificationPolicyFromDefaults(centersettings.Default().IncidentDefaults)
 }
 
+// MetricThresholdsFromDefaults builds MetricThresholds from settings.IncidentDefaults.
+// Zero or negative values fall back to the original hardcoded defaults.
+func MetricThresholdsFromDefaults(defaults centersettings.IncidentDefaults) MetricThresholds {
+	t := DefaultMetricThresholds()
+	if defaults.CPUWarningPct > 0 {
+		t.CPUWarningPct = defaults.CPUWarningPct
+	}
+	if defaults.CPUAlertPct > 0 {
+		t.CPUAlertPct = defaults.CPUAlertPct
+	}
+	if defaults.CPUCriticalPct > 0 {
+		t.CPUCriticalPct = defaults.CPUCriticalPct
+	}
+	if defaults.MemWarningPct > 0 {
+		t.MemWarningPct = defaults.MemWarningPct
+	}
+	if defaults.MemAlertPct > 0 {
+		t.MemAlertPct = defaults.MemAlertPct
+	}
+	if defaults.MemCriticalPct > 0 {
+		t.MemCriticalPct = defaults.MemCriticalPct
+	}
+	if defaults.DiskWarningPct > 0 {
+		t.DiskWarningPct = defaults.DiskWarningPct
+	}
+	if defaults.DiskAlertPct > 0 {
+		t.DiskAlertPct = defaults.DiskAlertPct
+	}
+	if defaults.DiskCriticalPct > 0 {
+		t.DiskCriticalPct = defaults.DiskCriticalPct
+	}
+	if defaults.InodeWarningPct > 0 {
+		t.InodeWarningPct = defaults.InodeWarningPct
+	}
+	if defaults.InodeAlertPct > 0 {
+		t.InodeAlertPct = defaults.InodeAlertPct
+	}
+	if defaults.InodeCriticalPct > 0 {
+		t.InodeCriticalPct = defaults.InodeCriticalPct
+	}
+	return t
+}
+
 func notificationPolicyFromDefaults(defaults centersettings.IncidentDefaults) notificationPolicy {
 	return notificationPolicy{
 		notifyOnStarted:   defaults.NotifyOnStarted,
@@ -406,6 +450,23 @@ func applyIncidentDefaults(timing incidentTiming, defaults centersettings.Incide
 		timing.sweepInterval = time.Duration(defaults.SweepIntervalSeconds) * time.Second
 	}
 	return timing
+}
+
+func (s *Service) metricThresholdsFor(ctx context.Context) MetricThresholds {
+	if s.settingsRepo == nil {
+		return DefaultMetricThresholds()
+	}
+	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
+		defaults, exists, err := source.GetPersistedIncidentDefaults(ctx)
+		if err == nil && exists {
+			return MetricThresholdsFromDefaults(defaults)
+		}
+	}
+	settings, err := s.settingsRepo.GetSettings(ctx)
+	if err != nil {
+		return DefaultMetricThresholds()
+	}
+	return MetricThresholdsFromDefaults(settings.IncidentDefaults)
 }
 
 func (s *Service) notificationPolicyFor(ctx context.Context) notificationPolicy {

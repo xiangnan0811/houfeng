@@ -31,6 +31,18 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 			NotifyOnStarted:          true,
 			NotifyOnEscalated:        true,
 			NotifyOnRecovered:        false,
+			CPUWarningPct:            80,
+			CPUAlertPct:              90,
+			CPUCriticalPct:           95,
+			MemWarningPct:            85,
+			MemAlertPct:              92,
+			MemCriticalPct:           95,
+			DiskWarningPct:           85,
+			DiskAlertPct:             92,
+			DiskCriticalPct:          97,
+			InodeWarningPct:          80,
+			InodeAlertPct:            90,
+			InodeCriticalPct:         95,
 		},
 		OverrideRules: OverrideRules{
 			NodeLabels: []NodeLabelOverrideRule{
@@ -256,6 +268,76 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	}
 	if got.RetentionPolicy.EventLayerDays <= 0 {
 		t.Fatalf("EventLayerDays = %d, want positive", got.RetentionPolicy.EventLayerDays)
+	}
+	if got.IncidentDefaults.CPUWarningPct != 80 {
+		t.Fatalf("CPUWarningPct = %d, want 80", got.IncidentDefaults.CPUWarningPct)
+	}
+	if got.IncidentDefaults.CPUCriticalPct != 95 {
+		t.Fatalf("CPUCriticalPct = %d, want 95", got.IncidentDefaults.CPUCriticalPct)
+	}
+	if got.IncidentDefaults.MemCriticalPct != 95 {
+		t.Fatalf("MemCriticalPct = %d, want 95", got.IncidentDefaults.MemCriticalPct)
+	}
+	if got.IncidentDefaults.DiskCriticalPct != 97 {
+		t.Fatalf("DiskCriticalPct = %d, want 97", got.IncidentDefaults.DiskCriticalPct)
+	}
+	if got.IncidentDefaults.InodeWarningPct != 80 {
+		t.Fatalf("InodeWarningPct = %d, want 80", got.IncidentDefaults.InodeWarningPct)
+	}
+}
+
+func TestSettingsValidateRejectsOutOfRangeThreshold(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.IncidentDefaults.CPUWarningPct = 101
+	_, err := Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+	}
+	if !strings.Contains(err.Error(), "cpu warning pct") {
+		t.Fatalf("Validate() error = %v, want mention of cpu warning pct", err)
+	}
+
+	input = Default()
+	input.IncidentDefaults.MemCriticalPct = -5
+	_, err = Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings for negative threshold", err)
+	}
+
+	input = Default()
+	input.IncidentDefaults.DiskAlertPct = 0
+	// 0 is filled with default (92) in validate, so it should pass
+	got, err := Validate(input)
+	if err != nil {
+		t.Fatalf("Validate() error = %v, want nil (0 should be filled with default)", err)
+	}
+	if got.IncidentDefaults.DiskAlertPct != 92 {
+		t.Fatalf("DiskAlertPct = %d, want 92 (default filled)", got.IncidentDefaults.DiskAlertPct)
+	}
+}
+
+func TestSettingsValidateRejectsOutOfRangeOverrideThreshold(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.OverrideRules = OverrideRules{
+		NodeLabels: []NodeLabelOverrideRule{{
+			Label: "core",
+			Overrides: SettingsOverrideFields{
+				IncidentDefaults: &IncidentDefaultsOverride{
+					CPUCriticalPct: intPtr(200),
+				},
+			},
+		}},
+	}
+	_, err := Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+	}
+	if !strings.Contains(err.Error(), "cpu critical pct") {
+		t.Fatalf("Validate() error = %v, want mention of cpu critical pct", err)
 	}
 }
 

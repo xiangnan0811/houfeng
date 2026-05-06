@@ -22,37 +22,37 @@ func EvaluateNodeHeartbeatMissing(previous *IncidentRecord, nodeID string, now t
 	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeHeartbeatMissing, severity, now, summary)
 }
 
-func EvaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample) EvaluationResult {
+func EvaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
 	if sample == nil {
 		return noop(previous)
 	}
 	suppressed := sample.MaintenanceContext || sample.IsBackfilled
 	if suppressed {
-		result := evaluateNodeDiskPressure(previous, nodeID, sample)
+		result := evaluateNodeDiskPressure(previous, nodeID, sample, thresholds)
 		if result.Transition == TransitionRecovered {
 			return suppressNotification(result)
 		}
 		return skip(previous)
 	}
-	return evaluateNodeDiskPressure(previous, nodeID, sample)
+	return evaluateNodeDiskPressure(previous, nodeID, sample, thresholds)
 }
 
-func EvaluateNodeInodePressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample) EvaluationResult {
+func EvaluateNodeInodePressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
 	if sample == nil {
 		return noop(previous)
 	}
 	suppressed := sample.MaintenanceContext || sample.IsBackfilled
 	if suppressed {
-		result := evaluateNodeInodePressure(previous, nodeID, sample)
+		result := evaluateNodeInodePressure(previous, nodeID, sample, thresholds)
 		if result.Transition == TransitionRecovered {
 			return suppressNotification(result)
 		}
 		return skip(previous)
 	}
-	return evaluateNodeInodePressure(previous, nodeID, sample)
+	return evaluateNodeInodePressure(previous, nodeID, sample, thresholds)
 }
 
-func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, samples []NodeResourceSample) EvaluationResult {
+func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, samples []NodeResourceSample, thresholds MetricThresholds) EvaluationResult {
 	samples = normalizeNodeResourceSamples(samples)
 	if len(samples) == 0 {
 		return noop(previous)
@@ -63,7 +63,7 @@ func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, sampl
 	activeSamples := unsuppressedNodeResourceSamples(samples)
 	window15 := nodeResourceSamplesWithin(activeSamples, referenceTime, 15*time.Minute)
 	window30 := nodeResourceSamplesWithin(activeSamples, referenceTime, 30*time.Minute)
-	severity, summary, active := resourcePressureSeverity(window15, window30)
+	severity, summary, active := resourcePressureSeverity(window15, window30, thresholds)
 	if !active {
 		recoveryWindow := 15 * time.Minute
 		if previous != nil && previous.Severity == SeverityCritical {
@@ -263,8 +263,8 @@ func suppressNotification(result EvaluationResult) EvaluationResult {
 	return result
 }
 
-func evaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample) EvaluationResult {
-	severity, active := fastThresholdSeverity(sample.DiskUsedPct, 85, 92, 97)
+func evaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
+	severity, active := fastThresholdSeverity(sample.DiskUsedPct, float64(thresholds.DiskWarningPct), float64(thresholds.DiskAlertPct), float64(thresholds.DiskCriticalPct))
 	if !active {
 		return recoverIfNeeded(previous, sample.ObservedAt, "磁盘使用率恢复到安全区间")
 	}
@@ -272,8 +272,8 @@ func evaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *r
 	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeDiskPressure, severity, sample.ObservedAt, summary)
 }
 
-func evaluateNodeInodePressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample) EvaluationResult {
-	severity, active := fastThresholdSeverity(sample.InodeUsedPct, 80, 90, 95)
+func evaluateNodeInodePressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
+	severity, active := fastThresholdSeverity(sample.InodeUsedPct, float64(thresholds.InodeWarningPct), float64(thresholds.InodeAlertPct), float64(thresholds.InodeCriticalPct))
 	if !active {
 		return recoverIfNeeded(previous, sample.ObservedAt, "inode 使用率恢复到安全区间")
 	}
@@ -385,7 +385,7 @@ func fastThresholdSeverity(value, notice, alert, critical float64) (Severity, bo
 	}
 }
 
-func resourcePressureSeverity(window15, window30 []NodeResourceSample) (Severity, string, bool) {
+func resourcePressureSeverity(window15, window30 []NodeResourceSample, thresholds MetricThresholds) (Severity, string, bool) {
 	if len(window15) == 0 {
 		return SeverityNormal, "", false
 	}
@@ -406,27 +406,27 @@ func resourcePressureSeverity(window15, window30 []NodeResourceSample) (Severity
 	min30MemAvailable := minimumNodeResourceMetric(window30, func(sample NodeResourceSample) float64 { return float64(sample.MemAvailableBytes) })
 
 	switch {
-	case has30m && avg30CPU >= 95:
+	case has30m && avg30CPU >= float64(thresholds.CPUCriticalPct):
 		return SeverityCritical, fmt.Sprintf("CPU 连续 30m 平均 %.1f%%", avg30CPU), true
 	case has30m && avg30Load >= 2.5:
 		return SeverityCritical, fmt.Sprintf("归一化 Load5 连续 30m 平均 %.1f", avg30Load), true
-	case has30m && avg30Mem >= 95 && min30MemAvailable <= 512*1024*1024:
+	case has30m && avg30Mem >= float64(thresholds.MemCriticalPct) && min30MemAvailable <= 512*1024*1024:
 		return SeverityCritical, fmt.Sprintf("内存连续 30m 平均 %.1f%%，可用内存持续偏低", avg30Mem), true
-	case has15m && avg15CPU >= 90:
+	case has15m && avg15CPU >= float64(thresholds.CPUAlertPct):
 		return SeverityAlert, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", avg15CPU), true
 	case has15m && avg15Load >= 1.8:
 		return SeverityAlert, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", avg15Load), true
-	case has15m && avg15Mem >= 92:
+	case has15m && avg15Mem >= float64(thresholds.MemAlertPct):
 		return SeverityAlert, fmt.Sprintf("内存连续 15m 平均 %.1f%%", avg15Mem), true
 	case has30m && avg30Iowait >= 20:
 		return SeverityAlert, fmt.Sprintf("iowait 连续 30m 平均 %.1f%%", avg30Iowait), true
 	case has30m && avg30Steal >= 10:
 		return SeverityAlert, fmt.Sprintf("steal 连续 30m 平均 %.1f%%", avg30Steal), true
-	case has15m && avg15CPU >= 80:
+	case has15m && avg15CPU >= float64(thresholds.CPUWarningPct):
 		return SeverityNotice, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", avg15CPU), true
 	case has15m && avg15Load >= 1.2:
 		return SeverityNotice, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", avg15Load), true
-	case has15m && avg15Mem >= 85:
+	case has15m && avg15Mem >= float64(thresholds.MemWarningPct):
 		return SeverityNotice, fmt.Sprintf("内存连续 15m 平均 %.1f%%", avg15Mem), true
 	case has15m && avg15Swap > 10:
 		return SeverityNotice, fmt.Sprintf("swap 连续 15m 平均 %.1f%%", avg15Swap), true

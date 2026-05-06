@@ -50,6 +50,19 @@ type IncidentDefaults struct {
 	NotifyOnStarted          bool `json:"notify_on_started"`
 	NotifyOnEscalated        bool `json:"notify_on_escalated"`
 	NotifyOnRecovered        bool `json:"notify_on_recovered"`
+
+	CPUWarningPct    int `json:"cpu_warning_pct"`
+	CPUAlertPct      int `json:"cpu_alert_pct"`
+	CPUCriticalPct   int `json:"cpu_critical_pct"`
+	MemWarningPct    int `json:"mem_warning_pct"`
+	MemAlertPct      int `json:"mem_alert_pct"`
+	MemCriticalPct   int `json:"mem_critical_pct"`
+	DiskWarningPct   int `json:"disk_warning_pct"`
+	DiskAlertPct     int `json:"disk_alert_pct"`
+	DiskCriticalPct  int `json:"disk_critical_pct"`
+	InodeWarningPct  int `json:"inode_warning_pct"`
+	InodeAlertPct    int `json:"inode_alert_pct"`
+	InodeCriticalPct int `json:"inode_critical_pct"`
 }
 
 type OverrideRules struct {
@@ -92,6 +105,19 @@ type IncidentDefaultsOverride struct {
 	NotifyOnStarted          *bool `json:"notify_on_started,omitempty"`
 	NotifyOnEscalated        *bool `json:"notify_on_escalated,omitempty"`
 	NotifyOnRecovered        *bool `json:"notify_on_recovered,omitempty"`
+
+	CPUWarningPct    *int `json:"cpu_warning_pct,omitempty"`
+	CPUAlertPct      *int `json:"cpu_alert_pct,omitempty"`
+	CPUCriticalPct   *int `json:"cpu_critical_pct,omitempty"`
+	MemWarningPct    *int `json:"mem_warning_pct,omitempty"`
+	MemAlertPct      *int `json:"mem_alert_pct,omitempty"`
+	MemCriticalPct   *int `json:"mem_critical_pct,omitempty"`
+	DiskWarningPct   *int `json:"disk_warning_pct,omitempty"`
+	DiskAlertPct     *int `json:"disk_alert_pct,omitempty"`
+	DiskCriticalPct  *int `json:"disk_critical_pct,omitempty"`
+	InodeWarningPct  *int `json:"inode_warning_pct,omitempty"`
+	InodeAlertPct    *int `json:"inode_alert_pct,omitempty"`
+	InodeCriticalPct *int `json:"inode_critical_pct,omitempty"`
 }
 
 type RetentionPolicy struct {
@@ -116,6 +142,18 @@ func Default() CenterSettings {
 			NotifyOnStarted:          true,
 			NotifyOnEscalated:        true,
 			NotifyOnRecovered:        true,
+			CPUWarningPct:            80,
+			CPUAlertPct:              90,
+			CPUCriticalPct:           95,
+			MemWarningPct:            85,
+			MemAlertPct:              92,
+			MemCriticalPct:           95,
+			DiskWarningPct:           85,
+			DiskAlertPct:             92,
+			DiskCriticalPct:          97,
+			InodeWarningPct:          80,
+			InodeAlertPct:            90,
+			InodeCriticalPct:         95,
 		},
 		OverrideRules: OverrideRules{
 			NodeLabels:   []NodeLabelOverrideRule{},
@@ -191,7 +229,52 @@ func validateIncidentDefaults(input IncidentDefaults) (IncidentDefaults, error) 
 	if input.SweepIntervalSeconds <= 0 {
 		return IncidentDefaults{}, invalidSettings("sweep interval must be positive")
 	}
+
+	// Fill in defaults for zero-value thresholds (fields omitted in API input).
+	defaults := Default().IncidentDefaults
+	applyIntDefault(&input.CPUWarningPct, defaults.CPUWarningPct)
+	applyIntDefault(&input.CPUAlertPct, defaults.CPUAlertPct)
+	applyIntDefault(&input.CPUCriticalPct, defaults.CPUCriticalPct)
+	applyIntDefault(&input.MemWarningPct, defaults.MemWarningPct)
+	applyIntDefault(&input.MemAlertPct, defaults.MemAlertPct)
+	applyIntDefault(&input.MemCriticalPct, defaults.MemCriticalPct)
+	applyIntDefault(&input.DiskWarningPct, defaults.DiskWarningPct)
+	applyIntDefault(&input.DiskAlertPct, defaults.DiskAlertPct)
+	applyIntDefault(&input.DiskCriticalPct, defaults.DiskCriticalPct)
+	applyIntDefault(&input.InodeWarningPct, defaults.InodeWarningPct)
+	applyIntDefault(&input.InodeAlertPct, defaults.InodeAlertPct)
+	applyIntDefault(&input.InodeCriticalPct, defaults.InodeCriticalPct)
+
+	thresholdFields := []struct {
+		name  string
+		value int
+	}{
+		{"cpu warning pct", input.CPUWarningPct},
+		{"cpu alert pct", input.CPUAlertPct},
+		{"cpu critical pct", input.CPUCriticalPct},
+		{"mem warning pct", input.MemWarningPct},
+		{"mem alert pct", input.MemAlertPct},
+		{"mem critical pct", input.MemCriticalPct},
+		{"disk warning pct", input.DiskWarningPct},
+		{"disk alert pct", input.DiskAlertPct},
+		{"disk critical pct", input.DiskCriticalPct},
+		{"inode warning pct", input.InodeWarningPct},
+		{"inode alert pct", input.InodeAlertPct},
+		{"inode critical pct", input.InodeCriticalPct},
+	}
+	for _, f := range thresholdFields {
+		if f.value < 1 || f.value > 100 {
+			return IncidentDefaults{}, invalidSettings(fmt.Sprintf("%s must be between 1 and 100", f.name))
+		}
+	}
+
 	return input, nil
+}
+
+func applyIntDefault(dst *int, defaultVal int) {
+	if *dst == 0 {
+		*dst = defaultVal
+	}
 }
 
 func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
@@ -340,6 +423,33 @@ func validateIncidentDefaultsOverride(input IncidentDefaultsOverride) (IncidentD
 	}
 	if input.NotifyOnStarted != nil || input.NotifyOnEscalated != nil || input.NotifyOnRecovered != nil {
 		hasOverride = true
+	}
+
+	thresholdPtrs := []struct {
+		name string
+		ptr  *int
+	}{
+		{"cpu warning pct", input.CPUWarningPct},
+		{"cpu alert pct", input.CPUAlertPct},
+		{"cpu critical pct", input.CPUCriticalPct},
+		{"mem warning pct", input.MemWarningPct},
+		{"mem alert pct", input.MemAlertPct},
+		{"mem critical pct", input.MemCriticalPct},
+		{"disk warning pct", input.DiskWarningPct},
+		{"disk alert pct", input.DiskAlertPct},
+		{"disk critical pct", input.DiskCriticalPct},
+		{"inode warning pct", input.InodeWarningPct},
+		{"inode alert pct", input.InodeAlertPct},
+		{"inode critical pct", input.InodeCriticalPct},
+	}
+	for _, f := range thresholdPtrs {
+		if f.ptr == nil {
+			continue
+		}
+		hasOverride = true
+		if *f.ptr < 1 || *f.ptr > 100 {
+			return IncidentDefaultsOverride{}, invalidSettings(fmt.Sprintf("override %s must be between 1 and 100", f.name))
+		}
 	}
 
 	if !hasOverride {

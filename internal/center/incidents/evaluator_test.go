@@ -59,11 +59,12 @@ func TestEvaluateNodeDiskAndInodePressureThresholds(t *testing.T) {
 	diskSample := &runtimefacts.HostSample{ObservedAt: now, DiskUsedPct: 92}
 	inodeSample := &runtimefacts.HostSample{ObservedAt: now, InodeUsedPct: 95}
 
-	disk := EvaluateNodeDiskPressure(nil, "nd_001", diskSample)
+	thresholds := DefaultMetricThresholds()
+	disk := EvaluateNodeDiskPressure(nil, "nd_001", diskSample, thresholds)
 	if disk.Current == nil || disk.Current.Severity != SeverityAlert {
 		t.Fatalf("disk severity = %#v, want alert", disk.Current)
 	}
-	inode := EvaluateNodeInodePressure(nil, "nd_001", inodeSample)
+	inode := EvaluateNodeInodePressure(nil, "nd_001", inodeSample, thresholds)
 	if inode.Current == nil || inode.Current.Severity != SeverityCritical {
 		t.Fatalf("inode severity = %#v, want critical", inode.Current)
 	}
@@ -77,7 +78,8 @@ func TestEvaluateNodeResourcePressureUsesSustainedWindow(t *testing.T) {
 		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 90, MemUsedPct: 92, NormalizedLoad5: 1.85, MemAvailableBytes: 620 * 1024 * 1024},
 	}
 
-	result := EvaluateNodeResourcePressure(nil, "nd_001", samples)
+	thresholds := DefaultMetricThresholds()
+	result := EvaluateNodeResourcePressure(nil, "nd_001", samples, thresholds)
 	if result.Current == nil || result.Current.Severity != SeverityAlert {
 		t.Fatalf("Current = %#v, want alert resource incident", result.Current)
 	}
@@ -91,7 +93,8 @@ func TestEvaluateNodeResourcePressureRequiresFullWindowCoverage(t *testing.T) {
 		{ObservedAt: now.Add(-14 * time.Minute), CPUUsagePct: 99, MemUsedPct: 97, NormalizedLoad5: 2.7, MemAvailableBytes: 380 * 1024 * 1024},
 	}
 
-	result := EvaluateNodeResourcePressure(nil, "nd_001", samples)
+	thresholds := DefaultMetricThresholds()
+	result := EvaluateNodeResourcePressure(nil, "nd_001", samples, thresholds)
 	if result.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q when 15m/30m coverage is incomplete", result.Transition, TransitionNoop)
 	}
@@ -107,7 +110,8 @@ func TestEvaluateNodeResourcePressureUsesLoadAndLowAvailableMemoryForSeverity(t 
 		{ObservedAt: now.Add(-8 * time.Minute), NormalizedLoad5: 2.0, MemAvailableBytes: 780 * 1024 * 1024},
 		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 1.8, MemAvailableBytes: 760 * 1024 * 1024},
 	}
-	loadResult := EvaluateNodeResourcePressure(nil, "nd_001", loadSamples)
+	thresholds := DefaultMetricThresholds()
+	loadResult := EvaluateNodeResourcePressure(nil, "nd_001", loadSamples, thresholds)
 	if loadResult.Current == nil || loadResult.Current.Severity != SeverityAlert {
 		t.Fatalf("Current = %#v, want alert load-driven resource incident", loadResult.Current)
 	}
@@ -117,7 +121,7 @@ func TestEvaluateNodeResourcePressureUsesLoadAndLowAvailableMemoryForSeverity(t 
 		{ObservedAt: now.Add(-15 * time.Minute), MemUsedPct: 95, MemAvailableBytes: 420 * 1024 * 1024},
 		{ObservedAt: now.Add(-30 * time.Minute), MemUsedPct: 97, MemAvailableBytes: 380 * 1024 * 1024},
 	}
-	memoryResult := EvaluateNodeResourcePressure(nil, "nd_001", memorySamples)
+	memoryResult := EvaluateNodeResourcePressure(nil, "nd_001", memorySamples, thresholds)
 	if memoryResult.Current == nil || memoryResult.Current.Severity != SeverityCritical {
 		t.Fatalf("Current = %#v, want critical low-available-memory incident", memoryResult.Current)
 	}
@@ -131,7 +135,8 @@ func TestEvaluateNodeResourcePressureIgnoresSuppressedHistoryForActiveEvidence(t
 		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 90, MemUsedPct: 92, NormalizedLoad5: 1.85, MemAvailableBytes: 620 * 1024 * 1024, MaintenanceContext: true},
 	}
 
-	result := EvaluateNodeResourcePressure(nil, "nd_001", samples)
+	thresholds := DefaultMetricThresholds()
+	result := EvaluateNodeResourcePressure(nil, "nd_001", samples, thresholds)
 	if result.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q when only suppressed history spans the active window", result.Transition, TransitionNoop)
 	}
@@ -264,7 +269,8 @@ func TestMaintenanceAndBackfillSuppressesStartsButAllowsSilentRecovery(t *testin
 		LastEvaluatedAt: now,
 	}
 
-	skipped := EvaluateNodeDiskPressure(previous, "nd_001", &runtimefacts.HostSample{ObservedAt: now, DiskUsedPct: 99, MaintenanceContext: true})
+	thresholds := DefaultMetricThresholds()
+	skipped := EvaluateNodeDiskPressure(previous, "nd_001", &runtimefacts.HostSample{ObservedAt: now, DiskUsedPct: 99, MaintenanceContext: true}, thresholds)
 	if skipped.Transition != TransitionSkipped {
 		t.Fatalf("Transition = %q, want %q", skipped.Transition, TransitionSkipped)
 	}
@@ -275,7 +281,7 @@ func TestMaintenanceAndBackfillSuppressesStartsButAllowsSilentRecovery(t *testin
 		t.Fatalf("Current = %#v, want nil on maintenance short-circuit", skipped.Current)
 	}
 
-	recovered := EvaluateNodeDiskPressure(previous, "nd_001", &runtimefacts.HostSample{ObservedAt: now.Add(time.Minute), DiskUsedPct: 40, MaintenanceContext: true})
+	recovered := EvaluateNodeDiskPressure(previous, "nd_001", &runtimefacts.HostSample{ObservedAt: now.Add(time.Minute), DiskUsedPct: 40, MaintenanceContext: true}, thresholds)
 	if recovered.Transition != TransitionRecovered {
 		t.Fatalf("Transition = %q, want %q", recovered.Transition, TransitionRecovered)
 	}
@@ -327,7 +333,8 @@ func TestEmptyInputDoesNotForceRecovery(t *testing.T) {
 	}
 
 	nodeIncident := &IncidentRecord{ObjectType: ObjectTypeNode, ObjectID: "nd_001", IncidentClass: IncidentNodeResourcePressure, Severity: SeverityAlert}
-	resource := EvaluateNodeResourcePressure(nodeIncident, "nd_001", nil)
+	thresholds := DefaultMetricThresholds()
+	resource := EvaluateNodeResourcePressure(nodeIncident, "nd_001", nil, thresholds)
 	if resource.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q for empty host input", resource.Transition, TransitionNoop)
 	}
@@ -373,11 +380,12 @@ func TestEvaluateNodeResourcePressureRequiresRecoveryWindowBeforeClosing(t *test
 		LastEvaluatedAt: now.Add(-time.Minute),
 	}
 
+	thresholds := DefaultMetricThresholds()
 	insufficient := []NodeResourceSample{
 		{ObservedAt: now, CPUUsagePct: 20, MemUsedPct: 40, NormalizedLoad5: 0.8},
 		{ObservedAt: now.Add(-5 * time.Minute), CPUUsagePct: 22, MemUsedPct: 42, NormalizedLoad5: 0.9},
 	}
-	result := EvaluateNodeResourcePressure(previous, "nd_001", insufficient)
+	result := EvaluateNodeResourcePressure(previous, "nd_001", insufficient, thresholds)
 	if result.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q for incomplete safe window", result.Transition, TransitionNoop)
 	}
@@ -387,7 +395,7 @@ func TestEvaluateNodeResourcePressureRequiresRecoveryWindowBeforeClosing(t *test
 		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 22, MemUsedPct: 42, NormalizedLoad5: 0.9},
 		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 24, MemUsedPct: 44, NormalizedLoad5: 1.0},
 	}
-	recovered := EvaluateNodeResourcePressure(previous, "nd_001", safeWindow)
+	recovered := EvaluateNodeResourcePressure(previous, "nd_001", safeWindow, thresholds)
 	if recovered.Transition != TransitionRecovered {
 		t.Fatalf("Transition = %q, want %q for sustained safe window", recovered.Transition, TransitionRecovered)
 	}

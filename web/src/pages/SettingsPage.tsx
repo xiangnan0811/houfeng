@@ -38,6 +38,18 @@ type FormState = {
     notifyOnStarted: boolean
     notifyOnEscalated: boolean
     notifyOnRecovered: boolean
+    cpuWarningPct: string
+    cpuAlertPct: string
+    cpuCriticalPct: string
+    memWarningPct: string
+    memAlertPct: string
+    memCriticalPct: string
+    diskWarningPct: string
+    diskAlertPct: string
+    diskCriticalPct: string
+    inodeWarningPct: string
+    inodeAlertPct: string
+    inodeCriticalPct: string
   }
   nodeLabelOverridesText: string
   targetTypeOverridesText: string
@@ -88,6 +100,18 @@ function buildFormState(settings: SettingsRecord): FormState {
       notifyOnStarted: settings.incident_defaults.notify_on_started,
       notifyOnEscalated: settings.incident_defaults.notify_on_escalated,
       notifyOnRecovered: settings.incident_defaults.notify_on_recovered,
+      cpuWarningPct: String(settings.incident_defaults.cpu_warning_pct),
+      cpuAlertPct: String(settings.incident_defaults.cpu_alert_pct),
+      cpuCriticalPct: String(settings.incident_defaults.cpu_critical_pct),
+      memWarningPct: String(settings.incident_defaults.mem_warning_pct),
+      memAlertPct: String(settings.incident_defaults.mem_alert_pct),
+      memCriticalPct: String(settings.incident_defaults.mem_critical_pct),
+      diskWarningPct: String(settings.incident_defaults.disk_warning_pct),
+      diskAlertPct: String(settings.incident_defaults.disk_alert_pct),
+      diskCriticalPct: String(settings.incident_defaults.disk_critical_pct),
+      inodeWarningPct: String(settings.incident_defaults.inode_warning_pct),
+      inodeAlertPct: String(settings.incident_defaults.inode_alert_pct),
+      inodeCriticalPct: String(settings.incident_defaults.inode_critical_pct),
     },
     nodeLabelOverridesText: formatJSON(settings.override_rules.node_labels),
     targetTypeOverridesText: formatJSON(settings.override_rules.target_types),
@@ -168,6 +192,18 @@ function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): Set
         notify_on_started: form.incidentDefaults.notifyOnStarted,
         notify_on_escalated: form.incidentDefaults.notifyOnEscalated,
         notify_on_recovered: form.incidentDefaults.notifyOnRecovered,
+        cpu_warning_pct: parsePositiveInteger(form.incidentDefaults.cpuWarningPct, 'CPU 关注阈值'),
+        cpu_alert_pct: parsePositiveInteger(form.incidentDefaults.cpuAlertPct, 'CPU 告警阈值'),
+        cpu_critical_pct: parsePositiveInteger(form.incidentDefaults.cpuCriticalPct, 'CPU 严重阈值'),
+        mem_warning_pct: parsePositiveInteger(form.incidentDefaults.memWarningPct, '内存关注阈值'),
+        mem_alert_pct: parsePositiveInteger(form.incidentDefaults.memAlertPct, '内存告警阈值'),
+        mem_critical_pct: parsePositiveInteger(form.incidentDefaults.memCriticalPct, '内存严重阈值'),
+        disk_warning_pct: parsePositiveInteger(form.incidentDefaults.diskWarningPct, '磁盘关注阈值'),
+        disk_alert_pct: parsePositiveInteger(form.incidentDefaults.diskAlertPct, '磁盘告警阈值'),
+        disk_critical_pct: parsePositiveInteger(form.incidentDefaults.diskCriticalPct, '磁盘严重阈值'),
+        inode_warning_pct: parsePositiveInteger(form.incidentDefaults.inodeWarningPct, 'Inode 关注阈值'),
+        inode_alert_pct: parsePositiveInteger(form.incidentDefaults.inodeAlertPct, 'Inode 告警阈值'),
+        inode_critical_pct: parsePositiveInteger(form.incidentDefaults.inodeCriticalPct, 'Inode 严重阈值'),
       },
       override_rules: {
         node_labels: parseOverrideRuleArray<NodeLabelOverrideRule>(
@@ -230,6 +266,18 @@ function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): Set
       notify_on_started: form.incidentDefaults.notifyOnStarted,
       notify_on_escalated: form.incidentDefaults.notifyOnEscalated,
       notify_on_recovered: form.incidentDefaults.notifyOnRecovered,
+      cpu_warning_pct: parsePositiveInteger(form.incidentDefaults.cpuWarningPct, 'CPU 关注阈值'),
+      cpu_alert_pct: parsePositiveInteger(form.incidentDefaults.cpuAlertPct, 'CPU 告警阈值'),
+      cpu_critical_pct: parsePositiveInteger(form.incidentDefaults.cpuCriticalPct, 'CPU 严重阈值'),
+      mem_warning_pct: parsePositiveInteger(form.incidentDefaults.memWarningPct, '内存关注阈值'),
+      mem_alert_pct: parsePositiveInteger(form.incidentDefaults.memAlertPct, '内存告警阈值'),
+      mem_critical_pct: parsePositiveInteger(form.incidentDefaults.memCriticalPct, '内存严重阈值'),
+      disk_warning_pct: parsePositiveInteger(form.incidentDefaults.diskWarningPct, '磁盘关注阈值'),
+      disk_alert_pct: parsePositiveInteger(form.incidentDefaults.diskAlertPct, '磁盘告警阈值'),
+      disk_critical_pct: parsePositiveInteger(form.incidentDefaults.diskCriticalPct, '磁盘严重阈值'),
+      inode_warning_pct: parsePositiveInteger(form.incidentDefaults.inodeWarningPct, 'Inode 关注阈值'),
+      inode_alert_pct: parsePositiveInteger(form.incidentDefaults.inodeAlertPct, 'Inode 告警阈值'),
+      inode_critical_pct: parsePositiveInteger(form.incidentDefaults.inodeCriticalPct, 'Inode 严重阈值'),
     },
     override_rules: {
       node_labels: parseOverrideRuleArray<NodeLabelOverrideRule>(
@@ -312,6 +360,72 @@ function RetentionInput({
   )
 }
 
+function ThresholdInput({
+  ariaLabel,
+  value,
+  onChange,
+}: {
+  ariaLabel: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="summary-card">
+      <span className="summary-card__label">{ariaLabel}</span>
+      <span className="input-with-suffix">
+        <input
+          aria-label={ariaLabel}
+          inputMode="numeric"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <span className="input-with-suffix__unit">%</span>
+      </span>
+    </label>
+  )
+}
+
+function MetricThresholdGroup({
+  label,
+  warning,
+  alert,
+  critical,
+  hasAlert,
+  onUpdate,
+}: {
+  label: string
+  warning: string
+  alert: string
+  critical: string
+  hasAlert: boolean
+  onUpdate: (field: string, value: string) => void
+}) {
+  return (
+    <div className="page-stack" style={{ gap: '8px' }}>
+      <span className="section-heading__eyebrow">{label}</span>
+      <div className="summary-grid summary-grid--numeric">
+        <ThresholdInput
+          ariaLabel={`${label} 关注阈值`}
+          value={warning}
+          onChange={(value) => onUpdate('warning', value)}
+        />
+        {hasAlert ? (
+          <ThresholdInput
+            ariaLabel={`${label} 告警阈值`}
+            value={alert}
+            onChange={(value) => onUpdate('alert', value)}
+          />
+        ) : null}
+        <ThresholdInput
+          ariaLabel={`${label} 严重阈值`}
+          value={critical}
+          onChange={(value) => onUpdate('critical', value)}
+        />
+      </div>
+    </div>
+  )
+}
+
 function IncidentDefaultsEditor({
   value,
   onChange,
@@ -327,69 +441,133 @@ function IncidentDefaultsEditor({
   }
 
   return (
-    <div className="summary-grid">
-      <label className="summary-card">
-        <span className="summary-card__label">心跳间隔秒数</span>
-        <input
-          aria-label="心跳间隔秒数"
-          inputMode="numeric"
-          value={value.heartbeatIntervalSeconds}
-          onChange={(event) => update('heartbeatIntervalSeconds', event.target.value)}
-        />
-      </label>
+    <div className="page-stack" style={{ gap: '16px' }}>
+      <div className="summary-grid">
+        <label className="summary-card">
+          <span className="summary-card__label">心跳间隔秒数</span>
+          <input
+            aria-label="心跳间隔秒数"
+            inputMode="numeric"
+            value={value.heartbeatIntervalSeconds}
+            onChange={(event) => update('heartbeatIntervalSeconds', event.target.value)}
+          />
+        </label>
 
-      <label className="summary-card">
-        <span className="summary-card__label">失联判定阈值</span>
-        <input
-          aria-label="失联判定阈值"
-          inputMode="numeric"
-          value={value.staleThresholdIntervals}
-          onChange={(event) => update('staleThresholdIntervals', event.target.value)}
-        />
-      </label>
+        <label className="summary-card">
+          <span className="summary-card__label">失联判定阈值</span>
+          <input
+            aria-label="失联判定阈值"
+            inputMode="numeric"
+            value={value.staleThresholdIntervals}
+            onChange={(event) => update('staleThresholdIntervals', event.target.value)}
+          />
+        </label>
 
-      <label className="summary-card">
-        <span className="summary-card__label">扫描间隔秒数</span>
-        <input
-          aria-label="扫描间隔秒数"
-          inputMode="numeric"
-          value={value.sweepIntervalSeconds}
-          onChange={(event) => update('sweepIntervalSeconds', event.target.value)}
-        />
-      </label>
+        <label className="summary-card">
+          <span className="summary-card__label">扫描间隔秒数</span>
+          <input
+            aria-label="扫描间隔秒数"
+            inputMode="numeric"
+            value={value.sweepIntervalSeconds}
+            onChange={(event) => update('sweepIntervalSeconds', event.target.value)}
+          />
+        </label>
 
-      <label className="summary-card">
-        <span className="summary-card__label">异常开始通知</span>
-        <input
-          aria-label="异常开始通知"
-          type="checkbox"
-          checked={value.notifyOnStarted}
-          onChange={(event) => update('notifyOnStarted', event.target.checked)}
-        />
-      </label>
+        <label className="summary-card">
+          <span className="summary-card__label">异常开始通知</span>
+          <input
+            aria-label="异常开始通知"
+            type="checkbox"
+            checked={value.notifyOnStarted}
+            onChange={(event) => update('notifyOnStarted', event.target.checked)}
+          />
+        </label>
 
-      <label className="summary-card">
-        <span className="summary-card__label">异常升级通知</span>
-        <input
-          aria-label="异常升级通知"
-          type="checkbox"
-          checked={value.notifyOnEscalated}
-          onChange={(event) => update('notifyOnEscalated', event.target.checked)}
-        />
-      </label>
+        <label className="summary-card">
+          <span className="summary-card__label">异常升级通知</span>
+          <input
+            aria-label="异常升级通知"
+            type="checkbox"
+            checked={value.notifyOnEscalated}
+            onChange={(event) => update('notifyOnEscalated', event.target.checked)}
+          />
+        </label>
 
-      <label className="summary-card">
-        <span className="summary-card__label">异常恢复通知</span>
-        <input
-          aria-label="异常恢复通知"
-          type="checkbox"
-          checked={value.notifyOnRecovered}
-          onChange={(event) => update('notifyOnRecovered', event.target.checked)}
-        />
-      </label>
+        <label className="summary-card">
+          <span className="summary-card__label">异常恢复通知</span>
+          <input
+            aria-label="异常恢复通知"
+            type="checkbox"
+            checked={value.notifyOnRecovered}
+            onChange={(event) => update('notifyOnRecovered', event.target.checked)}
+          />
+        </label>
+      </div>
+
+      <MetricThresholdGroup
+        label="CPU 阈值"
+        warning={value.cpuWarningPct}
+        alert={value.cpuAlertPct}
+        critical={value.cpuCriticalPct}
+        hasAlert
+        onUpdate={(field, nextValue) => {
+          const key = cpuThresholdKey(field)
+          if (key) update(key, nextValue)
+        }}
+      />
+
+      <MetricThresholdGroup
+        label="内存阈值"
+        warning={value.memWarningPct}
+        alert={value.memAlertPct}
+        critical={value.memCriticalPct}
+        hasAlert
+        onUpdate={(field, nextValue) => {
+          const key = memThresholdKey(field)
+          if (key) update(key, nextValue)
+        }}
+      />
+
+      <MetricThresholdGroup
+        label="磁盘阈值"
+        warning={value.diskWarningPct}
+        alert={value.diskAlertPct}
+        critical={value.diskCriticalPct}
+        hasAlert
+        onUpdate={(field, nextValue) => {
+          const key = diskThresholdKey(field)
+          if (key) update(key, nextValue)
+        }}
+      />
+
+      <MetricThresholdGroup
+        label="Inode 阈值"
+        warning={value.inodeWarningPct}
+        alert={value.inodeAlertPct}
+        critical={value.inodeCriticalPct}
+        hasAlert
+        onUpdate={(field, nextValue) => {
+          const key = inodeThresholdKey(field)
+          if (key) update(key, nextValue)
+        }}
+      />
     </div>
   )
 }
+
+function thresholdKey(prefix: string, field: string): keyof FormState['incidentDefaults'] | null {
+  switch (field) {
+    case 'warning': return `${prefix}WarningPct` as keyof FormState['incidentDefaults']
+    case 'alert': return `${prefix}AlertPct` as keyof FormState['incidentDefaults']
+    case 'critical': return `${prefix}CriticalPct` as keyof FormState['incidentDefaults']
+    default: return null
+  }
+}
+
+const cpuThresholdKey = (field: string) => thresholdKey('cpu', field)
+const memThresholdKey = (field: string) => thresholdKey('mem', field)
+const diskThresholdKey = (field: string) => thresholdKey('disk', field)
+const inodeThresholdKey = (field: string) => thresholdKey('inode', field)
 
 function OverrideTextarea({
   ariaLabel,

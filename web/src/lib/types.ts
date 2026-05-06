@@ -374,6 +374,18 @@ export type IncidentDefaults = {
   notify_on_started: boolean
   notify_on_escalated: boolean
   notify_on_recovered: boolean
+  cpu_warning_pct: number
+  cpu_alert_pct: number
+  cpu_critical_pct: number
+  mem_warning_pct: number
+  mem_alert_pct: number
+  mem_critical_pct: number
+  disk_warning_pct: number
+  disk_alert_pct: number
+  disk_critical_pct: number
+  inode_warning_pct: number
+  inode_alert_pct: number
+  inode_critical_pct: number
 }
 
 export type ProbeFrequencyOverride = {
@@ -389,6 +401,18 @@ export type IncidentDefaultsOverride = {
   notify_on_started?: boolean
   notify_on_escalated?: boolean
   notify_on_recovered?: boolean
+  cpu_warning_pct?: number
+  cpu_alert_pct?: number
+  cpu_critical_pct?: number
+  mem_warning_pct?: number
+  mem_alert_pct?: number
+  mem_critical_pct?: number
+  disk_warning_pct?: number
+  disk_alert_pct?: number
+  disk_critical_pct?: number
+  inode_warning_pct?: number
+  inode_alert_pct?: number
+  inode_critical_pct?: number
 }
 
 export type SettingsOverrideFields = {
