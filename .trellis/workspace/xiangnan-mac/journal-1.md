@@ -1622,3 +1622,36 @@ Simplified Dashboard into a decision-focused status and workbench flow, removed 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 49: Dashboard visual audit polish
+
+**Date**: 2026-05-07
+**Task**: Dashboard visual audit polish
+**Branch**: `main`
+
+### Summary
+
+Removed standalone Dashboard summary strip, moved key metrics inline into status bar, replaced abnormal DataTable with compact task links, updated Dashboard tests/spec/docs, and verified web checks.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `570a72b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
