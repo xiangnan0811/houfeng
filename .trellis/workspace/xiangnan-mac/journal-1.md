@@ -1588,3 +1588,37 @@ Converged Dashboard into a state-driven workbench, updated IA tests and specs, a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 48: Dashboard decision-focused simplification
+
+**Date**: 2026-05-07
+**Task**: Dashboard decision-focused simplification
+**Branch**: `main`
+
+### Summary
+
+Simplified Dashboard into a decision-focused status and workbench flow, removed always-visible fact/KPI/context clutter, and updated tests plus specs to enforce progressive disclosure.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0db7658` | (see git log) |
+| `1bb96ad` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

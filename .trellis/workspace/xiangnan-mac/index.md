@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 47
+- **Total Sessions**: 48
 - **Last Active**: 2026-05-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1590 | Active |
+| `journal-1.md` | ~1624 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 48 | 2026-05-07 | Dashboard decision-focused simplification | `0db7658`, `1bb96ad` | `main` |
 | 47 | 2026-05-07 | Dashboard information architecture convergence | `0ba86c0`, `0bc8449` | `main` |
 | 46 | 2026-05-07 | PR4 Dashboard deep links and URL-state lists | `5974118`, `012569d`, `c8aa7d9`, `2f2b2f9` | `main` |
 | 45 | 2026-05-07 | Dashboard contract extension | `4842bb6` | `main` |
