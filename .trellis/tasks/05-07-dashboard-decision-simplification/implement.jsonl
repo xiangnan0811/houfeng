@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web layer overview and implementation conventions for Dashboard work."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Dashboard refactor must preserve accessibility, link behavior, and component composition."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard should only show API facts that support the primary decision path and keep PR4 deep links."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Visual simplification requires CSS changes using existing tokens and BEM patterns."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Testing and verification requirements for web UI changes."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing atoms and page patterns while removing overbuilt Dashboard sections."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Ensure frontend simplification does not imply backend contract changes."}
+{"file": ".trellis/tasks/05-07-dashboard-decision-simplification/research/web-interface-guidelines-dashboard-review.md", "reason": "UI review notes and concrete design constraints for the simplification."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-ia-convergence/prd.md", "reason": "Previous failed convergence attempt and constraints to correct, not repeat."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-deep-links-url-state/prd.md", "reason": "PR4 filtered deep link contract must remain intact."}

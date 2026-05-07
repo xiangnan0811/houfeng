@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Verify Dashboard changes stay inside web layer conventions."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check accessibility, link behavior, and React structure."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify Dashboard displays only appropriate facts and preserves deep links."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check CSS token/BEM compliance and visual simplification constraints."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Guide lint, build, and test verification."}
+{"file": ".trellis/tasks/05-07-dashboard-decision-simplification/research/web-interface-guidelines-dashboard-review.md", "reason": "Check against UI review findings that motivated the task."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-deep-links-url-state/prd.md", "reason": "Verify PR4 filtered links remain supported."}
