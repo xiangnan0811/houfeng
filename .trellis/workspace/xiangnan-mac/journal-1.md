@@ -1655,3 +1655,36 @@ Removed standalone Dashboard summary strip, moved key metrics inline into status
 ### Next Steps
 
 - None - task complete
+
+
+## Session 50: Dashboard comparable systems enrichment
+
+**Date**: 2026-05-07
+**Task**: Dashboard comparable systems enrichment
+**Branch**: `main`
+
+### Summary
+
+Added a compact operating context strip to Dashboard based on comparable monitoring/server-management systems: impact scope, inventory state, and recent activity links without restoring KPI, Group, or Recent list clutter.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0091a3c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
