@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { Button, MonoDigits, Tabs, type TabItem } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
+import {
+  FilterBar,
+  FilterChip,
+  FilterSelect,
+  FilterToggle,
+  type FilterSelectOption,
+} from '../components/filters'
 import { ApiError, listEvents } from '../lib/api'
 import {
   STATE_CHANGE_EVENT_TYPE_LABELS,
@@ -43,6 +51,20 @@ type State = {
 }
 
 const DEFAULT_LIMIT = 50
+const LIMIT_OPTIONS = ['10', '25', '50', '100'] as const
+const OBJECT_TYPE_OPTIONS: FilterSelectOption[] = [
+  { value: 'node', label: '节点' },
+  { value: 'target', label: '目标' },
+]
+const SEVERITY_OPTIONS: FilterSelectOption[] = [
+  { value: '关注', label: '关注' },
+  { value: '告警', label: '告警' },
+  { value: '严重', label: '严重' },
+]
+const LIMIT_SELECT_OPTIONS: FilterSelectOption[] = LIMIT_OPTIONS.map((value) => ({
+  value,
+  label: value,
+}))
 
 const DEFAULT_FILTERS: FilterState = {
   object_type: '',
@@ -62,6 +84,9 @@ const DEFAULT_FILTERS: FilterState = {
 const EVENT_TYPE_OPTIONS = Object.entries(STATE_CHANGE_EVENT_TYPE_LABELS) as Array<
   [StateChangeEventType, string]
 >
+const EVENT_TYPE_SELECT_OPTIONS: FilterSelectOption[] = EVENT_TYPE_OPTIONS.map(
+  ([value, label]) => ({ value, label }),
+)
 
 const TIME_RANGE_TABS: TabItem<TimeRange>[] = [
   { value: '24h', label: '近 24 小时' },
@@ -76,32 +101,182 @@ const TIME_RANGE_DURATIONS_MS: Record<Exclude<TimeRange, 'custom'>, number> = {
   '30d': 30 * 24 * 60 * 60 * 1000,
 }
 
-function buildFilterQuery(filters: FilterState, effectiveLimit: number): EventListFilter {
+const TIME_RANGE_LABELS: Record<TimeRange, string> = {
+  '24h': '近 24 小时',
+  '7d': '近 7 天',
+  '30d': '近 30 天',
+  custom: '自定义',
+}
+
+const ALLOWED_EVENT_TYPES = new Set<StateChangeEventType>(
+  EVENT_TYPE_OPTIONS.map(([value]) => value),
+)
+const ALLOWED_LIMITS = new Set<string>(LIMIT_OPTIONS)
+const ALLOWED_TIME_RANGES = new Set<TimeRange>(['24h', '7d', '30d', 'custom'])
+
+function isObjectType(value: string | null): value is 'node' | 'target' {
+  return value === 'node' || value === 'target'
+}
+
+function isSeverity(value: string | null): value is FilterState['severity'] {
+  return value === '关注' || value === '告警' || value === '严重'
+}
+
+function isEventType(value: string | null): value is StateChangeEventType {
+  return value !== null && ALLOWED_EVENT_TYPES.has(value as StateChangeEventType)
+}
+
+function isTimeRange(value: string | null): value is TimeRange {
+  return value !== null && ALLOWED_TIME_RANGES.has(value as TimeRange)
+}
+
+function isValidDateInput(value: string): boolean {
+  return value.trim() !== '' && !Number.isNaN(Date.parse(value.trim()))
+}
+
+function normalizeDateInput(value: string): string {
+  const trimmed = value.trim()
+  return isValidDateInput(trimmed) ? trimmed : ''
+}
+
+function normalizeDateForApi(value: string): string {
+  const trimmed = normalizeDateInput(value)
+  if (!trimmed) return ''
+  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(trimmed)) {
+    return trimmed
+  }
+  return new Date(trimmed).toISOString()
+}
+
+function parseEventSearchParams(searchParams: URLSearchParams): FilterState {
+  const rawTimeRange = searchParams.get('time_range')
+  const timeRange = isTimeRange(rawTimeRange) ? rawTimeRange : DEFAULT_FILTERS.time_range
+  const customRange = timeRange === 'custom'
+  const rawObjectType = searchParams.get('object_type')
+  const rawSeverity = searchParams.get('severity')
+  const rawEventType = searchParams.get('event_type')
+  const rawLimit = searchParams.get('limit')
+
   return {
+    object_type: isObjectType(rawObjectType) ? rawObjectType : DEFAULT_FILTERS.object_type,
+    severity: isSeverity(rawSeverity) ? rawSeverity : DEFAULT_FILTERS.severity,
+    event_type: isEventType(rawEventType) ? rawEventType : DEFAULT_FILTERS.event_type,
+    limit: ALLOWED_LIMITS.has(rawLimit ?? '') ? rawLimit ?? DEFAULT_FILTERS.limit : DEFAULT_FILTERS.limit,
+    created_from: customRange
+      ? normalizeDateInput(searchParams.get('created_from') ?? '')
+      : DEFAULT_FILTERS.created_from,
+    created_to: customRange
+      ? normalizeDateInput(searchParams.get('created_to') ?? '')
+      : DEFAULT_FILTERS.created_to,
+    label: (searchParams.get('label') ?? '').trim(),
+    notification_only: searchParams.get('notification_only') === '1',
+    recovery_only: searchParams.get('recovery_only') === '1',
+    maintenance_only: searchParams.get('maintenance_only') === '1',
+    include_backfilled: false,
+    time_range: timeRange,
+  }
+}
+
+function normalizeFilters(filters: FilterState): FilterState {
+  const timeRange = ALLOWED_TIME_RANGES.has(filters.time_range)
+    ? filters.time_range
+    : DEFAULT_FILTERS.time_range
+  const customRange = timeRange === 'custom'
+  const limit = ALLOWED_LIMITS.has(filters.limit) ? filters.limit : DEFAULT_FILTERS.limit
+
+  return {
+    object_type: isObjectType(filters.object_type) ? filters.object_type : '',
+    severity: isSeverity(filters.severity) ? filters.severity : '',
+    event_type: isEventType(filters.event_type) ? filters.event_type : '',
+    limit,
+    created_from: customRange ? normalizeDateInput(filters.created_from) : '',
+    created_to: customRange ? normalizeDateInput(filters.created_to) : '',
+    label: filters.label.trim(),
+    notification_only: filters.notification_only,
+    recovery_only: filters.recovery_only,
+    maintenance_only: filters.maintenance_only,
+    include_backfilled: false,
+    time_range: timeRange,
+  }
+}
+
+function searchParamsFromFilters(filters: FilterState): URLSearchParams {
+  const normalized = normalizeFilters(filters)
+  const next = new URLSearchParams()
+  if (normalized.object_type) next.set('object_type', normalized.object_type)
+  if (normalized.severity) next.set('severity', normalized.severity)
+  if (normalized.event_type) next.set('event_type', normalized.event_type)
+  if (normalized.limit !== String(DEFAULT_LIMIT)) next.set('limit', normalized.limit)
+  if (normalized.time_range !== 'custom') {
+    next.set('time_range', normalized.time_range)
+  } else if (normalized.created_from || normalized.created_to) {
+    next.set('time_range', 'custom')
+    if (normalized.created_from) next.set('created_from', normalized.created_from)
+    if (normalized.created_to) next.set('created_to', normalized.created_to)
+  }
+  if (normalized.label) next.set('label', normalized.label)
+  if (normalized.notification_only) next.set('notification_only', '1')
+  if (normalized.recovery_only) next.set('recovery_only', '1')
+  if (normalized.maintenance_only) next.set('maintenance_only', '1')
+  return next
+}
+
+function filterKey(filters: FilterState): string {
+  return searchParamsFromFilters(filters).toString()
+}
+
+function filterLimit(filters: FilterState): number {
+  return Number(filters.limit || DEFAULT_LIMIT) || DEFAULT_LIMIT
+}
+
+function hasActiveFilters(filters: FilterState): boolean {
+  const normalized = normalizeFilters(filters)
+  return (
+    normalized.object_type !== '' ||
+    normalized.severity !== '' ||
+    normalized.event_type !== '' ||
+    normalized.limit !== String(DEFAULT_LIMIT) ||
+    normalized.created_from !== '' ||
+    normalized.created_to !== '' ||
+    normalized.label !== '' ||
+    normalized.notification_only ||
+    normalized.recovery_only ||
+    normalized.maintenance_only ||
+    normalized.time_range !== 'custom'
+  )
+}
+
+function buildFilterQuery(filters: FilterState, effectiveLimit: number): EventListFilter {
+  const query: EventListFilter = {
     object_type: filters.object_type,
     severity: filters.severity,
     event_type: filters.event_type,
     limit: effectiveLimit,
-    created_from: filters.created_from,
-    created_to: filters.created_to,
     label: filters.label,
     notification_only: filters.notification_only,
     recovery_only: filters.recovery_only,
     maintenance_only: filters.maintenance_only,
   }
+
+  if (filters.time_range === 'custom') {
+    query.created_from = normalizeDateForApi(filters.created_from)
+    query.created_to = normalizeDateForApi(filters.created_to)
+    return query
+  }
+
+  const now = new Date()
+  const from = new Date(now.getTime() - TIME_RANGE_DURATIONS_MS[filters.time_range])
+  query.created_from = from.toISOString()
+  query.created_to = now.toISOString()
+  return query
 }
 
 function applyTimeRange(filters: FilterState, range: TimeRange): FilterState {
-  if (range === 'custom') {
-    return { ...filters, time_range: range }
-  }
-  const now = new Date()
-  const from = new Date(now.getTime() - TIME_RANGE_DURATIONS_MS[range])
   return {
     ...filters,
     time_range: range,
-    created_from: from.toISOString(),
-    created_to: now.toISOString(),
+    created_from: range === 'custom' ? filters.created_from : '',
+    created_to: range === 'custom' ? filters.created_to : '',
   }
 }
 
@@ -161,13 +336,33 @@ function groupEventsByTime(
 }
 
 export function EventsPage() {
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
-  const [appliedFilters, setAppliedFilters] = useState<FilterState>(DEFAULT_FILTERS)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const appliedFilterKey = useMemo(
+    () => filterKey(parseEventSearchParams(searchParams)),
+    [searchParams],
+  )
+  const appliedFilters = useMemo(
+    () => normalizeFilters(parseEventSearchParams(new URLSearchParams(appliedFilterKey))),
+    [appliedFilterKey],
+  )
+  const [draftState, setDraftState] = useState(() => ({
+    filterKey: appliedFilterKey,
+    filters: appliedFilters,
+  }))
+  const filters =
+    draftState.filterKey === appliedFilterKey ? draftState.filters : appliedFilters
   // effectiveLimit drives the actual limit sent to backend. It starts at the
   // user-selected limit; "加载更早事件" increments it by the user-selected
   // limit and refetches so older rows append naturally (server returns the
   // most-recent N for the current filter).
-  const [effectiveLimit, setEffectiveLimit] = useState<number>(DEFAULT_LIMIT)
+  const [limitState, setLimitState] = useState(() => ({
+    filterKey: appliedFilterKey,
+    effectiveLimit: filterLimit(appliedFilters),
+  }))
+  const effectiveLimit =
+    limitState.filterKey === appliedFilterKey
+      ? limitState.effectiveLimit
+      : filterLimit(appliedFilters)
   const [state, setState] = useState<State>({
     loading: true,
     error: null,
@@ -176,11 +371,27 @@ export function EventsPage() {
   })
   const [loadingMore, setLoadingMore] = useState(false)
 
-  function submitFilters(nextFilters: FilterState) {
-    const limitValue = Number(nextFilters.limit || DEFAULT_LIMIT) || DEFAULT_LIMIT
-    setState((current) => ({ ...current, loading: true, error: null }))
-    setEffectiveLimit(limitValue)
-    setAppliedFilters({ ...nextFilters })
+  useEffect(() => {
+    const canonicalParams = searchParamsFromFilters(appliedFilters)
+    if (searchParams.toString() !== canonicalParams.toString()) {
+      setSearchParams(canonicalParams, { replace: true })
+    }
+  }, [appliedFilterKey, appliedFilters, searchParams, setSearchParams])
+
+  function commitFilters(nextFilters: FilterState) {
+    const normalized = normalizeFilters(nextFilters)
+    const nextKey = filterKey(normalized)
+    const nextLimit = filterLimit(normalized)
+    const nextParams = searchParamsFromFilters(normalized)
+    if (nextKey !== appliedFilterKey || nextLimit !== effectiveLimit) {
+      setState((current) => ({ ...current, loading: true, error: null }))
+    }
+    setDraftState({ filterKey: nextKey, filters: normalized })
+    setLoadingMore(false)
+    setLimitState({ filterKey: nextKey, effectiveLimit: nextLimit })
+    if (searchParams.toString() !== nextParams.toString()) {
+      setSearchParams(nextParams, { replace: true })
+    }
   }
 
   useEffect(() => {
@@ -207,16 +418,45 @@ export function EventsPage() {
     return () => {
       cancelled = true
     }
-  }, [appliedFilters, effectiveLimit])
+  }, [appliedFilters, appliedFilterKey, effectiveLimit])
 
   const groupedEvents = useMemo(() => groupEventsByTime(state.events), [state.events])
+  const activeFilters = hasActiveFilters(appliedFilters)
 
   function handleLoadMore() {
     if (state.exhausted || loadingMore) return
-    const increment = Number(appliedFilters.limit || DEFAULT_LIMIT) || DEFAULT_LIMIT
+    const increment = filterLimit(appliedFilters)
     setLoadingMore(true)
-    setEffectiveLimit((current) => current + increment)
+    setLimitState({
+      filterKey: appliedFilterKey,
+      effectiveLimit: effectiveLimit + increment,
+    })
   }
+
+  function updateDraftFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
+    setDraftState((current) => {
+      const currentFilters =
+        current.filterKey === appliedFilterKey ? current.filters : appliedFilters
+      return {
+        filterKey: appliedFilterKey,
+        filters: { ...currentFilters, [key]: value },
+      }
+    })
+  }
+
+  function removeAppliedFilter(key: keyof FilterState) {
+    commitFilters({
+      ...appliedFilters,
+      [key]: DEFAULT_FILTERS[key],
+    })
+  }
+
+  const objectTypeLabel =
+    appliedFilters.object_type === 'node'
+      ? '节点'
+      : appliedFilters.object_type === 'target'
+        ? '目标'
+        : ''
 
   if (state.loading) {
     return <section className="page-panel">正在加载事件…</section>
@@ -248,88 +488,165 @@ export function EventsPage() {
         <form
           onSubmit={(event) => {
             event.preventDefault()
-            submitFilters(filters)
+            commitFilters(filters)
           }}
         >
-          <div style={{ marginBottom: 'var(--space-4)' }}>
-            <p className="section-heading__eyebrow" style={{ marginBottom: 8 }}>时间范围</p>
+          <div className="summary-card">
+            <span className="summary-card__label">时间范围</span>
             <Tabs<TimeRange>
               variant="pill"
               value={filters.time_range}
               onChange={(next) =>
-                setFilters((current) => applyTimeRange(current, next))
+                setDraftState((current) => {
+                  const currentFilters =
+                    current.filterKey === appliedFilterKey ? current.filters : appliedFilters
+                  return {
+                    filterKey: appliedFilterKey,
+                    filters: applyTimeRange(currentFilters, next),
+                  }
+                })
               }
               items={TIME_RANGE_TABS}
             />
           </div>
 
+          <FilterBar
+            hasActiveFilters={activeFilters}
+            onClearAll={() => commitFilters(DEFAULT_FILTERS)}
+            activeChips={
+              <>
+                {appliedFilters.object_type ? (
+                  <FilterChip
+                    label={`对象类型: ${objectTypeLabel}`}
+                    onRemove={() => removeAppliedFilter('object_type')}
+                  />
+                ) : null}
+                {appliedFilters.severity ? (
+                  <FilterChip
+                    label={`严重程度: ${appliedFilters.severity}`}
+                    onRemove={() => removeAppliedFilter('severity')}
+                  />
+                ) : null}
+                {appliedFilters.event_type ? (
+                  <FilterChip
+                    label={`事件类型: ${STATE_CHANGE_EVENT_TYPE_LABELS[appliedFilters.event_type]}`}
+                    onRemove={() => removeAppliedFilter('event_type')}
+                  />
+                ) : null}
+                {appliedFilters.limit !== String(DEFAULT_LIMIT) ? (
+                  <FilterChip
+                    label={`数量: ${appliedFilters.limit}`}
+                    onRemove={() => removeAppliedFilter('limit')}
+                  />
+                ) : null}
+                {appliedFilters.time_range !== 'custom' ? (
+                  <FilterChip
+                    label={`时间范围: ${TIME_RANGE_LABELS[appliedFilters.time_range]}`}
+                    onRemove={() => removeAppliedFilter('time_range')}
+                  />
+                ) : null}
+                {appliedFilters.created_from ? (
+                  <FilterChip
+                    label={`开始时间: ${appliedFilters.created_from}`}
+                    onRemove={() => removeAppliedFilter('created_from')}
+                  />
+                ) : null}
+                {appliedFilters.created_to ? (
+                  <FilterChip
+                    label={`结束时间: ${appliedFilters.created_to}`}
+                    onRemove={() => removeAppliedFilter('created_to')}
+                  />
+                ) : null}
+                {appliedFilters.label ? (
+                  <FilterChip
+                    label={`标签: ${appliedFilters.label}`}
+                    onRemove={() => removeAppliedFilter('label')}
+                  />
+                ) : null}
+                {appliedFilters.notification_only ? (
+                  <FilterChip
+                    label="仅看通知事件"
+                    onRemove={() => removeAppliedFilter('notification_only')}
+                  />
+                ) : null}
+                {appliedFilters.recovery_only ? (
+                  <FilterChip
+                    label="仅看恢复事件"
+                    onRemove={() => removeAppliedFilter('recovery_only')}
+                  />
+                ) : null}
+                {appliedFilters.maintenance_only ? (
+                  <FilterChip
+                    label="仅看维护事件"
+                    onRemove={() => removeAppliedFilter('maintenance_only')}
+                  />
+                ) : null}
+              </>
+            }
+          >
+            <FilterSelect
+              label="对象类型"
+              value={filters.object_type || null}
+              options={OBJECT_TYPE_OPTIONS}
+              onChange={(value) => updateDraftFilter('object_type', value === 'node' || value === 'target' ? value : '')}
+            />
+            <FilterSelect
+              label="严重程度"
+              value={filters.severity || null}
+              options={SEVERITY_OPTIONS}
+              onChange={(value) =>
+                updateDraftFilter(
+                  'severity',
+                  value === '关注' || value === '告警' || value === '严重' ? value : '',
+                )
+              }
+            />
+            <FilterSelect
+              label="事件类型"
+              value={filters.event_type || null}
+              options={EVENT_TYPE_SELECT_OPTIONS}
+              onChange={(value) =>
+                updateDraftFilter(
+                  'event_type',
+                  isEventType(value) ? value : '',
+                )
+              }
+            />
+            <FilterSelect
+              label="数量"
+              value={filters.limit}
+              options={LIMIT_SELECT_OPTIONS}
+              onChange={(value) =>
+                updateDraftFilter(
+                  'limit',
+                  value !== null && ALLOWED_LIMITS.has(value) ? value : String(DEFAULT_LIMIT),
+                )
+              }
+            />
+            <FilterToggle
+              label="仅看通知事件"
+              checked={filters.notification_only}
+              onChange={(checked) => updateDraftFilter('notification_only', checked)}
+            />
+            <FilterToggle
+              label="仅看恢复事件"
+              checked={filters.recovery_only}
+              onChange={(checked) => updateDraftFilter('recovery_only', checked)}
+            />
+            <FilterToggle
+              label="仅看维护事件"
+              checked={filters.maintenance_only}
+              onChange={(checked) => updateDraftFilter('maintenance_only', checked)}
+            />
+            <FilterToggle
+              label="包含补传事件"
+              checked={false}
+              disabled
+              onChange={() => {}}
+            />
+          </FilterBar>
+
           <div className="summary-grid">
-            <label className="summary-card">
-              <span className="summary-card__label">对象类型</span>
-              <select
-                aria-label="对象类型"
-                value={filters.object_type}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, object_type: event.target.value as FilterState['object_type'] }))
-                }
-              >
-                <option value="">全部</option>
-                <option value="node">节点</option>
-                <option value="target">目标</option>
-              </select>
-            </label>
-
-            <label className="summary-card">
-              <span className="summary-card__label">严重程度</span>
-              <select
-                aria-label="严重程度"
-                value={filters.severity}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, severity: event.target.value as FilterState['severity'] }))
-                }
-              >
-                <option value="">全部</option>
-                <option value="关注">关注</option>
-                <option value="告警">告警</option>
-                <option value="严重">严重</option>
-              </select>
-            </label>
-
-            <label className="summary-card">
-              <span className="summary-card__label">事件类型</span>
-              <select
-                aria-label="事件类型"
-                value={filters.event_type}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, event_type: event.target.value as FilterState['event_type'] }))
-                }
-              >
-                <option value="">全部</option>
-                {EVENT_TYPE_OPTIONS.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="summary-card">
-              <span className="summary-card__label">数量</span>
-              <select
-                aria-label="数量"
-                className="mono"
-                value={filters.limit}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, limit: event.target.value }))
-                }
-              >
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-              </select>
-            </label>
-
             <label className="summary-card">
               <span className="summary-card__label">开始时间</span>
               <input
@@ -338,7 +655,7 @@ export function EventsPage() {
                 value={filters.created_from}
                 disabled={!customRange}
                 onChange={(event) =>
-                  setFilters((current) => ({ ...current, created_from: event.target.value }))
+                  updateDraftFilter('created_from', event.target.value)
                 }
               />
             </label>
@@ -351,7 +668,7 @@ export function EventsPage() {
                 value={filters.created_to}
                 disabled={!customRange}
                 onChange={(event) =>
-                  setFilters((current) => ({ ...current, created_to: event.target.value }))
+                  updateDraftFilter('created_to', event.target.value)
                 }
               />
             </label>
@@ -363,73 +680,23 @@ export function EventsPage() {
                 placeholder="edge"
                 value={filters.label}
                 onChange={(event) =>
-                  setFilters((current) => ({ ...current, label: event.target.value }))
+                  updateDraftFilter('label', event.target.value)
                 }
               />
             </label>
 
-            <label className="summary-card">
-              <span className="summary-card__label">通知相关</span>
-              <input
-                aria-label="仅看通知事件"
-                type="checkbox"
-                checked={filters.notification_only}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    notification_only: event.target.checked,
-                  }))
-                }
-              />
-            </label>
-
-            <label className="summary-card">
-              <span className="summary-card__label">恢复事件</span>
-              <input
-                aria-label="仅看恢复事件"
-                type="checkbox"
-                checked={filters.recovery_only}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, recovery_only: event.target.checked }))
-                }
-              />
-            </label>
-
-            <label className="summary-card">
-              <span className="summary-card__label">维护事件</span>
-              <input
-                aria-label="仅看维护事件"
-                type="checkbox"
-                checked={filters.maintenance_only}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    maintenance_only: event.target.checked,
-                  }))
-                }
-              />
-            </label>
-
-            <label className="summary-card">
+            <div className="summary-card">
               <span className="summary-card__label">包含补传事件</span>
               <span className="summary-card__value">待后端支持</span>
-              <input
-                aria-label="包含补传事件"
-                type="checkbox"
-                checked={filters.include_backfilled}
-                disabled
-                title="当前事件 API 尚未暴露补传维度"
-                onChange={() => {}}
-              />
-            </label>
+              <span className="summary-card__value--text">当前事件 API 尚未暴露补传维度</span>
+            </div>
           </div>
 
           <button type="submit">应用筛选</button>
           <button
             type="button"
             onClick={() => {
-              setFilters({ ...DEFAULT_FILTERS })
-              submitFilters(DEFAULT_FILTERS)
+              commitFilters(DEFAULT_FILTERS)
             }}
           >
             重置筛选
@@ -441,24 +708,11 @@ export function EventsPage() {
         {state.events.length === 0 ? (
           <EventList events={state.events} />
         ) : (
-          <div
-            className="event-groups"
-            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
-          >
+          <div className="probe-list">
             {groupedEvents.map((group) => (
               <div key={group.key} className="event-group">
-                <header
-                  className="section-heading"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'baseline',
-                    gap: 'var(--space-2)',
-                    marginBottom: 'var(--space-3)',
-                  }}
-                >
-                  <h3 className="section-heading__title" style={{ margin: 0 }}>
-                    {EVENT_GROUP_LABELS[group.key]}
-                  </h3>
+                <header className="section-heading">
+                  <h3 className="section-heading__title">{EVENT_GROUP_LABELS[group.key]}</h3>
                   <span className="section-heading__eyebrow">
                     <MonoDigits>{group.events.length}</MonoDigits>
                   </span>
@@ -468,10 +722,7 @@ export function EventsPage() {
             ))}
           </div>
         )}
-        <div
-          className="load-more"
-          style={{ display: 'flex', justifyContent: 'center', marginTop: 'var(--space-6)' }}
-        >
+        <div>
           <Button
             variant="secondary"
             size="sm"

@@ -1091,6 +1091,97 @@ describe('TargetsPage', () => {
     expect(screen.getByText('类型: service')).toBeInTheDocument()
   })
 
+  it('uses abnormal=1 from Dashboard deep links as the initial target filter', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_normal',
+          name: 'Healthy API',
+          current_health_status: '正常',
+        }),
+        targetRecord({
+          target_id: 'tg_alert',
+          name: 'Failing API',
+          current_health_status: '告警',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets?abnormal=1']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Failing API')).toBeInTheDocument())
+
+    expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: '仅看异常' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    expect(
+      screen.getByRole('button', { name: '移除筛选 仅看异常' }),
+    ).toBeInTheDocument()
+  })
+
+  it('uses run_status=暂停 from Dashboard deep links as the initial target filter', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({ target_id: 'tg_enabled', name: 'Enabled API' }),
+        targetRecord({
+          target_id: 'tg_paused',
+          name: 'Paused API',
+          run_status: '暂停',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets?run_status=暂停']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Paused API')).toBeInTheDocument())
+
+    expect(screen.queryByText('Enabled API')).not.toBeInTheDocument()
+    expect(screen.getByText('运行状态: 暂停')).toBeInTheDocument()
+  })
+
+  it('uses run_status=已归档 from Dashboard deep links as the initial target filter', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({ target_id: 'tg_enabled', name: 'Enabled API' }),
+        targetRecord({
+          target_id: 'tg_archived',
+          name: 'Archived API',
+          run_status: '已归档',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets?run_status=已归档']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Archived API')).toBeInTheDocument())
+
+    expect(screen.queryByText('Enabled API')).not.toBeInTheDocument()
+    expect(screen.getByText('运行状态: 已归档')).toBeInTheDocument()
+  })
+
   it('toggles "仅看异常" and clears all filters via FilterBar', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       mockJSONResponse([

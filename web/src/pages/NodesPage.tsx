@@ -71,6 +71,7 @@ type NodeFilterState = {
   health: string | null
   labels: string[]
   abnormal: boolean
+  onboardingPending: boolean
 }
 
 function parseMultiValue(value: string | null): string[] {
@@ -105,6 +106,7 @@ const initialCreateForm: CreateNodeInput = {
 }
 
 const NODE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
+const NODE_BINDING_UNBOUND_STATUS = '未绑定'
 const NODE_BINDING_CONFLICT_SUMMARY = '等待绑定确认'
 
 type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
@@ -182,6 +184,14 @@ function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction
 
 function isBindingConflictNode(node: NodeRecord) {
   return node.binding_status === NODE_BINDING_CONFLICT_STATUS
+}
+
+function isPendingOnboardingNode(node: NodeRecord) {
+  return (
+    node.lifecycle_status === '待接入' ||
+    node.binding_status === NODE_BINDING_UNBOUND_STATUS ||
+    node.binding_status === NODE_BINDING_CONFLICT_STATUS
+  )
 }
 
 function pauseConfirmationCurrent(node: NodeRecord) {
@@ -462,6 +472,7 @@ export function NodesPage() {
       health: searchParams.get('health'),
       labels: parseMultiValue(searchParams.get('labels')),
       abnormal: searchParams.get('abnormal') === '1',
+      onboardingPending: searchParams.get('onboarding') === 'pending',
     }),
     [searchParams],
   )
@@ -525,6 +536,7 @@ export function NodesPage() {
         if (!hasAll) return false
       }
       if (filterState.abnormal && node.current_health_status === '正常') return false
+      if (filterState.onboardingPending && !isPendingOnboardingNode(node)) return false
       return true
     })
   }, [baseNodes, filterState])
@@ -538,7 +550,8 @@ export function NodesPage() {
     filterState.runStatus !== null ||
     filterState.health !== null ||
     filterState.labels.length > 0 ||
-    filterState.abnormal
+    filterState.abnormal ||
+    filterState.onboardingPending
 
   const groupFilterActive = filterState.group !== null
 
@@ -646,6 +659,10 @@ export function NodesPage() {
 
   function setAbnormalFilter(checked: boolean) {
     updateSearchParam('abnormal', checked ? '1' : null)
+  }
+
+  function setOnboardingFilter(checked: boolean) {
+    updateSearchParam('onboarding', checked ? 'pending' : null)
   }
 
   function clearAllFilters() {
@@ -1140,6 +1157,12 @@ export function NodesPage() {
                     onRemove={() => setAbnormalFilter(false)}
                   />
                 ) : null}
+                {filterState.onboardingPending ? (
+                  <FilterChip
+                    label="待接入/绑定待处理"
+                    onRemove={() => setOnboardingFilter(false)}
+                  />
+                ) : null}
               </>
             }
           >
@@ -1195,6 +1218,11 @@ export function NodesPage() {
               label="仅看异常"
               checked={filterState.abnormal}
               onChange={setAbnormalFilter}
+            />
+            <FilterToggle
+              label="待接入/绑定待处理"
+              checked={filterState.onboardingPending}
+              onChange={setOnboardingFilter}
             />
           </FilterBar>
           {groupFilterActive && filteredNodes.length > 0 ? (

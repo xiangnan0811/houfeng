@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { getOnboardingTokenCache } from '../lib/onboardingTokenCache'
@@ -57,6 +57,11 @@ function nodeRecord(overrides: Partial<Record<string, unknown>> = {}) {
     updated_at: '2026-04-26T09:00:00Z',
     ...overrides,
   }
+}
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output aria-label="location">{location.pathname + location.search}</output>
 }
 
 describe('NodesPage', () => {
@@ -1043,6 +1048,74 @@ describe('NodesPage', () => {
     )
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
     expect(screen.getByText('生命周期: 在用')).toBeInTheDocument()
+  })
+
+  it('uses onboarding=pending from Dashboard deep links and clears the URL filter', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_pending_lifecycle',
+            display_name: 'Pending Lifecycle',
+            lifecycle_status: '待接入',
+            binding_status: '已绑定',
+          }),
+          nodeRecord({
+            node_id: 'nd_unbound',
+            display_name: 'Unbound Edge',
+            lifecycle_status: '在用',
+            binding_status: '未绑定',
+          }),
+          nodeRecord({
+            node_id: 'nd_binding_conflict',
+            display_name: 'Conflict Edge',
+            lifecycle_status: '在用',
+            binding_status: '指纹变更待确认',
+          }),
+          nodeRecord({
+            node_id: 'nd_ready',
+            display_name: 'Healthy Edge',
+            lifecycle_status: '在用',
+            binding_status: '已绑定',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes?onboarding=pending']}>
+        <Routes>
+          <Route
+            path="/nodes"
+            element={
+              <>
+                <NodesPage />
+                <LocationProbe />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Pending Lifecycle')).toBeInTheDocument())
+
+    expect(screen.getByText('Unbound Edge')).toBeInTheDocument()
+    expect(screen.getByText('Conflict Edge')).toBeInTheDocument()
+    expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: '待接入/绑定待处理' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    expect(
+      screen.getByRole('button', { name: '移除筛选 待接入/绑定待处理' }),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '移除筛选 待接入/绑定待处理' }))
+
+    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
+    expect(screen.getByLabelText('location')).toHaveTextContent('/nodes')
   })
 
   it('toggles "仅看异常" and clears all filters via FilterBar', async () => {
