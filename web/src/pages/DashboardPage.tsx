@@ -15,14 +15,15 @@ import {
   type SparklineTone,
 } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
-import { EventList } from '../components/EventList'
 import { ApiError, getDashboard } from '../lib/api'
-import type {
-  DashboardNodeSummary,
-  DashboardOverview,
-  DashboardGroupSummary,
-  DashboardTargetSummary,
-  IncidentSeverity,
+import {
+  STATE_CHANGE_EVENT_TYPE_LABELS,
+  type DashboardGroupSummary,
+  type DashboardNodeSummary,
+  type DashboardOverview,
+  type DashboardTargetSummary,
+  type IncidentSeverity,
+  type StateChangeEventRecord,
 } from '../lib/types'
 
 type State = {
@@ -59,6 +60,9 @@ type AttentionItem = {
 }
 
 const SEVERITY_RANK = ['严重', '告警', '关注', '维护中', '正常'] as const
+const MAX_ATTENTION_ITEMS = 6
+const MAX_CONTEXT_GROUPS = 3
+const MAX_CONTEXT_EVENTS = 4
 const DASHBOARD_LINKS = {
   eventsSevere: '/events?severity=严重',
   events24h: '/events?time_range=24h',
@@ -230,6 +234,40 @@ function buildAttentionItems(overview: DashboardOverview): AttentionItem[] {
   })
 }
 
+function groupObjectCount(group: DashboardGroupSummary) {
+  return group.node_count + group.target_count
+}
+
+function groupAttentionCount(group: DashboardGroupSummary) {
+  return (
+    group.abnormal_node_count +
+    group.abnormal_target_count +
+    group.severe_node_count +
+    group.severe_target_count +
+    group.maintenance_node_count +
+    group.maintenance_target_count
+  )
+}
+
+function topGroups(groups: DashboardGroupSummary[]) {
+  return [...groups]
+    .sort((a, b) => {
+      const attentionDelta = groupAttentionCount(b) - groupAttentionCount(a)
+      if (attentionDelta !== 0) return attentionDelta
+      return groupObjectCount(b) - groupObjectCount(a)
+    })
+    .slice(0, MAX_CONTEXT_GROUPS)
+}
+
+function eventTypeLabel(value: StateChangeEventRecord['event_type']) {
+  return STATE_CHANGE_EVENT_TYPE_LABELS[value] ?? value
+}
+
+function objectTypeLabel(value: StateChangeEventRecord['object_type']) {
+  if (value === 'node') return '节点'
+  return '目标'
+}
+
 function FleetStatePanel({
   overview,
   fleetState,
@@ -391,12 +429,11 @@ function GlobalKpiStrip({
 
 function AttentionQueue({
   items,
-  recentEventCount,
 }: {
   items: AttentionItem[]
-  recentEventCount: number
 }) {
   const navigate = useNavigate()
+  const visibleItems = items.slice(0, MAX_ATTENTION_ITEMS)
 
   const columns: DataTableColumn<AttentionItem>[] = [
     {
@@ -473,6 +510,7 @@ function AttentionQueue({
             to={item.route}
             aria-label={`查看${item.kind === 'node' ? '节点' : '目标'} ${item.name}`}
             onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
           >
             进入
           </Link>
@@ -482,46 +520,25 @@ function AttentionQueue({
   ]
 
   return (
-    <DetailSection
-      eyebrow="处理队列"
-      title="当前需要处理"
-      ribbon={items.length > 0 ? 'alert' : 'normal'}
-      aside={
-        <div className="dashboard-section-actions">
-          <Link className="text-link" to={DASHBOARD_LINKS.nodesAbnormal}>
-            查看全部异常节点
-          </Link>
-          <Link className="text-link" to={DASHBOARD_LINKS.targetsAbnormal}>
-            查看全部异常目标
-          </Link>
-          <Link className="text-link" to={DASHBOARD_LINKS.events24h}>
-            查看事件流
-          </Link>
-        </div>
-      }
-    >
+    <div className="dashboard-attention" aria-label="异常处理队列">
       <DataTable<AttentionItem>
         columns={columns}
-        rows={items}
+        rows={visibleItems}
         rowKey={(item) => `${item.kind}-${item.id}`}
         density="compact"
         className="dashboard-table dashboard-attention-table"
         onRowClick={(item) => navigate(item.route)}
-        emptyContent={
-          <div className="empty-state dashboard-empty-state">
-            <h3>当前没有活跃异常</h3>
-            <p>
-              处理队列为空；最近事件中仍有{' '}
-              <MonoDigits>{recentEventCount}</MonoDigits> 条状态变化可供回溯。
-            </p>
-          </div>
-        }
       />
-    </DetailSection>
+      {items.length > visibleItems.length ? (
+        <p className="dashboard-attention__limit">
+          首页显示最高优先级 <MonoDigits>{visibleItems.length}</MonoDigits> 项；完整队列请进入节点、目标或事件页处理。
+        </p>
+      ) : null}
+    </div>
   )
 }
 
-function SystemEntryPoints({
+function ShortcutRail({
   overview,
 }: {
   overview: DashboardOverview
@@ -571,94 +588,164 @@ function SystemEntryPoints({
   ]
 
   return (
-    <DetailSection eyebrow="System Entry Points" title="系统入口">
-      <div className="dashboard-entry-grid">
+    <div className="dashboard-context-card" aria-label="系统快捷入口">
+      <div className="dashboard-context-card__header">
+        <p className="dashboard-context-card__eyebrow">Shortcuts</p>
+        <h3 className="dashboard-context-card__title">系统快捷入口</h3>
+      </div>
+      <div className="dashboard-shortcut-list">
         {entries.map((entry) => (
-          <Link className="dashboard-entry" to={entry.to} key={entry.title}>
-            <span className="dashboard-entry__title">{entry.title}</span>
-            <span className="dashboard-entry__description">{entry.description}</span>
-            <span className="dashboard-entry__stat">{entry.stat}</span>
+          <Link className="dashboard-shortcut" to={entry.to} key={entry.title}>
+            <span className="dashboard-shortcut__title">{entry.title}</span>
+            <span className="dashboard-shortcut__description">{entry.description}</span>
+            <span className="dashboard-shortcut__stat">{entry.stat}</span>
           </Link>
         ))}
       </div>
-    </DetailSection>
+    </div>
   )
 }
 
-function GroupDistribution({ groups }: { groups: DashboardGroupSummary[] }) {
-  const columns: DataTableColumn<DashboardGroupSummary>[] = [
-    {
-      key: 'group',
-      label: 'Group',
-      render: (group) => (
-        <div className="dashboard-table__identity">
-          <Hostname truncate maxChars={28} className="dashboard-table__id">
-            {group.group}
-          </Hostname>
-          <span className="dashboard-table__display-name">
-            对象 <MonoDigits>{group.node_count + group.target_count}</MonoDigits>
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: 'inventory',
-      label: '全量库存',
-      render: (group) => (
-        <span className="dashboard-group__metric">
-          节点 <MonoDigits>{group.node_count}</MonoDigits> · 目标{' '}
-          <MonoDigits>{group.target_count}</MonoDigits>
-        </span>
-      ),
-    },
-    {
-      key: 'abnormal',
-      label: '异常',
-      render: (group) => (
-        <span className="dashboard-group__metric">
-          节点 <MonoDigits>{group.abnormal_node_count}</MonoDigits> · 目标{' '}
-          <MonoDigits>{group.abnormal_target_count}</MonoDigits>
-        </span>
-      ),
-    },
-    {
-      key: 'severe',
-      label: '严重',
-      render: (group) => (
-        <span className="dashboard-group__metric">
-          节点 <MonoDigits>{group.severe_node_count}</MonoDigits> · 目标{' '}
-          <MonoDigits>{group.severe_target_count}</MonoDigits>
-        </span>
-      ),
-    },
-    {
-      key: 'maintenance',
-      label: '维护',
-      render: (group) => (
-        <span className="dashboard-group__metric">
-          节点 <MonoDigits>{group.maintenance_node_count}</MonoDigits> · 目标{' '}
-          <MonoDigits>{group.maintenance_target_count}</MonoDigits>
-        </span>
-      ),
-    },
-  ]
+function GroupContextSummary({ groups }: { groups: DashboardGroupSummary[] }) {
+  const visibleGroups = topGroups(groups)
 
   return (
-    <DetailSection eyebrow="Inventory Distribution" title="按 Group 分布" ribbon="notice">
-      <DataTable<DashboardGroupSummary>
-        columns={columns}
-        rows={groups}
-        rowKey={(group) => group.group}
-        density="compact"
-        className="dashboard-table dashboard-group-table"
-        emptyContent={
-          <div className="empty-state dashboard-empty-state">
-            <h3>暂无 Group 分布</h3>
-            <p>当前还没有节点或目标库存，Dashboard 不生成空的未分组行。</p>
-          </div>
-        }
-      />
-    </DetailSection>
+    <div className="dashboard-context-card" aria-label="Group 上下文摘要">
+      <div className="dashboard-context-card__header">
+        <p className="dashboard-context-card__eyebrow">Inventory Context</p>
+        <h3 className="dashboard-context-card__title">Group 摘要</h3>
+      </div>
+      {visibleGroups.length > 0 ? (
+        <div className="dashboard-context-list">
+          {visibleGroups.map((group) => (
+            <div className="dashboard-context-row" key={group.group}>
+              <div className="dashboard-context-row__main">
+                <Hostname truncate maxChars={24}>
+                  {group.group}
+                </Hostname>
+                <span>
+                  节点 <MonoDigits>{group.node_count}</MonoDigits> · 目标{' '}
+                  <MonoDigits>{group.target_count}</MonoDigits>
+                </span>
+              </div>
+              <span className="dashboard-context-row__meta">
+                异常 <MonoDigits>{group.abnormal_node_count + group.abnormal_target_count}</MonoDigits>
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="dashboard-context-card__empty">暂无 Group 摘要；Dashboard 不生成空的未分组行。</p>
+      )}
+    </div>
+  )
+}
+
+function RecentEventsContext({ events }: { events: StateChangeEventRecord[] }) {
+  const visibleEvents = events.slice(0, MAX_CONTEXT_EVENTS)
+
+  return (
+    <div className="dashboard-context-card" aria-label="最近事件上下文摘要">
+      <div className="dashboard-context-card__header dashboard-context-card__header--split">
+        <div>
+          <p className="dashboard-context-card__eyebrow">Recent Events</p>
+          <h3 className="dashboard-context-card__title">最近事件摘要</h3>
+        </div>
+        <Link className="text-link" to={DASHBOARD_LINKS.events24h}>
+          查看全部事件
+        </Link>
+      </div>
+      {visibleEvents.length > 0 ? (
+        <div className="dashboard-event-list">
+          {visibleEvents.map((event) => (
+            <article
+              className="dashboard-event"
+              key={event.event_id ?? `${event.created_at}-${event.incident_id}-${event.event_type}`}
+            >
+              <StatusGlyph state={statusGlyph(event.severity)} size="sm" ariaLabel={event.severity || '事件'} />
+              <div className="dashboard-event__body">
+                <div className="dashboard-event__title">
+                  <span>{eventTypeLabel(event.event_type)}</span>
+                  <Badge variant="info" tone={event.object_type === 'node' ? 'notice' : 'normal'}>
+                    {objectTypeLabel(event.object_type)}
+                  </Badge>
+                </div>
+                <p>{event.summary || '暂无摘要'}</p>
+                <span className="dashboard-event__meta">
+                  <Hostname truncate maxChars={22}>{event.object_id}</Hostname> ·{' '}
+                  <Timestamp value={event.created_at} mode="relative" />
+                </span>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="dashboard-context-card__empty">最近没有状态变更事件。</p>
+      )}
+    </div>
+  )
+}
+
+function RunningOverview({
+  overview,
+  maintenanceTotal,
+}: {
+  overview: DashboardOverview
+  maintenanceTotal: number
+}) {
+  const isMaintenance = maintenanceTotal > 0
+
+  return (
+    <div className="dashboard-overview-panel">
+      <div className="dashboard-overview-panel__summary">
+        <StatusGlyph state={isMaintenance ? 'maintenance' : 'normal'} size="md" />
+        <div>
+          <h3>{isMaintenance ? '维护观察中' : '当前没有活跃异常'}</h3>
+          <p>
+            {isMaintenance
+              ? '维护对象进入观察状态，首页保留事件和库存上下文，不把维护态提升为紧急异常。'
+              : '处理队列保持为空，首页转为运行概览与管理入口。'}
+          </p>
+        </div>
+      </div>
+      <div className="dashboard-overview-metrics" aria-label={isMaintenance ? '维护观察指标' : '运行概览指标'}>
+        <Link className="dashboard-overview-metric" to={DASHBOARD_LINKS.nodes}>
+          <span>节点库存</span>
+          <strong>
+            <MonoDigits>{overview.total_node_count}</MonoDigits>
+          </strong>
+          <small>
+            待接入 <MonoDigits>{overview.pending_onboarding_node_count}</MonoDigits> · 暂停{' '}
+            <MonoDigits>{overview.paused_node_count}</MonoDigits>
+          </small>
+        </Link>
+        <Link className="dashboard-overview-metric" to={DASHBOARD_LINKS.targets}>
+          <span>目标库存</span>
+          <strong>
+            <MonoDigits>{overview.total_target_count}</MonoDigits>
+          </strong>
+          <small>
+            暂停 <MonoDigits>{overview.paused_target_count}</MonoDigits> · 归档{' '}
+            <MonoDigits>{overview.archived_target_count}</MonoDigits>
+          </small>
+        </Link>
+        <Link
+          className="dashboard-overview-metric"
+          to={isMaintenance ? DASHBOARD_LINKS.eventsMaintenance : DASHBOARD_LINKS.events24h}
+        >
+          <span>{isMaintenance ? '维护事件' : '24h 变化'}</span>
+          <strong>
+            <MonoDigits>
+              {isMaintenance ? maintenanceTotal : overview.recent_new_incident_count + overview.recent_recovery_count}
+            </MonoDigits>
+          </strong>
+          <small>
+            新增 <MonoDigits>{overview.recent_new_incident_count}</MonoDigits> · 恢复{' '}
+            <MonoDigits>{overview.recent_recovery_count}</MonoDigits>
+          </small>
+        </Link>
+      </div>
+    </div>
   )
 }
 
@@ -691,22 +778,103 @@ function OnboardingWorkbench() {
   ]
 
   return (
-    <DetailSection eyebrow="First Run" title="首次接入工作台" ribbon="notice">
-      <div className="dashboard-onboarding">
-        {steps.map((step, index) => (
-          <article className="dashboard-onboarding__step" key={step.title}>
-            <span className="dashboard-onboarding__index">
-              <MonoDigits>{index + 1}</MonoDigits>
-            </span>
-            <div className="dashboard-onboarding__body">
-              <h3>{step.title}</h3>
-              <p>{step.description}</p>
-              <Link className="text-link" to={step.to}>
-                {step.cta}
-              </Link>
-            </div>
-          </article>
-        ))}
+    <div className="dashboard-onboarding">
+      {steps.map((step, index) => (
+        <article className="dashboard-onboarding__step" key={step.title}>
+          <span className="dashboard-onboarding__index">
+            <MonoDigits>{index + 1}</MonoDigits>
+          </span>
+          <div className="dashboard-onboarding__body">
+            <h3>{step.title}</h3>
+            <p>{step.description}</p>
+            <Link className="text-link" to={step.to}>
+              {step.cta}
+            </Link>
+          </div>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function DashboardWorkbench({
+  overview,
+  attentionItems,
+  abnormalTotal,
+  maintenanceTotal,
+  isFreshInstall,
+}: {
+  overview: DashboardOverview
+  attentionItems: AttentionItem[]
+  abnormalTotal: number
+  maintenanceTotal: number
+  isFreshInstall: boolean
+}) {
+  const hasAbnormal = abnormalTotal > 0
+  const isMaintenance = !hasAbnormal && maintenanceTotal > 0
+  const title = isFreshInstall
+    ? '首次接入工作台'
+    : hasAbnormal
+      ? '当前需要处理'
+      : isMaintenance
+        ? '维护观察'
+        : '运行概览'
+  const eyebrow = isFreshInstall
+    ? 'First Run'
+    : hasAbnormal
+      ? '处理队列'
+      : isMaintenance
+        ? 'Maintenance Watch'
+        : 'Running Overview'
+  const ribbon: 'notice' | 'alert' | 'maintenance' | 'normal' = isFreshInstall
+    ? 'notice'
+    : hasAbnormal
+      ? 'alert'
+      : isMaintenance
+        ? 'maintenance'
+        : 'normal'
+  const mode = isFreshInstall ? 'onboarding' : hasAbnormal ? 'abnormal' : isMaintenance ? 'maintenance' : 'normal'
+
+  return (
+    <DetailSection
+      eyebrow={eyebrow}
+      title={title}
+      ribbon={ribbon}
+      aside={
+        hasAbnormal ? (
+          <div className="dashboard-section-actions">
+            <Link className="text-link" to={DASHBOARD_LINKS.nodesAbnormal}>
+              查看全部异常节点
+            </Link>
+            <Link className="text-link" to={DASHBOARD_LINKS.targetsAbnormal}>
+              查看全部异常目标
+            </Link>
+            <Link className="text-link" to={DASHBOARD_LINKS.events24h}>
+              查看事件流
+            </Link>
+          </div>
+        ) : null
+      }
+    >
+      <div className={`dashboard-workbench dashboard-workbench--${mode}`}>
+        <div className="dashboard-workbench__main">
+          {isFreshInstall ? (
+            <OnboardingWorkbench />
+          ) : hasAbnormal ? (
+            <AttentionQueue items={attentionItems} />
+          ) : (
+            <RunningOverview overview={overview} maintenanceTotal={maintenanceTotal} />
+          )}
+        </div>
+        <aside className="dashboard-workbench__context" aria-label="工作台上下文">
+          <ShortcutRail overview={overview} />
+          {isFreshInstall ? null : (
+            <>
+              <GroupContextSummary groups={overview.group_summaries} />
+              <RecentEventsContext events={overview.recent_events} />
+            </>
+          )}
+        </aside>
       </div>
     </DetailSection>
   )
@@ -782,31 +950,13 @@ export function DashboardPage() {
         maintenanceTotal={maintenanceTotal}
       />
 
-      {isFreshInstall ? (
-        <OnboardingWorkbench />
-      ) : (
-        <AttentionQueue items={attentionItems} recentEventCount={overview.recent_events.length} />
-      )}
-
-      <SystemEntryPoints overview={overview} />
-
-      <GroupDistribution groups={overview.group_summaries} />
-
-      <DetailSection
-        eyebrow="Recent Events"
-        title="最近事件"
-        aside={
-          <Link className="text-link" to={DASHBOARD_LINKS.events24h}>
-            查看全部事件
-          </Link>
-        }
-      >
-        <EventList
-          events={overview.recent_events}
-          emptyTitle="最近没有状态变更事件"
-          emptyDescription="当前没有新的异常变化，首页事件流保持为空。"
-        />
-      </DetailSection>
+      <DashboardWorkbench
+        overview={overview}
+        attentionItems={attentionItems}
+        abnormalTotal={abnormalTotal}
+        maintenanceTotal={maintenanceTotal}
+        isFreshInstall={isFreshInstall}
+      />
     </div>
   )
 }

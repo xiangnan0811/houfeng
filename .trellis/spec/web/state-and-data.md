@@ -47,7 +47,7 @@
 
 - `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实。当前可用事实来自 `DashboardOverview`：dashboard 生成时间、总节点/目标数、异常/严重/维护计数、库存完整度计数、24h 新异常/恢复趋势、真实全量 `group_summaries`、通知配置布尔摘要、异常节点/目标摘要、最近事件。
 - `snapshot_generated_at` 只能写成 `生成时间`、`Dashboard 摘要` 这类接口生成时间提示。它不是 Center health、agent heartbeat、sync freshness 或全链路实时性证明，不要写 `中心运行正常` / `同步于` / `健康检查通过` 之类文案。
-- `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。Dashboard 的 `按 Group 分布` 必须来自后端 `group_summaries`；如果该数组为空，显示空态，不在前端制造 `未分组 0` 行。
+- `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。Dashboard 工作台内的 Group 上下文摘要必须来自后端 `group_summaries`；如果该数组为空，只显示轻量说明，不在前端制造 `未分组 0` 行。
 - `notification_status` 只能展示配置布尔摘要，例如 Telegram / Feishu 是否已配置、Telegram runtime apply 是否生效。前端不得要求或展示 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url` 等敏感配置值；需要编辑真实配置时跳转 SettingsPage。
 - 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入节点、暂停节点、退役节点、暂停目标、归档目标。PR4 后，Dashboard 深链是受支持 contract：`/nodes?onboarding=pending` 表示待接入或绑定待处理节点，`/nodes?abnormal=1` 表示异常节点，`/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档` 表示对应目标列表筛选，`/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1` 表示事件页筛选；新增深链必须先在目标页面用 URL-state 和可见 chip/toggle 承接。
 - AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的节点/目标 count 可以来自 `abnormal_node_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
@@ -55,7 +55,7 @@
 ```tsx
 // 错误：从异常摘要伪装成全量分布
 const groupSummaries = overview.abnormal_nodes.reduce(...)
-<DetailSection title="按 Group 分布">...</DetailSection>
+<GroupContextSummary groups={groupSummaries} />
 
 // 错误：把 dashboard 生成时间写成同步/健康状态
 <Timestamp value={overview.snapshot_generated_at} /> 同步完成
@@ -68,8 +68,7 @@ overview.notification_status.telegram_bot_token
 
 // 正确：只展示 dashboard contract 支撑的事实
 <KpiLink label="节点" value={overview.total_node_count} description={`${overview.abnormal_node_count} 个异常`} />
-<DetailSection title="当前需要处理">...</DetailSection>
-<DetailSection title="按 Group 分布">...</DetailSection> // rows = overview.group_summaries
+<DashboardWorkbench title="当前需要处理" groupSummaries={overview.group_summaries} />
 <span>Dashboard 摘要 <Timestamp value={overview.snapshot_generated_at} /></span>
 <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
 ```
