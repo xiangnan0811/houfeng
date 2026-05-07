@@ -196,28 +196,29 @@ parent: docs/design/v2-houfeng/design-language.md
 ### DashboardPage
 1. Fleet State hero：动态状态结论作为 h1（`需要处理严重异常` / `存在活跃异常` / `系统处于维护观察中` / `系统运行正常` / `开始接入第一台服务器`），eyebrow `Fleet State`；说明文案必须基于现有 `/api/dashboard` 事实，不声明 shell health。
    - 右侧 facts：`API 已加载 /api/dashboard`、`生成时间 Dashboard 摘要 <Timestamp>`、库存总数、当前异常/严重/维护队列计数；生成时间只代表 dashboard response 生成时间，不等同 AppShell SyncStatus、Center health 或 agent sync freshness。
-   - CTA：主按钮随状态切换（异常态 → `/events`，正常态 → `/nodes`，首次接入 → `/nodes`），次按钮固定 `查看事件流` / `进入设置`。
-2. **Global KPI strip**（5 列等宽 Link 卡）：节点、目标、严重、维护、`24h 变化`。每列含 `[label · MonoDigits · 描述 · 可选 Sparkline]`，点击进入节点/目标/事件页；状态色仅通过底部 2px rail 提示，不把 nav/count 语义染成告警。
+   - CTA：主按钮随状态切换并使用 PR4 filtered URL contract：有严重项 → `/events?severity=严重`，有异常但无严重 → `/events?time_range=24h`，维护态 → `/events?maintenance_only=1`，正常态 / 首次接入 → `/nodes`；次按钮 `查看事件流` → `/events?time_range=24h`，`进入设置` → `/settings`。
+2. **Global KPI strip**（5 列等宽 Link 卡）：节点、目标、严重、维护、`24h 变化`。每列含 `[label · MonoDigits · 描述 · 可选 Sparkline]`，点击进入节点/目标/事件页；PR4 后支持 filtered URL：节点有异常时 `/nodes?abnormal=1`，目标有异常时 `/targets?abnormal=1`，严重 `/events?severity=严重`，维护 `/events?maintenance_only=1`，`24h 变化` `/events?time_range=24h`；状态色仅通过底部 2px rail 提示，不把 nav/count 语义染成告警。
 3. DetailSection `当前需要处理`，eyebrow `处理队列`：统一处理队列，合并异常节点与异常目标，按 severity + active incident count 排序。
    - DataTable 列：`[StatusGlyph, 对象(Hostname + 名字 + freshness Timestamp), 类型(Badge + group/location/type), 状态(Badge state), 当前主问题(MonoDigits count + 摘要), 操作]`。
-   - 行点击进入节点/目标详情；操作列 link `stopPropagation()`；section aside 提供 `查看全部异常节点` / `查看全部异常目标` / `查看事件流`。
+   - 行点击进入节点/目标详情；操作列 link `stopPropagation()`；section aside 提供 `查看全部异常节点` → `/nodes?abnormal=1`、`查看全部异常目标` → `/targets?abnormal=1`、`查看事件流` → `/events?time_range=24h`。
    - 空态：`当前没有活跃异常`，说明处理队列为空并保留最近事件回溯入口。
-4. DetailSection `系统入口`：四个高密度 Link 入口：节点 / 目标 / 事件 / 设置。节点入口展示待接入、暂停、退役；目标入口展示暂停、归档、异常；事件入口展示 24h 新增/恢复；设置入口只展示 `notification_status` 的通道配置布尔摘要，不暴露 token、chat id 或 webhook URL。
-5. 首次接入时用 DetailSection `首次接入工作台` 替代处理队列：4 步卡片 `[创建节点, 接入 agent, 创建目标, 添加 ProbeItem]`，每步给出具体入口。
+4. DetailSection `系统入口`：四个高密度 Link 入口：节点 / 目标 / 事件 / 设置。节点入口展示待接入、暂停、退役，并按优先级跳到 `/nodes?onboarding=pending`、`/nodes?run_status=暂停`、`/nodes?lifecycle=已退役`、`/nodes`；目标入口展示暂停、归档、异常，并按优先级跳到 `/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档`、`/targets`；事件入口展示 24h 新增/恢复并跳到 `/events?time_range=24h`；设置入口只展示 `notification_status` 的通道配置布尔摘要，不暴露 token、chat id 或 webhook URL。
+5. 首次接入时用 DetailSection `首次接入工作台` 替代处理队列：4 步卡片 `[创建节点, 接入 agent, 创建目标, 添加 ProbeItem]`，入口分别为 `/nodes`、`/nodes?onboarding=pending`、`/targets`、`/targets`。
 6. DetailSection `按 Group 分布`：数据必须来自 `/api/dashboard.group_summaries`，覆盖全量 nodes + targets；不能从 `abnormal_nodes` / `abnormal_targets` 归并。空库存显示空态，不制造 `未分组 0` 行。
-7. DetailSection `最近事件`：复用 EventList timeline，aside 固定 `查看全部事件`。复杂历史筛选仍归 EventsPage，Dashboard 不复制 EventsPage。
+7. DetailSection `最近事件`：复用 EventList timeline，aside 固定 `查看全部事件` → `/events?time_range=24h`。复杂历史筛选仍归 EventsPage，Dashboard 不复制 EventsPage。
 
 ### NodesPage
 1. Section heading + 「新建节点」按钮
 2. （可选）创建节点表单（page-panel）
 3. 视图切换：segmented control 「全部节点 N」/「绑定异常 M」
-4. **DataTable**（density compact）：列 `[StatusGlyph, 节点(Hostname + 名字 + 心跳/同步 mono), 位置, 标签, 当前主问题, 近 24h 趋势(sparkline strip), 操作 hover]`
+4. 筛选栏：URL-state 承接 Dashboard 深链；`onboarding=pending` 显示 `待接入/绑定待处理` chip/toggle，匹配生命周期待接入、未绑定或指纹变更待确认节点。
+5. **DataTable**（density compact）：列 `[StatusGlyph, 节点(Hostname + 名字 + 心跳/同步 mono), 位置, 标签, 当前主问题, 近 24h 趋势(sparkline strip), 操作 hover]`
    - 节点身份列三行：第 1 行 `<Hostname truncate>` node_id（mono 小字）、第 2 行 display_name（sans 粗体 link）、第 3 行 `心跳 X 分钟前 · 同步 Y 分钟前`（mono 10px `--text-muted`）
    - 趋势列（~220px）：CPU / Mem / Disk 三指标 mini sparkline strip，每项含上方 mono 当前值（9px）+ 下方 `<Sparkline>` 64×14，tone 按阈值择色（CPU 80/95、Mem 85/95、Disk 80/95）
    - Sparklines 延迟加载（不阻塞列表首屏），缺失 / 加载中 / 失败均显示 "—"
    - 原"心跳·同步"独立列已删除，信息合并入节点身份列第三行
-5. 行 hover：操作列显示「快速编辑标签」「进入维护」「暂停监控」三个 ghost 按钮
-6. 行点击：导航到节点详情
+6. 行 hover：操作列显示「快速编辑标签」「进入维护」「暂停监控」三个 ghost 按钮
+7. 行点击：导航到节点详情
 
 ### NodeDetailPage（watchtower）
 
@@ -246,7 +247,9 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
 
 ### EventsPage
 1. Hero panel
-2. DetailSection `筛选条件`：横向 chip 行（对象类型 / 严重度 / 事件类型 / 数量）+ 「高级筛选」展开抽屉（时间范围 / 标签 / 三个 checkbox）+ 应用/重置按钮
+2. DetailSection `筛选条件`：使用 `FilterBar` / `FilterChip` / `FilterSelect` / `FilterToggle` 承载 URL-state 筛选。受支持 query：`object_type`、`severity`、`event_type`、`limit`、`created_from`、`created_to`、`label`、`notification_only=1`、`recovery_only=1`、`maintenance_only=1`、`time_range=24h|7d|30d|custom`。Dashboard 深链使用 `/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1`；页面初次加载、应用筛选、重置、移除 chip 都必须同步 URL 与事件请求。
+   - `time_range=24h|7d|30d` 在 URL 保留相对窗口，发 API 请求时动态计算 `created_from` / `created_to`；`time_range=custom` 使用显式日期。
+   - `include_backfilled` 当前后端不支持，只能显示待支持状态，不写入 URL 或 API 请求。
 3. DetailSection `事件流`：EventList（按日期 sticky 分组）
 
 ### SettingsPage
@@ -262,7 +265,7 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
 ### TargetsPage
 1. Section heading + 「新建目标」按钮（右对齐，primary）
 2. （可选）创建目标表单（page-panel，可折叠）
-3. 筛选栏：6 项（type / run_status / health / labels / execution_node_labels / abnormal toggle）
+3. 筛选栏：6 项（type / run_status / health / labels / execution_node_labels / abnormal toggle），URL-state 承接 Dashboard 深链（`abnormal=1`、`run_status=暂停`、`run_status=已归档`）并显示对应 chip/toggle。
 4. **DataTable**（density compact）：列 `[StatusGlyph, 目标(名字 + Hostname target_id), 类型, Host(Hostname host[:base_port]), 标签(截断+overflow+inline 编辑), 状态(StatusBadge run_status + health + 执行节点标签), 最近成功/失败(Timestamp relative), 当前主问题(MonoDigits incident_count + 摘要), 操作]`
 5. 行 hover：操作列显示「快速编辑标签 / 进入维护 / 暂停 / 归档 / 恢复」等条件性 ghost 按钮（hover-only opacity 模式）
 6. 行点击：导航到目标详情；操作列内部 `event.stopPropagation()` 防误触发

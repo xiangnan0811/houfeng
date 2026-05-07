@@ -49,7 +49,7 @@
 - `snapshot_generated_at` 只能写成 `生成时间`、`Dashboard 摘要` 这类接口生成时间提示。它不是 Center health、agent heartbeat、sync freshness 或全链路实时性证明，不要写 `中心运行正常` / `同步于` / `健康检查通过` 之类文案。
 - `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。Dashboard 的 `按 Group 分布` 必须来自后端 `group_summaries`；如果该数组为空，显示空态，不在前端制造 `未分组 0` 行。
 - `notification_status` 只能展示配置布尔摘要，例如 Telegram / Feishu 是否已配置、Telegram runtime apply 是否生效。前端不得要求或展示 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url` 等敏感配置值；需要编辑真实配置时跳转 SettingsPage。
-- 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入节点、暂停节点、退役节点、暂停目标、归档目标；PR4 之前不要从 Dashboard 私自拼接 URL-state 深链筛选。
+- 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入节点、暂停节点、退役节点、暂停目标、归档目标。PR4 后，Dashboard 深链是受支持 contract：`/nodes?onboarding=pending` 表示待接入或绑定待处理节点，`/nodes?abnormal=1` 表示异常节点，`/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档` 表示对应目标列表筛选，`/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1` 表示事件页筛选；新增深链必须先在目标页面用 URL-state 和可见 chip/toggle 承接。
 - AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的节点/目标 count 可以来自 `abnormal_node_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
 
 ```tsx
