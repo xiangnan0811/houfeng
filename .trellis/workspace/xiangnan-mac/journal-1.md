@@ -1419,3 +1419,36 @@ Completed a repo-wide early audit repair: fixed node actions routing and regress
 ### Next Steps
 
 - None - task complete
+
+
+## Session 43: Dashboard workbench redesign PR1
+
+**Date**: 2026-05-07
+**Task**: Dashboard workbench redesign PR1
+**Branch**: `main`
+
+### Summary
+
+Redesigned Dashboard into a fleet workbench with Fleet State, global KPI strip, unified handling queue, system entry points, first-run onboarding, updated tests, design docs, and dashboard data-truth spec guidance.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3dedbd1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
