@@ -194,19 +194,19 @@ parent: docs/design/v2-houfeng/design-language.md
 ## 五、页面模板
 
 ### DashboardPage
-1. Fleet State hero：动态状态结论作为 h1（`需要处理严重异常` / `存在活跃异常` / `系统处于维护观察中` / `系统运行正常` / `开始接入第一台服务器`），eyebrow `Fleet State`；说明文案必须基于现有 `/api/dashboard` 事实，不声明 shell health。
-   - 右侧 facts：`API 已加载 /api/dashboard`、`生成时间 Dashboard 摘要 <Timestamp>`、库存总数、当前异常/严重/维护队列计数；生成时间只代表 dashboard response 生成时间，不等同 AppShell SyncStatus、Center health 或 agent sync freshness。
-   - CTA：主按钮随状态切换并使用 PR4 filtered URL contract：有严重项 → `/events?severity=严重`，有异常但无严重 → `/events?time_range=24h`，维护态 → `/events?maintenance_only=1`，正常态 / 首次接入 → `/nodes`；次按钮 `查看事件流` → `/events?time_range=24h`，`进入设置` → `/settings`。
-2. **Global KPI strip**（5 列等宽 Link 卡）：节点、目标、严重、维护、`24h 变化`。每列含 `[label · MonoDigits · 描述 · 可选 Sparkline]`，点击进入节点/目标/事件页；PR4 后支持 filtered URL：节点有异常时 `/nodes?abnormal=1`，目标有异常时 `/targets?abnormal=1`，严重 `/events?severity=严重`，维护 `/events?maintenance_only=1`，`24h 变化` `/events?time_range=24h`；状态色仅通过底部 2px rail 提示，不把 nav/count 语义染成告警。
+1. Fleet State 降级为紧凑状态栏：动态状态结论作为 h1（`需要处理严重异常` / `存在活跃异常` / `系统处于维护观察中` / `系统运行正常` / `开始接入第一台服务器`），eyebrow `Fleet State`；说明文案必须基于现有 `/api/dashboard` 事实，不声明 shell health。
+   - 不渲染右侧 boxed facts、API loaded 卡、库存卡或队列卡。`snapshot_generated_at` 只能作为 muted inline metadata，例如 `Dashboard 摘要 <Timestamp>`；生成时间只代表 dashboard response 生成时间，不等同 AppShell SyncStatus、Center health 或 agent sync freshness。
+   - CTA：主按钮随状态切换并使用 PR4 filtered URL contract：有严重项 → `/events?severity=严重`，有异常但无严重 → `/events?time_range=24h`，维护态 → `/events?maintenance_only=1`，正常态 / 首次接入 → `/nodes`。异常 / 维护 / 正常态可保留轻量 `查看事件流` → `/events?time_range=24h` 与 `进入设置` → `/settings`；首次接入态只保留创建节点主入口。
+2. **Dashboard 摘要指标** 是最多 4 个紧凑 Link chip，不是 5 列大型 KPI card strip，不展示 Sparkline。异常态优先显示异常对象、严重、`24h 变化`、维护；正常 / 维护态优先显示节点、目标、`24h 变化`、通知或维护。每个 chip 保留 PR4 filtered URL：异常节点 `/nodes?abnormal=1`、异常目标 `/targets?abnormal=1`、严重 `/events?severity=严重`、维护 `/events?maintenance_only=1`、`24h 变化` `/events?time_range=24h`、节点 / 目标管理入口按库存状态优先跳转。首次接入态不渲染摘要指标。
 3. Dashboard 主流程收敛为一个 DetailSection 工作台，而不是 `当前需要处理` / `系统入口` / `按 Group 分布` / `最近事件` 四个同权 section 线性堆叠。工作台 title 随状态切换：
-   - 异常态：`当前需要处理`，eyebrow `处理队列`，左侧主栏是统一处理队列，合并异常节点与异常目标，按 severity + active incident count 排序；默认只展示最高优先级少量对象，完整处理跳 Nodes / Targets / Events。
-   - 维护态：`维护观察`，eyebrow `Maintenance Watch`，左侧主栏展示维护观察、库存和事件入口，不把维护态伪装成紧急异常。
-   - 正常态：`运行概览`，eyebrow `Running Overview`，左侧主栏展示库存健康、24h 变化和管理入口，不渲染大型空处理队列表格。
-   - 首次接入态：`首次接入工作台`，eyebrow `First Run`，左侧主栏只突出四步 onboarding。
-4. 异常态处理队列 DataTable 列：`[StatusGlyph, 对象(Hostname + 名字 + freshness Timestamp), 类型(Badge + group/location/type), 状态(Badge state), 当前主问题(MonoDigits count + 摘要), 操作]`。行点击进入节点/目标详情；操作列 link 必须 `stopPropagation()`；workbench aside 提供 `查看全部异常节点` → `/nodes?abnormal=1`、`查看全部异常目标` → `/targets?abnormal=1`、`查看事件流` → `/events?time_range=24h`。
-5. 系统入口降级为 workbench context rail 内的 `系统快捷入口`，不是独立 DetailSection。四个紧凑 Link 入口：节点 / 目标 / 事件 / 设置。节点入口展示待接入、暂停、退役，并按优先级跳到 `/nodes?onboarding=pending`、`/nodes?run_status=暂停`、`/nodes?lifecycle=已退役`、`/nodes`；目标入口展示暂停、归档、异常，并按优先级跳到 `/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档`、`/targets`；事件入口展示 24h 新增/恢复并跳到 `/events?time_range=24h`；设置入口只展示 `notification_status` 的通道配置布尔摘要，不暴露 token、chat id 或 webhook URL。
-6. Group 与最近事件降级为 workbench context rail 的上下文摘要，不再作为独立大 section。Group 摘要数据必须来自 `/api/dashboard.group_summaries`，默认 Top 3，覆盖全量 nodes + targets；不能从 `abnormal_nodes` / `abnormal_targets` 归并。空库存只显示一句小型说明，不制造 `未分组 0` 行。最近事件默认展示 3-5 条紧凑记录，固定入口 `查看全部事件` → `/events?time_range=24h`；复杂历史筛选仍归 EventsPage，Dashboard 不复制 EventsPage。
-7. 首次接入态只渲染 onboarding 主工作台和必要快捷入口，不渲染空 Group 摘要、空最近事件摘要或其它暗示系统已有数据的大区块。四步入口分别为 `/nodes`、`/nodes?onboarding=pending`、`/targets`、`/targets`。
+   - 异常态：`当前需要处理`，eyebrow `处理队列`，主体只展示统一处理队列，合并异常节点与异常目标，按 severity + active incident count 排序；默认只展示最高优先级少量对象，完整处理跳 Nodes / Targets / Events。
+   - 维护态：`维护观察`，eyebrow `Maintenance Watch`，主体展示维护观察、库存、事件和一个紧凑管理入口，不把维护态伪装成紧急异常。
+   - 正常态：`运行概览`，eyebrow `Running Overview`，主体展示库存健康、24h 变化和一个紧凑管理入口，不渲染大型空处理队列表格。
+   - 首次接入态：`首次接入工作台`，eyebrow `First Run`，主体只突出四步 onboarding。
+4. 异常态处理队列 DataTable 列：`[StatusGlyph, 对象(Hostname + 名字 + freshness Timestamp), 类型(Badge + group/location/type), 状态(Badge state), 当前主问题(MonoDigits count + 摘要), 操作]`。行点击进入节点/目标详情；操作列 link 必须 `stopPropagation()`；DetailSection aside 只提供队列相关链接：`查看全部异常节点` → `/nodes?abnormal=1`、`查看全部异常目标` → `/targets?abnormal=1`、`查看事件流` → `/events?time_range=24h`。
+5. 正常 / 维护态的系统入口表现为主体内的 `管理入口` 紧凑行，不是 `系统快捷入口` heading + 详细描述列表，也不是右侧 context rail。四个入口为节点 / 目标 / 事件 / 设置：节点入口展示待接入、暂停、退役，并按优先级跳到 `/nodes?onboarding=pending`、`/nodes?run_status=暂停`、`/nodes?lifecycle=已退役`、`/nodes`；目标入口展示异常、暂停、归档，并按优先级跳到 `/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档`、`/targets`；事件入口展示 24h 新增/恢复并跳到 `/events?time_range=24h`；设置入口只展示 `notification_status` 的通道配置布尔摘要，不暴露 token、chat id 或 webhook URL。
+6. Dashboard 默认不展示所有 `/api/dashboard` contract 字段。`group_summaries` 与 `recent_events` 是次级详情入口的数据来源，不在 Dashboard 首屏展开为 `Group 摘要` 或 `最近事件摘要` 列表；用户通过节点、目标、事件页深链查看完整上下文。需要重新展示这些字段时必须先证明它们服务当前状态的主决策路径，并同步测试防止信息摊开。
+7. 首次接入态只渲染 onboarding 主工作台和必要入口，不渲染摘要指标、空 Group、空最近事件、API facts 或其它暗示系统已有数据的大区块。四步入口分别为 `/nodes`、`/nodes?onboarding=pending`、`/targets`、`/targets`。
 
 ### NodesPage
 1. Section heading + 「新建节点」按钮
