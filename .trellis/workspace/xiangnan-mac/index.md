@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 45
+- **Total Sessions**: 46
 - **Last Active**: 2026-05-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1520 | Active |
+| `journal-1.md` | ~1556 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 46 | 2026-05-07 | PR4 Dashboard deep links and URL-state lists | `5974118`, `012569d`, `c8aa7d9`, `2f2b2f9` | `main` |
 | 45 | 2026-05-07 | Dashboard contract extension | `4842bb6` | `main` |
 | 44 | 2026-05-07 | Shell counts and freshness PR2 | `2956978` | `main` |
 | 43 | 2026-05-07 | Dashboard workbench redesign PR1 | `3dedbd1` | `main` |

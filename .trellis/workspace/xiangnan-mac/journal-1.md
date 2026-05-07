@@ -1518,3 +1518,39 @@ Extended /api/dashboard with generated snapshot time, inventory completeness cou
 ### Next Steps
 
 - None - task complete
+
+
+## Session 46: PR4 Dashboard deep links and URL-state lists
+
+**Date**: 2026-05-07
+**Task**: PR4 Dashboard deep links and URL-state lists
+**Branch**: `main`
+
+### Summary
+
+Completed PR4 by wiring Dashboard filtered routes into Nodes, Targets, and Events URL-state filters; added onboarding pending node filter, EventsPage URL-state/chip flow, tests, and contract docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5974118` | (see git log) |
+| `012569d` | (see git log) |
+| `c8aa7d9` | (see git log) |
+| `2f2b2f9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
