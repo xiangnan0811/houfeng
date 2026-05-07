@@ -8,6 +8,7 @@ import {
   DataTable,
   type DataTableColumn,
   type DataTableSortState,
+  Drawer,
   Hostname,
   type HealthState,
   MonoDigits,
@@ -253,6 +254,7 @@ export function NodesPage() {
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandID, setCommandID] = useState('')
   const [sortState, setSortState] = useState<DataTableSortState | null>(null)
+  const [showTrends, setShowTrends] = useState(true)
 
   function resetCreateFlow() {
     setCreateError(null)
@@ -1008,101 +1010,105 @@ export function NodesPage() {
         </Button>
       </header>
 
-      {createOpen ? (
-        <section className="page-panel nodes-create-panel">
-          <p className="page-panel__eyebrow">节点创建</p>
-          <h3 className="page-panel__title">创建节点并进入接入工作台</h3>
-          <p className="page-panel__description">创建完成后将立即生成接入 Token，并跳转到节点接入准备页。</p>
-          <form onSubmit={handleCreate}>
-            <p>
-              <label>
-                显示名称
-                <input
-                  name="display_name"
-                  value={createForm.display_name}
-                  onChange={(event) => updateField('display_name', event.target.value)}
-                  required
-                />
-              </label>
-            </p>
-            <p>
-              <label>
-                Group
-                <input
-                  name="group"
-                  value={createForm.group}
-                  onChange={(event) => updateField('group', event.target.value)}
-                />
-              </label>
-            </p>
-            <p>
-              <label>
-                地区
-                <input
-                  name="region"
-                  value={createForm.region}
-                  onChange={(event) => updateField('region', event.target.value)}
-                  required
-                />
-              </label>
-            </p>
-            <p>
-              <label>
-                城市
-                <input
-                  name="city"
-                  value={createForm.city}
-                  onChange={(event) => updateField('city', event.target.value)}
-                  required
-                />
-              </label>
-            </p>
-            <p>
-              <label>
-                供应商
-                <input
-                  name="provider"
-                  value={createForm.provider}
-                  onChange={(event) => updateField('provider', event.target.value)}
-                  required
-                />
-              </label>
-            </p>
-            <p>
-              <label>
-                生命周期状态固定为待接入
-              </label>
-            </p>
-            <p>
-              <label>
-                标签
-                <input
-                  name="labels"
-                  value={labelInput}
-                  onChange={(event) => setLabelInput(event.target.value)}
-                />
-              </label>
-            </p>
-            <p>
-              <label>
-                备注
-                <textarea
-                  name="note"
-                  value={createForm.note}
-                  onChange={(event) => updateField('note', event.target.value)}
-                  rows={3}
-                />
-              </label>
-            </p>
-            {createError ? <p>{createError}</p> : null}
-            <div>
-              <button type="submit" disabled={createSubmitting}>
-                {createSubmitting ? '正在创建…' : '创建并生成 Token'}
-              </button>
-            </div>
-          </form>
-        </section>
-      ) : null}
+      <Drawer
+        open={createOpen}
+        onClose={() => {
+          setCreateOpen(false)
+          resetCreateFlow()
+        }}
+        title="创建节点并进入接入工作台"
+        ariaLabel="创建节点表单"
+      >
+        <p className="page-panel__description">创建完成后将立即生成接入 Token，并跳转到节点接入准备页。</p>
+        <form onSubmit={handleCreate}>
+          <p>
+            <label>
+              显示名称
+              <input
+                name="display_name"
+                value={createForm.display_name}
+                onChange={(event) => updateField('display_name', event.target.value)}
+                required
+              />
+            </label>
+          </p>
+          <p>
+            <label>
+              Group
+              <input
+                name="group"
+                value={createForm.group}
+                onChange={(event) => updateField('group', event.target.value)}
+              />
+            </label>
+          </p>
+          <p>
+            <label>
+              地区
+              <input
+                name="region"
+                value={createForm.region}
+                onChange={(event) => updateField('region', event.target.value)}
+                required
+              />
+            </label>
+          </p>
+          <p>
+            <label>
+              城市
+              <input
+                name="city"
+                value={createForm.city}
+                onChange={(event) => updateField('city', event.target.value)}
+                required
+              />
+            </label>
+          </p>
+          <p>
+            <label>
+              供应商
+              <input
+                name="provider"
+                value={createForm.provider}
+                onChange={(event) => updateField('provider', event.target.value)}
+                required
+              />
+            </label>
+          </p>
+          <p>
+            <label>
+              生命周期状态固定为待接入
+            </label>
+          </p>
+          <p>
+            <label>
+              标签
+              <input
+                name="labels"
+                value={labelInput}
+                onChange={(event) => setLabelInput(event.target.value)}
+              />
+            </label>
+          </p>
+          <p>
+            <label>
+              备注
+              <textarea
+                name="note"
+                value={createForm.note}
+                onChange={(event) => updateField('note', event.target.value)}
+                rows={3}
+              />
+            </label>
+          </p>
+          {createError ? <p>{createError}</p> : null}
+          <div>
+            <button type="submit" disabled={createSubmitting}>
+              {createSubmitting ? '正在创建…' : '创建并生成 Token'}
+            </button>
+          </div>
+        </form>
+      </Drawer>
 
       <div className="nodes-toolbar">
         <Tabs<NodeListView>
@@ -1111,6 +1117,13 @@ export function NodesPage() {
           value={nodeListView}
           onChange={setNodeListView}
         />
+        <button
+          type="button"
+          className={`btn btn--ghost btn--sm ${!showTrends ? 'btn--active' : ''}`}
+          onClick={() => setShowTrends((v) => !v)}
+        >
+          {showTrends ? '隐藏趋势' : '显示趋势'}
+        </button>
       </div>
 
       {baseNodes.length === 0 ? (
@@ -1374,7 +1387,7 @@ export function NodesPage() {
             </div>
           ) : (
             <DataTable<NodeRecord>
-              columns={columns}
+              columns={showTrends ? columns : columns.filter((col) => col.key !== 'trends')}
               rows={sortedFilteredNodes}
               rowKey={(node) => node.node_id}
               density="compact"

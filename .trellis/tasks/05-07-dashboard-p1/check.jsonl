@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Quality gate: lint, typecheck, test pass, no regression"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer check: frontend-only changes, no API breakage"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Verify new CollapsibleSection follows conventions, no breaking changes to existing atoms"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Verify visual compliance: animation curves, color tokens, spacing"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Verify page templates and component specs match implementation"}
+{"file": ".trellis/tasks/05-07-dashboard-p1/prd.md", "reason": "Verify all 8 acceptance criteria met"}

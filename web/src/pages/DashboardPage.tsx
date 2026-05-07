@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import {
@@ -523,10 +523,14 @@ function FleetStatePanel({
   overview,
   fleetState,
   metrics,
+  refreshing = false,
+  onRefresh,
 }: {
   overview: DashboardOverview
   fleetState: FleetState
   metrics: DashboardMetric[]
+  refreshing?: boolean
+  onRefresh?: () => void
 }) {
   return (
     <section
@@ -579,6 +583,16 @@ function FleetStatePanel({
             {cta.label}
           </Link>
         ))}
+        {onRefresh ? (
+          <button
+            type="button"
+            className="btn btn--ghost btn--md"
+            disabled={refreshing}
+            onClick={onRefresh}
+          >
+            {refreshing ? '刷新中…' : '刷新'}
+          </button>
+        ) : null}
       </div>
     </section>
   )
@@ -1028,25 +1042,34 @@ export function DashboardPage() {
     error: null,
     overview: null,
   })
+  const [refreshing, setRefreshing] = useState(false)
+  const mountedRef = useRef(true)
 
-  useEffect(() => {
-    let cancelled = false
-
+  function loadDashboard() {
     getDashboard()
       .then((overview) => {
-        if (cancelled) return
+        if (!mountedRef.current) return
         setState({ loading: false, error: null, overview })
+        setRefreshing(false)
       })
       .catch((error: unknown) => {
-        if (cancelled) return
+        if (!mountedRef.current) return
         const message = error instanceof ApiError ? error.message : '加载首页 / Dashboard 失败'
         setState({ loading: false, error: message, overview: null })
+        setRefreshing(false)
       })
+  }
 
-    return () => {
-      cancelled = true
-    }
+  useEffect(() => {
+    mountedRef.current = true
+    loadDashboard()
+    return () => { mountedRef.current = false }
   }, [])
+
+  function handleRefresh() {
+    setRefreshing(true)
+    loadDashboard()
+  }
 
   if (state.loading) {
     return <section className="page-panel">正在加载首页 / Dashboard…</section>
@@ -1089,6 +1112,8 @@ export function DashboardPage() {
         overview={overview}
         fleetState={fleetState}
         metrics={metrics}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
       />
 
       <DashboardWorkbench

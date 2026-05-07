@@ -2507,6 +2507,29 @@
   color: var(--text-muted);
   font-style: italic;
 }
+.command-output-section {
+  margin-top: var(--space-2);
+}
+.command-output-section__label {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-1);
+}
+.command-output-section--stderr {
+  margin-top: var(--space-2);
+}
+.command-output--stderr {
+  background: var(--color-state-critical);
+  background: rgba(182, 73, 58, 0.08);
+  border-color: rgba(182, 73, 58, 0.25);
+  color: var(--color-state-critical);
+}
+.command-output__expand {
+  margin-top: var(--space-1);
+}
 .batch-bar {
   display: flex;
   align-items: center;

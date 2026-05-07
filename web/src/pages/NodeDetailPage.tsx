@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
+import { CollapsibleSection } from '../components/CollapsibleSection'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import { IncidentList } from '../components/IncidentList'
@@ -177,6 +178,82 @@ const COMMAND_LIST = [
 const COMMAND_LABELS: Record<string, string> = Object.fromEntries(
   COMMAND_LIST.map((c) => [c.id, c.name]),
 )
+
+const MAX_STDOUT_LINES = 20
+
+function CommandResult({
+  action,
+  labels,
+}: {
+  action: NonNullable<NodeRecord['last_action']>
+  labels: Record<string, string>
+}) {
+  const [stdoutExpanded, setStdoutExpanded] = useState(false)
+  const commandLabel = labels[action.command_id] ?? action.command_id
+
+  if (action.status === 'pending') {
+    return (
+      <div className="command-result">
+        <h4>{commandLabel} · 等待 agent 执行…</h4>
+        <p className="command-pending">
+          已下发，等待 agent 执行…（约 30s-60s，取决于 sync 间隔）
+        </p>
+      </div>
+    )
+  }
+
+  const stdout = action.stdout ?? ''
+  const stderr = action.stderr ?? ''
+  const exitCode = action.exit_code
+  const stdoutLines = stdout.split('\n')
+  const stdoutTruncated = stdoutLines.length > MAX_STDOUT_LINES
+
+  return (
+    <div className="command-result">
+      <h4>
+        {commandLabel} · 已完成{' '}
+        <StatusBadge
+          label={exitCode === 0 ? 'exit 0' : `exit ${exitCode ?? '?'}`}
+          tone={exitCode === 0 ? 'green' : 'red'}
+        />
+      </h4>
+
+      {stdout ? (
+        <div className="command-output-section">
+          <p className="command-output-section__label">stdout</p>
+          <pre className="command-output">
+            <code>
+              {(stdoutTruncated && !stdoutExpanded
+                ? stdoutLines.slice(0, MAX_STDOUT_LINES)
+                : stdoutLines
+              ).join('\n')}
+            </code>
+          </pre>
+          {stdoutTruncated ? (
+            <button
+              type="button"
+              className="text-link command-output__expand"
+              onClick={() => setStdoutExpanded(!stdoutExpanded)}
+            >
+              {stdoutExpanded
+                ? '收起'
+                : `展开全部（${stdoutLines.length} 行）`}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {stderr ? (
+        <div className="command-output-section command-output-section--stderr">
+          <p className="command-output-section__label">stderr</p>
+          <pre className="command-output command-output--stderr">
+            <code>{stderr}</code>
+          </pre>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 export function NodeDetailPage() {
   const { nodeId } = useParams()
@@ -977,174 +1054,168 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
 
 
-      <details className="watchtower-secondary">
-        <summary>标签与备注</summary>
-        <div className="watchtower-secondary__body">
-          <NodeLabelsAndNote
-            node={node}
-            editing={metadataEditing}
-            groupDraft={metadataGroupDraft}
-            labelDraft={metadataLabelDraft}
-            noteDraft={metadataNoteDraft}
-            submitting={metadataSubmitting}
-            error={metadataError}
-            onGroupDraftChange={setMetadataGroupDraft}
-            onLabelDraftChange={setMetadataLabelDraft}
-            onNoteDraftChange={setMetadataNoteDraft}
-            onStartEdit={() => {
-              setMetadataEditing(true)
-              setMetadataGroupDraft(node.group || '')
-              setMetadataLabelDraft(node.labels.join(', '))
-              setMetadataNoteDraft(node.note)
-              setMetadataError(null)
-            }}
-            onCancelEdit={() => {
-              setMetadataEditing(false)
-              setMetadataGroupDraft('')
-              setMetadataLabelDraft('')
-              setMetadataNoteDraft('')
-              setMetadataError(null)
-            }}
-            onSave={() => void handleMetadataSave()}
-          />
-        </div>
-      </details>
+      <CollapsibleSection title="标签与备注" className="watchtower-secondary">
+        <NodeLabelsAndNote
+          node={node}
+          editing={metadataEditing}
+          groupDraft={metadataGroupDraft}
+          labelDraft={metadataLabelDraft}
+          noteDraft={metadataNoteDraft}
+          submitting={metadataSubmitting}
+          error={metadataError}
+          onGroupDraftChange={setMetadataGroupDraft}
+          onLabelDraftChange={setMetadataLabelDraft}
+          onNoteDraftChange={setMetadataNoteDraft}
+          onStartEdit={() => {
+            setMetadataEditing(true)
+            setMetadataGroupDraft(node.group || '')
+            setMetadataLabelDraft(node.labels.join(', '))
+            setMetadataNoteDraft(node.note)
+            setMetadataError(null)
+          }}
+          onCancelEdit={() => {
+            setMetadataEditing(false)
+            setMetadataGroupDraft('')
+            setMetadataLabelDraft('')
+            setMetadataNoteDraft('')
+            setMetadataError(null)
+          }}
+          onSave={() => void handleMetadataSave()}
+        />
+      </CollapsibleSection>
 
-      <details className="watchtower-secondary">
-        <summary>生命周期</summary>
-        <div className="watchtower-secondary__body">
-          <div className="page-stack">
-            {isRetiredNode ? <p>{NODE_LIFECYCLE_V1_LIMITATION_COPY}</p> : null}
-            <div className="badge-row badge-row--wrap">
-              {isRetiredNode ? (
+      <CollapsibleSection title="生命周期" className="watchtower-secondary">
+        <div className="page-stack">
+          {isRetiredNode ? <p>{NODE_LIFECYCLE_V1_LIMITATION_COPY}</p> : null}
+          <div className="badge-row badge-row--wrap">
+            {isRetiredNode ? (
+              <button
+                type="button"
+                disabled={lifecycleSubmitting !== null}
+                onClick={() => void handleLifecycleAction('restore-to-observing')}
+              >
+                {lifecycleSubmitting === 'restore-to-observing' ? '正在恢复…' : '恢复到观察中'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={lifecycleSubmitting !== null}
+                onClick={() => {
+                  setShowRetireConfirmation(true)
+                  setLifecycleError(null)
+                }}
+              >
+                退役节点
+              </button>
+            )}
+          </div>
+          {!isRetiredNode && showRetireConfirmation ? (
+            <div className="page-stack">
+              <p>退役会让节点退出当前工作集，但会保留历史记录。这不是删除，也不会清空事件、观测记录或 agent 绑定历史。</p>
+              <div className="badge-row badge-row--wrap">
                 <button
                   type="button"
                   disabled={lifecycleSubmitting !== null}
-                  onClick={() => void handleLifecycleAction('restore-to-observing')}
+                  onClick={() => void handleLifecycleAction('retire')}
                 >
-                  {lifecycleSubmitting === 'restore-to-observing' ? '正在恢复…' : '恢复到观察中'}
+                  {lifecycleSubmitting === 'retire' ? '正在退役…' : '确认退役'}
                 </button>
-              ) : (
                 <button
                   type="button"
                   disabled={lifecycleSubmitting !== null}
                   onClick={() => {
-                    setShowRetireConfirmation(true)
+                    setShowRetireConfirmation(false)
                     setLifecycleError(null)
                   }}
                 >
-                  退役节点
+                  取消
                 </button>
-              )}
-            </div>
-            {!isRetiredNode && showRetireConfirmation ? (
-              <div className="page-stack">
-                <p>退役会让节点退出当前工作集，但会保留历史记录。这不是删除，也不会清空事件、观测记录或 agent 绑定历史。</p>
-                <div className="badge-row badge-row--wrap">
-                  <button
-                    type="button"
-                    disabled={lifecycleSubmitting !== null}
-                    onClick={() => void handleLifecycleAction('retire')}
-                  >
-                    {lifecycleSubmitting === 'retire' ? '正在退役…' : '确认退役'}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={lifecycleSubmitting !== null}
-                    onClick={() => {
-                      setShowRetireConfirmation(false)
-                      setLifecycleError(null)
-                    }}
-                  >
-                    取消
-                  </button>
-                </div>
               </div>
-            ) : null}
-            {lifecycleError ? <p role="alert">{lifecycleError}</p> : null}
-          </div>
+            </div>
+          ) : null}
+          {lifecycleError ? <p role="alert">{lifecycleError}</p> : null}
         </div>
-      </details>
+      </CollapsibleSection>
 
-      <details className="watchtower-secondary">
-        <summary>接入凭证状态</summary>
-        <div className="watchtower-secondary__body">
-          <p>
-            当前绑定状态：<StatusBadge label={node.binding_status} />
-          </p>
-          <p>
-            <Link className="text-link" to={`/nodes/${node.node_id}/onboarding`}>
-              查看接入工作台 →
-            </Link>
-          </p>
-        </div>
-      </details>
+      <CollapsibleSection title="接入凭证状态" className="watchtower-secondary">
+        <p>
+          当前绑定状态：<StatusBadge label={node.binding_status} />
+        </p>
+        <p>
+          <Link className="text-link" to={`/nodes/${node.node_id}/onboarding`}>
+            查看接入工作台 →
+          </Link>
+        </p>
+      </CollapsibleSection>
 
-      <details className="watchtower-secondary">
-        <summary>容器列表</summary>
-        <div className="watchtower-secondary__body">
-          {sample?.containers && sample.containers.length > 0 ? (
-            <DataTable<ContainerInfo>
-              density="compact"
-              columns={[
-                {
-                  key: 'status',
-                  label: '状态',
-                  width: 60,
-                  render: (c: ContainerInfo) => {
-                    const state =
-                      c.status === 'running'
-                        ? 'normal'
-                        : c.status === 'exited'
-                          ? 'offline'
-                          : 'notice'
-                    return <StatusGlyph state={state} size="sm" ariaLabel={c.status} />
-                  },
+      <CollapsibleSection title="容器列表" className="watchtower-secondary">
+        {sample?.containers && sample.containers.length > 0 ? (
+          <DataTable<ContainerInfo>
+            density="compact"
+            columns={[
+              {
+                key: 'status',
+                label: '状态',
+                width: 60,
+                render: (c: ContainerInfo) => {
+                  const state =
+                    c.status === 'running'
+                      ? 'normal'
+                      : c.status === 'exited'
+                        ? 'offline'
+                        : 'notice'
+                  return <StatusGlyph state={state} size="sm" ariaLabel={c.status} />
                 },
-                {
-                  key: 'name',
-                  label: '容器名',
-                  render: (c: ContainerInfo) => <Hostname>{c.name}</Hostname>,
-                },
-                {
-                  key: 'image',
-                  label: 'Image',
-                  render: (c: ContainerInfo) => (
-                    <span className="watchtower-container-image">{c.image}</span>
-                  ),
-                },
-                {
-                  key: 'cpu',
-                  label: 'CPU%',
-                  align: 'right',
-                  width: 72,
-                  cellClassName: 'mono',
-                  render: (c: ContainerInfo) =>
-                    c.cpu_pct != null ? <MonoDigits>{c.cpu_pct.toFixed(1)}%</MonoDigits> : '—',
-                },
-                {
-                  key: 'mem',
-                  label: 'Mem%',
-                  align: 'right',
-                  width: 72,
-                  cellClassName: 'mono',
-                  render: (c: ContainerInfo) =>
-                    c.mem_pct != null ? <MonoDigits>{c.mem_pct.toFixed(1)}%</MonoDigits> : '—',
-                },
-              ]}
-              rows={sample.containers}
-              rowKey={(c: ContainerInfo) => c.id}
-              emptyContent="暂无容器数据"
-            />
-          ) : (
-            <p>暂无容器数据</p>
-          )}
-        </div>
-      </details>
+              },
+              {
+                key: 'name',
+                label: '容器名',
+                render: (c: ContainerInfo) => <Hostname>{c.name}</Hostname>,
+              },
+              {
+                key: 'image',
+                label: 'Image',
+                render: (c: ContainerInfo) => (
+                  <span className="watchtower-container-image">{c.image}</span>
+                ),
+              },
+              {
+                key: 'cpu',
+                label: 'CPU%',
+                align: 'right',
+                width: 72,
+                cellClassName: 'mono',
+                render: (c: ContainerInfo) =>
+                  c.cpu_pct != null ? <MonoDigits>{c.cpu_pct.toFixed(1)}%</MonoDigits> : '—',
+              },
+              {
+                key: 'mem',
+                label: 'Mem%',
+                align: 'right',
+                width: 72,
+                cellClassName: 'mono',
+                render: (c: ContainerInfo) =>
+                  c.mem_pct != null ? <MonoDigits>{c.mem_pct.toFixed(1)}%</MonoDigits> : '—',
+              },
+            ]}
+            rows={sample.containers}
+            rowKey={(c: ContainerInfo) => c.id}
+            emptyContent="暂无容器数据"
+          />
+        ) : (
+          <p>暂无容器数据</p>
+        )}
+      </CollapsibleSection>
 
       <p className="watchtower-snapshot-meta">
-        数据快照时间：<Timestamp value={new Date().toISOString()} mode="absolute" />
-        ，刷新页面获取最新。
+        {sample?.observed_at ? (
+          <>
+            数据快照时间：<Timestamp value={sample.observed_at} mode="absolute" />
+            ，刷新页面获取最新。
+          </>
+        ) : (
+          '尚未收到主机样本，暂无快照数据。'
+        )}
       </p>
 
       <Drawer
@@ -1233,38 +1304,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         ) : null}
 
         {node?.last_action ? (
-          <div className="command-result">
-            <h4>
-              {COMMAND_LABELS[node.last_action.command_id] ??
-                node.last_action.command_id}
-              {' '}
-              {node.last_action.status === 'pending'
-                ? '· 等待 agent 执行…'
-                : '· 已完成'}
-            </h4>
-            {node.last_action.status === 'done' ? (
-              <pre className="command-output">
-                <code>
-                  {[
-                    node.last_action.stdout ?? '',
-                    node.last_action.stderr
-                      ? `\n\n[stderr]\n${node.last_action.stderr}`
-                      : '',
-                    node.last_action.exit_code !== 0 &&
-                    node.last_action.exit_code != null
-                      ? `\n\nexit code: ${node.last_action.exit_code}`
-                      : '',
-                  ]
-                    .filter(Boolean)
-                    .join('')}
-                </code>
-              </pre>
-            ) : (
-              <p className="command-pending">
-                已下发，等待 agent 执行…（约 30s-60s，取决于 sync 间隔）
-              </p>
-            )}
-          </div>
+          <CommandResult action={node.last_action} labels={COMMAND_LABELS} />
         ) : null}
       </Drawer>
     </div>

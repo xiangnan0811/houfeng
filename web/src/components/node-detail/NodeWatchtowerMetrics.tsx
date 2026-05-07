@@ -107,7 +107,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(cpuPriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3>CPU 使用率</h3>
+            <h3 title="CPU 总体使用率。正常：< 80%，关注：≥ 80%，严重：≥ 95%。含 steal 时间占比。">CPU 使用率</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.cpu_usage_pct)}</MonoDigits>
             </span>
@@ -144,7 +144,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(memPriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3>内存使用率</h3>
+            <h3 title="内存总体使用率。正常：< 85%，关注：≥ 85%，严重：≥ 95%。含 swap 和可用内存。">内存使用率</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.mem_used_pct)}</MonoDigits>
             </span>
@@ -187,7 +187,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(diskPriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3>磁盘使用率</h3>
+            <h3 title="磁盘空间使用率。正常：< 80%，关注：≥ 80%，严重：≥ 95%。含 IO busy 和读写速率。">磁盘使用率</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.disk_used_pct)}</MonoDigits>
             </span>
@@ -233,7 +233,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(inodePriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3>Inode 使用率</h3>
+            <h3 title="Inode 使用率。正常：< 80%，关注：≥ 80%，严重：≥ 95%。Inode 耗尽会导致无法创建新文件。">Inode 使用率</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.inode_used_pct)}</MonoDigits>
             </span>
@@ -262,7 +262,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(load5Priority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3>Load5</h3>
+            <h3 title="系统 5 分钟负载均值。正常：< 4.0，关注：≥ 4.0，严重：≥ 8.0。需结合 CPU 核数判断。">Load5</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatNumber(sample.load_5)}</MonoDigits>
             </span>
@@ -300,7 +300,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(iowaitPriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3>CPU IOWait</h3>
+            <h3 title="CPU 等待 I/O 的时间占比。正常：< 20%，关注：≥ 20%，严重：≥ 50%。偏高通常意味着磁盘瓶颈。">CPU IOWait</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.cpu_iowait_pct)}</MonoDigits>
             </span>
@@ -328,7 +328,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
       render: () => (
         <article className="watchtower-metric-card">
           <header className="watchtower-metric-card__head">
-            <h3>网络入</h3>
+            <h3 title="网络入站速率（B/s）。无固定阈值，关注异常波动。">网络入</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatBytesPerSecond(sample.net_in_bytes_per_sec)}</MonoDigits>
             </span>
@@ -352,7 +352,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
       render: () => (
         <article className="watchtower-metric-card">
           <header className="watchtower-metric-card__head">
-            <h3>网络出</h3>
+            <h3 title="网络出站速率（B/s）。无固定阈值，关注异常波动。">网络出</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatBytesPerSecond(sample.net_out_bytes_per_sec)}</MonoDigits>
             </span>

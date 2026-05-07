@@ -15,16 +15,12 @@ interface SearchResult {
 const MAX_RESULTS = 6
 
 /**
- * Minimal global search.
+ * Global search with ⌘K / Ctrl+K shortcut.
  *
  * On Enter: fetch the full Node and Target lists in parallel and filter
  * client-side by display_name / hostname / labels / id substring match
  * (case-insensitive). Render up to 6 hits in a dropdown; arrow keys move
  * focus, Enter navigates.
- *
- * No keyboard shortcut yet (no ⌘K binding) and no caching — first version
- * keeps shape minimal. Later we can add shortcut + result caching once we
- * have a backend search endpoint with ranking.
  */
 export function GlobalSearch() {
   const navigate = useNavigate()
@@ -35,6 +31,7 @@ export function GlobalSearch() {
   const [error, setError] = useState<string | null>(null)
   const [focusIndex, setFocusIndex] = useState(-1)
   const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -43,6 +40,29 @@ export function GlobalSearch() {
     }
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  // ⌘K / Ctrl+K to toggle search; Escape to close
+  useEffect(() => {
+    function onKeyDown(e: globalThis.KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && e.key === 'k') {
+        e.preventDefault()
+        if (open) {
+          setOpen(false)
+        } else {
+          setOpen(true)
+          // Focus input on next frame so the keyup doesn't type 'k'
+          requestAnimationFrame(() => inputRef.current?.focus())
+        }
+        return
+      }
+      if (e.key === 'Escape' && open) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
   }, [open])
 
   async function handleSearch(e: FormEvent) {
@@ -98,9 +118,10 @@ export function GlobalSearch() {
     <div className="global-search" ref={containerRef}>
       <form onSubmit={handleSearch} role="search">
         <input
+          ref={inputRef}
           type="search"
           className="global-search__input"
-          placeholder="搜索节点 / 目标"
+          placeholder="搜索节点 / 目标 (⌘K)"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}

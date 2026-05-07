@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web spec index — component conventions, styling, state patterns"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "New CollapsibleSection component must follow conventions; Drawer usage patterns"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS conventions for new CollapsibleSection, tooltip, command result styling"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "State patterns for refresh button, column visibility toggle"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse Drawer atom for create form, reuse Badge for exit code, reuse existing patterns"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Design tokens: animation constants, tone colors, font roles for tooltip/command output"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Component visual contracts: Drawer spec, page templates for NodesPage/NodeDetailPage/DashboardPage"}
+{"file": ".trellis/tasks/05-07-dashboard-p1/prd.md", "reason": "Task PRD with 8 requirements and acceptance criteria"}
