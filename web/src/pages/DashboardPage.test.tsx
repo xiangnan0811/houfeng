@@ -88,6 +88,8 @@ describe('DashboardPage', () => {
         archived_target_count: 1,
         recent_new_incident_count: 4,
         recent_recovery_count: 1,
+        new_incident_trend_24h: [0, 0, 1, 0, 2, 1, 4],
+        recovery_trend_24h: [0, 0, 0, 1, 0, 0, 1],
         group_summaries: [
           {
             group: 'production',
@@ -165,6 +167,9 @@ describe('DashboardPage', () => {
     expect(statusBar).toHaveTextContent('摘要生成')
     expect(statusBar).toHaveTextContent('2026/04/25 16:30')
     expect(statusBar).toHaveTextContent('2 个对象异常，其中 1 个严重')
+    const trendPulse = within(statusBar).getByRole('link', { name: '24h 事件趋势：新增 4 · 恢复 1' })
+    expect(trendPulse).toHaveAttribute('href', '/events?time_range=24h')
+    expect(within(trendPulse).getByRole('img', { name: '24h 新增异常趋势' })).toBeInTheDocument()
     const keyMetrics = screen.getByLabelText('关键状态指标')
     expect(within(keyMetrics).getAllByRole('link')).toHaveLength(4)
     expect(within(keyMetrics).getByRole('link', { name: '异常对象：节点 1 · 目标 1' })).toHaveAttribute(
@@ -204,6 +209,7 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('heading', { name: '当前需要处理' })).toBeInTheDocument()
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
+    expect(screen.getByText('nd_001')).toBeInTheDocument()
     expect(screen.getByText('磁盘使用率 92.0%')).toBeInTheDocument()
     expect(screen.getByText('Blog')).toBeInTheDocument()
     expect(screen.getByText('blog.example.com:443')).toBeInTheDocument()
@@ -237,6 +243,9 @@ describe('DashboardPage', () => {
     )
     const context = screen.getByLabelText('运行上下文')
     expect(within(context).getAllByRole('link')).toHaveLength(3)
+    expect(within(context).getByText('production 受影响')).toBeInTheDocument()
+    expect(within(context).getByText('待接入 2')).toBeInTheDocument()
+    expect(within(context).getByText('新增 4 / 恢复 1')).toBeInTheDocument()
     expect(within(context).getByRole('link', { name: '影响范围：1 个分组受影响，最高影响 production' })).toHaveAttribute(
       'href',
       '/nodes?abnormal=1',
@@ -249,6 +258,26 @@ describe('DashboardPage', () => {
       'href',
       '/events?maintenance_only=1',
     )
+    const management = within(attentionSection).getByLabelText('管理入口')
+    expect(within(management).getByRole('heading', { name: '管理入口' })).toBeInTheDocument()
+    expect(within(management).queryByRole('link', { name: '查看事件流' })).not.toBeInTheDocument()
+    expect(within(management).getByRole('link', { name: '节点：待接入 2 · 暂停 1 · 退役 1' })).toHaveAttribute(
+      'href',
+      '/nodes?onboarding=pending',
+    )
+    expect(within(management).getByRole('link', { name: '目标：异常 1 · 暂停 1 · 归档 1' })).toHaveAttribute(
+      'href',
+      '/targets?abnormal=1',
+    )
+    expect(within(management).getByRole('link', { name: '事件：24h 新增 4 · 恢复 1' })).toHaveAttribute(
+      'href',
+      '/events?time_range=24h',
+    )
+    expect(within(management).getByRole('link', { name: /设置：通知通道 1\/2 已配置/ })).toHaveAttribute(
+      'href',
+      '/settings',
+    )
+    expect(within(management).getAllByText('进入')).toHaveLength(4)
 
     expect(screen.queryByLabelText('工作台上下文')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '系统快捷入口' })).not.toBeInTheDocument()

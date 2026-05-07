@@ -5,6 +5,7 @@ import {
   Badge,
   Hostname,
   MonoDigits,
+  Sparkline,
   StatusGlyph,
   Timestamp,
   type BadgeTone,
@@ -219,6 +220,22 @@ function latestEventTimestamp(overview: DashboardOverview): string | null {
   return overview.recent_events[0]?.created_at ?? null
 }
 
+function trendValues(overview: DashboardOverview) {
+  const values = overview.new_incident_trend_24h?.filter((value) => Number.isFinite(value)) ?? []
+  if (values.length > 0) return values
+  if (overview.recent_new_incident_count > 0 || overview.recent_recovery_count > 0) {
+    return [0, overview.recent_new_incident_count]
+  }
+  return []
+}
+
+function trendBalanceLabel(overview: DashboardOverview) {
+  const delta = overview.recent_new_incident_count - overview.recent_recovery_count
+  if (delta > 0) return `净增 ${delta}`
+  if (delta < 0) return `净恢复 ${Math.abs(delta)}`
+  return '新增与恢复持平'
+}
+
 function buildContextItems(
   overview: DashboardOverview,
   abnormalTotal: number,
@@ -245,7 +262,7 @@ function buildContextItems(
   return [
     {
       label: '影响范围',
-      title: affectedGroupCount > 0 ? `${affectedGroupCount} 个分组` : '分组稳定',
+      title: affectedGroupCount > 0 && topGroup ? `${topGroup.group} 受影响` : '分组稳定',
       detail: impactDetail,
       to: abnormalTotal > 0
         ? overview.abnormal_node_count > 0
@@ -256,7 +273,9 @@ function buildContextItems(
     },
     {
       label: '库存状态',
-      title: `${overview.total_node_count} 节点 / ${overview.total_target_count} 目标`,
+      title: overview.pending_onboarding_node_count > 0
+        ? `待接入 ${overview.pending_onboarding_node_count}`
+        : `${overview.total_node_count} 节点 / ${overview.total_target_count} 目标`,
       detail: inventoryDetail,
       to: inventoryEntryLink(overview),
       tone: overview.pending_onboarding_node_count > 0 ||
@@ -268,7 +287,7 @@ function buildContextItems(
     },
     {
       label: '最近活动',
-      title: `${overview.recent_new_incident_count}/${overview.recent_recovery_count} 变化`,
+      title: `新增 ${overview.recent_new_incident_count} / 恢复 ${overview.recent_recovery_count}`,
       detail: latestEventSummary(overview),
       to: maintenanceTotal > 0 ? DASHBOARD_LINKS.eventsMaintenance : DASHBOARD_LINKS.events24h,
       tone: overview.recent_new_incident_count > 0 ? 'notice' : 'normal',
@@ -461,6 +480,44 @@ function buildDashboardMetrics(
   ]
 }
 
+function DashboardTrendPulse({
+  overview,
+  tone,
+}: {
+  overview: DashboardOverview
+  tone: FleetStateTone
+}) {
+  const values = trendValues(overview)
+  const changeLabel = `新增 ${overview.recent_new_incident_count} · 恢复 ${overview.recent_recovery_count}`
+
+  return (
+    <Link
+      className={`dashboard-trend-pulse dashboard-trend-pulse--${tone}`}
+      to={DASHBOARD_LINKS.events24h}
+      aria-label={`24h 事件趋势：${changeLabel}`}
+    >
+      <span className="dashboard-trend-pulse__copy">
+        <span className="dashboard-trend-pulse__label">24h 事件趋势</span>
+        <strong>{trendBalanceLabel(overview)}</strong>
+        <span>{changeLabel}</span>
+      </span>
+      {values.length > 0 ? (
+        <span className="dashboard-trend-pulse__chart">
+          <Sparkline
+            values={values}
+            tone={tone}
+            width={96}
+            height={24}
+            expand
+            ariaLabel="24h 新增异常趋势"
+            formatValue={(value) => `${Math.round(value)} 次`}
+          />
+        </span>
+      ) : null}
+    </Link>
+  )
+}
+
 function FleetStatePanel({
   overview,
   fleetState,
@@ -480,9 +537,14 @@ function FleetStatePanel({
         <h1 className="dashboard-status-bar__title">{fleetState.title}</h1>
         <p className="dashboard-status-bar__description">{fleetState.description}</p>
         <div className="dashboard-status-bar__meta">
-          <span className="dashboard-status-bar__generated">
-            摘要生成 <Timestamp value={overview.snapshot_generated_at} mode="absolute" />
-          </span>
+          <div className="dashboard-status-bar__meta-row">
+            <span className="dashboard-status-bar__generated">
+              摘要生成 <Timestamp value={overview.snapshot_generated_at} mode="absolute" />
+            </span>
+            {metrics.length > 0 ? (
+              <DashboardTrendPulse overview={overview} tone={fleetState.tone} />
+            ) : null}
+          </div>
           {metrics.length > 0 ? (
             <div className="dashboard-status-bar__metrics" aria-label="关键状态指标">
               {metrics.map((metric) => (
@@ -552,14 +614,14 @@ function AttentionQueue({
                 />
               </div>
               <div className="dashboard-attention-item__identity">
-                <Hostname truncate maxChars={28} className="dashboard-attention-item__technical-id">
-                  {item.technicalId}
-                </Hostname>
                 <h3 className="dashboard-attention-item__name">{item.name}</h3>
                 <p className="dashboard-attention-item__meta">
                   {item.meta} · {item.location} · {item.freshnessLabel}{' '}
                   <Timestamp value={item.freshnessAt ?? null} mode="relative" />
                 </p>
+                <Hostname truncate maxChars={32} className="dashboard-attention-item__technical-id">
+                  {item.technicalId}
+                </Hostname>
               </div>
               <div className="dashboard-attention-item__issue">
                 <Badge variant="state" tone={statusTone(item.health)} withDot>
@@ -567,7 +629,10 @@ function AttentionQueue({
                 </Badge>
                 <span className="dashboard-attention-item__issue-label">当前问题</span>
                 <p>
-                  <MonoDigits>{item.incidentCount}</MonoDigits> {item.issueSummary}
+                  <span>
+                    活跃问题 <MonoDigits>{item.incidentCount}</MonoDigits>
+                  </span>
+                  <strong>{item.issueSummary}</strong>
                 </p>
               </div>
             </Link>
@@ -592,7 +657,13 @@ function AttentionQueue({
   )
 }
 
-function ManagementEntries({ overview }: { overview: DashboardOverview }) {
+function ManagementEntries({
+  overview,
+  showEventLink = true,
+}: {
+  overview: DashboardOverview
+  showEventLink?: boolean
+}) {
   const entries: ManagementEntry[] = [
     {
       title: '节点',
@@ -620,9 +691,11 @@ function ManagementEntries({ overview }: { overview: DashboardOverview }) {
     <div className="dashboard-management" aria-label="管理入口">
       <div className="dashboard-management__header">
         <h3>管理入口</h3>
-        <Link className="text-link" to={DASHBOARD_LINKS.events24h}>
-          查看事件流
-        </Link>
+        {showEventLink ? (
+          <Link className="text-link" to={DASHBOARD_LINKS.events24h}>
+            查看事件流
+          </Link>
+        ) : null}
       </div>
       <div className="dashboard-management__grid">
         {entries.map((entry) => (
@@ -851,7 +924,10 @@ function DashboardWorkbench({
         ) : hasAbnormal ? (
           <>
             <AttentionQueue items={attentionItems} />
-            <DashboardContextStrip items={buildContextItems(overview, abnormalTotal, maintenanceTotal)} />
+            <div className="dashboard-workbench__system">
+              <DashboardContextStrip items={buildContextItems(overview, abnormalTotal, maintenanceTotal)} />
+              <ManagementEntries overview={overview} showEventLink={false} />
+            </div>
           </>
         ) : (
           <RunningOverview
