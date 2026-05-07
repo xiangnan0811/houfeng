@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Frontend component conventions for page-level React changes"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Token/BEM CSS rules for Dashboard visual refinement"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard data contract and progressive disclosure rules"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing atoms and helpers before adding abstractions"}
+{"file": ".trellis/tasks/05-07-dashboard-system-overview-excellence/research/dashboard-patterns.md", "reason": "Dashboard UX pattern research for this task"}

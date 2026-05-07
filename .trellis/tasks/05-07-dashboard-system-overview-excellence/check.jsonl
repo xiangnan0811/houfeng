@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Frontend test/lint/build verification gate"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Review Dashboard contract and anti-regression constraints"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Review visual implementation against tokens and BEM rules"}
+{"file": ".trellis/tasks/05-07-dashboard-system-overview-excellence/prd.md", "reason": "Task acceptance criteria"}
