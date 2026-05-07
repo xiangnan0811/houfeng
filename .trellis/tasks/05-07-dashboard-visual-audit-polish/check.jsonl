@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Verify Dashboard changes remain in the web layer and active visual authority."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check component structure, Link usage, and accessibility behavior."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify Dashboard still displays only appropriate contract facts and keeps deep links."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check CSS token/BEM compliance, density, focus states, and visual hierarchy."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Guide required lint, test, build, and UI verification checks."}
+{"file": ".trellis/tasks/05-07-dashboard-visual-audit-polish/research/visual-audit.md", "reason": "Check that implementation resolves the recorded visual audit findings."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-deep-links-url-state/prd.md", "reason": "Verify PR4 URL-state/deep-link behavior does not regress."}

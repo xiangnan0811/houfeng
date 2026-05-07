@@ -1,18 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
-
-const navigateMock = vi.fn()
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useNavigate: () => navigateMock,
-  }
-})
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -80,7 +70,6 @@ function renderWithDashboard(body: unknown, status = 200) {
 describe('DashboardPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
-    navigateMock.mockReset()
   })
 
   it('keeps severe abnormal state focused on the attention queue and PR4 links only', async () => {
@@ -173,9 +162,27 @@ describe('DashboardPage', () => {
     )
 
     const statusBar = screen.getByLabelText('Dashboard 状态')
-    expect(statusBar).toHaveTextContent('Dashboard 摘要')
+    expect(statusBar).toHaveTextContent('摘要生成')
     expect(statusBar).toHaveTextContent('2026/04/25 16:30')
     expect(statusBar).toHaveTextContent('2 个对象异常，其中 1 个严重')
+    const keyMetrics = screen.getByLabelText('关键状态指标')
+    expect(within(keyMetrics).getAllByRole('link')).toHaveLength(4)
+    expect(within(keyMetrics).getByRole('link', { name: '异常对象：节点 1 · 目标 1' })).toHaveAttribute(
+      'href',
+      '/nodes?abnormal=1',
+    )
+    expect(within(keyMetrics).getByRole('link', { name: '严重：节点 0 · 目标 1' })).toHaveAttribute(
+      'href',
+      '/events?severity=严重',
+    )
+    expect(within(keyMetrics).getByRole('link', { name: '24h 变化：新增异常 / 恢复' })).toHaveAttribute(
+      'href',
+      '/events?time_range=24h',
+    )
+    expect(within(keyMetrics).getByRole('link', { name: '维护：节点 1 · 目标 0' })).toHaveAttribute(
+      'href',
+      '/events?maintenance_only=1',
+    )
     const fleetActions = screen.getByLabelText('首页主要入口')
     expect(within(fleetActions).getByRole('link', { name: '查看当前异常' })).toHaveAttribute(
       'href',
@@ -193,24 +200,7 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('已加载 /api/dashboard')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('首页数据可信度')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('系统全局指标')).not.toBeInTheDocument()
-    const summary = screen.getByLabelText('Dashboard 摘要指标')
-    expect(within(summary).getAllByRole('link')).toHaveLength(4)
-    expect(within(summary).getByRole('link', { name: '异常对象：节点 1 · 目标 1' })).toHaveAttribute(
-      'href',
-      '/nodes?abnormal=1',
-    )
-    expect(within(summary).getByRole('link', { name: '严重：节点 0 · 目标 1' })).toHaveAttribute(
-      'href',
-      '/events?severity=严重',
-    )
-    expect(within(summary).getByRole('link', { name: '24h 变化：新增异常 / 恢复' })).toHaveAttribute(
-      'href',
-      '/events?time_range=24h',
-    )
-    expect(within(summary).getByRole('link', { name: '维护：节点 1 · 目标 0' })).toHaveAttribute(
-      'href',
-      '/events?maintenance_only=1',
-    )
+    expect(screen.queryByLabelText('Dashboard 摘要指标')).not.toBeInTheDocument()
 
     expect(screen.getByRole('heading', { name: '当前需要处理' })).toBeInTheDocument()
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
@@ -309,6 +299,11 @@ describe('DashboardPage', () => {
       'href',
       '/events?maintenance_only=1',
     )
+    const keyMetrics = screen.getByLabelText('关键状态指标')
+    expect(within(keyMetrics).getByRole('link', { name: '维护：节点 1 · 目标 1' })).toHaveAttribute(
+      'href',
+      '/events?maintenance_only=1',
+    )
     expect(screen.getByRole('heading', { name: '维护观察' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '维护观察中' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '当前需要处理' })).not.toBeInTheDocument()
@@ -317,12 +312,7 @@ describe('DashboardPage', () => {
       'href',
       '/events?maintenance_only=1',
     )
-    const summary = screen.getByLabelText('Dashboard 摘要指标')
-    expect(within(summary).getAllByRole('link')).toHaveLength(4)
-    expect(within(summary).getByRole('link', { name: '维护：节点 1 · 目标 1' })).toHaveAttribute(
-      'href',
-      '/events?maintenance_only=1',
-    )
+    expect(screen.queryByLabelText('Dashboard 摘要指标')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '管理入口' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '系统快捷入口' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Group 摘要' })).not.toBeInTheDocument()
@@ -355,16 +345,17 @@ describe('DashboardPage', () => {
     expect(screen.getByText('当前没有活跃异常；最近 24h 新增 0 次异常，恢复 0 次。')).toBeInTheDocument()
     const fleetActions = screen.getByLabelText('首页主要入口')
     expect(within(fleetActions).getByRole('link', { name: '查看节点' })).toHaveAttribute('href', '/nodes')
-    const summary = screen.getByLabelText('Dashboard 摘要指标')
-    expect(within(summary).getAllByRole('link')).toHaveLength(4)
-    expect(within(summary).getByRole('link', { name: '节点：待接入 0 · 暂停 0 · 退役 0' })).toHaveAttribute(
+    const keyMetrics = screen.getByLabelText('关键状态指标')
+    expect(within(keyMetrics).getAllByRole('link')).toHaveLength(4)
+    expect(within(keyMetrics).getByRole('link', { name: '节点：待接入 0 · 暂停 0 · 退役 0' })).toHaveAttribute(
       'href',
       '/nodes',
     )
-    expect(within(summary).getByRole('link', { name: '目标：异常 0 · 暂停 0 · 归档 0' })).toHaveAttribute(
+    expect(within(keyMetrics).getByRole('link', { name: '目标：异常 0 · 暂停 0 · 归档 0' })).toHaveAttribute(
       'href',
       '/targets',
     )
+    expect(screen.queryByLabelText('Dashboard 摘要指标')).not.toBeInTheDocument()
 
     expect(screen.getByRole('heading', { name: '运行概览' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前没有活跃异常' })).toBeInTheDocument()
@@ -437,6 +428,7 @@ describe('DashboardPage', () => {
     expect(within(onboardingSection).getByRole('heading', { name: '添加 ProbeItem' })).toBeInTheDocument()
     expect(within(onboardingSection).getByRole('link', { name: '添加 ProbeItem' })).toHaveAttribute('href', '/targets')
 
+    expect(screen.queryByLabelText('关键状态指标')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Dashboard 摘要指标')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('系统全局指标')).not.toBeInTheDocument()
     expect(screen.queryByText('已加载 /api/dashboard')).not.toBeInTheDocument()
@@ -492,11 +484,11 @@ describe('DashboardPage', () => {
       expect(screen.getByRole('heading', { name: '首页不可用' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('Fleet State')).toBeInTheDocument()
+    expect(screen.getByText('Dashboard')).toBeInTheDocument()
     expect(screen.getByText('dashboard unavailable')).toBeInTheDocument()
   })
 
-  it('navigates to node and target detail pages from the unified attention queue rows', async () => {
+  it('uses links for node and target detail navigation from the unified attention queue', async () => {
     renderWithDashboard(
       baseOverview({
         abnormal_node_count: 1,
@@ -538,18 +530,17 @@ describe('DashboardPage', () => {
 
     await waitFor(() => expect(screen.getByText('Singapore Edge')).toBeInTheDocument())
 
-    const nodeRow = screen.getByText('Singapore Edge').closest('tr')
-    expect(nodeRow).not.toBeNull()
-    fireEvent.click(nodeRow as HTMLElement)
-    expect(navigateMock).toHaveBeenCalledWith('/nodes/nd_077')
-
-    const targetRow = screen.getByText('Payments API').closest('tr')
-    expect(targetRow).not.toBeNull()
-    fireEvent.click(targetRow as HTMLElement)
-    expect(navigateMock).toHaveBeenCalledWith('/targets/tg_555')
+    expect(screen.getByRole('link', { name: '进入节点 Singapore Edge' })).toHaveAttribute(
+      'href',
+      '/nodes/nd_077',
+    )
+    expect(screen.getByRole('link', { name: '进入目标 Payments API' })).toHaveAttribute(
+      'href',
+      '/targets/tg_555',
+    )
   })
 
-  it('does not trigger row navigation when an attention queue action link is clicked', async () => {
+  it('keeps secondary attention queue action links as direct detail links', async () => {
     renderWithDashboard(
       baseOverview({
         abnormal_node_count: 1,
@@ -574,11 +565,13 @@ describe('DashboardPage', () => {
 
     await waitFor(() => expect(screen.getByText('Taipei Edge')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('link', { name: '查看节点 Taipei Edge' }))
-    expect(navigateMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('link', { name: '查看节点 Taipei Edge' })).toHaveAttribute(
+      'href',
+      '/nodes/nd_088',
+    )
   })
 
-  it('does not trigger row keyboard navigation when an attention queue action link handles Enter', async () => {
+  it('keeps target attention queue action links as direct detail links', async () => {
     renderWithDashboard(
       baseOverview({
         abnormal_target_count: 1,
@@ -603,7 +596,9 @@ describe('DashboardPage', () => {
 
     await waitFor(() => expect(screen.getByText('Status API')).toBeInTheDocument())
 
-    fireEvent.keyDown(screen.getByRole('link', { name: '查看目标 Status API' }), { key: 'Enter' })
-    expect(navigateMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('link', { name: '查看目标 Status API' })).toHaveAttribute(
+      'href',
+      '/targets/tg_909',
+    )
   })
 })

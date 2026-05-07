@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web layer overview and current visual authority for Dashboard work."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "React component structure, accessibility, and page/component layering rules."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard contract facts are a pool, not a display checklist; preserve supported deep links."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Dashboard CSS must use existing tokens, BEM, density, and theme constraints."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required tests, lint, build, and user-visible UI verification expectations."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing atoms and avoid new duplicated card/table patterns when simplifying."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Keep this task frontend-only and avoid implying backend contract changes."}
+{"file": ".trellis/tasks/05-07-dashboard-visual-audit-polish/research/visual-audit.md", "reason": "Current visual findings and concrete implementation constraints for this iteration."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-decision-simplification/prd.md", "reason": "Previous iteration and the remaining shape that still needs correction."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-deep-links-url-state/prd.md", "reason": "PR4 filtered deep link contract must remain intact."}

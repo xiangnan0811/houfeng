@@ -46,8 +46,8 @@
 ### Dashboard 数据可信度
 
 - `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实，并且**不得默认展示所有 contract 字段**。当前可用事实来自 `DashboardOverview`：dashboard 生成时间、总节点/目标数、异常/严重/维护计数、库存完整度计数、24h 新异常/恢复趋势、真实全量 `group_summaries`、通知配置布尔摘要、异常节点/目标摘要、最近事件；这些字段是可用事实池，不是首页全部展示清单。
-- Dashboard 首屏按状态做渐进披露：异常态只展示紧凑状态栏、最多 4 个摘要 chip、异常处理队列和队列相关深链；正常 / 维护态展示运行概览与紧凑管理入口；首次接入态只展示 onboarding。不要为了“contract 已返回”而渲染 API loaded facts、5-card KPI strip、`系统快捷入口` 详情列表、`Group 摘要` 列表或 `最近事件摘要` 列表。
-- `snapshot_generated_at` 只能写成 `生成时间`、`Dashboard 摘要` 这类接口生成时间提示。它不是 Center health、agent heartbeat、sync freshness 或全链路实时性证明，不要写 `中心运行正常` / `同步于` / `健康检查通过` 之类文案。
+- Dashboard 首屏按状态做渐进披露：异常态只展示紧凑状态栏、内联关键指标、异常处理队列和队列相关深链；正常 / 维护态展示运行概览与紧凑管理入口；首次接入态只展示 onboarding。不要为了“contract 已返回”而渲染 API loaded facts、独立 KPI/summary strip、`系统快捷入口` 详情列表、`Group 摘要` 列表或 `最近事件摘要` 列表。
+- `snapshot_generated_at` 只能写成 `生成时间`、`摘要生成` 这类接口生成时间提示。它不是 Center health、agent heartbeat、sync freshness 或全链路实时性证明，不要写 `中心运行正常` / `同步于` / `健康检查通过` 之类文案。
 - `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。`group_summaries` 必须来自后端全量聚合，但它默认不在 Dashboard 首屏展开；如果未来重新展示 Group 上下文，必须保持轻量、服务当前状态决策，数组为空时只显示轻量说明，不在前端制造 `未分组 0` 行。
 - `recent_events` 默认不在 Dashboard 首屏展开成事件列表。Dashboard 只保留 `查看事件流` / `/events?time_range=24h` 这类入口；复杂历史筛选、事件列表和上下文展开交给 EventsPage。
 - `notification_status` 只能展示配置布尔摘要，例如 Telegram / Feishu 是否已配置、Telegram runtime apply 是否生效。前端不得要求或展示 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url` 等敏感配置值；需要编辑真实配置时跳转 SettingsPage。
@@ -75,9 +75,9 @@ overview.notification_status.telegram_bot_token
 <RecentEventsContext events={overview.recent_events} />
 
 // 正确：只展示支撑当前决策路径的 dashboard contract 事实
-<DashboardSummaryChip label="异常对象" value={abnormalTotal} to="/nodes?abnormal=1" />
+<DashboardInlineMetric label="异常对象" value={abnormalTotal} to="/nodes?abnormal=1" />
 <DashboardWorkbench title="当前需要处理" attentionItems={attentionItems} />
-<span>Dashboard 摘要 <Timestamp value={overview.snapshot_generated_at} /></span>
+<span>摘要生成 <Timestamp value={overview.snapshot_generated_at} /></span>
 <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
 ```
 
@@ -124,7 +124,7 @@ overview.notification_status.telegram_bot_token
 - Go store test: 新计数字段、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary。
 - Go handler test: 新字段 JSON snake_case，且不泄露敏感通知字段。
 - Frontend type/API fixture: `DashboardOverview` fixture 覆盖新增字段。
-- DashboardPage test: 生成时间、PR4 深链、异常处理队列、库存完整度 / 通知配置在紧凑入口中的呈现，以及异常态 / 首次接入态不展开 KPI strip、Group、最近事件、API facts。
+- DashboardPage test: 生成时间、PR4 深链、异常处理队列、库存完整度 / 通知配置在内联关键指标和紧凑入口中的呈现，以及异常态 / 首次接入态不展开独立 summary/KPI strip、Group、最近事件、API facts。
 - AppShell test: 共享 dashboard fixture 与新增 contract 保持兼容。
 
 #### 7. Wrong vs Correct
