@@ -1485,3 +1485,36 @@ Made AppShell and Sidebar status credible by loading existing dashboard summary 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 45: Dashboard contract extension
+
+**Date**: 2026-05-07
+**Task**: Dashboard contract extension
+**Branch**: `main`
+
+### Summary
+
+Extended /api/dashboard with generated snapshot time, inventory completeness counts, full group summaries, and notification status; wired Dashboard UI/types/tests and synced design/spec docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4842bb6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
