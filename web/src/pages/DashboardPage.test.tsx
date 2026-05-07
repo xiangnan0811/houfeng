@@ -70,7 +70,7 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
 function renderWithDashboard(body: unknown, status = 200) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(body, status)))
 
-  render(
+  return render(
     <MemoryRouter>
       <DashboardPage />
     </MemoryRouter>,
@@ -188,8 +188,8 @@ describe('DashboardPage', () => {
       screen.getByText('2 个对象异常，其中 1 个严重；最近 24h 新增 4 次异常，恢复 1 次。'),
     ).toBeInTheDocument()
     const fleetActions = screen.getByLabelText('首页主要入口')
-    expect(within(fleetActions).getByRole('link', { name: '查看当前异常' })).toHaveAttribute('href', '/events')
-    expect(within(fleetActions).getByRole('link', { name: '查看事件流' })).toHaveAttribute('href', '/events')
+    expect(within(fleetActions).getByRole('link', { name: '查看当前异常' })).toHaveAttribute('href', '/events?severity=严重')
+    expect(within(fleetActions).getByRole('link', { name: '查看事件流' })).toHaveAttribute('href', '/events?time_range=24h')
     expect(within(fleetActions).getByRole('link', { name: '进入设置' })).toHaveAttribute('href', '/settings')
     expect(screen.getByText('已加载 /api/dashboard')).toBeInTheDocument()
     expect(screen.getByText('Dashboard 摘要')).toBeInTheDocument()
@@ -197,11 +197,11 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('接口暂未提供')).not.toBeInTheDocument()
 
     const kpiStrip = screen.getByLabelText('系统全局指标')
-    expect(within(kpiStrip).getByRole('link', { name: '节点：1 个异常' })).toHaveAttribute('href', '/nodes')
-    expect(within(kpiStrip).getByRole('link', { name: '目标：1 个异常' })).toHaveAttribute('href', '/targets')
-    expect(within(kpiStrip).getByRole('link', { name: '严重：节点 0 · 目标 1' })).toHaveAttribute('href', '/events')
-    expect(within(kpiStrip).getByRole('link', { name: '维护：节点 1 · 目标 0' })).toHaveAttribute('href', '/nodes')
-    expect(within(kpiStrip).getByRole('link', { name: '24h 变化：新增异常 / 恢复' })).toHaveAttribute('href', '/events')
+    expect(within(kpiStrip).getByRole('link', { name: '节点：1 个异常' })).toHaveAttribute('href', '/nodes?abnormal=1')
+    expect(within(kpiStrip).getByRole('link', { name: '目标：1 个异常' })).toHaveAttribute('href', '/targets?abnormal=1')
+    expect(within(kpiStrip).getByRole('link', { name: '严重：节点 0 · 目标 1' })).toHaveAttribute('href', '/events?severity=严重')
+    expect(within(kpiStrip).getByRole('link', { name: '维护：节点 1 · 目标 0' })).toHaveAttribute('href', '/events?maintenance_only=1')
+    expect(within(kpiStrip).getByRole('link', { name: '24h 变化：新增异常 / 恢复' })).toHaveAttribute('href', '/events?time_range=24h')
 
     expect(screen.getByRole('heading', { name: '当前需要处理' })).toBeInTheDocument()
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
@@ -210,13 +210,15 @@ describe('DashboardPage', () => {
     expect(screen.getByText('blog.example.com:443')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看节点 Tokyo Edge' })).toHaveAttribute('href', '/nodes/nd_001')
     expect(screen.getByRole('link', { name: '查看目标 Blog' })).toHaveAttribute('href', '/targets/tg_001')
-    expect(screen.getByRole('link', { name: '查看全部异常节点' })).toHaveAttribute('href', '/nodes')
-    expect(screen.getByRole('link', { name: '查看全部异常目标' })).toHaveAttribute('href', '/targets')
+    const attentionSection = screen.getByRole('heading', { name: '当前需要处理' }).closest('section') as HTMLElement
+    expect(within(attentionSection).getByRole('link', { name: '查看全部异常节点' })).toHaveAttribute('href', '/nodes?abnormal=1')
+    expect(within(attentionSection).getByRole('link', { name: '查看全部异常目标' })).toHaveAttribute('href', '/targets?abnormal=1')
+    expect(within(attentionSection).getByRole('link', { name: '查看事件流' })).toHaveAttribute('href', '/events?time_range=24h')
 
     expect(screen.getByRole('heading', { name: '系统入口' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /管理服务器、agent 接入、维护与暂停/ })).toHaveAttribute('href', '/nodes')
-    expect(screen.getByRole('link', { name: /管理观测目标、ProbeItem 与运行状态/ })).toHaveAttribute('href', '/targets')
-    expect(screen.getByRole('link', { name: /查看异常开始、升级、恢复与维护历史/ })).toHaveAttribute('href', '/events')
+    expect(screen.getByRole('link', { name: /管理服务器、agent 接入、维护与暂停/ })).toHaveAttribute('href', '/nodes?onboarding=pending')
+    expect(screen.getByRole('link', { name: /管理观测目标、ProbeItem 与运行状态/ })).toHaveAttribute('href', '/targets?abnormal=1')
+    expect(screen.getByRole('link', { name: /查看异常开始、升级、恢复与维护历史/ })).toHaveAttribute('href', '/events?time_range=24h')
     expect(screen.getByRole('link', { name: /进入通知、阈值、频率与保留策略配置/ })).toHaveAttribute('href', '/settings')
     expect(screen.getByRole('link', { name: /管理服务器、agent 接入、维护与暂停/ })).toHaveTextContent('待接入 2 · 暂停 1 · 退役 1')
     expect(screen.getByRole('link', { name: /管理观测目标、ProbeItem 与运行状态/ })).toHaveTextContent('暂停 1 · 归档 1 · 异常 1')
@@ -230,7 +232,7 @@ describe('DashboardPage', () => {
     expect(groupSection).toHaveTextContent('节点 1 · 目标 1')
 
     expect(screen.getAllByText('HTTPS 探测连续失败').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByRole('link', { name: '查看全部事件' })).toHaveAttribute('href', '/events')
+    expect(screen.getByRole('link', { name: '查看全部事件' })).toHaveAttribute('href', '/events?time_range=24h')
   })
 
   it('renders abnormal-but-not-severe fleet state', async () => {
@@ -263,7 +265,25 @@ describe('DashboardPage', () => {
     )
 
     expect(screen.getByText('1 个对象需要关注；最近 24h 新增 1 次异常，恢复 0 次。')).toBeInTheDocument()
+    const fleetActions = screen.getByLabelText('首页主要入口')
+    expect(within(fleetActions).getByRole('link', { name: '查看当前异常' })).toHaveAttribute('href', '/events?time_range=24h')
     expect(screen.getByText('Osaka Edge')).toBeInTheDocument()
+  })
+
+  it('routes maintenance fleet state to maintenance event filters', async () => {
+    renderWithDashboard(
+      baseOverview({
+        maintenance_node_count: 1,
+        maintenance_target_count: 1,
+      }),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '系统处于维护观察中' })).toBeInTheDocument(),
+    )
+
+    const fleetActions = screen.getByLabelText('首页主要入口')
+    expect(within(fleetActions).getByRole('link', { name: '查看维护事件' })).toHaveAttribute('href', '/events?maintenance_only=1')
   })
 
   it('renders normal fleet state with an empty attention queue', async () => {
@@ -290,7 +310,11 @@ describe('DashboardPage', () => {
     )
 
     expect(screen.getByText('当前没有活跃异常；最近 24h 新增 0 次异常，恢复 0 次。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看节点' })).toHaveAttribute('href', '/nodes')
+    const fleetActions = screen.getByLabelText('首页主要入口')
+    expect(within(fleetActions).getByRole('link', { name: '查看节点' })).toHaveAttribute('href', '/nodes')
+    const kpiStrip = screen.getByLabelText('系统全局指标')
+    expect(within(kpiStrip).getByRole('link', { name: '节点：0 个异常' })).toHaveAttribute('href', '/nodes')
+    expect(within(kpiStrip).getByRole('link', { name: '目标：0 个异常' })).toHaveAttribute('href', '/targets')
     expect(screen.getByRole('heading', { name: '当前没有活跃异常' })).toBeInTheDocument()
     expect(screen.getByText(/处理队列为空/)).toBeInTheDocument()
     expect(screen.getByText('CPU 使用率恢复')).toBeInTheDocument()
@@ -315,12 +339,53 @@ describe('DashboardPage', () => {
     const fleetActions = screen.getByLabelText('首页主要入口')
     expect(within(fleetActions).getByRole('link', { name: '创建第一个节点' })).toHaveAttribute('href', '/nodes')
     expect(screen.getByRole('heading', { name: '首次接入工作台' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '创建节点' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '接入 agent' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '创建目标' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '添加 ProbeItem' })).toBeInTheDocument()
+    const onboardingSection = screen.getByRole('heading', { name: '首次接入工作台' }).closest('section') as HTMLElement
+    expect(within(onboardingSection).getByRole('heading', { name: '创建节点' })).toBeInTheDocument()
+    expect(within(onboardingSection).getByRole('link', { name: '创建第一个节点' })).toHaveAttribute('href', '/nodes')
+    expect(within(onboardingSection).getByRole('heading', { name: '接入 agent' })).toBeInTheDocument()
+    expect(within(onboardingSection).getByRole('link', { name: '查看节点接入' })).toHaveAttribute('href', '/nodes?onboarding=pending')
+    expect(within(onboardingSection).getByRole('heading', { name: '创建目标' })).toBeInTheDocument()
+    expect(within(onboardingSection).getByRole('link', { name: '创建第一个目标' })).toHaveAttribute('href', '/targets')
+    expect(within(onboardingSection).getByRole('heading', { name: '添加 ProbeItem' })).toBeInTheDocument()
+    expect(within(onboardingSection).getByRole('link', { name: '添加 ProbeItem' })).toHaveAttribute('href', '/targets')
     expect(screen.queryByRole('heading', { name: '当前需要处理' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '暂无 Group 分布' })).toBeInTheDocument()
+  })
+
+  it('uses dashboard system entry priority to route inventory states to filtered lists', async () => {
+    const systemEntryLinks = async (overrides: Record<string, unknown>) => {
+      const rendered = renderWithDashboard(baseOverview(overrides))
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: '系统入口' })).toBeInTheDocument(),
+      )
+
+      const nodeEntry = screen.getByRole('link', { name: /管理服务器、agent 接入、维护与暂停/ })
+      const targetEntry = screen.getByRole('link', { name: /管理观测目标、ProbeItem 与运行状态/ })
+      const result = {
+        nodeHref: nodeEntry.getAttribute('href'),
+        targetHref: targetEntry.getAttribute('href'),
+      }
+
+      rendered.unmount()
+      vi.restoreAllMocks()
+      return result
+    }
+
+    await expect(systemEntryLinks({ pending_onboarding_node_count: 1 })).resolves.toEqual({
+      nodeHref: '/nodes?onboarding=pending',
+      targetHref: '/targets',
+    })
+
+    await expect(systemEntryLinks({ paused_node_count: 1, paused_target_count: 1 })).resolves.toEqual({
+      nodeHref: '/nodes?run_status=暂停',
+      targetHref: '/targets?run_status=暂停',
+    })
+
+    await expect(systemEntryLinks({ retired_node_count: 1, archived_target_count: 1 })).resolves.toEqual({
+      nodeHref: '/nodes?lifecycle=已退役',
+      targetHref: '/targets?run_status=已归档',
+    })
   })
 
   it('renders an explicit error state when the dashboard request fails', async () => {

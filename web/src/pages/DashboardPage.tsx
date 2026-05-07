@@ -59,6 +59,21 @@ type AttentionItem = {
 }
 
 const SEVERITY_RANK = ['严重', '告警', '关注', '维护中', '正常'] as const
+const DASHBOARD_LINKS = {
+  eventsSevere: '/events?severity=严重',
+  events24h: '/events?time_range=24h',
+  eventsMaintenance: '/events?maintenance_only=1',
+  nodes: '/nodes',
+  nodesAbnormal: '/nodes?abnormal=1',
+  nodesPendingOnboarding: '/nodes?onboarding=pending',
+  nodesPaused: '/nodes?run_status=暂停',
+  nodesRetired: '/nodes?lifecycle=已退役',
+  targets: '/targets',
+  targetsAbnormal: '/targets?abnormal=1',
+  targetsPaused: '/targets?run_status=暂停',
+  targetsArchived: '/targets?run_status=已归档',
+  settings: '/settings',
+} as const
 
 function severityWeight(value: string): number {
   const idx = (SEVERITY_RANK as readonly string[]).indexOf(value)
@@ -110,6 +125,20 @@ function notificationSummary(overview: DashboardOverview) {
   return `通知通道 ${configuredCount}/2 已配置：${channels.join('、')}${runtime}`
 }
 
+function nodeEntryLink(overview: DashboardOverview) {
+  if (overview.pending_onboarding_node_count > 0) return DASHBOARD_LINKS.nodesPendingOnboarding
+  if (overview.paused_node_count > 0) return DASHBOARD_LINKS.nodesPaused
+  if (overview.retired_node_count > 0) return DASHBOARD_LINKS.nodesRetired
+  return DASHBOARD_LINKS.nodes
+}
+
+function targetEntryLink(overview: DashboardOverview) {
+  if (overview.abnormal_target_count > 0) return DASHBOARD_LINKS.targetsAbnormal
+  if (overview.paused_target_count > 0) return DASHBOARD_LINKS.targetsPaused
+  if (overview.archived_target_count > 0) return DASHBOARD_LINKS.targetsArchived
+  return DASHBOARD_LINKS.targets
+}
+
 function buildFleetState(
   overview: DashboardOverview,
   abnormalTotal: number,
@@ -124,7 +153,7 @@ function buildFleetState(
       title: '开始接入第一台服务器',
       description: '候风还没有节点与目标。先创建节点并接入 agent，再创建观测目标与 ProbeItem。',
       tone: 'notice',
-      primaryCta: { label: '创建第一个节点', to: '/nodes' },
+      primaryCta: { label: '创建第一个节点', to: DASHBOARD_LINKS.nodes },
     }
   }
 
@@ -133,7 +162,7 @@ function buildFleetState(
       title: '需要处理严重异常',
       description: `${abnormalTotal} 个对象异常，其中 ${severeTotal} 个严重；${recentSummary}`,
       tone: 'critical',
-      primaryCta: { label: '查看当前异常', to: '/events' },
+      primaryCta: { label: '查看当前异常', to: DASHBOARD_LINKS.eventsSevere },
     }
   }
 
@@ -142,7 +171,7 @@ function buildFleetState(
       title: '存在活跃异常',
       description: `${abnormalTotal} 个对象需要关注；${recentSummary}`,
       tone: 'alert',
-      primaryCta: { label: '查看当前异常', to: '/events' },
+      primaryCta: { label: '查看当前异常', to: DASHBOARD_LINKS.events24h },
     }
   }
 
@@ -151,7 +180,7 @@ function buildFleetState(
       title: '系统处于维护观察中',
       description: `${maintenanceTotal} 个对象处于维护相关状态；${recentSummary}`,
       tone: 'maintenance',
-      primaryCta: { label: '查看节点', to: '/nodes' },
+      primaryCta: { label: '查看维护事件', to: DASHBOARD_LINKS.eventsMaintenance },
     }
   }
 
@@ -159,7 +188,7 @@ function buildFleetState(
     title: '系统运行正常',
     description: `当前没有活跃异常；${recentSummary}`,
     tone: 'normal',
-    primaryCta: { label: '查看节点', to: '/nodes' },
+    primaryCta: { label: '查看节点', to: DASHBOARD_LINKS.nodes },
   }
 }
 
@@ -225,10 +254,10 @@ function FleetStatePanel({
             <Link className="btn btn--primary btn--md" to={fleetState.primaryCta.to}>
               {fleetState.primaryCta.label}
             </Link>
-            <Link className="btn btn--secondary btn--md" to="/events">
+            <Link className="btn btn--secondary btn--md" to={DASHBOARD_LINKS.events24h}>
               查看事件流
             </Link>
-            <Link className="btn btn--ghost btn--md" to="/settings">
+            <Link className="btn btn--ghost btn--md" to={DASHBOARD_LINKS.settings}>
               进入设置
             </Link>
           </div>
@@ -324,35 +353,35 @@ function GlobalKpiStrip({
         label="节点"
         value={overview.total_node_count}
         description={`${overview.abnormal_node_count} 个异常`}
-        to="/nodes"
+        to={overview.abnormal_node_count > 0 ? DASHBOARD_LINKS.nodesAbnormal : DASHBOARD_LINKS.nodes}
         tone={overview.abnormal_node_count > 0 ? 'alert' : 'normal'}
       />
       <KpiLink
         label="目标"
         value={overview.total_target_count}
         description={`${overview.abnormal_target_count} 个异常`}
-        to="/targets"
+        to={overview.abnormal_target_count > 0 ? DASHBOARD_LINKS.targetsAbnormal : DASHBOARD_LINKS.targets}
         tone={overview.abnormal_target_count > 0 ? 'alert' : 'normal'}
       />
       <KpiLink
         label="严重"
         value={severeTotal}
         description={`节点 ${overview.severe_node_count} · 目标 ${overview.severe_target_count}`}
-        to="/events"
+        to={DASHBOARD_LINKS.eventsSevere}
         tone={severeTone}
       />
       <KpiLink
         label="维护"
         value={maintenanceTotal}
         description={`节点 ${overview.maintenance_node_count} · 目标 ${overview.maintenance_target_count}`}
-        to="/nodes"
+        to={DASHBOARD_LINKS.eventsMaintenance}
         tone={maintenanceTone}
       />
       <KpiLink
         label="24h 变化"
         value={changeValue}
         description="新增异常 / 恢复"
-        to="/events"
+        to={DASHBOARD_LINKS.events24h}
         trend={overview.new_incident_trend_24h?.length ? overview.new_incident_trend_24h : overview.recovery_trend_24h}
         trendTone={overview.recent_new_incident_count > 0 ? 'critical' : 'normal'}
       />
@@ -459,13 +488,13 @@ function AttentionQueue({
       ribbon={items.length > 0 ? 'alert' : 'normal'}
       aside={
         <div className="dashboard-section-actions">
-          <Link className="text-link" to="/nodes">
+          <Link className="text-link" to={DASHBOARD_LINKS.nodesAbnormal}>
             查看全部异常节点
           </Link>
-          <Link className="text-link" to="/targets">
+          <Link className="text-link" to={DASHBOARD_LINKS.targetsAbnormal}>
             查看全部异常目标
           </Link>
-          <Link className="text-link" to="/events">
+          <Link className="text-link" to={DASHBOARD_LINKS.events24h}>
             查看事件流
           </Link>
         </div>
@@ -501,7 +530,7 @@ function SystemEntryPoints({
     {
       title: '节点',
       description: '管理服务器、agent 接入、维护与暂停。',
-      to: '/nodes',
+      to: nodeEntryLink(overview),
       stat: (
         <>
           待接入 <MonoDigits>{overview.pending_onboarding_node_count}</MonoDigits> · 暂停{' '}
@@ -513,7 +542,7 @@ function SystemEntryPoints({
     {
       title: '目标',
       description: '管理观测目标、ProbeItem 与运行状态。',
-      to: '/targets',
+      to: targetEntryLink(overview),
       stat: (
         <>
           暂停 <MonoDigits>{overview.paused_target_count}</MonoDigits> · 归档{' '}
@@ -525,7 +554,7 @@ function SystemEntryPoints({
     {
       title: '事件',
       description: '查看异常开始、升级、恢复与维护历史。',
-      to: '/events',
+      to: DASHBOARD_LINKS.events24h,
       stat: (
         <>
           24h 新增 <MonoDigits>{overview.recent_new_incident_count}</MonoDigits> · 恢复{' '}
@@ -536,7 +565,7 @@ function SystemEntryPoints({
     {
       title: '设置',
       description: '进入通知、阈值、频率与保留策略配置。',
-      to: '/settings',
+      to: DASHBOARD_LINKS.settings,
       stat: notificationSummary(overview),
     },
   ]
@@ -638,25 +667,25 @@ function OnboardingWorkbench() {
     {
       title: '创建节点',
       description: '登记第一台服务器。',
-      to: '/nodes',
+      to: DASHBOARD_LINKS.nodes,
       cta: '创建第一个节点',
     },
     {
       title: '接入 agent',
       description: '进入节点详情完成 agent 接入。',
-      to: '/nodes',
+      to: DASHBOARD_LINKS.nodesPendingOnboarding,
       cta: '查看节点接入',
     },
     {
       title: '创建目标',
       description: '添加需要观测的服务或端口。',
-      to: '/targets',
+      to: DASHBOARD_LINKS.targets,
       cta: '创建第一个目标',
     },
     {
       title: '添加 ProbeItem',
       description: '在目标详情中补齐探测项。',
-      to: '/targets',
+      to: DASHBOARD_LINKS.targets,
       cta: '添加 ProbeItem',
     },
   ]
@@ -767,7 +796,7 @@ export function DashboardPage() {
         eyebrow="Recent Events"
         title="最近事件"
         aside={
-          <Link className="text-link" to="/events">
+          <Link className="text-link" to={DASHBOARD_LINKS.events24h}>
             查看全部事件
           </Link>
         }
