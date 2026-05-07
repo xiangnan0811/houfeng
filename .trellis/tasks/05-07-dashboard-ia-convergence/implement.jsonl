@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web layer overview and required conventions before editing Dashboard UI."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Component composition, accessibility, and interaction conventions for React pages."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard must preserve API-derived facts and URL-state deep link contracts."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Dashboard IA refactor requires CSS changes using existing tokens and BEM patterns."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Testing and verification expectations for web changes."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Refactor should reuse existing atoms, DetailSection, EventList, and filter/link patterns instead of inventing a new UI system."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Ensure frontend-only IA changes do not imply unsupported backend facts."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-dashboard-and-system-navigation-redesign/prd.md", "reason": "Previous Dashboard PRD explains current structure and the user goals this task must correct."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-deep-links-url-state/prd.md", "reason": "PR4 deep link contract must remain intact while rearranging Dashboard UI."}
