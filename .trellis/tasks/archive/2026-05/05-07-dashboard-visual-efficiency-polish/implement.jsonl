@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Dashboard component structure and page composition rules"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Dashboard CSS token/BEM/visual authority rules"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard contract and information disclosure constraints"}
+{"file": ".trellis/tasks/05-07-dashboard-visual-efficiency-polish/research/comparable-dashboard-patterns.md", "reason": "Comparable dashboard patterns and current UI audit"}
