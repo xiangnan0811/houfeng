@@ -480,7 +480,7 @@ function FleetStatePanel({
         <h1 className="dashboard-status-bar__title">{fleetState.title}</h1>
         <p className="dashboard-status-bar__description">{fleetState.description}</p>
         <div className="dashboard-status-bar__meta">
-          <span>
+          <span className="dashboard-status-bar__generated">
             摘要生成 <Timestamp value={overview.snapshot_generated_at} mode="absolute" />
           </span>
           {metrics.length > 0 ? (
@@ -531,7 +531,7 @@ function AttentionQueue({
   return (
     <div className="dashboard-attention" aria-label="异常处理队列">
       <div className="dashboard-attention-list">
-        {visibleItems.map((item) => (
+        {visibleItems.map((item, index) => (
           <article
             className={`dashboard-attention-item dashboard-attention-item--${statusTone(item.health)}`}
             key={`${item.kind}-${item.id}`}
@@ -542,6 +542,9 @@ function AttentionQueue({
               aria-label={`进入${item.kind === 'node' ? '节点' : '目标'} ${item.name}`}
             >
               <div className="dashboard-attention-item__status">
+                <span className="dashboard-attention-item__rank">
+                  P<MonoDigits>{index + 1}</MonoDigits>
+                </span>
                 <StatusGlyph
                   state={statusGlyph(item.health)}
                   size="md"
@@ -562,6 +565,7 @@ function AttentionQueue({
                 <Badge variant="state" tone={statusTone(item.health)} withDot>
                   {item.health}
                 </Badge>
+                <span className="dashboard-attention-item__issue-label">当前问题</span>
                 <p>
                   <MonoDigits>{item.incidentCount}</MonoDigits> {item.issueSummary}
                 </p>
@@ -574,7 +578,7 @@ function AttentionQueue({
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
             >
-              进入
+              处理
             </Link>
           </article>
         ))}
@@ -628,8 +632,11 @@ function ManagementEntries({ overview }: { overview: DashboardOverview }) {
             key={entry.title}
             aria-label={`${entry.title}：${entry.stat}`}
           >
-            <span className="dashboard-management-entry__title">{entry.title}</span>
-            <span className="dashboard-management-entry__stat">{entry.stat}</span>
+            <span className="dashboard-management-entry__body">
+              <span className="dashboard-management-entry__title">{entry.title}</span>
+              <span className="dashboard-management-entry__stat">{entry.stat}</span>
+            </span>
+            <span className="dashboard-management-entry__cta">进入</span>
           </Link>
         ))}
       </div>
@@ -725,8 +732,8 @@ function RunningOverview({
           </small>
         </Link>
       </div>
-      <DashboardContextStrip items={contextItems} />
       <ManagementEntries overview={overview} />
+      <DashboardContextStrip items={contextItems} />
     </div>
   )
 }

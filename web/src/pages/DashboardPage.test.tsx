@@ -211,6 +211,11 @@ describe('DashboardPage', () => {
       'href',
       '/nodes/nd_001',
     )
+    const nodeAction = screen.getByRole('link', { name: '查看节点 Tokyo Edge' })
+    expect(nodeAction).toHaveTextContent('处理')
+    const priorityRanks = screen.getAllByText((_, element) => element?.className === 'dashboard-attention-item__rank')
+    expect(priorityRanks.map((element) => element.textContent)).toEqual(['P1', 'P2'])
+    expect(screen.getAllByText('当前问题')).toHaveLength(2)
     expect(screen.getByRole('link', { name: '查看目标 Blog' })).toHaveAttribute(
       'href',
       '/targets/tg_001',
@@ -386,6 +391,7 @@ describe('DashboardPage', () => {
       'href',
       '/nodes',
     )
+    expect(within(management).getAllByText('进入')).toHaveLength(4)
     expect(within(management).getByRole('link', { name: '事件：24h 新增 0 · 恢复 0' })).toHaveAttribute(
       'href',
       '/events?time_range=24h',
