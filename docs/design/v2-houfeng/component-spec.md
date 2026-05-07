@@ -194,11 +194,18 @@ parent: docs/design/v2-houfeng/design-language.md
 ## 五、页面模板
 
 ### DashboardPage
-1. Hero panel：`当前风险总览` eyebrow + `首页 / Dashboard` h1 + 描述
-2. **Stat strip**（5 列等宽，`role="group" aria-label="..."`）：每列 `[label · MonoDigits · TrendArrow]`
-3. DetailSection `异常节点概览`：summary-grid (3 KPI) + 紧凑节点行（StatusGlyph + Hostname + 位置 + 当前问题 + Timestamp）
-4. DetailSection `异常目标概览`：同样模式
-5. DetailSection `最近事件`：EventList timeline
+1. Fleet State hero：动态状态结论作为 h1（`需要处理严重异常` / `存在活跃异常` / `系统处于维护观察中` / `系统运行正常` / `开始接入第一台服务器`），eyebrow `Fleet State`；说明文案必须基于现有 `/api/dashboard` 事实，不声明后端未提供的全量库存或 shell health。
+   - 右侧 facts：`API 已加载 /api/dashboard`、`快照时间 接口暂未提供`、库存总数、当前异常/严重/维护队列计数；这是数据可信度提示，不等同 AppShell SyncStatus。
+   - CTA：主按钮随状态切换（异常态 → `/events`，正常态 → `/nodes`，首次接入 → `/nodes`），次按钮固定 `查看事件流` / `进入设置`。
+2. **Global KPI strip**（5 列等宽 Link 卡）：节点、目标、严重、维护、`24h 变化`。每列含 `[label · MonoDigits · 描述 · 可选 Sparkline]`，点击进入节点/目标/事件页；状态色仅通过底部 2px rail 提示，不把 nav/count 语义染成告警。
+3. DetailSection `当前需要处理`，eyebrow `处理队列`：统一处理队列，合并异常节点与异常目标，按 severity + active incident count 排序。
+   - DataTable 列：`[StatusGlyph, 对象(Hostname + 名字 + freshness Timestamp), 类型(Badge + group/location/type), 状态(Badge state), 当前主问题(MonoDigits count + 摘要), 操作]`。
+   - 行点击进入节点/目标详情；操作列 link `stopPropagation()`；section aside 提供 `查看全部异常节点` / `查看全部异常目标` / `查看事件流`。
+   - 空态：`当前没有活跃异常`，说明处理队列为空并保留最近事件回溯入口。
+4. DetailSection `系统入口`：四个高密度 Link 入口：节点 / 目标 / 事件 / 设置。每个入口只展示现有 `/api/dashboard` 可支撑的状态数字；通知配置、真实 group 分布、shell health 等未接入 contract 前不得展示。
+5. 首次接入时用 DetailSection `首次接入工作台` 替代处理队列：4 步卡片 `[创建节点, 接入 agent, 创建目标, 添加 ProbeItem]`，每步给出具体入口。
+6. DetailSection `最近事件`：复用 EventList timeline，aside 固定 `查看全部事件`。复杂历史筛选仍归 EventsPage，Dashboard 不复制 EventsPage。
+7. 已移除旧 `按 Group 分布` 区：当前 dashboard API 只提供异常对象摘要，不能伪装成全量 group distribution；如需恢复，必须先扩展 `/api/dashboard` 的真实 group summary contract。
 
 ### NodesPage
 1. Section heading + 「新建节点」按钮

@@ -43,6 +43,24 @@
 
 ---
 
+### Dashboard 数据可信度
+
+- `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实。当前可用事实来自 `DashboardOverview`：总节点/目标数、异常/严重/维护计数、24h 新异常/恢复趋势、异常节点/目标摘要、最近事件。
+- `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。需要展示分布时，要么明确命名为“异常对象按 Group”，要么先扩展 center dashboard contract、store 查询、Go 测试与 `web/src/lib/types.ts`。
+- 静态入口可以展示为导航事实，例如 Settings 卡片写“配置入口”；但在 `/api/dashboard` 没有字段前，不要展示通知是否已配置、AppShell health、真实 snapshot 时间、全量库存完整度等状态断言。
+
+```tsx
+// 错误：从异常摘要伪装成全量分布
+const groupSummaries = overview.abnormal_nodes.reduce(...)
+<DetailSection title="按 Group 分布">...</DetailSection>
+
+// 正确：只展示 dashboard contract 支撑的事实，或等待后端扩展
+<KpiLink label="节点" value={overview.total_node_count} description={`${overview.abnormal_node_count} 个异常`} />
+<DetailSection title="当前需要处理">...</DetailSection>
+```
+
+---
+
 ## Page 内数据流：loading / error / empty 三态
 
 标准模式（参考 `web/src/pages/EventsPage.tsx:63-108`）：

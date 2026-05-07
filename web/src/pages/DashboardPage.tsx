@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import {
+  Badge,
   DataTable,
   type DataTableColumn,
   Hostname,
@@ -9,14 +10,19 @@ import {
   Sparkline,
   StatusGlyph,
   Timestamp,
+  type BadgeTone,
   type HealthState,
   type SparklineTone,
 } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
-import { ApiError, getDashboard, listNodeSparklines, listTargetSparklines } from '../lib/api'
-import type { DashboardNodeSummary, DashboardOverview, DashboardTargetSummary, NodeSparklinesResponse, TargetSparklinesResponse } from '../lib/types'
-import { formatPercent } from '../lib/format'
+import { ApiError, getDashboard } from '../lib/api'
+import type {
+  DashboardNodeSummary,
+  DashboardOverview,
+  DashboardTargetSummary,
+  IncidentSeverity,
+} from '../lib/types'
 
 type State = {
   loading: boolean
@@ -24,45 +30,38 @@ type State = {
   overview: DashboardOverview | null
 }
 
-function StatTile({
-  label,
-  value,
-  ariaLabel,
-  trend,
-  trendTone = 'accent',
-  trendAriaLabel,
-}: {
-  label: string
-  value: number | string
-  ariaLabel?: string
-  /** Optional 24-bucket time series. When non-empty renders a Sparkline below the value. */
-  trend?: number[]
-  trendTone?: SparklineTone
-  trendAriaLabel?: string
-}) {
-  return (
-    <article
-      className="summary-card stat-tile"
-      role="group"
-      aria-label={ariaLabel ?? label}
-    >
-      <p className="summary-card__label stat-tile__label">{label}</p>
-      <p className="summary-card__value stat-tile__value">
-        <MonoDigits>{value}</MonoDigits>
-      </p>
-      {trend && trend.length > 0 ? (
-        <div className="stat-tile__trend">
-          <Sparkline
-            values={trend}
-            tone={trendTone}
-            width={120}
-            height={20}
-            ariaLabel={trendAriaLabel ?? `${label} 近 24h 趋势`}
-          />
-        </div>
-      ) : null}
-    </article>
-  )
+type FleetStateTone = 'normal' | 'notice' | 'alert' | 'critical' | 'maintenance'
+
+type FleetState = {
+  title: string
+  description: string
+  tone: FleetStateTone
+  primaryCta: {
+    label: string
+    to: string
+  }
+}
+
+type AttentionItem = {
+  kind: 'node' | 'target'
+  id: string
+  name: string
+  route: string
+  health: IncidentSeverity
+  incidentCount: number
+  issueSummary: string
+  location: string
+  technicalId: string
+  freshnessLabel: string
+  freshnessAt?: string | null
+  meta: string
+}
+
+const SEVERITY_RANK = ['严重', '告警', '关注', '维护中', '正常'] as const
+
+function severityWeight(value: string): number {
+  const idx = (SEVERITY_RANK as readonly string[]).indexOf(value)
+  return idx === -1 ? 999 : idx
 }
 
 function statusGlyph(value: string): HealthState {
@@ -74,312 +73,361 @@ function statusGlyph(value: string): HealthState {
   return 'offline'
 }
 
-const SEVERITY_RANK = ['严重', '告警', '关注', '维护中', '正常'] as const
-function severityWeight(v: string): number {
-  const idx = (SEVERITY_RANK as readonly string[]).indexOf(v)
-  return idx === -1 ? 999 : idx
+function statusTone(value: string): BadgeTone {
+  if (value === '正常') return 'normal'
+  if (value === '关注') return 'notice'
+  if (value === '告警') return 'alert'
+  if (value === '严重') return 'critical'
+  if (value === '维护中') return 'maintenance'
+  return 'offline'
 }
 
 function hostPortSummary(target: DashboardTargetSummary) {
   return typeof target.base_port === 'number' ? `${target.host}:${target.base_port}` : target.host
 }
 
-function AbnormalNodeList({ nodes }: { nodes: DashboardNodeSummary[] }) {
-  const navigate = useNavigate()
-  const [sparklines, setSparklines] = useState<NodeSparklinesResponse | null>(null)
+function nodeLocation(node: DashboardNodeSummary) {
+  return [node.group, node.region, node.city, node.provider].filter(Boolean).join(' · ') || '未标记位置'
+}
 
-  useEffect(() => {
-    if (nodes.length === 0) return
-    let cancelled = false
-    listNodeSparklines(['cpu_usage_pct', 'mem_used_pct', 'disk_used_pct'])
-      .then(data => { if (!cancelled) setSparklines(data) })
-      .catch(() => {}) // silent fail
-    return () => { cancelled = true }
-  }, [nodes.length])
+function targetLocation(target: DashboardTargetSummary) {
+  return [target.group, target.target_type].filter(Boolean).join(' · ') || '未标记分组'
+}
 
-  if (nodes.length === 0) {
-    return (
-      <div className="empty-state">
-        <h3>当前没有异常节点</h3>
-        <p>节点侧暂未发现需要处理的活跃异常。</p>
-      </div>
-    )
+function buildFleetState(
+  overview: DashboardOverview,
+  abnormalTotal: number,
+  severeTotal: number,
+  maintenanceTotal: number,
+  isFreshInstall: boolean,
+): FleetState {
+  const recentSummary = `最近 24h 新增 ${overview.recent_new_incident_count} 次异常，恢复 ${overview.recent_recovery_count} 次。`
+
+  if (isFreshInstall) {
+    return {
+      title: '开始接入第一台服务器',
+      description: '候风还没有节点与目标。先创建节点并接入 agent，再创建观测目标与 ProbeItem。',
+      tone: 'notice',
+      primaryCta: { label: '创建第一个节点', to: '/nodes' },
+    }
   }
 
-  const sorted = [...nodes].sort(
-    (a, b) =>
-      severityWeight(a.current_health_status) - severityWeight(b.current_health_status),
-  )
+  if (severeTotal > 0) {
+    return {
+      title: '需要处理严重异常',
+      description: `${abnormalTotal} 个对象异常，其中 ${severeTotal} 个严重；${recentSummary}`,
+      tone: 'critical',
+      primaryCta: { label: '查看当前异常', to: '/events' },
+    }
+  }
 
-  const columns: DataTableColumn<DashboardNodeSummary>[] = [
-    {
-      key: 'glyph',
-      label: '',
-      width: 32,
-      align: 'center',
-      render: (node) => (
-        <StatusGlyph
-          state={statusGlyph(node.current_health_status)}
-          size="md"
-          ariaLabel={`${node.display_name} 健康 ${node.current_health_status}`}
-        />
-      ),
-    },
-    {
-      key: 'identity',
-      label: '节点',
-      render: (node) => (
-        <div className="dashboard-table__identity">
-          <Hostname truncate maxChars={14} className="dashboard-table__id">
-            {node.node_id}
-          </Hostname>
-          <span className="dashboard-table__display-name">{node.display_name}</span>
-          <span className="dashboard-table__freshness">
-            心跳 <Timestamp value={node.last_heartbeat_at ?? null} mode="relative" />
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: 'location',
-      label: '位置',
-      render: (node) => (
-        <span className="dashboard-table__location">
-          {[node.group, node.region, node.city, node.provider].filter(Boolean).join(' · ') || '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'issue',
-      label: '当前主问题',
-      render: (node) => (
-        <div className="dashboard-table__issue">
-          <MonoDigits className="dashboard-table__issue-count">
-            {node.current_active_incident_count}
-          </MonoDigits>
-          <span className="dashboard-table__issue-summary">
-            {node.current_primary_issue_summary || '暂无关键异常摘要'}
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: 'trends',
-      label: '近 24h',
-      cellClassName: 'dashboard-table__trends',
-      render: (node) => {
-        const series = sparklines?.nodes?.[node.node_id]
-        if (!series) {
-          return <span className="dashboard-table__trends-empty">—</span>
-        }
-        const cpu = series.cpu_usage_pct
-        const mem = series.mem_used_pct
-        const disk = series.disk_used_pct
-        const latestCpu = cpu?.[cpu.length - 1] ?? null
-        const latestMem = mem?.[mem.length - 1] ?? null
-        const latestDisk = disk?.[disk.length - 1] ?? null
+  if (abnormalTotal > 0) {
+    return {
+      title: '存在活跃异常',
+      description: `${abnormalTotal} 个对象需要关注；${recentSummary}`,
+      tone: 'alert',
+      primaryCta: { label: '查看当前异常', to: '/events' },
+    }
+  }
 
-        const cpuTone = !latestCpu ? 'default' : latestCpu >= 95 ? 'critical' : latestCpu >= 80 ? 'alert' : 'accent'
-        const memTone = !latestMem ? 'default' : latestMem >= 95 ? 'critical' : latestMem >= 85 ? 'alert' : 'accent'
-        const diskTone = !latestDisk ? 'default' : latestDisk >= 95 ? 'critical' : latestDisk >= 80 ? 'alert' : 'accent'
+  if (maintenanceTotal > 0) {
+    return {
+      title: '系统处于维护观察中',
+      description: `${maintenanceTotal} 个对象处于维护相关状态；${recentSummary}`,
+      tone: 'maintenance',
+      primaryCta: { label: '查看节点', to: '/nodes' },
+    }
+  }
 
-        return (
-          <span className="dashboard-table__trend-strip">
-            <span className="dashboard-table__trend-item">
-              <span className="dashboard-table__trend-value">
-                {latestCpu != null ? <MonoDigits>{formatPercent(latestCpu)}</MonoDigits> : '—'}
-              </span>
-              {cpu && cpu.length > 0 ? (
-                <Sparkline values={cpu.filter((v): v is number => v != null)} tone={cpuTone} width={64} height={14} />
-              ) : (
-                <span className="dashboard-table__trends-empty">—</span>
-              )}
-            </span>
-            <span className="dashboard-table__trend-item">
-              <span className="dashboard-table__trend-value">
-                {latestMem != null ? <MonoDigits>{formatPercent(latestMem)}</MonoDigits> : '—'}
-              </span>
-              {mem && mem.length > 0 ? (
-                <Sparkline values={mem.filter((v): v is number => v != null)} tone={memTone} width={64} height={14} />
-              ) : (
-                <span className="dashboard-table__trends-empty">—</span>
-              )}
-            </span>
-            <span className="dashboard-table__trend-item">
-              <span className="dashboard-table__trend-value">
-                {latestDisk != null ? <MonoDigits>{formatPercent(latestDisk)}</MonoDigits> : '—'}
-              </span>
-              {disk && disk.length > 0 ? (
-                <Sparkline values={disk.filter((v): v is number => v != null)} tone={diskTone} width={64} height={14} />
-              ) : (
-                <span className="dashboard-table__trends-empty">—</span>
-              )}
-            </span>
-          </span>
-        )
-      },
-    },
-    {
-      key: 'actions',
-      label: '',
-      align: 'right',
-      cellClassName: 'dashboard-table__actions-cell',
-      render: (node) => (
-        <span className="dashboard-table__actions">
-          <Link
-            className="text-link"
-            to={`/nodes/${node.node_id}`}
-            aria-label={`查看节点 ${node.display_name}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            查看节点
-          </Link>
-        </span>
-      ),
-    },
-  ]
+  return {
+    title: '系统运行正常',
+    description: `当前没有活跃异常；${recentSummary}`,
+    tone: 'normal',
+    primaryCta: { label: '查看节点', to: '/nodes' },
+  }
+}
 
+function buildAttentionItems(overview: DashboardOverview): AttentionItem[] {
+  const nodeItems = (overview.abnormal_nodes ?? []).map((node): AttentionItem => ({
+    kind: 'node',
+    id: node.node_id,
+    name: node.display_name,
+    route: `/nodes/${node.node_id}`,
+    health: node.current_health_status,
+    incidentCount: node.current_active_incident_count,
+    issueSummary: node.current_primary_issue_summary || '暂无关键异常摘要',
+    location: nodeLocation(node),
+    technicalId: node.node_id,
+    freshnessLabel: '心跳',
+    freshnessAt: node.last_heartbeat_at ?? null,
+    meta: '服务器节点',
+  }))
+
+  const targetItems = (overview.abnormal_targets ?? []).map((target): AttentionItem => ({
+    kind: 'target',
+    id: target.target_id,
+    name: target.name,
+    route: `/targets/${target.target_id}`,
+    health: target.current_health_status,
+    incidentCount: target.current_active_incident_count,
+    issueSummary: target.current_primary_issue_summary || '暂无关键异常摘要',
+    location: targetLocation(target),
+    technicalId: hostPortSummary(target),
+    freshnessLabel: target.last_failure_at ? '最近失败' : '最近成功',
+    freshnessAt: target.last_failure_at ?? target.last_success_at ?? null,
+    meta: '观测目标',
+  }))
+
+  return [...nodeItems, ...targetItems].sort((a, b) => {
+    const severityDelta = severityWeight(a.health) - severityWeight(b.health)
+    if (severityDelta !== 0) return severityDelta
+    return b.incidentCount - a.incidentCount
+  })
+}
+
+function FleetStatePanel({
+  overview,
+  fleetState,
+  abnormalTotal,
+  severeTotal,
+  maintenanceTotal,
+}: {
+  overview: DashboardOverview
+  fleetState: FleetState
+  abnormalTotal: number
+  severeTotal: number
+  maintenanceTotal: number
+}) {
   return (
-    <DataTable<DashboardNodeSummary>
-      columns={columns}
-      rows={sorted}
-      rowKey={(node) => node.node_id}
-      density="compact"
-      className="dashboard-table"
-      onRowClick={(node) => navigate(`/nodes/${node.node_id}`)}
-    />
+    <section className={`hero-panel dashboard-fleet dashboard-fleet--${fleetState.tone}`}>
+      <div className="dashboard-fleet__content">
+        <div className="dashboard-fleet__main">
+          <p className="hero-panel__eyebrow">Fleet State</p>
+          <h1 className="hero-panel__title">{fleetState.title}</h1>
+          <p className="hero-panel__description">{fleetState.description}</p>
+          <div className="dashboard-fleet__actions" aria-label="首页主要入口">
+            <Link className="btn btn--primary btn--md" to={fleetState.primaryCta.to}>
+              {fleetState.primaryCta.label}
+            </Link>
+            <Link className="btn btn--secondary btn--md" to="/events">
+              查看事件流
+            </Link>
+            <Link className="btn btn--ghost btn--md" to="/settings">
+              进入设置
+            </Link>
+          </div>
+        </div>
+        <dl className="dashboard-fleet__facts" aria-label="首页数据可信度">
+          <div>
+            <dt>API</dt>
+            <dd>已加载 /api/dashboard</dd>
+          </div>
+          <div>
+            <dt>快照时间</dt>
+            <dd>接口暂未提供</dd>
+          </div>
+          <div>
+            <dt>库存</dt>
+            <dd>
+              节点 <MonoDigits>{overview.total_node_count}</MonoDigits> · 目标{' '}
+              <MonoDigits>{overview.total_target_count}</MonoDigits>
+            </dd>
+          </div>
+          <div>
+            <dt>当前队列</dt>
+            <dd>
+              异常 <MonoDigits>{abnormalTotal}</MonoDigits> · 严重{' '}
+              <MonoDigits>{severeTotal}</MonoDigits> · 维护{' '}
+              <MonoDigits>{maintenanceTotal}</MonoDigits>
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </section>
   )
 }
 
-function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) {
-  const navigate = useNavigate()
-  const [sparklines, setSparklines] = useState<TargetSparklinesResponse | null>(null)
-
-  useEffect(() => {
-    if (targets.length === 0) return
-    let cancelled = false
-    listTargetSparklines().then(data => { if (!cancelled) setSparklines(data) }).catch(() => {})
-    return () => { cancelled = true }
-  }, [targets.length])
-
-  if (targets.length === 0) {
-    return (
-      <div className="empty-state">
-        <h3>当前没有异常目标</h3>
-        <p>目标侧暂未发现需要处理的活跃异常。</p>
-      </div>
-    )
-  }
-
-  const sorted = [...targets].sort(
-    (a, b) =>
-      severityWeight(a.current_health_status) - severityWeight(b.current_health_status),
+function KpiLink({
+  label,
+  value,
+  description,
+  to,
+  tone = 'neutral',
+  trend,
+  trendTone = 'accent',
+}: {
+  label: string
+  value: number | string
+  description: string
+  to: string
+  tone?: BadgeTone
+  trend?: number[]
+  trendTone?: SparklineTone
+}) {
+  return (
+    <Link className="dashboard-kpi" to={to} aria-label={`${label}：${description}`}>
+      <span className="dashboard-kpi__label">{label}</span>
+      <span className="dashboard-kpi__value">
+        <MonoDigits>{value}</MonoDigits>
+      </span>
+      <span className="dashboard-kpi__description">{description}</span>
+      {trend && trend.length > 0 ? (
+        <span className="dashboard-kpi__trend">
+          <Sparkline
+            values={trend}
+            tone={trendTone}
+            width={120}
+            height={20}
+            ariaLabel={`${label} 近 24h 趋势`}
+          />
+        </span>
+      ) : null}
+      {tone !== 'neutral' ? <span className={`dashboard-kpi__rail tone--${tone}`} aria-hidden /> : null}
+    </Link>
   )
+}
 
-  const columns: DataTableColumn<DashboardTargetSummary>[] = [
+function GlobalKpiStrip({
+  overview,
+  severeTotal,
+  maintenanceTotal,
+}: {
+  overview: DashboardOverview
+  severeTotal: number
+  maintenanceTotal: number
+}) {
+  const changeValue = `${overview.recent_new_incident_count}/${overview.recent_recovery_count}`
+  const severeTone: BadgeTone = severeTotal > 0 ? 'critical' : 'neutral'
+  const maintenanceTone: BadgeTone = maintenanceTotal > 0 ? 'maintenance' : 'neutral'
+
+  return (
+    <section className="dashboard-kpi-strip" aria-label="系统全局指标">
+      <KpiLink
+        label="节点"
+        value={overview.total_node_count}
+        description={`${overview.abnormal_node_count} 个异常`}
+        to="/nodes"
+        tone={overview.abnormal_node_count > 0 ? 'alert' : 'normal'}
+      />
+      <KpiLink
+        label="目标"
+        value={overview.total_target_count}
+        description={`${overview.abnormal_target_count} 个异常`}
+        to="/targets"
+        tone={overview.abnormal_target_count > 0 ? 'alert' : 'normal'}
+      />
+      <KpiLink
+        label="严重"
+        value={severeTotal}
+        description={`节点 ${overview.severe_node_count} · 目标 ${overview.severe_target_count}`}
+        to="/events"
+        tone={severeTone}
+      />
+      <KpiLink
+        label="维护"
+        value={maintenanceTotal}
+        description={`节点 ${overview.maintenance_node_count} · 目标 ${overview.maintenance_target_count}`}
+        to="/nodes"
+        tone={maintenanceTone}
+      />
+      <KpiLink
+        label="24h 变化"
+        value={changeValue}
+        description="新增异常 / 恢复"
+        to="/events"
+        trend={overview.new_incident_trend_24h?.length ? overview.new_incident_trend_24h : overview.recovery_trend_24h}
+        trendTone={overview.recent_new_incident_count > 0 ? 'critical' : 'normal'}
+      />
+    </section>
+  )
+}
+
+function AttentionQueue({
+  items,
+  recentEventCount,
+}: {
+  items: AttentionItem[]
+  recentEventCount: number
+}) {
+  const navigate = useNavigate()
+
+  const columns: DataTableColumn<AttentionItem>[] = [
     {
       key: 'glyph',
       label: '',
       width: 32,
       align: 'center',
-      render: (target) => (
+      render: (item) => (
         <StatusGlyph
-          state={statusGlyph(target.current_health_status)}
+          state={statusGlyph(item.health)}
           size="md"
-          ariaLabel={`${target.name} 健康 ${target.current_health_status}`}
+          ariaLabel={`${item.name} 健康 ${item.health}`}
         />
       ),
     },
     {
-      key: 'identity',
-      label: '目标',
-      render: (target) => (
+      key: 'object',
+      label: '对象',
+      render: (item) => (
         <div className="dashboard-table__identity">
-          <Hostname className="dashboard-table__id">{hostPortSummary(target)}</Hostname>
-          <span className="dashboard-table__display-name">{target.name}</span>
+          <Hostname truncate maxChars={24} className="dashboard-table__id">
+            {item.technicalId}
+          </Hostname>
+          <span className="dashboard-table__display-name">{item.name}</span>
           <span className="dashboard-table__freshness">
-            最近成功 <Timestamp value={target.last_success_at} mode="relative" />
-            {target.last_failure_at ? <> · 最近失败 <Timestamp value={target.last_failure_at} mode="relative" /></> : null}
+            {item.freshnessLabel} <Timestamp value={item.freshnessAt ?? null} mode="relative" />
           </span>
         </div>
-      ),
-    },
-    {
-      key: 'group',
-      label: 'Group',
-      render: (target) => (
-        <span className="dashboard-table__group">{target.group || '—'}</span>
       ),
     },
     {
       key: 'type',
       label: '类型',
-      render: (target) => (
-        <span className="dashboard-table__type">{target.target_type}</span>
+      render: (item) => (
+        <div className="dashboard-table__stack">
+          <Badge variant="info" tone={item.kind === 'node' ? 'notice' : 'normal'}>
+            {item.meta}
+          </Badge>
+          <span className="dashboard-table__location">{item.location}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'health',
+      label: '状态',
+      render: (item) => (
+        <Badge variant="state" tone={statusTone(item.health)} withDot>
+          {item.health}
+        </Badge>
       ),
     },
     {
       key: 'issue',
       label: '当前主问题',
-      render: (target) => (
+      render: (item) => (
         <div className="dashboard-table__issue">
           <MonoDigits className="dashboard-table__issue-count">
-            {target.current_active_incident_count}
+            {item.incidentCount}
           </MonoDigits>
-          <span className="dashboard-table__issue-summary">
-            {target.current_primary_issue_summary || '暂无关键异常摘要'}
-          </span>
+          <span className="dashboard-table__issue-summary">{item.issueSummary}</span>
         </div>
       ),
-    },
-    {
-      key: 'trends',
-      label: '近 24h',
-      cellClassName: 'dashboard-table__trends',
-      render: (target) => {
-        const series = sparklines?.targets?.[target.target_id]?.latency
-        if (!series) {
-          return <span className="dashboard-table__trends-empty">—</span>
-        }
-        const latest = series.length > 0 ? (series[series.length - 1] ?? null) : null
-
-        const tone: SparklineTone =
-          latest == null ? 'default'
-          : latest <= 10 ? 'accent'
-          : latest <= 200 ? 'notice'
-          : latest <= 1000 ? 'alert'
-          : 'critical'
-
-        return (
-          <span className="dashboard-table__trend-strip">
-            <span className="dashboard-table__trend-item">
-              <span className="dashboard-table__trend-value">
-                {latest != null ? <MonoDigits>{latest.toFixed(1)}ms</MonoDigits> : '—'}
-              </span>
-              {series.length > 0 ? (
-                <Sparkline values={series.filter((v): v is number => v != null)} tone={tone} width={64} height={14} />
-              ) : (
-                <span className="dashboard-table__trends-empty">—</span>
-              )}
-            </span>
-          </span>
-        )
-      },
     },
     {
       key: 'actions',
       label: '',
       align: 'right',
+      width: 92,
       cellClassName: 'dashboard-table__actions-cell',
-      render: (target) => (
+      render: (item) => (
         <span className="dashboard-table__actions">
           <Link
             className="text-link"
-            to={`/targets/${target.target_id}`}
-            aria-label={`查看目标 ${target.name}`}
+            to={item.route}
+            aria-label={`查看${item.kind === 'node' ? '节点' : '目标'} ${item.name}`}
             onClick={(event) => event.stopPropagation()}
           >
-            查看目标
+            进入
           </Link>
         </span>
       ),
@@ -387,14 +435,154 @@ function AbnormalTargetList({ targets }: { targets: DashboardTargetSummary[] }) 
   ]
 
   return (
-    <DataTable<DashboardTargetSummary>
-      columns={columns}
-      rows={sorted}
-      rowKey={(target) => target.target_id}
-      density="compact"
-      className="dashboard-table"
-      onRowClick={(target) => navigate(`/targets/${target.target_id}`)}
-    />
+    <DetailSection
+      eyebrow="处理队列"
+      title="当前需要处理"
+      ribbon={items.length > 0 ? 'alert' : 'normal'}
+      aside={
+        <div className="dashboard-section-actions">
+          <Link className="text-link" to="/nodes">
+            查看全部异常节点
+          </Link>
+          <Link className="text-link" to="/targets">
+            查看全部异常目标
+          </Link>
+          <Link className="text-link" to="/events">
+            查看事件流
+          </Link>
+        </div>
+      }
+    >
+      <DataTable<AttentionItem>
+        columns={columns}
+        rows={items}
+        rowKey={(item) => `${item.kind}-${item.id}`}
+        density="compact"
+        className="dashboard-table dashboard-attention-table"
+        onRowClick={(item) => navigate(item.route)}
+        emptyContent={
+          <div className="empty-state dashboard-empty-state">
+            <h3>当前没有活跃异常</h3>
+            <p>
+              处理队列为空；最近事件中仍有{' '}
+              <MonoDigits>{recentEventCount}</MonoDigits> 条状态变化可供回溯。
+            </p>
+          </div>
+        }
+      />
+    </DetailSection>
+  )
+}
+
+function SystemEntryPoints({
+  overview,
+}: {
+  overview: DashboardOverview
+}) {
+  const entries = [
+    {
+      title: '节点',
+      description: '管理服务器、agent 接入、维护与暂停。',
+      to: '/nodes',
+      stat: (
+        <>
+          总数 <MonoDigits>{overview.total_node_count}</MonoDigits> · 异常{' '}
+          <MonoDigits>{overview.abnormal_node_count}</MonoDigits>
+        </>
+      ),
+    },
+    {
+      title: '目标',
+      description: '管理观测目标、ProbeItem 与运行状态。',
+      to: '/targets',
+      stat: (
+        <>
+          总数 <MonoDigits>{overview.total_target_count}</MonoDigits> · 异常{' '}
+          <MonoDigits>{overview.abnormal_target_count}</MonoDigits>
+        </>
+      ),
+    },
+    {
+      title: '事件',
+      description: '查看异常开始、升级、恢复与维护历史。',
+      to: '/events',
+      stat: (
+        <>
+          24h 新增 <MonoDigits>{overview.recent_new_incident_count}</MonoDigits> · 恢复{' '}
+          <MonoDigits>{overview.recent_recovery_count}</MonoDigits>
+        </>
+      ),
+    },
+    {
+      title: '设置',
+      description: '进入通知、阈值、频率与保留策略配置。',
+      to: '/settings',
+      stat: '配置入口',
+    },
+  ]
+
+  return (
+    <DetailSection eyebrow="System Entry Points" title="系统入口">
+      <div className="dashboard-entry-grid">
+        {entries.map((entry) => (
+          <Link className="dashboard-entry" to={entry.to} key={entry.title}>
+            <span className="dashboard-entry__title">{entry.title}</span>
+            <span className="dashboard-entry__description">{entry.description}</span>
+            <span className="dashboard-entry__stat">{entry.stat}</span>
+          </Link>
+        ))}
+      </div>
+    </DetailSection>
+  )
+}
+
+function OnboardingWorkbench() {
+  const steps = [
+    {
+      title: '创建节点',
+      description: '登记第一台服务器。',
+      to: '/nodes',
+      cta: '创建第一个节点',
+    },
+    {
+      title: '接入 agent',
+      description: '进入节点详情完成 agent 接入。',
+      to: '/nodes',
+      cta: '查看节点接入',
+    },
+    {
+      title: '创建目标',
+      description: '添加需要观测的服务或端口。',
+      to: '/targets',
+      cta: '创建第一个目标',
+    },
+    {
+      title: '添加 ProbeItem',
+      description: '在目标详情中补齐探测项。',
+      to: '/targets',
+      cta: '添加 ProbeItem',
+    },
+  ]
+
+  return (
+    <DetailSection eyebrow="First Run" title="首次接入工作台" ribbon="notice">
+      <div className="dashboard-onboarding">
+        {steps.map((step, index) => (
+          <article className="dashboard-onboarding__step" key={step.title}>
+            <span className="dashboard-onboarding__index">
+              <MonoDigits>{index + 1}</MonoDigits>
+            </span>
+            <div className="dashboard-onboarding__body">
+              <h3>{step.title}</h3>
+              <p>{step.description}</p>
+              <Link className="text-link" to={step.to}>
+                {step.cta}
+              </Link>
+            </div>
+          </article>
+        ))}
+      </div>
+    </DetailSection>
   )
 }
 
@@ -415,7 +603,7 @@ export function DashboardPage() {
       })
       .catch((error: unknown) => {
         if (cancelled) return
-        const message = error instanceof ApiError ? error.message : '加载首页 / Dashboard失败'
+        const message = error instanceof ApiError ? error.message : '加载首页 / Dashboard 失败'
         setState({ loading: false, error: message, overview: null })
       })
 
@@ -424,26 +612,6 @@ export function DashboardPage() {
     }
   }, [])
 
-  const groupSummaries = useMemo(() => {
-    if (!state.overview) return []
-    const map = new Map<string, { nodeCount: number; targetCount: number; abnormalCount: number }>()
-    const get = (g: string) => {
-      if (!map.has(g)) map.set(g, { nodeCount: 0, targetCount: 0, abnormalCount: 0 })
-      return map.get(g)!
-    }
-    for (const n of state.overview.abnormal_nodes ?? []) {
-      const s = get(n.group || '未分组')
-      s.nodeCount++
-      s.abnormalCount++
-    }
-    for (const t of state.overview.abnormal_targets ?? []) {
-      const s = get(t.group || '未分组')
-      s.targetCount++
-      s.abnormalCount++
-    }
-    return Array.from(map.entries()).map(([group, s]) => ({ group, ...s }))
-  }, [state.overview])
-
   if (state.loading) {
     return <section className="page-panel">正在加载首页 / Dashboard…</section>
   }
@@ -451,7 +619,7 @@ export function DashboardPage() {
   if (state.error || !state.overview) {
     return (
       <section className="page-panel">
-        <p className="page-panel__eyebrow">当前风险总览</p>
+        <p className="page-panel__eyebrow">Fleet State</p>
         <h2 className="page-panel__title">首页不可用</h2>
         <p className="page-panel__description">{state.error ?? '未获取到概览数据'}</p>
       </section>
@@ -463,101 +631,48 @@ export function DashboardPage() {
   const abnormalTotal = overview.abnormal_node_count + overview.abnormal_target_count
   const severeTotal = overview.severe_node_count + overview.severe_target_count
   const maintenanceTotal = overview.maintenance_node_count + overview.maintenance_target_count
-
-
-  if (isFreshInstall) {
-    return (
-      <div className="page-stack">
-        <section className="hero-panel">
-          <div className="hero-panel__content">
-            <p className="hero-panel__eyebrow">当前风险总览</p>
-            <h2 className="hero-panel__title">首页 / Dashboard</h2>
-            <p className="hero-panel__description">先处理当前异常，再查看趋势与事件历史。</p>
-          </div>
-        </section>
-
-        <section className="page-panel">
-          <p className="page-panel__eyebrow">首次接入</p>
-          <h3 className="page-panel__title">还没有节点与目标</h3>
-          <p className="page-panel__description">
-            这不是异常。候风需要先有一个节点接入 agent，然后才能创建目标并添加 ProbeItem。
-          </p>
-          <ol>
-            <li>创建第一个节点</li>
-            <li>接入 agent</li>
-            <li>创建第一个目标</li>
-            <li>添加第一个 ProbeItem</li>
-          </ol>
-          <Link className="text-link" to="/nodes">
-            创建第一个节点
-          </Link>
-        </section>
-      </div>
-    )
-  }
-
+  const fleetState = buildFleetState(
+    overview,
+    abnormalTotal,
+    severeTotal,
+    maintenanceTotal,
+    isFreshInstall,
+  )
+  const attentionItems = buildAttentionItems(overview)
 
   return (
-    <div className="page-stack">
-      <section className="hero-panel">
-        <div className="hero-panel__content">
-          <p className="hero-panel__eyebrow">当前风险总览</p>
-          <h2 className="hero-panel__title">首页 / Dashboard</h2>
-          <p className="hero-panel__description">先处理当前异常，再查看趋势与事件历史。</p>
-        </div>
-      </section>
+    <div className="page-stack dashboard-page">
+      <FleetStatePanel
+        overview={overview}
+        fleetState={fleetState}
+        abnormalTotal={abnormalTotal}
+        severeTotal={severeTotal}
+        maintenanceTotal={maintenanceTotal}
+      />
 
-      <div className="summary-grid summary-grid--strip">
-        <StatTile label="风险对象" value={abnormalTotal} />
-        <StatTile label="严重对象总数" value={severeTotal} />
-        <StatTile label="维护对象总数" value={maintenanceTotal} />
-        <StatTile
-          label="新增异常"
-          value={overview.recent_new_incident_count}
-          trend={overview.new_incident_trend_24h}
-          trendTone="critical"
-        />
-        <StatTile
-          label="恢复事件"
-          value={overview.recent_recovery_count}
-          trend={overview.recovery_trend_24h}
-          trendTone="normal"
-        />
-      </div>
+      <GlobalKpiStrip
+        overview={overview}
+        severeTotal={severeTotal}
+        maintenanceTotal={maintenanceTotal}
+      />
 
-      <DetailSection eyebrow="节点" title="异常节点概览" ribbon="alert">
-        <div className="summary-grid summary-grid--strip">
-          <StatTile label="当前异常数" value={overview.abnormal_node_count} />
-          <StatTile label="严重节点" value={overview.severe_node_count} />
-          <StatTile label="维护节点" value={overview.maintenance_node_count} />
-        </div>
-        <AbnormalNodeList nodes={overview.abnormal_nodes} />
-      </DetailSection>
+      {isFreshInstall ? (
+        <OnboardingWorkbench />
+      ) : (
+        <AttentionQueue items={attentionItems} recentEventCount={overview.recent_events.length} />
+      )}
 
-      <DetailSection eyebrow="目标" title="异常目标概览" ribbon="alert">
-        <div className="summary-grid summary-grid--strip">
-          <StatTile label="当前异常数" value={overview.abnormal_target_count} />
-          <StatTile label="严重目标" value={overview.severe_target_count} />
-          <StatTile label="维护目标" value={overview.maintenance_target_count} />
-        </div>
-        <AbnormalTargetList targets={overview.abnormal_targets} />
-      </DetailSection>
+      <SystemEntryPoints overview={overview} />
 
-      <DetailSection eyebrow="分组视图" title="按 Group 分布">
-        <div className="summary-grid">
-          {groupSummaries.map((g) => (
-            <article className="summary-card" key={g.group}>
-              <p className="summary-card__label">{g.group || '未分组'}</p>
-              <p className="summary-card__value">
-                节点 {g.nodeCount} / 目标 {g.targetCount}
-                {g.abnormalCount > 0 ? ` · 异常 ${g.abnormalCount}` : ''}
-              </p>
-            </article>
-          ))}
-        </div>
-      </DetailSection>
-
-      <DetailSection eyebrow="最近事件" title="最近事件">
+      <DetailSection
+        eyebrow="Recent Events"
+        title="最近事件"
+        aside={
+          <Link className="text-link" to="/events">
+            查看全部事件
+          </Link>
+        }
+      >
         <EventList
           events={overview.recent_events}
           emptyTitle="最近没有状态变更事件"
