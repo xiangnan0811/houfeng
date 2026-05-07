@@ -7,7 +7,16 @@ export interface DataTableColumn<T> {
   width?: string | number
   /** Extra class applied to <td> cells in this column (e.g. 'mono'). */
   cellClassName?: string
+  /** When true, the column header is clickable for sorting. Uses `key` as sort key unless `sortKey` is set. */
+  sortable?: boolean
+  /** Explicit sort key; defaults to column `key` when omitted. */
+  sortKey?: string
   render: (row: T, rowIndex: number) => ReactNode
+}
+
+export interface DataTableSortState {
+  key: string
+  direction: 'asc' | 'desc'
 }
 
 export interface DataTableProps<T> {
@@ -21,6 +30,10 @@ export interface DataTableProps<T> {
   caption?: ReactNode
   /** Optional row-level class derivation (e.g. severity-tinted background). */
   rowClassName?: (row: T) => string | undefined
+  /** Current sort state. When set, sort indicators render on matching column header. */
+  sortState?: DataTableSortState | null
+  /** Called when user clicks a sortable column header. The page is responsible for re-sorting data. */
+  onSortChange?: (key: string) => void
 }
 
 export function DataTable<T>({
@@ -33,6 +46,8 @@ export function DataTable<T>({
   className = '',
   caption,
   rowClassName,
+  sortState,
+  onSortChange,
 }: DataTableProps<T>) {
   const cls = [
     'data-table',
@@ -64,16 +79,42 @@ export function DataTable<T>({
       </colgroup>
       <thead className="data-table__head">
         <tr role="row">
-          {columns.map((col) => (
-            <th
-              key={col.key}
-              role="columnheader"
-              className={`data-table__th data-table__th--${col.align ?? 'left'}`}
-              scope="col"
-            >
-              {col.label}
-            </th>
-          ))}
+          {columns.map((col) => {
+            const isSortable = col.sortable && onSortChange
+            const sortKey = col.sortKey ?? col.key
+            const isActive = sortState?.key === sortKey
+            const dir = isActive ? sortState?.direction : null
+
+            return (
+              <th
+                key={col.key}
+                role="columnheader"
+                className={[
+                  'data-table__th',
+                  `data-table__th--${col.align ?? 'left'}`,
+                  isSortable ? 'data-table__th--sortable' : '',
+                  isActive ? 'data-table__th--sorted' : '',
+                ].filter(Boolean).join(' ')}
+                scope="col"
+                aria-sort={isActive ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}
+              >
+                {isSortable ? (
+                  <button
+                    type="button"
+                    className="data-table__sort-btn"
+                    onClick={() => onSortChange(sortKey)}
+                  >
+                    {col.label}
+                    <span className="data-table__sort-indicator" aria-hidden="true">
+                      {isActive && dir === 'asc' ? ' ↑' : isActive && dir === 'desc' ? ' ↓' : ' ↕'}
+                    </span>
+                  </button>
+                ) : (
+                  col.label
+                )}
+              </th>
+            )
+          })}
         </tr>
       </thead>
       <tbody>

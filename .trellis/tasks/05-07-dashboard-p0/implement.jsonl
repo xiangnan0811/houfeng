@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web spec index — entry point for component conventions, styling, state patterns"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Component patterns: DataTable atom extension, prop naming, colocation rules"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS/BEM conventions for new classes (watchtower-metric-card--notice/critical, sort indicators)"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "State management patterns — sort state, derived metric priority"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse guide — sorting logic in DataTable vs page, group health table vs existing DataTable"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Design authority: color tokens, font roles, density, tone system for ribbon/sort indicators"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Component visual contracts: DataTable sort spec, MetricChart thresholds, page templates"}
+{"file": ".trellis/tasks/05-07-dashboard-p0/prd.md", "reason": "Task PRD with requirements, acceptance criteria, technical approach"}

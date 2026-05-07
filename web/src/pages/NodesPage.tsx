@@ -7,6 +7,7 @@ import {
   Button,
   DataTable,
   type DataTableColumn,
+  type DataTableSortState,
   Hostname,
   type HealthState,
   MonoDigits,
@@ -251,6 +252,7 @@ export function NodesPage() {
   const [batchError, setBatchError] = useState<string | null>(null)
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandID, setCommandID] = useState('')
+  const [sortState, setSortState] = useState<DataTableSortState | null>(null)
 
   function resetCreateFlow() {
     setCreateError(null)
@@ -541,6 +543,35 @@ export function NodesPage() {
     })
   }, [baseNodes, filterState])
 
+  function handleSortChange(key: string) {
+    setSortState((current) => {
+      if (current?.key === key) {
+        const nextDir = current.direction === 'asc' ? 'desc' : 'asc'
+        return { key, direction: nextDir }
+      }
+      return { key, direction: 'asc' }
+    })
+  }
+
+  const sortedFilteredNodes = useMemo(() => {
+    if (!sortState) return filteredNodes
+    const sorted = [...filteredNodes]
+    sorted.sort((a, b) => {
+      let cmp = 0
+      if (sortState.key === 'identity') {
+        cmp = (a.display_name || '').localeCompare(b.display_name || '', 'zh-Hans-CN')
+      } else if (sortState.key === 'issue') {
+        cmp = (a.current_active_incident_count ?? 0) - (b.current_active_incident_count ?? 0)
+      } else if (sortState.key === 'location') {
+        const la = [a.group, a.region, a.city, a.provider].filter(Boolean).join(' · ')
+        const lb = [b.group, b.region, b.city, b.provider].filter(Boolean).join(' · ')
+        cmp = la.localeCompare(lb, 'zh-Hans-CN')
+      }
+      return sortState.direction === 'desc' ? -cmp : cmp
+    })
+    return sorted
+  }, [filteredNodes, sortState])
+
   const hasActiveFilters =
     filterState.group !== null ||
     filterState.region !== null ||
@@ -552,8 +583,6 @@ export function NodesPage() {
     filterState.labels.length > 0 ||
     filterState.abnormal ||
     filterState.onboardingPending
-
-  const groupFilterActive = filterState.group !== null
 
   async function executeBatchAction(action: string) {
     if (action === 'pause') {
@@ -695,6 +724,7 @@ export function NodesPage() {
     {
       key: 'identity',
       label: '节点',
+      sortable: true,
       render: (node) => (
         <div className="nodes-table__identity">
           <Hostname truncate maxChars={14} className="nodes-table__id">
@@ -717,6 +747,7 @@ export function NodesPage() {
     {
       key: 'location',
       label: '位置',
+      sortable: true,
       render: (node) => (
         <span className="nodes-table__location">
           {[node.group, node.region, node.city, node.provider].filter(Boolean).join(' · ') || '—'}
@@ -801,6 +832,7 @@ export function NodesPage() {
     {
       key: 'issue',
       label: '当前主问题',
+      sortable: true,
       render: (node) => {
         const summary = isBindingConflictNode(node)
           ? NODE_BINDING_CONFLICT_SUMMARY
@@ -1225,7 +1257,7 @@ export function NodesPage() {
               onChange={setOnboardingFilter}
             />
           </FilterBar>
-          {groupFilterActive && filteredNodes.length > 0 ? (
+          {filteredNodes.length > 0 ? (
             <div className="batch-bar">
               <label className="batch-bar__toggle">
                 <input
@@ -1330,7 +1362,7 @@ export function NodesPage() {
               onCancel={() => setPendingBatchAction(null)}
             />
           ) : null}
-          {filteredNodes.length === 0 ? (
+          {sortedFilteredNodes.length === 0 ? (
             <div className="empty-state">
               <h3>没有匹配当前筛选的节点</h3>
               <p>请尝试调整筛选条件，或清空筛选恢复完整列表。</p>
@@ -1343,10 +1375,12 @@ export function NodesPage() {
           ) : (
             <DataTable<NodeRecord>
               columns={columns}
-              rows={filteredNodes}
+              rows={sortedFilteredNodes}
               rowKey={(node) => node.node_id}
               density="compact"
               className="nodes-table"
+              sortState={sortState}
+              onSortChange={handleSortChange}
               onRowClick={(node) => {
                 if (!shouldNavigateOnRowClick(node)) return
                 navigate(`/nodes/${node.node_id}`)
@@ -1354,7 +1388,7 @@ export function NodesPage() {
             />
           )}
 
-          {filteredNodes.map((node) => {
+          {sortedFilteredNodes.map((node) => {
             const runtimeError = runtimeErrors[node.node_id]
             const showPauseConfirmation =
               pendingConfirmation?.nodeId === node.node_id &&

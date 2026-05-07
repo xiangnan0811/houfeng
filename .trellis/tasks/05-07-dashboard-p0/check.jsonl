@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Quality gate: lint, typecheck, test pass, no regression"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer check: ensure frontend-only changes don't break API contract or data flow"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Verify new props follow conventions, no breaking changes to DataTable API"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Verify visual compliance: tone colors, ribbon, sort indicators match design tokens"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Verify implementation matches page template specs for Dashboard/Nodes/NodeDetail"}
+{"file": ".trellis/tasks/05-07-dashboard-p0/prd.md", "reason": "Verify all acceptance criteria met"}

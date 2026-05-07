@@ -465,6 +465,35 @@
 .data-table__th--right { text-align: right; }
 .data-table__th--center { text-align: center; }
 
+/* Sortable column headers */
+.data-table__th--sortable { padding: 0; }
+.data-table__sort-btn {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: inherit;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-calm);
+}
+.data-table__sort-btn:hover { color: var(--text-primary); }
+.data-table__sort-indicator {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-disabled);
+  transition: color var(--dur-micro) var(--ease-calm);
+}
+.data-table__th--sorted .data-table__sort-indicator { color: var(--accent); }
+.data-table__th--sorted .data-table__sort-btn { color: var(--text-primary); }
+.data-table--compact .data-table__sort-btn { padding: 8px var(--space-3); }
+.data-table--normal .data-table__sort-btn { padding: var(--space-3) var(--space-4); }
+
 .data-table__row { transition: background-color var(--dur-micro) var(--ease-calm); }
 .data-table__row + .data-table__row td { border-top: 1px solid var(--border); }
 .data-table__row:hover { background: var(--surface-elevated); }
