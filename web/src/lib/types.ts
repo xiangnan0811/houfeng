@@ -268,6 +268,7 @@ export type StateChangeEventRecord = {
 }
 
 export type DashboardOverview = {
+  snapshot_generated_at: string
   total_node_count: number
   total_target_count: number
   abnormal_node_count: number
@@ -276,8 +277,15 @@ export type DashboardOverview = {
   severe_target_count: number
   maintenance_node_count: number
   maintenance_target_count: number
+  pending_onboarding_node_count: number
+  paused_node_count: number
+  retired_node_count: number
+  paused_target_count: number
+  archived_target_count: number
   recent_new_incident_count: number
   recent_recovery_count: number
+  group_summaries: DashboardGroupSummary[]
+  notification_status: DashboardNotificationStatus
   abnormal_nodes: DashboardNodeSummary[]
   abnormal_targets: DashboardTargetSummary[]
   recent_events: StateChangeEventRecord[]
@@ -293,6 +301,25 @@ export type DashboardOverview = {
    * as new_incident_trend_24h.
    */
   recovery_trend_24h?: number[]
+}
+
+export type DashboardGroupSummary = {
+  group: string
+  node_count: number
+  target_count: number
+  abnormal_node_count: number
+  abnormal_target_count: number
+  severe_node_count: number
+  severe_target_count: number
+  maintenance_node_count: number
+  maintenance_target_count: number
+}
+
+export type DashboardNotificationStatus = {
+  telegram_configured: boolean
+  telegram_runtime_managed: boolean
+  telegram_runtime_apply_active: boolean
+  feishu_configured: boolean
 }
 
 export type DashboardNodeSummary = {

@@ -45,9 +45,11 @@
 
 ### Dashboard 数据可信度
 
-- `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实。当前可用事实来自 `DashboardOverview`：总节点/目标数、异常/严重/维护计数、24h 新异常/恢复趋势、异常节点/目标摘要、最近事件。
-- `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。需要展示分布时，要么明确命名为“异常对象按 Group”，要么先扩展 center dashboard contract、store 查询、Go 测试与 `web/src/lib/types.ts`。
-- 静态入口可以展示为导航事实，例如 Settings 卡片写“配置入口”；但在 `/api/dashboard` 没有字段前，不要展示通知是否已配置、AppShell health、真实 snapshot 时间、全量库存完整度等状态断言。
+- `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实。当前可用事实来自 `DashboardOverview`：dashboard 生成时间、总节点/目标数、异常/严重/维护计数、库存完整度计数、24h 新异常/恢复趋势、真实全量 `group_summaries`、通知配置布尔摘要、异常节点/目标摘要、最近事件。
+- `snapshot_generated_at` 只能写成 `生成时间`、`Dashboard 摘要` 这类接口生成时间提示。它不是 Center health、agent heartbeat、sync freshness 或全链路实时性证明，不要写 `中心运行正常` / `同步于` / `健康检查通过` 之类文案。
+- `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。Dashboard 的 `按 Group 分布` 必须来自后端 `group_summaries`；如果该数组为空，显示空态，不在前端制造 `未分组 0` 行。
+- `notification_status` 只能展示配置布尔摘要，例如 Telegram / Feishu 是否已配置、Telegram runtime apply 是否生效。前端不得要求或展示 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url` 等敏感配置值；需要编辑真实配置时跳转 SettingsPage。
+- 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入节点、暂停节点、退役节点、暂停目标、归档目标；PR4 之前不要从 Dashboard 私自拼接 URL-state 深链筛选。
 - AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的节点/目标 count 可以来自 `abnormal_node_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
 
 ```tsx
@@ -55,13 +57,83 @@
 const groupSummaries = overview.abnormal_nodes.reduce(...)
 <DetailSection title="按 Group 分布">...</DetailSection>
 
+// 错误：把 dashboard 生成时间写成同步/健康状态
+<Timestamp value={overview.snapshot_generated_at} /> 同步完成
+
+// 错误：要求 dashboard 暴露敏感通知配置
+overview.notification_status.telegram_bot_token
+
 // 错误：没有真实 health/sync contract 时伪造 Shell 健康状态
 <SyncStatus state="ok" label="中心运行正常" meta={`v1.0 · sync ${new Date().toISOString()}`} />
 
-// 正确：只展示 dashboard contract 支撑的事实，或等待后端扩展
+// 正确：只展示 dashboard contract 支撑的事实
 <KpiLink label="节点" value={overview.total_node_count} description={`${overview.abnormal_node_count} 个异常`} />
 <DetailSection title="当前需要处理">...</DetailSection>
+<DetailSection title="按 Group 分布">...</DetailSection> // rows = overview.group_summaries
+<span>Dashboard 摘要 <Timestamp value={overview.snapshot_generated_at} /></span>
 <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
+```
+
+### Scenario: Dashboard Overview Contract
+
+#### 1. Scope / Trigger
+
+- Trigger: `/api/dashboard` 是 DashboardPage 与 AppShell 共享的全局摘要接口；任何新增字段都会跨越 PostgreSQL read model、Go JSON、`web/src/lib/types.ts` 和页面展示。
+- 修改触发：新增/改名/改语义任一 `DashboardOverview` 字段，或让 Dashboard/AppShell 展示新的系统事实。
+
+#### 2. Signatures
+
+- Backend API: `GET /api/dashboard?limit=<positive-int>`。
+- Backend method: `PostgresDashboardRepository.GetDashboardOverview(ctx, limit)`。
+- Frontend API: `getDashboard(): Promise<DashboardOverview>`。
+- Frontend type: `web/src/lib/types.ts` 的 `DashboardOverview`，字段保持 center JSON snake_case。
+
+#### 3. Contracts
+
+- `limit` 只限制 `abnormal_nodes`、`abnormal_targets` 和 `recent_events`；不得限制全局计数、`group_summaries` 或 `notification_status`。
+- `snapshot_generated_at` 是 Center 生成 overview 的时间，只能被展示为 dashboard 生成时间。
+- `group_summaries` 必须由后端基于全量 `nodes` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce。
+- `notification_status` 只能包含配置布尔摘要，不包含 Telegram token/chat id 或 Feishu webhook URL。
+- 库存完整度计数必须来自后端 contract：待接入节点、暂停节点、退役节点、暂停目标、归档目标。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| `limit` 缺失 | handler 使用默认 limit |
+| `limit <= 0` 或非数字 | handler 返回 400 |
+| dashboard store 查询失败 | handler 返回 500，store error 用 `%w` 包装上下文 |
+| `center_settings` singleton 缺失 | `notification_status` 全 false，不返回错误 |
+| `group_summaries` 为空 | Dashboard 显示空态，不制造 `未分组 0` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: group 只存在于 targets 时仍出现在 `group_summaries`，节点计数为 0、目标计数为真实值。
+- Base: 无节点无目标时 dashboard 仍返回 200，计数为 0，首次接入工作台显示，Group 区为空态。
+- Bad: 从 `abnormal_nodes` 推导 `按 Group 分布`；把 `snapshot_generated_at` 写成同步完成；把通知 token 暴露给 Dashboard。
+
+#### 6. Tests Required
+
+- Go store test: 新计数字段、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary。
+- Go handler test: 新字段 JSON snake_case，且不泄露敏感通知字段。
+- Frontend type/API fixture: `DashboardOverview` fixture 覆盖新增字段。
+- DashboardPage test: 生成时间、Group 全量分布、库存完整度、通知配置摘要。
+- AppShell test: 共享 dashboard fixture 与新增 contract 保持兼容。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：PR4 前从 Dashboard 拼筛选深链，并且筛选语义不由 API contract 支撑
+<Link to={`/nodes?monitoring_status=${overview.paused_node_count > 0 ? '暂停' : ''}`}>暂停节点</Link>
+
+// 正确：PR3 只展示 contract 支撑的状态摘要，入口仍去列表页
+<Link to="/nodes">暂停 <MonoDigits>{overview.paused_node_count}</MonoDigits></Link>
+
+// 错误：要求 settings secret 出现在 dashboard contract
+overview.notification_status.feishu_webhook_url
+
+// 正确：只展示配置布尔摘要，并把编辑动作交给 SettingsPage
+<Link to="/settings">{notificationSummary(overview)}</Link>
 ```
 
 ---

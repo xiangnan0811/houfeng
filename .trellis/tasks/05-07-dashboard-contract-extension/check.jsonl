@@ -1,0 +1,13 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend review entrypoint for Go center changes."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Check dashboard SQL correctness and contract-backed read model behavior."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Check error wrapping and HTTP failure behavior."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check backend tests and verification coverage."}
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend review entrypoint for Dashboard changes."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check Dashboard composition stays aligned with existing component patterns."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check every displayed system fact comes from the expanded contract."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check Dashboard visual adjustments remain within existing CSS conventions."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check frontend tests, lint, and build coverage."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check cross-layer data flow consistency from SQL to UI."}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Check docs/specs were synchronized with the new dashboard contract."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-dashboard-and-system-navigation-redesign/prd.md", "reason": "Check PR3 preserves the PR1 Dashboard IA intent."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-shell-counts-freshness/prd.md", "reason": "Check PR3 stays compatible with PR2 Shell behavior."}

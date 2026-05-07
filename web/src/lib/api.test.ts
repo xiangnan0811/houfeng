@@ -230,6 +230,7 @@ describe('api helpers', () => {
 
   it('loads dashboard overview from /api/dashboard', async () => {
     const responseBody = {
+      snapshot_generated_at: '2026-04-25T08:30:00Z',
       total_node_count: 5,
       total_target_count: 4,
       abnormal_node_count: 1,
@@ -238,8 +239,32 @@ describe('api helpers', () => {
       severe_target_count: 1,
       maintenance_node_count: 1,
       maintenance_target_count: 0,
+      pending_onboarding_node_count: 1,
+      paused_node_count: 1,
+      retired_node_count: 0,
+      paused_target_count: 1,
+      archived_target_count: 0,
       recent_new_incident_count: 3,
       recent_recovery_count: 2,
+      group_summaries: [
+        {
+          group: 'production',
+          node_count: 3,
+          target_count: 2,
+          abnormal_node_count: 1,
+          abnormal_target_count: 2,
+          severe_node_count: 0,
+          severe_target_count: 1,
+          maintenance_node_count: 1,
+          maintenance_target_count: 0,
+        },
+      ],
+      notification_status: {
+        telegram_configured: true,
+        telegram_runtime_managed: true,
+        telegram_runtime_apply_active: true,
+        feishu_configured: false,
+      },
       recent_events: [],
     }
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))

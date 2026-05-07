@@ -46,19 +46,27 @@ type NotificationDecision struct {
 }
 
 type DashboardOverview struct {
-	TotalNodeCount         int                      `json:"total_node_count"`
-	TotalTargetCount       int                      `json:"total_target_count"`
-	AbnormalNodeCount      int                      `json:"abnormal_node_count"`
-	AbnormalTargetCount    int                      `json:"abnormal_target_count"`
-	SevereNodeCount        int                      `json:"severe_node_count"`
-	SevereTargetCount      int                      `json:"severe_target_count"`
-	MaintenanceNodeCount   int                      `json:"maintenance_node_count"`
-	MaintenanceTargetCount int                      `json:"maintenance_target_count"`
-	RecentNewIncidentCount int                      `json:"recent_new_incident_count"`
-	RecentRecoveryCount    int                      `json:"recent_recovery_count"`
-	AbnormalNodes          []DashboardNodeSummary   `json:"abnormal_nodes"`
-	AbnormalTargets        []DashboardTargetSummary `json:"abnormal_targets"`
-	RecentEvents           []StateChangeEventRecord `json:"recent_events"`
+	SnapshotGeneratedAt        time.Time                   `json:"snapshot_generated_at"`
+	TotalNodeCount             int                         `json:"total_node_count"`
+	TotalTargetCount           int                         `json:"total_target_count"`
+	AbnormalNodeCount          int                         `json:"abnormal_node_count"`
+	AbnormalTargetCount        int                         `json:"abnormal_target_count"`
+	SevereNodeCount            int                         `json:"severe_node_count"`
+	SevereTargetCount          int                         `json:"severe_target_count"`
+	MaintenanceNodeCount       int                         `json:"maintenance_node_count"`
+	MaintenanceTargetCount     int                         `json:"maintenance_target_count"`
+	PendingOnboardingNodeCount int                         `json:"pending_onboarding_node_count"`
+	PausedNodeCount            int                         `json:"paused_node_count"`
+	RetiredNodeCount           int                         `json:"retired_node_count"`
+	PausedTargetCount          int                         `json:"paused_target_count"`
+	ArchivedTargetCount        int                         `json:"archived_target_count"`
+	RecentNewIncidentCount     int                         `json:"recent_new_incident_count"`
+	RecentRecoveryCount        int                         `json:"recent_recovery_count"`
+	GroupSummaries             []DashboardGroupSummary     `json:"group_summaries"`
+	NotificationStatus         DashboardNotificationStatus `json:"notification_status"`
+	AbnormalNodes              []DashboardNodeSummary      `json:"abnormal_nodes"`
+	AbnormalTargets            []DashboardTargetSummary    `json:"abnormal_targets"`
+	RecentEvents               []StateChangeEventRecord    `json:"recent_events"`
 	// NewIncidentTrend24h is a 24-element array of per-hour incident_started
 	// counts. Index 0 is 23 hours ago, index 23 is the current hour. Frontend
 	// uses this to render the dashboard "新增异常" sparkline.
@@ -66,6 +74,25 @@ type DashboardOverview struct {
 	// RecoveryTrend24h is a 24-element array of per-hour incident_recovered
 	// counts. Same indexing as NewIncidentTrend24h.
 	RecoveryTrend24h []int `json:"recovery_trend_24h,omitempty"`
+}
+
+type DashboardGroupSummary struct {
+	Group                  string `json:"group"`
+	NodeCount              int    `json:"node_count"`
+	TargetCount            int    `json:"target_count"`
+	AbnormalNodeCount      int    `json:"abnormal_node_count"`
+	AbnormalTargetCount    int    `json:"abnormal_target_count"`
+	SevereNodeCount        int    `json:"severe_node_count"`
+	SevereTargetCount      int    `json:"severe_target_count"`
+	MaintenanceNodeCount   int    `json:"maintenance_node_count"`
+	MaintenanceTargetCount int    `json:"maintenance_target_count"`
+}
+
+type DashboardNotificationStatus struct {
+	TelegramConfigured         bool `json:"telegram_configured"`
+	TelegramRuntimeManaged     bool `json:"telegram_runtime_managed"`
+	TelegramRuntimeApplyActive bool `json:"telegram_runtime_apply_active"`
+	FeishuConfigured           bool `json:"feishu_configured"`
 }
 
 type DashboardNodeSummary struct {

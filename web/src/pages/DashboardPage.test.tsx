@@ -25,6 +25,7 @@ function mockJSONResponse(body: unknown, status = 200) {
 
 function baseOverview(overrides: Record<string, unknown> = {}) {
   return {
+    snapshot_generated_at: '2026-04-25T08:30:00Z',
     total_node_count: 5,
     total_target_count: 4,
     abnormal_node_count: 0,
@@ -33,8 +34,32 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
     severe_target_count: 0,
     maintenance_node_count: 0,
     maintenance_target_count: 0,
+    pending_onboarding_node_count: 0,
+    paused_node_count: 0,
+    retired_node_count: 0,
+    paused_target_count: 0,
+    archived_target_count: 0,
     recent_new_incident_count: 0,
     recent_recovery_count: 0,
+    group_summaries: [
+      {
+        group: 'edge',
+        node_count: 5,
+        target_count: 4,
+        abnormal_node_count: 0,
+        abnormal_target_count: 0,
+        severe_node_count: 0,
+        severe_target_count: 0,
+        maintenance_node_count: 0,
+        maintenance_target_count: 0,
+      },
+    ],
+    notification_status: {
+      telegram_configured: false,
+      telegram_runtime_managed: false,
+      telegram_runtime_apply_active: false,
+      feishu_configured: false,
+    },
     recent_events: [],
     abnormal_nodes: [],
     abnormal_targets: [],
@@ -67,9 +92,44 @@ describe('DashboardPage', () => {
         severe_target_count: 1,
         maintenance_node_count: 1,
         maintenance_target_count: 0,
+        pending_onboarding_node_count: 2,
+        paused_node_count: 1,
+        retired_node_count: 1,
+        paused_target_count: 1,
+        archived_target_count: 1,
         recent_new_incident_count: 4,
         recent_recovery_count: 1,
         new_incident_trend_24h: [0, 1, 0, 3],
+        group_summaries: [
+          {
+            group: 'production',
+            node_count: 3,
+            target_count: 2,
+            abnormal_node_count: 1,
+            abnormal_target_count: 1,
+            severe_node_count: 0,
+            severe_target_count: 1,
+            maintenance_node_count: 1,
+            maintenance_target_count: 0,
+          },
+          {
+            group: '未分组',
+            node_count: 2,
+            target_count: 2,
+            abnormal_node_count: 0,
+            abnormal_target_count: 0,
+            severe_node_count: 0,
+            severe_target_count: 0,
+            maintenance_node_count: 0,
+            maintenance_target_count: 0,
+          },
+        ],
+        notification_status: {
+          telegram_configured: true,
+          telegram_runtime_managed: true,
+          telegram_runtime_apply_active: true,
+          feishu_configured: false,
+        },
         recent_events: [
           {
             event_id: 'evt_001',
@@ -132,7 +192,9 @@ describe('DashboardPage', () => {
     expect(within(fleetActions).getByRole('link', { name: '查看事件流' })).toHaveAttribute('href', '/events')
     expect(within(fleetActions).getByRole('link', { name: '进入设置' })).toHaveAttribute('href', '/settings')
     expect(screen.getByText('已加载 /api/dashboard')).toBeInTheDocument()
-    expect(screen.getByText('接口暂未提供')).toBeInTheDocument()
+    expect(screen.getByText('Dashboard 摘要')).toBeInTheDocument()
+    expect(screen.getByText('2026/04/25 16:30')).toBeInTheDocument()
+    expect(screen.queryByText('接口暂未提供')).not.toBeInTheDocument()
 
     const kpiStrip = screen.getByLabelText('系统全局指标')
     expect(within(kpiStrip).getByRole('link', { name: '节点：1 个异常' })).toHaveAttribute('href', '/nodes')
@@ -156,10 +218,19 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('link', { name: /管理观测目标、ProbeItem 与运行状态/ })).toHaveAttribute('href', '/targets')
     expect(screen.getByRole('link', { name: /查看异常开始、升级、恢复与维护历史/ })).toHaveAttribute('href', '/events')
     expect(screen.getByRole('link', { name: /进入通知、阈值、频率与保留策略配置/ })).toHaveAttribute('href', '/settings')
+    expect(screen.getByRole('link', { name: /管理服务器、agent 接入、维护与暂停/ })).toHaveTextContent('待接入 2 · 暂停 1 · 退役 1')
+    expect(screen.getByRole('link', { name: /管理观测目标、ProbeItem 与运行状态/ })).toHaveTextContent('暂停 1 · 归档 1 · 异常 1')
+    expect(screen.getByText('通知通道 1/2 已配置：Telegram · Telegram runtime 生效')).toBeInTheDocument()
+
+    expect(screen.getByRole('heading', { name: '按 Group 分布' })).toBeInTheDocument()
+    expect(screen.getByText('production')).toBeInTheDocument()
+    expect(screen.getByText('未分组')).toBeInTheDocument()
+    const groupSection = screen.getByRole('heading', { name: '按 Group 分布' }).closest('section')
+    expect(groupSection).toHaveTextContent('节点 3 · 目标 2')
+    expect(groupSection).toHaveTextContent('节点 1 · 目标 1')
 
     expect(screen.getAllByText('HTTPS 探测连续失败').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('link', { name: '查看全部事件' })).toHaveAttribute('href', '/events')
-    expect(screen.queryByText('按 Group 分布')).not.toBeInTheDocument()
   })
 
   it('renders abnormal-but-not-severe fleet state', async () => {
@@ -230,6 +301,7 @@ describe('DashboardPage', () => {
       baseOverview({
         total_node_count: 0,
         total_target_count: 0,
+        group_summaries: [],
       }),
     )
 
@@ -248,6 +320,7 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('heading', { name: '创建目标' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '添加 ProbeItem' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '当前需要处理' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '暂无 Group 分布' })).toBeInTheDocument()
   })
 
   it('renders an explicit error state when the dashboard request fails', async () => {

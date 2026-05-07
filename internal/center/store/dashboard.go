@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -59,23 +60,32 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 
 	overview, err := loadDashboardCounts(ctx, r.db)
 	if err != nil {
-		return incidents.DashboardOverview{}, err
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard counts: %w", err)
+	}
+	overview.SnapshotGeneratedAt = time.Now().UTC()
+	overview.GroupSummaries, err = loadDashboardGroupSummaries(ctx, r.db)
+	if err != nil {
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard group summaries: %w", err)
+	}
+	overview.NotificationStatus, err = loadDashboardNotificationStatus(ctx, r.db)
+	if err != nil {
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard notification status: %w", err)
 	}
 	overview.AbnormalNodes, err = loadAbnormalNodeSummaries(ctx, r.db, limit)
 	if err != nil {
-		return incidents.DashboardOverview{}, err
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard abnormal nodes: %w", err)
 	}
 	overview.AbnormalTargets, err = loadAbnormalTargetSummaries(ctx, r.db, limit)
 	if err != nil {
-		return incidents.DashboardOverview{}, err
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard abnormal targets: %w", err)
 	}
 	overview.NewIncidentTrend24h, overview.RecoveryTrend24h, err = loadDashboardTrends24h(ctx, r.db)
 	if err != nil {
-		return incidents.DashboardOverview{}, err
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard trends: %w", err)
 	}
 	events, err := r.ListEvents(ctx, EventsFilter{Limit: limit})
 	if err != nil {
-		return incidents.DashboardOverview{}, err
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard recent events: %w", err)
 	}
 	overview.RecentEvents = make([]incidents.StateChangeEventRecord, 0, len(events))
 	for _, event := range events {
@@ -264,16 +274,21 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 	var overview incidents.DashboardOverview
 	if err := queryer.QueryRow(ctx, `
 		select
-			(select count(*) from nodes),
-			(select count(*) from targets),
-			(select count(*) from nodes where current_health_status <> '正常'),
-			(select count(*) from targets where current_health_status <> '正常'),
-			(select count(*) from nodes where current_health_status = '严重'),
-			(select count(*) from targets where current_health_status = '严重'),
-			(select count(*) from nodes where monitoring_status = '维护中'),
-			(select count(*) from targets where run_status = '维护中'),
-			(select count(*) from state_change_events where event_type = 'incident_started' and created_at >= now() - interval '24 hours'),
-			(select count(*) from state_change_events where event_type = 'incident_recovered' and created_at >= now() - interval '24 hours')
+			(select count(*)::int from nodes),
+			(select count(*)::int from targets),
+			(select count(*)::int from nodes where current_health_status <> '正常'),
+			(select count(*)::int from targets where current_health_status <> '正常'),
+			(select count(*)::int from nodes where current_health_status = '严重'),
+			(select count(*)::int from targets where current_health_status = '严重'),
+			(select count(*)::int from nodes where monitoring_status = '维护中'),
+			(select count(*)::int from targets where run_status = '维护中'),
+			(select count(*)::int from nodes where lifecycle_status = '待接入' or binding_status in ('未绑定', '指纹变更待确认')),
+			(select count(*)::int from nodes where monitoring_status = '暂停'),
+			(select count(*)::int from nodes where lifecycle_status = '已退役'),
+			(select count(*)::int from targets where run_status = '暂停'),
+			(select count(*)::int from targets where run_status = '已归档'),
+			(select count(*)::int from state_change_events where event_type = 'incident_started' and created_at >= now() - interval '24 hours'),
+			(select count(*)::int from state_change_events where event_type = 'incident_recovered' and created_at >= now() - interval '24 hours')
 	`).Scan(
 		&overview.TotalNodeCount,
 		&overview.TotalTargetCount,
@@ -283,12 +298,109 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 		&overview.SevereTargetCount,
 		&overview.MaintenanceNodeCount,
 		&overview.MaintenanceTargetCount,
+		&overview.PendingOnboardingNodeCount,
+		&overview.PausedNodeCount,
+		&overview.RetiredNodeCount,
+		&overview.PausedTargetCount,
+		&overview.ArchivedTargetCount,
 		&overview.RecentNewIncidentCount,
 		&overview.RecentRecoveryCount,
 	); err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("query dashboard overview: %w", err)
 	}
 	return overview, nil
+}
+
+func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) ([]incidents.DashboardGroupSummary, error) {
+	rows, err := queryer.Query(ctx, `
+		with node_groups as (
+			select
+				coalesce(nullif(btrim("group"), ''), '未分组') as group_name,
+				count(*)::int as node_count,
+				(count(*) filter (where current_health_status <> '正常'))::int as abnormal_node_count,
+				(count(*) filter (where current_health_status = '严重'))::int as severe_node_count,
+				(count(*) filter (where monitoring_status = '维护中'))::int as maintenance_node_count
+			from nodes
+			group by 1
+		),
+		target_groups as (
+			select
+				coalesce(nullif(btrim("group"), ''), '未分组') as group_name,
+				count(*)::int as target_count,
+				(count(*) filter (where current_health_status <> '正常'))::int as abnormal_target_count,
+				(count(*) filter (where current_health_status = '严重'))::int as severe_target_count,
+				(count(*) filter (where run_status = '维护中'))::int as maintenance_target_count
+			from targets
+			group by 1
+		)
+		select
+			coalesce(ng.group_name, tg.group_name) as group_name,
+			coalesce(ng.node_count, 0),
+			coalesce(tg.target_count, 0),
+			coalesce(ng.abnormal_node_count, 0),
+			coalesce(tg.abnormal_target_count, 0),
+			coalesce(ng.severe_node_count, 0),
+			coalesce(tg.severe_target_count, 0),
+			coalesce(ng.maintenance_node_count, 0),
+			coalesce(tg.maintenance_target_count, 0)
+		from node_groups ng
+		full outer join target_groups tg on tg.group_name = ng.group_name
+		order by
+			(coalesce(ng.abnormal_node_count, 0) + coalesce(tg.abnormal_target_count, 0)) desc,
+			(coalesce(ng.severe_node_count, 0) + coalesce(tg.severe_target_count, 0)) desc,
+			(coalesce(ng.node_count, 0) + coalesce(tg.target_count, 0)) desc,
+			group_name asc`)
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard group summaries: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]incidents.DashboardGroupSummary, 0)
+	for rows.Next() {
+		var record incidents.DashboardGroupSummary
+		if err := rows.Scan(
+			&record.Group,
+			&record.NodeCount,
+			&record.TargetCount,
+			&record.AbnormalNodeCount,
+			&record.AbnormalTargetCount,
+			&record.SevereNodeCount,
+			&record.SevereTargetCount,
+			&record.MaintenanceNodeCount,
+			&record.MaintenanceTargetCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan dashboard group summary row: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dashboard group summaries: %w", err)
+	}
+	return records, nil
+}
+
+func loadDashboardNotificationStatus(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardNotificationStatus, error) {
+	var status incidents.DashboardNotificationStatus
+	if err := queryer.QueryRow(ctx, `
+		select
+			btrim(telegram_bot_token) <> '' and btrim(telegram_chat_id) <> '',
+			telegram_runtime_managed,
+			telegram_runtime_managed and btrim(telegram_bot_token) <> '' and btrim(telegram_chat_id) <> '',
+			feishu_enabled and btrim(feishu_webhook_url) <> ''
+		from center_settings
+		where settings_id = 'center'
+	`).Scan(
+		&status.TelegramConfigured,
+		&status.TelegramRuntimeManaged,
+		&status.TelegramRuntimeApplyActive,
+		&status.FeishuConfigured,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return incidents.DashboardNotificationStatus{}, nil
+		}
+		return incidents.DashboardNotificationStatus{}, fmt.Errorf("query dashboard notification status: %w", err)
+	}
+	return status, nil
 }
 
 func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter EventsFilter) ([]EventListItem, error) {

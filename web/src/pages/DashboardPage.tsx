@@ -20,6 +20,7 @@ import { ApiError, getDashboard } from '../lib/api'
 import type {
   DashboardNodeSummary,
   DashboardOverview,
+  DashboardGroupSummary,
   DashboardTargetSummary,
   IncidentSeverity,
 } from '../lib/types'
@@ -92,6 +93,21 @@ function nodeLocation(node: DashboardNodeSummary) {
 
 function targetLocation(target: DashboardTargetSummary) {
   return [target.group, target.target_type].filter(Boolean).join(' · ') || '未标记分组'
+}
+
+function notificationSummary(overview: DashboardOverview) {
+  const status = overview.notification_status
+  const configuredCount =
+    (status.telegram_configured ? 1 : 0) + (status.feishu_configured ? 1 : 0)
+  if (configuredCount === 0) {
+    return '通知通道 0/2 已配置'
+  }
+  const channels = [
+    status.telegram_configured ? 'Telegram' : null,
+    status.feishu_configured ? 'Feishu' : null,
+  ].filter(Boolean)
+  const runtime = status.telegram_runtime_apply_active ? ' · Telegram runtime 生效' : ''
+  return `通知通道 ${configuredCount}/2 已配置：${channels.join('、')}${runtime}`
 }
 
 function buildFleetState(
@@ -223,8 +239,10 @@ function FleetStatePanel({
             <dd>已加载 /api/dashboard</dd>
           </div>
           <div>
-            <dt>快照时间</dt>
-            <dd>接口暂未提供</dd>
+            <dt>生成时间</dt>
+            <dd>
+              Dashboard 摘要 <Timestamp value={overview.snapshot_generated_at} mode="absolute" />
+            </dd>
           </div>
           <div>
             <dt>库存</dt>
@@ -486,8 +504,9 @@ function SystemEntryPoints({
       to: '/nodes',
       stat: (
         <>
-          总数 <MonoDigits>{overview.total_node_count}</MonoDigits> · 异常{' '}
-          <MonoDigits>{overview.abnormal_node_count}</MonoDigits>
+          待接入 <MonoDigits>{overview.pending_onboarding_node_count}</MonoDigits> · 暂停{' '}
+          <MonoDigits>{overview.paused_node_count}</MonoDigits> · 退役{' '}
+          <MonoDigits>{overview.retired_node_count}</MonoDigits>
         </>
       ),
     },
@@ -497,7 +516,8 @@ function SystemEntryPoints({
       to: '/targets',
       stat: (
         <>
-          总数 <MonoDigits>{overview.total_target_count}</MonoDigits> · 异常{' '}
+          暂停 <MonoDigits>{overview.paused_target_count}</MonoDigits> · 归档{' '}
+          <MonoDigits>{overview.archived_target_count}</MonoDigits> · 异常{' '}
           <MonoDigits>{overview.abnormal_target_count}</MonoDigits>
         </>
       ),
@@ -517,7 +537,7 @@ function SystemEntryPoints({
       title: '设置',
       description: '进入通知、阈值、频率与保留策略配置。',
       to: '/settings',
-      stat: '配置入口',
+      stat: notificationSummary(overview),
     },
   ]
 
@@ -532,6 +552,83 @@ function SystemEntryPoints({
           </Link>
         ))}
       </div>
+    </DetailSection>
+  )
+}
+
+function GroupDistribution({ groups }: { groups: DashboardGroupSummary[] }) {
+  const columns: DataTableColumn<DashboardGroupSummary>[] = [
+    {
+      key: 'group',
+      label: 'Group',
+      render: (group) => (
+        <div className="dashboard-table__identity">
+          <Hostname truncate maxChars={28} className="dashboard-table__id">
+            {group.group}
+          </Hostname>
+          <span className="dashboard-table__display-name">
+            对象 <MonoDigits>{group.node_count + group.target_count}</MonoDigits>
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'inventory',
+      label: '全量库存',
+      render: (group) => (
+        <span className="dashboard-group__metric">
+          节点 <MonoDigits>{group.node_count}</MonoDigits> · 目标{' '}
+          <MonoDigits>{group.target_count}</MonoDigits>
+        </span>
+      ),
+    },
+    {
+      key: 'abnormal',
+      label: '异常',
+      render: (group) => (
+        <span className="dashboard-group__metric">
+          节点 <MonoDigits>{group.abnormal_node_count}</MonoDigits> · 目标{' '}
+          <MonoDigits>{group.abnormal_target_count}</MonoDigits>
+        </span>
+      ),
+    },
+    {
+      key: 'severe',
+      label: '严重',
+      render: (group) => (
+        <span className="dashboard-group__metric">
+          节点 <MonoDigits>{group.severe_node_count}</MonoDigits> · 目标{' '}
+          <MonoDigits>{group.severe_target_count}</MonoDigits>
+        </span>
+      ),
+    },
+    {
+      key: 'maintenance',
+      label: '维护',
+      render: (group) => (
+        <span className="dashboard-group__metric">
+          节点 <MonoDigits>{group.maintenance_node_count}</MonoDigits> · 目标{' '}
+          <MonoDigits>{group.maintenance_target_count}</MonoDigits>
+        </span>
+      ),
+    },
+  ]
+
+  return (
+    <DetailSection eyebrow="Inventory Distribution" title="按 Group 分布" ribbon="notice">
+      <DataTable<DashboardGroupSummary>
+        columns={columns}
+        rows={groups}
+        rowKey={(group) => group.group}
+        density="compact"
+        className="dashboard-table dashboard-group-table"
+        emptyContent={
+          <div className="empty-state dashboard-empty-state">
+            <h3>暂无 Group 分布</h3>
+            <p>当前还没有节点或目标库存，Dashboard 不生成空的未分组行。</p>
+          </div>
+        }
+      />
     </DetailSection>
   )
 }
@@ -663,6 +760,8 @@ export function DashboardPage() {
       )}
 
       <SystemEntryPoints overview={overview} />
+
+      <GroupDistribution groups={overview.group_summaries} />
 
       <DetailSection
         eyebrow="Recent Events"

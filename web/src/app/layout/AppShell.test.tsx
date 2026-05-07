@@ -24,6 +24,7 @@ function mockJSONResponse(body: unknown, status = 200) {
 
 function baseOverview(overrides: Record<string, unknown> = {}) {
   return {
+    snapshot_generated_at: '2026-04-25T08:30:00Z',
     total_node_count: 5,
     total_target_count: 4,
     abnormal_node_count: 0,
@@ -32,8 +33,20 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
     severe_target_count: 0,
     maintenance_node_count: 0,
     maintenance_target_count: 0,
+    pending_onboarding_node_count: 0,
+    paused_node_count: 0,
+    retired_node_count: 0,
+    paused_target_count: 0,
+    archived_target_count: 0,
     recent_new_incident_count: 0,
     recent_recovery_count: 0,
+    group_summaries: [],
+    notification_status: {
+      telegram_configured: false,
+      telegram_runtime_managed: false,
+      telegram_runtime_apply_active: false,
+      feishu_configured: false,
+    },
     recent_events: [],
     abnormal_nodes: [],
     abnormal_targets: [],

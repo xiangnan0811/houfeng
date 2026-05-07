@@ -19,6 +19,15 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	lastFailure := now.Add(-2 * time.Minute)
 	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
 		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from center_settings") {
+				return fakeRow{scan: func(dest ...any) error {
+					*(dest[0].(*bool)) = true
+					*(dest[1].(*bool)) = true
+					*(dest[2].(*bool)) = true
+					*(dest[3].(*bool)) = false
+					return nil
+				}}
+			}
 			return fakeRow{scan: func(dest ...any) error {
 				*(dest[0].(*int)) = 5
 				*(dest[1].(*int)) = 4
@@ -28,13 +37,31 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 				*(dest[5].(*int)) = 0
 				*(dest[6].(*int)) = 1
 				*(dest[7].(*int)) = 1
-				*(dest[8].(*int)) = 3
-				*(dest[9].(*int)) = 2
+				*(dest[8].(*int)) = 2
+				*(dest[9].(*int)) = 1
+				*(dest[10].(*int)) = 1
+				*(dest[11].(*int)) = 1
+				*(dest[12].(*int)) = 1
+				*(dest[13].(*int)) = 3
+				*(dest[14].(*int)) = 2
 				return nil
 			}}
 		},
 		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			switch {
+			case strings.Contains(sql, "node_groups"):
+				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "production"
+					*(dest[1].(*int)) = 3
+					*(dest[2].(*int)) = 2
+					*(dest[3].(*int)) = 1
+					*(dest[4].(*int)) = 1
+					*(dest[5].(*int)) = 1
+					*(dest[6].(*int)) = 0
+					*(dest[7].(*int)) = 1
+					*(dest[8].(*int)) = 1
+					return nil
+				}}}}, nil
 			case strings.Contains(sql, "hour_buckets"):
 				// 24-bucket trend query for the dashboard sparkline.
 				// Each bucket returns (started, recovered) ints.
@@ -111,6 +138,27 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if overview.AbnormalNodeCount != 2 || overview.RecentRecoveryCount != 2 {
 		t.Fatalf("overview = %#v, want populated counts", overview)
 	}
+	if overview.SnapshotGeneratedAt.IsZero() {
+		t.Fatal("SnapshotGeneratedAt is zero, want dashboard generation time")
+	}
+	if overview.PendingOnboardingNodeCount != 2 || overview.PausedNodeCount != 1 || overview.RetiredNodeCount != 1 {
+		t.Fatalf("node completeness counts = (%d,%d,%d), want (2,1,1)", overview.PendingOnboardingNodeCount, overview.PausedNodeCount, overview.RetiredNodeCount)
+	}
+	if overview.PausedTargetCount != 1 || overview.ArchivedTargetCount != 1 {
+		t.Fatalf("target completeness counts = (%d,%d), want (1,1)", overview.PausedTargetCount, overview.ArchivedTargetCount)
+	}
+	if len(overview.GroupSummaries) != 1 || overview.GroupSummaries[0].Group != "production" {
+		t.Fatalf("GroupSummaries = %#v, want production group summary", overview.GroupSummaries)
+	}
+	if overview.GroupSummaries[0].NodeCount != 3 || overview.GroupSummaries[0].TargetCount != 2 {
+		t.Fatalf("GroupSummaries[0] = %#v, want full node/target counts", overview.GroupSummaries[0])
+	}
+	if !overview.NotificationStatus.TelegramConfigured || !overview.NotificationStatus.TelegramRuntimeManaged || !overview.NotificationStatus.TelegramRuntimeApplyActive {
+		t.Fatalf("NotificationStatus = %#v, want configured runtime-managed telegram", overview.NotificationStatus)
+	}
+	if overview.NotificationStatus.FeishuConfigured {
+		t.Fatalf("NotificationStatus = %#v, want feishu unconfigured", overview.NotificationStatus)
+	}
 	if len(overview.RecentEvents) != 1 || overview.RecentEvents[0].IncidentID != "inc_001" {
 		t.Fatalf("RecentEvents = %#v, want decoded event payload", overview.RecentEvents)
 	}
@@ -163,6 +211,94 @@ func TestPostgresDashboardRepositoryBuildsAbnormalSummaryQueries(t *testing.T) {
 			t.Fatalf("capturedSQL = %#v, want %q", capturedSQL, want)
 		}
 	}
+}
+
+func TestPostgresDashboardRepositoryBuildsFullGroupSummaryQuery(t *testing.T) {
+	capturedSQL := []string{}
+	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeRow{scan: func(dest ...any) error { return nil }}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedSQL = append(capturedSQL, sql)
+			return &fakeDashboardRows{}, nil
+		},
+	}}
+
+	_, err := repo.GetDashboardOverview(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("GetDashboardOverview() error = %v", err)
+	}
+
+	groupSQL := firstSQLContaining(capturedSQL, "node_groups")
+	if groupSQL == "" {
+		t.Fatalf("capturedSQL = %#v, want full group summary query", capturedSQL)
+	}
+	for _, want := range []string{
+		"from nodes",
+		"from targets",
+		"full outer join target_groups",
+		`coalesce(nullif(btrim("group"), ''), '未分组')`,
+		"count(*) filter (where current_health_status <> '正常')",
+		"order by",
+	} {
+		if !strings.Contains(groupSQL, want) {
+			t.Fatalf("groupSQL = %q, want %q", groupSQL, want)
+		}
+	}
+	if strings.Contains(groupSQL, "limit $1") {
+		t.Fatalf("groupSQL = %q, want group summaries unaffected by dashboard limit", groupSQL)
+	}
+}
+
+func TestLoadDashboardNotificationStatus(t *testing.T) {
+	t.Run("missing settings row returns false status", func(t *testing.T) {
+		status, err := loadDashboardNotificationStatus(context.Background(), fakeDashboardQueryer{
+			queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+				return fakeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			},
+			query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+				t.Fatal("Query() should not be called")
+				return nil, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("loadDashboardNotificationStatus() error = %v", err)
+		}
+		if status != (incidents.DashboardNotificationStatus{}) {
+			t.Fatalf("status = %#v, want zero false status", status)
+		}
+	})
+
+	t.Run("configured settings row computes booleans only", func(t *testing.T) {
+		status, err := loadDashboardNotificationStatus(context.Background(), fakeDashboardQueryer{
+			queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+				if !strings.Contains(sql, "btrim(telegram_bot_token)") || !strings.Contains(sql, "btrim(feishu_webhook_url)") {
+					t.Fatalf("sql = %q, want trimmed notification configuration checks", sql)
+				}
+				if strings.Contains(sql, "telegram_bot_token,") || strings.Contains(sql, "telegram_chat_id,") || strings.Contains(sql, "feishu_webhook_url,") {
+					t.Fatalf("sql = %q, want booleans only without selecting secret values", sql)
+				}
+				return fakeRow{scan: func(dest ...any) error {
+					*(dest[0].(*bool)) = true
+					*(dest[1].(*bool)) = true
+					*(dest[2].(*bool)) = true
+					*(dest[3].(*bool)) = true
+					return nil
+				}}
+			},
+			query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+				t.Fatal("Query() should not be called")
+				return nil, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("loadDashboardNotificationStatus() error = %v", err)
+		}
+		if !status.TelegramConfigured || !status.TelegramRuntimeManaged || !status.TelegramRuntimeApplyActive || !status.FeishuConfigured {
+			t.Fatalf("status = %#v, want all configured booleans", status)
+		}
+	})
 }
 
 func TestPostgresDashboardRepositoryListEventsBuildsFilters(t *testing.T) {
@@ -309,3 +445,12 @@ func (f *fakeDashboardRows) Next() bool {
 	return true
 }
 func (f *fakeDashboardRows) Scan(dest ...any) error { return f.rows[f.idx-1].scan(dest...) }
+
+func firstSQLContaining(sqls []string, want string) string {
+	for _, sql := range sqls {
+		if strings.Contains(sql, want) {
+			return sql
+		}
+	}
+	return ""
+}

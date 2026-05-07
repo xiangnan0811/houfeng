@@ -26,10 +26,33 @@ func (f *fakeDashboardRepository) GetDashboardOverview(_ context.Context, limit 
 func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	repo := &fakeDashboardRepository{result: incidents.DashboardOverview{
-		TotalNodeCount:         5,
-		TotalTargetCount:       4,
-		AbnormalNodeCount:      2,
-		RecentNewIncidentCount: 3,
+		SnapshotGeneratedAt:        now,
+		TotalNodeCount:             5,
+		TotalTargetCount:           4,
+		AbnormalNodeCount:          2,
+		PendingOnboardingNodeCount: 1,
+		PausedNodeCount:            1,
+		RetiredNodeCount:           1,
+		PausedTargetCount:          1,
+		ArchivedTargetCount:        1,
+		RecentNewIncidentCount:     3,
+		GroupSummaries: []incidents.DashboardGroupSummary{{
+			Group:                  "production",
+			NodeCount:              3,
+			TargetCount:            2,
+			AbnormalNodeCount:      1,
+			AbnormalTargetCount:    1,
+			SevereNodeCount:        0,
+			SevereTargetCount:      1,
+			MaintenanceNodeCount:   1,
+			MaintenanceTargetCount: 0,
+		}},
+		NotificationStatus: incidents.DashboardNotificationStatus{
+			TelegramConfigured:         true,
+			TelegramRuntimeManaged:     true,
+			TelegramRuntimeApplyActive: true,
+			FeishuConfigured:           false,
+		},
 		RecentEvents: []incidents.StateChangeEventRecord{{
 			IncidentID:    "inc_001",
 			IncidentClass: incidents.IncidentNodeDiskPressure,
@@ -90,8 +113,43 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	if body["abnormal_node_count"] != float64(2) {
 		t.Fatalf("body = %#v, want abnormal_node_count=2", body)
 	}
+	if body["snapshot_generated_at"] != "2026-04-25T12:00:00Z" {
+		t.Fatalf("body = %#v, want snapshot_generated_at", body)
+	}
+	if body["pending_onboarding_node_count"] != float64(1) || body["paused_node_count"] != float64(1) || body["retired_node_count"] != float64(1) {
+		t.Fatalf("body = %#v, want node completeness counts", body)
+	}
+	if body["paused_target_count"] != float64(1) || body["archived_target_count"] != float64(1) {
+		t.Fatalf("body = %#v, want target completeness counts", body)
+	}
 	if _, ok := body["AbnormalNodeCount"]; ok {
 		t.Fatalf("body = %#v, want snake_case keys only", body)
+	}
+	groupSummaries, ok := body["group_summaries"].([]any)
+	if !ok || len(groupSummaries) != 1 {
+		t.Fatalf("body = %#v, want one group summary", body)
+	}
+	groupSummary, ok := groupSummaries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("groupSummaries[0] = %#v, want object", groupSummaries[0])
+	}
+	if groupSummary["group"] != "production" || groupSummary["target_count"] != float64(2) {
+		t.Fatalf("group summary = %#v, want snake_case group summary", groupSummary)
+	}
+	if _, ok := groupSummary["NodeCount"]; ok {
+		t.Fatalf("group summary = %#v, want snake_case keys only", groupSummary)
+	}
+	notificationStatus, ok := body["notification_status"].(map[string]any)
+	if !ok {
+		t.Fatalf("body = %#v, want notification_status object", body)
+	}
+	if notificationStatus["telegram_configured"] != true || notificationStatus["telegram_runtime_apply_active"] != true || notificationStatus["feishu_configured"] != false {
+		t.Fatalf("notification status = %#v, want boolean-only snake_case status", notificationStatus)
+	}
+	for _, secretKey := range []string{"telegram_bot_token", "telegram_chat_id", "feishu_webhook_url", "TelegramConfigured"} {
+		if _, ok := notificationStatus[secretKey]; ok {
+			t.Fatalf("notification status = %#v, want no secret or Go struct keys", notificationStatus)
+		}
 	}
 	abnormalNodes, ok := body["abnormal_nodes"].([]any)
 	if !ok || len(abnormalNodes) != 1 {
