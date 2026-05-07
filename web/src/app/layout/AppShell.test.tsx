@@ -1,10 +1,11 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PRIMARY_NAV_ITEMS, PRODUCT_FULL_NAME_ZH, PRODUCT_NAME_ZH } from '../metadata'
 import { AppShell } from './AppShell'
 import * as authCtx from '../../lib/auth-context'
+import type { User } from '../../lib/auth-client'
 
 const baseAuth = {
   login: vi.fn(),
@@ -13,19 +14,55 @@ const baseAuth = {
 }
 const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
 
-describe('AppShell', () => {
-  it('renders sidebar chrome and sets document title when authenticated', () => {
-    vi.spyOn(authCtx, 'useAuth').mockReturnValue({
-      ...baseAuth,
-      user,
-      loading: false,
-    })
+function mockJSONResponse(body: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => JSON.stringify(body),
+  } as Response
+}
 
-    render(
-      <MemoryRouter>
-        <AppShell />
-      </MemoryRouter>,
-    )
+function baseOverview(overrides: Record<string, unknown> = {}) {
+  return {
+    total_node_count: 5,
+    total_target_count: 4,
+    abnormal_node_count: 0,
+    abnormal_target_count: 0,
+    severe_node_count: 0,
+    severe_target_count: 0,
+    maintenance_node_count: 0,
+    maintenance_target_count: 0,
+    recent_new_incident_count: 0,
+    recent_recovery_count: 0,
+    recent_events: [],
+    abnormal_nodes: [],
+    abnormal_targets: [],
+    ...overrides,
+  }
+}
+
+function renderAuthenticatedAppShell(authUser: User = user) {
+  vi.spyOn(authCtx, 'useAuth').mockReturnValue({
+    ...baseAuth,
+    user: authUser,
+    loading: false,
+  })
+
+  return render(
+    <MemoryRouter>
+      <AppShell />
+    </MemoryRouter>,
+  )
+}
+
+describe('AppShell', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('renders sidebar chrome and sets document title when authenticated', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
+    renderAuthenticatedAppShell()
 
     expect(screen.getByText(PRODUCT_NAME_ZH)).toBeInTheDocument()
     PRIMARY_NAV_ITEMS.forEach((item) => {
@@ -36,21 +73,132 @@ describe('AppShell', () => {
   })
 
   it('does not surface single-user phrasing', () => {
-    vi.spyOn(authCtx, 'useAuth').mockReturnValue({
-      ...baseAuth,
-      user,
-      loading: false,
-    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
 
-    const { container } = render(
-      <MemoryRouter>
-        <AppShell />
-      </MemoryRouter>,
-    )
+    renderAuthenticatedAppShell()
+    const appShell = screen.getByText(PRODUCT_NAME_ZH).closest('.app-shell')
+    expect(appShell).not.toBeNull()
+    const container = appShell as HTMLElement
     expect(container.textContent).not.toMatch(/单用户|全权限|个人系统|V1 冻结基线/)
   })
 
+  it('requests dashboard summary when authenticated and shows loading as degraded', () => {
+    const fetchMock = vi.fn().mockReturnValue(new Promise(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAuthenticatedAppShell()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/dashboard', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(screen.getByText('正在读取系统摘要')).toBeInTheDocument()
+    expect(screen.getByText('v1.0 · dashboard loading')).toBeInTheDocument()
+    expect(screen.queryByText('中心运行正常')).not.toBeInTheDocument()
+  })
+
+  it('shows dashboard anomaly counts in sidebar after summary loads', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(
+          baseOverview({
+            abnormal_node_count: 3,
+            abnormal_target_count: 2,
+            severe_node_count: 1,
+          }),
+        ),
+      ),
+    )
+
+    renderAuthenticatedAppShell()
+
+    await waitFor(() =>
+      expect(screen.getByText('摘要已加载 · 存在严重异常')).toBeInTheDocument(),
+    )
+    expect(screen.getByText('3')).toHaveClass('badge--count')
+    expect(screen.getByText('3')).not.toHaveClass('tone--alert', 'tone--critical')
+    expect(screen.getByText('2')).toHaveClass('badge--count')
+    expect(screen.getByText('2')).not.toHaveClass('tone--alert', 'tone--critical')
+    expect(screen.getByText(/v1\.0 · dashboard \d{2}:\d{2}:\d{2}/)).toBeInTheDocument()
+    expect(screen.queryByText('中心运行正常')).not.toBeInTheDocument()
+  })
+
+  it('resets the shell summary to loading instead of reusing a previous load', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          baseOverview({
+            abnormal_node_count: 3,
+            abnormal_target_count: 2,
+          }),
+        ),
+      )
+      .mockReturnValueOnce(new Promise(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { unmount } = renderAuthenticatedAppShell()
+    await waitFor(() =>
+      expect(screen.getByText('摘要已加载 · 存在活跃异常')).toBeInTheDocument(),
+    )
+    unmount()
+
+    renderAuthenticatedAppShell()
+
+    expect(screen.getByText('正在读取系统摘要')).toBeInTheDocument()
+    expect(screen.queryByText('摘要已加载 · 存在活跃异常')).not.toBeInTheDocument()
+    expect(document.querySelectorAll('.badge--count')).toHaveLength(0)
+  })
+
+  it('marks loaded summaries with active anomalies as degraded', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(
+          baseOverview({
+            abnormal_node_count: 1,
+            abnormal_target_count: 0,
+          }),
+        ),
+      ),
+    )
+
+    renderAuthenticatedAppShell()
+
+    await waitFor(() =>
+      expect(screen.getByText('摘要已加载 · 存在活跃异常')).toBeInTheDocument(),
+    )
+    expect(document.querySelector('.sync-status')).toHaveClass('sync-status--degraded')
+  })
+
+  it('marks loaded summaries without anomalies as ok', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
+
+    renderAuthenticatedAppShell()
+
+    await waitFor(() => expect(screen.getByText('摘要已加载')).toBeInTheDocument())
+    expect(document.querySelector('.sync-status')).toHaveClass('sync-status--ok')
+  })
+
+  it('shows dashboard unavailable when the shell summary request fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(mockJSONResponse({ error: 'dashboard unavailable' }, 503)),
+    )
+
+    renderAuthenticatedAppShell()
+
+    await waitFor(() => expect(screen.getByText('摘要不可用')).toBeInTheDocument())
+    expect(screen.getByText('v1.0 · dashboard unavailable')).toBeInTheDocument()
+    expect(document.querySelector('.sync-status')).toHaveClass('sync-status--down')
+    expect(document.querySelectorAll('.badge--count')).toHaveLength(0)
+    expect(screen.queryByText('中心运行正常')).not.toBeInTheDocument()
+  })
+
   it('renders nothing when no authenticated user', () => {
+    vi.stubGlobal('fetch', vi.fn())
     vi.spyOn(authCtx, 'useAuth').mockReturnValue({
       ...baseAuth,
       user: null,
@@ -62,5 +210,6 @@ describe('AppShell', () => {
       </MemoryRouter>,
     )
     expect(container.querySelector('.app-shell')).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

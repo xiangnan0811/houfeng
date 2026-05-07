@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Front-end spec index and quality checklist for PR2 review."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Verify AppShell/layout layering and React component conventions."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify API client usage, loading/error behavior, and dashboard data-truth constraints."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Verify layout CSS remains BEM/token aligned and no hardcoded visual drift is introduced."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Verify required tests/lint/build and test coverage."}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Verify Sidebar/SyncStatus/AppShell visual contract remains truthful after PR2."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-dashboard-and-system-navigation-redesign/prd.md", "reason": "Check PR2 does not drift into PR3/PR4 scope from the prior plan."}
+{"file": ".trellis/tasks/05-07-shell-counts-freshness/prd.md", "reason": "Current PR2 requirements and acceptance criteria."}

@@ -176,7 +176,7 @@ parent: docs/design/v2-houfeng/design-language.md
 - ok 状态点：呼吸动画 1.6s
 - 状态行下方：7-bar Sparkline（最近 7 个心跳间隔）
 - 数据不可用降级：只显示状态行不留空白
-- meta 行：mono 9px `v1.0 · sync HH:mm:ss`
+- meta 行：mono 9px；无真实健康/同步 contract 前只展示 dashboard 摘要来源，例如 `v1.0 · dashboard loading` / `v1.0 · dashboard HH:mm:ss` / `v1.0 · dashboard unavailable`，不得用 `sync HH:mm:ss` 暗示真实同步成功
 
 ### AppShell
 - grid `220px 1fr`

@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Front-end spec index and quality checklist for AppShell PR2 implementation."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "AppShell, layout component layering, props, hooks, and anti-pattern constraints."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client usage, effect loading/error/cancelled pattern, dashboard data-truth constraints."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "SyncStatus and layout CSS must use existing BEM/token conventions."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required lint/test/build commands and test patterns."}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Active v2 visual contract for Sidebar, SyncStatus, and AppShell."}
+{"file": ".trellis/tasks/archive/2026-05/05-06-dashboard-and-system-navigation-redesign/prd.md", "reason": "PR1 archive contains PR2 split rationale and Dashboard data constraints."}
+{"file": ".trellis/tasks/05-07-shell-counts-freshness/prd.md", "reason": "Current PR2 requirements, acceptance criteria, and out-of-scope boundaries."}

@@ -48,15 +48,20 @@
 - `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实。当前可用事实来自 `DashboardOverview`：总节点/目标数、异常/严重/维护计数、24h 新异常/恢复趋势、异常节点/目标摘要、最近事件。
 - `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。需要展示分布时，要么明确命名为“异常对象按 Group”，要么先扩展 center dashboard contract、store 查询、Go 测试与 `web/src/lib/types.ts`。
 - 静态入口可以展示为导航事实，例如 Settings 卡片写“配置入口”；但在 `/api/dashboard` 没有字段前，不要展示通知是否已配置、AppShell health、真实 snapshot 时间、全量库存完整度等状态断言。
+- AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的节点/目标 count 可以来自 `abnormal_node_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
 
 ```tsx
 // 错误：从异常摘要伪装成全量分布
 const groupSummaries = overview.abnormal_nodes.reduce(...)
 <DetailSection title="按 Group 分布">...</DetailSection>
 
+// 错误：没有真实 health/sync contract 时伪造 Shell 健康状态
+<SyncStatus state="ok" label="中心运行正常" meta={`v1.0 · sync ${new Date().toISOString()}`} />
+
 // 正确：只展示 dashboard contract 支撑的事实，或等待后端扩展
 <KpiLink label="节点" value={overview.total_node_count} description={`${overview.abnormal_node_count} 个异常`} />
 <DetailSection title="当前需要处理">...</DetailSection>
+<SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
 ```
 
 ---

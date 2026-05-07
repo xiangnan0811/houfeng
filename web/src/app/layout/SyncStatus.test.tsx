@@ -3,21 +3,33 @@ import { describe, it, expect } from 'vitest'
 import { SyncStatus } from './SyncStatus'
 
 describe('SyncStatus', () => {
-  it('shows ok with version and timestamp', () => {
+  it('shows custom label and meta without fabricating sync copy', () => {
     const { container } = render(
-      <SyncStatus state="ok" version="v1.0" lastSync="2026-04-29T14:32:01Z" />,
+      <SyncStatus state="ok" label="摘要已加载" meta="v1.0 · dashboard 14:32:01" />,
     )
-    expect(screen.getByText('中心运行正常')).toBeInTheDocument()
-    expect(container.textContent).toMatch(/v1\.0/)
+    expect(screen.getByText('摘要已加载')).toBeInTheDocument()
+    expect(screen.getByText('v1.0 · dashboard 14:32:01')).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/中心运行正常|sync/)
   })
 
-  it('shows degraded label', () => {
-    render(<SyncStatus state="degraded" version="v1.0" lastSync="2026-04-29T14:32:01Z" />)
-    expect(screen.getByText('中心运行降级')).toBeInTheDocument()
+  it('keeps the ok state class contract', () => {
+    const { container } = render(
+      <SyncStatus state="ok" label="摘要已加载" meta="v1.0 · dashboard 14:32:01" />,
+    )
+    expect(container.firstElementChild).toHaveClass('sync-status', 'sync-status--ok')
   })
 
-  it('shows down label', () => {
-    render(<SyncStatus state="down" version="v1.0" lastSync="2026-04-29T14:32:01Z" />)
-    expect(screen.getByText('中心不可达')).toBeInTheDocument()
+  it('keeps the degraded state class contract', () => {
+    const { container } = render(
+      <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />,
+    )
+    expect(container.firstElementChild).toHaveClass('sync-status', 'sync-status--degraded')
+  })
+
+  it('keeps the down state class contract', () => {
+    const { container } = render(
+      <SyncStatus state="down" label="摘要不可用" meta="v1.0 · dashboard unavailable" />,
+    )
+    expect(container.firstElementChild).toHaveClass('sync-status', 'sync-status--down')
   })
 })
