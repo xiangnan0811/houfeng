@@ -53,6 +53,10 @@ type FormState = {
     inodeWarningPct: string
     inodeAlertPct: string
     inodeCriticalPct: string
+    iowaitWarningPct: string
+    iowaitCriticalPct: string
+    load5Warning: string
+    load5Critical: string
   }
   nodeLabelOverridesText: string
   targetTypeOverridesText: string
@@ -117,6 +121,10 @@ function buildFormState(settings: SettingsRecord): FormState {
       inodeWarningPct: String(settings.incident_defaults.inode_warning_pct),
       inodeAlertPct: String(settings.incident_defaults.inode_alert_pct),
       inodeCriticalPct: String(settings.incident_defaults.inode_critical_pct),
+      iowaitWarningPct: String(settings.incident_defaults.iowait_warning_pct),
+      iowaitCriticalPct: String(settings.incident_defaults.iowait_critical_pct),
+      load5Warning: String(settings.incident_defaults.load5_warning),
+      load5Critical: String(settings.incident_defaults.load5_critical),
     },
     nodeLabelOverridesText: formatJSON(settings.override_rules.node_labels),
     targetTypeOverridesText: formatJSON(settings.override_rules.target_types),
@@ -136,6 +144,15 @@ function parsePositiveInteger(value: string, label: string) {
     throw new Error(`${label}必须为正整数。`)
   }
   return Number.parseInt(normalized, 10)
+}
+
+function parsePositiveNumber(value: string, label: string) {
+  const normalized = value.trim()
+  const num = Number(normalized)
+  if (!Number.isFinite(num) || num <= 0) {
+    throw new Error(`${label}必须为正数。`)
+  }
+  return num
 }
 
 function parseOverrideRuleArray<T>(value: string, label: string): T[] {
@@ -214,6 +231,10 @@ function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): Set
         inode_warning_pct: parsePositiveInteger(form.incidentDefaults.inodeWarningPct, 'Inode 关注阈值'),
         inode_alert_pct: parsePositiveInteger(form.incidentDefaults.inodeAlertPct, 'Inode 告警阈值'),
         inode_critical_pct: parsePositiveInteger(form.incidentDefaults.inodeCriticalPct, 'Inode 严重阈值'),
+        iowait_warning_pct: parsePositiveInteger(form.incidentDefaults.iowaitWarningPct, 'IOWait 关注阈值'),
+        iowait_critical_pct: parsePositiveInteger(form.incidentDefaults.iowaitCriticalPct, 'IOWait 严重阈值'),
+        load5_warning: parsePositiveNumber(form.incidentDefaults.load5Warning, 'Load5 关注阈值'),
+        load5_critical: parsePositiveNumber(form.incidentDefaults.load5Critical, 'Load5 严重阈值'),
       },
       override_rules: {
         node_labels: parseOverrideRuleArray<NodeLabelOverrideRule>(
@@ -292,6 +313,10 @@ function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): Set
       inode_warning_pct: parsePositiveInteger(form.incidentDefaults.inodeWarningPct, 'Inode 关注阈值'),
       inode_alert_pct: parsePositiveInteger(form.incidentDefaults.inodeAlertPct, 'Inode 告警阈值'),
       inode_critical_pct: parsePositiveInteger(form.incidentDefaults.inodeCriticalPct, 'Inode 严重阈值'),
+      iowait_warning_pct: parsePositiveInteger(form.incidentDefaults.iowaitWarningPct, 'IOWait 关注阈值'),
+      iowait_critical_pct: parsePositiveInteger(form.incidentDefaults.iowaitCriticalPct, 'IOWait 严重阈值'),
+      load5_warning: parsePositiveNumber(form.incidentDefaults.load5Warning, 'Load5 关注阈值'),
+      load5_critical: parsePositiveNumber(form.incidentDefaults.load5Critical, 'Load5 严重阈值'),
     },
     override_rules: {
       node_labels: parseOverrideRuleArray<NodeLabelOverrideRule>(
@@ -565,6 +590,30 @@ function IncidentDefaultsEditor({
           if (key) update(key, nextValue)
         }}
       />
+
+      <MetricThresholdGroup
+        label="IOWait 阈值"
+        warning={value.iowaitWarningPct}
+        alert=""
+        critical={value.iowaitCriticalPct}
+        hasAlert={false}
+        onUpdate={(field, nextValue) => {
+          const key = iowaitThresholdKey(field)
+          if (key) update(key, nextValue)
+        }}
+      />
+
+      <MetricThresholdGroup
+        label="Load5 阈值"
+        warning={value.load5Warning}
+        alert=""
+        critical={value.load5Critical}
+        hasAlert={false}
+        onUpdate={(field, nextValue) => {
+          const key = load5ThresholdKey(field)
+          if (key) update(key, nextValue)
+        }}
+      />
     </div>
   )
 }
@@ -582,6 +631,15 @@ const cpuThresholdKey = (field: string) => thresholdKey('cpu', field)
 const memThresholdKey = (field: string) => thresholdKey('mem', field)
 const diskThresholdKey = (field: string) => thresholdKey('disk', field)
 const inodeThresholdKey = (field: string) => thresholdKey('inode', field)
+const iowaitThresholdKey = (field: string) => thresholdKey('iowait', field)
+
+function load5ThresholdKey(field: string): keyof FormState['incidentDefaults'] | null {
+  switch (field) {
+    case 'warning': return 'load5Warning'
+    case 'critical': return 'load5Critical'
+    default: return null
+  }
+}
 
 function OverrideTextarea({
   ariaLabel,

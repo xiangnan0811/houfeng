@@ -65,6 +65,11 @@ type IncidentDefaults struct {
 	InodeWarningPct  int `json:"inode_warning_pct"`
 	InodeAlertPct    int `json:"inode_alert_pct"`
 	InodeCriticalPct int `json:"inode_critical_pct"`
+
+	IOWaitWarningPct  int     `json:"iowait_warning_pct"`
+	IOWaitCriticalPct int     `json:"iowait_critical_pct"`
+	Load5Warning      float64 `json:"load5_warning"`
+	Load5Critical     float64 `json:"load5_critical"`
 }
 
 type OverrideRules struct {
@@ -120,6 +125,11 @@ type IncidentDefaultsOverride struct {
 	InodeWarningPct  *int `json:"inode_warning_pct,omitempty"`
 	InodeAlertPct    *int `json:"inode_alert_pct,omitempty"`
 	InodeCriticalPct *int `json:"inode_critical_pct,omitempty"`
+
+	IOWaitWarningPct  *int     `json:"iowait_warning_pct,omitempty"`
+	IOWaitCriticalPct *int     `json:"iowait_critical_pct,omitempty"`
+	Load5Warning      *float64 `json:"load5_warning,omitempty"`
+	Load5Critical     *float64 `json:"load5_critical,omitempty"`
 }
 
 type RetentionPolicy struct {
@@ -156,6 +166,10 @@ func Default() CenterSettings {
 			InodeWarningPct:          80,
 			InodeAlertPct:            90,
 			InodeCriticalPct:         95,
+			IOWaitWarningPct:         20,
+			IOWaitCriticalPct:        50,
+			Load5Warning:             4.0,
+			Load5Critical:            8.0,
 		},
 		OverrideRules: OverrideRules{
 			NodeLabels:   []NodeLabelOverrideRule{},
@@ -247,6 +261,14 @@ func validateIncidentDefaults(input IncidentDefaults) (IncidentDefaults, error) 
 	applyIntDefault(&input.InodeWarningPct, defaults.InodeWarningPct)
 	applyIntDefault(&input.InodeAlertPct, defaults.InodeAlertPct)
 	applyIntDefault(&input.InodeCriticalPct, defaults.InodeCriticalPct)
+	applyIntDefault(&input.IOWaitWarningPct, defaults.IOWaitWarningPct)
+	applyIntDefault(&input.IOWaitCriticalPct, defaults.IOWaitCriticalPct)
+	if input.Load5Warning == 0 {
+		input.Load5Warning = defaults.Load5Warning
+	}
+	if input.Load5Critical == 0 {
+		input.Load5Critical = defaults.Load5Critical
+	}
 
 	thresholdFields := []struct {
 		name  string
@@ -264,11 +286,20 @@ func validateIncidentDefaults(input IncidentDefaults) (IncidentDefaults, error) 
 		{"inode warning pct", input.InodeWarningPct},
 		{"inode alert pct", input.InodeAlertPct},
 		{"inode critical pct", input.InodeCriticalPct},
+		{"iowait warning pct", input.IOWaitWarningPct},
+		{"iowait critical pct", input.IOWaitCriticalPct},
 	}
 	for _, f := range thresholdFields {
 		if f.value < 1 || f.value > 100 {
 			return IncidentDefaults{}, invalidSettings(fmt.Sprintf("%s must be between 1 and 100", f.name))
 		}
+	}
+
+	if input.Load5Warning <= 0 {
+		return IncidentDefaults{}, invalidSettings("load5 warning must be positive")
+	}
+	if input.Load5Critical <= 0 {
+		return IncidentDefaults{}, invalidSettings("load5 critical must be positive")
 	}
 
 	return input, nil
@@ -444,6 +475,8 @@ func validateIncidentDefaultsOverride(input IncidentDefaultsOverride) (IncidentD
 		{"inode warning pct", input.InodeWarningPct},
 		{"inode alert pct", input.InodeAlertPct},
 		{"inode critical pct", input.InodeCriticalPct},
+		{"iowait warning pct", input.IOWaitWarningPct},
+		{"iowait critical pct", input.IOWaitCriticalPct},
 	}
 	for _, f := range thresholdPtrs {
 		if f.ptr == nil {
@@ -452,6 +485,19 @@ func validateIncidentDefaultsOverride(input IncidentDefaultsOverride) (IncidentD
 		hasOverride = true
 		if *f.ptr < 1 || *f.ptr > 100 {
 			return IncidentDefaultsOverride{}, invalidSettings(fmt.Sprintf("override %s must be between 1 and 100", f.name))
+		}
+	}
+
+	if input.Load5Warning != nil {
+		hasOverride = true
+		if *input.Load5Warning <= 0 {
+			return IncidentDefaultsOverride{}, invalidSettings("override load5 warning must be positive")
+		}
+	}
+	if input.Load5Critical != nil {
+		hasOverride = true
+		if *input.Load5Critical <= 0 {
+			return IncidentDefaultsOverride{}, invalidSettings("override load5 critical must be positive")
 		}
 	}
 

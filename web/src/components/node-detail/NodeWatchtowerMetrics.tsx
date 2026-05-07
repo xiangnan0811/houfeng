@@ -9,6 +9,7 @@ import {
   formatPercent,
 } from '../../lib/format'
 import type { HostSample } from '../../lib/types'
+import { DEFAULT_THRESHOLDS } from '../../config/thresholds'
 
 type Props = {
   sample: HostSample | null
@@ -76,24 +77,25 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
   const baseTone = isMaintenance ? 'maintenance' : 'accent'
   const altTone = isMaintenance ? 'maintenance' : 'accent-2'
 
-  // Compute priorities for each metric
+  // Compute priorities for each metric using default thresholds
+  const t = DEFAULT_THRESHOLDS
   const cpuPriority = priorityFromThresholds(sample.cpu_usage_pct, [
-    { value: 80, tone: 'notice' }, { value: 95, tone: 'critical' },
+    { value: t.cpu.notice, tone: 'notice' }, { value: t.cpu.critical, tone: 'critical' },
   ])
   const memPriority = priorityFromThresholds(sample.mem_used_pct, [
-    { value: 85, tone: 'notice' }, { value: 95, tone: 'critical' },
+    { value: t.mem.notice, tone: 'notice' }, { value: t.mem.critical, tone: 'critical' },
   ])
   const diskPriority = priorityFromThresholds(sample.disk_used_pct, [
-    { value: 80, tone: 'notice' }, { value: 95, tone: 'critical' },
+    { value: t.disk.notice, tone: 'notice' }, { value: t.disk.critical, tone: 'critical' },
   ])
   const inodePriority = priorityFromThresholds(sample.inode_used_pct, [
-    { value: 80, tone: 'notice' }, { value: 95, tone: 'critical' },
+    { value: t.inode.notice, tone: 'notice' }, { value: t.inode.critical, tone: 'critical' },
   ])
   const iowaitPriority = priorityFromThresholds(sample.cpu_iowait_pct, [
-    { value: 20, tone: 'notice' }, { value: 50, tone: 'critical' },
+    { value: t.iowait.notice, tone: 'notice' }, { value: t.iowait.critical, tone: 'critical' },
   ])
   const load5Priority = priorityFromThresholds(sample.load_5, [
-    { value: 4, tone: 'notice' }, { value: 8, tone: 'critical' },
+    { value: t.load5.notice, tone: 'notice' }, { value: t.load5.critical, tone: 'critical' },
   ])
   // Network metrics have no thresholds — always normal priority
   const netInPriority: MetricPriority = 0
@@ -120,8 +122,8 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
             yMin={0}
             yMax={100}
             thresholds={[
-              { value: 80, tone: 'notice', label: '80%' },
-              { value: 95, tone: 'critical', label: '95%' },
+              { value: t.cpu.notice, tone: 'notice', label: `${t.cpu.notice}%` },
+              { value: t.cpu.critical, tone: 'critical', label: `${t.cpu.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
             ariaLabel="CPU 使用率近 24h 趋势"
@@ -157,8 +159,8 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
             yMin={0}
             yMax={100}
             thresholds={[
-              { value: 85, tone: 'notice', label: '85%' },
-              { value: 95, tone: 'critical', label: '95%' },
+              { value: t.mem.notice, tone: 'notice', label: `${t.mem.notice}%` },
+              { value: t.mem.critical, tone: 'critical', label: `${t.mem.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
             ariaLabel="内存使用率近 24h 趋势"
@@ -200,8 +202,8 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
             yMin={0}
             yMax={100}
             thresholds={[
-              { value: 80, tone: 'notice', label: '80%' },
-              { value: 95, tone: 'critical', label: '95%' },
+              { value: t.disk.notice, tone: 'notice', label: `${t.disk.notice}%` },
+              { value: t.disk.critical, tone: 'critical', label: `${t.disk.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
             ariaLabel="磁盘使用率近 24h 趋势"
@@ -246,8 +248,8 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
             yMin={0}
             yMax={100}
             thresholds={[
-              { value: 80, tone: 'notice', label: '80%' },
-              { value: 95, tone: 'critical', label: '95%' },
+              { value: t.inode.notice, tone: 'notice', label: `${t.inode.notice}%` },
+              { value: t.inode.critical, tone: 'critical', label: `${t.inode.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
             ariaLabel="Inode 使用率近 24h 趋势"
@@ -274,8 +276,8 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
             height={140}
             yMin={0}
             thresholds={[
-              { value: 4, tone: 'notice', label: '4.0' },
-              { value: 8, tone: 'critical', label: '8.0' },
+              { value: t.load5.notice, tone: 'notice', label: String(t.load5.notice) },
+              { value: t.load5.critical, tone: 'critical', label: String(t.load5.critical) },
             ]}
             formatValue={(v) => formatNumber(v)}
             ariaLabel="Load5 近 24h 趋势"
@@ -312,8 +314,8 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
             height={140}
             yMin={0}
             thresholds={[
-              { value: 20, tone: 'notice', label: '20%' },
-              { value: 50, tone: 'critical', label: '50%' },
+              { value: t.iowait.notice, tone: 'notice', label: `${t.iowait.notice}%` },
+              { value: t.iowait.critical, tone: 'critical', label: `${t.iowait.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
             ariaLabel="CPU IOWait 近 24h 趋势"

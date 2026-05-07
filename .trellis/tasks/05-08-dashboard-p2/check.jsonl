@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Frontend quality gate"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Backend quality gate: vet, test, migration"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify API contract matches frontend consumption"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Visual compliance"}
+{"file": ".trellis/tasks/05-08-dashboard-p2/prd.md", "reason": "Acceptance criteria verification"}

@@ -433,6 +433,10 @@ export type IncidentDefaults = {
   inode_warning_pct: number
   inode_alert_pct: number
   inode_critical_pct: number
+  iowait_warning_pct: number
+  iowait_critical_pct: number
+  load5_warning: number
+  load5_critical: number
 }
 
 export type ProbeFrequencyOverride = {
@@ -460,6 +464,10 @@ export type IncidentDefaultsOverride = {
   inode_warning_pct?: number
   inode_alert_pct?: number
   inode_critical_pct?: number
+  iowait_warning_pct?: number
+  iowait_critical_pct?: number
+  load5_warning?: number
+  load5_critical?: number
 }
 
 export type SettingsOverrideFields = {

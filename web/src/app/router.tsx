@@ -5,6 +5,7 @@ import { RequireAuth } from './RequireAuth'
 import { DashboardPage } from '../pages/DashboardPage'
 import { EventsPage } from '../pages/EventsPage'
 import { LoginPage } from '../pages/LoginPage'
+import { NodeComparePage } from '../pages/NodeComparePage'
 import { NodeDetailPage } from '../pages/NodeDetailPage'
 import { NodeOnboardingPage } from '../pages/NodeOnboardingPage'
 import { NodesPage } from '../pages/NodesPage'
@@ -23,6 +24,7 @@ export const appRoutes: RouteObject[] = [
         children: [
           { index: true, element: <DashboardPage /> },
           { path: 'nodes', element: <NodesPage /> },
+          { path: 'nodes/compare', element: <NodeComparePage /> },
           { path: 'nodes/:nodeId', element: <NodeDetailPage /> },
           { path: 'nodes/:nodeId/onboarding', element: <NodeOnboardingPage /> },
           { path: 'targets', element: <TargetsPage /> },

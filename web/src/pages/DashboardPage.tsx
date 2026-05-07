@@ -14,6 +14,11 @@ import {
 import { DetailSection } from '../components/DetailSection'
 import { ApiError, getDashboard } from '../lib/api'
 import {
+  AUTO_REFRESH_OPTIONS,
+  type AutoRefreshOption,
+  useAutoRefresh,
+} from '../lib/useAutoRefresh'
+import {
   type DashboardGroupSummary,
   type DashboardNodeSummary,
   type DashboardOverview,
@@ -525,12 +530,16 @@ function FleetStatePanel({
   metrics,
   refreshing = false,
   onRefresh,
+  autoRefresh,
+  onAutoRefreshChange,
 }: {
   overview: DashboardOverview
   fleetState: FleetState
   metrics: DashboardMetric[]
   refreshing?: boolean
   onRefresh?: () => void
+  autoRefresh?: AutoRefreshOption
+  onAutoRefreshChange?: (value: AutoRefreshOption) => void
 }) {
   return (
     <section
@@ -592,6 +601,23 @@ function FleetStatePanel({
           >
             {refreshing ? '刷新中…' : '刷新'}
           </button>
+        ) : null}
+        {onAutoRefreshChange ? (
+          <select
+            className="auto-refresh-select"
+            value={autoRefresh == null ? '' : String(autoRefresh)}
+            onChange={(e) => {
+              const v = e.target.value
+              onAutoRefreshChange(v === '' ? null : Number(v))
+            }}
+            aria-label="自动刷新间隔"
+          >
+            {AUTO_REFRESH_OPTIONS.map((opt) => (
+              <option key={opt.label} value={opt.value == null ? '' : String(opt.value)}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         ) : null}
       </div>
     </section>
@@ -1043,6 +1069,7 @@ export function DashboardPage() {
     overview: null,
   })
   const [refreshing, setRefreshing] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState<AutoRefreshOption>(null)
   const mountedRef = useRef(true)
 
   function loadDashboard() {
@@ -1065,6 +1092,8 @@ export function DashboardPage() {
     loadDashboard()
     return () => { mountedRef.current = false }
   }, [])
+
+  useAutoRefresh(autoRefresh, loadDashboard)
 
   function handleRefresh() {
     setRefreshing(true)
@@ -1114,6 +1143,8 @@ export function DashboardPage() {
         metrics={metrics}
         refreshing={refreshing}
         onRefresh={handleRefresh}
+        autoRefresh={autoRefresh}
+        onAutoRefreshChange={setAutoRefresh}
       />
 
       <DashboardWorkbench

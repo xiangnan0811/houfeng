@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web spec index"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "New NodeComparePage and AutoRefresh hook conventions"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Auto-refresh state, threshold fetching, comparison data loading"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for migration, store, handler patterns"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Migration conventions for metric_thresholds field"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where to place new handler and store code"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "API contract between Go and frontend for thresholds"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Design tokens for comparison view, refresh UI"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "SettingsPage template, NodeDetailPage watchtower reference for comparison"}
+{"file": ".trellis/tasks/05-08-dashboard-p2/prd.md", "reason": "Task PRD"}

@@ -92,6 +92,10 @@ const settingsResponseBody = {
     inode_warning_pct: 80,
     inode_alert_pct: 90,
     inode_critical_pct: 95,
+    iowait_warning_pct: 20,
+    iowait_critical_pct: 50,
+    load5_warning: 4.0,
+    load5_critical: 8.0,
   },
   override_rules: {
     node_labels: [
@@ -162,6 +166,10 @@ const settingsUpdateBody = {
     inode_warning_pct: 80,
     inode_alert_pct: 90,
     inode_critical_pct: 95,
+    iowait_warning_pct: 20,
+    iowait_critical_pct: 50,
+    load5_warning: 4.0,
+    load5_critical: 8.0,
   },
   override_rules: {
     node_labels: [

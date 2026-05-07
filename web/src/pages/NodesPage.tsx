@@ -41,6 +41,12 @@ import {
 import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { CreateNodeInput, NodeRecord, NodeSparklinesResponse } from '../lib/types'
 import { formatPercent } from '../lib/format'
+import { DEFAULT_THRESHOLDS } from '../config/thresholds'
+import {
+  AUTO_REFRESH_OPTIONS,
+  type AutoRefreshOption,
+  useAutoRefresh,
+} from '../lib/useAutoRefresh'
 
 const NODE_LIFECYCLE_FILTER_OPTIONS = [
   { value: '待接入', label: '待接入' },
@@ -255,11 +261,23 @@ export function NodesPage() {
   const [commandID, setCommandID] = useState('')
   const [sortState, setSortState] = useState<DataTableSortState | null>(null)
   const [showTrends, setShowTrends] = useState(true)
+  const [autoRefresh, setAutoRefresh] = useState<AutoRefreshOption>(null)
+  const [compareSet, setCompareSet] = useState<Set<string>>(new Set())
 
   function resetCreateFlow() {
     setCreateError(null)
     setLabelInput('')
     setCreateForm(initialCreateForm)
+  }
+
+  function refreshNodes() {
+    listNodes()
+      .then((result) => {
+        setNodes(result)
+      })
+      .catch(() => {
+        // silent refresh — keep old data on error
+      })
   }
 
   useEffect(() => {
@@ -280,6 +298,8 @@ export function NodesPage() {
       cancelled = true
     }
   }, [])
+
+  useAutoRefresh(autoRefresh, refreshNodes)
 
   useEffect(() => {
     let cancelled = false
@@ -709,7 +729,42 @@ export function NodesPage() {
     },
   ]
 
+  function toggleCompare(nodeId: string) {
+    setCompareSet((current) => {
+      const next = new Set(current)
+      if (next.has(nodeId)) {
+        next.delete(nodeId)
+      } else if (next.size < 2) {
+        next.add(nodeId)
+      } else {
+        return current // ignore if already 2 selected and trying a 3rd
+      }
+      return next
+    })
+  }
+
   const columns: DataTableColumn<NodeRecord>[] = [
+    {
+      key: 'compare',
+      label: '',
+      width: 28,
+      align: 'center',
+      render: (node) => {
+        const checked = compareSet.has(node.node_id)
+        const disabled = !checked && compareSet.size >= 2
+        return (
+          <input
+            type="checkbox"
+            className="nodes-table__compare-check"
+            checked={checked}
+            disabled={disabled}
+            onChange={() => toggleCompare(node.node_id)}
+            onClick={(event) => event.stopPropagation()}
+            aria-label={`选择 ${node.display_name} 进行对比`}
+          />
+        )
+      },
+    },
     {
       key: 'glyph',
       label: '',
@@ -868,9 +923,10 @@ export function NodesPage() {
         const latestMem = mem?.[mem.length - 1] ?? null
         const latestDisk = disk?.[disk.length - 1] ?? null
 
-        const cpuTone = !latestCpu ? 'default' : latestCpu >= 95 ? 'critical' : latestCpu >= 80 ? 'alert' : 'accent'
-        const memTone = !latestMem ? 'default' : latestMem >= 95 ? 'critical' : latestMem >= 85 ? 'alert' : 'accent'
-        const diskTone = !latestDisk ? 'default' : latestDisk >= 95 ? 'critical' : latestDisk >= 80 ? 'alert' : 'accent'
+        const t = DEFAULT_THRESHOLDS
+        const cpuTone = !latestCpu ? 'default' : latestCpu >= t.cpu.critical ? 'critical' : latestCpu >= t.cpu.notice ? 'alert' : 'accent'
+        const memTone = !latestMem ? 'default' : latestMem >= t.mem.critical ? 'critical' : latestMem >= t.mem.notice ? 'alert' : 'accent'
+        const diskTone = !latestDisk ? 'default' : latestDisk >= t.disk.critical ? 'critical' : latestDisk >= t.disk.notice ? 'alert' : 'accent'
 
         return (
           <span className="nodes-table__trend-strip">
@@ -1124,6 +1180,29 @@ export function NodesPage() {
         >
           {showTrends ? '隐藏趋势' : '显示趋势'}
         </button>
+        {compareSet.size === 2 ? (
+          <Link
+            className="btn btn--secondary btn--sm"
+            to={`/nodes/compare?id=${[...compareSet].join('&id=')}`}
+          >
+            对比选中节点
+          </Link>
+        ) : null}
+        <select
+          className="auto-refresh-select"
+          value={autoRefresh == null ? '' : String(autoRefresh)}
+          onChange={(e) => {
+            const v = e.target.value
+            setAutoRefresh(v === '' ? null : Number(v))
+          }}
+          aria-label="自动刷新间隔"
+        >
+          {AUTO_REFRESH_OPTIONS.map((opt) => (
+            <option key={opt.label} value={opt.value == null ? '' : String(opt.value)}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {baseNodes.length === 0 ? (
