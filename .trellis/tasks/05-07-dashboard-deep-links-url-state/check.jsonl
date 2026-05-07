@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "前端质量检查的规范入口"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "检查页面/组件分层、命名导出和 filter 原语使用是否一致"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "检查 URL-state、Dashboard 事实展示和 API client 约束"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "检查新增 UI 样式是否符合 tokens/BEM/无 inline 业务样式要求"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "检查 Vitest 请求 URL 断言与 lint/test/build 命令是否覆盖"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 Dashboard 深链到列表页筛选的跨页面语义一致性"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "检查页面视觉与交互契约更新是否完整"}
+{"file": ".trellis/tasks/archive/2026-05/05-06-dashboard-and-system-navigation-redesign/prd.md", "reason": "校验 PR4 是否偿还 PR1 遗留的深链范围"}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-contract-extension/prd.md", "reason": "校验实现未越界扩展后端 contract 或泄露敏感设置"}

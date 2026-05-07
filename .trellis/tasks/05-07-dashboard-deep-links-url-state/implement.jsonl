@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "前端规范入口，说明视觉与业务权威来源"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "页面与共享 filter 原语的组件分层、命名和反模式"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "URL 状态、Dashboard 数据可信度和 API client 约束"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "EventsPage 筛选 UI 改造时避免 inline 样式和令牌漂移"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Vitest、URL 请求断言、lint/test/build 验证要求"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Dashboard 到列表页 URL contract 跨页面数据流检查"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Dashboard、Nodes、Targets、Events 页面视觉和交互契约"}
+{"file": ".trellis/tasks/archive/2026-05/05-06-dashboard-and-system-navigation-redesign/prd.md", "reason": "PR1 留给 PR4 的 Dashboard 深链与事件筛选偿还范围"}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-contract-extension/prd.md", "reason": "PR3 dashboard contract 字段与 PR4 明确不扩后端的边界"}
+{"file": ".trellis/tasks/archive/2026-05/05-06-dashboard-and-system-navigation-redesign/research/current-ui-ia-audit.md", "reason": "现有 Nodes/Targets URL filter、EventsPage 本地筛选和 Dashboard IA 发现"}
