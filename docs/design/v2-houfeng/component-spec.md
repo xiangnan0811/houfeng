@@ -204,9 +204,10 @@ parent: docs/design/v2-houfeng/design-language.md
    - 正常态：`运行概览`，eyebrow `运行概览`，主体展示库存健康、24h 变化和一个紧凑管理入口，不渲染大型空处理队列表格。
    - 首次接入态：`首次接入工作台`，eyebrow `首次接入`，主体只突出四步 onboarding。
 4. 异常态处理队列是首页任务列表，不是列表页表格复制。每项包含 `StatusGlyph`、对象（`Hostname` / display name / freshness）、类型与位置、状态 `Badge`、当前主问题（活跃异常数 + 摘要）和 `进入` link。项点击进入节点/目标详情；操作 link 必须 `stopPropagation()`；DetailSection aside 只提供队列相关链接：`查看全部异常节点` → `/nodes?abnormal=1`、`查看全部异常目标` → `/targets?abnormal=1`、`查看事件流` → `/events?time_range=24h`。
-5. 正常 / 维护态的系统入口表现为主体内的 `管理入口` 紧凑行，不是 `系统快捷入口` heading + 详细描述列表，也不是右侧 context rail。四个入口为节点 / 目标 / 事件 / 设置：节点入口展示待接入、暂停、退役，并按优先级跳到 `/nodes?onboarding=pending`、`/nodes?run_status=暂停`、`/nodes?lifecycle=已退役`、`/nodes`；目标入口展示异常、暂停、归档，并按优先级跳到 `/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档`、`/targets`；事件入口展示 24h 新增/恢复并跳到 `/events?time_range=24h`；设置入口只展示 `notification_status` 的通道配置布尔摘要，不暴露 token、chat id 或 webhook URL。
-6. Dashboard 默认不展示所有 `/api/dashboard` contract 字段。`group_summaries` 与 `recent_events` 是次级详情入口的数据来源，不在 Dashboard 首屏展开为 `Group 摘要` 或 `最近事件摘要` 列表；用户通过节点、目标、事件页深链查看完整上下文。需要重新展示这些字段时必须先证明它们服务当前状态的主决策路径，并同步测试防止信息摊开。
-7. 首次接入态只渲染 onboarding 主工作台和必要入口，不渲染摘要指标、空 Group、空最近事件、API facts 或其它暗示系统已有数据的大区块。四步入口分别为 `/nodes`、`/nodes?onboarding=pending`、`/targets`、`/targets`。
+5. 工作台内部可展示一个低权重 `运行上下文` strip，用于补充同类系统常见的影响范围、库存状态、最近活动。它最多 3 个 Link item，不作为独立 page section，不使用 `Group 摘要` / `最近事件摘要` heading，不展开完整 group/recent 列表；最近活动只展示事件类型、严重度、对象和跳转，不展示 event summary 正文。
+6. 正常 / 维护态的系统入口表现为主体内的 `管理入口` 紧凑行，不是 `系统快捷入口` heading + 详细描述列表，也不是右侧 context rail。四个入口为节点 / 目标 / 事件 / 设置：节点入口展示待接入、暂停、退役，并按优先级跳到 `/nodes?onboarding=pending`、`/nodes?run_status=暂停`、`/nodes?lifecycle=已退役`、`/nodes`；目标入口展示异常、暂停、归档，并按优先级跳到 `/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档`、`/targets`；事件入口展示 24h 新增/恢复并跳到 `/events?time_range=24h`；设置入口只展示 `notification_status` 的通道配置布尔摘要，不暴露 token、chat id 或 webhook URL。
+7. Dashboard 默认不展示所有 `/api/dashboard` contract 字段。`group_summaries` 与 `recent_events` 是次级详情入口的数据来源，不在 Dashboard 首屏展开为 `Group 摘要` 或 `最近事件摘要` 列表；用户通过节点、目标、事件页深链查看完整上下文。需要重新展示这些字段时必须先证明它们服务当前状态的主决策路径，并同步测试防止信息摊开。
+8. 首次接入态只渲染 onboarding 主工作台和必要入口，不渲染摘要指标、运行上下文、空 Group、空最近事件、API facts 或其它暗示系统已有数据的大区块。四步入口分别为 `/nodes`、`/nodes?onboarding=pending`、`/targets`、`/targets`。
 
 ### NodesPage
 1. Section heading + 「新建节点」按钮

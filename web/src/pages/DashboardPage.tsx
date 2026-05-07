@@ -17,6 +17,7 @@ import {
   type DashboardOverview,
   type DashboardTargetSummary,
   type IncidentSeverity,
+  STATE_CHANGE_EVENT_TYPE_LABELS,
 } from '../lib/types'
 
 type State = {
@@ -68,6 +69,15 @@ type ManagementEntry = {
   title: string
   stat: string
   to: string
+}
+
+type ContextItem = {
+  label: string
+  title: string
+  detail: string
+  to: string
+  tone?: BadgeTone
+  timestampAt?: string | null
 }
 
 const SEVERITY_RANK = ['严重', '告警', '关注', '维护中', '正常'] as const
@@ -162,6 +172,109 @@ function targetManagementStat(overview: DashboardOverview) {
 
 function eventManagementStat(overview: DashboardOverview) {
   return `24h 新增 ${overview.recent_new_incident_count} · 恢复 ${overview.recent_recovery_count}`
+}
+
+function inventoryEntryLink(overview: DashboardOverview) {
+  if (
+    overview.pending_onboarding_node_count > 0 ||
+    overview.paused_node_count > 0 ||
+    overview.retired_node_count > 0
+  ) {
+    return nodeEntryLink(overview)
+  }
+  if (
+    overview.abnormal_target_count > 0 ||
+    overview.paused_target_count > 0 ||
+    overview.archived_target_count > 0
+  ) {
+    return targetEntryLink(overview)
+  }
+  return DASHBOARD_LINKS.nodes
+}
+
+function activeGroupCount(overview: DashboardOverview) {
+  return overview.group_summaries.filter(
+    (group) => group.abnormal_node_count + group.abnormal_target_count > 0,
+  ).length
+}
+
+function topAffectedGroup(overview: DashboardOverview) {
+  return [...overview.group_summaries].sort((a, b) => {
+    const activeDelta =
+      b.abnormal_node_count + b.abnormal_target_count - (a.abnormal_node_count + a.abnormal_target_count)
+    if (activeDelta !== 0) return activeDelta
+    return b.severe_node_count + b.severe_target_count - (a.severe_node_count + a.severe_target_count)
+  })[0]
+}
+
+function latestEventSummary(overview: DashboardOverview): string {
+  const latestEvent = overview.recent_events[0]
+  if (!latestEvent) return '24h 内没有事件记录'
+  const eventLabel = STATE_CHANGE_EVENT_TYPE_LABELS[latestEvent.event_type] ?? '状态变化'
+  const severity = latestEvent.severity ? ` · ${latestEvent.severity}` : ''
+  return `${eventLabel}${severity} · ${latestEvent.object_type === 'node' ? '节点' : '目标'} ${latestEvent.object_id}`
+}
+
+function latestEventTimestamp(overview: DashboardOverview): string | null {
+  return overview.recent_events[0]?.created_at ?? null
+}
+
+function buildContextItems(
+  overview: DashboardOverview,
+  abnormalTotal: number,
+  maintenanceTotal: number,
+): ContextItem[] {
+  const affectedGroupCount = activeGroupCount(overview)
+  const topGroup = topAffectedGroup(overview)
+  const impactDetail =
+    affectedGroupCount > 0 && topGroup
+      ? `${affectedGroupCount} 个分组受影响，最高影响 ${topGroup.group}`
+      : `覆盖 ${overview.group_summaries.length} 个分组，当前无异常分组`
+  const inventoryDetail = [
+    `节点 ${overview.total_node_count}`,
+    `目标 ${overview.total_target_count}`,
+    overview.pending_onboarding_node_count > 0 ? `待接入 ${overview.pending_onboarding_node_count}` : null,
+    overview.paused_node_count + overview.paused_target_count > 0
+      ? `暂停 ${overview.paused_node_count + overview.paused_target_count}`
+      : null,
+    overview.retired_node_count + overview.archived_target_count > 0
+      ? `退役/归档 ${overview.retired_node_count + overview.archived_target_count}`
+      : null,
+  ].filter(Boolean).join(' · ')
+
+  return [
+    {
+      label: '影响范围',
+      title: affectedGroupCount > 0 ? `${affectedGroupCount} 个分组` : '分组稳定',
+      detail: impactDetail,
+      to: abnormalTotal > 0
+        ? overview.abnormal_node_count > 0
+          ? DASHBOARD_LINKS.nodesAbnormal
+          : DASHBOARD_LINKS.targetsAbnormal
+        : DASHBOARD_LINKS.nodes,
+      tone: abnormalTotal > 0 ? 'alert' : 'normal',
+    },
+    {
+      label: '库存状态',
+      title: `${overview.total_node_count} 节点 / ${overview.total_target_count} 目标`,
+      detail: inventoryDetail,
+      to: inventoryEntryLink(overview),
+      tone: overview.pending_onboarding_node_count > 0 ||
+        overview.paused_node_count > 0 ||
+        overview.paused_target_count > 0 ||
+        overview.archived_target_count > 0
+        ? 'notice'
+        : 'neutral',
+    },
+    {
+      label: '最近活动',
+      title: `${overview.recent_new_incident_count}/${overview.recent_recovery_count} 变化`,
+      detail: latestEventSummary(overview),
+      to: maintenanceTotal > 0 ? DASHBOARD_LINKS.eventsMaintenance : DASHBOARD_LINKS.events24h,
+      tone: overview.recent_new_incident_count > 0 ? 'notice' : 'normal',
+      timestampAt: latestEventTimestamp(overview),
+    },
+  ]
 }
 
 function buildFleetState(
@@ -524,12 +637,41 @@ function ManagementEntries({ overview }: { overview: DashboardOverview }) {
   )
 }
 
+function DashboardContextStrip({ items }: { items: ContextItem[] }) {
+  return (
+    <div className="dashboard-context-strip" aria-label="运行上下文">
+      {items.map((item) => (
+        <Link
+          className={`dashboard-context-item${item.tone ? ` dashboard-context-item--${item.tone}` : ''}`}
+          to={item.to}
+          key={item.label}
+          aria-label={`${item.label}：${item.detail}`}
+        >
+          <span className="dashboard-context-item__label">{item.label}</span>
+          <strong className="dashboard-context-item__title">{item.title}</strong>
+          <span className="dashboard-context-item__detail">
+            {item.detail}
+            {item.timestampAt ? (
+              <>
+                {' · '}
+                <Timestamp value={item.timestampAt} mode="relative" />
+              </>
+            ) : null}
+          </span>
+        </Link>
+      ))}
+    </div>
+  )
+}
+
 function RunningOverview({
   overview,
   maintenanceTotal,
+  contextItems,
 }: {
   overview: DashboardOverview
   maintenanceTotal: number
+  contextItems: ContextItem[]
 }) {
   const isMaintenance = maintenanceTotal > 0
 
@@ -583,6 +725,7 @@ function RunningOverview({
           </small>
         </Link>
       </div>
+      <DashboardContextStrip items={contextItems} />
       <ManagementEntries overview={overview} />
     </div>
   )
@@ -699,9 +842,16 @@ function DashboardWorkbench({
         {isFreshInstall ? (
           <OnboardingWorkbench />
         ) : hasAbnormal ? (
-          <AttentionQueue items={attentionItems} />
+          <>
+            <AttentionQueue items={attentionItems} />
+            <DashboardContextStrip items={buildContextItems(overview, abnormalTotal, maintenanceTotal)} />
+          </>
         ) : (
-          <RunningOverview overview={overview} maintenanceTotal={maintenanceTotal} />
+          <RunningOverview
+            overview={overview}
+            maintenanceTotal={maintenanceTotal}
+            contextItems={buildContextItems(overview, abnormalTotal, maintenanceTotal)}
+          />
         )}
       </div>
     </DetailSection>

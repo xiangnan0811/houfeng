@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Verify web-layer scope and visual authority."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check component structure, Link usage, and accessibility behavior."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify Dashboard context uses only appropriate contract facts and does not restore noisy sections."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check CSS token/BEM compliance, density, and responsive behavior."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Guide required lint, test, build, and UI checks."}
+{"file": ".trellis/tasks/05-07-dashboard-comparable-systems-enrichment/research/comparable-systems.md", "reason": "Check implementation matches converged comparable-system direction."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-visual-audit-polish/prd.md", "reason": "Ensure the new information does not undo prior visual simplification."}

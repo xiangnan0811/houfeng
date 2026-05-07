@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web layer overview and active visual authority."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "React component, Link, and accessibility conventions for Dashboard additions."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard contract facts and rules for not displaying all fields by default."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS token, BEM, density, and non-card-heavy layout rules."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required tests, lint, build, and UI verification checks."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing atoms and avoid duplicating old dashboard sections."}
+{"file": ".trellis/tasks/05-07-dashboard-comparable-systems-enrichment/research/comparable-systems.md", "reason": "Comparable-system patterns to absorb without restoring clutter."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-visual-audit-polish/prd.md", "reason": "Previous visual simplification constraints that must remain intact."}
+{"file": ".trellis/tasks/archive/2026-05/05-07-dashboard-deep-links-url-state/prd.md", "reason": "PR4 filtered deep-link contract must remain intact."}

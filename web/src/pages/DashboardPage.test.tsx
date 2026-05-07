@@ -230,6 +230,20 @@ describe('DashboardPage', () => {
       'href',
       '/events?time_range=24h',
     )
+    const context = screen.getByLabelText('运行上下文')
+    expect(within(context).getAllByRole('link')).toHaveLength(3)
+    expect(within(context).getByRole('link', { name: '影响范围：1 个分组受影响，最高影响 production' })).toHaveAttribute(
+      'href',
+      '/nodes?abnormal=1',
+    )
+    expect(within(context).getByRole('link', { name: /库存状态：节点 5 · 目标 4/ })).toHaveAttribute(
+      'href',
+      '/nodes?onboarding=pending',
+    )
+    expect(within(context).getByRole('link', { name: /最近活动：异常开始 · 严重 · 目标 tg_001/ })).toHaveAttribute(
+      'href',
+      '/events?maintenance_only=1',
+    )
 
     expect(screen.queryByLabelText('工作台上下文')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '系统快捷入口' })).not.toBeInTheDocument()
@@ -376,6 +390,15 @@ describe('DashboardPage', () => {
       'href',
       '/events?time_range=24h',
     )
+    const context = screen.getByLabelText('运行上下文')
+    expect(within(context).getByRole('link', { name: '影响范围：覆盖 1 个分组，当前无异常分组' })).toHaveAttribute(
+      'href',
+      '/nodes',
+    )
+    expect(within(context).getByRole('link', { name: /最近活动：异常恢复 · 正常 · 节点 nd_001/ })).toHaveAttribute(
+      'href',
+      '/events?time_range=24h',
+    )
     expect(screen.queryByText('CPU 使用率恢复')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '系统快捷入口' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Group 摘要' })).not.toBeInTheDocument()
@@ -429,6 +452,7 @@ describe('DashboardPage', () => {
     expect(within(onboardingSection).getByRole('link', { name: '添加 ProbeItem' })).toHaveAttribute('href', '/targets')
 
     expect(screen.queryByLabelText('关键状态指标')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('运行上下文')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Dashboard 摘要指标')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('系统全局指标')).not.toBeInTheDocument()
     expect(screen.queryByText('已加载 /api/dashboard')).not.toBeInTheDocument()
