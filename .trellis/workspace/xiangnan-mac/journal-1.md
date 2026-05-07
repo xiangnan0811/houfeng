@@ -1452,3 +1452,36 @@ Redesigned Dashboard into a fleet workbench with Fleet State, global KPI strip, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 44: Shell counts and freshness PR2
+
+**Date**: 2026-05-07
+**Task**: Shell counts and freshness PR2
+**Branch**: `main`
+
+### Summary
+
+Made AppShell and Sidebar status credible by loading existing dashboard summary data, deriving node/target anomaly counts from /api/dashboard, replacing fake center sync health copy with factual dashboard summary states, updating tests and design/spec guidance.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2956978` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
