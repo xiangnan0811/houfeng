@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+blocked=0
+
+while IFS=' ' read -r local_ref local_oid remote_ref remote_oid
+do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master|main|master)
+      cat >&2 <<EOF
+Push blocked: remote ${remote_ref} is protected by repository policy.
+
+Push a feature branch and open a pull request instead:
+  git push -u origin HEAD
+
+Direct pushes, deletes, and force pushes to remote main/master are not allowed.
+EOF
+      blocked=1
+      ;;
+  esac
+done
+
+if [ "$blocked" -ne 0 ]; then
+  exit 1
+fi
+
+exit 0

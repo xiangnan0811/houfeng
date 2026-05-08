@@ -21,6 +21,7 @@ These guides help you **ask the right questions before coding**.
 
 | Guide | Purpose | When to Use |
 |-------|---------|-------------|
+| [Branch Workflow Governance](./branch-workflow-governance.md) | Keep local and remote main branches protected | Before starting implementation, branch setup, or PR/release workflow changes |
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
 
@@ -46,6 +47,15 @@ These guides help you **ask the right questions before coding**.
 - [ ] **You're creating a new utility/helper function** ← Search first!
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+
+### When to Think About Branch Workflow Governance
+
+- [ ] You are about to start implementation work
+- [ ] You are on `main` or `master`
+- [ ] You are changing branch, hook, PR, or release workflow guidance
+- [ ] A workflow suggests using `git worktree`
+
+→ Read [Branch Workflow Governance](./branch-workflow-governance.md)
 
 ---
 

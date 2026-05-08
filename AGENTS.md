@@ -55,3 +55,11 @@ When `wait` returns a `completed` notification, treat it as an event signal — 
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
+
+## Repository Branch Governance
+
+- Do not commit, merge, amend, squash, reset, or otherwise directly modify local `main` or `master`.
+- All feature work, bug fixes, documentation changes, and agent implementation work must happen on a new non-main branch.
+- Do not use `git worktree` for this repository workflow; keep work in the single checkout unless the human owner explicitly changes this policy.
+- Enable the versioned local hooks with `sh scripts/setup-git-hooks.sh` before making changes. The hooks block commits on local `main` / `master` and pushes to remote `main` / `master`.
+- Remote `main` / `master` must be protected in the Git host to reject direct pushes and force pushes by everyone. Use pull requests from feature branches instead of pushing to protected branches directly.
