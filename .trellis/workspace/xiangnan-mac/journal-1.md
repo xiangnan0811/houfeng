@@ -1888,3 +1888,36 @@ Made Dashboard and NodeOnboarding timestamp assertions timezone-stable by derivi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 57: Fix Actions Node 20 deprecation
+
+**Date**: 2026-05-08
+**Task**: Fix Actions Node 20 deprecation
+**Branch**: `main`
+
+### Summary
+
+Upgraded CI official actions to Node 24 runtime major versions, kept Go/Web quality gates unchanged, updated Trellis CI specs, and verified local gates before remote CI monitoring.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `39c7b35` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
