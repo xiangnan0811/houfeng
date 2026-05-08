@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 57
+- **Total Sessions**: 58
 - **Last Active**: 2026-05-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1923 | Active |
+| `journal-1.md` | ~1958 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 58 | 2026-05-08 | Resolve stale Dashboard Trellis tasks | `d5280a8`, `df7d0f5`, `bee3622` | `chore/resolve-stale-dashboard-tasks` |
 | 57 | 2026-05-08 | Fix Actions Node 20 deprecation | `39c7b35` | `main` |
 | 56 | 2026-05-08 | Fix CI web timezone tests | `13a7d4f` | `main` |
 | 55 | 2026-05-08 | Fix GitHub Actions CI workflow | `ba4846e` | `main` |
