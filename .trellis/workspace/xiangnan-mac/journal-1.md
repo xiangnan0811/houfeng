@@ -1788,3 +1788,37 @@ Refined Dashboard, node pages, and adjacent target/event/settings pages with sha
 ### Next Steps
 
 - None - task complete
+
+
+## Session 54: Update Trellis integration
+
+**Date**: 2026-05-08
+**Task**: Update Trellis integration
+**Branch**: `main`
+
+### Summary
+
+Upgraded Trellis CLI and project templates to 0.5.7, validated Codex hook/bootstrap behavior, and adjusted local Codex config compatibility for multi_agent_v2.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a8e5ba8` | (see git log) |
+| `ab12982` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
