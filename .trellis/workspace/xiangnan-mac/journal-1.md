@@ -1921,3 +1921,38 @@ Upgraded CI official actions to Node 24 runtime major versions, kept Go/Web qual
 ### Next Steps
 
 - None - task complete
+
+
+## Session 58: Resolve stale Dashboard Trellis tasks
+
+**Date**: 2026-05-08
+**Task**: Resolve stale Dashboard Trellis tasks
+**Branch**: `chore/resolve-stale-dashboard-tasks`
+
+### Summary
+
+Audited stale Dashboard P0/P1/P2 tasks. Archived P1 as complete and archived P0/P2 as stale partial/superseded after adding completion-audit records, leaving no active Trellis tasks.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d5280a8` | (see git log) |
+| `df7d0f5` | (see git log) |
+| `bee3622` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
