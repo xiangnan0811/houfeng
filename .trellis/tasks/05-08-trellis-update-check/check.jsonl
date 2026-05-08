@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "Verification should account for project-level thinking guides and config-change safety."}
+{"file": ".trellis/tasks/05-08-trellis-update-check/research/official-update-path.md", "reason": "Check the final state against the documented Trellis update path."}
