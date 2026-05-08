@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { formatDateTime } from '../lib/format'
 import { getOnboardingTokenCache, setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import { NodeOnboardingPage } from './NodeOnboardingPage'
 
@@ -359,8 +360,8 @@ describe('NodeOnboardingPage', () => {
 
     expect(within(conflictCard).getByText('sha256:c…abcdef')).toBeInTheDocument()
     expect(within(conflictCard).getByText('sha256:p…567890')).toBeInTheDocument()
-    expect(within(conflictCard).getByText('2026/04/26 17:15')).toBeInTheDocument()
-    expect(within(conflictCard).getByText('2026/04/26 17:18')).toBeInTheDocument()
+    expect(within(conflictCard).getByText(formatDateTime('2026-04-26T09:15:00Z'))).toBeInTheDocument()
+    expect(within(conflictCard).getByText(formatDateTime('2026-04-26T09:18:00Z'))).toBeInTheDocument()
     expect(within(conflictCard).getByText('4')).toBeInTheDocument()
     // Two-step UX: section shows ghost buttons by default; the actual
     // confirmation card only appears after a choice is made.
@@ -748,11 +749,11 @@ describe('NodeOnboardingPage', () => {
     expect(pendingFp.className).toContain('hostname')
 
     // first / last seen timestamps → Timestamp (mono + timestamp class)
-    const firstSeen = within(conflictCard).getByText('2026/04/26 17:15')
+    const firstSeen = within(conflictCard).getByText(formatDateTime('2026-04-26T09:15:00Z'))
     expect(firstSeen.className).toContain('timestamp')
     expect(firstSeen.className).toContain('mono')
 
-    const lastSeen = within(conflictCard).getByText('2026/04/26 17:18')
+    const lastSeen = within(conflictCard).getByText(formatDateTime('2026-04-26T09:18:00Z'))
     expect(lastSeen.className).toContain('timestamp')
 
     // attempt count → MonoDigits (mono + tnum + mono-digits)

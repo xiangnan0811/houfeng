@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend test and quality conventions"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Vitest and CI quality gate expectations"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Timestamp atom semantics and test style"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared pre-modification and consistency guidance"}

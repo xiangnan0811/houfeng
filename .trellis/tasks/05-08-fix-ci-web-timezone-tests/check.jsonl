@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Check frontend test changes against conventions"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check Vitest and CI quality gate expectations"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check Timestamp DOM/class semantics stay covered"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared quality and consistency checklist"}

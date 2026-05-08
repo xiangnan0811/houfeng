@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { formatDateTime } from '../lib/format'
 import { DashboardPage } from './DashboardPage'
 
 function mockJSONResponse(body: unknown, status = 200) {
@@ -165,7 +166,9 @@ describe('DashboardPage', () => {
 
     const statusBar = screen.getByLabelText('Dashboard 状态')
     expect(statusBar).toHaveTextContent('摘要生成')
-    expect(statusBar).toHaveTextContent('2026/04/25 16:30')
+    const generatedAt = within(statusBar).getByText(formatDateTime('2026-04-25T08:30:00Z'))
+    expect(generatedAt).toHaveClass('timestamp')
+    expect(generatedAt).toHaveClass('mono')
     expect(statusBar).toHaveTextContent('2 个对象异常，其中 1 个严重')
     const trendPulse = within(statusBar).getByRole('link', { name: '24h 事件趋势：新增 4 · 恢复 1' })
     expect(trendPulse).toHaveAttribute('href', '/events?time_range=24h')

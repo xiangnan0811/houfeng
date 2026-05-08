@@ -123,6 +123,7 @@ describe('EventsPage', () => {
 - **不要起真 server**：jsdom 环境，全部走 `fetch` 桩。
 - **断言用户可见行为优先**：`screen.getByRole('heading', { name: '事件' })` / `screen.getByText('正在加载事件…')`，少用 `getByTestId`。
 - **`toHaveBeenLastCalledWith` 校验请求 URL + headers**：当前所有 page 测试都把请求 URL 完整字面写出来（含 URL-encoded query），这是发现 query 拼装回归的关键手段。
+- **时间文本不要硬编码本机时区结果**：CI runner 默认 UTC，本地常见 Asia/Shanghai。断言 `Z` 时间戳渲染时，用产品同款 `formatDateTime('...Z')` 生成期望，或在测试环境显式固定 `TZ`；不要写死 `2026/04/26 17:15` 这类只在当前机器时区成立的字符串。若页面必须通过 `Timestamp` atom 渲染，除了文本外还要断言 `timestamp` / `mono` 等 class，避免测试退化成纯 formatter 自测。
 
 #### Hook / Context 测试：`vi.spyOn` 替换 hook 返回值
 
