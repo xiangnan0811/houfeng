@@ -1956,3 +1956,36 @@ Audited stale Dashboard P0/P1/P2 tasks. Archived P1 as complete and archived P0/
 ### Next Steps
 
 - None - task complete
+
+
+## Session 59: Refine VPS Asset Ledger plan
+
+**Date**: 2026-05-08
+**Task**: Refine VPS Asset Ledger plan
+**Branch**: `chore/refine-asset-ledger-plan`
+
+### Summary
+
+Converted the root VPS Asset Ledger direction into an executable post-V1/MVP plan, fixed migration numbering guidance, and recorded Trellis context for future implementation slices.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3b3c8a1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
