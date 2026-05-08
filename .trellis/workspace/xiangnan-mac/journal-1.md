@@ -1855,3 +1855,36 @@ Removed unsupported job-level hashFiles condition from ci.yml so GitHub Actions 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 56: Fix CI web timezone tests
+
+**Date**: 2026-05-08
+**Task**: Fix CI web timezone tests
+**Branch**: `main`
+
+### Summary
+
+Made Dashboard and NodeOnboarding timestamp assertions timezone-stable by deriving expected text from formatDateTime, preserved Timestamp atom semantics checks, and documented the testing rule for CI UTC environments.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `13a7d4f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
