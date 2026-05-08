@@ -52,8 +52,8 @@
 
 - `jobs.go.steps[*].run`: `make verify-go`
 - `jobs.web.steps[*].run`: `make verify-web`
-- Go 版本：`actions/setup-go@v5` + `go-version-file: go.mod`
-- Node 版本：`actions/setup-node@v4` + `node-version: 22`
+- Go 版本：`actions/setup-go@v6` + `go-version-file: go.mod`
+- Node 版本：`actions/setup-node@v6` + `node-version: 22`
 - npm cache dependency path：`web/package-lock.json`
 
 ### 3. Contracts
@@ -211,7 +211,7 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 
 ### Go 版本
 
-`actions/setup-go@v5` 通过 `go-version-file: go.mod`（`.github/workflows/ci.yml:16`）锁定。本地 Go 必须 ≥ `go.mod` 声明的版本。
+`actions/setup-go@v6` 通过 `go-version-file: go.mod`（`.github/workflows/ci.yml:16`）锁定。本地 Go 必须 ≥ `go.mod` 声明的版本。
 
 ---
 

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "CI keeps backend quality gate via make verify-go"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "GitHub Actions workflow contract and backend verification expectations"}
+{"file": ".trellis/spec/web/index.md", "reason": "CI keeps web quality gate via make verify-web"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Frontend CI toolchain and verification expectations"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared pre-modification and consistency guidance"}

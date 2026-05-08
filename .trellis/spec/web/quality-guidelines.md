@@ -47,7 +47,7 @@ verify-web:
 
 - **`make verify-web` 会跑 `npm run lint`**，然后跑 `npm run test -- --run` 与 `npm run build`。CI 与本地通过同一个 target 覆盖 lint / Vitest / TS+Vite build。
 - `npm ci` 每次清空 `node_modules` 重装，本地反复跑会比较慢；本地速度优先时直接 `cd web && npm run test -- --run` / `npm run build` 即可，CI 仍走完整 `verify-web`。
-- CI 用 `actions/setup-node@v4 with node-version: 22 cache: npm`（`.github/workflows/ci.yml:24-28`）锁 Node 22.x；本地 Node 必须 ≥ 22（`web/package.json:6-8` 的 `engines.node = "22.x"`）。
+- CI 用 `actions/setup-node@v6 with node-version: 22 cache: npm`（`.github/workflows/ci.yml:24-28`）锁 Node 22.x；本地 Node 必须 ≥ 22（`web/package.json:6-8` 的 `engines.node = "22.x"`）。
 
 ---
 
