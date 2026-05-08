@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+
+case "$branch" in
+  main|master)
+    cat >&2 <<'EOF'
+Merge blocked: local main/master is read-only for development work.
+
+Merge feature work through a pull request instead of merging directly into local main/master.
+Do not use git worktree for this repository workflow.
+EOF
+    exit 1
+    ;;
+esac
+
+exit 0

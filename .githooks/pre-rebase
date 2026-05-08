@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+branch=${2:-}
+if [ -z "$branch" ]; then
+  branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+fi
+
+case "$branch" in
+  main|master|refs/heads/main|refs/heads/master)
+    cat >&2 <<'EOF'
+Rebase blocked: local main/master is read-only for development work.
+
+Create or switch to a feature branch before rewriting development history.
+Do not use git worktree for this repository workflow.
+EOF
+    exit 1
+    ;;
+esac
+
+exit 0

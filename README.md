@@ -6,6 +6,22 @@ This is the V1 implementation repository for 候风 / Houfeng Fleet Control Plan
 
 不要在实现阶段重新设计 V1 一级能力。If implementation work discovers a mismatch, record the gap against the frozen baseline before changing behavior.
 
+## Branch workflow governance
+
+Houfeng uses a protected-branch workflow:
+
+- Local `main` / `master` must stay read-only for development work. Do not commit, merge, amend, squash, reset, or otherwise directly modify those branches.
+- Create a new branch for every feature, bug fix, documentation update, or agent implementation task.
+- Do not use `git worktree` in this repository workflow.
+- Enable the versioned local hooks once per clone:
+
+  ```bash
+  sh scripts/setup-git-hooks.sh
+  ```
+
+  This sets `core.hooksPath=.githooks` and activates hooks that reject commits on local `main` / `master` and pushes to remote `main` / `master`.
+- Remote `main` / `master` must be protected in the Git host to reject direct pushes and force pushes by everyone. Changes should land through pull requests from feature branches.
+
 ## V1 baseline 文档（部分 frozen / 部分 superseded）
 
 V1 业务结构 frozen 在 v1-baseline 的 4 份子集（加 README，共 5 份保留在原路径）：

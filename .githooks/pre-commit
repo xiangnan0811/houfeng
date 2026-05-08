@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+
+case "$branch" in
+  main|master)
+    cat >&2 <<'EOF'
+Commit blocked: local main/master is read-only for development work.
+
+Create a feature branch first:
+  git switch -c <type>/<short-description>
+
+Do not use git worktree for this repository workflow.
+EOF
+    exit 1
+    ;;
+esac
+
+exit 0
