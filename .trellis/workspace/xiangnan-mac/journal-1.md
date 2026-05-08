@@ -1822,3 +1822,36 @@ Upgraded Trellis CLI and project templates to 0.5.7, validated Codex hook/bootst
 ### Next Steps
 
 - None - task complete
+
+
+## Session 55: Fix GitHub Actions CI workflow
+
+**Date**: 2026-05-08
+**Task**: Fix GitHub Actions CI workflow
+**Branch**: `main`
+
+### Summary
+
+Removed unsupported job-level hashFiles condition from ci.yml so GitHub Actions can create go/web jobs, documented the workflow guardrail, and verified make verify-go plus make verify-web locally.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba4846e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
