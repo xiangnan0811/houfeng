@@ -40,6 +40,70 @@
 
 ---
 
+## GitHub Actions workflow 合约
+
+### 1. Scope / Trigger
+
+触发条件：改 `.github/workflows/ci.yml`、`Makefile` 的 verify target、或调整 CI job 条件时，必须保持 GitHub Actions 能先创建实际 job，再由 Makefile 执行质量门。
+
+### 2. Signatures
+
+当前 workflow job 合约：
+
+- `jobs.go.steps[*].run`: `make verify-go`
+- `jobs.web.steps[*].run`: `make verify-web`
+- Go 版本：`actions/setup-go@v5` + `go-version-file: go.mod`
+- Node 版本：`actions/setup-node@v4` + `node-version: 22`
+- npm cache dependency path：`web/package-lock.json`
+
+### 3. Contracts
+
+- CI 与本地共用 Makefile target；不要把 lint/test/build 细节复制进 YAML。
+- `web` workspace 是否存在由 `make verify-web` 的 shell 判断负责；workflow 不需要再用 `hashFiles('web/package.json')` 判断。
+- 如果未来确实需要条件跳过 job，`jobs.<job_id>.if` 只能使用 GitHub Actions 在 job-level 支持的上下文和 status 函数；不要把 step-level/file-hash 表达式搬到 job-level。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 预期 | 失败表现 |
+|------|------|----------|
+| `jobs.<job_id>.if` 使用 unsupported function，例如 `hashFiles(...)` | 禁止 | GitHub Actions run 直接 `failure`，`jobs=[]`，`log not found`，check suite `latest_check_runs_count=0` |
+| `.github/workflows/ci.yml` 包含 `hashFiles` | 只有在 step-level 支持位置才允许 | job 创建前失败或表达式校验失败 |
+| `make verify-go` / `make verify-web` 失败 | workflow job 应创建并输出日志 | 正常红 job，有可读失败日志 |
+
+### 5. Good/Base/Bad Cases
+
+- Good：`web` job 总是创建，`run: make verify-web`；不存在 `web/package.json` 时由 Makefile 输出 `web workspace not initialized yet`。
+- Base：`go` job 总是创建，`run: make verify-go`；Go 工具链版本来自 `go.mod`。
+- Bad：`web` job 写 `if: ${{ hashFiles('web/package.json') != '' }}`，push 后 run 在 job 创建前失败。
+
+### 6. Tests Required
+
+- 改 workflow 后跑 `git diff --check`。
+- 用 `rg -n "hashFiles" .github/workflows/ci.yml` 确认没有 job-level `hashFiles`。
+- 本地跑 `make verify-go`；如果 workflow 或 Makefile touch 到 web 质量门，同时跑 `make verify-web`。
+- 修复必须推送后观察一次 GitHub Actions run，确认 check suite 创建了实际 `go` / `web` jobs。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```yaml
+web:
+  if: ${{ hashFiles('web/package.json') != '' }}
+  runs-on: ubuntu-latest
+```
+
+#### Correct
+
+```yaml
+web:
+  runs-on: ubuntu-latest
+  steps:
+    - run: make verify-web
+```
+
+---
+
 ## 测试约定
 
 ### 测试文件位置 / 命名

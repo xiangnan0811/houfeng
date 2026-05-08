@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Check CI still invokes backend quality gate"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check backend verification expectations"}
+{"file": ".trellis/spec/web/index.md", "reason": "Check CI still invokes web quality gate"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check frontend lint/test/build quality expectations"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared quality and consistency checklist"}
