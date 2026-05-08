@@ -202,6 +202,26 @@ function isPendingOnboardingNode(node: NodeRecord) {
   )
 }
 
+function countAbnormalNodes(nodes: NodeRecord[]) {
+  return nodes.filter((node) => node.current_health_status !== '正常').length
+}
+
+function countPendingOnboardingNodes(nodes: NodeRecord[]) {
+  return nodes.filter(isPendingOnboardingNode).length
+}
+
+function countMaintenanceOrPausedNodes(nodes: NodeRecord[]) {
+  return nodes.filter(
+    (node) => node.monitoring_status === '维护中' || node.monitoring_status === '暂停',
+  ).length
+}
+
+function runtimeAttentionFilter(nodes: NodeRecord[]): string | null {
+  if (nodes.some((node) => node.monitoring_status === '维护中')) return '维护中'
+  if (nodes.some((node) => node.monitoring_status === '暂停')) return '暂停'
+  return null
+}
+
 function pauseConfirmationCurrent(node: NodeRecord) {
   return node.monitoring_status === '维护中'
     ? '当前：监控运行状态为维护中。'
@@ -483,6 +503,9 @@ export function NodesPage() {
     () => nodes.filter(isBindingConflictNode),
     [nodes],
   )
+  const abnormalNodeCount = useMemo(() => countAbnormalNodes(nodes), [nodes])
+  const pendingOnboardingNodeCount = useMemo(() => countPendingOnboardingNodes(nodes), [nodes])
+  const maintenanceOrPausedNodeCount = useMemo(() => countMaintenanceOrPausedNodes(nodes), [nodes])
   const baseNodes = nodeListView === 'binding-conflict' ? bindingConflictNodes : nodes
 
   const filterState: NodeFilterState = useMemo(
@@ -1041,29 +1064,74 @@ export function NodesPage() {
   }
 
   return (
-    <section className="page-stack">
-      <header className="section-heading section-heading--inline">
+    <section className="page-stack nodes-page">
+      <header className="section-heading section-heading--inline nodes-hero">
         <div>
           <p className="section-heading__eyebrow">节点</p>
           <h2 className="section-heading__title">节点列表</h2>
           <p className="section-heading__description">
-            当前以“当前问题优先、最近运行事实次之”的冻结 V1 层级展示节点状态。
+            按健康风险、接入状态和最近运行事实管理服务器节点。
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="md"
-          onClick={() =>
-            setCreateOpen((current) => {
-              if (current) {
-                resetCreateFlow()
-              }
-              return !current
-            })
-          }
-        >
-          新建节点
-        </Button>
+        <div className="nodes-hero__aside" aria-label="节点库存摘要">
+          <div className="nodes-hero__stats">
+            <Link className="nodes-hero-stat nodes-hero-stat--normal" to="/nodes" aria-label={`全部节点：${nodes.length}`}>
+              <span>全部</span>
+              <strong>
+                <MonoDigits>{nodes.length}</MonoDigits>
+              </strong>
+            </Link>
+            <button
+              type="button"
+              className="nodes-hero-stat nodes-hero-stat--alert"
+              aria-label={`异常节点：${abnormalNodeCount}`}
+              onClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
+            >
+              <span>异常</span>
+              <strong>
+                <MonoDigits>{abnormalNodeCount}</MonoDigits>
+              </strong>
+            </button>
+            <button
+              type="button"
+              className="nodes-hero-stat nodes-hero-stat--notice"
+              aria-label={`待接入节点：${pendingOnboardingNodeCount}`}
+              onClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
+            >
+              <span>待接入</span>
+              <strong>
+                <MonoDigits>{pendingOnboardingNodeCount}</MonoDigits>
+              </strong>
+            </button>
+            <button
+              type="button"
+              className="nodes-hero-stat nodes-hero-stat--maintenance"
+              aria-label={`维护或暂停节点：${maintenanceOrPausedNodeCount}`}
+              onClick={() => {
+                setSingleFilter('run_status', runtimeAttentionFilter(nodes))
+              }}
+            >
+              <span>维护/暂停</span>
+              <strong>
+                <MonoDigits>{maintenanceOrPausedNodeCount}</MonoDigits>
+              </strong>
+            </button>
+          </div>
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() =>
+              setCreateOpen((current) => {
+                if (current) {
+                  resetCreateFlow()
+                }
+                return !current
+              })
+            }
+          >
+            新建节点
+          </Button>
+        </div>
       </header>
 
       <Drawer
@@ -1072,7 +1140,7 @@ export function NodesPage() {
           setCreateOpen(false)
           resetCreateFlow()
         }}
-        title="创建节点并进入接入工作台"
+        title="节点创建"
         ariaLabel="创建节点表单"
       >
         <p className="page-panel__description">创建完成后将立即生成接入 Token，并跳转到节点接入准备页。</p>
@@ -1166,43 +1234,57 @@ export function NodesPage() {
         </form>
       </Drawer>
 
-      <div className="nodes-toolbar">
-        <Tabs<NodeListView>
-          variant="pill"
-          items={viewTabs}
-          value={nodeListView}
-          onChange={setNodeListView}
-        />
-        <button
-          type="button"
-          className={`btn btn--ghost btn--sm ${!showTrends ? 'btn--active' : ''}`}
-          onClick={() => setShowTrends((v) => !v)}
-        >
-          {showTrends ? '隐藏趋势' : '显示趋势'}
-        </button>
-        {compareSet.size === 2 ? (
-          <Link
-            className="btn btn--secondary btn--sm"
-            to={`/nodes/compare?id=${[...compareSet].join('&id=')}`}
+      <div className="nodes-toolbar" aria-label="节点列表工具栏">
+        <div className="nodes-toolbar__primary">
+          <Tabs<NodeListView>
+            variant="pill"
+            items={viewTabs}
+            value={nodeListView}
+            onChange={setNodeListView}
+          />
+          <span className="nodes-toolbar__result">
+            当前显示 <MonoDigits>{sortedFilteredNodes.length}</MonoDigits> / <MonoDigits>{baseNodes.length}</MonoDigits>
+          </span>
+        </div>
+        <div className="nodes-toolbar__actions">
+          <button
+            type="button"
+            className={`btn btn--ghost btn--sm ${!showTrends ? 'btn--active' : ''}`}
+            onClick={() => setShowTrends((v) => !v)}
           >
-            对比选中节点
-          </Link>
-        ) : null}
-        <select
-          className="auto-refresh-select"
-          value={autoRefresh == null ? '' : String(autoRefresh)}
-          onChange={(e) => {
-            const v = e.target.value
-            setAutoRefresh(v === '' ? null : Number(v))
-          }}
-          aria-label="自动刷新间隔"
-        >
-          {AUTO_REFRESH_OPTIONS.map((opt) => (
-            <option key={opt.label} value={opt.value == null ? '' : String(opt.value)}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+            {showTrends ? '隐藏趋势' : '显示趋势'}
+          </button>
+          {compareSet.size === 2 ? (
+            <Link
+              className="btn btn--secondary btn--sm"
+              to={`/nodes/compare?id=${[...compareSet].join('&id=')}`}
+            >
+              对比选中节点
+            </Link>
+          ) : (
+            <span className="nodes-toolbar__hint">
+              选择 2 个节点可对比
+            </span>
+          )}
+          <label className="nodes-toolbar__refresh">
+            <span>自动刷新</span>
+            <select
+              className="auto-refresh-select"
+              value={autoRefresh == null ? '' : String(autoRefresh)}
+              onChange={(e) => {
+                const v = e.target.value
+                setAutoRefresh(v === '' ? null : Number(v))
+              }}
+              aria-label="自动刷新间隔"
+            >
+              {AUTO_REFRESH_OPTIONS.map((opt) => (
+                <option key={opt.label} value={opt.value == null ? '' : String(opt.value)}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {baseNodes.length === 0 ? (
@@ -1349,8 +1431,8 @@ export function NodesPage() {
               onChange={setOnboardingFilter}
             />
           </FilterBar>
-          {filteredNodes.length > 0 ? (
-            <div className="batch-bar">
+          {hasActiveFilters && filteredNodes.length > 0 ? (
+            <div className={`batch-bar${selectAll ? ' batch-bar--active' : ''}`}>
               <label className="batch-bar__toggle">
                 <input
                   type="checkbox"

@@ -19,7 +19,6 @@ import {
   useAutoRefresh,
 } from '../lib/useAutoRefresh'
 import {
-  type DashboardGroupSummary,
   type DashboardNodeSummary,
   type DashboardOverview,
   type DashboardTargetSummary,
@@ -126,6 +125,22 @@ function statusTone(value: string): BadgeTone {
   if (value === '严重') return 'critical'
   if (value === '维护中') return 'maintenance'
   return 'offline'
+}
+
+function fleetGlyphState(tone: FleetStateTone): HealthState {
+  if (tone === 'normal') return 'normal'
+  if (tone === 'notice') return 'notice'
+  if (tone === 'alert') return 'alert'
+  if (tone === 'critical') return 'critical'
+  return 'maintenance'
+}
+
+function fleetSignalLabel(tone: FleetStateTone): string {
+  if (tone === 'normal') return '正常'
+  if (tone === 'notice') return '待接入'
+  if (tone === 'alert') return '异常'
+  if (tone === 'critical') return '严重'
+  return '维护'
 }
 
 function hostPortSummary(target: DashboardTargetSummary) {
@@ -547,78 +562,90 @@ function FleetStatePanel({
       aria-label="Dashboard 状态"
     >
       <div className="dashboard-status-bar__body">
-        <p className="dashboard-status-bar__eyebrow">全局状态</p>
+        <div className="dashboard-status-bar__headline">
+          <div
+            className={`dashboard-status-bar__signal dashboard-status-bar__signal--${fleetState.tone}`}
+            aria-hidden="true"
+          >
+            <StatusGlyph state={fleetGlyphState(fleetState.tone)} size="md" />
+            <span>{fleetSignalLabel(fleetState.tone)}</span>
+          </div>
+          <p className="dashboard-status-bar__eyebrow">全局状态</p>
+        </div>
         <h1 className="dashboard-status-bar__title">{fleetState.title}</h1>
         <p className="dashboard-status-bar__description">{fleetState.description}</p>
-        <div className="dashboard-status-bar__meta">
-          <div className="dashboard-status-bar__meta-row">
-            <span className="dashboard-status-bar__generated">
-              摘要生成 <Timestamp value={overview.snapshot_generated_at} mode="absolute" />
-            </span>
-            {metrics.length > 0 ? (
-              <DashboardTrendPulse overview={overview} tone={fleetState.tone} />
-            ) : null}
+        <span className="dashboard-status-bar__generated">
+          摘要生成 <Timestamp value={overview.snapshot_generated_at} mode="absolute" />
+        </span>
+      </div>
+      {metrics.length > 0 ? (
+        <div className="dashboard-status-bar__telemetry">
+          <DashboardTrendPulse overview={overview} tone={fleetState.tone} />
+          <div className="dashboard-status-bar__metrics" aria-label="关键状态指标">
+            {metrics.map((metric) => (
+              <Link
+                className={`dashboard-inline-metric${metric.tone ? ` dashboard-inline-metric--${metric.tone}` : ''}`}
+                to={metric.to}
+                key={metric.label}
+                aria-label={`${metric.label}：${metric.detail}`}
+              >
+                <span className="dashboard-inline-metric__label">{metric.label}</span>
+                <strong className="dashboard-inline-metric__value">
+                  <MonoDigits>{metric.value}</MonoDigits>
+                </strong>
+                <span className="dashboard-inline-metric__detail">{metric.detail}</span>
+              </Link>
+            ))}
           </div>
-          {metrics.length > 0 ? (
-            <div className="dashboard-status-bar__metrics" aria-label="关键状态指标">
-              {metrics.map((metric) => (
-                <Link
-                  className={`dashboard-inline-metric${metric.tone ? ` dashboard-inline-metric--${metric.tone}` : ''}`}
-                  to={metric.to}
-                  key={metric.label}
-                  aria-label={`${metric.label}：${metric.detail}`}
-                >
-                  <span className="dashboard-inline-metric__label">{metric.label}</span>
-                  <strong className="dashboard-inline-metric__value">
-                    <MonoDigits>{metric.value}</MonoDigits>
-                  </strong>
-                  <span className="dashboard-inline-metric__detail">{metric.detail}</span>
-                </Link>
-              ))}
-            </div>
+        </div>
+      ) : null}
+      <div className="dashboard-status-bar__actions" aria-label="首页主要入口">
+        <div className="dashboard-status-bar__cta-row">
+          <Link className="btn btn--primary btn--md" to={fleetState.primaryCta.to}>
+            {fleetState.primaryCta.label}
+          </Link>
+          {fleetState.secondaryCtas.map((cta) => (
+            <Link
+              className="btn btn--ghost btn--md"
+              to={cta.to}
+              key={cta.label}
+            >
+              {cta.label}
+            </Link>
+          ))}
+        </div>
+        <div className="dashboard-status-bar__utility-row">
+          {onRefresh ? (
+            <button
+              type="button"
+              className="btn btn--ghost btn--md"
+              disabled={refreshing}
+              onClick={onRefresh}
+            >
+              {refreshing ? '刷新中…' : '刷新'}
+            </button>
+          ) : null}
+          {onAutoRefreshChange ? (
+            <label className="dashboard-status-bar__refresh">
+              <span>自动刷新</span>
+              <select
+                className="auto-refresh-select"
+                value={autoRefresh == null ? '' : String(autoRefresh)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  onAutoRefreshChange(v === '' ? null : Number(v))
+                }}
+                aria-label="自动刷新间隔"
+              >
+                {AUTO_REFRESH_OPTIONS.map((opt) => (
+                  <option key={opt.label} value={opt.value == null ? '' : String(opt.value)}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           ) : null}
         </div>
-      </div>
-      <div className="dashboard-status-bar__actions" aria-label="首页主要入口">
-        <Link className="btn btn--primary btn--md" to={fleetState.primaryCta.to}>
-          {fleetState.primaryCta.label}
-        </Link>
-        {fleetState.secondaryCtas.map((cta, index) => (
-          <Link
-            className={`btn ${index === 0 ? 'btn--secondary' : 'btn--ghost'} btn--md`}
-            to={cta.to}
-            key={cta.label}
-          >
-            {cta.label}
-          </Link>
-        ))}
-        {onRefresh ? (
-          <button
-            type="button"
-            className="btn btn--ghost btn--md"
-            disabled={refreshing}
-            onClick={onRefresh}
-          >
-            {refreshing ? '刷新中…' : '刷新'}
-          </button>
-        ) : null}
-        {onAutoRefreshChange ? (
-          <select
-            className="auto-refresh-select"
-            value={autoRefresh == null ? '' : String(autoRefresh)}
-            onChange={(e) => {
-              const v = e.target.value
-              onAutoRefreshChange(v === '' ? null : Number(v))
-            }}
-            aria-label="自动刷新间隔"
-          >
-            {AUTO_REFRESH_OPTIONS.map((opt) => (
-              <option key={opt.label} value={opt.value == null ? '' : String(opt.value)}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        ) : null}
       </div>
     </section>
   )
@@ -668,7 +695,6 @@ function AttentionQueue({
                 <Badge variant="state" tone={statusTone(item.health)} withDot>
                   {item.health}
                 </Badge>
-                <span className="dashboard-attention-item__issue-label">当前问题</span>
                 <p>
                   <span>
                     活跃问题 <MonoDigits>{item.incidentCount}</MonoDigits>
@@ -785,85 +811,6 @@ function DashboardContextStrip({ items }: { items: ContextItem[] }) {
   )
 }
 
-function GroupHealthTable({ overview }: { overview: DashboardOverview }) {
-  const groups = overview.group_summaries
-  if (groups.length === 0) return null
-
-  const sorted = [...groups].sort((a, b) => {
-    const aAbnormal = a.abnormal_node_count + a.abnormal_target_count + a.severe_node_count + a.severe_target_count
-    const bAbnormal = b.abnormal_node_count + b.abnormal_target_count + b.severe_node_count + b.severe_target_count
-    if (bAbnormal !== aAbnormal) return bAbnormal - aAbnormal
-    return (b.node_count + b.target_count) - (a.node_count + a.target_count)
-  })
-
-  function groupStatusTone(g: DashboardGroupSummary): BadgeTone {
-    if (g.severe_node_count + g.severe_target_count > 0) return 'critical'
-    if (g.abnormal_node_count + g.abnormal_target_count > 0) return 'alert'
-    if (g.maintenance_node_count + g.maintenance_target_count > 0) return 'maintenance'
-    return 'normal'
-  }
-
-  function groupStatusLabel(g: DashboardGroupSummary): string {
-    const parts: string[] = []
-    const severe = g.severe_node_count + g.severe_target_count
-    const abnormal = g.abnormal_node_count + g.abnormal_target_count
-    const maintenance = g.maintenance_node_count + g.maintenance_target_count
-    if (severe > 0) parts.push(`严重 ${severe}`)
-    if (abnormal > 0) parts.push(`异常 ${abnormal}`)
-    if (maintenance > 0) parts.push(`维护 ${maintenance}`)
-    return parts.length > 0 ? parts.join(' · ') : '正常'
-  }
-
-  return (
-    <table className="dashboard-group-table" aria-label="分组健康总览">
-      <thead>
-        <tr>
-          <th>分组</th>
-          <th className="mono">节点</th>
-          <th className="mono">目标</th>
-          <th>状态</th>
-          <th className="mono">严重</th>
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((g) => (
-          <tr key={g.group}>
-            <td>
-              <Link className="text-link" to={`/nodes?group=${encodeURIComponent(g.group)}`}>
-                {g.group}
-              </Link>
-            </td>
-            <td className="mono">
-              <MonoDigits>{g.node_count}</MonoDigits>
-              {g.abnormal_node_count > 0 ? (
-                <span className="dashboard-group-table__abnormal"> · <MonoDigits>{g.abnormal_node_count}</MonoDigits></span>
-              ) : null}
-            </td>
-            <td className="mono">
-              <MonoDigits>{g.target_count}</MonoDigits>
-              {g.abnormal_target_count > 0 ? (
-                <span className="dashboard-group-table__abnormal"> · <MonoDigits>{g.abnormal_target_count}</MonoDigits></span>
-              ) : null}
-            </td>
-            <td>
-              <Badge variant="state" tone={groupStatusTone(g)} withDot>
-                {groupStatusLabel(g)}
-              </Badge>
-            </td>
-            <td className="mono">
-              {g.severe_node_count + g.severe_target_count > 0 ? (
-                <MonoDigits>{g.severe_node_count + g.severe_target_count}</MonoDigits>
-              ) : (
-                <span className="empty-inline">—</span>
-              )}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
 function RunningOverview({
   overview,
   maintenanceTotal,
@@ -888,7 +835,6 @@ function RunningOverview({
           </p>
         </div>
       </div>
-      <GroupHealthTable overview={overview} />
       <div className="dashboard-overview-metrics" aria-label={isMaintenance ? '维护观察指标' : '运行概览指标'}>
         <Link className="dashboard-overview-metric" to={DASHBOARD_LINKS.nodes}>
           <span>节点库存</span>
@@ -1043,13 +989,15 @@ function DashboardWorkbench({
         {isFreshInstall ? (
           <OnboardingWorkbench />
         ) : hasAbnormal ? (
-          <>
-            <AttentionQueue items={attentionItems} />
-            <div className="dashboard-workbench__system">
+          <div className="dashboard-incident-console">
+            <div className="dashboard-incident-console__queue">
+              <AttentionQueue items={attentionItems} />
+            </div>
+            <aside className="dashboard-incident-console__aside" aria-label="异常上下文">
               <DashboardContextStrip items={buildContextItems(overview, abnormalTotal, maintenanceTotal)} />
               <ManagementEntries overview={overview} showEventLink={false} />
-            </div>
-          </>
+            </aside>
+          </div>
         ) : (
           <RunningOverview
             overview={overview}

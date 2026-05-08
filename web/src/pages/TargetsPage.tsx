@@ -957,29 +957,31 @@ export function TargetsPage() {
   }
 
   return (
-    <section className="page-stack">
-      <header className="section-heading section-heading--inline">
+    <section className="page-stack targets-page">
+      <header className="page-panel page-panel--inline">
         <div>
-          <p className="section-heading__eyebrow">目标</p>
-          <h2 className="section-heading__title">目标列表</h2>
-          <p className="section-heading__description">
+          <p className="page-panel__eyebrow">目标</p>
+          <h2 className="page-panel__title">目标列表</h2>
+          <p className="page-panel__description">
             以 ProbeItem 视角组织目标状态，并保留执行节点标签与最近成功/失败摘要。
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="md"
-          onClick={() =>
-            setCreateOpen((current) => {
-              if (current) {
-                resetCreateFlow()
-              }
-              return !current
-            })
-          }
-        >
-          新建目标
-        </Button>
+        <div className="page-panel__actions">
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() =>
+              setCreateOpen((current) => {
+                if (current) {
+                  resetCreateFlow()
+                }
+                return !current
+              })
+            }
+          >
+            新建目标
+          </Button>
+        </div>
       </header>
 
       {createOpen ? (
@@ -1108,8 +1110,12 @@ export function TargetsPage() {
                 />
               </label>
             </p>
-            {createError ? <p>{createError}</p> : null}
-            <div>
+            {createError ? (
+              <p className="create-form__error" role="alert">
+                {createError}
+              </p>
+            ) : null}
+            <div className="page-form-actions">
               <button type="submit" disabled={createSubmitting}>
                 {createSubmitting ? '正在创建…' : '创建目标'}
               </button>

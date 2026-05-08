@@ -22,6 +22,7 @@ type MetricTone = 'normal' | 'notice' | 'critical'
 
 interface MetricCardDef {
   id: string
+  label: string
   priority: MetricPriority
   tone: MetricTone
   render: () => ReactNode
@@ -104,6 +105,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
   const cards: MetricCardDef[] = [
     {
       id: 'cpu',
+      label: 'CPU',
       priority: cpuPriority,
       tone: priorityTone(cpuPriority),
       render: () => (
@@ -141,6 +143,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
     },
     {
       id: 'mem',
+      label: '内存',
       priority: memPriority,
       tone: priorityTone(memPriority),
       render: () => (
@@ -184,6 +187,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
     },
     {
       id: 'disk',
+      label: '磁盘',
       priority: diskPriority,
       tone: priorityTone(diskPriority),
       render: () => (
@@ -230,6 +234,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
     },
     {
       id: 'inode',
+      label: 'Inode',
       priority: inodePriority,
       tone: priorityTone(inodePriority),
       render: () => (
@@ -259,6 +264,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
     },
     {
       id: 'load5',
+      label: 'Load5',
       priority: load5Priority,
       tone: priorityTone(load5Priority),
       render: () => (
@@ -297,6 +303,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
     },
     {
       id: 'iowait',
+      label: 'IOWait',
       priority: iowaitPriority,
       tone: priorityTone(iowaitPriority),
       render: () => (
@@ -325,6 +332,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
     },
     {
       id: 'net-in',
+      label: '网络入',
       priority: netInPriority,
       tone: 'normal',
       render: () => (
@@ -349,6 +357,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
     },
     {
       id: 'net-out',
+      label: '网络出',
       priority: netOutPriority,
       tone: 'normal',
       render: () => (
@@ -380,10 +389,22 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
   })
 
   return (
-    <div className="watchtower-metrics" role="group" aria-label="主机指标趋势">
-      {sorted.map((card) => (
-        <Fragment key={card.id}>{card.render()}</Fragment>
-      ))}
-    </div>
+    <section className="watchtower-metrics-panel" aria-label="主机指标趋势">
+      <div className="watchtower-metrics-panel__header">
+        <div>
+          <p className="watchtower-metrics-panel__eyebrow">Host Metrics</p>
+          <h2>关键资源趋势</h2>
+        </div>
+        <p>
+          已按阈值优先级排序
+          {sorted[0]?.priority > 0 ? <> · 首要关注 {sorted[0].label}</> : null}
+        </p>
+      </div>
+      <div className="watchtower-metrics" role="group" aria-label="主机指标趋势">
+        {sorted.map((card) => (
+          <Fragment key={card.id}>{card.render()}</Fragment>
+        ))}
+      </div>
+    </section>
   )
 }

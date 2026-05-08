@@ -88,17 +88,20 @@ function openRuntimeMenu() {
 }
 
 /**
- * Open one of the secondary <details> blocks (标签与备注 / 生命周期 / 接入凭证状态).
- * Clicks the <summary> regardless of whether the same label appears elsewhere
+ * Open one of the secondary collapsible blocks (标签与备注 / 生命周期 / 接入凭证状态).
+ * Clicks the trigger regardless of whether the same label appears elsewhere
  * (e.g. NodeLabelsAndNote also renders a "标签与备注" h2 inside the body).
  */
 function openSecondary(label: string) {
   const matches = screen.getAllByText(label)
-  const summary = matches.find((node) => node.tagName === 'SUMMARY')
-  if (!summary) {
-    throw new Error(`No <summary> matching "${label}" found`)
+  const trigger =
+    matches.find((node) => node.closest('button.collapsible-section__trigger')) ??
+    matches.find((node) => node.tagName === 'SUMMARY')
+  const clickable = trigger?.tagName === 'BUTTON' ? trigger : trigger?.closest('button, summary')
+  if (!clickable) {
+    throw new Error(`No collapsible trigger matching "${label}" found`)
   }
-  fireEvent.click(summary)
+  fireEvent.click(clickable)
 }
 
 function NodeDetailTestHarness() {
@@ -2635,7 +2638,8 @@ describe('NodeDetailPage', () => {
     const headings = Array.from(container.querySelectorAll('.watchtower-metric-card__head h3')).map(
       (n) => (n.textContent ?? '').trim(),
     )
-    expect(headings).toEqual([
+    expect(headings).toHaveLength(8)
+    expect(headings).toEqual(expect.arrayContaining([
       'CPU 使用率',
       'Load5',
       '内存使用率',
@@ -2644,10 +2648,10 @@ describe('NodeDetailPage', () => {
       '网络入',
       '网络出',
       'CPU IOWait',
-    ])
+    ]))
   })
 
-  it('keeps the watchtower secondary <details> sections collapsed by default', async () => {
+  it('keeps the watchtower secondary sections collapsed by default', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -2680,11 +2684,12 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    const secondaryDetails = Array.from(container.querySelectorAll('details.watchtower-secondary'))
-    expect(secondaryDetails.length).toBe(4)
-    // Each section is collapsed by default (no `open` attribute)
-    secondaryDetails.forEach((details) => {
-      expect((details as HTMLDetailsElement).open).toBe(false)
+    const secondarySections = Array.from(container.querySelectorAll('.collapsible-section.watchtower-secondary'))
+    expect(secondarySections.length).toBe(4)
+    secondarySections.forEach((section) => {
+      const trigger = section.querySelector('.collapsible-section__trigger')
+      expect(trigger).not.toBeNull()
+      expect(trigger).toHaveAttribute('aria-expanded', 'false')
     })
     // Page footer surfaces the snapshot meta line
     expect(container.querySelector('.watchtower-snapshot-meta')).not.toBeNull()

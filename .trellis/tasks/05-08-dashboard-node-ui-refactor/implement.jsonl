@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "frontend package entrypoint and pre-development checklist"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "web file ownership, route/page/component placement, and allowed style locations"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "React component conventions, props typing, and anti-patterns"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "dashboard contract constraints, API/data-flow rules, and URL-state conventions"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "token-driven CSS, BEM naming, theme and visual authority rules"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "frontend quality gate and test conventions"}
+{"file": ".trellis/spec/guides/index.md", "reason": "shared thinking guide index"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "avoid duplicating existing atoms/components/utilities during refactor"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "active visual language for Houfeng v2"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "active component and page visual contracts for dashboard, nodes, and node detail"}

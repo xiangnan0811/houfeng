@@ -49,6 +49,10 @@ const settingsResponseBody = {
     inode_warning_pct: 80,
     inode_alert_pct: 90,
     inode_critical_pct: 95,
+    iowait_warning_pct: 20,
+    iowait_critical_pct: 50,
+    load5_warning: 4,
+    load5_critical: 8,
   },
   override_rules: {
     node_labels: [
@@ -243,6 +247,10 @@ describe('SettingsPage', () => {
         inode_warning_pct: 80,
         inode_alert_pct: 90,
         inode_critical_pct: 95,
+        iowait_warning_pct: 20,
+        iowait_critical_pct: 50,
+        load5_warning: 4,
+        load5_critical: 8,
       },
       override_rules: settingsResponseBody.override_rules,
       retention_policy: {
@@ -344,6 +352,10 @@ describe('SettingsPage', () => {
         inode_warning_pct: 80,
         inode_alert_pct: 90,
         inode_critical_pct: 95,
+        iowait_warning_pct: 20,
+        iowait_critical_pct: 50,
+        load5_warning: 4,
+        load5_critical: 8,
       },
       override_rules: settingsResponseBody.override_rules,
       retention_policy: {
@@ -424,6 +436,10 @@ describe('SettingsPage', () => {
         inode_warning_pct: 80,
         inode_alert_pct: 90,
         inode_critical_pct: 95,
+        iowait_warning_pct: 20,
+        iowait_critical_pct: 50,
+        load5_warning: 4,
+        load5_critical: 8,
       },
       override_rules: settingsResponseBody.override_rules,
       retention_policy: settingsResponseBody.retention_policy,

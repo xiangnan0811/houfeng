@@ -221,7 +221,9 @@ describe('DashboardPage', () => {
     expect(nodeAction).toHaveTextContent('处理')
     const priorityRanks = screen.getAllByText((_, element) => element?.className === 'dashboard-attention-item__rank')
     expect(priorityRanks.map((element) => element.textContent)).toEqual(['P1', 'P2'])
-    expect(screen.getAllByText('当前问题')).toHaveLength(2)
+    expect(screen.queryByText('当前问题')).not.toBeInTheDocument()
+    expect(screen.getByText('磁盘使用率 92.0%')).toBeInTheDocument()
+    expect(screen.getByText('HTTPS 探测连续失败')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看目标 Blog' })).toHaveAttribute(
       'href',
       '/targets/tg_001',

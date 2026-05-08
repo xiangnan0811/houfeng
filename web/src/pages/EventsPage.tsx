@@ -475,7 +475,7 @@ export function EventsPage() {
   const customRange = filters.time_range === 'custom'
 
   return (
-    <div className="page-stack">
+    <div className="page-stack events-page">
       <section className="page-panel">
         <p className="page-panel__eyebrow">事件</p>
         <h2 className="page-panel__title">事件</h2>
@@ -692,15 +692,17 @@ export function EventsPage() {
             </div>
           </div>
 
-          <button type="submit">应用筛选</button>
-          <button
-            type="button"
-            onClick={() => {
-              commitFilters(DEFAULT_FILTERS)
-            }}
-          >
-            重置筛选
-          </button>
+          <div className="event-filter-actions">
+            <button type="submit">应用筛选</button>
+            <button
+              type="button"
+              onClick={() => {
+                commitFilters(DEFAULT_FILTERS)
+              }}
+            >
+              重置筛选
+            </button>
+          </div>
         </form>
       </DetailSection>
 

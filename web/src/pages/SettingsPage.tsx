@@ -440,7 +440,7 @@ function MetricThresholdGroup({
   onUpdate: (field: string, value: string) => void
 }) {
   return (
-    <div className="page-stack" style={{ gap: '8px' }}>
+    <div className="settings-cluster settings-cluster--tight">
       <span className="section-heading__eyebrow">{label}</span>
       <div className="summary-grid summary-grid--numeric">
         <ThresholdInput
@@ -480,7 +480,7 @@ function IncidentDefaultsEditor({
   }
 
   return (
-    <div className="page-stack" style={{ gap: '16px' }}>
+    <div className="settings-cluster">
       <div className="summary-grid">
         <label className="summary-card">
           <span className="summary-card__label">心跳间隔秒数</span>
@@ -788,7 +788,7 @@ export function SettingsPage() {
   }
 
   return (
-    <form className="page-stack" onSubmit={handleSubmit}>
+    <form className="page-stack settings-page" onSubmit={handleSubmit}>
       <section className="page-panel">
         <p className="page-panel__eyebrow">设置</p>
         <h2 className="page-panel__title">设置 / Settings</h2>
@@ -1031,7 +1031,7 @@ export function SettingsPage() {
         <SectionIntro>
           仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；异常默认覆盖仍仅作为持久化策略保存。
         </SectionIntro>
-        <div className="page-stack">
+        <div className="settings-cluster">
           <OverrideTextarea
             ariaLabel="节点标签覆盖规则 JSON"
             value={form.nodeLabelOverridesText}
@@ -1148,7 +1148,7 @@ export function SettingsPage() {
       {state.saveError ? <section className="page-panel">{state.saveError}</section> : null}
       {state.saveSuccess ? <section className="page-panel">{state.saveSuccess}</section> : null}
 
-      <div>
+      <div className="settings-actions">
         <button type="submit" disabled={state.saving}>
           {state.saving ? '正在保存…' : '保存设置'}
         </button>
@@ -1178,9 +1178,9 @@ function ThemeSettingsSection() {
       title="主题"
       aside="本地浏览器偏好"
     >
-      <div className="page-stack">
-        <div>
-          <p className="section-heading__eyebrow" style={{ marginBottom: 8 }}>风格</p>
+      <div className="settings-cluster">
+        <div className="settings-fieldset">
+          <p className="section-heading__eyebrow">风格</p>
           <Tabs<Preset>
             variant="pill"
             value={preset}
@@ -1188,8 +1188,8 @@ function ThemeSettingsSection() {
             items={PRESET_TABS}
           />
         </div>
-        <div>
-          <p className="section-heading__eyebrow" style={{ marginBottom: 8 }}>明暗</p>
+        <div className="settings-fieldset">
+          <p className="section-heading__eyebrow">明暗</p>
           <Tabs<Mode>
             variant="pill"
             value={mode}

@@ -17,6 +17,7 @@ type StatusBadgeProps = {
 
 function inferTone(label: string): StatusBadgeTone {
   if (['正常', '启用', '已绑定', '在用'].includes(label)) return 'green'
+  if (['异常', '严重', 'P1', 'P2', 'critical', 'severe'].includes(label)) return 'red'
   if (['维护中', '观察中', '待接入'].includes(label)) return 'yellow'
   if (['暂停', '已归档', '已退役', '不续费', '指纹变更待确认'].includes(label)) {
     return 'red'

@@ -31,7 +31,7 @@
   --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-12: 48px;
 
   /* ---------- Radius scale ---------- */
-  --radius-0: 0; --radius-1: 4px; --radius-2: 7px; --radius-3: 12px; --radius-pill: 999px;
+  --radius-0: 0; --radius-1: 5px; --radius-2: 9px; --radius-3: 14px; --radius-pill: 999px;
 
   /* ---------- Border weights ---------- */
   --border-w: 1px;
@@ -67,6 +67,20 @@
   --accent-soft:   rgba(201, 165, 111, 0.12);
   --accent-border: rgba(201, 165, 111, 0.32);
   --accent-2:      #5C8FA8;
+
+  /* ---------- Shared app surface tokens ---------- */
+  --panel-bg:              color-mix(in srgb, var(--surface) 88%, var(--surface-elevated));
+  --panel-bg-elevated:     color-mix(in srgb, var(--surface-elevated) 82%, var(--surface));
+  --panel-bg-muted:        color-mix(in srgb, var(--surface) 78%, var(--bg));
+  --panel-border:          color-mix(in srgb, var(--border) 84%, transparent);
+  --panel-border-strong:   color-mix(in srgb, var(--border-strong) 82%, var(--border));
+  --panel-highlight:       color-mix(in srgb, var(--accent) 7%, transparent);
+  --panel-highlight-2:     color-mix(in srgb, var(--accent-2) 6%, transparent);
+  --control-bg:            color-mix(in srgb, var(--surface-elevated) 58%, var(--surface));
+  --control-bg-hover:      color-mix(in srgb, var(--surface-elevated) 82%, var(--surface));
+  --control-border:        color-mix(in srgb, var(--border) 88%, transparent);
+  --row-bg:                color-mix(in srgb, var(--surface) 86%, transparent);
+  --row-bg-hover:          color-mix(in srgb, var(--surface-elevated) 72%, transparent);
 
   --color-state-normal:      #4FA08A;
   --color-state-notice:      #D4A053;
