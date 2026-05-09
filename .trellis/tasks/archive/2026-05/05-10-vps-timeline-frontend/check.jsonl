@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend task entrypoint and applicable web spec index"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check API and type alignment for VPS timeline contract"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check CSS token and BEM compliance"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check lint/test/build quality gate"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Check timeline UI preserves backend Asset Ledger history semantics"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check cross-layer data shape and null handling"}

@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { Badge, Button, DataTable, Hostname, MonoDigits, Timestamp, type DataTableColumn } from '../components/atoms'
-import { ApiError, getVPSAsset } from '../lib/api'
+import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
+import { ApiError, getVPSAsset, getVPSTimeline } from '../lib/api'
 import { formatOptional } from '../lib/format'
-import type { VPSAssetDetail, VPSNodeSummary } from '../lib/types'
+import type { VPSAssetDetail, VPSNodeSummary, VPSTimeline } from '../lib/types'
 import {
   AssetLabels,
   HealthBadge,
@@ -17,12 +18,14 @@ type PageState = {
   vpsId: string | null
   error: string | null
   detail: VPSAssetDetail | null
+  timeline: VPSTimeline | null
 }
 
 const INITIAL_STATE: PageState = {
   vpsId: null,
   error: null,
   detail: null,
+  timeline: null,
 }
 
 function describeError(error: unknown, fallback: string): string {
@@ -52,10 +55,10 @@ export function VPSDetailPage() {
 
     let cancelled = false
 
-    getVPSAsset(vpsId)
-      .then((detail) => {
+    Promise.all([getVPSAsset(vpsId), getVPSTimeline(vpsId)])
+      .then(([detail, timeline]) => {
         if (cancelled) return
-        setState({ vpsId, error: null, detail })
+        setState({ vpsId, error: null, detail, timeline })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -63,6 +66,7 @@ export function VPSDetailPage() {
           vpsId,
           error: describeError(error, '加载 VPS 详情失败'),
           detail: null,
+          timeline: null,
         })
       })
 
@@ -148,7 +152,7 @@ export function VPSDetailPage() {
     )
   }
 
-  if (state.error || !state.detail) {
+  if (state.error || !state.detail || !state.timeline) {
     return (
       <div className="page-stack asset-page vps-detail-page">
         <section className="page-panel page-panel--inline">
@@ -166,6 +170,7 @@ export function VPSDetailPage() {
   }
 
   const detail = state.detail
+  const timeline = state.timeline
 
   return (
     <div className="page-stack asset-page vps-detail-page">
@@ -233,6 +238,8 @@ export function VPSDetailPage() {
           emptyContent={<span className="empty-inline">尚未关联 Node</span>}
         />
       </section>
+
+      <VPSTimelinePanel timeline={timeline} />
 
       <section className="page-panel">
         <div className="section-heading">

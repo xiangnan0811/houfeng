@@ -20,6 +20,7 @@ import {
   getSettings,
   getSubscription,
   getVPSAsset,
+  getVPSTimeline,
   issueNodeEnrollmentToken,
   listProviders,
   listNodes,
@@ -60,6 +61,7 @@ import type {
   UpdateProbeItemInput,
   UpdateTargetMetadataInput,
   VPSAssetRecord,
+  VPSTimeline,
 } from './types'
 import { appRoutes } from '../app/router'
 
@@ -427,15 +429,24 @@ describe('api helpers', () => {
       note: '',
     } satisfies CreateVPSAssetInput
     const detail = { ...vps, node_links: [] }
+    const timeline = {
+      vps_id: 'vps_001',
+      renewal_decisions: [],
+      price_histories: [],
+      ip_histories: [],
+      spec_snapshots: [],
+    } satisfies VPSTimeline
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([vps])))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(detail)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(timeline)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(vps)))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep' })).resolves.toEqual([vps])
     await expect(getVPSAsset('vps_001')).resolves.toEqual(detail)
+    await expect(getVPSTimeline('vps_001')).resolves.toEqual(timeline)
     await expect(createVPSAsset(input)).resolves.toEqual(vps)
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -452,7 +463,12 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/timeline', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps', {
       method: 'POST',
       headers: {
         Accept: 'application/json',

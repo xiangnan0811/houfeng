@@ -32,6 +32,7 @@ import type {
   VPSAssetRecord,
   VPSNodeSummary,
   VPSSummary,
+  VPSTimeline,
 } from './types'
 
 export class ApiError extends Error {
@@ -428,6 +429,10 @@ export function createVPSAsset(input: CreateVPSAssetInput): Promise<VPSAssetReco
 
 export function getVPSAsset(vpsId: string) {
   return requestJSON<VPSAssetDetail>(`/api/vps/${vpsId}`)
+}
+
+export function getVPSTimeline(vpsId: string) {
+  return requestJSON<VPSTimeline>(`/api/vps/${vpsId}/timeline`)
 }
 
 export function listVPSNodes(vpsId: string) {
