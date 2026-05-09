@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec entry point for Task 3 subscriptions work."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Defines migration numbering, handwritten SQL, Asset Ledger table contracts, and no ORM policy."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Defines domain/store/handler/router/bootstrap placement and existing providers/VPS patterns."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Defines sentinel errors and HTTP error translation expectations."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines test coverage, router/bootstrap wiring, and make verify-go gate."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Task must stay on feature branch and land through PR."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Subscriptions span DB/domain/store/HTTP/router/bootstrap contracts."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse providers/VPS slice patterns and avoid duplicate drift."}
+{"file": ".trellis/tasks/05-09-subscriptions-backend/research/repo-patterns.md", "reason": "Task-specific findings and boundaries for subscriptions slice."}

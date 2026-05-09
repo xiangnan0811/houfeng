@@ -110,3 +110,38 @@ Stabilized agent runtime two-sync tests by replacing timing-dependent 35ms cance
 ### Next Steps
 
 - None - task complete
+
+
+## Session 63: Subscriptions backend slice
+
+**Date**: 2026-05-09
+**Task**: Subscriptions backend slice
+**Branch**: `feat/subscriptions-backend`
+
+### Summary
+
+Implemented Task 3 subscriptions backend with 0018 migration, subscription domain validation, Postgres store, HTTP handlers, router/bootstrap wiring, tests, and backend spec updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1cd94d` | (see git log) |
+| `e4d8aae` | (see git log) |
+| `a64ffde` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

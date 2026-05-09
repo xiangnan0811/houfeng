@@ -31,6 +31,7 @@
 | `internal/center/observations/` | `service.go:18-19` | `ErrInvalidProbeObservation`、`ErrProbeMetadataNotFound` |
 | `internal/center/settings/` | `types.go:14` | `ErrInvalidSettings`（再用 `fmt.Errorf("%w: %s", ErrInvalidSettings, message)` 携带详情，见 `types.go:368`） |
 | `internal/center/syncing/` | `service.go:13-17` | `ErrBindingNotAccepted` / `ErrInvalidSyncToken`（**别名转发自 `enrollment` 包**，避免 handler 多包导入） |
+| `internal/center/subscriptions/` | `types.go:14-15` | `ErrSubscriptionNotFound`、`ErrInvalidSubscriptionInput` |
 
 命名约定：
 

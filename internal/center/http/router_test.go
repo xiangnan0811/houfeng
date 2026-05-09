@@ -285,6 +285,84 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	}
 }
 
+func TestRouterDispatchesSubscriptionAPIs(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		SubscriptionsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "collection"
+			w.WriteHeader(http.StatusOK)
+		}),
+		SubscriptionItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "item"
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("collection status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "collection" {
+		t.Fatalf("called = %q, want collection", called)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/subscriptions/sub_001", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("item status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "item" {
+		t.Fatalf("called = %q, want item", called)
+	}
+}
+
+func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
+	collectionCalled := false
+	itemCalled := false
+	middlewareCalls := 0
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		SubscriptionsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			collectionCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		SubscriptionItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			itemCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		AuthMiddleware: func(_ http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				middlewareCalls++
+				w.WriteHeader(http.StatusUnauthorized)
+			})
+		},
+	})
+
+	for _, path := range []string{"/api/subscriptions", "/api/subscriptions/sub_001"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusUnauthorized)
+		}
+	}
+	if collectionCalled {
+		t.Fatal("subscription collection handler was called despite auth middleware blocking")
+	}
+	if itemCalled {
+		t.Fatal("subscription item handler was called despite auth middleware blocking")
+	}
+	if middlewareCalls != 2 {
+		t.Fatalf("middleware calls = %d, want 2", middlewareCalls)
+	}
+}
+
 type fakeNodeRepository struct {
 	listNodesResult  []nodes.Record
 	getNodeResult    nodes.Record
@@ -527,6 +605,8 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	providerItemInnerCalled := false
 	vpsInnerCalled := false
 	vpsItemInnerCalled := false
+	subscriptionsInnerCalled := false
+	subscriptionItemInnerCalled := false
 	mwCalled := false
 	opts := centerhttp.RouterOptions{
 		Version: "test",
@@ -548,6 +628,14 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 		}),
 		VPSItemHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			vpsItemInnerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		SubscriptionsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			subscriptionsInnerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		SubscriptionItemHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			subscriptionItemInnerCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
 		AuthMiddleware: func(_ http.Handler) http.Handler {
@@ -625,6 +713,34 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	}
 	if !mwCalled {
 		t.Fatal("middleware not invoked for vps item route")
+	}
+
+	mwCalled = false
+	r = httptest.NewRequest(http.MethodGet, "/api/subscriptions", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("subscriptions status = %d, want 401 (middleware should block)", w.Code)
+	}
+	if subscriptionsInnerCalled {
+		t.Fatal("inner subscriptions handler must not be called when middleware blocks")
+	}
+	if !mwCalled {
+		t.Fatal("middleware not invoked for subscriptions route")
+	}
+
+	mwCalled = false
+	r = httptest.NewRequest(http.MethodGet, "/api/subscriptions/sub_001", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("subscription item status = %d, want 401 (middleware should block)", w.Code)
+	}
+	if subscriptionItemInnerCalled {
+		t.Fatal("inner subscription item handler must not be called when middleware blocks")
+	}
+	if !mwCalled {
+		t.Fatal("middleware not invoked for subscription item route")
 	}
 }
 

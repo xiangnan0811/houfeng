@@ -49,8 +49,11 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	if names[9] != "0009_add_observability_filter_indexes.sql" {
 		t.Fatalf("tenth migration = %q, want %q", names[9], "0009_add_observability_filter_indexes.sql")
 	}
-	if names[len(names)-1] != "0017_add_vps_assets.sql" {
-		t.Fatalf("last migration = %q, want %q", names[len(names)-1], "0017_add_vps_assets.sql")
+	if names[len(names)-2] != "0017_add_vps_assets.sql" {
+		t.Fatalf("penultimate migration = %q, want %q", names[len(names)-2], "0017_add_vps_assets.sql")
+	}
+	if names[len(names)-1] != "0018_add_subscriptions.sql" {
+		t.Fatalf("last migration = %q, want %q", names[len(names)-1], "0018_add_subscriptions.sql")
 	}
 }
 

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 62
+- **Total Sessions**: 63
 - **Last Active**: 2026-05-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~112 | Active |
+| `journal-2.md` | ~147 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 63 | 2026-05-09 | Subscriptions backend slice | `b1cd94d`, `e4d8aae`, `a64ffde` | `feat/subscriptions-backend` |
 | 62 | 2026-05-09 | Runtime action sync flake repair | `8057c9b`, `2748da9` | `fix/runtime-action-sync-flake` |
 | 61 | 2026-05-09 | VPS assets backend slice | `22a5582`, `55e1dd9`, `dfa0dc7` | `feat/vps-assets-backend` |
 | 60 | 2026-05-09 | Asset Ledger providers vertical slice | `5051b45`, `9d57f1a`, `38404c2`, `671ac21` | `feat/asset-ledger-providers` |
