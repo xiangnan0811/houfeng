@@ -5,7 +5,10 @@ import {
   archiveTarget,
   confirmNodeRebind,
   createProbeItem,
+  createProvider,
+  createSubscription,
   createTarget,
+  createVPSAsset,
   deleteProbeItem,
   enterNodeMaintenance,
   enterTargetMaintenance,
@@ -13,11 +16,16 @@ import {
   exitTargetMaintenance,
   getDashboard,
   getNodeOnboarding,
+  getProvider,
   getSettings,
+  getSubscription,
+  getVPSAsset,
   issueNodeEnrollmentToken,
+  listProviders,
   listNodes,
   listEvents,
   listIncidents,
+  listSubscriptions,
   pauseNodeMonitoring,
   pauseTarget,
   rejectPendingNodeBinding,
@@ -31,18 +39,27 @@ import {
   updateProbeItem,
   updateSettings,
   updateTargetMetadata,
+  listVPSAssets,
+  listVPSForNode,
+  listVPSNodes,
 } from './api'
 import type {
+  CreateProviderInput,
   CreateProbeItemInput,
+  CreateSubscriptionInput,
   CreateTargetInput,
+  CreateVPSAssetInput,
   NodeRecord,
   ProbeItemRecord,
+  ProviderRecord,
   SettingsRecord,
   SettingsUpdateInput,
+  SubscriptionRecord,
   TargetRecord,
   UpdateNodeMetadataInput,
   UpdateProbeItemInput,
   UpdateTargetMetadataInput,
+  VPSAssetRecord,
 } from './types'
 import { appRoutes } from '../app/router'
 
@@ -283,6 +300,244 @@ describe('api helpers', () => {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
+    })
+  })
+
+  it('loads and creates providers through /api/providers', async () => {
+    const provider = {
+      provider_id: 'pv_001',
+      name: 'Hetzner',
+      website: 'https://hetzner.com',
+      panel_url: 'https://console.hetzner.cloud',
+      account_hint: 'main',
+      country: 'DE',
+      note: '',
+      rating: 5,
+      labels: ['core'],
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+    } satisfies ProviderRecord
+    const input = {
+      name: 'Hetzner',
+      website: 'https://hetzner.com',
+      panel_url: 'https://console.hetzner.cloud',
+      account_hint: 'main',
+      country: 'DE',
+      note: '',
+      rating: 5,
+      labels: ['core'],
+    } satisfies CreateProviderInput
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([provider])))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(provider)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(provider)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listProviders()).resolves.toEqual([provider])
+    await expect(getProvider('pv_001')).resolves.toEqual(provider)
+    await expect(createProvider(input)).resolves.toEqual(provider)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/providers', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/providers/pv_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/providers', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(input),
+    })
+  })
+
+  it('serializes VPS asset filters and creates VPS assets', async () => {
+    const vps = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: '',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: '',
+      ipv4: '',
+      ipv6: '',
+      ssh_host: '',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: '',
+      virtualization: '',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: '',
+      active_node_link_count: 1,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+    } satisfies VPSAssetRecord
+    const input = {
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: '',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: '',
+      ipv4: '',
+      ipv6: '',
+      ssh_host: '',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: '',
+      virtualization: '',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: '',
+    } satisfies CreateVPSAssetInput
+    const detail = { ...vps, node_links: [] }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([vps])))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(detail)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(vps)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep' })).resolves.toEqual([vps])
+    await expect(getVPSAsset('vps_001')).resolves.toEqual(detail)
+    await expect(createVPSAsset(input)).resolves.toEqual(vps)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/vps?provider_id=pv_001&lifecycle_status=active&usage_status=in_use&renewal_decision=keep',
+      {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(input),
+    })
+  })
+
+  it('loads VPS link summaries from asset and node sides', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '[]'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listVPSNodes('vps_001')
+    await listVPSForNode('nd_001')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/nodes', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/vps', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('serializes subscription filters and creates subscriptions without monthly_price', async () => {
+    const subscription = {
+      subscription_id: 'sub_001',
+      vps_id: 'vps_001',
+      price: 12,
+      currency: 'USD',
+      billing_cycle: 'monthly',
+      billing_months: 1,
+      monthly_price: 12,
+      started_at: '2026-05-01',
+      renew_at: '2026-06-01',
+      auto_renew: true,
+      auto_renew_cancelled: false,
+      status: 'active',
+      payment_method: 'card',
+      note: '',
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+    } satisfies SubscriptionRecord
+    const input = {
+      vps_id: 'vps_001',
+      price: 12,
+      currency: 'USD',
+      billing_cycle: 'monthly',
+      billing_months: 1,
+      started_at: '2026-05-01',
+      renew_at: '2026-06-01',
+      auto_renew: true,
+      auto_renew_cancelled: false,
+      status: 'active',
+      payment_method: 'card',
+      note: '',
+    } satisfies CreateSubscriptionInput
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([subscription])))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(subscription)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(subscription)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc' })).resolves.toEqual([subscription])
+    await expect(getSubscription('sub_001')).resolves.toEqual(subscription)
+    await expect(createSubscription(input)).resolves.toEqual(subscription)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/subscriptions?vps_id=vps_001&status=active&renew_within_days=30&sort=renew_at&order=asc',
+      {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/subscriptions/sub_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/subscriptions', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(input),
     })
   })
 

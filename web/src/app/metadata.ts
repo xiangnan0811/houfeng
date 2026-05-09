@@ -11,6 +11,9 @@ export const PRODUCT_FULL_NAME_EN = 'Houfeng Fleet Control Plane'
 
 export const PRIMARY_NAV_ITEMS: NavItem[] = [
   { to: '/', label: '首页', end: true },
+  { to: '/vps', label: 'VPS' },
+  { to: '/providers', label: '服务商' },
+  { to: '/subscriptions', label: '订阅' },
   { to: '/nodes', label: '节点' },
   { to: '/targets', label: '目标' },
   { to: '/events', label: '事件' },
