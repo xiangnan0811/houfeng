@@ -53,6 +53,20 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 			TelegramRuntimeApplyActive: true,
 			FeishuConfigured:           false,
 		},
+		AssetSummary: incidents.DashboardAssetSummary{
+			RenewalDue30dSubscriptionCount: 3,
+			RenewalDue30dVPSCount:          2,
+			UnreviewedVPSCount:             4,
+			ToCancelVPSCount:               1,
+			ToMigrateVPSCount:              2,
+			UnlinkedVPSCount:               5,
+			AbnormalLinkedVPSCount:         1,
+			CostByCurrency: []incidents.DashboardAssetCostByCurrency{{
+				Currency:     "USD",
+				MonthlyTotal: 42.5,
+				YearlyTotal:  510,
+			}},
+		},
 		RecentEvents: []incidents.StateChangeEventRecord{{
 			IncidentID:    "inc_001",
 			IncidentClass: incidents.IncidentNodeDiskPressure,
@@ -150,6 +164,40 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 		if _, ok := notificationStatus[secretKey]; ok {
 			t.Fatalf("notification status = %#v, want no secret or Go struct keys", notificationStatus)
 		}
+	}
+	assetSummary, ok := body["asset_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("body = %#v, want asset_summary object", body)
+	}
+	for key, want := range map[string]float64{
+		"renewal_due_30d_subscription_count": 3,
+		"renewal_due_30d_vps_count":          2,
+		"unreviewed_vps_count":               4,
+		"to_cancel_vps_count":                1,
+		"to_migrate_vps_count":               2,
+		"unlinked_vps_count":                 5,
+		"abnormal_linked_vps_count":          1,
+	} {
+		if assetSummary[key] != want {
+			t.Fatalf("asset summary = %#v, want %s=%v", assetSummary, key, want)
+		}
+	}
+	if _, ok := assetSummary["VPSAssets"]; ok {
+		t.Fatalf("asset summary = %#v, want no asset detail dump", assetSummary)
+	}
+	costs, ok := assetSummary["cost_by_currency"].([]any)
+	if !ok || len(costs) != 1 {
+		t.Fatalf("asset summary = %#v, want one cost row", assetSummary)
+	}
+	cost, ok := costs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("asset cost = %#v, want object", costs[0])
+	}
+	if cost["currency"] != "USD" || cost["monthly_total"] != 42.5 || cost["yearly_total"] != float64(510) {
+		t.Fatalf("asset cost = %#v, want USD monthly/yearly totals", cost)
+	}
+	if _, ok := cost["MonthlyTotal"]; ok {
+		t.Fatalf("asset cost = %#v, want snake_case keys only", cost)
 	}
 	abnormalNodes, ok := body["abnormal_nodes"].([]any)
 	if !ok || len(abnormalNodes) != 1 {

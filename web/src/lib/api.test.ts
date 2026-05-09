@@ -290,6 +290,18 @@ describe('api helpers', () => {
         telegram_runtime_apply_active: true,
         feishu_configured: false,
       },
+      asset_summary: {
+        renewal_due_30d_subscription_count: 3,
+        renewal_due_30d_vps_count: 2,
+        unreviewed_vps_count: 4,
+        to_cancel_vps_count: 1,
+        to_migrate_vps_count: 2,
+        unlinked_vps_count: 5,
+        abnormal_linked_vps_count: 1,
+        cost_by_currency: [
+          { currency: 'USD', monthly_total: 42.5, yearly_total: 510 },
+        ],
+      },
       recent_events: [],
     }
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
