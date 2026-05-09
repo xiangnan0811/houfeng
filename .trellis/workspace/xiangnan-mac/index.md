@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 67
+- **Total Sessions**: 68
 - **Last Active**: 2026-05-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~285 | Active |
+| `journal-2.md` | ~319 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 68 | 2026-05-09 | Renewal decision history and VPS timeline backend | `578759e`, `10b3067` | `feat/renewal-decision-history` |
 | 67 | 2026-05-09 | Dashboard asset summary | `e6840d7`, `770507e` | `feat/dashboard-asset-summary` |
 | 66 | 2026-05-09 | Asset frontend pages | `41a52d3`, `35804bf` | `feat/asset-frontend-pages` |
 | 65 | 2026-05-09 | VPS node links backend | `a08643f`, `3b951b2`, `c815834` | `feat/vps-node-links` |

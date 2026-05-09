@@ -283,3 +283,37 @@ Added Dashboard asset_summary aggregates for renewal, VPS decisions, node-link h
 ### Next Steps
 
 - None - task complete
+
+
+## Session 68: Renewal decision history and VPS timeline backend
+
+**Date**: 2026-05-09
+**Task**: Renewal decision history and VPS timeline backend
+**Branch**: `feat/renewal-decision-history`
+
+### Summary
+
+Added renewal_decisions history storage, renewal decision domain/store logic, atomic VPS renewal-decision patch history recording, a VPS timeline API, router/bootstrap wiring, targeted tests, and Trellis backend spec updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `578759e` | (see git log) |
+| `10b3067` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
