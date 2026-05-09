@@ -708,6 +708,74 @@ export type VPSAssetDetail = VPSAssetRecord & {
   node_links: VPSNodeSummary[]
 }
 
+export type VPSDecisionHistoryRecord = {
+  decision_id: string
+  vps_id: string
+  from_decision?: VPSRenewalDecision | null
+  to_decision: VPSRenewalDecision
+  reason: string
+  decided_at: string
+  created_at: string
+}
+
+export type VPSPriceHistoryRecord = {
+  price_history_id: string
+  subscription_id: string
+  vps_id: string
+  from_price: number
+  to_price: number
+  from_currency: string
+  to_currency: string
+  from_billing_cycle: string
+  to_billing_cycle: string
+  from_billing_months: number
+  to_billing_months: number
+  from_monthly_price: number
+  to_monthly_price: number
+  from_renew_at?: string | null
+  to_renew_at?: string | null
+  from_auto_renew: boolean
+  to_auto_renew: boolean
+  from_auto_renew_cancelled: boolean
+  to_auto_renew_cancelled: boolean
+  from_status: SubscriptionStatus
+  to_status: SubscriptionStatus
+  changed_at: string
+  created_at: string
+}
+
+export type VPSIPHistoryRecord = {
+  ip_history_id: string
+  vps_id: string
+  from_ipv4: string
+  to_ipv4: string
+  from_ipv6: string
+  to_ipv6: string
+  changed_at: string
+  created_at: string
+}
+
+export type VPSSpecSnapshotRecord = {
+  snapshot_id: string
+  vps_id: string
+  product_name: string
+  ssh_host: string
+  ssh_port: number
+  ssh_user: string
+  os_name: string
+  virtualization: string
+  captured_at: string
+  created_at: string
+}
+
+export type VPSTimeline = {
+  vps_id: string
+  renewal_decisions: VPSDecisionHistoryRecord[]
+  price_histories: VPSPriceHistoryRecord[]
+  ip_histories: VPSIPHistoryRecord[]
+  spec_snapshots: VPSSpecSnapshotRecord[]
+}
+
 export type VPSSummary = {
   vps_id: string
   display_name: string
