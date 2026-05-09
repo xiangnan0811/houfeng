@@ -51,6 +51,16 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
       telegram_runtime_apply_active: false,
       feishu_configured: false,
     },
+    asset_summary: {
+      renewal_due_30d_subscription_count: 0,
+      renewal_due_30d_vps_count: 0,
+      unreviewed_vps_count: 0,
+      to_cancel_vps_count: 0,
+      to_migrate_vps_count: 0,
+      unlinked_vps_count: 0,
+      abnormal_linked_vps_count: 0,
+      cost_by_currency: [],
+    },
     recent_events: [],
     abnormal_nodes: [],
     abnormal_targets: [],
@@ -109,6 +119,19 @@ describe('DashboardPage', () => {
           telegram_runtime_managed: true,
           telegram_runtime_apply_active: true,
           feishu_configured: false,
+        },
+        asset_summary: {
+          renewal_due_30d_subscription_count: 3,
+          renewal_due_30d_vps_count: 2,
+          unreviewed_vps_count: 4,
+          to_cancel_vps_count: 1,
+          to_migrate_vps_count: 2,
+          unlinked_vps_count: 5,
+          abnormal_linked_vps_count: 1,
+          cost_by_currency: [
+            { currency: 'USD', monthly_total: 42.5, yearly_total: 510 },
+            { currency: 'EUR', monthly_total: 18, yearly_total: 216 },
+          ],
         },
         recent_events: [
           {
@@ -263,6 +286,33 @@ describe('DashboardPage', () => {
       'href',
       '/events?maintenance_only=1',
     )
+    const assetSummary = screen.getByLabelText('资产决策摘要')
+    expect(within(assetSummary).getByRole('heading', { name: '资产决策' })).toBeInTheDocument()
+    expect(within(assetSummary).getByText('15 项资产信号需要复核')).toBeInTheDocument()
+    expect(within(assetSummary).getByRole('link', { name: '30 天续费：订阅 3' })).toHaveAttribute(
+      'href',
+      '/subscriptions?renew_within_days=30',
+    )
+    expect(within(assetSummary).getByRole('link', { name: '待决策：续费状态未评估' })).toHaveAttribute(
+      'href',
+      '/vps?renewal_decision=unreviewed',
+    )
+    expect(within(assetSummary).getByRole('link', { name: '取消/迁移：待取消 1 · 待迁移 2' })).toHaveAttribute(
+      'href',
+      '/vps?lifecycle_status=to_migrate',
+    )
+    expect(within(assetSummary).getByRole('link', { name: '未关联 Node：需人工核对' })).toHaveAttribute(
+      'href',
+      '/vps',
+    )
+    expect(within(assetSummary).getByRole('link', { name: '关联异常：VPS 关联异常 Node' })).toHaveAttribute(
+      'href',
+      '/nodes?abnormal=1',
+    )
+    expect(within(assetSummary).getByRole('link', { name: '成本：USD 42.50/月 · EUR 18.00/月' })).toHaveAttribute(
+      'href',
+      '/subscriptions?renew_within_days=30',
+    )
     const management = within(attentionSection).getByLabelText('管理入口')
     expect(within(management).getByRole('heading', { name: '管理入口' })).toBeInTheDocument()
     expect(within(management).queryByRole('link', { name: '查看事件流' })).not.toBeInTheDocument()
@@ -283,6 +333,7 @@ describe('DashboardPage', () => {
       '/settings',
     )
     expect(within(management).getAllByText('进入')).toHaveLength(4)
+    expect(within(management).queryByRole('link', { name: /资产：/ })).not.toBeInTheDocument()
 
     expect(screen.queryByLabelText('工作台上下文')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '系统快捷入口' })).not.toBeInTheDocument()

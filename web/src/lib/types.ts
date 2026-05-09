@@ -286,6 +286,7 @@ export type DashboardOverview = {
   recent_recovery_count: number
   group_summaries: DashboardGroupSummary[]
   notification_status: DashboardNotificationStatus
+  asset_summary: DashboardAssetSummary
   abnormal_nodes: DashboardNodeSummary[]
   abnormal_targets: DashboardTargetSummary[]
   recent_events: StateChangeEventRecord[]
@@ -320,6 +321,23 @@ export type DashboardNotificationStatus = {
   telegram_runtime_managed: boolean
   telegram_runtime_apply_active: boolean
   feishu_configured: boolean
+}
+
+export type DashboardAssetSummary = {
+  renewal_due_30d_subscription_count: number
+  renewal_due_30d_vps_count: number
+  unreviewed_vps_count: number
+  to_cancel_vps_count: number
+  to_migrate_vps_count: number
+  unlinked_vps_count: number
+  abnormal_linked_vps_count: number
+  cost_by_currency: DashboardAssetCostByCurrency[]
+}
+
+export type DashboardAssetCostByCurrency = {
+  currency: string
+  monthly_total: number
+  yearly_total: number
 }
 
 export type DashboardNodeSummary = {

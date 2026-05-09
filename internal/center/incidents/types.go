@@ -64,6 +64,7 @@ type DashboardOverview struct {
 	RecentRecoveryCount        int                         `json:"recent_recovery_count"`
 	GroupSummaries             []DashboardGroupSummary     `json:"group_summaries"`
 	NotificationStatus         DashboardNotificationStatus `json:"notification_status"`
+	AssetSummary               DashboardAssetSummary       `json:"asset_summary"`
 	AbnormalNodes              []DashboardNodeSummary      `json:"abnormal_nodes"`
 	AbnormalTargets            []DashboardTargetSummary    `json:"abnormal_targets"`
 	RecentEvents               []StateChangeEventRecord    `json:"recent_events"`
@@ -93,6 +94,23 @@ type DashboardNotificationStatus struct {
 	TelegramRuntimeManaged     bool `json:"telegram_runtime_managed"`
 	TelegramRuntimeApplyActive bool `json:"telegram_runtime_apply_active"`
 	FeishuConfigured           bool `json:"feishu_configured"`
+}
+
+type DashboardAssetSummary struct {
+	RenewalDue30dSubscriptionCount int                            `json:"renewal_due_30d_subscription_count"`
+	RenewalDue30dVPSCount          int                            `json:"renewal_due_30d_vps_count"`
+	UnreviewedVPSCount             int                            `json:"unreviewed_vps_count"`
+	ToCancelVPSCount               int                            `json:"to_cancel_vps_count"`
+	ToMigrateVPSCount              int                            `json:"to_migrate_vps_count"`
+	UnlinkedVPSCount               int                            `json:"unlinked_vps_count"`
+	AbnormalLinkedVPSCount         int                            `json:"abnormal_linked_vps_count"`
+	CostByCurrency                 []DashboardAssetCostByCurrency `json:"cost_by_currency"`
+}
+
+type DashboardAssetCostByCurrency struct {
+	Currency     string  `json:"currency"`
+	MonthlyTotal float64 `json:"monthly_total"`
+	YearlyTotal  float64 `json:"yearly_total"`
 }
 
 type DashboardNodeSummary struct {

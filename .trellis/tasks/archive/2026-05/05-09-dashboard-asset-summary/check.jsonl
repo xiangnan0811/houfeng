@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify feature branch and PR workflow compliance."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check Dashboard asset summary data flow across storage, API, TS types, and UI."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Review dashboard SQL and Asset Ledger invariants."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review store/handler error handling."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Run and interpret backend verification."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check Dashboard contract, no data warehouse regression, and API/type synchronization."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check Dashboard UI uses existing token/BEM style and remains responsive."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Run and interpret frontend lint/test/build verification."}

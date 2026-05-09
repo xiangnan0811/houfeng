@@ -22,6 +22,7 @@ import {
   type DashboardNodeSummary,
   type DashboardOverview,
   type DashboardTargetSummary,
+  type DashboardAssetSummary,
   type IncidentSeverity,
   STATE_CHANGE_EVENT_TYPE_LABELS,
 } from '../lib/types'
@@ -102,6 +103,11 @@ const DASHBOARD_LINKS = {
   targetsPaused: '/targets?run_status=暂停',
   targetsArchived: '/targets?run_status=已归档',
   settings: '/settings',
+  vps: '/vps',
+  vpsUnreviewed: '/vps?renewal_decision=unreviewed',
+  vpsToCancel: '/vps?lifecycle_status=to_cancel',
+  vpsToMigrate: '/vps?lifecycle_status=to_migrate',
+  subscriptionsRenew30d: '/subscriptions?renew_within_days=30',
 } as const
 
 function severityWeight(value: string): number {
@@ -255,6 +261,14 @@ function trendBalanceLabel(overview: DashboardOverview) {
   if (delta > 0) return `净增 ${delta}`
   if (delta < 0) return `净恢复 ${Math.abs(delta)}`
   return '新增与恢复持平'
+}
+
+function formatAssetCost(summary: DashboardAssetSummary) {
+  if (summary.cost_by_currency.length === 0) return '暂无 active 订阅成本'
+  return summary.cost_by_currency
+    .slice(0, 2)
+    .map((item) => `${item.currency} ${item.monthly_total.toFixed(2)}/月`)
+    .join(' · ')
 }
 
 function buildContextItems(
@@ -784,6 +798,101 @@ function ManagementEntries({
   )
 }
 
+function AssetDecisionSummary({ summary }: { summary: DashboardAssetSummary }) {
+  const pressureCount =
+    summary.renewal_due_30d_vps_count +
+    summary.unreviewed_vps_count +
+    summary.to_cancel_vps_count +
+    summary.to_migrate_vps_count +
+    summary.unlinked_vps_count +
+    summary.abnormal_linked_vps_count
+  const lifecycleReviewCount = summary.to_cancel_vps_count + summary.to_migrate_vps_count
+  const lifecycleReviewLink =
+    summary.to_cancel_vps_count >= summary.to_migrate_vps_count
+      ? DASHBOARD_LINKS.vpsToCancel
+      : DASHBOARD_LINKS.vpsToMigrate
+  const lifecycleReviewDetail =
+    `待取消 ${summary.to_cancel_vps_count} · 待迁移 ${summary.to_migrate_vps_count}`
+  const items = [
+    {
+      label: '30 天续费',
+      value: summary.renewal_due_30d_vps_count,
+      detail: `订阅 ${summary.renewal_due_30d_subscription_count}`,
+      to: DASHBOARD_LINKS.subscriptionsRenew30d,
+      tone: summary.renewal_due_30d_vps_count > 0 ? 'notice' : 'normal',
+    },
+    {
+      label: '待决策',
+      value: summary.unreviewed_vps_count,
+      detail: '续费状态未评估',
+      to: DASHBOARD_LINKS.vpsUnreviewed,
+      tone: summary.unreviewed_vps_count > 0 ? 'notice' : 'normal',
+    },
+    {
+      label: '取消/迁移',
+      value: lifecycleReviewCount,
+      detail: lifecycleReviewDetail,
+      to: lifecycleReviewLink,
+      tone: lifecycleReviewCount > 0 ? 'alert' : 'normal',
+    },
+    {
+      label: '未关联 Node',
+      value: summary.unlinked_vps_count,
+      detail: '需人工核对',
+      to: DASHBOARD_LINKS.vps,
+      tone: summary.unlinked_vps_count > 0 ? 'notice' : 'normal',
+    },
+    {
+      label: '关联异常',
+      value: summary.abnormal_linked_vps_count,
+      detail: 'VPS 关联异常 Node',
+      to: DASHBOARD_LINKS.nodesAbnormal,
+      tone: summary.abnormal_linked_vps_count > 0 ? 'alert' : 'normal',
+    },
+    {
+      label: '成本',
+      value: summary.cost_by_currency.length,
+      detail: formatAssetCost(summary),
+      to: DASHBOARD_LINKS.subscriptionsRenew30d,
+      tone: summary.cost_by_currency.length > 0 ? 'neutral' : 'normal',
+    },
+  ] as const
+
+  return (
+    <div className="dashboard-asset-summary" aria-label="资产决策摘要">
+      <div className="dashboard-asset-summary__header">
+        <div>
+          <h3>资产决策</h3>
+          <p>
+            {pressureCount > 0
+              ? `${pressureCount} 项资产信号需要复核`
+              : '资产层暂无续费、关联或决策压力'}
+          </p>
+        </div>
+        <Link className="text-link" to={DASHBOARD_LINKS.vps}>
+          进入 VPS
+        </Link>
+      </div>
+      <div className="dashboard-asset-summary__grid">
+        {items.map((item) => (
+          <Link
+            className={`dashboard-asset-item dashboard-asset-item--${item.tone}`}
+            to={item.to}
+            key={item.label}
+            aria-label={`${item.label}：${item.detail}`}
+          >
+            <span className="dashboard-asset-item__label">{item.label}</span>
+            <strong>
+              <MonoDigits>{item.value}</MonoDigits>
+            </strong>
+            <span className="dashboard-asset-item__detail">{item.detail}</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function DashboardContextStrip({ items }: { items: ContextItem[] }) {
   return (
     <div className="dashboard-context-strip" aria-label="运行上下文">
@@ -872,6 +981,7 @@ function RunningOverview({
           </small>
         </Link>
       </div>
+      <AssetDecisionSummary summary={overview.asset_summary} />
       <ManagementEntries overview={overview} />
       <DashboardContextStrip items={contextItems} />
     </div>
@@ -995,6 +1105,7 @@ function DashboardWorkbench({
             </div>
             <aside className="dashboard-incident-console__aside" aria-label="异常上下文">
               <DashboardContextStrip items={buildContextItems(overview, abnormalTotal, maintenanceTotal)} />
+              <AssetDecisionSummary summary={overview.asset_summary} />
               <ManagementEntries overview={overview} showEventLink={false} />
             </aside>
           </div>

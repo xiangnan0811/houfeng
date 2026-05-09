@@ -165,6 +165,19 @@
 - import 不接受也不写 `monthly_price`，仍由 subscription 后端计算。
 - import 不创建 `vps_node_links`，不改写 `nodes.provider`，不改变 Node / Target / Agent 语义。Node 相关输入只能作为人工确认候选进入报告。
 
+### Asset Ledger Dashboard summary
+
+`internal/center/store/dashboard.go` 可以读取资产层表来生成 `/api/dashboard` 的少量决策摘要，但它仍是 Dashboard read model，不是资产 CRUD 仓库。
+
+- `incidents.DashboardOverview.AssetSummary` 的 JSON contract 是 `asset_summary`，只允许返回聚合计数和按币种成本分组，不返回 VPS、subscription、Node 或 provider 明细数组。
+- `asset_summary` 的 30 天续费口径：`subscriptions.status = 'active'`，`renew_at >= current_date` 且 `renew_at <= current_date + 30`，并只统计未取消/未归档的 VPS。
+- active VPS 口径：`vps_assets.lifecycle_status not in ('cancelled', 'archived')`。
+- active link 口径：`vps_node_links.unlinked_at is null`。
+- 异常关联 VPS 口径：active link 关联到 `nodes.current_health_status <> '正常'` 的 Node；只读 Node 派生状态，不改写 Node。
+- 成本口径：`sum(active subscriptions monthly_price)` 按 `currency` 分组，`yearly_total = monthly_total * 12`；第一阶段不做汇率换算。
+- 该查询不得改变 `nodes.provider`、Node lifecycle / monitoring / health、Target、Agent、VPS、subscription 或 link 记录。
+- `limit` 只限制异常队列和 recent events；不得限制 `asset_summary`。
+
 ---
 
 ## 模型层关键不变量

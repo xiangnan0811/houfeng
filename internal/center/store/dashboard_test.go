@@ -28,6 +28,18 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					return nil
 				}}
 			}
+			if strings.Contains(sql, "active_vps") {
+				return fakeRow{scan: func(dest ...any) error {
+					*(dest[0].(*int)) = 3
+					*(dest[1].(*int)) = 2
+					*(dest[2].(*int)) = 4
+					*(dest[3].(*int)) = 1
+					*(dest[4].(*int)) = 2
+					*(dest[5].(*int)) = 5
+					*(dest[6].(*int)) = 1
+					return nil
+				}}
+			}
 			return fakeRow{scan: func(dest ...any) error {
 				*(dest[0].(*int)) = 5
 				*(dest[1].(*int)) = 4
@@ -77,6 +89,13 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					}(started, recovered)})
 				}
 				return &fakeDashboardRows{rows: rows}, nil
+			case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "group by currency"):
+				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "USD"
+					*(dest[1].(*float64)) = 42.5
+					*(dest[2].(*float64)) = 510
+					return nil
+				}}}}, nil
 			case strings.Contains(sql, "from state_change_events"):
 				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "evt_001"
@@ -158,6 +177,18 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	}
 	if overview.NotificationStatus.FeishuConfigured {
 		t.Fatalf("NotificationStatus = %#v, want feishu unconfigured", overview.NotificationStatus)
+	}
+	if overview.AssetSummary.RenewalDue30dSubscriptionCount != 3 || overview.AssetSummary.RenewalDue30dVPSCount != 2 {
+		t.Fatalf("AssetSummary renewal = %#v, want 3 subscriptions / 2 VPS", overview.AssetSummary)
+	}
+	if overview.AssetSummary.UnreviewedVPSCount != 4 || overview.AssetSummary.UnlinkedVPSCount != 5 || overview.AssetSummary.AbnormalLinkedVPSCount != 1 {
+		t.Fatalf("AssetSummary counts = %#v, want decision/link counts", overview.AssetSummary)
+	}
+	if len(overview.AssetSummary.CostByCurrency) != 1 || overview.AssetSummary.CostByCurrency[0].Currency != "USD" {
+		t.Fatalf("AssetSummary costs = %#v, want USD cost row", overview.AssetSummary.CostByCurrency)
+	}
+	if overview.AssetSummary.CostByCurrency[0].MonthlyTotal != 42.5 || overview.AssetSummary.CostByCurrency[0].YearlyTotal != 510 {
+		t.Fatalf("AssetSummary costs = %#v, want monthly/yearly totals", overview.AssetSummary.CostByCurrency)
 	}
 	if len(overview.RecentEvents) != 1 || overview.RecentEvents[0].IncidentID != "inc_001" {
 		t.Fatalf("RecentEvents = %#v, want decoded event payload", overview.RecentEvents)
@@ -248,6 +279,92 @@ func TestPostgresDashboardRepositoryBuildsFullGroupSummaryQuery(t *testing.T) {
 	}
 	if strings.Contains(groupSQL, "limit $1") {
 		t.Fatalf("groupSQL = %q, want group summaries unaffected by dashboard limit", groupSQL)
+	}
+}
+
+func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
+	capturedQueryRows := []string{}
+	capturedQueries := []string{}
+	summary, err := loadDashboardAssetSummary(context.Background(), fakeDashboardQueryer{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			capturedQueryRows = append(capturedQueryRows, sql)
+			return fakeRow{scan: func(dest ...any) error {
+				*(dest[0].(*int)) = 6
+				*(dest[1].(*int)) = 4
+				*(dest[2].(*int)) = 5
+				*(dest[3].(*int)) = 2
+				*(dest[4].(*int)) = 1
+				*(dest[5].(*int)) = 3
+				*(dest[6].(*int)) = 2
+				return nil
+			}}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedQueries = append(capturedQueries, sql)
+			return &fakeDashboardRows{rows: []fakeDashboardScan{
+				{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "EUR"
+					*(dest[1].(*float64)) = 18.25
+					*(dest[2].(*float64)) = 219
+					return nil
+				}},
+				{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "USD"
+					*(dest[1].(*float64)) = 42.5
+					*(dest[2].(*float64)) = 510
+					return nil
+				}},
+			}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("loadDashboardAssetSummary() error = %v", err)
+	}
+	if summary.RenewalDue30dSubscriptionCount != 6 || summary.RenewalDue30dVPSCount != 4 {
+		t.Fatalf("summary renewal = %#v, want 6 subscriptions / 4 VPS", summary)
+	}
+	if summary.ToCancelVPSCount != 2 || summary.ToMigrateVPSCount != 1 || summary.AbnormalLinkedVPSCount != 2 {
+		t.Fatalf("summary decisions = %#v, want cancel/migrate/abnormal counts", summary)
+	}
+	if len(summary.CostByCurrency) != 2 || summary.CostByCurrency[0].Currency != "EUR" || summary.CostByCurrency[1].Currency != "USD" {
+		t.Fatalf("summary costs = %#v, want EUR and USD", summary.CostByCurrency)
+	}
+
+	countSQL := firstSQLContaining(capturedQueryRows, "active_vps")
+	if countSQL == "" {
+		t.Fatalf("capturedQueryRows = %#v, want asset summary count SQL", capturedQueryRows)
+	}
+	for _, want := range []string{
+		"from vps_assets",
+		"lifecycle_status not in ('cancelled', 'archived')",
+		"from vps_node_links",
+		"unlinked_at is null",
+		"from subscriptions",
+		"status = 'active'",
+		"renew_at <= current_date + 30",
+		"renewal_decision = 'unreviewed'",
+		"lifecycle_status = 'to_cancel'",
+		"lifecycle_status = 'to_migrate'",
+		"current_health_status <> '正常'",
+	} {
+		if !strings.Contains(countSQL, want) {
+			t.Fatalf("countSQL = %q, want %q", countSQL, want)
+		}
+	}
+
+	costSQL := firstSQLContaining(capturedQueries, "group by currency")
+	if costSQL == "" {
+		t.Fatalf("capturedQueries = %#v, want asset cost SQL", capturedQueries)
+	}
+	for _, want := range []string{
+		"sum(monthly_price)",
+		"where status = 'active'",
+		"group by currency",
+		"order by currency asc",
+	} {
+		if !strings.Contains(costSQL, want) {
+			t.Fatalf("costSQL = %q, want %q", costSQL, want)
+		}
 	}
 }
 

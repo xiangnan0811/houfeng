@@ -71,6 +71,10 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard notification status: %w", err)
 	}
+	overview.AssetSummary, err = loadDashboardAssetSummary(ctx, r.db)
+	if err != nil {
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard asset summary: %w", err)
+	}
 	overview.AbnormalNodes, err = loadAbnormalNodeSummaries(ctx, r.db, limit)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard abnormal nodes: %w", err)
@@ -401,6 +405,94 @@ func loadDashboardNotificationStatus(ctx context.Context, queryer dashboardQuery
 		return incidents.DashboardNotificationStatus{}, fmt.Errorf("query dashboard notification status: %w", err)
 	}
 	return status, nil
+}
+
+func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardAssetSummary, error) {
+	var summary incidents.DashboardAssetSummary
+	if err := queryer.QueryRow(ctx, `
+		with active_vps as (
+			select vps_id
+			from vps_assets
+			where lifecycle_status not in ('cancelled', 'archived')
+		),
+		active_links as (
+			select distinct vps_id, node_id
+			from vps_node_links
+			where unlinked_at is null
+		),
+		renewal_due as (
+			select distinct s.subscription_id, s.vps_id
+			from subscriptions s
+			join active_vps v on v.vps_id = s.vps_id
+			where s.status = 'active'
+				and s.renew_at >= current_date
+				and s.renew_at <= current_date + 30
+		)
+		select
+			(select count(*)::int from renewal_due),
+			(select count(distinct vps_id)::int from renewal_due),
+			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.renewal_decision = 'unreviewed'),
+			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.lifecycle_status = 'to_cancel'),
+			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.lifecycle_status = 'to_migrate'),
+			(select count(*)::int from active_vps v where not exists (
+				select 1 from active_links l where l.vps_id = v.vps_id
+			)),
+			(select count(distinct l.vps_id)::int
+				from active_links l
+				join active_vps v on v.vps_id = l.vps_id
+				join nodes n on n.node_id = l.node_id
+				where n.current_health_status <> '正常')
+	`).Scan(
+		&summary.RenewalDue30dSubscriptionCount,
+		&summary.RenewalDue30dVPSCount,
+		&summary.UnreviewedVPSCount,
+		&summary.ToCancelVPSCount,
+		&summary.ToMigrateVPSCount,
+		&summary.UnlinkedVPSCount,
+		&summary.AbnormalLinkedVPSCount,
+	); err != nil {
+		return incidents.DashboardAssetSummary{}, fmt.Errorf("query dashboard asset summary counts: %w", err)
+	}
+
+	costs, err := loadDashboardAssetCostByCurrency(ctx, queryer)
+	if err != nil {
+		return incidents.DashboardAssetSummary{}, err
+	}
+	summary.CostByCurrency = costs
+	return summary, nil
+}
+
+func loadDashboardAssetCostByCurrency(ctx context.Context, queryer dashboardQueryer) ([]incidents.DashboardAssetCostByCurrency, error) {
+	rows, err := queryer.Query(ctx, `
+		select
+			currency,
+			round(sum(monthly_price)::numeric, 4)::float8 as monthly_total,
+			round((sum(monthly_price) * 12)::numeric, 4)::float8 as yearly_total
+		from subscriptions
+		where status = 'active'
+		group by currency
+		order by currency asc`)
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard asset costs: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]incidents.DashboardAssetCostByCurrency, 0)
+	for rows.Next() {
+		var record incidents.DashboardAssetCostByCurrency
+		if err := rows.Scan(
+			&record.Currency,
+			&record.MonthlyTotal,
+			&record.YearlyTotal,
+		); err != nil {
+			return nil, fmt.Errorf("scan dashboard asset cost row: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dashboard asset costs: %w", err)
+	}
+	return records, nil
 }
 
 func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter EventsFilter) ([]EventListItem, error) {
