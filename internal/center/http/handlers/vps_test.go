@@ -12,6 +12,7 @@ import (
 
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -59,6 +60,20 @@ func (f *fakeVPSAssetRepository) PatchVPSAsset(_ context.Context, vpsID string, 
 		return vpsassets.Record{}, f.patchVPSAssetErr
 	}
 	return f.patchVPSAssetResult, nil
+}
+
+type fakeRenewalTimelineRepository struct {
+	timeline       renewals.VPSTimeline
+	err            error
+	requestedVPSID string
+}
+
+func (f *fakeRenewalTimelineRepository) GetVPSTimeline(_ context.Context, vpsID string) (renewals.VPSTimeline, error) {
+	f.requestedVPSID = vpsID
+	if f.err != nil {
+		return renewals.VPSTimeline{}, f.err
+	}
+	return f.timeline, nil
 }
 
 func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
@@ -352,6 +367,9 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	if !repo.patchVPSAssetInput.LifecycleStatus.Set || repo.patchVPSAssetInput.LifecycleStatus.Value != vpsassets.LifecycleArchived {
 		t.Fatalf("patch lifecycle = %#v, want archived", repo.patchVPSAssetInput.LifecycleStatus)
 	}
+	if !repo.patchVPSAssetInput.RenewalDecision.Set || repo.patchVPSAssetInput.RenewalDecision.Value != vpsassets.RenewalCancel {
+		t.Fatalf("patch renewal = %#v, want cancel", repo.patchVPSAssetInput.RenewalDecision)
+	}
 	if !repo.patchVPSAssetInput.Labels.Set || len(repo.patchVPSAssetInput.Labels.Values) != 2 {
 		t.Fatalf("patch labels = %#v, want normalized labels", repo.patchVPSAssetInput.Labels)
 	}
@@ -361,6 +379,104 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	}
 	if body.DisplayName != "Tokyo Edge Archived" || body.ArchivedAt == nil {
 		t.Fatalf("body = %#v, want archived asset", body)
+	}
+}
+
+func TestVPSItemPatchesRenewalDecisionReason(t *testing.T) {
+	repo := &fakeVPSAssetRepository{patchVPSAssetResult: vpsassets.Record{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+		RenewalDecision: vpsassets.RenewalCancel,
+		CreatedAt:       time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC),
+		UpdatedAt:       time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC),
+	}}
+
+	handler := handlers.VPSItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
+		"renewal_decision":"cancel",
+		"renewal_reason":" too expensive "
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if !repo.patchVPSAssetInput.RenewalDecision.Set || repo.patchVPSAssetInput.RenewalDecision.Value != vpsassets.RenewalCancel {
+		t.Fatalf("patch renewal decision = %#v, want cancel", repo.patchVPSAssetInput.RenewalDecision)
+	}
+	if !repo.patchVPSAssetInput.RenewalReason.Set || repo.patchVPSAssetInput.RenewalReason.Value != "too expensive" {
+		t.Fatalf("patch renewal reason = %#v, want trimmed reason", repo.patchVPSAssetInput.RenewalReason)
+	}
+}
+
+func TestVPSTimelineReturnsRenewalDecisionHistory(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	fromDecision := vpsassets.RenewalKeep
+	repo := &fakeRenewalTimelineRepository{timeline: renewals.VPSTimeline{
+		VPSID: "vps_001",
+		RenewalDecisions: []renewals.DecisionRecord{{
+			DecisionID:   "rdec_001",
+			VPSID:        "vps_001",
+			FromDecision: &fromDecision,
+			ToDecision:   vpsassets.RenewalCancel,
+			Reason:       "too expensive",
+			DecidedAt:    now,
+			CreatedAt:    now,
+		}},
+	}}
+
+	handler := handlers.VPSTimeline(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/timeline", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.requestedVPSID != "vps_001" {
+		t.Fatalf("requested vps id = %q, want vps_001", repo.requestedVPSID)
+	}
+	var body renewals.VPSTimeline
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.VPSID != "vps_001" || len(body.RenewalDecisions) != 1 || body.RenewalDecisions[0].FromDecision == nil || *body.RenewalDecisions[0].FromDecision != vpsassets.RenewalKeep {
+		t.Fatalf("timeline body = %#v, want renewal decision history", body)
+	}
+}
+
+func TestVPSTimelineMapsErrorsAndMethods(t *testing.T) {
+	tests := []struct {
+		name   string
+		repo   *fakeRenewalTimelineRepository
+		method string
+		path   string
+		want   int
+	}{
+		{name: "missing vps", repo: &fakeRenewalTimelineRepository{err: renewals.ErrRenewalTimelineNotFound}, method: http.MethodGet, path: "/api/vps/vps_missing/timeline", want: http.StatusNotFound},
+		{name: "invalid input", repo: &fakeRenewalTimelineRepository{err: renewals.ErrInvalidRenewalDecisionInput}, method: http.MethodGet, path: "/api/vps/vps_001/timeline", want: http.StatusBadRequest},
+		{name: "repo failure", repo: &fakeRenewalTimelineRepository{err: errors.New("query failed")}, method: http.MethodGet, path: "/api/vps/vps_001/timeline", want: http.StatusInternalServerError},
+		{name: "wrong method", repo: &fakeRenewalTimelineRepository{}, method: http.MethodPost, path: "/api/vps/vps_001/timeline", want: http.StatusMethodNotAllowed},
+		{name: "malformed path", repo: &fakeRenewalTimelineRepository{}, method: http.MethodGet, path: "/api/vps/vps_001/timeline/extra", want: http.StatusNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSTimeline(tt.repo).ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.want {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tt.want, recorder.Body.String())
+			}
+		})
 	}
 }
 

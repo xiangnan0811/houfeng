@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -166,4 +167,33 @@ func VPSItem(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http
 type vpsDetailResponse struct {
 	vpsassets.Record
 	NodeLinks []assetlinks.NodeSummary `json:"node_links"`
+}
+
+func VPSTimeline(repo renewals.TimelineRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "timeline")
+		if !ok {
+			writeError(w, http.StatusNotFound, "vps asset not found")
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		timeline, err := repo.GetVPSTimeline(r.Context(), vpsID)
+		if errors.Is(err, renewals.ErrInvalidRenewalDecisionInput) {
+			writeError(w, http.StatusBadRequest, "invalid input")
+			return
+		}
+		if errors.Is(err, renewals.ErrRenewalTimelineNotFound) {
+			writeError(w, http.StatusNotFound, "vps asset not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		writeJSON(w, http.StatusOK, timeline)
+	})
 }

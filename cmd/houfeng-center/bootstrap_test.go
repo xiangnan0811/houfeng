@@ -207,6 +207,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSUnlinkNodeHandler == nil {
 		t.Fatal("router vps unlink node handler = nil, want non-nil")
 	}
+	if gotOpts.VPSTimelineHandler == nil {
+		t.Fatal("router vps timeline handler = nil, want non-nil")
+	}
 	if gotOpts.SubscriptionsCollectionHandler == nil {
 		t.Fatal("router subscriptions collection handler = nil, want non-nil")
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -21,12 +22,20 @@ type vpsAssetDB interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+type vpsAssetQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 type PostgresVPSAssetRepository struct {
-	db vpsAssetDB
+	db      vpsAssetDB
+	beginTx func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
 func NewPostgresVPSAssetRepository(db *pgxpool.Pool) *PostgresVPSAssetRepository {
-	return &PostgresVPSAssetRepository{db: db}
+	return &PostgresVPSAssetRepository{
+		db:      db,
+		beginTx: db.BeginTx,
+	}
 }
 
 const vpsAssetSelectColumns = `
@@ -269,7 +278,80 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 		return r.GetVPSAsset(ctx, vpsID)
 	}
 
-	record, err := scanVPSAsset(r.db.QueryRow(ctx, `
+	if input.RenewalDecision.Set {
+		return r.patchVPSAssetWithRenewalDecisionHistory(ctx, vpsID, input)
+	}
+
+	record, err := patchVPSAssetRow(ctx, r.db, vpsID, input)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
+	}
+	if err != nil {
+		if isVPSAssetInvalidPostgresError(err) {
+			return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+		}
+		return vpsassets.Record{}, fmt.Errorf("patch vps asset %q: %w", vpsID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresVPSAssetRepository) patchVPSAssetWithRenewalDecisionHistory(ctx context.Context, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {
+	if r.beginTx == nil {
+		return vpsassets.Record{}, errors.New("vps asset repository cannot record renewal decision history without transaction support")
+	}
+
+	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return vpsassets.Record{}, fmt.Errorf("begin vps asset renewal decision transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	current, err := scanVPSAsset(tx.QueryRow(ctx, `
+		select `+vpsAssetSelectColumns+`
+		from vps_assets
+		where vps_id = $1
+		for update`, vpsID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
+	}
+	if err != nil {
+		return vpsassets.Record{}, fmt.Errorf("query vps asset %q before renewal decision patch: %w", vpsID, err)
+	}
+
+	record, err := patchVPSAssetRow(ctx, tx, vpsID, input)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
+	}
+	if err != nil {
+		if isVPSAssetInvalidPostgresError(err) {
+			return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+		}
+		return vpsassets.Record{}, fmt.Errorf("patch vps asset %q: %w", vpsID, err)
+	}
+
+	if current.RenewalDecision != record.RenewalDecision {
+		fromDecision := current.RenewalDecision
+		if _, err := createRenewalDecision(ctx, tx, renewals.CreateDecisionInput{
+			VPSID:        vpsID,
+			FromDecision: &fromDecision,
+			ToDecision:   record.RenewalDecision,
+			Reason:       input.RenewalReason.Value,
+		}); err != nil {
+			if errors.Is(err, renewals.ErrInvalidRenewalDecisionInput) || errors.Is(err, renewals.ErrRenewalTimelineNotFound) {
+				return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+			}
+			return vpsassets.Record{}, fmt.Errorf("record renewal decision history for vps %q: %w", vpsID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return vpsassets.Record{}, fmt.Errorf("commit vps asset renewal decision transaction: %w", err)
+	}
+	return record, nil
+}
+
+func patchVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {
+	return scanVPSAsset(db.QueryRow(ctx, `
 		update vps_assets
 		set display_name = case when $2::boolean then $3 else display_name end,
 		    provider_id = case when $4::boolean then $5::text else provider_id end,
@@ -347,16 +429,6 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 		input.Note.Set,
 		input.Note.Value,
 	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
-	}
-	if err != nil {
-		if isVPSAssetInvalidPostgresError(err) {
-			return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
-		}
-		return vpsassets.Record{}, fmt.Errorf("patch vps asset %q: %w", vpsID, err)
-	}
-	return record, nil
 }
 
 func nullableStringArg(value *string) any {
