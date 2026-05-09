@@ -19,10 +19,14 @@ type RouterOptions struct {
 	ProviderItemHandler             stdhttp.Handler
 	VPSCollectionHandler            stdhttp.Handler
 	VPSItemHandler                  stdhttp.Handler
+	VPSNodesHandler                 stdhttp.Handler
+	VPSLinkNodeHandler              stdhttp.Handler
+	VPSUnlinkNodeHandler            stdhttp.Handler
 	SubscriptionsCollectionHandler  stdhttp.Handler
 	SubscriptionItemHandler         stdhttp.Handler
 	NodesCollectionHandler          stdhttp.Handler
 	NodeItemHandler                 stdhttp.Handler
+	NodeVPSHandler                  stdhttp.Handler
 	NodeRuntimeFactsHandler         stdhttp.Handler
 	NodeRuntimeControlHandler       stdhttp.Handler
 	NodeLifecycleControlHandler     stdhttp.Handler
@@ -99,8 +103,43 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil {
-		mux.Handle("/api/vps/", protect(opts.VPSItemHandler))
+	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil {
+		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			vpsID, subtree := vpsSubtreePath(r.URL.Path)
+			if vpsID == "" {
+				stdhttp.NotFound(w, r)
+				return
+			}
+
+			switch subtree {
+			case vpsSubtreeItem:
+				if opts.VPSItemHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSItemHandler.ServeHTTP(w, r)
+			case vpsSubtreeNodes:
+				if opts.VPSNodesHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSNodesHandler.ServeHTTP(w, r)
+			case vpsSubtreeLinkNode:
+				if opts.VPSLinkNodeHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSLinkNodeHandler.ServeHTTP(w, r)
+			case vpsSubtreeUnlinkNode:
+				if opts.VPSUnlinkNodeHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSUnlinkNodeHandler.ServeHTTP(w, r)
+			default:
+				stdhttp.NotFound(w, r)
+			}
+		})))
 	}
 	if opts.SubscriptionsCollectionHandler != nil {
 		mux.Handle("/api/subscriptions", protect(opts.SubscriptionsCollectionHandler))
@@ -114,7 +153,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.NodeBatchHandler != nil {
 		mux.Handle("/api/nodes/batch", protect(opts.NodeBatchHandler))
 	}
-	if opts.NodeItemHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil || opts.NodeSparklinesHandler != nil || opts.NodeActionsHandler != nil {
+	if opts.NodeItemHandler != nil || opts.NodeVPSHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil || opts.NodeSparklinesHandler != nil || opts.NodeActionsHandler != nil {
 		mux.Handle("/api/nodes/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			nodeID, subtree := nodeSubtreePath(r.URL.Path)
 			if nodeID == "" && subtree != nodeSubtreeSparklines {
@@ -129,6 +168,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.NodeItemHandler.ServeHTTP(w, r)
+			case nodeSubtreeVPS:
+				if opts.NodeVPSHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeVPSHandler.ServeHTTP(w, r)
 			case nodeSubtreeRuntimeFacts:
 				if opts.NodeRuntimeFactsHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -253,11 +298,50 @@ func New(opts RouterOptions) stdhttp.Handler {
 	return mux
 }
 
+type vpsSubtree string
+
+const (
+	vpsSubtreeUnknown    vpsSubtree = ""
+	vpsSubtreeItem       vpsSubtree = "item"
+	vpsSubtreeNodes      vpsSubtree = "nodes"
+	vpsSubtreeLinkNode   vpsSubtree = "link-node"
+	vpsSubtreeUnlinkNode vpsSubtree = "unlink-node"
+)
+
+func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
+	relative := strings.Trim(strings.TrimPrefix(path, "/api/vps/"), "/")
+	if relative == "" {
+		return "", vpsSubtreeUnknown
+	}
+
+	segments := strings.Split(relative, "/")
+	if len(segments) == 0 || segments[0] == "" {
+		return "", vpsSubtreeUnknown
+	}
+	if len(segments) == 1 {
+		return segments[0], vpsSubtreeItem
+	}
+	if len(segments) != 2 {
+		return segments[0], vpsSubtreeUnknown
+	}
+	switch segments[1] {
+	case "nodes":
+		return segments[0], vpsSubtreeNodes
+	case "link-node":
+		return segments[0], vpsSubtreeLinkNode
+	case "unlink-node":
+		return segments[0], vpsSubtreeUnlinkNode
+	default:
+		return segments[0], vpsSubtreeUnknown
+	}
+}
+
 type nodeSubtree string
 
 const (
 	nodeSubtreeUnknown              nodeSubtree = ""
 	nodeSubtreeItem                 nodeSubtree = "item"
+	nodeSubtreeVPS                  nodeSubtree = "vps"
 	nodeSubtreeRuntimeFacts         nodeSubtree = "runtime-facts"
 	nodeSubtreeRuntimeControl       nodeSubtree = "runtime-control"
 	nodeSubtreeLifecycleControl     nodeSubtree = "lifecycle-control"
@@ -285,6 +369,9 @@ func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
 	}
 	if len(segments) == 1 {
 		return segments[0], nodeSubtreeItem
+	}
+	if segments[1] == "vps" && len(segments) == 2 {
+		return segments[0], nodeSubtreeVPS
 	}
 	if segments[1] == "runtime-facts" && len(segments) == 2 {
 		return segments[0], nodeSubtreeRuntimeFacts

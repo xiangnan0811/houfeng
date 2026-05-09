@@ -5,10 +5,16 @@ import (
 	"net/http"
 	"strings"
 
+	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/vpsassets"
 )
 
-func VPSCollection(repo vpsassets.Repository) http.Handler {
+func VPSCollection(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http.Handler {
+	var linkRepo assetlinks.Repository
+	if len(linkRepos) > 0 {
+		linkRepo = linkRepos[0]
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -31,6 +37,16 @@ func VPSCollection(repo vpsassets.Repository) http.Handler {
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
+			}
+			if linkRepo != nil {
+				for i := range records {
+					count, err := linkRepo.CountActiveLinksForVPS(r.Context(), records[i].VPSID)
+					if err != nil {
+						writeError(w, http.StatusInternalServerError, "internal server error")
+						return
+					}
+					records[i].ActiveNodeLinkCount = count
+				}
 			}
 			writeJSON(w, http.StatusOK, records)
 		case http.MethodPost:
@@ -55,6 +71,14 @@ func VPSCollection(repo vpsassets.Repository) http.Handler {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
+			if linkRepo != nil {
+				count, err := linkRepo.CountActiveLinksForVPS(r.Context(), record.VPSID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				record.ActiveNodeLinkCount = count
+			}
 			writeJSON(w, http.StatusCreated, record)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -62,7 +86,12 @@ func VPSCollection(repo vpsassets.Repository) http.Handler {
 	})
 }
 
-func VPSItem(repo vpsassets.Repository) http.Handler {
+func VPSItem(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http.Handler {
+	var linkRepo assetlinks.Repository
+	if len(linkRepos) > 0 {
+		linkRepo = linkRepos[0]
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vpsID := strings.TrimPrefix(r.URL.Path, "/api/vps/")
 		vpsID = strings.Trim(vpsID, "/")
@@ -80,6 +109,16 @@ func VPSItem(repo vpsassets.Repository) http.Handler {
 			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			if linkRepo != nil {
+				nodeLinks, err := linkRepo.ListNodesForVPS(r.Context(), vpsID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				record.ActiveNodeLinkCount = len(nodeLinks)
+				writeJSON(w, http.StatusOK, vpsDetailResponse{Record: record, NodeLinks: nodeLinks})
 				return
 			}
 			writeJSON(w, http.StatusOK, record)
@@ -109,9 +148,22 @@ func VPSItem(repo vpsassets.Repository) http.Handler {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
+			if linkRepo != nil {
+				count, err := linkRepo.CountActiveLinksForVPS(r.Context(), record.VPSID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				record.ActiveNodeLinkCount = count
+			}
 			writeJSON(w, http.StatusOK, record)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+type vpsDetailResponse struct {
+	vpsassets.Record
+	NodeLinks []assetlinks.NodeSummary `json:"node_links"`
 }

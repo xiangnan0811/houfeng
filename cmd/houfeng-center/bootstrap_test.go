@@ -198,6 +198,15 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSItemHandler == nil {
 		t.Fatal("router vps item handler = nil, want non-nil")
 	}
+	if gotOpts.VPSNodesHandler == nil {
+		t.Fatal("router vps nodes handler = nil, want non-nil")
+	}
+	if gotOpts.VPSLinkNodeHandler == nil {
+		t.Fatal("router vps link node handler = nil, want non-nil")
+	}
+	if gotOpts.VPSUnlinkNodeHandler == nil {
+		t.Fatal("router vps unlink node handler = nil, want non-nil")
+	}
 	if gotOpts.SubscriptionsCollectionHandler == nil {
 		t.Fatal("router subscriptions collection handler = nil, want non-nil")
 	}
@@ -209,6 +218,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	}
 	if gotOpts.NodeItemHandler == nil {
 		t.Fatal("router node item handler = nil, want non-nil")
+	}
+	if gotOpts.NodeVPSHandler == nil {
+		t.Fatal("router node vps handler = nil, want non-nil")
 	}
 	if gotOpts.NodeRuntimeFactsHandler == nil {
 		t.Fatal("router node runtime facts handler = nil, want non-nil")

@@ -137,15 +137,32 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"vps_id":"vps_001"}`))
 		}),
+		VPSNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"node_id":"nd_001"}]`))
+		}),
+		VPSLinkNodeHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"link_id":"vnl_001"}`))
+		}),
+		VPSUnlinkNodeHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"link_id":"vnl_001"}`))
+		}),
 	})
 
 	tests := []struct {
 		name            string
 		path            string
+		wantStatus      int
 		wantBodySnippet string
 	}{
-		{name: "collection", path: "/api/vps", wantBodySnippet: `"vps_id":"vps_001"`},
-		{name: "item", path: "/api/vps/vps_001", wantBodySnippet: `"vps_id":"vps_001"`},
+		{name: "collection", path: "/api/vps", wantStatus: http.StatusOK, wantBodySnippet: `"vps_id":"vps_001"`},
+		{name: "item", path: "/api/vps/vps_001", wantStatus: http.StatusOK, wantBodySnippet: `"vps_id":"vps_001"`},
+		{name: "nodes", path: "/api/vps/vps_001/nodes", wantStatus: http.StatusOK, wantBodySnippet: `"node_id":"nd_001"`},
+		{name: "link node", path: "/api/vps/vps_001/link-node", wantStatus: http.StatusCreated, wantBodySnippet: `"link_id":"vnl_001"`},
+		{name: "unlink node", path: "/api/vps/vps_001/unlink-node", wantStatus: http.StatusOK, wantBodySnippet: `"link_id":"vnl_001"`},
 	}
 
 	for _, tt := range tests {
@@ -155,8 +172,8 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 
 			handler.ServeHTTP(recorder, req)
 
-			if recorder.Code != http.StatusOK {
-				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("expected status %d, got %d", tt.wantStatus, recorder.Code)
 			}
 			body, err := io.ReadAll(recorder.Body)
 			if err != nil {
@@ -169,6 +186,36 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 				t.Fatalf("expected vps payload, got %q", string(body))
 			}
 		})
+	}
+}
+
+func TestRouterKeepsNodeVPSOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		NodeVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"vps_id":"vps_001"}]`))
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/vps", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	body, err := io.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if strings.TrimSpace(string(body)) == spaShell {
+		t.Fatalf("expected node vps API response, got SPA fallback body %q", string(body))
+	}
+	if !strings.Contains(string(body), `"vps_id":"vps_001"`) {
+		t.Fatalf("expected node vps payload, got %q", string(body))
 	}
 }
 

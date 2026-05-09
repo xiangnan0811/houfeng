@@ -73,6 +73,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	providerRepo := store.NewPostgresProviderRepository(db.Pool())
 	vpsAssetRepo := store.NewPostgresVPSAssetRepository(db.Pool())
 	subscriptionRepo := store.NewPostgresSubscriptionRepository(db.Pool())
+	vpsNodeLinkRepo := store.NewPostgresVPSNodeLinkRepository(db.Pool())
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
 	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
@@ -126,12 +127,16 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		SettingsHandler:                 handlers.Settings(settingsHandlerRepo),
 		ProvidersCollectionHandler:      handlers.ProvidersCollection(providerRepo),
 		ProviderItemHandler:             handlers.ProviderItem(providerRepo),
-		VPSCollectionHandler:            handlers.VPSCollection(vpsAssetRepo),
-		VPSItemHandler:                  handlers.VPSItem(vpsAssetRepo),
+		VPSCollectionHandler:            handlers.VPSCollection(vpsAssetRepo, vpsNodeLinkRepo),
+		VPSItemHandler:                  handlers.VPSItem(vpsAssetRepo, vpsNodeLinkRepo),
+		VPSNodesHandler:                 handlers.VPSNodes(vpsNodeLinkRepo),
+		VPSLinkNodeHandler:              handlers.VPSLinkNode(vpsNodeLinkRepo),
+		VPSUnlinkNodeHandler:            handlers.VPSUnlinkNode(vpsNodeLinkRepo),
 		SubscriptionsCollectionHandler:  handlers.SubscriptionsCollection(subscriptionRepo),
 		SubscriptionItemHandler:         handlers.SubscriptionItem(subscriptionRepo),
 		NodesCollectionHandler:          handlers.NodesCollection(nodeRepo),
 		NodeItemHandler:                 handlers.NodeItem(nodeRepo),
+		NodeVPSHandler:                  handlers.NodeVPS(vpsNodeLinkRepo),
 		NodeRuntimeFactsHandler:         handlers.NodeRuntimeFacts(runtimeFactsRepo),
 		NodeRuntimeControlHandler:       handlers.NodeRuntimeControls(nodeRepo),
 		NodeLifecycleControlHandler:     handlers.NodeLifecycleControls(nodeRepo),
