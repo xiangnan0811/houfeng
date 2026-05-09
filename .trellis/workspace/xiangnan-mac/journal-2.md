@@ -249,3 +249,37 @@ Implemented asset ledger frontend routes for providers, VPS assets/details, and 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 67: Dashboard asset summary
+
+**Date**: 2026-05-09
+**Task**: Dashboard asset summary
+**Branch**: `feat/dashboard-asset-summary`
+
+### Summary
+
+Added Dashboard asset_summary aggregates for renewal, VPS decisions, node-link health, and subscription cost, surfaced the summary as low-weight Dashboard decision links, updated fixtures/tests, and recorded the contract in Trellis specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e6840d7` | (see git log) |
+| `770507e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
