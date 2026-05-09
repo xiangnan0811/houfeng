@@ -142,6 +142,17 @@
 - `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。
 - 订阅 CRUD 不得创建 `vps_node_links`、不得改写 `nodes.provider`、不得增加 Dashboard / import / currency exchange 行为。
 
+### Asset Ledger JSON import
+
+`internal/center/importing/` 是真实 VPS JSON dry-run/import 的领域入口。它复用 `providers`、`vpsassets`、`subscriptions` 的 normalize / validate 规则，不维护第二套枚举、金额、日期或 provider 校验。
+
+- dry-run 是默认路径，只解析、归一化、校验和产出报告，不写数据库。
+- dry-run 必须报告 provider 创建候选、VPS 创建候选、subscription 创建候选、缺失 provider、缺失续费日期、非法字段、重复候选、Node 关联候选、未来 30 天续费候选和闲置但付费候选。
+- 数据库可用时，dry-run 可以读取现有 providers / vps_assets / subscriptions / nodes 做重复和 Node 候选诊断；数据库不可用时仍应能完成纯文件模型校验。
+- `-import` 必须显式开启，且在一个事务中按 provider → VPS asset → subscription 顺序写入；校验错误或重复候选存在时拒绝写入。
+- import 不接受也不写 `monthly_price`，仍由 subscription 后端计算。
+- import 不创建 `vps_node_links`，不改写 `nodes.provider`，不改变 Node / Target / Agent 语义。Node 相关输入只能作为人工确认候选进入报告。
+
 ---
 
 ## 模型层关键不变量
