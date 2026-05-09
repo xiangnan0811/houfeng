@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index for final review"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Review placement of cmd and internal import code"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Review database-backed import behavior and Asset Ledger invariants"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review error wrapping and user-facing command failures"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review tests and verification coverage"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Confirm non-main branch and PR lifecycle"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Confirm existing validation helpers are reused"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Confirm CLI/report/store flow is coherent"}
+{"file":".trellis/tasks/05-09-vps-json-import-dry-run/research/repo-patterns.md","reason":"Task-specific implementation and review constraints"}

@@ -145,3 +145,38 @@ Implemented Task 3 subscriptions backend with 0018 migration, subscription domai
 ### Next Steps
 
 - None - task complete
+
+
+## Session 64: VPS JSON import dry-run
+
+**Date**: 2026-05-09
+**Task**: VPS JSON import dry-run
+**Branch**: `feat/vps-json-import-dry-run`
+
+### Summary
+
+Implemented VPS JSON dry-run/import CLI, repo-local import validation/reporting, and backend import contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `73b98c8` | (see git log) |
+| `adb1869` | (see git log) |
+| `0f31c08` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
