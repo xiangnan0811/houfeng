@@ -72,7 +72,7 @@
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号的文件，例如当前最大为 `0015_add_host_containers.sql` 时，下一个应为 `0016_add_<scope>.sql`。
+2. 在 `db/migrations/` 新建下一个未占用序号的文件，例如当前最大为 `0016_create_asset_ledger.sql` 时，下一个应为 `0017_<verb>_<scope>.sql`。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/v1-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
@@ -83,7 +83,7 @@
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
-> ⚠️ **已知 gap**（值得记入 `docs/release/v1-gap-checklist.md`）：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。`migrate.Apply` 按文件名字典序排序，二者顺序由后缀决定，并不冲突；但序号撞车违反了"序号唯一"的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前最大为 `0015_add_host_containers.sql`，下一个应为 `0016_*`，如果期间已有新迁移则继续顺延）。
+> ⚠️ **已知 gap**（值得记入 `docs/release/v1-gap-checklist.md`）：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。`migrate.Apply` 按文件名字典序排序，二者顺序由后缀决定，并不冲突；但序号撞车违反了"序号唯一"的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前最大为 `0016_create_asset_ledger.sql`，下一个应为 `0017_*`，如果期间已有新迁移则继续顺延）。
 
 ---
 
@@ -104,6 +104,16 @@
 | 唯一约束 | 表内列 `unique`，或单独命名 | `username text not null unique`（`users`） |
 
 > 例外：`db/migrations/0010_add_users_and_sessions.sql` 中的 `sessions_user_idx` / `sessions_expires_idx` 没有 `idx_` 前缀，是仓库现存差异；新增索引请遵循 `idx_<table>_<purpose>` 主流写法。
+
+### Asset Ledger providers
+
+`db/migrations/0016_create_asset_ledger.sql` 是 post-V1 Asset Ledger 的 schema 入口，当前只落 `providers` 服务商主数据表：
+
+- `providers.provider_id` 使用 `ids.New("pv")` 生成，字段和 JSON contract 保持英文稳定值。
+- `name` 必须通过数据库 `providers_name_not_blank` 约束保证 trim 后非空；领域层也必须在 create / patch 时校验。
+- `rating` 是 nullable `integer`，只允许 `null` 或 `1..5`，数据库约束为 `providers_rating_range`。
+- `labels` 使用 `text[] not null default '{}'`；领域层负责 trim 和过滤空标签。
+- provider CRUD 不得自动改写、规范化或 backfill `nodes.provider`。`nodes.provider` 仍是 Fleet Observability 的节点元数据字符串，Asset Ledger provider 是独立资产层主数据。
 
 ---
 
