@@ -7,9 +7,9 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 59
-- **Last Active**: 2026-05-08
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 60
+- **Last Active**: 2026-05-09
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1991 | Active |
+| `journal-2.md` | ~43 | Active |
+| `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 60 | 2026-05-09 | Asset Ledger providers vertical slice | `5051b45`, `9d57f1a`, `38404c2`, `671ac21` | `feat/asset-ledger-providers` |
 | 59 | 2026-05-08 | Refine VPS Asset Ledger plan | `3b3c8a1` | `chore/refine-asset-ledger-plan` |
 | 58 | 2026-05-08 | Resolve stale Dashboard Trellis tasks | `d5280a8`, `df7d0f5`, `bee3622` | `chore/resolve-stale-dashboard-tasks` |
 | 57 | 2026-05-08 | Fix Actions Node 20 deprecation | `39c7b35` | `main` |
