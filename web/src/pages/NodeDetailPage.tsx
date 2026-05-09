@@ -15,6 +15,7 @@ import {
   StatusGlyph,
   Tabs,
   Timestamp,
+  type DataTableColumn,
   type HealthState,
 } from '../components/atoms'
 import { Button } from '../components/atoms/Button'
@@ -33,6 +34,7 @@ import {
   getNode,
   getNodeOnboarding,
   getNodeRuntimeFacts,
+  listVPSForNode,
   listEvents,
   listHistoricalIncidents,
   listIncidents,
@@ -54,7 +56,14 @@ import type {
   NodeRuntimeFacts,
   PendingBindingMetadata,
   StateChangeEventRecord,
+  VPSSummary,
 } from '../lib/types'
+import {
+  AssetLabels,
+  LifecycleBadge,
+  RenewalBadge,
+  UsageBadge,
+} from './assetPageBadges'
 
 type State = {
   requestedNodeId: string | null
@@ -90,6 +99,14 @@ type BindingConflictAction = 'confirm' | 'reject' | 'reset'
 type NodeLifecycleAction = 'retire' | 'restore-to-observing'
 type PendingRuntimeConfirmation = {
   action: 'pause'
+}
+
+type LinkedVPSState = {
+  requestedNodeId: string | null
+  records: VPSSummary[]
+  loading: boolean
+  loaded: boolean
+  error: string | null
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -350,6 +367,11 @@ function NodeDiagnosisSummary({
   )
 }
 
+function formatAssetLocation(vps: VPSSummary): string {
+  const parts = [vps.country, vps.region, vps.city].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : '位置未确认'
+}
+
 export function NodeDetailPage() {
   const { nodeId } = useParams()
   return <NodeDetailPageContent key={nodeId ?? 'missing-node'} nodeId={nodeId} />
@@ -396,6 +418,15 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const [commandSubmitting, setCommandSubmitting] = useState(false)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d'>('24h')
+  const [linkedVPSState, setLinkedVPSState] = useState<LinkedVPSState>({
+    requestedNodeId: null,
+    records: [],
+    loading: false,
+    loaded: false,
+    error: null,
+  })
+  const [linkedVPSVisible, setLinkedVPSVisible] = useState(false)
+  const linkedVPSSectionRef = useRef<HTMLDivElement | null>(null)
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
@@ -502,6 +533,101 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       cancelled = true
     }
   }, [nodeId])
+
+  useEffect(() => {
+    setLinkedVPSVisible(false)
+    setLinkedVPSState({
+      requestedNodeId: null,
+      records: [],
+      loading: false,
+      loaded: false,
+      error: null,
+    })
+  }, [nodeId])
+
+  useEffect(() => {
+    if (linkedVPSVisible) return
+    const element = linkedVPSSectionRef.current
+    if (!element) return
+    if (typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return
+      setLinkedVPSVisible(true)
+      observer.disconnect()
+    }, { rootMargin: '160px' })
+
+    observer.observe(element)
+    return () => {
+      observer.disconnect()
+    }
+  }, [linkedVPSVisible, state.node, state.requestedNodeId])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!nodeId) {
+      setLinkedVPSState({
+        requestedNodeId: null,
+        records: [],
+        loading: false,
+        loaded: false,
+        error: null,
+      })
+      return
+    }
+    if (!linkedVPSVisible) return
+    if (state.requestedNodeId !== nodeId || !state.node) {
+      return
+    }
+    if (
+      linkedVPSState.requestedNodeId === nodeId &&
+      (linkedVPSState.loading || linkedVPSState.loaded)
+    ) {
+      return
+    }
+
+    setLinkedVPSState((current) => ({
+      requestedNodeId: nodeId,
+      records: current.requestedNodeId === nodeId ? current.records : [],
+      loading: true,
+      loaded: false,
+      error: null,
+    }))
+
+    listVPSForNode(nodeId)
+      .then((records) => {
+        if (cancelled) return
+        setLinkedVPSState({
+          requestedNodeId: nodeId,
+          records: Array.isArray(records) ? records : [],
+          loading: false,
+          loaded: true,
+          error: null,
+        })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setLinkedVPSState({
+          requestedNodeId: nodeId,
+          records: [],
+          loading: false,
+          loaded: true,
+          error: describeError(error, '加载关联 VPS 失败'),
+        })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    linkedVPSState.loaded,
+    linkedVPSState.loading,
+    linkedVPSState.requestedNodeId,
+    linkedVPSVisible,
+    nodeId,
+    state.node,
+    state.requestedNodeId,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -689,6 +815,65 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const incidents = hasCurrentActivity ? state.incidents : []
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
+  const linkedVPS =
+    linkedVPSState.requestedNodeId === nodeId ? linkedVPSState.records : []
+  const linkedVPSLoading =
+    linkedVPSState.requestedNodeId === nodeId ? linkedVPSState.loading : false
+  const linkedVPSError =
+    linkedVPSState.requestedNodeId === nodeId ? linkedVPSState.error : null
+  const linkedVPSLoaded =
+    linkedVPSState.requestedNodeId === nodeId ? linkedVPSState.loaded : false
+
+  const linkedVPSColumns: DataTableColumn<VPSSummary>[] = [
+    {
+      key: 'vps',
+      label: 'VPS',
+      render: (vps) => (
+        <div className="asset-table__identity">
+          <strong>
+            <Link className="text-link" to={`/vps/${vps.vps_id}`}>{vps.display_name}</Link>
+          </strong>
+          <span>{vps.vps_id}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'provider',
+      label: 'Provider / 位置',
+      render: (vps) => (
+        <div className="asset-table__stack">
+          <strong>{vps.provider_name || 'Provider 未确认'}</strong>
+          <span>{formatAssetLocation(vps)}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      label: '资产状态',
+      render: (vps) => (
+        <span className="asset-status-stack">
+          <LifecycleBadge value={vps.lifecycle_status} />
+          <UsageBadge value={vps.usage_status} />
+          <RenewalBadge value={vps.renewal_decision} />
+        </span>
+      ),
+    },
+    {
+      key: 'link',
+      label: '关联',
+      render: (vps) => (
+        <div className="asset-table__stack">
+          <strong><Timestamp value={vps.linked_at} /></strong>
+          <span>{vps.note || '无关联备注'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'labels',
+      label: '标签',
+      render: (vps) => <AssetLabels labels={vps.labels} />,
+    },
+  ]
 
   async function handleRuntimeAction(action: NodeRuntimeAction, confirmed = false) {
     if (!node) return
@@ -1019,6 +1204,31 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         onOpenEvents={() => openHistory('events')}
         onOpenIncidents={() => openHistory('incidents')}
       />
+
+      <div ref={linkedVPSSectionRef}>
+        <DetailSection
+          eyebrow="ASSET LEDGER"
+          title="关联 VPS"
+          aside={linkedVPSLoading ? '加载中' : linkedVPSLoaded ? `${linkedVPS.length} 台` : '待同步'}
+        >
+          {linkedVPSError ? <p className="empty-inline" role="alert">{linkedVPSError}</p> : null}
+          <DataTable
+            className="asset-table node-vps-table"
+            columns={linkedVPSColumns}
+            rows={linkedVPS}
+            rowKey={(vps) => vps.vps_id}
+            emptyContent={
+              <span className="empty-inline">
+                {linkedVPSLoading
+                  ? '正在加载关联 VPS…'
+                  : linkedVPSLoaded
+                    ? '尚未关联 VPS'
+                    : '关联 VPS 待同步'}
+              </span>
+            }
+          />
+        </DetailSection>
+      </div>
 
       {showBindingConflict ? (
         <DetailSection eyebrow="绑定冲突" title="绑定冲突处置" aside="高优先级">

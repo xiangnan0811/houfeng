@@ -22,6 +22,7 @@ import {
   getVPSAsset,
   getVPSTimeline,
   issueNodeEnrollmentToken,
+  linkVPSNode,
   listProviders,
   listNodes,
   listEvents,
@@ -36,10 +37,12 @@ import {
   restoreTargetToPaused,
   resumeNodeMonitoring,
   resumeTarget,
+  unlinkVPSNode,
   updateNodeMetadata,
   updateProbeItem,
   updateSettings,
   updateTargetMetadata,
+  updateVPSAsset,
   listVPSAssets,
   listVPSForNode,
   listVPSNodes,
@@ -61,6 +64,7 @@ import type {
   UpdateProbeItemInput,
   UpdateTargetMetadataInput,
   VPSAssetRecord,
+  VPSNodeLinkRecord,
   VPSTimeline,
 } from './types'
 import { appRoutes } from '../app/router'
@@ -496,6 +500,95 @@ describe('api helpers', () => {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
+    })
+  })
+
+  it('serializes VPS asset updates and link operations', async () => {
+    const updatedVPS = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: '',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: '',
+      ipv4: '',
+      ipv6: '',
+      ssh_host: '',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: '',
+      virtualization: '',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'cancel',
+      importance: 'normal',
+      labels: ['edge'],
+      note: '',
+      active_node_link_count: 1,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T09:00:00Z',
+      archived_at: null,
+    } satisfies VPSAssetRecord
+    const linkRecord = {
+      link_id: 'vpn_001',
+      vps_id: 'vps_001',
+      node_id: 'nd_001',
+      linked_at: '2026-05-09T09:01:00Z',
+      unlinked_at: null,
+      note: 'primary',
+    } satisfies VPSNodeLinkRecord
+    const unlinkedRecord = {
+      ...linkRecord,
+      unlinked_at: '2026-05-09T09:02:00Z',
+      note: 'rotated',
+    } satisfies VPSNodeLinkRecord
+    const patchBody = { renewal_decision: 'cancel', renewal_reason: 'too expensive' } as const
+    const linkBody = { node_id: 'nd_001', note: 'primary' } as const
+    const unlinkBody = { node_id: 'nd_001', note: 'rotated' } as const
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(updatedVPS)))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify(linkRecord)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(unlinkedRecord)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(updateVPSAsset('vps_001', patchBody)).resolves.toEqual(updatedVPS)
+    await expect(linkVPSNode('vps_001', linkBody)).resolves.toEqual(linkRecord)
+    await expect(unlinkVPSNode('vps_001', unlinkBody)).resolves.toEqual(unlinkedRecord)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(patchBody),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001/link-node', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(linkBody),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/unlink-node', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(unlinkBody),
     })
   })
 

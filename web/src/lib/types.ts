@@ -678,6 +678,32 @@ export type CreateVPSAssetInput = {
   note: string
 }
 
+export type UpdateVPSAssetInput = Partial<{
+  display_name: string
+  provider_id: string | null
+  provider_name: string
+  product_name: string
+  order_ref: string
+  country: string
+  region: string
+  city: string
+  datacenter: string
+  ipv4: string
+  ipv6: string
+  ssh_host: string
+  ssh_port: number
+  ssh_user: string
+  os_name: string
+  virtualization: string
+  lifecycle_status: VPSLifecycleStatus
+  usage_status: VPSUsageStatus
+  renewal_decision: VPSRenewalDecision
+  renewal_reason: string
+  importance: string
+  labels: string[]
+  note: string
+}>
+
 export type VPSAssetListFilter = {
   provider_id?: string | null
   lifecycle_status?: VPSLifecycleStatus | '' | null
@@ -702,6 +728,25 @@ export type VPSNodeSummary = {
   current_primary_issue_summary: string
   linked_at: string
   note: string
+}
+
+export type VPSNodeLinkRecord = {
+  link_id: string
+  vps_id: string
+  node_id: string
+  linked_at: string
+  unlinked_at?: string | null
+  note: string
+}
+
+export type LinkVPSNodeInput = {
+  node_id: string
+  note?: string
+}
+
+export type UnlinkVPSNodeInput = {
+  node_id: string
+  note?: string
 }
 
 export type VPSAssetDetail = VPSAssetRecord & {
