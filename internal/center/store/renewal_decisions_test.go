@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/renewals"
+	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -48,6 +49,8 @@ func TestPostgresRenewalDecisionCreateListAndTimeline(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	renewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 8, 0, 0, 0, time.UTC))
+	patchedRenewAt := subscriptions.NewDate(time.Date(2026, time.December, 1, 8, 0, 0, 0, time.UTC))
 	previous := vpsassets.RenewalKeep
 	var rowCalls []string
 	var rowArgs [][]any
@@ -88,20 +91,47 @@ func TestPostgresRenewalDecisionCreateListAndTimeline(t *testing.T) {
 		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 			queryCalls = append(queryCalls, sql)
 			queryArgs = append(queryArgs, append([]any(nil), args...))
-			return &fakeRenewalDecisionRows{rows: []fakeRenewalDecisionScan{{
-				scan: func(dest ...any) error {
-					scanRenewalDecisionRecordDestinations(dest, renewals.DecisionRecord{
-						DecisionID:   "rdec_001",
-						VPSID:        "vps_001",
-						FromDecision: &previous,
-						ToDecision:   vpsassets.RenewalCancel,
-						Reason:       "too expensive",
-						DecidedAt:    now,
-						CreatedAt:    now,
-					})
-					return nil
-				},
-			}}}, nil
+			switch {
+			case strings.Contains(sql, "from renewal_decisions"):
+				return &fakeRenewalDecisionRows{rows: []fakeRenewalDecisionScan{{
+					scan: func(dest ...any) error {
+						scanRenewalDecisionRecordDestinations(dest, renewals.DecisionRecord{
+							DecisionID:   "rdec_001",
+							VPSID:        "vps_001",
+							FromDecision: &previous,
+							ToDecision:   vpsassets.RenewalCancel,
+							Reason:       "too expensive",
+							DecidedAt:    now,
+							CreatedAt:    now,
+						})
+						return nil
+					},
+				}}}, nil
+			case strings.Contains(sql, "from price_histories"):
+				return &fakeRenewalDecisionRows{rows: []fakeRenewalDecisionScan{{
+					scan: func(dest ...any) error {
+						scanPriceHistoryRecordDestinations(dest, priceHistoryFixture("ph_001", now, renewAt, patchedRenewAt))
+						return nil
+					},
+				}}}, nil
+			case strings.Contains(sql, "from ip_histories"):
+				return &fakeRenewalDecisionRows{rows: []fakeRenewalDecisionScan{{
+					scan: func(dest ...any) error {
+						scanIPHistoryRecordDestinations(dest, "iph_001", now)
+						return nil
+					},
+				}}}, nil
+			case strings.Contains(sql, "from vps_spec_snapshots"):
+				return &fakeRenewalDecisionRows{rows: []fakeRenewalDecisionScan{{
+					scan: func(dest ...any) error {
+						scanSpecSnapshotRecordDestinations(dest, "vss_001", now)
+						return nil
+					},
+				}}}, nil
+			default:
+				t.Fatalf("unexpected Query SQL %q", sql)
+				return &fakeRenewalDecisionRows{}, nil
+			}
 		},
 	}}
 
@@ -137,8 +167,12 @@ func TestPostgresRenewalDecisionCreateListAndTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetVPSTimeline() error = %v", err)
 	}
-	if timeline.VPSID != "vps_001" || len(timeline.RenewalDecisions) != 1 {
-		t.Fatalf("timeline = %#v, want one renewal decision", timeline)
+	if timeline.VPSID != "vps_001" ||
+		len(timeline.RenewalDecisions) != 1 ||
+		len(timeline.PriceHistories) != 1 ||
+		len(timeline.IPHistories) != 1 ||
+		len(timeline.SpecSnapshots) != 1 {
+		t.Fatalf("timeline = %#v, want one record per history type", timeline)
 	}
 }
 

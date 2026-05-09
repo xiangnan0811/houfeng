@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
 )
 
@@ -49,6 +50,36 @@ func TestPostgresSubscriptionMigrationDefinesTableConstraintsAndIndexes(t *testi
 	} {
 		if !strings.Contains(text, snippet) {
 			t.Fatalf("subscription migration missing %q", snippet)
+		}
+	}
+}
+
+func TestPostgresSubscriptionPriceHistoryMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0021_create_asset_histories.sql"))
+	if err != nil {
+		t.Fatalf("ReadFile(asset history migration) error = %v", err)
+	}
+	text := string(source)
+	for _, snippet := range []string{
+		"create table if not exists price_histories",
+		"price_history_id text primary key",
+		"subscription_id text not null references subscriptions(subscription_id) on delete cascade",
+		"vps_id text not null references vps_assets(vps_id) on delete cascade",
+		"from_price numeric(12, 2) not null",
+		"to_price numeric(12, 2) not null",
+		"from_monthly_price numeric(12, 4) not null",
+		"to_monthly_price numeric(12, 4) not null",
+		"price_histories_price_non_negative",
+		"price_histories_billing_months_positive",
+		"price_histories_currency_code",
+		"price_histories_status_allowed",
+		"idx_price_histories_vps_time",
+		"idx_price_histories_subscription_time",
+	} {
+		if !strings.Contains(text, snippet) {
+			t.Fatalf("asset history migration missing %q", snippet)
 		}
 	}
 }
@@ -253,18 +284,10 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 	}
 
 	patched, err := repo.PatchSubscription(context.Background(), "sub_001", subscriptions.PatchInput{
-		VPSID:              subscriptions.PatchString(" vps_002 "),
-		Price:              subscriptions.PatchFloat(240),
-		Currency:           subscriptions.PatchString(" eur "),
-		BillingCycle:       subscriptions.PatchString(" biennial "),
-		BillingMonths:      subscriptions.PatchInt(24),
-		StartedAt:          subscriptions.PatchDate(nil),
-		RenewAt:            subscriptions.PatchDate(&patchedRenewAt),
-		AutoRenew:          subscriptions.PatchBool(false),
-		AutoRenewCancelled: subscriptions.PatchBool(true),
-		Status:             subscriptions.PatchStatus(subscriptions.StatusPaused),
-		PaymentMethod:      subscriptions.PatchString(" paypal "),
-		Note:               subscriptions.PatchString(" review "),
+		VPSID:         subscriptions.PatchString(" vps_002 "),
+		StartedAt:     subscriptions.PatchDate(nil),
+		PaymentMethod: subscriptions.PatchString(" paypal "),
+		Note:          subscriptions.PatchString(" review "),
 	})
 	if err != nil {
 		t.Fatalf("PatchSubscription() error = %v", err)
@@ -282,14 +305,11 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 	if patchArgs[0] != "sub_001" || patchArgs[1] != true || patchArgs[2] != "vps_002" {
 		t.Fatalf("patch vps args = %#v, want subscription id and vps", patchArgs[:3])
 	}
-	if patchArgs[3] != true || patchArgs[4] != float64(240) || patchArgs[9] != true || patchArgs[10] != 24 {
-		t.Fatalf("patch price/month args = %#v, want explicit recalculation inputs", patchArgs)
+	if patchArgs[3] != false || patchArgs[9] != false || patchArgs[19] != false {
+		t.Fatalf("patch tracked history args = %#v, want price/month/status unset in direct patch", patchArgs)
 	}
 	if patchArgs[11] != true || patchArgs[12] != nil {
 		t.Fatalf("patch started_at args = set:%#v value:%#v, want explicit null", patchArgs[11], patchArgs[12])
-	}
-	if patchArgs[19] != true || patchArgs[20] != string(subscriptions.StatusPaused) {
-		t.Fatalf("patch status args = set:%#v value:%#v, want paused", patchArgs[19], patchArgs[20])
 	}
 	for _, snippet := range []string{
 		"vps_id = case when $2::boolean then $3 else vps_id end",
@@ -348,6 +368,165 @@ func TestPostgresSubscriptionPatchWithoutChangesReturnsExistingSubscription(t *t
 	}
 	if queryCount != 1 {
 		t.Fatalf("QueryRow calls = %d, want only get", queryCount)
+	}
+}
+
+func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	renewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 8, 0, 0, 0, time.UTC))
+	patchedRenewAt := subscriptions.NewDate(time.Date(2026, time.December, 1, 8, 0, 0, 0, time.UTC))
+	tx := &fakeSubscriptionTx{}
+	var calls []string
+	var args [][]any
+	tx.queryRow = func(_ context.Context, sql string, callArgs ...any) pgx.Row {
+		calls = append(calls, sql)
+		args = append(args, append([]any(nil), callArgs...))
+		switch {
+		case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "for update"):
+			return fakeSubscriptionRow{scan: func(dest ...any) error {
+				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+					SubscriptionID:     "sub_001",
+					VPSID:              "vps_001",
+					Price:              120,
+					Currency:           "USD",
+					BillingCycle:       "annual",
+					BillingMonths:      12,
+					MonthlyPrice:       10,
+					RenewAt:            &renewAt,
+					AutoRenew:          true,
+					AutoRenewCancelled: false,
+					Status:             subscriptions.StatusActive,
+					CreatedAt:          now.Add(-time.Hour),
+					UpdatedAt:          now.Add(-time.Hour),
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "update subscriptions"):
+			return fakeSubscriptionRow{scan: func(dest ...any) error {
+				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+					SubscriptionID:     "sub_001",
+					VPSID:              "vps_001",
+					Price:              240,
+					Currency:           "USD",
+					BillingCycle:       "biennial",
+					BillingMonths:      24,
+					MonthlyPrice:       10,
+					RenewAt:            &patchedRenewAt,
+					AutoRenew:          false,
+					AutoRenewCancelled: true,
+					Status:             subscriptions.StatusPaused,
+					CreatedAt:          now.Add(-time.Hour),
+					UpdatedAt:          now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "insert into price_histories"):
+			return fakeSubscriptionRow{scan: func(dest ...any) error {
+				priceHistoryID, ok := callArgs[0].(string)
+				if !ok || !strings.HasPrefix(priceHistoryID, "ph_") {
+					t.Fatalf("price history id arg = %#v, want ph_ prefix", callArgs[0])
+				}
+				scanPriceHistoryRecordDestinations(dest, priceHistoryFixture(priceHistoryID, now, renewAt, patchedRenewAt))
+				return nil
+			}}
+		default:
+			t.Fatalf("unexpected QueryRow SQL %q", sql)
+			return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
+		}
+	}
+
+	repo := &PostgresSubscriptionRepository{
+		db: fakeSubscriptionDB{},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
+	record, err := repo.PatchSubscription(context.Background(), "sub_001", subscriptions.PatchInput{
+		Price:              subscriptions.PatchFloat(240),
+		BillingCycle:       subscriptions.PatchString(" biennial "),
+		BillingMonths:      subscriptions.PatchInt(24),
+		RenewAt:            subscriptions.PatchDate(&patchedRenewAt),
+		AutoRenew:          subscriptions.PatchBool(false),
+		AutoRenewCancelled: subscriptions.PatchBool(true),
+		Status:             subscriptions.PatchStatus(subscriptions.StatusPaused),
+	})
+	if err != nil {
+		t.Fatalf("PatchSubscription() error = %v", err)
+	}
+	if record.Price != 240 || record.Status != subscriptions.StatusPaused {
+		t.Fatalf("record = %#v, want patched subscription", record)
+	}
+	if !tx.committed || tx.rolledBack == 0 {
+		t.Fatalf("transaction committed=%t rollbackCalls=%d, want committed with deferred rollback", tx.committed, tx.rolledBack)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("query row calls = %d, want lock/update/history", len(calls))
+	}
+	if !strings.Contains(calls[0], "for update") || !strings.Contains(calls[2], "insert into price_histories") {
+		t.Fatalf("calls = %#v, want lock/update/price history", calls)
+	}
+	historyArgs := args[2]
+	if len(historyArgs) != 22 {
+		t.Fatalf("history args len = %d, want 22", len(historyArgs))
+	}
+	if historyArgs[1] != "sub_001" || historyArgs[2] != "vps_001" || historyArgs[3] != float64(120) || historyArgs[4] != float64(240) {
+		t.Fatalf("history args = %#v, want from/to price and ids", historyArgs)
+	}
+	if historyArgs[9] != 12 || historyArgs[10] != 24 || historyArgs[19] != "active" || historyArgs[20] != "paused" {
+		t.Fatalf("history billing/status args = %#v", historyArgs)
+	}
+}
+
+func TestPostgresSubscriptionPatchSkipsPriceHistoryWhenTrackedFieldsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	renewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 8, 0, 0, 0, time.UTC))
+	tx := &fakeSubscriptionTx{}
+	insertedHistory := false
+	tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
+		switch {
+		case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "for update"), strings.Contains(sql, "update subscriptions"):
+			return fakeSubscriptionRow{scan: func(dest ...any) error {
+				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+					SubscriptionID:     "sub_001",
+					VPSID:              "vps_001",
+					Price:              120,
+					Currency:           "USD",
+					BillingCycle:       "annual",
+					BillingMonths:      12,
+					MonthlyPrice:       10,
+					RenewAt:            &renewAt,
+					AutoRenew:          true,
+					AutoRenewCancelled: false,
+					Status:             subscriptions.StatusActive,
+					CreatedAt:          now,
+					UpdatedAt:          now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "insert into price_histories"):
+			insertedHistory = true
+			return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
+		default:
+			t.Fatalf("unexpected QueryRow SQL %q", sql)
+			return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
+		}
+	}
+
+	repo := &PostgresSubscriptionRepository{
+		db: fakeSubscriptionDB{},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
+	if _, err := repo.PatchSubscription(context.Background(), "sub_001", subscriptions.PatchInput{Price: subscriptions.PatchFloat(120)}); err != nil {
+		t.Fatalf("PatchSubscription() error = %v", err)
+	}
+	if insertedHistory {
+		t.Fatal("PatchSubscription() inserted price history for unchanged tracked values")
 	}
 }
 
@@ -428,6 +607,51 @@ type fakeSubscriptionDB struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 }
 
+type fakeSubscriptionTx struct {
+	queryRow   func(context.Context, string, ...any) pgx.Row
+	query      func(context.Context, string, ...any) (pgx.Rows, error)
+	exec       func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	committed  bool
+	rolledBack int
+}
+
+func (f *fakeSubscriptionTx) Begin(context.Context) (pgx.Tx, error) { return f, nil }
+func (f *fakeSubscriptionTx) Commit(context.Context) error {
+	f.committed = true
+	return nil
+}
+func (f *fakeSubscriptionTx) Rollback(context.Context) error {
+	f.rolledBack++
+	return nil
+}
+func (f *fakeSubscriptionTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (f *fakeSubscriptionTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
+func (f *fakeSubscriptionTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+func (f *fakeSubscriptionTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	return nil, nil
+}
+func (f *fakeSubscriptionTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if f.exec != nil {
+		return f.exec(ctx, sql, args...)
+	}
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+func (f *fakeSubscriptionTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.query != nil {
+		return f.query(ctx, sql, args...)
+	}
+	return nil, nil
+}
+func (f *fakeSubscriptionTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if f.queryRow != nil {
+		return f.queryRow(ctx, sql, args...)
+	}
+	return fakeSubscriptionRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+}
+func (f *fakeSubscriptionTx) Conn() *pgx.Conn { return nil }
+
 func (f fakeSubscriptionDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	if f.query == nil {
 		return &fakeSubscriptionRows{}, nil
@@ -495,4 +719,58 @@ func scanSubscriptionRecordDestinations(dest []any, record subscriptions.Record)
 	*(dest[13].(*string)) = record.Note
 	*(dest[14].(*time.Time)) = record.CreatedAt
 	*(dest[15].(*time.Time)) = record.UpdatedAt
+}
+
+func scanPriceHistoryRecordDestinations(dest []any, record renewals.PriceHistoryRecord) {
+	*(dest[0].(*string)) = record.PriceHistoryID
+	*(dest[1].(*string)) = record.SubscriptionID
+	*(dest[2].(*string)) = record.VPSID
+	*(dest[3].(*float64)) = record.FromPrice
+	*(dest[4].(*float64)) = record.ToPrice
+	*(dest[5].(*string)) = record.FromCurrency
+	*(dest[6].(*string)) = record.ToCurrency
+	*(dest[7].(*string)) = record.FromBillingCycle
+	*(dest[8].(*string)) = record.ToBillingCycle
+	*(dest[9].(*int)) = record.FromBillingMonths
+	*(dest[10].(*int)) = record.ToBillingMonths
+	*(dest[11].(*float64)) = record.FromMonthlyPrice
+	*(dest[12].(*float64)) = record.ToMonthlyPrice
+	*(dest[13].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.FromRenewAt))
+	*(dest[14].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.ToRenewAt))
+	*(dest[15].(*bool)) = record.FromAutoRenew
+	*(dest[16].(*bool)) = record.ToAutoRenew
+	*(dest[17].(*bool)) = record.FromAutoRenewCancelled
+	*(dest[18].(*bool)) = record.ToAutoRenewCancelled
+	*(dest[19].(*string)) = string(record.FromStatus)
+	*(dest[20].(*string)) = string(record.ToStatus)
+	*(dest[21].(*time.Time)) = record.ChangedAt
+	*(dest[22].(*time.Time)) = record.CreatedAt
+}
+
+func priceHistoryFixture(id string, now time.Time, fromRenewAt, toRenewAt subscriptions.Date) renewals.PriceHistoryRecord {
+	return renewals.PriceHistoryRecord{
+		PriceHistoryID:         id,
+		SubscriptionID:         "sub_001",
+		VPSID:                  "vps_001",
+		FromPrice:              120,
+		ToPrice:                240,
+		FromCurrency:           "USD",
+		ToCurrency:             "USD",
+		FromBillingCycle:       "annual",
+		ToBillingCycle:         "biennial",
+		FromBillingMonths:      12,
+		ToBillingMonths:        24,
+		FromMonthlyPrice:       10,
+		ToMonthlyPrice:         10,
+		FromRenewAt:            &fromRenewAt,
+		ToRenewAt:              &toRenewAt,
+		FromAutoRenew:          true,
+		ToAutoRenew:            false,
+		FromAutoRenewCancelled: false,
+		ToAutoRenewCancelled:   true,
+		FromStatus:             subscriptions.StatusActive,
+		ToStatus:               subscriptions.StatusPaused,
+		ChangedAt:              now,
+		CreatedAt:              now,
+	}
 }
