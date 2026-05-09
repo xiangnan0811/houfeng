@@ -352,3 +352,37 @@ Added Asset Ledger price/IP/spec history persistence, expanded VPS timelines, an
 ### Next Steps
 
 - None - task complete
+
+
+## Session 70: VPS timeline frontend
+
+**Date**: 2026-05-10
+**Task**: VPS timeline frontend
+**Branch**: `feat/vps-timeline-frontend`
+
+### Summary
+
+Added typed VPS timeline API consumption and rendered renewal, price, IP, and spec history on the VPS detail page.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af7bf15` | (see git log) |
+| `9630ba9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
