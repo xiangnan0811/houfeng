@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Frontend API/data-flow contract: no page-level fetch, types in lib/types.ts, API helpers in lib/api.ts, loading/error patterns."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Component/page structure, naming, and abstraction boundaries for the new operation UI."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Token/BEM styling requirements for new asset operation sections."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required lint/test/build/verify-web quality gate and testing patterns."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature branch and PR workflow required for implementation work."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Existing backend contracts are consumed by frontend helpers and page UI; cross-layer request/response alignment matters."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing asset badges, labels, table patterns, and API helpers before adding new abstractions."}
+{"file": "houfeng_codex_下一步开发计划.md", "reason": "Task scope derives from remaining first-phase asset operation criteria."}
