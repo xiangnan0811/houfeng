@@ -41,3 +41,38 @@ Implemented the first Asset Ledger backend slice: providers schema, domain valid
 ### Next Steps
 
 - None - task complete
+
+
+## Session 61: VPS assets backend slice
+
+**Date**: 2026-05-09
+**Task**: VPS assets backend slice
+**Branch**: `feat/vps-assets-backend`
+
+### Summary
+
+Implemented VPS assets backend slice with vps_assets migration, domain validation, Postgres store, HTTP handlers, router/bootstrap wiring, tests, and backend spec updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `22a5582` | (see git log) |
+| `55e1dd9` | (see git log) |
+| `dfa0dc7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
