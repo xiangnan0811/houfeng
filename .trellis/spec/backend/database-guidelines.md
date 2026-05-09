@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`nodes.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：`db/migrations/0001_*.sql` … 当前最大 migration（现为 `0017_add_vps_assets.sql`）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入；启动时由 `internal/center/store/migrate/migrate.go` 中的 `Apply` 顺序应用，状态记在 `schema_migrations` 表。
+- **schema 演进**：`db/migrations/0001_*.sql` … 当前最大 migration（现为 `0018_add_subscriptions.sql`）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入；启动时由 `internal/center/store/migrate/migrate.go` 中的 `Apply` 顺序应用，状态记在 `schema_migrations` 表。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（Node/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -72,7 +72,7 @@
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号的文件，例如当前最大为 `0017_add_vps_assets.sql` 时，下一个应为 `0018_<verb>_<scope>.sql`。
+2. 在 `db/migrations/` 新建下一个未占用序号的文件，例如当前最大为 `0018_add_subscriptions.sql` 时，下一个应为 `0019_<verb>_<scope>.sql`。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/v1-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
@@ -83,7 +83,7 @@
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
-> ⚠️ **已知 gap**（值得记入 `docs/release/v1-gap-checklist.md`）：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。`migrate.Apply` 按文件名字典序排序，二者顺序由后缀决定，并不冲突；但序号撞车违反了"序号唯一"的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前最大为 `0017_add_vps_assets.sql`，下一个应为 `0018_*`，如果期间已有新迁移则继续顺延）。
+> ⚠️ **已知 gap**（值得记入 `docs/release/v1-gap-checklist.md`）：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。`migrate.Apply` 按文件名字典序排序，二者顺序由后缀决定，并不冲突；但序号撞车违反了"序号唯一"的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前最大为 `0018_add_subscriptions.sql`，下一个应为 `0019_*`，如果期间已有新迁移则继续顺延）。
 
 ---
 
@@ -127,7 +127,20 @@
 - `ssh_port` 默认为 `22`，数据库约束为 `1..65535`；领域 create 中 `0` 表示省略并默认，patch 中显式 `0` 必须拒绝。
 - `archived_at` 是派生字段：生命周期切到 `archived` 时补时间，从 `archived` 切出时清空；API 输入不得任意写入 `archived_at`。
 - VPS 资产 CRUD 不得改写 `nodes.provider`，也不得改变 Node / Target / Agent 的既有语义。
-- subscription summary 与 active node link count 属于后续 subscriptions / node-link 表；当前 VPS 查询不得硬编码假聚合、查询不存在表，或提前创建占位表。
+- subscription summary 与 active node link count 属于后续 API / node-link 表；当前 VPS 查询不得硬编码假聚合、查询不存在表，或提前创建占位表。
+
+### Asset Ledger subscriptions
+
+`db/migrations/0018_add_subscriptions.sql` 添加 `subscriptions`，代表资产层 VPS 订阅账本。它依赖 `vps_assets.vps_id`，但不得反向改写 VPS 资产、Provider、Node、Target 或 Agent 状态。
+
+- `subscriptions.subscription_id` 使用 `ids.New("sub")` 生成。
+- `vps_id` 必须引用已存在的 `vps_assets(vps_id)`，并在 VPS 删除时 `on delete cascade`。
+- `currency` 使用大写 3 字母代码；领域层负责 trim + uppercase，数据库约束兜底。
+- `price` 对齐数据库 `numeric(12, 2)`，领域层必须拒绝负数、超过精度或超过 2 位小数的输入，避免入库四舍五入后与派生字段漂移。
+- `monthly_price` 是后端派生字段，按 `price / billing_months` 计算并四舍五入到 4 位小数；create / patch JSON 不接受 `monthly_price`，patch 修改 `price` 或 `billing_months` 时必须重新计算。
+- `started_at` 与 `renew_at` 是 nullable `date`：未知日期用 `null`，不要写假日期。
+- `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。
+- 订阅 CRUD 不得创建 `vps_node_links`、不得改写 `nodes.provider`、不得增加 Dashboard / import / currency exchange 行为。
 
 ---
 
