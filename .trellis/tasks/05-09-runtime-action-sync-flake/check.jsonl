@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec entry point for review."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify deterministic worker tests and required quality gates."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Confirm changes stay in the correct agent/runtime surface."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Confirm no production error behavior drift."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Confirm branch/PR workflow remains compliant."}
+{"file": ".trellis/tasks/05-09-runtime-action-sync-flake/research/ci-failure.md", "reason": "Review against the exact CI failure evidence."}

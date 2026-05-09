@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec entry point for agent/runtime changes."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines worker test guidance, make verify-go, and flake prevention expectations."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Confirms error handling conventions if runtime test changes expose error behavior."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Confirms agent runtime logging conventions; production logging should not change."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Defines agent/runtime ownership and thin-agent boundaries."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared Trellis thinking guide index."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Prefer existing fake-client cancellation helpers over new ad hoc synchronization."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Repair must stay on a non-main branch and land through PR."}
+{"file": ".trellis/tasks/05-09-runtime-action-sync-flake/research/ci-failure.md", "reason": "Captured CI failure evidence and candidate deterministic test repair."}
