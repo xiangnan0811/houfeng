@@ -317,3 +317,38 @@ Added renewal_decisions history storage, renewal decision domain/store logic, at
 ### Next Steps
 
 - None - task complete
+
+
+## Session 69: Asset history snapshots backend
+
+**Date**: 2026-05-09
+**Task**: Asset history snapshots backend
+**Branch**: `feat/asset-history-snapshots`
+
+### Summary
+
+Added Asset Ledger price/IP/spec history persistence, expanded VPS timelines, and recorded backend history contracts/specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `37356c2` | (see git log) |
+| `de86ab4` | (see git log) |
+| `9d8b397` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
