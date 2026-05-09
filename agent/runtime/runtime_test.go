@@ -308,6 +308,7 @@ func TestRuntimeReturnsMissingSyncTokenErrorForBoundEnrollment(t *testing.T) {
 func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
+		cancelAfterSyncs: 2,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -347,8 +348,9 @@ func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testi
 
 	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+	client.cancel = cancel
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -392,6 +394,7 @@ func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testi
 func TestRuntimeLogsHostSampleFailureAndContinuesHeartbeatSync(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
+		cancelAfterSyncs: 2,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -408,8 +411,9 @@ func TestRuntimeLogsHostSampleFailureAndContinuesHeartbeatSync(t *testing.T) {
 
 	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+	client.cancel = cancel
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -622,6 +626,7 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	actionID := "act_001"
 	client := &fakeClient{
+		cancelAfterSyncs: 2,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -640,8 +645,9 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 
 	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+	client.cancel = cancel
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -672,6 +678,7 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
+		cancelAfterSyncs: 2,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -690,8 +697,9 @@ func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
 
 	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+	client.cancel = cancel
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -724,6 +732,7 @@ func TestRuntimeCollectHostSampleAttachesContainers(t *testing.T) {
 
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
+		cancelAfterSyncs: 2,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -741,8 +750,9 @@ func TestRuntimeCollectHostSampleAttachesContainers(t *testing.T) {
 
 	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, &fakeProbeProvider{}, 10*time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+	client.cancel = cancel
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
