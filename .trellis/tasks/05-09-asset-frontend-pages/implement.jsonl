@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend task entrypoint and applicable guideline index."}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Defines page, component, lib, style, and test file placement."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Defines React component style, page composition, props, and anti-patterns."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Defines API client, type, loading/error/data, and no-direct-fetch contracts."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Defines token-based CSS, BEM, dark-first visual rules, and style file placement."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Defines lint, Vitest, build, and page test expectations."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "User requires protected-branch PR workflow for every task."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "This task connects backend JSON contracts to frontend types, APIs, and pages."}
