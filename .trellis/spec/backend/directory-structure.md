@@ -60,7 +60,7 @@
 │   │   ├── vpsassets/         # Asset Ledger VPS 资产 + Repository 接口
 │   │   ├── subscriptions/     # Asset Ledger VPS 订阅 + Repository 接口
 │   │   ├── assetlinks/        # Asset Ledger VPS ↔ Node 关联 + 摘要查询接口
-│   │   ├── renewals/          # Asset Ledger 续费决策历史 + VPS timeline 接口
+│   │   ├── renewals/          # Asset Ledger 续费 / 价格 / IP / 规格历史 + VPS timeline 接口
 │   │   ├── importing/         # Asset Ledger JSON dry-run/import 解析、校验、报告与编排
 │   │   ├── targets/           # Target / ProbeItem 领域类型与频率档枚举
 │   │   ├── nodes/             # Node 领域类型 + Repository 接口
@@ -71,7 +71,7 @@
 │   └── contracts/
 │       └── agentapi/          # ★ center 与 agent 共享的契约：路径、类型、错误码
 ├── db/
-│   └── migrations/            # 迁移文件 + embed.go（embed.FS），当前最大 0020_create_renewal_decisions.sql
+│   └── migrations/            # 迁移文件 + embed.go（embed.FS），当前最大 0021_create_asset_histories.sql
 ├── docs/                      # 设计基线 / 部署 / 验证
 ├── scripts/                   # verify.sh 等
 ├── bin/                       # build 产物（go build 输出）
@@ -205,7 +205,7 @@ center 与 agent 同时引用的唯一契约包。内容：
 - 测试文件：`<file>_test.go`，与被测文件**同目录同包**；端到端测试加 `_e2e_test.go` 后缀（参考 `internal/center/http/auth_e2e_test.go`）。
 - 仓库类型：`Postgres<Aggregate>Repository`，构造器 `NewPostgres<Aggregate>Repository`。
 - HTTP handler 工厂：`handlers.<Resource>(repoOrSvc)` 或 `handlers.<Resource><Action>(...)`，统一返回 `http.Handler`，由 `bootstrap.go` 注入到 `RouterOptions`。
-- 迁移文件：`<NNNN>_<verb>_<scope>.sql`，序号 4 位起步、动词放第一个（`add`、`normalize`、`create`），见 `db/migrations/0001_initial_schema.sql` … `0020_create_renewal_decisions.sql`。
+- 迁移文件：`<NNNN>_<verb>_<scope>.sql`，序号 4 位起步、动词放第一个（`add`、`normalize`、`create`），见 `db/migrations/0001_initial_schema.sql` … `0021_create_asset_histories.sql`。
 
 ---
 
@@ -231,7 +231,7 @@ center 与 agent 同时引用的唯一契约包。内容：
 - **Asset Ledger VPS assets 完整一条线**：`internal/center/http/handlers/vps.go`（handler）+ `internal/center/store/vps_assets.go`（仓库）+ `internal/center/vpsassets/`（领域类型 / 校验 / PATCH presence helper）+ `db/migrations/0017_add_vps_assets.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护资产层 VPS 账本，不改写 Node / Target / Agent 语义。
 - **Asset Ledger subscriptions 完整一条线**：`internal/center/http/handlers/subscriptions.go`（handler）+ `internal/center/store/subscriptions.go`（仓库）+ `internal/center/subscriptions/`（领域类型 / 校验 / PATCH presence helper / nullable date）+ `db/migrations/0018_add_subscriptions.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护资产层 VPS 订阅账本，不创建 node-link、不改写 Node / Target / Agent 语义。
 - **Asset Ledger VPS ↔ Node link 完整一条线**：`internal/center/http/handlers/asset_links.go`（link / unlink / query handler）+ `internal/center/store/vps_node_links.go`（仓库）+ `internal/center/assetlinks/`（领域类型 / 摘要 DTO / sentinel errors）+ `db/migrations/0019_create_vps_node_links.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护关联历史；link / unlink 不改写 `nodes.provider`、Node lifecycle / monitoring / health、Target 或 Agent。
-- **Asset Ledger renewal decision history 完整一条线**：`internal/center/http/handlers/vps.go`（`VPSTimeline` handler 与 VPS PATCH 入口）+ `internal/center/store/renewal_decisions.go`（续费决策历史仓库）+ `internal/center/store/vps_assets.go`（续费决策 PATCH 事务内记录历史）+ `internal/center/renewals/`（历史 DTO / timeline DTO / sentinel errors）+ `db/migrations/0020_create_renewal_decisions.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只记录资产层决策历史；不得创建 Node link、不得改写 Node / Target / Agent。
+- **Asset Ledger history / timeline 完整一条线**：`internal/center/http/handlers/vps.go`（`VPSTimeline` handler 与 VPS PATCH 入口）+ `internal/center/store/renewal_decisions.go`（续费、价格、IP、规格历史仓库与 timeline 聚合）+ `internal/center/store/vps_assets.go`（续费 / IP / 规格 PATCH 事务内记录历史）+ `internal/center/store/subscriptions.go`（价格 / 续费日期 PATCH 事务内记录历史）+ `internal/center/renewals/`（历史 DTO / timeline DTO / sentinel errors）+ `db/migrations/0020_create_renewal_decisions.sql` / `0021_create_asset_histories.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只记录资产层历史；不得创建 Node link、不得改写 Node / Target / Agent。
 - **Asset Ledger JSON import CLI**：`cmd/houfeng-import-vps-json/main.go`（flag / 文件 / DB / migration / 事务 / 输出）+ `internal/center/importing/`（严格 JSON、复用 provider/VPS/subscription 领域校验、dry-run 报告、导入编排）。dry-run 不写库；`-import` 才能写 provider、VPS asset、subscription，且不得创建 `vps_node_links` 或改写 Node / Target / Agent。
 - **Settings-aware notifier**：`internal/center/notify/`（基础 Telegram 客户端）被 `internal/center/incidents/` 用 `NewSettingsAwareNotifier` 包装，最终在 `bootstrap.go:88-99` 装配，体现"领域子包负责行为，bootstrap 负责拼装"。
 - **agent ↔ center 契约**：`internal/contracts/agentapi/routes.go` + `types.go` 同时被 `internal/center/http/handlers/agent.go` 与 `agent/runtime/` 引用。

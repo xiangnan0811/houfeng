@@ -278,8 +278,8 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 		return r.GetVPSAsset(ctx, vpsID)
 	}
 
-	if input.RenewalDecision.Set {
-		return r.patchVPSAssetWithRenewalDecisionHistory(ctx, vpsID, input)
+	if patchRequiresVPSAssetHistory(input) {
+		return r.patchVPSAssetWithHistory(ctx, vpsID, input)
 	}
 
 	record, err := patchVPSAssetRow(ctx, r.db, vpsID, input)
@@ -295,14 +295,14 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 	return record, nil
 }
 
-func (r *PostgresVPSAssetRepository) patchVPSAssetWithRenewalDecisionHistory(ctx context.Context, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {
+func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistory(ctx context.Context, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {
 	if r.beginTx == nil {
-		return vpsassets.Record{}, errors.New("vps asset repository cannot record renewal decision history without transaction support")
+		return vpsassets.Record{}, errors.New("vps asset repository cannot record asset history without transaction support")
 	}
 
 	tx, err := r.beginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return vpsassets.Record{}, fmt.Errorf("begin vps asset renewal decision transaction: %w", err)
+		return vpsassets.Record{}, fmt.Errorf("begin vps asset history transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -315,7 +315,7 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithRenewalDecisionHistory(ctx
 		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
 	}
 	if err != nil {
-		return vpsassets.Record{}, fmt.Errorf("query vps asset %q before renewal decision patch: %w", vpsID, err)
+		return vpsassets.Record{}, fmt.Errorf("query vps asset %q before history patch: %w", vpsID, err)
 	}
 
 	record, err := patchVPSAssetRow(ctx, tx, vpsID, input)
@@ -344,10 +344,63 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithRenewalDecisionHistory(ctx
 		}
 	}
 
+	if current.IPv4 != record.IPv4 || current.IPv6 != record.IPv6 {
+		if _, err := createIPHistory(ctx, tx, renewals.CreateIPHistoryInput{
+			VPSID:    record.VPSID,
+			FromIPv4: current.IPv4,
+			ToIPv4:   record.IPv4,
+			FromIPv6: current.IPv6,
+			ToIPv6:   record.IPv6,
+		}); err != nil {
+			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+				return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+			}
+			return vpsassets.Record{}, fmt.Errorf("record ip history for vps %q: %w", vpsID, err)
+		}
+	}
+
+	if vpsSpecChanged(current, record) {
+		if _, err := createSpecSnapshot(ctx, tx, renewals.CreateSpecSnapshotInput{
+			VPSID:          record.VPSID,
+			ProductName:    record.ProductName,
+			SSHHost:        record.SSHHost,
+			SSHPort:        record.SSHPort,
+			SSHUser:        record.SSHUser,
+			OSName:         record.OSName,
+			Virtualization: record.Virtualization,
+		}); err != nil {
+			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+				return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+			}
+			return vpsassets.Record{}, fmt.Errorf("record spec snapshot for vps %q: %w", vpsID, err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
-		return vpsassets.Record{}, fmt.Errorf("commit vps asset renewal decision transaction: %w", err)
+		return vpsassets.Record{}, fmt.Errorf("commit vps asset history transaction: %w", err)
 	}
 	return record, nil
+}
+
+func patchRequiresVPSAssetHistory(input vpsassets.PatchInput) bool {
+	return input.RenewalDecision.Set ||
+		input.IPv4.Set ||
+		input.IPv6.Set ||
+		input.ProductName.Set ||
+		input.SSHHost.Set ||
+		input.SSHPort.Set ||
+		input.SSHUser.Set ||
+		input.OSName.Set ||
+		input.Virtualization.Set
+}
+
+func vpsSpecChanged(from, to vpsassets.Record) bool {
+	return from.ProductName != to.ProductName ||
+		from.SSHHost != to.SSHHost ||
+		from.SSHPort != to.SSHPort ||
+		from.SSHUser != to.SSHUser ||
+		from.OSName != to.OSName ||
+		from.Virtualization != to.Virtualization
 }
 
 func patchVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {

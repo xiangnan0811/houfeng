@@ -51,6 +51,38 @@ func TestPostgresVPSAssetMigrationDefinesTableConstraintsAndIndexes(t *testing.T
 	}
 }
 
+func TestPostgresVPSAssetHistoryMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0021_create_asset_histories.sql"))
+	if err != nil {
+		t.Fatalf("ReadFile(asset history migration) error = %v", err)
+	}
+	text := string(source)
+	for _, snippet := range []string{
+		"create table if not exists ip_histories",
+		"ip_history_id text primary key",
+		"vps_id text not null references vps_assets(vps_id) on delete cascade",
+		"from_ipv4 text not null default ''",
+		"to_ipv4 text not null default ''",
+		"from_ipv6 text not null default ''",
+		"to_ipv6 text not null default ''",
+		"ip_histories_changed",
+		"create table if not exists vps_spec_snapshots",
+		"snapshot_id text primary key",
+		"product_name text not null default ''",
+		"ssh_port integer not null",
+		"captured_at timestamptz not null default now()",
+		"vps_spec_snapshots_ssh_port_range",
+		"idx_ip_histories_vps_time",
+		"idx_vps_spec_snapshots_vps_time",
+	} {
+		if !strings.Contains(text, snippet) {
+			t.Fatalf("asset history migration missing %q", snippet)
+		}
+	}
+}
+
 func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	t.Parallel()
 
@@ -149,7 +181,7 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 						VPSID:           "vps_001",
 						DisplayName:     "Akamai Edge Archived",
 						ProviderID:      nil,
-						SSHPort:         2200,
+						SSHPort:         22,
 						LifecycleStatus: vpsassets.LifecycleArchived,
 						UsageStatus:     vpsassets.UsageIdle,
 						RenewalDecision: vpsassets.RenewalCancel,
@@ -239,7 +271,6 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	patched, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
 		DisplayName:     vpsassets.PatchString(" Akamai Edge Archived "),
 		ProviderID:      vpsassets.PatchNullableString(nil),
-		SSHPort:         vpsassets.PatchInt(2200),
 		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleArchived),
 		UsageStatus:     vpsassets.PatchUsage(vpsassets.UsageIdle),
 		Importance:      vpsassets.PatchString(" critical "),
@@ -264,8 +295,8 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	if patchArgs[3] != true || patchArgs[4] != nil {
 		t.Fatalf("patch provider args = set:%#v value:%#v, want explicit clear", patchArgs[3], patchArgs[4])
 	}
-	if patchArgs[25] != true || patchArgs[26] != 2200 {
-		t.Fatalf("patch ssh port args = set:%#v value:%#v, want 2200", patchArgs[25], patchArgs[26])
+	if patchArgs[25] != false {
+		t.Fatalf("patch ssh port set arg = %#v, want false in non-history patch", patchArgs[25])
 	}
 	if patchArgs[33] != true || patchArgs[34] != string(vpsassets.LifecycleArchived) {
 		t.Fatalf("patch lifecycle args = set:%#v value:%#v, want archived", patchArgs[33], patchArgs[34])
@@ -472,6 +503,182 @@ func TestPostgresVPSAssetPatchSkipsRenewalDecisionHistoryWhenDecisionUnchanged(t
 	}
 }
 
+func TestPostgresVPSAssetPatchRecordsIPAndSpecHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	tx := &fakeVPSAssetTx{}
+	var calls []string
+	var args [][]any
+	tx.queryRow = func(_ context.Context, sql string, callArgs ...any) pgx.Row {
+		calls = append(calls, sql)
+		args = append(args, append([]any(nil), callArgs...))
+		switch {
+		case strings.Contains(sql, "for update"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Tokyo Edge",
+					ProductName:     "CX22",
+					IPv4:            "192.0.2.1",
+					IPv6:            "2001:db8::1",
+					SSHHost:         "old.example",
+					SSHPort:         22,
+					SSHUser:         "root",
+					OSName:          "Debian 12",
+					Virtualization:  "kvm",
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalKeep,
+					Importance:      "normal",
+					CreatedAt:       now.Add(-time.Hour),
+					UpdatedAt:       now.Add(-time.Hour),
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "update vps_assets"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Tokyo Edge",
+					ProductName:     "CPX31",
+					IPv4:            "198.51.100.5",
+					IPv6:            "2001:db8::5",
+					SSHHost:         "new.example",
+					SSHPort:         2222,
+					SSHUser:         "deploy",
+					OSName:          "Ubuntu 24.04",
+					Virtualization:  "kvm",
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalKeep,
+					Importance:      "normal",
+					CreatedAt:       now.Add(-time.Hour),
+					UpdatedAt:       now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "insert into ip_histories"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				ipHistoryID, ok := callArgs[0].(string)
+				if !ok || !strings.HasPrefix(ipHistoryID, "iph_") {
+					t.Fatalf("ip history id arg = %#v, want iph_ prefix", callArgs[0])
+				}
+				scanIPHistoryRecordDestinations(dest, "iph_001", now)
+				return nil
+			}}
+		case strings.Contains(sql, "insert into vps_spec_snapshots"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				snapshotID, ok := callArgs[0].(string)
+				if !ok || !strings.HasPrefix(snapshotID, "vss_") {
+					t.Fatalf("spec snapshot id arg = %#v, want vss_ prefix", callArgs[0])
+				}
+				scanSpecSnapshotRecordDestinations(dest, "vss_001", now)
+				return nil
+			}}
+		default:
+			t.Fatalf("unexpected QueryRow SQL %q", sql)
+			return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+		}
+	}
+
+	repo := &PostgresVPSAssetRepository{
+		db: fakeVPSAssetDB{},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
+	record, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
+		ProductName: vpsassets.PatchString(" CPX31 "),
+		IPv4:        vpsassets.PatchString(" 198.51.100.5 "),
+		IPv6:        vpsassets.PatchString(" 2001:db8::5 "),
+		SSHHost:     vpsassets.PatchString(" new.example "),
+		SSHPort:     vpsassets.PatchInt(2222),
+		SSHUser:     vpsassets.PatchString(" deploy "),
+		OSName:      vpsassets.PatchString(" Ubuntu 24.04 "),
+	})
+	if err != nil {
+		t.Fatalf("PatchVPSAsset() error = %v", err)
+	}
+	if record.IPv4 != "198.51.100.5" || record.SSHPort != 2222 {
+		t.Fatalf("record = %#v, want patched IP/spec values", record)
+	}
+	if !tx.committed || tx.rolledBack == 0 {
+		t.Fatalf("transaction committed=%t rollbackCalls=%d, want committed with deferred rollback", tx.committed, tx.rolledBack)
+	}
+	if len(calls) != 4 {
+		t.Fatalf("query row calls = %d, want lock/update/ip/spec", len(calls))
+	}
+	if !strings.Contains(calls[0], "for update") || !strings.Contains(calls[2], "insert into ip_histories") || !strings.Contains(calls[3], "insert into vps_spec_snapshots") {
+		t.Fatalf("calls = %#v, want lock/update/ip/spec history", calls)
+	}
+	ipArgs := args[2]
+	if len(ipArgs) != 7 || ipArgs[1] != "vps_001" || ipArgs[2] != "192.0.2.1" || ipArgs[3] != "198.51.100.5" || ipArgs[4] != "2001:db8::1" || ipArgs[5] != "2001:db8::5" {
+		t.Fatalf("ip history args = %#v", ipArgs)
+	}
+	specArgs := args[3]
+	if len(specArgs) != 9 || specArgs[1] != "vps_001" || specArgs[2] != "CPX31" || specArgs[4] != 2222 || specArgs[5] != "deploy" || specArgs[6] != "Ubuntu 24.04" {
+		t.Fatalf("spec snapshot args = %#v", specArgs)
+	}
+}
+
+func TestPostgresVPSAssetPatchSkipsIPAndSpecHistoryWhenTrackedFieldsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	tx := &fakeVPSAssetTx{}
+	insertedIPHistory := false
+	insertedSpecHistory := false
+	tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
+		switch {
+		case strings.Contains(sql, "for update"), strings.Contains(sql, "update vps_assets"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Tokyo Edge",
+					ProductName:     "CX22",
+					IPv4:            "192.0.2.1",
+					IPv6:            "2001:db8::1",
+					SSHHost:         "edge.example",
+					SSHPort:         22,
+					SSHUser:         "root",
+					OSName:          "Debian 12",
+					Virtualization:  "kvm",
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalKeep,
+					Importance:      "normal",
+					CreatedAt:       now,
+					UpdatedAt:       now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "insert into ip_histories"):
+			insertedIPHistory = true
+			return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+		case strings.Contains(sql, "insert into vps_spec_snapshots"):
+			insertedSpecHistory = true
+			return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+		default:
+			t.Fatalf("unexpected QueryRow SQL %q", sql)
+			return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+		}
+	}
+
+	repo := &PostgresVPSAssetRepository{
+		db: fakeVPSAssetDB{},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
+	if _, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{IPv4: vpsassets.PatchString("192.0.2.1"), SSHPort: vpsassets.PatchInt(22)}); err != nil {
+		t.Fatalf("PatchVPSAsset() error = %v", err)
+	}
+	if insertedIPHistory || insertedSpecHistory {
+		t.Fatalf("insertedIPHistory=%t insertedSpecHistory=%t, want no history for unchanged tracked values", insertedIPHistory, insertedSpecHistory)
+	}
+}
+
 func TestPostgresVPSAssetMapsNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -665,6 +872,30 @@ func scanVPSAssetRecordDestinations(dest []any, record vpsassets.Record) {
 	*(dest[23].(*time.Time)) = record.CreatedAt
 	*(dest[24].(*time.Time)) = record.UpdatedAt
 	*(dest[25].(**time.Time)) = cloneTimePtr(record.ArchivedAt)
+}
+
+func scanIPHistoryRecordDestinations(dest []any, id string, now time.Time) {
+	*(dest[0].(*string)) = id
+	*(dest[1].(*string)) = "vps_001"
+	*(dest[2].(*string)) = "192.0.2.1"
+	*(dest[3].(*string)) = "198.51.100.5"
+	*(dest[4].(*string)) = "2001:db8::1"
+	*(dest[5].(*string)) = "2001:db8::5"
+	*(dest[6].(*time.Time)) = now
+	*(dest[7].(*time.Time)) = now
+}
+
+func scanSpecSnapshotRecordDestinations(dest []any, id string, now time.Time) {
+	*(dest[0].(*string)) = id
+	*(dest[1].(*string)) = "vps_001"
+	*(dest[2].(*string)) = "CPX31"
+	*(dest[3].(*string)) = "new.example"
+	*(dest[4].(*int)) = 2222
+	*(dest[5].(*string)) = "deploy"
+	*(dest[6].(*string)) = "Ubuntu 24.04"
+	*(dest[7].(*string)) = "kvm"
+	*(dest[8].(*time.Time)) = now
+	*(dest[9].(*time.Time)) = now
 }
 
 func cloneStringPtr(value *string) *string {

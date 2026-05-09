@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend task index and applicable guide list"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Asset Ledger package, handler, store, migration, and bootstrap placement"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "PostgreSQL migration, transaction, Asset Ledger history, and timeline invariants"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "sentinel error and HTTP mapping conventions"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "required tests and quality gates"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "feature branch and PR workflow governance"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "timeline data flow crosses database, store, domain, and HTTP layers"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "reuse existing renewal timeline and patch-history patterns"}

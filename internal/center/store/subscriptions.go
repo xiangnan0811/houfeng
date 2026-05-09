@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
 )
 
@@ -22,12 +23,20 @@ type subscriptionDB interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+type subscriptionQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 type PostgresSubscriptionRepository struct {
-	db subscriptionDB
+	db      subscriptionDB
+	beginTx func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
 func NewPostgresSubscriptionRepository(db *pgxpool.Pool) *PostgresSubscriptionRepository {
-	return &PostgresSubscriptionRepository{db: db}
+	return &PostgresSubscriptionRepository{
+		db:      db,
+		beginTx: db.BeginTx,
+	}
 }
 
 const subscriptionSelectColumns = `
@@ -233,7 +242,77 @@ func (r *PostgresSubscriptionRepository) PatchSubscription(ctx context.Context, 
 		return r.GetSubscription(ctx, subscriptionID)
 	}
 
-	record, err := scanSubscription(r.db.QueryRow(ctx, `
+	if patchRequiresPriceHistory(input) {
+		return r.patchSubscriptionWithPriceHistory(ctx, subscriptionID, input)
+	}
+
+	record, err := patchSubscriptionRow(ctx, r.db, subscriptionID, input)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return subscriptions.Record{}, subscriptions.ErrSubscriptionNotFound
+	}
+	if err != nil {
+		if isSubscriptionInvalidPostgresError(err) {
+			return subscriptions.Record{}, subscriptions.ErrInvalidSubscriptionInput
+		}
+		return subscriptions.Record{}, fmt.Errorf("patch subscription %q: %w", subscriptionID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresSubscriptionRepository) patchSubscriptionWithPriceHistory(ctx context.Context, subscriptionID string, input subscriptions.PatchInput) (subscriptions.Record, error) {
+	if r.beginTx == nil {
+		return subscriptions.Record{}, errors.New("subscription repository cannot record price history without transaction support")
+	}
+
+	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return subscriptions.Record{}, fmt.Errorf("begin subscription price history transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	current, err := scanSubscription(tx.QueryRow(ctx, `
+		select `+subscriptionSelectColumns+`
+		from subscriptions
+		where subscription_id = $1
+		for update`, subscriptionID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return subscriptions.Record{}, subscriptions.ErrSubscriptionNotFound
+	}
+	if err != nil {
+		return subscriptions.Record{}, fmt.Errorf("query subscription %q before price history patch: %w", subscriptionID, err)
+	}
+
+	record, err := patchSubscriptionRow(ctx, tx, subscriptionID, input)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return subscriptions.Record{}, subscriptions.ErrSubscriptionNotFound
+	}
+	if err != nil {
+		if isSubscriptionInvalidPostgresError(err) {
+			return subscriptions.Record{}, subscriptions.ErrInvalidSubscriptionInput
+		}
+		return subscriptions.Record{}, fmt.Errorf("patch subscription %q: %w", subscriptionID, err)
+	}
+
+	if subscriptionPriceHistoryChanged(current, record) {
+		if _, err := createPriceHistory(ctx, tx, renewals.CreatePriceHistoryInput{
+			From: current,
+			To:   record,
+		}); err != nil {
+			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+				return subscriptions.Record{}, subscriptions.ErrInvalidSubscriptionInput
+			}
+			return subscriptions.Record{}, fmt.Errorf("record price history for subscription %q: %w", subscriptionID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return subscriptions.Record{}, fmt.Errorf("commit subscription price history transaction: %w", err)
+	}
+	return record, nil
+}
+
+func patchSubscriptionRow(ctx context.Context, db subscriptionQueryer, subscriptionID string, input subscriptions.PatchInput) (subscriptions.Record, error) {
+	return scanSubscription(db.QueryRow(ctx, `
 		update subscriptions
 		set vps_id = case when $2::boolean then $3 else vps_id end,
 		    price = case when $4::boolean then $5::numeric else price end,
@@ -283,16 +362,36 @@ func (r *PostgresSubscriptionRepository) PatchSubscription(ctx context.Context, 
 		input.Note.Set,
 		input.Note.Value,
 	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return subscriptions.Record{}, subscriptions.ErrSubscriptionNotFound
+}
+
+func patchRequiresPriceHistory(input subscriptions.PatchInput) bool {
+	return input.Price.Set ||
+		input.Currency.Set ||
+		input.BillingCycle.Set ||
+		input.BillingMonths.Set ||
+		input.RenewAt.Set ||
+		input.AutoRenew.Set ||
+		input.AutoRenewCancelled.Set ||
+		input.Status.Set
+}
+
+func subscriptionPriceHistoryChanged(from, to subscriptions.Record) bool {
+	return from.Price != to.Price ||
+		from.Currency != to.Currency ||
+		from.BillingCycle != to.BillingCycle ||
+		from.BillingMonths != to.BillingMonths ||
+		from.MonthlyPrice != to.MonthlyPrice ||
+		!sameSubscriptionDate(from.RenewAt, to.RenewAt) ||
+		from.AutoRenew != to.AutoRenew ||
+		from.AutoRenewCancelled != to.AutoRenewCancelled ||
+		from.Status != to.Status
+}
+
+func sameSubscriptionDate(left, right *subscriptions.Date) bool {
+	if left == nil || right == nil {
+		return left == right
 	}
-	if err != nil {
-		if isSubscriptionInvalidPostgresError(err) {
-			return subscriptions.Record{}, subscriptions.ErrInvalidSubscriptionInput
-		}
-		return subscriptions.Record{}, fmt.Errorf("patch subscription %q: %w", subscriptionID, err)
-	}
-	return record, nil
+	return left.Time.Equal(right.Time)
 }
 
 func isSubscriptionInvalidPostgresError(err error) bool {

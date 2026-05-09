@@ -13,6 +13,7 @@ import (
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/renewals"
+	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -414,9 +415,11 @@ func TestVPSItemPatchesRenewalDecisionReason(t *testing.T) {
 	}
 }
 
-func TestVPSTimelineReturnsRenewalDecisionHistory(t *testing.T) {
+func TestVPSTimelineReturnsAssetHistory(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
 	fromDecision := vpsassets.RenewalKeep
+	fromRenewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 8, 0, 0, 0, time.UTC))
+	toRenewAt := subscriptions.NewDate(time.Date(2026, time.December, 1, 8, 0, 0, 0, time.UTC))
 	repo := &fakeRenewalTimelineRepository{timeline: renewals.VPSTimeline{
 		VPSID: "vps_001",
 		RenewalDecisions: []renewals.DecisionRecord{{
@@ -427,6 +430,53 @@ func TestVPSTimelineReturnsRenewalDecisionHistory(t *testing.T) {
 			Reason:       "too expensive",
 			DecidedAt:    now,
 			CreatedAt:    now,
+		}},
+		PriceHistories: []renewals.PriceHistoryRecord{{
+			PriceHistoryID:         "ph_001",
+			SubscriptionID:         "sub_001",
+			VPSID:                  "vps_001",
+			FromPrice:              120,
+			ToPrice:                240,
+			FromCurrency:           "USD",
+			ToCurrency:             "USD",
+			FromBillingCycle:       "annual",
+			ToBillingCycle:         "biennial",
+			FromBillingMonths:      12,
+			ToBillingMonths:        24,
+			FromMonthlyPrice:       10,
+			ToMonthlyPrice:         10,
+			FromRenewAt:            &fromRenewAt,
+			ToRenewAt:              &toRenewAt,
+			FromAutoRenew:          true,
+			ToAutoRenew:            false,
+			FromAutoRenewCancelled: false,
+			ToAutoRenewCancelled:   true,
+			FromStatus:             subscriptions.StatusActive,
+			ToStatus:               subscriptions.StatusPaused,
+			ChangedAt:              now,
+			CreatedAt:              now,
+		}},
+		IPHistories: []renewals.IPHistoryRecord{{
+			IPHistoryID: "iph_001",
+			VPSID:       "vps_001",
+			FromIPv4:    "192.0.2.1",
+			ToIPv4:      "198.51.100.5",
+			FromIPv6:    "2001:db8::1",
+			ToIPv6:      "2001:db8::5",
+			ChangedAt:   now,
+			CreatedAt:   now,
+		}},
+		SpecSnapshots: []renewals.SpecSnapshotRecord{{
+			SnapshotID:     "vss_001",
+			VPSID:          "vps_001",
+			ProductName:    "CPX31",
+			SSHHost:        "edge.example",
+			SSHPort:        2222,
+			SSHUser:        "deploy",
+			OSName:         "Ubuntu 24.04",
+			Virtualization: "kvm",
+			CapturedAt:     now,
+			CreatedAt:      now,
 		}},
 	}}
 
@@ -446,8 +496,17 @@ func TestVPSTimelineReturnsRenewalDecisionHistory(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body.VPSID != "vps_001" || len(body.RenewalDecisions) != 1 || body.RenewalDecisions[0].FromDecision == nil || *body.RenewalDecisions[0].FromDecision != vpsassets.RenewalKeep {
-		t.Fatalf("timeline body = %#v, want renewal decision history", body)
+	if body.VPSID != "vps_001" ||
+		len(body.RenewalDecisions) != 1 ||
+		len(body.PriceHistories) != 1 ||
+		len(body.IPHistories) != 1 ||
+		len(body.SpecSnapshots) != 1 ||
+		body.RenewalDecisions[0].FromDecision == nil ||
+		*body.RenewalDecisions[0].FromDecision != vpsassets.RenewalKeep ||
+		body.PriceHistories[0].PriceHistoryID != "ph_001" ||
+		body.IPHistories[0].ToIPv4 != "198.51.100.5" ||
+		body.SpecSnapshots[0].ProductName != "CPX31" {
+		t.Fatalf("timeline body = %#v, want all asset history arrays", body)
 	}
 }
 

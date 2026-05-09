@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`nodes.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：`db/migrations/0001_*.sql` … 当前最大 migration（现为 `0020_create_renewal_decisions.sql`）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入；启动时由 `internal/center/store/migrate/migrate.go` 中的 `Apply` 顺序应用，状态记在 `schema_migrations` 表。
+- **schema 演进**：`db/migrations/0001_*.sql` … 当前最大 migration（现为 `0021_create_asset_histories.sql`）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入；启动时由 `internal/center/store/migrate/migrate.go` 中的 `Apply` 顺序应用，状态记在 `schema_migrations` 表。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（Node/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -72,7 +72,7 @@
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号的文件，例如当前最大为 `0020_create_renewal_decisions.sql` 时，下一个应为 `0021_<verb>_<scope>.sql`。
+2. 在 `db/migrations/` 新建下一个未占用序号的文件，例如当前最大为 `0021_create_asset_histories.sql` 时，下一个应为 `0022_<verb>_<scope>.sql`。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/v1-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
@@ -83,7 +83,7 @@
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
-> ⚠️ **已知 gap**（值得记入 `docs/release/v1-gap-checklist.md`）：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。`migrate.Apply` 按文件名字典序排序，二者顺序由后缀决定，并不冲突；但序号撞车违反了"序号唯一"的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前最大为 `0020_create_renewal_decisions.sql`，下一个应为 `0021_*`，如果期间已有新迁移则继续顺延）。
+> ⚠️ **已知 gap**（值得记入 `docs/release/v1-gap-checklist.md`）：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。`migrate.Apply` 按文件名字典序排序，二者顺序由后缀决定，并不冲突；但序号撞车违反了"序号唯一"的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前最大为 `0021_create_asset_histories.sql`，下一个应为 `0022_*`，如果期间已有新迁移则继续顺延）。
 
 ---
 
@@ -154,7 +154,7 @@
 - VPS item/list API 可以补 `active_node_link_count`，VPS detail 可以返回 active Node 摘要；这些摘要通过 `internal/center/assetlinks.Repository` 查询，不要把 Node 查询 SQL 塞进 `store/vps_assets.go`。
 - Node 侧 VPS 摘要使用独立 `/api/nodes/{node_id}/vps` 查询，不把资产字段混入基础 `nodes.Record`。
 
-### Asset Ledger renewal decision history
+### Asset Ledger timeline histories
 
 `db/migrations/0020_create_renewal_decisions.sql` 添加 `renewal_decisions`，用于记录资产层 VPS 续费决策变化历史。它补充 `vps_assets.renewal_decision` 当前状态，不替代当前状态字段。
 
@@ -166,8 +166,18 @@
 - `decided_at` 默认 `now()`，领域入口可传入 UTC 时间；timeline 按 `decided_at desc, created_at desc, decision_id desc` 排序。
 - `PATCH /api/vps/{vps_id}` 只有在显式设置 `renewal_decision` 且最终值发生变化时才插入历史；只改其他字段或设置为原值不得插入历史。
 - VPS 当前状态更新与 history insert 必须在同一个事务中完成，并先 `select ... for update` 锁定 VPS 行，避免当前状态和历史漂移。
-- `GET /api/vps/{vps_id}/timeline` 第一版只返回 `renewal_decisions[]`，不得返回价格 / IP / 规格历史占位假数据。
+- `GET /api/vps/{vps_id}/timeline` 返回真实表驱动的 `renewal_decisions[]`、`price_histories[]`、`ip_histories[]`、`spec_snapshots[]`，不得返回占位假数据。
 - 续费决策历史不得创建 `vps_node_links`，不得改写 `nodes.provider`、Node lifecycle / monitoring / health、Target、Agent 或 subscription。
+
+`db/migrations/0021_create_asset_histories.sql` 添加 `price_histories`、`ip_histories`、`vps_spec_snapshots`，用于补齐资产层价格、IP、规格变化历史。三张表补充当前状态字段，不替代 `subscriptions` 或 `vps_assets` 当前状态。
+
+- `price_histories.price_history_id` 使用 `ids.New("ph")` 生成；`ip_histories.ip_history_id` 使用 `ids.New("iph")`；`vps_spec_snapshots.snapshot_id` 使用 `ids.New("vss")`。
+- `price_histories` 必须同时引用 `subscriptions(subscription_id)` 和 `vps_assets(vps_id)`；subscription PATCH 只有在价格、币种、计费周期、计费月数、月付折算、续费日、自动续费标记或状态最终发生变化时才插入历史。
+- subscription 当前状态更新与 price history insert 必须在同一个事务中完成，并先 `select ... for update` 锁定 subscription 行，避免当前订阅和历史漂移。
+- `ip_histories` 必须记录 IPv4 / IPv6 前后值，且只有至少一个 IP 字段变化时才插入；数据库约束 `ip_histories_changed` 兜底拒绝无变化历史。
+- `vps_spec_snapshots` 记录变化后的规格快照：`product_name`、`ssh_host`、`ssh_port`、`ssh_user`、`os_name`、`virtualization`。VPS PATCH 只有这些字段最终发生变化时才插入 snapshot。
+- VPS 当前状态更新与 IP / spec history insert 必须复用 VPS history 事务路径，并先 `select ... for update` 锁定 VPS 行。
+- 所有 history 仍属于 Asset Ledger，不得创建 `vps_node_links`，不得改写 `nodes.provider`、Node lifecycle / monitoring / health、Target、Agent 或 provider。
 
 ### Asset Ledger JSON import
 
