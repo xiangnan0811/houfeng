@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for final Task 5 verification."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify code lands in the expected backend packages and wiring points."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify migration and repository behavior preserves Asset Ledger and Node invariants."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify sentinel errors and HTTP mappings are consistent."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify required focused tests, router/bootstrap coverage, and make verify-go."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify schema/store/API response boundaries remain coherent."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch and PR flow constraints remain satisfied."}
