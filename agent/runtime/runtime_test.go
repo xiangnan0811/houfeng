@@ -601,10 +601,15 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 	}
 
 	client := &fakeClient{}
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, store)
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	fileStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+	store := &cancelAfterDeleteQueue{
+		FileStore:    fileStore,
+		afterDeletes: 1,
+		cancel:       cancel,
+	}
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, store)
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}

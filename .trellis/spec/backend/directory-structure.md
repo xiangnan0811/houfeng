@@ -56,6 +56,7 @@
 │   │   ├── syncing/           # /api/agent/sync 的批量 ingest 管线
 │   │   ├── retention/         # 按表 retention worker
 │   │   ├── settings/          # CenterSettings 模型 + Repository
+│   │   ├── providers/         # Asset Ledger 服务商主数据 + Repository 接口
 │   │   ├── targets/           # Target / ProbeItem 领域类型与频率档枚举
 │   │   ├── nodes/             # Node 领域类型 + Repository 接口
 │   │   ├── agentplan/         # 下发给 agent 的 plan 类型
@@ -65,7 +66,7 @@
 │   └── contracts/
 │       └── agentapi/          # ★ center 与 agent 共享的契约：路径、类型、错误码
 ├── db/
-│   └── migrations/            # 0001_*.sql … 0010_*.sql + embed.go（embed.FS）
+│   └── migrations/            # 迁移文件 + embed.go（embed.FS），当前最大 0016_create_asset_ledger.sql
 ├── docs/                      # 设计基线 / 部署 / 验证
 ├── scripts/                   # verify.sh 等
 ├── bin/                       # build 产物（go build 输出）
@@ -108,6 +109,7 @@
 | `metadata.go` | 元数据查询辅助 |
 | `node_onboarding.go` | 节点接入与 binding 操作 |
 | `nodes.go` | `/api/nodes`、`/api/nodes/{id}` |
+| `providers.go` | `/api/providers`、`/api/providers/{provider_id}` |
 | `runtime_controls.go` | 节点 / 目标 runtime 控制（含维护开关） |
 | `runtime_facts.go` | 节点 / 目标运行时事实 |
 | `settings.go` | `/api/settings` |
@@ -123,9 +125,9 @@
 
 ```
 agent_plan.go      dashboard.go     incidents.go     nodes.go
-observations.go    postgres.go      probe_metadata.go retention.go
-runtime_facts.go   sessions.go      settings.go      sync_batches.go
-targets.go         users.go         migrate/
+observations.go    postgres.go      probe_metadata.go providers.go
+retention.go       runtime_facts.go sessions.go       settings.go
+sync_batches.go    targets.go       users.go          migrate/
 ```
 
 每个文件提供一个 `NewPostgres<Aggregate>Repository(*pgxpool.Pool)` 构造器（参见 `store/nodes.go:34-36`）。`postgres.go` 提供共享的 `OpenPostgres` 入口（`store/postgres.go:11-31`）。
@@ -191,7 +193,7 @@ center 与 agent 同时引用的唯一契约包。内容：
 - 测试文件：`<file>_test.go`，与被测文件**同目录同包**；端到端测试加 `_e2e_test.go` 后缀（参考 `internal/center/http/auth_e2e_test.go`）。
 - 仓库类型：`Postgres<Aggregate>Repository`，构造器 `NewPostgres<Aggregate>Repository`。
 - HTTP handler 工厂：`handlers.<Resource>(repoOrSvc)` 或 `handlers.<Resource><Action>(...)`，统一返回 `http.Handler`，由 `bootstrap.go` 注入到 `RouterOptions`。
-- 迁移文件：`<NNNN>_<verb>_<scope>.sql`，序号 4 位起步、动词放第一个（`add`、`normalize`），见 `db/migrations/0001_initial_schema.sql` … `0010_add_users_and_sessions.sql`。
+- 迁移文件：`<NNNN>_<verb>_<scope>.sql`，序号 4 位起步、动词放第一个（`add`、`normalize`、`create`），见 `db/migrations/0001_initial_schema.sql` … `0016_create_asset_ledger.sql`。
 
 ---
 
@@ -212,6 +214,7 @@ center 与 agent 同时引用的唯一契约包。内容：
 以下是当前代码库内"组织到位"的真实参考点：
 
 - **HTTP 资源完整一条线**：`internal/center/http/handlers/nodes.go`（handler）+ `internal/center/http/handlers/nodes_test.go`（table-driven 测试）+ `internal/center/store/nodes.go`（仓库）+ `internal/center/nodes/`（领域类型）+ `cmd/houfeng-center/bootstrap.go:122-131`（wiring）。
+- **Asset Ledger providers 完整一条线**：`internal/center/http/handlers/providers.go`（handler）+ `internal/center/store/providers.go`（仓库）+ `internal/center/providers/`（领域类型 / 校验 / PATCH presence helper）+ `db/migrations/0016_create_asset_ledger.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源是资产层服务商主数据，不回写 `nodes.provider`。
 - **Settings-aware notifier**：`internal/center/notify/`（基础 Telegram 客户端）被 `internal/center/incidents/` 用 `NewSettingsAwareNotifier` 包装，最终在 `bootstrap.go:88-99` 装配，体现"领域子包负责行为，bootstrap 负责拼装"。
 - **agent ↔ center 契约**：`internal/contracts/agentapi/routes.go` + `types.go` 同时被 `internal/center/http/handlers/agent.go` 与 `agent/runtime/` 引用。
 - **迁移闭环**：`db/migrations/0010_add_users_and_sessions.sql`（schema） + `internal/center/store/users.go` + `internal/center/store/sessions.go`（仓库） + `internal/center/auth/`（领域）+ `bootstrap.go:102-113`（wiring）。

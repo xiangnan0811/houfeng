@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch governance, PR landing expectations, and no protected-branch edits."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check the database-domain-store-HTTP-router-bootstrap contract is coherent."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline entry point and authority ordering."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Check new files are placed in the expected backend directories."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Check migration numbering, schema constraints, and pgx repository patterns."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Check provider sentinel errors and HTTP mapping."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Run and assess required quality gates and test coverage."}
+{"file": ".trellis/tasks/05-08-asset-ledger-providers/research/repo-patterns.md", "reason": "Check implementation follows local provider vertical-slice pattern notes."}

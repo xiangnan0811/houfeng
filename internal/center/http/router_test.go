@@ -129,6 +129,84 @@ func TestRouterDispatchesTargetProbeItemsAPI(t *testing.T) {
 	}
 }
 
+func TestRouterDispatchesProviderAPIs(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		ProvidersCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "collection"
+			w.WriteHeader(http.StatusOK)
+		}),
+		ProviderItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "item"
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/providers", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("collection status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "collection" {
+		t.Fatalf("called = %q, want collection", called)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/providers/pv_001", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("item status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "item" {
+		t.Fatalf("called = %q, want item", called)
+	}
+}
+
+func TestRouterProtectsProviderRoutes(t *testing.T) {
+	collectionCalled := false
+	itemCalled := false
+	middlewareCalls := 0
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		ProvidersCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			collectionCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		ProviderItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			itemCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		AuthMiddleware: func(_ http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				middlewareCalls++
+				w.WriteHeader(http.StatusUnauthorized)
+			})
+		},
+	})
+
+	for _, path := range []string{"/api/providers", "/api/providers/pv_001"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusUnauthorized)
+		}
+	}
+	if collectionCalled {
+		t.Fatal("provider collection handler was called despite auth middleware blocking")
+	}
+	if itemCalled {
+		t.Fatal("provider item handler was called despite auth middleware blocking")
+	}
+	if middlewareCalls != 2 {
+		t.Fatalf("middleware calls = %d, want 2", middlewareCalls)
+	}
+}
+
 type fakeNodeRepository struct {
 	listNodesResult  []nodes.Record
 	getNodeResult    nodes.Record
@@ -366,12 +444,22 @@ func TestRouterRegistersAuthRoutesPublic(t *testing.T) {
 }
 
 func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
-	innerCalled := false
+	dashboardInnerCalled := false
+	providersInnerCalled := false
+	providerItemInnerCalled := false
 	mwCalled := false
 	opts := centerhttp.RouterOptions{
 		Version: "test",
 		DashboardHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			innerCalled = true
+			dashboardInnerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		ProvidersCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			providersInnerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		ProviderItemHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			providerItemInnerCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
 		AuthMiddleware: func(_ http.Handler) http.Handler {
@@ -388,11 +476,39 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 (middleware should block)", w.Code)
 	}
-	if innerCalled {
+	if dashboardInnerCalled {
 		t.Fatal("inner dashboard handler must not be called when middleware blocks")
 	}
 	if !mwCalled {
 		t.Fatal("middleware not invoked")
+	}
+
+	mwCalled = false
+	r = httptest.NewRequest(http.MethodGet, "/api/providers", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("provider status = %d, want 401 (middleware should block)", w.Code)
+	}
+	if providersInnerCalled {
+		t.Fatal("inner provider handler must not be called when middleware blocks")
+	}
+	if !mwCalled {
+		t.Fatal("middleware not invoked for provider route")
+	}
+
+	mwCalled = false
+	r = httptest.NewRequest(http.MethodGet, "/api/providers/pv_001", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("provider item status = %d, want 401 (middleware should block)", w.Code)
+	}
+	if providerItemInnerCalled {
+		t.Fatal("inner provider item handler must not be called when middleware blocks")
+	}
+	if !mwCalled {
+		t.Fatal("middleware not invoked for provider item route")
 	}
 }
 

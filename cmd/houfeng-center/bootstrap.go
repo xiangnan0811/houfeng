@@ -70,6 +70,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 
 	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
+	providerRepo := store.NewPostgresProviderRepository(db.Pool())
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
 	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
@@ -121,6 +122,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		EventsHandler:                   handlers.Events(dashboardRepo),
 		IncidentsHandler:                handlers.Incidents(incidentRepo),
 		SettingsHandler:                 handlers.Settings(settingsHandlerRepo),
+		ProvidersCollectionHandler:      handlers.ProvidersCollection(providerRepo),
+		ProviderItemHandler:             handlers.ProviderItem(providerRepo),
 		NodesCollectionHandler:          handlers.NodesCollection(nodeRepo),
 		NodeItemHandler:                 handlers.NodeItem(nodeRepo),
 		NodeRuntimeFactsHandler:         handlers.NodeRuntimeFacts(runtimeFactsRepo),

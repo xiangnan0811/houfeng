@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "All implementation must stay on the feature branch and respect PR-based landing."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Providers slice spans database, domain, store, HTTP handlers, router, and bootstrap wiring."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "New backend code should reuse existing repository, handler, validation, ID, and test patterns."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline entry point and source-of-truth ordering."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Required placement for new backend domain, store, handler, router, bootstrap, and migration files."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "PostgreSQL migration numbering, schema, pgx, and repository conventions."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Sentinel errors, errors.Is, and HTTP error mapping conventions."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required Go tests, verification commands, and review expectations."}
+{"file": ".trellis/tasks/05-08-asset-ledger-providers/research/repo-patterns.md", "reason": "Repo-local provider vertical-slice implementation pattern notes."}
