@@ -5,6 +5,36 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NodeDetailPage } from './NodeDetailPage'
 import { formatDateTime } from '../lib/format'
 
+class MockIntersectionObserver implements IntersectionObserver {
+  private readonly callback: IntersectionObserverCallback
+  readonly root = null
+  readonly rootMargin = ''
+  readonly scrollMargin = ''
+  readonly thresholds = []
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback
+  }
+
+  observe(target: Element) {
+    this.callback([
+      {
+        isIntersecting: true,
+        target,
+        intersectionRatio: 1,
+        boundingClientRect: target.getBoundingClientRect(),
+        intersectionRect: target.getBoundingClientRect(),
+        rootBounds: null,
+        time: Date.now(),
+      } as IntersectionObserverEntry,
+    ], this)
+  }
+
+  disconnect() {}
+  takeRecords() { return [] }
+  unobserve() {}
+}
+
 function mockJSONResponse(body: unknown, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -122,6 +152,80 @@ function NodeDetailTestHarness() {
 describe('NodeDetailPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('loads linked VPS summaries when the asset ledger section is visible', async () => {
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_001',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '在用',
+          monitoring_status: '启用',
+          binding_status: '已绑定',
+          labels: ['核心', 'edge'],
+          note: '',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_sync_at: '2026-04-24T09:05:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          node_id: 'nd_001',
+          latest_host_sample: null,
+          recent_host_samples: [],
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            vps_id: 'vps_001',
+            display_name: 'Tokyo Edge VPS',
+            provider_id: 'pv_001',
+            provider_name: 'Hetzner',
+            country: 'JP',
+            region: 'Kanto',
+            city: 'Tokyo',
+            lifecycle_status: 'active',
+            usage_status: 'in_use',
+            renewal_decision: 'keep',
+            importance: 'normal',
+            labels: ['asset-ledger'],
+            archived_at: null,
+            linked_at: '2026-04-24T09:06:00Z',
+            note: 'primary host',
+          },
+        ]),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_001']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge VPS')).toBeInTheDocument())
+    expect(screen.getByText('primary host')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_001/vps', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
   })
 
   it('renders node header and latest host sample cards', async () => {

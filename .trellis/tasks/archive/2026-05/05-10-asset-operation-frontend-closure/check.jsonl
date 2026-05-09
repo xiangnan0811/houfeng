@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify no direct fetch and typed API helpers/types remain aligned with backend JSON."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Verify UI additions fit page/component boundaries and naming style."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Verify new styles use existing tokens and BEM-style class names."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Verify focused tests plus lint/build/verify-web are run."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify work stays on feature branch and follows PR merge workflow."}
+{"file": "houfeng_codex_下一步开发计划.md", "reason": "Verify implementation closes first-phase criteria 5, 7, and 10 while leaving real data import deferred."}

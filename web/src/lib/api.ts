@@ -6,6 +6,7 @@ import type {
   CreateSubscriptionInput,
   CreateTargetInput,
   CreateVPSAssetInput,
+  LinkVPSNodeInput,
   UpdateProbeItemInput,
   DashboardOverview,
   EventListFilter,
@@ -25,11 +26,14 @@ import type {
   TargetRecord,
   TargetRuntimeFacts,
   TargetSparklinesResponse,
+  UnlinkVPSNodeInput,
   UpdateNodeMetadataInput,
   UpdateTargetMetadataInput,
+  UpdateVPSAssetInput,
   VPSAssetDetail,
   VPSAssetListFilter,
   VPSAssetRecord,
+  VPSNodeLinkRecord,
   VPSNodeSummary,
   VPSSummary,
   VPSTimeline,
@@ -431,12 +435,24 @@ export function getVPSAsset(vpsId: string) {
   return requestJSON<VPSAssetDetail>(`/api/vps/${vpsId}`)
 }
 
+export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promise<VPSAssetRecord> {
+  return patchJSONBody<VPSAssetRecord>(`/api/vps/${vpsId}`, input)
+}
+
 export function getVPSTimeline(vpsId: string) {
   return requestJSON<VPSTimeline>(`/api/vps/${vpsId}/timeline`)
 }
 
 export function listVPSNodes(vpsId: string) {
   return requestJSON<VPSNodeSummary[]>(`/api/vps/${vpsId}/nodes`)
+}
+
+export function linkVPSNode(vpsId: string, input: LinkVPSNodeInput): Promise<VPSNodeLinkRecord> {
+  return postJSONBody<VPSNodeLinkRecord>(`/api/vps/${vpsId}/link-node`, input)
+}
+
+export function unlinkVPSNode(vpsId: string, input: UnlinkVPSNodeInput): Promise<VPSNodeLinkRecord> {
+  return postJSONBody<VPSNodeLinkRecord>(`/api/vps/${vpsId}/unlink-node`, input)
 }
 
 export function listVPSForNode(nodeId: string) {

@@ -1,8 +1,16 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { VPSDetailPage } from './VPSDetailPage'
+
+const timelineEmptyBody = {
+  vps_id: 'vps_001',
+  renewal_decisions: [],
+  price_histories: [],
+  ip_histories: [],
+  spec_snapshots: [],
+}
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -170,6 +178,236 @@ describe('VPSDetailPage', () => {
     expect(screen.getAllByText('USD 10.00 -> USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getByText('192.0.2.10 -> 192.0.2.1')).toBeInTheDocument()
     expect(screen.getByText('root@192.0.2.1:22')).toBeInTheDocument()
+  })
+
+  it('updates the renewal decision and refreshes asset history', async () => {
+    const detailBody = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: 'ord-1',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: 'nrt',
+      ipv4: '192.0.2.1',
+      ipv6: '',
+      ssh_host: '192.0.2.1',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: 'Debian',
+      virtualization: 'kvm',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: 'primary',
+      active_node_link_count: 0,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+      node_links: [],
+    }
+    const updatedRecord = {
+      ...detailBody,
+      renewal_decision: 'cancel',
+      updated_at: '2026-05-09T09:00:00Z',
+      active_node_link_count: 0,
+    }
+    const refreshedDetail = {
+      ...updatedRecord,
+      node_links: [],
+    }
+    const refreshedTimeline = {
+      vps_id: 'vps_001',
+      renewal_decisions: [
+        {
+          decision_id: 'rdec_002',
+          vps_id: 'vps_001',
+          from_decision: 'keep',
+          to_decision: 'cancel',
+          reason: 'too expensive',
+          decided_at: '2026-05-09T09:01:00Z',
+          created_at: '2026-05-09T09:01:00Z',
+        },
+      ],
+      price_histories: [],
+      ip_histories: [],
+      spec_snapshots: [],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(updatedRecord))
+      .mockResolvedValueOnce(mockJSONResponse(refreshedDetail))
+      .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('续费决策'), { target: { value: 'cancel' } })
+    fireEvent.change(screen.getByLabelText('决策理由'), { target: { value: 'too expensive' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
+
+    await waitFor(() => expect(screen.getByText('续费决策已更新，资产历史已刷新')).toBeInTheDocument())
+    expect(screen.getByText('保留 -> 取消')).toBeInTheDocument()
+    expect(screen.getByText('too expensive')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        renewal_decision: 'cancel',
+        renewal_reason: 'too expensive',
+      }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/timeline', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('links and unlinks Node monitoring from a VPS asset', async () => {
+    const detailBody = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: 'ord-1',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: 'nrt',
+      ipv4: '192.0.2.1',
+      ipv6: '',
+      ssh_host: '192.0.2.1',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: 'Debian',
+      virtualization: 'kvm',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: 'primary',
+      active_node_link_count: 0,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+      node_links: [],
+    }
+    const linkedDetail = {
+      ...detailBody,
+      active_node_link_count: 1,
+      node_links: [
+        {
+          node_id: 'nd_002',
+          display_name: 'Seoul Node',
+          group: 'edge',
+          region: 'KR',
+          city: 'Seoul',
+          provider: 'Node Hint',
+          lifecycle_status: '在用',
+          monitoring_status: '启用',
+          binding_status: '已绑定',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-05-09T08:10:00Z',
+          last_sync_at: '2026-05-09T08:11:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          linked_at: '2026-05-09T09:02:00Z',
+          note: 'secondary',
+        },
+      ],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse({
+        link_id: 'vpn_001',
+        vps_id: 'vps_001',
+        node_id: 'nd_002',
+        linked_at: '2026-05-09T09:02:00Z',
+        unlinked_at: null,
+        note: 'secondary',
+      }, 201))
+      .mockResolvedValueOnce(mockJSONResponse(linkedDetail))
+      .mockResolvedValueOnce(mockJSONResponse({
+        link_id: 'vpn_001',
+        vps_id: 'vps_001',
+        node_id: 'nd_002',
+        linked_at: '2026-05-09T09:02:00Z',
+        unlinked_at: '2026-05-09T09:04:00Z',
+        note: 'secondary',
+      }))
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Node ID'), { target: { value: 'nd_002' } })
+    fireEvent.change(screen.getByLabelText('关联备注'), { target: { value: 'secondary' } })
+    fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
+
+    await waitFor(() => expect(screen.getByText('Seoul Node')).toBeInTheDocument())
+    expect(screen.getByText('Node 关联已更新')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/link-node', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({ node_id: 'nd_002', note: 'secondary' }),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '解除关联' }))
+    await waitFor(() => expect(screen.queryByText('Seoul Node')).not.toBeInTheDocument())
+    expect(screen.getByText('Node 关联已解除')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/unlink-node', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({ node_id: 'nd_002', note: 'secondary' }),
+    })
   })
 
   it('renders compact empty states when the VPS has no timeline records', async () => {
