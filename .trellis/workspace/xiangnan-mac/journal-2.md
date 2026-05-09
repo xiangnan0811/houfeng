@@ -215,3 +215,37 @@ Implemented VPS to Node link backend, active link summaries, schema, routing, te
 ### Next Steps
 
 - None - task complete
+
+
+## Session 66: Asset frontend pages
+
+**Date**: 2026-05-09
+**Task**: Asset frontend pages
+**Branch**: `feat/asset-frontend-pages`
+
+### Summary
+
+Implemented asset ledger frontend routes for providers, VPS assets/details, and subscriptions; added API/type helpers, navigation, formatting utilities, page tests, and verification records.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `41a52d3` | (see git log) |
+| `35804bf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

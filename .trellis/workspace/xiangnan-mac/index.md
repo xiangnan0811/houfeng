@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 65
+- **Total Sessions**: 66
 - **Last Active**: 2026-05-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~217 | Active |
+| `journal-2.md` | ~251 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 66 | 2026-05-09 | Asset frontend pages | `41a52d3`, `35804bf` | `feat/asset-frontend-pages` |
 | 65 | 2026-05-09 | VPS node links backend | `a08643f`, `3b951b2`, `c815834` | `feat/vps-node-links` |
 | 64 | 2026-05-09 | VPS JSON import dry-run | `73b98c8`, `adb1869`, `0f31c08` | `feat/vps-json-import-dry-run` |
 | 63 | 2026-05-09 | Subscriptions backend slice | `b1cd94d`, `e4d8aae`, `a64ffde` | `feat/subscriptions-backend` |
