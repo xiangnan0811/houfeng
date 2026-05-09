@@ -242,7 +242,6 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 		SSHPort:         vpsassets.PatchInt(2200),
 		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleArchived),
 		UsageStatus:     vpsassets.PatchUsage(vpsassets.UsageIdle),
-		RenewalDecision: vpsassets.PatchRenewal(vpsassets.RenewalCancel),
 		Importance:      vpsassets.PatchString(" critical "),
 		Labels:          vpsassets.PatchLabels([]string{" edge ", "backup", "edge"}),
 	})
@@ -336,6 +335,143 @@ func TestPostgresVPSAssetPatchWithoutChangesReturnsExistingAsset(t *testing.T) {
 	}
 }
 
+func TestPostgresVPSAssetPatchRecordsRenewalDecisionHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	tx := &fakeVPSAssetTx{}
+	var calls []string
+	var args [][]any
+	tx.queryRow = func(_ context.Context, sql string, callArgs ...any) pgx.Row {
+		calls = append(calls, sql)
+		args = append(args, append([]any(nil), callArgs...))
+		switch {
+		case strings.Contains(sql, "for update"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Tokyo Edge",
+					SSHPort:         22,
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalKeep,
+					Importance:      "normal",
+					CreatedAt:       now,
+					UpdatedAt:       now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "update vps_assets"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Tokyo Edge",
+					SSHPort:         22,
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalCancel,
+					Importance:      "normal",
+					CreatedAt:       now.Add(-time.Hour),
+					UpdatedAt:       now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "insert into renewal_decisions"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "rdec_001"
+				*(dest[1].(*string)) = "vps_001"
+				fromDecision := "keep"
+				*(dest[2].(**string)) = &fromDecision
+				*(dest[3].(*string)) = "cancel"
+				*(dest[4].(*string)) = "too expensive"
+				*(dest[5].(*time.Time)) = now
+				*(dest[6].(*time.Time)) = now
+				return nil
+			}}
+		default:
+			t.Fatalf("unexpected QueryRow SQL %q", sql)
+			return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+		}
+	}
+
+	repo := &PostgresVPSAssetRepository{
+		db: fakeVPSAssetDB{},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
+
+	record, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
+		RenewalDecision: vpsassets.PatchRenewal(vpsassets.RenewalCancel),
+		RenewalReason:   vpsassets.PatchString(" too expensive "),
+	})
+	if err != nil {
+		t.Fatalf("PatchVPSAsset() error = %v", err)
+	}
+	if record.RenewalDecision != vpsassets.RenewalCancel {
+		t.Fatalf("RenewalDecision = %q, want cancel", record.RenewalDecision)
+	}
+	if !tx.committed || tx.rolledBack == 0 {
+		t.Fatalf("transaction committed=%t rollbackCalls=%d, want committed with deferred rollback", tx.committed, tx.rolledBack)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("query row calls = %d, want lock/update/insert", len(calls))
+	}
+	if !strings.Contains(calls[0], "for update") || !strings.Contains(calls[2], "insert into renewal_decisions") {
+		t.Fatalf("calls = %#v, want lock then history insert", calls)
+	}
+	historyArgs := args[2]
+	if len(historyArgs) != 6 || historyArgs[1] != "vps_001" || historyArgs[2] != "keep" || historyArgs[3] != "cancel" || historyArgs[4] != "too expensive" {
+		t.Fatalf("history args = %#v, want keep -> cancel with reason", historyArgs)
+	}
+}
+
+func TestPostgresVPSAssetPatchSkipsRenewalDecisionHistoryWhenDecisionUnchanged(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	tx := &fakeVPSAssetTx{}
+	insertedHistory := false
+	tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
+		switch {
+		case strings.Contains(sql, "for update"), strings.Contains(sql, "update vps_assets"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Tokyo Edge",
+					SSHPort:         22,
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalKeep,
+					Importance:      "normal",
+					CreatedAt:       now,
+					UpdatedAt:       now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "insert into renewal_decisions"):
+			insertedHistory = true
+			return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+		default:
+			t.Fatalf("unexpected QueryRow SQL %q", sql)
+			return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+		}
+	}
+
+	repo := &PostgresVPSAssetRepository{
+		db: fakeVPSAssetDB{},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
+	if _, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{RenewalDecision: vpsassets.PatchRenewal(vpsassets.RenewalKeep)}); err != nil {
+		t.Fatalf("PatchVPSAsset() error = %v", err)
+	}
+	if insertedHistory {
+		t.Fatal("PatchVPSAsset() inserted renewal history for unchanged decision")
+	}
+}
+
 func TestPostgresVPSAssetMapsNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -420,6 +556,51 @@ func (f fakeVPSAssetDB) QueryRow(ctx context.Context, sql string, args ...any) p
 	}
 	return f.queryRow(ctx, sql, args...)
 }
+
+type fakeVPSAssetTx struct {
+	queryRow   func(context.Context, string, ...any) pgx.Row
+	query      func(context.Context, string, ...any) (pgx.Rows, error)
+	exec       func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	committed  bool
+	rolledBack int
+}
+
+func (f *fakeVPSAssetTx) Begin(context.Context) (pgx.Tx, error) { return f, nil }
+func (f *fakeVPSAssetTx) Commit(context.Context) error {
+	f.committed = true
+	return nil
+}
+func (f *fakeVPSAssetTx) Rollback(context.Context) error {
+	f.rolledBack++
+	return nil
+}
+func (f *fakeVPSAssetTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (f *fakeVPSAssetTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
+func (f *fakeVPSAssetTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+func (f *fakeVPSAssetTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	return nil, nil
+}
+func (f *fakeVPSAssetTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if f.exec != nil {
+		return f.exec(ctx, sql, args...)
+	}
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+func (f *fakeVPSAssetTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.query != nil {
+		return f.query(ctx, sql, args...)
+	}
+	return nil, nil
+}
+func (f *fakeVPSAssetTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if f.queryRow != nil {
+		return f.queryRow(ctx, sql, args...)
+	}
+	return fakeVPSAssetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+}
+func (f *fakeVPSAssetTx) Conn() *pgx.Conn { return nil }
 
 type fakeVPSAssetRow struct {
 	scan func(dest ...any) error

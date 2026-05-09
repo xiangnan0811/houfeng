@@ -22,6 +22,7 @@ type RouterOptions struct {
 	VPSNodesHandler                 stdhttp.Handler
 	VPSLinkNodeHandler              stdhttp.Handler
 	VPSUnlinkNodeHandler            stdhttp.Handler
+	VPSTimelineHandler              stdhttp.Handler
 	SubscriptionsCollectionHandler  stdhttp.Handler
 	SubscriptionItemHandler         stdhttp.Handler
 	NodesCollectionHandler          stdhttp.Handler
@@ -103,7 +104,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil {
+	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil || opts.VPSTimelineHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -136,6 +137,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSUnlinkNodeHandler.ServeHTTP(w, r)
+			case vpsSubtreeTimeline:
+				if opts.VPSTimelineHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSTimelineHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -306,6 +313,7 @@ const (
 	vpsSubtreeNodes      vpsSubtree = "nodes"
 	vpsSubtreeLinkNode   vpsSubtree = "link-node"
 	vpsSubtreeUnlinkNode vpsSubtree = "unlink-node"
+	vpsSubtreeTimeline   vpsSubtree = "timeline"
 )
 
 func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
@@ -331,6 +339,8 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeLinkNode
 	case "unlink-node":
 		return segments[0], vpsSubtreeUnlinkNode
+	case "timeline":
+		return segments[0], vpsSubtreeTimeline
 	default:
 		return segments[0], vpsSubtreeUnknown
 	}

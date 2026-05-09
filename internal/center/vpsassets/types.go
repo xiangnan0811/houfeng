@@ -128,6 +128,7 @@ type PatchInput struct {
 	LifecycleStatus OptionalLifecycle      `json:"lifecycle_status"`
 	UsageStatus     OptionalUsage          `json:"usage_status"`
 	RenewalDecision OptionalRenewal        `json:"renewal_decision"`
+	RenewalReason   OptionalString         `json:"renewal_reason"`
 	Importance      OptionalString         `json:"importance"`
 	Labels          OptionalLabels         `json:"labels"`
 	Note            OptionalString         `json:"note"`
@@ -387,6 +388,7 @@ func NormalizePatchInput(input PatchInput) PatchInput {
 	if input.RenewalDecision.Set {
 		input.RenewalDecision.Value = RenewalDecision(strings.TrimSpace(string(input.RenewalDecision.Value)))
 	}
+	input.RenewalReason = normalizeOptionalString(input.RenewalReason)
 	input.Importance = normalizeOptionalString(input.Importance)
 	if input.Labels.Set {
 		input.Labels.Values = NormalizeLabels(input.Labels.Values)
@@ -407,6 +409,9 @@ func ValidatePatchInput(input PatchInput) error {
 	}
 	if input.RenewalDecision.Set && !IsValidRenewalDecision(input.RenewalDecision.Value) {
 		return fmt.Errorf("%w: invalid renewal_decision", ErrInvalidVPSAssetInput)
+	}
+	if input.RenewalReason.Set && !input.RenewalDecision.Set {
+		return fmt.Errorf("%w: renewal_reason requires renewal_decision", ErrInvalidVPSAssetInput)
 	}
 	if input.SSHPort.Set && !IsValidSSHPort(input.SSHPort.Value) {
 		return fmt.Errorf("%w: ssh_port must be between 1 and 65535", ErrInvalidVPSAssetInput)
