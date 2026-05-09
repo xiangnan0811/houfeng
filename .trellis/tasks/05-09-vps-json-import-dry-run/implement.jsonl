@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index for Asset Ledger import implementation"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Confirms cmd remains thin and domain logic belongs under internal/center"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Repository, transaction, migration, and Asset Ledger invariants"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Sentinel error and wrapping conventions for command and import package"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required Go tests and verification expectations"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Non-main branch and PR workflow governance"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing validation and normalization helpers"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Import data flow spans CLI, domain, store, and database"}
+{"file":".trellis/tasks/05-09-vps-json-import-dry-run/research/repo-patterns.md","reason":"Repo-local CLI, validation, store, and verification patterns for Task 4"}
