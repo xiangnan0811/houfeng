@@ -198,6 +198,12 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSItemHandler == nil {
 		t.Fatal("router vps item handler = nil, want non-nil")
 	}
+	if gotOpts.SubscriptionsCollectionHandler == nil {
+		t.Fatal("router subscriptions collection handler = nil, want non-nil")
+	}
+	if gotOpts.SubscriptionItemHandler == nil {
+		t.Fatal("router subscription item handler = nil, want non-nil")
+	}
 	if gotOpts.NodesCollectionHandler == nil {
 		t.Fatal("router nodes collection handler = nil, want non-nil")
 	}
