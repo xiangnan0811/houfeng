@@ -7,7 +7,7 @@ const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: ''
 const sync = { state: 'ok' as const, label: '摘要已加载', meta: 'v1.0 · dashboard 14:32:01' }
 
 describe('Sidebar', () => {
-  it('renders brand and 5 nav items', () => {
+  it('renders brand and asset-aware nav items', () => {
     render(
       <MemoryRouter>
         <Sidebar
@@ -20,7 +20,7 @@ describe('Sidebar', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText('候风')).toBeInTheDocument()
-    for (const label of ['首页', '节点', '目标', '事件', '设置']) {
+    for (const label of ['首页', 'VPS', '服务商', '订阅', '节点', '目标', '事件', '设置']) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
   })
@@ -39,7 +39,7 @@ describe('Sidebar', () => {
     )
     const links = screen.getAllByRole('link')
     const linkText = links.map((link) => link.textContent)
-    expect(linkText).toEqual(['首页', '节点3', '目标1', '事件', '设置'])
+    expect(linkText).toEqual(['首页', 'VPS', '服务商', '订阅', '节点3', '目标1', '事件', '设置'])
     expect(screen.getByText('3')).toHaveClass('badge--count')
     expect(screen.getByText('3')).not.toHaveClass('tone--alert', 'tone--critical')
     expect(screen.getByText('1')).toHaveClass('badge--count')

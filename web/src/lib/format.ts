@@ -11,6 +11,21 @@ export function formatDateTime(value?: string | null) {
   }).format(date)
 }
 
+export function formatDate(value?: string | null) {
+  if (!value) return '—'
+  return value
+}
+
+export function formatOptional(value?: string | number | null) {
+  if (value == null || value === '') return '—'
+  return String(value)
+}
+
+export function formatMoney(value: number, currency: string) {
+  const amount = Number.isFinite(value) ? value.toFixed(2) : '0.00'
+  return `${currency || '---'} ${amount}`
+}
+
 export function formatPercent(value?: number | null, digits = 1) {
   if (value == null || Number.isNaN(value)) return '—'
   return `${value.toFixed(digits)}%`

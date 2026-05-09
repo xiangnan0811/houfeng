@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend task entrypoint and applicable guideline index."}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Check new page, lib, style, and colocated test placement."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check React component style, page composition, and anti-patterns."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check API client/type contracts, no direct fetch, and loading/error/data states."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check token-based CSS, BEM classes, and visual consistency."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check lint, tests, build, and required coverage for new pages."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Check branch and PR workflow compliance."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check frontend/backend data flow consistency."}

@@ -522,6 +522,236 @@ export type TargetSparklinesResponse = {
   targets: Record<string, { latency: (number | null)[] }>
 }
 
+export type ProviderRecord = {
+  provider_id: string
+  name: string
+  website: string
+  panel_url: string
+  account_hint: string
+  country: string
+  note: string
+  rating: number | null
+  labels: string[]
+  created_at: string
+  updated_at: string
+}
+
+export type CreateProviderInput = {
+  name: string
+  website: string
+  panel_url: string
+  account_hint: string
+  country: string
+  note: string
+  rating?: number | null
+  labels: string[]
+}
+
+export type VPSLifecycleStatus =
+  | 'active'
+  | 'idle'
+  | 'testing'
+  | 'to_migrate'
+  | 'to_cancel'
+  | 'cancelled'
+  | 'archived'
+
+export type VPSUsageStatus = 'in_use' | 'idle' | 'standby' | 'testing' | 'unknown'
+
+export type VPSRenewalDecision =
+  | 'unreviewed'
+  | 'keep'
+  | 'observe'
+  | 'migrate'
+  | 'cancel'
+  | 'auto_renew_cancelled'
+  | 'replaced'
+
+export type SubscriptionStatus = 'active' | 'paused' | 'cancelled' | 'expired' | 'unknown'
+
+export const VPS_LIFECYCLE_STATUS_LABELS: Record<VPSLifecycleStatus, string> = {
+  active: '在用',
+  idle: '闲置',
+  testing: '测试中',
+  to_migrate: '待迁移',
+  to_cancel: '待取消',
+  cancelled: '已取消',
+  archived: '已归档',
+}
+
+export const VPS_USAGE_STATUS_LABELS: Record<VPSUsageStatus, string> = {
+  in_use: '承载业务',
+  idle: '暂无用途',
+  standby: '备用',
+  testing: '测试用途',
+  unknown: '未确认',
+}
+
+export const VPS_RENEWAL_DECISION_LABELS: Record<VPSRenewalDecision, string> = {
+  unreviewed: '未评估',
+  keep: '保留',
+  observe: '观察',
+  migrate: '迁移',
+  cancel: '取消',
+  auto_renew_cancelled: '已取消自动续费',
+  replaced: '已替换',
+}
+
+export const SUBSCRIPTION_STATUS_LABELS: Record<SubscriptionStatus, string> = {
+  active: '生效中',
+  paused: '已暂停',
+  cancelled: '已取消',
+  expired: '已过期',
+  unknown: '未确认',
+}
+
+export type VPSAssetRecord = {
+  vps_id: string
+  display_name: string
+  provider_id?: string | null
+  provider_name: string
+  product_name: string
+  order_ref: string
+  country: string
+  region: string
+  city: string
+  datacenter: string
+  ipv4: string
+  ipv6: string
+  ssh_host: string
+  ssh_port: number
+  ssh_user: string
+  os_name: string
+  virtualization: string
+  lifecycle_status: VPSLifecycleStatus
+  usage_status: VPSUsageStatus
+  renewal_decision: VPSRenewalDecision
+  importance: string
+  labels: string[]
+  note: string
+  active_node_link_count: number
+  created_at: string
+  updated_at: string
+  archived_at?: string | null
+}
+
+export type CreateVPSAssetInput = {
+  display_name: string
+  provider_id?: string | null
+  provider_name: string
+  product_name: string
+  order_ref: string
+  country: string
+  region: string
+  city: string
+  datacenter: string
+  ipv4: string
+  ipv6: string
+  ssh_host: string
+  ssh_port?: number
+  ssh_user: string
+  os_name: string
+  virtualization: string
+  lifecycle_status: VPSLifecycleStatus
+  usage_status: VPSUsageStatus
+  renewal_decision?: VPSRenewalDecision
+  importance: string
+  labels: string[]
+  note: string
+}
+
+export type VPSAssetListFilter = {
+  provider_id?: string | null
+  lifecycle_status?: VPSLifecycleStatus | '' | null
+  usage_status?: VPSUsageStatus | '' | null
+  renewal_decision?: VPSRenewalDecision | '' | null
+}
+
+export type VPSNodeSummary = {
+  node_id: string
+  display_name: string
+  group: string
+  region: string
+  city: string
+  provider: string
+  lifecycle_status: string
+  monitoring_status: string
+  binding_status: string
+  current_health_status: IncidentSeverity | string
+  last_heartbeat_at?: string | null
+  last_sync_at?: string | null
+  current_active_incident_count: number
+  current_primary_issue_summary: string
+  linked_at: string
+  note: string
+}
+
+export type VPSAssetDetail = VPSAssetRecord & {
+  node_links: VPSNodeSummary[]
+}
+
+export type VPSSummary = {
+  vps_id: string
+  display_name: string
+  provider_id?: string | null
+  provider_name: string
+  country: string
+  region: string
+  city: string
+  lifecycle_status: VPSLifecycleStatus | string
+  usage_status: VPSUsageStatus | string
+  renewal_decision: VPSRenewalDecision | string
+  importance: string
+  labels: string[]
+  archived_at?: string | null
+  linked_at: string
+  note: string
+}
+
+export type SubscriptionRecord = {
+  subscription_id: string
+  vps_id: string
+  price: number
+  currency: string
+  billing_cycle: string
+  billing_months: number
+  monthly_price: number
+  started_at?: string | null
+  renew_at?: string | null
+  auto_renew: boolean
+  auto_renew_cancelled: boolean
+  status: SubscriptionStatus
+  payment_method: string
+  note: string
+  created_at: string
+  updated_at: string
+}
+
+export type CreateSubscriptionInput = {
+  vps_id: string
+  price: number
+  currency: string
+  billing_cycle: string
+  billing_months: number
+  started_at?: string | null
+  renew_at?: string | null
+  auto_renew: boolean
+  auto_renew_cancelled: boolean
+  status?: SubscriptionStatus
+  payment_method: string
+  note: string
+}
+
+export type SubscriptionListFilter = {
+  vps_id?: string | null
+  status?: SubscriptionStatus | '' | null
+  renew_before?: string | null
+  renew_after?: string | null
+  renew_within_days?: number | null
+  sort?: 'renew_at' | '' | null
+  order?: 'asc' | 'desc' | '' | null
+}
+
 export type SettingsUpdateInput = {
   telegram: SettingsTelegramInput
   feishu: FeishuSettingsInput

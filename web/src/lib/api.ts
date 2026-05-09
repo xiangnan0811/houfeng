@@ -1,8 +1,11 @@
 import type {
   ActiveIncidentRecord,
+  CreateProviderInput,
   CreateNodeInput,
   CreateProbeItemInput,
+  CreateSubscriptionInput,
   CreateTargetInput,
+  CreateVPSAssetInput,
   UpdateProbeItemInput,
   DashboardOverview,
   EventListFilter,
@@ -13,14 +16,22 @@ import type {
   NodeRuntimeFacts,
   NodeSparklinesResponse,
   ProbeItemRecord,
+  ProviderRecord,
   SettingsRecord,
   StateChangeEventRecord,
   SettingsUpdateInput,
+  SubscriptionListFilter,
+  SubscriptionRecord,
   TargetRecord,
   TargetRuntimeFacts,
   TargetSparklinesResponse,
   UpdateNodeMetadataInput,
   UpdateTargetMetadataInput,
+  VPSAssetDetail,
+  VPSAssetListFilter,
+  VPSAssetRecord,
+  VPSNodeSummary,
+  VPSSummary,
 } from './types'
 
 export class ApiError extends Error {
@@ -386,4 +397,65 @@ export function listHistoricalIncidents(objectType: string, objectId: string) {
       objectId,
     )}&include_resolved=true`,
   )
+}
+
+export function listProviders() {
+  return requestJSON<ProviderRecord[]>('/api/providers')
+}
+
+export function createProvider(input: CreateProviderInput): Promise<ProviderRecord> {
+  return postJSONBody<ProviderRecord>('/api/providers', input)
+}
+
+export function getProvider(providerId: string) {
+  return requestJSON<ProviderRecord>(`/api/providers/${providerId}`)
+}
+
+export function listVPSAssets(filter?: VPSAssetListFilter) {
+  return requestJSON<VPSAssetRecord[]>(
+    withQuery('/api/vps', {
+      provider_id: filter?.provider_id,
+      lifecycle_status: filter?.lifecycle_status,
+      usage_status: filter?.usage_status,
+      renewal_decision: filter?.renewal_decision,
+    }),
+  )
+}
+
+export function createVPSAsset(input: CreateVPSAssetInput): Promise<VPSAssetRecord> {
+  return postJSONBody<VPSAssetRecord>('/api/vps', input)
+}
+
+export function getVPSAsset(vpsId: string) {
+  return requestJSON<VPSAssetDetail>(`/api/vps/${vpsId}`)
+}
+
+export function listVPSNodes(vpsId: string) {
+  return requestJSON<VPSNodeSummary[]>(`/api/vps/${vpsId}/nodes`)
+}
+
+export function listVPSForNode(nodeId: string) {
+  return requestJSON<VPSSummary[]>(`/api/nodes/${nodeId}/vps`)
+}
+
+export function listSubscriptions(filter?: SubscriptionListFilter) {
+  return requestJSON<SubscriptionRecord[]>(
+    withQuery('/api/subscriptions', {
+      vps_id: filter?.vps_id,
+      status: filter?.status,
+      renew_before: filter?.renew_before,
+      renew_after: filter?.renew_after,
+      renew_within_days: filter?.renew_within_days,
+      sort: filter?.sort,
+      order: filter?.order,
+    }),
+  )
+}
+
+export function createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionRecord> {
+  return postJSONBody<SubscriptionRecord>('/api/subscriptions', input)
+}
+
+export function getSubscription(subscriptionId: string) {
+  return requestJSON<SubscriptionRecord>(`/api/subscriptions/${subscriptionId}`)
 }

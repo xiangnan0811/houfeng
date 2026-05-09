@@ -1965,6 +1965,127 @@ html.theme-classic-light .dashboard-status-bar {
   gap: var(--space-2);
 }
 
+/* Asset Ledger pages */
+.asset-page {
+  gap: var(--space-5);
+}
+
+.asset-page .page-panel form > .input-field,
+.asset-page .page-panel form > .asset-checkbox {
+  grid-column: auto;
+}
+
+.asset-table__identity,
+.asset-table__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.asset-table__identity strong,
+.asset-table__stack strong {
+  color: var(--text-primary);
+  font-size: var(--type-body-size);
+  font-weight: var(--type-h2-weight);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.asset-table__identity span,
+.asset-table__stack span {
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.asset-status-stack,
+.asset-labels,
+.asset-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.asset-hero-meta {
+  margin-top: var(--space-4);
+}
+
+.asset-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.asset-detail-grid__item {
+  background: var(--surface-elevated);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-2);
+  padding: var(--space-3);
+  min-width: 0;
+}
+
+.asset-detail-grid__item dt {
+  color: var(--text-muted);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+  margin-bottom: var(--space-1);
+}
+
+.asset-detail-grid__item dd {
+  color: var(--text-primary);
+  font-size: var(--type-body-size);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.asset-access-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+}
+
+.asset-access-line .hostname,
+.asset-access-line .mono-digits {
+  color: var(--text-primary);
+}
+
+.asset-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--type-body-size);
+  min-height: 38px;
+}
+
+.asset-checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.asset-table .data-table__cell {
+  vertical-align: top;
+}
+
+@media (max-width: 920px) {
+  .asset-page .page-panel--inline {
+    flex-direction: column;
+  }
+
+  .asset-page .page-panel__actions {
+    justify-content: flex-start;
+  }
+}
+
 /* Toolbar row: view tabs on the left (room for future filters/sort) */
 .nodes-page {
   gap: var(--space-4);
