@@ -52,6 +52,7 @@
 - `recent_events` 默认不在 Dashboard 首屏展开成事件列表。Dashboard 只保留 `查看事件流` / `/events?time_range=24h` 这类入口；复杂历史筛选、事件列表和上下文展开交给 EventsPage。
 - Dashboard 可以在主工作台内部展示一个低权重 `运行上下文` strip，用于补充同类服务器管理系统常见的影响范围、库存状态、最近活动。该 strip 最多 3 个 link item：不得恢复独立 KPI/summary strip，不得使用 `Group 摘要` / `最近事件摘要` heading，不得展示完整 group list 或 recent event summary 列表。最近活动只展示事件类型、严重度、对象和时间语义入口，具体事件摘要交给 EventsPage。视觉上它应是工作台内的 compact context rail，而不是三个同权摘要卡片。
 - `notification_status` 只能展示配置布尔摘要，例如 Telegram / Feishu 是否已配置、Telegram runtime apply 是否生效。前端不得要求或展示 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url` 等敏感配置值；需要编辑真实配置时跳转 SettingsPage。
+- `asset_summary` 只能展示 VPS Asset Ledger 的少量决策入口：30 天续费、待决策、待取消/迁移、未关联 Node、关联异常 VPS、按币种月付成本。它不能展开资产明细，不能替代 VPS / 订阅页面，也不能把 Dashboard 变成资产字段总表。第一版没有未关联 VPS 专用筛选时，可以链接 `/vps` 作为人工核对入口。
 - 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入节点、暂停节点、退役节点、暂停目标、归档目标。PR4 后，Dashboard 深链是受支持 contract：`/nodes?onboarding=pending` 表示待接入或绑定待处理节点，`/nodes?abnormal=1` 表示异常节点，`/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档` 表示对应目标列表筛选，`/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1` 表示事件页筛选；新增深链必须先在目标页面用 URL-state 和可见 chip/toggle 承接。
 - AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的节点/目标 count 可以来自 `abnormal_node_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
 
@@ -66,6 +67,9 @@ const groupSummaries = overview.abnormal_nodes.reduce(...)
 // 错误：要求 dashboard 暴露敏感通知配置
 overview.notification_status.telegram_bot_token
 
+// 错误：把资产摘要扩成资产明细 dump
+overview.asset_summary.vps_assets.map(...)
+
 // 错误：没有真实 health/sync contract 时伪造 Shell 健康状态
 <SyncStatus state="ok" label="中心运行正常" meta={`v1.0 · sync ${new Date().toISOString()}`} />
 
@@ -78,6 +82,7 @@ overview.notification_status.telegram_bot_token
 // 正确：只展示支撑当前决策路径的 dashboard contract 事实
 <DashboardInlineMetric label="异常对象" value={abnormalTotal} to="/nodes?abnormal=1" />
 <DashboardWorkbench title="当前需要处理" attentionItems={attentionItems} />
+<AssetDecisionSummary summary={overview.asset_summary} />
 <DashboardContextStrip items={['影响范围', '库存状态', '最近活动']} />
 <span>摘要生成 <Timestamp value={overview.snapshot_generated_at} /></span>
 <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
@@ -96,6 +101,7 @@ overview.notification_status.telegram_bot_token
 - Backend method: `PostgresDashboardRepository.GetDashboardOverview(ctx, limit)`。
 - Frontend API: `getDashboard(): Promise<DashboardOverview>`。
 - Frontend type: `web/src/lib/types.ts` 的 `DashboardOverview`，字段保持 center JSON snake_case。
+- Asset summary field: `DashboardOverview.asset_summary`，类型为 `DashboardAssetSummary`。
 
 #### 3. Contracts
 
@@ -103,6 +109,7 @@ overview.notification_status.telegram_bot_token
 - `snapshot_generated_at` 是 Center 生成 overview 的时间，只能被展示为 dashboard 生成时间。
 - `group_summaries` 必须由后端基于全量 `nodes` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce。
 - `notification_status` 只能包含配置布尔摘要，不包含 Telegram token/chat id 或 Feishu webhook URL。
+- `asset_summary` 只能包含聚合摘要：`renewal_due_30d_subscription_count`、`renewal_due_30d_vps_count`、`unreviewed_vps_count`、`to_cancel_vps_count`、`to_migrate_vps_count`、`unlinked_vps_count`、`abnormal_linked_vps_count`、`cost_by_currency[]`。`cost_by_currency[]` 只包含 `currency`、`monthly_total`、`yearly_total`。
 - 库存完整度计数必须来自后端 contract：待接入节点、暂停节点、退役节点、暂停目标、归档目标。
 
 #### 4. Validation & Error Matrix
@@ -114,19 +121,22 @@ overview.notification_status.telegram_bot_token
 | dashboard store 查询失败 | handler 返回 500，store error 用 `%w` 包装上下文 |
 | `center_settings` singleton 缺失 | `notification_status` 全 false，不返回错误 |
 | `group_summaries` 为空 | Dashboard 显示空态，不制造 `未分组 0` |
+| Asset Ledger 表为空 | `asset_summary` 返回 0 计数与空 `cost_by_currency`，Dashboard 显示低权重空态 |
 
 #### 5. Good/Base/Bad Cases
 
 - Good: group 只存在于 targets 时仍出现在 `group_summaries`，节点计数为 0、目标计数为真实值。
 - Base: 无节点无目标时 dashboard 仍返回 200，计数为 0，首次接入工作台显示，Group 区为空态。
+- Good: 资产摘要显示为工作台内低权重入口，链接到 VPS / 订阅 / 节点筛选页，不新增资产明细表。
 - Bad: 从 `abnormal_nodes` 推导 `按 Group 分布`；把 `snapshot_generated_at` 写成同步完成；把通知 token 暴露给 Dashboard。
+- Bad: 把 `asset_summary` 扩展成 `vps_assets` / `subscriptions` 明细数组，或在 Dashboard 首屏展示所有资产字段。
 
 #### 6. Tests Required
 
 - Go store test: 新计数字段、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary。
 - Go handler test: 新字段 JSON snake_case，且不泄露敏感通知字段。
-- Frontend type/API fixture: `DashboardOverview` fixture 覆盖新增字段。
-- DashboardPage test: 生成时间、PR4 深链、异常处理队列、运行上下文、库存完整度 / 通知配置在内联关键指标和紧凑入口中的呈现，以及异常态 / 首次接入态不展开独立 summary/KPI strip、Group、最近事件、API facts。
+- Frontend type/API fixture: `DashboardOverview` fixture 覆盖新增字段；新增 `asset_summary` 时必须同步 AppShell、DashboardPage、api test fixtures。
+- DashboardPage test: 生成时间、PR4 深链、异常处理队列、运行上下文、库存完整度 / 通知配置在内联关键指标和紧凑入口中的呈现，资产摘要低权重入口，以及异常态 / 首次接入态不展开独立 summary/KPI strip、Group、最近事件、API facts、资产明细 dump。
 - AppShell test: 共享 dashboard fixture 与新增 contract 保持兼容。
 
 #### 7. Wrong vs Correct
@@ -141,8 +151,16 @@ overview.notification_status.telegram_bot_token
 // 错误：要求 settings secret 出现在 dashboard contract
 overview.notification_status.feishu_webhook_url
 
+// 错误：资产摘要变成 Dashboard 数据仓库
+overview.asset_summary.subscriptions.map((item) => item.renew_at)
+
 // 正确：只展示配置布尔摘要，并把编辑动作交给 SettingsPage
 <Link to="/settings">{notificationSummary(overview)}</Link>
+
+// 正确：资产摘要只做少量决策入口，明细交给资产页面
+<Link to="/subscriptions?renew_within_days=30">
+  30 天续费 <MonoDigits>{overview.asset_summary.renewal_due_30d_vps_count}</MonoDigits>
+</Link>
 ```
 
 ---

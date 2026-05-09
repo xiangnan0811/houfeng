@@ -1,0 +1,12 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Task must stay on a feature branch and land through PR workflow."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Dashboard asset summary spans Postgres read model, Go JSON contract, TS types, API client, and React UI."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing dashboard and asset query/display patterns instead of creating a separate warehouse."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for dashboard store and handler changes."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Dashboard summary reads Asset Ledger tables with hand-written SQL and must preserve asset invariants."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Store errors must be wrapped and handlers must keep stable generic HTTP errors."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required Go tests and verify-go quality gate."}
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend spec index for DashboardPage and type changes."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Dashboard UI should follow existing page/component conventions without over-abstracting."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard contract rules and API/type synchronization requirements."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Dashboard CSS must use existing tokens/BEM classes and keep the workbench visual contract."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required lint, Vitest, and build gates for web changes."}
