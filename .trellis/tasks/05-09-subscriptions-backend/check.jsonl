@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec entry point for review."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Review migration, SQL, Asset Ledger constraints, and no ORM policy."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Review domain/store/handler/router/bootstrap placement and wiring completeness."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review domain sentinel and HTTP error mapping."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review required tests and verification gate."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Confirm branch workflow compliance."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review cross-layer data and validation contracts."}
+{"file": ".trellis/tasks/05-09-subscriptions-backend/research/repo-patterns.md", "reason": "Review against Task 3 boundaries and existing slice patterns."}
