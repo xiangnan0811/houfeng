@@ -17,6 +17,8 @@ type RouterOptions struct {
 	SettingsHandler                 stdhttp.Handler
 	ProvidersCollectionHandler      stdhttp.Handler
 	ProviderItemHandler             stdhttp.Handler
+	VPSCollectionHandler            stdhttp.Handler
+	VPSItemHandler                  stdhttp.Handler
 	NodesCollectionHandler          stdhttp.Handler
 	NodeItemHandler                 stdhttp.Handler
 	NodeRuntimeFactsHandler         stdhttp.Handler
@@ -91,6 +93,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.ProviderItemHandler != nil {
 		mux.Handle("/api/providers/", protect(opts.ProviderItemHandler))
+	}
+	if opts.VPSCollectionHandler != nil {
+		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
+	}
+	if opts.VPSItemHandler != nil {
+		mux.Handle("/api/vps/", protect(opts.VPSItemHandler))
 	}
 	if opts.NodesCollectionHandler != nil {
 		mux.Handle("/api/nodes", protect(opts.NodesCollectionHandler))

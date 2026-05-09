@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "All work must stay on the feature branch and land through PR with CI monitoring."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "VPS assets span migration, domain, store, HTTP handlers, router, and bootstrap."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Implementation should reuse the provider vertical-slice patterns from PR #4."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline entry point and authority ordering."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Required placement for new domain, store, handler, router, bootstrap, and migration files."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Migration numbering, schema constraints, Postgres, and repository conventions."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Sentinel errors, errors.Is, and HTTP error mapping conventions."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required Go tests, verification commands, and CI gate expectations."}
+{"file": ".trellis/tasks/05-09-vps-assets-backend/research/repo-patterns.md", "reason": "Repo-local implementation pattern and Task 2 boundary notes."}
