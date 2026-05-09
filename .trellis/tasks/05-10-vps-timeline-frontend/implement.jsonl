@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend task entrypoint and applicable web spec index"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "VPS detail changes must stay in pages/lib/styles structure"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Component and page composition conventions for frontend timeline UI"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client, type, loading/error, and dashboard/asset data contracts"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Tokenized CSS and BEM styling requirements"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Frontend lint, test, and build requirements"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Existing VPS timeline JSON contract and Asset Ledger history semantics"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature branch and PR workflow governance"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Frontend consumes backend timeline contract across layers"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing atoms, timeline/list patterns, and formatters"}
