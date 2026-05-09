@@ -49,6 +49,9 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	if names[9] != "0009_add_observability_filter_indexes.sql" {
 		t.Fatalf("tenth migration = %q, want %q", names[9], "0009_add_observability_filter_indexes.sql")
 	}
+	if names[len(names)-1] != "0016_create_asset_ledger.sql" {
+		t.Fatalf("last migration = %q, want %q", names[len(names)-1], "0016_create_asset_ledger.sql")
+	}
 }
 
 func TestApplyFSExecutesPendingMigrationsInSortedOrder(t *testing.T) {
