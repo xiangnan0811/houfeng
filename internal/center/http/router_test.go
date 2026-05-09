@@ -219,6 +219,18 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 			called = "item"
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "nodes"
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSLinkNodeHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "link-node"
+			w.WriteHeader(http.StatusCreated)
+		}),
+		VPSUnlinkNodeHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "unlink-node"
+			w.WriteHeader(http.StatusOK)
+		}),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
@@ -239,6 +251,27 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 	}
 	if called != "item" {
 		t.Fatalf("called = %q, want item", called)
+	}
+
+	for _, tt := range []struct {
+		method string
+		path   string
+		want   int
+		called string
+	}{
+		{method: http.MethodGet, path: "/api/vps/vps_001/nodes", want: http.StatusOK, called: "nodes"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/link-node", want: http.StatusCreated, called: "link-node"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-node", want: http.StatusOK, called: "unlink-node"},
+	} {
+		req = httptest.NewRequest(tt.method, tt.path, nil)
+		recorder = httptest.NewRecorder()
+		handler.ServeHTTP(recorder, req)
+		if recorder.Code != tt.want {
+			t.Fatalf("%s status = %d, want %d", tt.path, recorder.Code, tt.want)
+		}
+		if called != tt.called {
+			t.Fatalf("%s called = %q, want %q", tt.path, called, tt.called)
+		}
 	}
 }
 
@@ -264,7 +297,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/api/vps", "/api/vps/vps_001"} {
+	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/nodes", "/api/vps/vps_001/link-node", "/api/vps/vps_001/unlink-node"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 
@@ -280,8 +313,8 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	if itemCalled {
 		t.Fatal("vps item handler was called despite auth middleware blocking")
 	}
-	if middlewareCalls != 2 {
-		t.Fatalf("middleware calls = %d, want 2", middlewareCalls)
+	if middlewareCalls != 5 {
+		t.Fatalf("middleware calls = %d, want 5", middlewareCalls)
 	}
 }
 
@@ -317,6 +350,33 @@ func TestRouterDispatchesSubscriptionAPIs(t *testing.T) {
 	}
 	if called != "item" {
 		t.Fatalf("called = %q, want item", called)
+	}
+}
+
+func TestRouterDispatchesNodeVPSAPI(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		NodeItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "item"
+			w.WriteHeader(http.StatusOK)
+		}),
+		NodeVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "vps"
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/vps", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if called != "vps" {
+		t.Fatalf("expected node vps handler, got %q", called)
 	}
 }
 
@@ -605,6 +665,8 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	providerItemInnerCalled := false
 	vpsInnerCalled := false
 	vpsItemInnerCalled := false
+	vpsNodesInnerCalled := false
+	nodeVPSInnerCalled := false
 	subscriptionsInnerCalled := false
 	subscriptionItemInnerCalled := false
 	mwCalled := false
@@ -628,6 +690,14 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 		}),
 		VPSItemHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			vpsItemInnerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			vpsNodesInnerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		NodeVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			nodeVPSInnerCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
 		SubscriptionsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -713,6 +783,34 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	}
 	if !mwCalled {
 		t.Fatal("middleware not invoked for vps item route")
+	}
+
+	mwCalled = false
+	r = httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/nodes", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("vps nodes status = %d, want 401 (middleware should block)", w.Code)
+	}
+	if vpsNodesInnerCalled {
+		t.Fatal("inner vps nodes handler must not be called when middleware blocks")
+	}
+	if !mwCalled {
+		t.Fatal("middleware not invoked for vps nodes route")
+	}
+
+	mwCalled = false
+	r = httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/vps", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("node vps status = %d, want 401 (middleware should block)", w.Code)
+	}
+	if nodeVPSInnerCalled {
+		t.Fatal("inner node vps handler must not be called when middleware blocks")
+	}
+	if !mwCalled {
+		t.Fatal("middleware not invoked for node vps route")
 	}
 
 	mwCalled = false

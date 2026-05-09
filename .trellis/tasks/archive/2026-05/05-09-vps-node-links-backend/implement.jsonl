@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for Task 5 asset-link implementation."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Defines domain/store/handler/router/bootstrap placement and Asset Ledger boundaries."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Defines migration, Postgres repository, transaction, and Asset Ledger invariants."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Defines sentinel errors and HTTP error mapping conventions."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines tests, router/bootstrap checks, and verification gates."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Task spans schema, store, handlers, router, bootstrap, and API responses."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Task must remain on a feature branch and land through PR workflow."}

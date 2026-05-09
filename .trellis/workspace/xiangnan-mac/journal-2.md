@@ -180,3 +180,38 @@ Implemented VPS JSON dry-run/import CLI, repo-local import validation/reporting,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 65: VPS node links backend
+
+**Date**: 2026-05-09
+**Task**: VPS node links backend
+**Branch**: `feat/vps-node-links`
+
+### Summary
+
+Implemented VPS to Node link backend, active link summaries, schema, routing, tests, and backend contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a08643f` | (see git log) |
+| `3b951b2` | (see git log) |
+| `c815834` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

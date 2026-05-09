@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/vpsassets"
 )
@@ -96,6 +97,41 @@ func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
 	}
 	if len(body) != 1 || body[0].VPSID != "vps_001" {
 		t.Fatalf("body = %#v, want vps asset list", body)
+	}
+}
+
+func TestVPSCollectionAddsActiveNodeLinkCountsWhenAvailable(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+		RenewalDecision: vpsassets.RenewalKeep,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}}}
+	linkRepo := &fakeAssetLinkRepository{countActiveLinksForVPSVal: 2}
+
+	handler := handlers.VPSCollection(repo, linkRepo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if linkRepo.countActiveLinksForVPSID != "vps_001" {
+		t.Fatalf("count vps id = %q, want vps_001", linkRepo.countActiveLinksForVPSID)
+	}
+	var body []vpsassets.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if len(body) != 1 || body[0].ActiveNodeLinkCount != 2 {
+		t.Fatalf("body = %#v, want active_node_link_count 2", body)
 	}
 }
 
@@ -220,6 +256,50 @@ func TestVPSItemGetsAsset(t *testing.T) {
 	}
 	if body.VPSID != "vps_001" {
 		t.Fatalf("vps_id = %q, want vps_001", body.VPSID)
+	}
+}
+
+func TestVPSItemReturnsNodeLinksWhenAvailable(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+		RenewalDecision: vpsassets.RenewalKeep,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}}
+	linkRepo := &fakeAssetLinkRepository{listNodesForVPSResult: []assetlinks.NodeSummary{{
+		NodeID:              "nd_001",
+		DisplayName:         "Tokyo Node",
+		CurrentHealthStatus: "正常",
+		LinkedAt:            now,
+	}}}
+
+	handler := handlers.VPSItem(repo, linkRepo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if linkRepo.listNodesForVPSID != "vps_001" {
+		t.Fatalf("list nodes vps id = %q, want vps_001", linkRepo.listNodesForVPSID)
+	}
+	var body struct {
+		VPSID               string                   `json:"vps_id"`
+		ActiveNodeLinkCount int                      `json:"active_node_link_count"`
+		NodeLinks           []assetlinks.NodeSummary `json:"node_links"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.VPSID != "vps_001" || body.ActiveNodeLinkCount != 1 || len(body.NodeLinks) != 1 || body.NodeLinks[0].NodeID != "nd_001" {
+		t.Fatalf("body = %#v, want vps detail with node link summary", body)
 	}
 }
 
@@ -424,6 +504,60 @@ func TestVPSMapRepositoryFailures(t *testing.T) {
 
 			if recorder.Code != http.StatusInternalServerError {
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+			}
+		})
+	}
+}
+
+func TestVPSMapsLinkRepositoryFailures(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name    string
+		handler http.Handler
+		method  string
+		path    string
+	}{
+		{
+			name: "list count failure",
+			handler: handlers.VPSCollection(&fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{{
+				VPSID:           "vps_001",
+				DisplayName:     "Tokyo Edge",
+				SSHPort:         22,
+				LifecycleStatus: vpsassets.LifecycleActive,
+				UsageStatus:     vpsassets.UsageInUse,
+				RenewalDecision: vpsassets.RenewalKeep,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}}}, &fakeAssetLinkRepository{countActiveLinksForVPSErr: errors.New("count failed")}),
+			method: http.MethodGet,
+			path:   "/api/vps",
+		},
+		{
+			name: "item node links failure",
+			handler: handlers.VPSItem(&fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{
+				VPSID:           "vps_001",
+				DisplayName:     "Tokyo Edge",
+				SSHPort:         22,
+				LifecycleStatus: vpsassets.LifecycleActive,
+				UsageStatus:     vpsassets.UsageInUse,
+				RenewalDecision: vpsassets.RenewalKeep,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}}, &fakeAssetLinkRepository{listNodesForVPSErr: errors.New("links failed")}),
+			method: http.MethodGet,
+			path:   "/api/vps/vps_001",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			tt.handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusInternalServerError, recorder.Body.String())
 			}
 		})
 	}
