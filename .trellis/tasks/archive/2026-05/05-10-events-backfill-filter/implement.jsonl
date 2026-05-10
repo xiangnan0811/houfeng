@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "feature branch and PR governance"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "events filter spans API, store, frontend, and docs"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec entrypoint"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "HTTP parse errors and repository error mapping"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "events SQL query conventions"}
+{"file": ".trellis/spec/web/index.md", "reason": "web spec entrypoint"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "frontend API and URL-state contracts"}

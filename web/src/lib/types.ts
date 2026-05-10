@@ -392,6 +392,7 @@ export type EventListFilter = {
   notification_only?: boolean
   recovery_only?: boolean
   maintenance_only?: boolean
+  include_backfilled?: boolean
   limit?: number
 }
 

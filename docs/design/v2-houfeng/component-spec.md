@@ -249,9 +249,9 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
 
 ### EventsPage
 1. Hero panel
-2. DetailSection `筛选条件`：使用 `FilterBar` / `FilterChip` / `FilterSelect` / `FilterToggle` 承载 URL-state 筛选。受支持 query：`object_type`、`severity`、`event_type`、`limit`、`created_from`、`created_to`、`label`、`notification_only=1`、`recovery_only=1`、`maintenance_only=1`、`time_range=24h|7d|30d|custom`。Dashboard 深链使用 `/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1`；页面初次加载、应用筛选、重置、移除 chip 都必须同步 URL 与事件请求。
+2. DetailSection `筛选条件`：使用 `FilterBar` / `FilterChip` / `FilterSelect` / `FilterToggle` 承载 URL-state 筛选。受支持 query：`object_type`、`severity`、`event_type`、`limit`、`created_from`、`created_to`、`label`、`notification_only=1`、`recovery_only=1`、`maintenance_only=1`、`include_backfilled=1`、`time_range=24h|7d|30d|custom`。Dashboard 深链使用 `/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1`；页面初次加载、应用筛选、重置、移除 chip 都必须同步 URL 与事件请求。
    - `time_range=24h|7d|30d` 在 URL 保留相对窗口，发 API 请求时动态计算 `created_from` / `created_to`；`time_range=custom` 使用显式日期。
-   - `include_backfilled` 当前后端不支持，只能显示待支持状态，不写入 URL 或 API 请求。
+   - `include_backfilled=1` 解除后端默认的补传相关事件排除；前端 API 请求使用 `include_backfilled=true`，chip 和 toggle 必须可移除 / 重置。
 3. DetailSection `事件流`：EventList（按日期 sticky 分组）
 
 ### SettingsPage

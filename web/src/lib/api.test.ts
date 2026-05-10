@@ -1380,11 +1380,12 @@ describe('api helpers', () => {
       notification_only: true,
       recovery_only: true,
       maintenance_only: false,
+      include_backfilled: true,
       limit: 25,
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/events?object_type=node&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true',
+      '/api/events?object_type=node&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true&include_backfilled=true',
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',

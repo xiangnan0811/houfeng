@@ -115,7 +115,7 @@ describe('EventsPage', () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(
-        '/api/events?object_type=node&severity=%E4%B8%A5%E9%87%8D&event_type=incident_started&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true&maintenance_only=true',
+        '/api/events?object_type=node&severity=%E4%B8%A5%E9%87%8D&event_type=incident_started&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true&maintenance_only=true&include_backfilled=true',
         {
           headers: { Accept: 'application/json' },
           cache: 'no-store',
@@ -127,6 +127,7 @@ describe('EventsPage', () => {
     expect(screen.getByText('严重程度: 严重')).toBeInTheDocument()
     expect(screen.getByText('事件类型: 异常开始')).toBeInTheDocument()
     expect(screen.getByText('标签: edge')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '移除筛选 包含补传事件' })).toBeInTheDocument()
   })
 
   it('offers binding audit event filters for node onboarding actions', async () => {
@@ -284,11 +285,12 @@ describe('EventsPage', () => {
     fireEvent.click(screen.getByLabelText('仅看通知事件'))
     fireEvent.click(screen.getByLabelText('仅看恢复事件'))
     fireEvent.click(screen.getByLabelText('仅看维护事件'))
+    fireEvent.click(screen.getByLabelText('包含补传事件'))
     fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(
-        '/api/events?object_type=node&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true&maintenance_only=true',
+        '/api/events?object_type=node&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true&maintenance_only=true&include_backfilled=true',
         {
           headers: { Accept: 'application/json' },
           cache: 'no-store',
@@ -298,7 +300,7 @@ describe('EventsPage', () => {
     )
     await waitFor(() =>
       expect(page.getCurrentLocation()).toBe(
-        '/events?object_type=node&limit=25&time_range=custom&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=1&recovery_only=1&maintenance_only=1',
+        '/events?object_type=node&limit=25&time_range=custom&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=1&recovery_only=1&maintenance_only=1&include_backfilled=1',
       ),
     )
 
@@ -314,20 +316,38 @@ describe('EventsPage', () => {
     await waitFor(() => expect(page.getCurrentLocation()).toBe('/events'))
   })
 
-  it('marks the backfilled event toggle as pending backend support', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse([]))
+  it('applies and removes the backfilled event toggle', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
-    renderEventsPage()
+    const page = renderEventsPage()
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
     )
 
     const backfilledToggle = screen.getByLabelText('包含补传事件')
-    expect(backfilledToggle).toBeDisabled()
-    expect(screen.getByText('待后端支持')).toBeInTheDocument()
+    expect(backfilledToggle).not.toBeDisabled()
+    expect(screen.getByText('未包含')).toBeInTheDocument()
+    fireEvent.click(backfilledToggle)
     fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith('/api/events?limit=50&include_backfilled=true', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      }),
+    )
+    await waitFor(() => expect(page.getCurrentLocation()).toBe('/events?include_backfilled=1'))
+    expect(screen.getByRole('button', { name: '移除筛选 包含补传事件' })).toBeInTheDocument()
+    expect(screen.getByText('已包含')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '移除筛选 包含补传事件' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith('/api/events?limit=50', {
@@ -336,6 +356,7 @@ describe('EventsPage', () => {
         credentials: 'include',
       }),
     )
+    await waitFor(() => expect(page.getCurrentLocation()).toBe('/events'))
   })
 
   it('removes active chips from URL state and refetches', async () => {
@@ -367,12 +388,12 @@ describe('EventsPage', () => {
     await waitFor(() => expect(page.getCurrentLocation()).toBe('/events?label=edge'))
   })
 
-  it('ignores invalid URL params and excludes unsupported backfilled filters', async () => {
+  it('ignores invalid URL params and invalid backfilled filters', async () => {
     const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = renderEventsPage(
-      '/events?object_type=service&severity=%E6%AD%A3%E5%B8%B8&event_type=unknown&limit=999&created_from=not-a-date&created_to=also-bad&notification_only=true&recovery_only=0&maintenance_only=yes&time_range=invalid&include_backfilled=1',
+      '/events?object_type=service&severity=%E6%AD%A3%E5%B8%B8&event_type=unknown&limit=999&created_from=not-a-date&created_to=also-bad&notification_only=true&recovery_only=0&maintenance_only=yes&time_range=invalid&include_backfilled=yes',
     )
 
     await waitFor(() =>

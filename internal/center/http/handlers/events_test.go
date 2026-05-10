@@ -73,7 +73,7 @@ func TestEventsHandlerReturnsListWithAdvancedFilters(t *testing.T) {
 	repo := &fakeEventsRepository{}
 
 	handler := handlers.Events(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/events?created_from=2026-04-25T00:00:00Z&created_to=2026-04-26T00:00:00Z&label=edge&notification_only=true&recovery_only=true&maintenance_only=true", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/events?created_from=2026-04-25T00:00:00Z&created_to=2026-04-26T00:00:00Z&label=edge&notification_only=true&recovery_only=true&maintenance_only=true&include_backfilled=true", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -86,7 +86,7 @@ func TestEventsHandlerReturnsListWithAdvancedFilters(t *testing.T) {
 	if repo.filter.CreatedTo == nil || !repo.filter.CreatedTo.Equal(time.Date(2026, time.April, 26, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("CreatedTo = %v, want parsed RFC3339 timestamp", repo.filter.CreatedTo)
 	}
-	if repo.filter.Label != "edge" || !repo.filter.NotificationOnly || !repo.filter.RecoveryOnly || !repo.filter.MaintenanceOnly {
+	if repo.filter.Label != "edge" || !repo.filter.NotificationOnly || !repo.filter.RecoveryOnly || !repo.filter.MaintenanceOnly || !repo.filter.IncludeBackfilled {
 		t.Fatalf("filter = %#v, want advanced filters", repo.filter)
 	}
 }
@@ -107,6 +107,9 @@ func TestEventsHandlerRejectsInvalidAdvancedFilters(t *testing.T) {
 		"/api/events?created_from=not-a-time",
 		"/api/events?created_to=not-a-time",
 		"/api/events?notification_only=definitely",
+		"/api/events?recovery_only=definitely",
+		"/api/events?maintenance_only=definitely",
+		"/api/events?include_backfilled=definitely",
 	}
 
 	for _, path := range tests {

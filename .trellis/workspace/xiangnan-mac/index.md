@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 78
+- **Total Sessions**: 79
 - **Last Active**: 2026-05-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~660 | Active |
+| `journal-2.md` | ~694 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 79 | 2026-05-10 | Events backfill filter | `25bf75d`, `2016137` | `feat/events-backfill-filter` |
 | 78 | 2026-05-10 | Asset Ledger roadmap completion audit | `107a74e`, `b360a3d` | `feat/asset-ledger-roadmap-audit` |
 | 77 | 2026-05-10 | Domain assets MVP | `10886ef`, `5e0ec21`, `7381b2a` | `feat/domain-assets-mvp` |
 | 76 | 2026-05-10 | Add VPS service assets | `77a3ecb`, `1ec9b7e`, `01c92b6` | `feat/service-assets-mvp` |

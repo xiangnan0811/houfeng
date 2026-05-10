@@ -27,17 +27,18 @@ type EventListItem struct {
 }
 
 type EventsFilter struct {
-	ObjectType       incidents.ObjectType
-	ObjectID         string
-	Severity         incidents.Severity
-	EventType        incidents.EventType
-	CreatedFrom      *time.Time
-	CreatedTo        *time.Time
-	Label            string
-	NotificationOnly bool
-	RecoveryOnly     bool
-	MaintenanceOnly  bool
-	Limit            int
+	ObjectType        incidents.ObjectType
+	ObjectID          string
+	Severity          incidents.Severity
+	EventType         incidents.EventType
+	CreatedFrom       *time.Time
+	CreatedTo         *time.Time
+	Label             string
+	NotificationOnly  bool
+	RecoveryOnly      bool
+	MaintenanceOnly   bool
+	IncludeBackfilled bool
+	Limit             int
 }
 
 type dashboardQueryer interface {
@@ -560,6 +561,9 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 			incidents.EventTargetMaintenanceExited,
 		))
 	}
+	if !filter.IncludeBackfilled {
+		conditions = append(conditions, "not "+backfilledEventConditionSQL())
+	}
 	args = append(args, limit)
 	limitArg := len(args)
 
@@ -614,4 +618,33 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 		return nil, fmt.Errorf("iterate events list: %w", err)
 	}
 	return events, nil
+}
+
+func backfilledEventConditionSQL() string {
+	return `(
+		(e.object_type = 'node' and (
+			exists (
+				select 1
+				from node_heartbeats nh
+				where nh.node_id = e.object_id
+					and nh.is_backfilled
+					and nh.observed_at = e.created_at
+			)
+			or exists (
+				select 1
+				from host_samples hs
+				where hs.node_id = e.object_id
+					and hs.is_backfilled
+					and hs.observed_at = e.created_at
+			)
+		))
+		or
+		(e.object_type = 'target' and exists (
+			select 1
+			from probe_observations po
+			where po.target_id = e.object_id
+				and po.is_backfilled
+				and po.observed_at = e.created_at
+		))
+	)`
 }
