@@ -593,6 +593,8 @@ export type AssetServiceType = 'web' | 'api' | 'database' | 'worker' | 'proxy' |
 
 export type AssetServiceStatus = 'active' | 'paused' | 'retired' | 'unknown'
 
+export type AssetDomainStatus = 'active' | 'paused' | 'retired' | 'unknown'
+
 export type VPSExperienceCategory =
   | 'note'
   | 'stability'
@@ -667,6 +669,13 @@ export const ASSET_SERVICE_TYPE_LABELS: Record<AssetServiceType, string> = {
 
 export const ASSET_SERVICE_STATUS_LABELS: Record<AssetServiceStatus, string> = {
   active: '运行中',
+  paused: '已暂停',
+  retired: '已退役',
+  unknown: '未确认',
+}
+
+export const ASSET_DOMAIN_STATUS_LABELS: Record<AssetDomainStatus, string> = {
+  active: '使用中',
   paused: '已暂停',
   retired: '已退役',
   unknown: '未确认',
@@ -905,6 +914,46 @@ export type AssetServiceListFilter = {
   target_id?: string | null
   service_type?: AssetServiceType | '' | null
   status?: AssetServiceStatus | '' | null
+}
+
+export type AssetDomainRecord = {
+  domain_id: string
+  vps_id: string
+  service_id?: string | null
+  target_id?: string | null
+  domain_name: string
+  purpose: string
+  status: AssetDomainStatus
+  registrar: string
+  expires_at?: string | null
+  auto_renew: boolean
+  https_enabled: boolean
+  labels: string[]
+  note: string
+  created_at: string
+  updated_at: string
+}
+
+export type CreateAssetDomainInput = {
+  vps_id?: string
+  service_id?: string | null
+  target_id?: string | null
+  domain_name: string
+  purpose?: string
+  status?: AssetDomainStatus
+  registrar?: string
+  expires_at?: string | null
+  auto_renew?: boolean
+  https_enabled?: boolean
+  labels?: string[]
+  note?: string
+}
+
+export type AssetDomainListFilter = {
+  vps_id?: string | null
+  service_id?: string | null
+  target_id?: string | null
+  status?: AssetDomainStatus | '' | null
 }
 
 export type CreateVPSExperienceLogInput = {

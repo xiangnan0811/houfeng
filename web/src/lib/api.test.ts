@@ -3,6 +3,7 @@ import { matchRoutes } from 'react-router-dom'
 
 import {
   archiveTarget,
+  createAssetDomain,
   confirmNodeRebind,
   createAssetService,
   createProbeItem,
@@ -26,7 +27,9 @@ import {
   getVPSTimeline,
   issueNodeEnrollmentToken,
   linkVPSNode,
+  listAssetDomains,
   listAssetServices,
+  listVPSDomains,
   listVPSExperienceLogs,
   listProviders,
   listNodes,
@@ -54,9 +57,13 @@ import {
   listVPSForNode,
   listVPSNodes,
   listVPSServices,
+  createVPSDomain,
 } from './api'
 import type {
+  AssetDomainListFilter,
+  AssetDomainRecord,
   AssetServiceRecord,
+  CreateAssetDomainInput,
   CreateAssetServiceInput,
   CreateProviderInput,
   CreateProbeItemInput,
@@ -663,6 +670,123 @@ describe('api helpers', () => {
       credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/services', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(expectedVPSScopedBody),
+    })
+  })
+
+  it('serializes asset domain collection and VPS-scoped operations', async () => {
+    const domain = {
+      domain_id: 'dom_001',
+      vps_id: 'vps_001',
+      service_id: 'svc_001',
+      target_id: 'tg_001',
+      domain_name: 'www.example.com',
+      purpose: 'site',
+      status: 'active',
+      registrar: 'NameSilo',
+      expires_at: '2026-07-01',
+      auto_renew: true,
+      https_enabled: true,
+      labels: ['prod'],
+      note: 'primary',
+      created_at: '2026-05-10T08:00:00Z',
+      updated_at: '2026-05-10T08:00:00Z',
+    } satisfies AssetDomainRecord
+    const filter = {
+      vps_id: 'vps_001',
+      service_id: 'svc_001',
+      target_id: 'tg_001',
+      status: 'active',
+    } satisfies AssetDomainListFilter
+    const collectionInput = {
+      vps_id: 'vps_001',
+      service_id: 'svc_001',
+      target_id: 'tg_001',
+      domain_name: 'www.example.com',
+      purpose: 'site',
+      status: 'active',
+      registrar: 'NameSilo',
+      expires_at: '2026-07-01',
+      auto_renew: true,
+      https_enabled: true,
+      labels: ['prod'],
+      note: 'primary',
+    } satisfies CreateAssetDomainInput
+    const vpsScopedInput = {
+      vps_id: 'vps_body',
+      service_id: null,
+      target_id: null,
+      domain_name: 'api.example.com',
+      purpose: 'api',
+      status: 'active',
+      registrar: '',
+      expires_at: null,
+      auto_renew: false,
+      https_enabled: true,
+      labels: ['api'],
+      note: 'gateway',
+    } satisfies CreateAssetDomainInput
+    const expectedVPSScopedBody = {
+      service_id: null,
+      target_id: null,
+      domain_name: 'api.example.com',
+      purpose: 'api',
+      status: 'active',
+      registrar: '',
+      expires_at: null,
+      auto_renew: false,
+      https_enabled: true,
+      labels: ['api'],
+      note: 'gateway',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([domain])))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify(domain)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([domain])))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify({ ...domain, domain_name: 'api.example.com' })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listAssetDomains(filter)).resolves.toEqual([domain])
+    await expect(createAssetDomain(collectionInput)).resolves.toEqual(domain)
+    await expect(listVPSDomains('vps_001')).resolves.toEqual([domain])
+    await expect(createVPSDomain('vps_001', vpsScopedInput)).resolves.toMatchObject({
+      domain_id: 'dom_001',
+      domain_name: 'api.example.com',
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/domains?vps_id=vps_001&service_id=svc_001&target_id=tg_001&status=active',
+      {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/domains', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(collectionInput),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/domains', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/domains', {
       method: 'POST',
       headers: {
         Accept: 'application/json',

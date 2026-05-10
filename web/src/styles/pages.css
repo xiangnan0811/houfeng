@@ -2210,6 +2210,21 @@ html.theme-classic-light .dashboard-status-bar {
   resize: vertical;
 }
 
+.asset-checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.4;
+}
+
+.asset-checkbox-line input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
 .asset-operation-feedback {
   margin: 0;
   color: var(--text-secondary);

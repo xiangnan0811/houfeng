@@ -5,17 +5,20 @@ import { Badge, Button, DataTable, Hostname, Input, MonoDigits, Timestamp, type 
 import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
 import {
   ApiError,
+  createVPSDomain,
   createVPSService,
   createVPSExperienceLog,
   getVPSAsset,
   getVPSTimeline,
   linkVPSNode,
+  listVPSDomains,
   listVPSServices,
   unlinkVPSNode,
   updateVPSAsset,
 } from '../lib/api'
 import { formatDateTime, formatOptional } from '../lib/format'
 import {
+  ASSET_DOMAIN_STATUS_LABELS,
   ASSET_SERVICE_STATUS_LABELS,
   ASSET_SERVICE_TYPE_LABELS,
   VPS_LIFECYCLE_STATUS_LABELS,
@@ -23,9 +26,12 @@ import {
   VPS_EXPERIENCE_SEVERITY_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
   VPS_USAGE_STATUS_LABELS,
+  type AssetDomainRecord,
+  type AssetDomainStatus,
   type AssetServiceRecord,
   type AssetServiceStatus,
   type AssetServiceType,
+  type CreateAssetDomainInput,
   type CreateAssetServiceInput,
   type CreateVPSExperienceLogInput,
   type UpdateVPSAssetInput,
@@ -53,6 +59,7 @@ type PageState = {
   detail: VPSAssetDetail | null
   timeline: VPSTimeline | null
   services: AssetServiceRecord[]
+  domains: AssetDomainRecord[]
 }
 
 const INITIAL_STATE: PageState = {
@@ -61,6 +68,7 @@ const INITIAL_STATE: PageState = {
   detail: null,
   timeline: null,
   services: [],
+  domains: [],
 }
 
 const RENEWAL_DECISION_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABELS) as Array<[
@@ -89,6 +97,10 @@ const SERVICE_TYPE_OPTIONS = Object.entries(ASSET_SERVICE_TYPE_LABELS) as Array<
 ]>
 const SERVICE_STATUS_OPTIONS = Object.entries(ASSET_SERVICE_STATUS_LABELS) as Array<[
   AssetServiceStatus,
+  string,
+]>
+const DOMAIN_STATUS_OPTIONS = Object.entries(ASSET_DOMAIN_STATUS_LABELS) as Array<[
+  AssetDomainStatus,
   string,
 ]>
 
@@ -135,6 +147,20 @@ type ServiceDraftState = {
   note: string
 }
 
+type DomainDraftState = {
+  domainName: string
+  status: AssetDomainStatus
+  purpose: string
+  serviceID: string
+  targetID: string
+  registrar: string
+  expiresAt: string
+  autoRenew: boolean
+  httpsEnabled: boolean
+  labels: string
+  note: string
+}
+
 const INITIAL_EXPERIENCE_DRAFT: ExperienceDraftState = {
   category: 'note',
   severity: 'info',
@@ -150,6 +176,20 @@ const INITIAL_SERVICE_DRAFT: ServiceDraftState = {
   targetID: '',
   url: '',
   port: '',
+  labels: '',
+  note: '',
+}
+
+const INITIAL_DOMAIN_DRAFT: DomainDraftState = {
+  domainName: '',
+  status: 'active',
+  purpose: '',
+  serviceID: '',
+  targetID: '',
+  registrar: '',
+  expiresAt: '',
+  autoRenew: false,
+  httpsEnabled: true,
   labels: '',
   note: '',
 }
@@ -273,6 +313,38 @@ function buildServiceInput(form: ServiceDraftState): CreateAssetServiceInput {
   }
 }
 
+function normalizeDomainName(value: string): string {
+  return value.trim().toLowerCase().replace(/\.$/, '')
+}
+
+function buildDomainInput(form: DomainDraftState): CreateAssetDomainInput {
+  const domainName = normalizeDomainName(form.domainName)
+  if (!domainName) {
+    throw new Error('域名不能为空。')
+  }
+  const hasInvalidChars = /[/:@?#\s]/.test(domainName) ||
+    domainName.includes('[') ||
+    domainName.includes(']') ||
+    domainName.includes('\\')
+  if (!domainName.includes('.') || hasInvalidChars) {
+    throw new Error('域名必须是不带协议、路径和空格的完整域名。')
+  }
+
+  return {
+    domain_name: domainName,
+    status: form.status,
+    purpose: form.purpose.trim(),
+    service_id: form.serviceID.trim() || null,
+    target_id: form.targetID.trim() || null,
+    registrar: form.registrar.trim(),
+    expires_at: form.expiresAt.trim() || null,
+    auto_renew: form.autoRenew,
+    https_enabled: form.httpsEnabled,
+    labels: parseLabels(form.labels),
+    note: form.note.trim(),
+  }
+}
+
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
@@ -307,6 +379,10 @@ export function VPSDetailPage() {
   const [serviceSubmitting, setServiceSubmitting] = useState(false)
   const [serviceError, setServiceError] = useState<string | null>(null)
   const [serviceNotice, setServiceNotice] = useState<string | null>(null)
+  const [domainDraft, setDomainDraft] = useState<DomainDraftState>(INITIAL_DOMAIN_DRAFT)
+  const [domainSubmitting, setDomainSubmitting] = useState(false)
+  const [domainError, setDomainError] = useState<string | null>(null)
+  const [domainNotice, setDomainNotice] = useState<string | null>(null)
 
   useEffect(() => {
     if (!vpsId) {
@@ -315,10 +391,10 @@ export function VPSDetailPage() {
 
     let cancelled = false
 
-    Promise.all([getVPSAsset(vpsId), getVPSTimeline(vpsId), listVPSServices(vpsId)])
-      .then(([detail, timeline, services]) => {
+    Promise.all([getVPSAsset(vpsId), getVPSTimeline(vpsId), listVPSServices(vpsId), listVPSDomains(vpsId)])
+      .then(([detail, timeline, services, domains]) => {
         if (cancelled) return
-        setState({ vpsId, error: null, detail, timeline, services })
+        setState({ vpsId, error: null, detail, timeline, services, domains })
         setDecisionDraft({ renewalDecision: detail.renewal_decision, reason: '' })
         setDecisionError(null)
         setDecisionNotice(null)
@@ -339,6 +415,9 @@ export function VPSDetailPage() {
         setServiceDraft(INITIAL_SERVICE_DRAFT)
         setServiceError(null)
         setServiceNotice(null)
+        setDomainDraft(INITIAL_DOMAIN_DRAFT)
+        setDomainError(null)
+        setDomainNotice(null)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -348,6 +427,7 @@ export function VPSDetailPage() {
           detail: null,
           timeline: null,
           services: [],
+          domains: [],
         })
       })
 
@@ -366,12 +446,13 @@ export function VPSDetailPage() {
   }
 
   async function refreshDetailAndTimeline(targetVPSId: string): Promise<VPSAssetDetail> {
-    const [detail, timeline, services] = await Promise.all([
+    const [detail, timeline, services, domains] = await Promise.all([
       getVPSAsset(targetVPSId),
       getVPSTimeline(targetVPSId),
       listVPSServices(targetVPSId),
+      listVPSDomains(targetVPSId),
     ])
-    setState({ vpsId: targetVPSId, error: null, detail, timeline, services })
+    setState({ vpsId: targetVPSId, error: null, detail, timeline, services, domains })
     return detail
   }
 
@@ -382,6 +463,15 @@ export function VPSDetailPage() {
       return { ...current, services }
     })
     return services
+  }
+
+  async function refreshDomains(targetVPSId: string): Promise<AssetDomainRecord[]> {
+    const domains = await listVPSDomains(targetVPSId)
+    setState((current) => {
+      if (current.vpsId !== targetVPSId) return current
+      return { ...current, domains }
+    })
+    return domains
   }
 
   async function handleDecisionSubmit(event: FormEvent<HTMLFormElement>) {
@@ -610,6 +700,35 @@ export function VPSDetailPage() {
     }
   }
 
+  async function handleDomainSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = state.detail
+    if (!detail) return
+
+    setDomainError(null)
+    setDomainNotice(null)
+
+    let input: CreateAssetDomainInput
+    try {
+      input = buildDomainInput(domainDraft)
+    } catch (error: unknown) {
+      setDomainError(describeError(error, '域名输入无效'))
+      return
+    }
+
+    setDomainSubmitting(true)
+    try {
+      await createVPSDomain(detail.vps_id, input)
+      await refreshDomains(detail.vps_id)
+      setDomainDraft(INITIAL_DOMAIN_DRAFT)
+      setDomainNotice('域名记录已创建')
+    } catch (error: unknown) {
+      setDomainError(describeError(error, '创建域名记录失败'))
+    } finally {
+      setDomainSubmitting(false)
+    }
+  }
+
   const nodeColumns: DataTableColumn<VPSNodeSummary>[] = [
     {
       key: 'node',
@@ -728,6 +847,78 @@ export function VPSDetailPage() {
       key: 'note',
       label: '备注',
       render: (service) => formatOptional(service.note),
+    },
+  ]
+  const domainColumns: DataTableColumn<AssetDomainRecord>[] = [
+    {
+      key: 'domain',
+      label: '域名',
+      render: (domain) => (
+        <div className="asset-table__identity">
+          <strong>{domain.domain_name}</strong>
+          <span>{domain.domain_id}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      label: '状态 / HTTPS',
+      render: (domain) => (
+        <span className="asset-status-stack">
+          <Badge variant="count" tone={domain.status === 'active' ? 'normal' : 'neutral'}>
+            {ASSET_DOMAIN_STATUS_LABELS[domain.status]}
+          </Badge>
+          <Badge variant="info" tone={domain.https_enabled ? 'normal' : 'neutral'}>
+            {domain.https_enabled ? 'HTTPS' : '未记录 HTTPS'}
+          </Badge>
+        </span>
+      ),
+    },
+    {
+      key: 'purpose',
+      label: '用途 / 注册商',
+      render: (domain) => (
+        <div className="asset-table__stack">
+          <strong>{formatOptional(domain.purpose)}</strong>
+          <span>{formatOptional(domain.registrar)}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'expires',
+      label: '过期 / 续费',
+      render: (domain) => (
+        <div className="asset-table__stack">
+          <strong>{formatOptional(domain.expires_at)}</strong>
+          <span>{domain.auto_renew ? '自动续费' : '手工续费'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'links',
+      label: '关联',
+      render: (domain) => (
+        <div className="asset-table__stack">
+          <span>{domain.service_id ? `服务 ${domain.service_id}` : '未关联服务'}</span>
+          {domain.target_id ? (
+            <Link className="text-link" to={`/targets/${domain.target_id}`}>
+              Target {domain.target_id}
+            </Link>
+          ) : (
+            <span className="text-muted">未关联 Target</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'labels',
+      label: '标签',
+      render: (domain) => <AssetLabels labels={domain.labels} />,
+    },
+    {
+      key: 'note',
+      label: '备注',
+      render: (domain) => formatOptional(domain.note),
     },
   ]
 
@@ -1351,6 +1542,175 @@ export function VPSDetailPage() {
             <div className="asset-operation-actions">
               <Button type="submit" disabled={serviceSubmitting}>
                 {serviceSubmitting ? '创建中…' : '创建服务记录'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section className="page-panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-heading__eyebrow">DOMAINS</p>
+            <h2>域名资产</h2>
+          </div>
+          <span className="section-heading__meta">
+            <MonoDigits>{state.domains.length}</MonoDigits> 个手工记录域名
+          </span>
+        </div>
+        <div className="asset-service-layout">
+          <div className="asset-service-list">
+            <DataTable
+              className="asset-table vps-domain-table"
+              columns={domainColumns}
+              rows={state.domains}
+              rowKey={(domain) => domain.domain_id}
+              emptyContent={<span className="empty-inline">尚未记录域名</span>}
+            />
+          </div>
+          <form className="asset-operation-form asset-service-form" onSubmit={(event) => void handleDomainSubmit(event)}>
+            <div className="asset-operation-form__header">
+              <div>
+                <h3>新增域名</h3>
+                <p>记录这台 VPS 承载、转发或观测关联的域名。</p>
+              </div>
+              <Badge variant="count" tone="neutral">手工维护</Badge>
+            </div>
+            <Input
+              label="域名"
+              value={domainDraft.domainName}
+              onChange={(event) => {
+                setDomainDraft((current) => ({ ...current, domainName: event.target.value }))
+                setDomainError(null)
+                setDomainNotice(null)
+              }}
+              placeholder="www.example.com"
+            />
+            <label className="asset-operation-field">
+              <span>域名状态</span>
+              <select
+                value={domainDraft.status}
+                onChange={(event) => {
+                  setDomainDraft((current) => ({
+                    ...current,
+                    status: event.target.value as AssetDomainStatus,
+                  }))
+                  setDomainError(null)
+                  setDomainNotice(null)
+                }}
+              >
+                {DOMAIN_STATUS_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <Input
+              label="用途"
+              value={domainDraft.purpose}
+              onChange={(event) => {
+                setDomainDraft((current) => ({ ...current, purpose: event.target.value }))
+                setDomainError(null)
+                setDomainNotice(null)
+              }}
+              placeholder="官网 / API / 回源"
+            />
+            <Input
+              label="Service ID"
+              value={domainDraft.serviceID}
+              onChange={(event) => {
+                setDomainDraft((current) => ({ ...current, serviceID: event.target.value }))
+                setDomainError(null)
+                setDomainNotice(null)
+              }}
+              placeholder="svc_..."
+            />
+            <Input
+              label="Target ID"
+              value={domainDraft.targetID}
+              onChange={(event) => {
+                setDomainDraft((current) => ({ ...current, targetID: event.target.value }))
+                setDomainError(null)
+                setDomainNotice(null)
+              }}
+              placeholder="tg_..."
+            />
+            <Input
+              label="注册商"
+              value={domainDraft.registrar}
+              onChange={(event) => {
+                setDomainDraft((current) => ({ ...current, registrar: event.target.value }))
+                setDomainError(null)
+                setDomainNotice(null)
+              }}
+              placeholder="NameSilo"
+            />
+            <Input
+              label="过期日期"
+              type="date"
+              value={domainDraft.expiresAt}
+              onChange={(event) => {
+                setDomainDraft((current) => ({ ...current, expiresAt: event.target.value }))
+                setDomainError(null)
+                setDomainNotice(null)
+              }}
+            />
+            <label className="asset-checkbox-line">
+              <input
+                type="checkbox"
+                checked={domainDraft.autoRenew}
+                onChange={(event) => {
+                  setDomainDraft((current) => ({ ...current, autoRenew: event.target.checked }))
+                  setDomainError(null)
+                  setDomainNotice(null)
+                }}
+              />
+              <span>自动续费</span>
+            </label>
+            <label className="asset-checkbox-line">
+              <input
+                type="checkbox"
+                checked={domainDraft.httpsEnabled}
+                onChange={(event) => {
+                  setDomainDraft((current) => ({ ...current, httpsEnabled: event.target.checked }))
+                  setDomainError(null)
+                  setDomainNotice(null)
+                }}
+              />
+              <span>已启用 HTTPS</span>
+            </label>
+            <Input
+              label="域名标签"
+              hint="用逗号分隔"
+              value={domainDraft.labels}
+              onChange={(event) => {
+                setDomainDraft((current) => ({ ...current, labels: event.target.value }))
+                setDomainError(null)
+                setDomainNotice(null)
+              }}
+              placeholder="prod, public"
+            />
+            <label className="asset-operation-field asset-operation-field--wide">
+              <span>域名备注</span>
+              <textarea
+                value={domainDraft.note}
+                onChange={(event) => {
+                  setDomainDraft((current) => ({ ...current, note: event.target.value }))
+                  setDomainError(null)
+                  setDomainNotice(null)
+                }}
+                placeholder="例如：Cloudflare 代理到主站服务"
+              />
+            </label>
+            {domainError ? (
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+                {domainError}
+              </p>
+            ) : domainNotice ? (
+              <p className="asset-operation-feedback" role="status">{domainNotice}</p>
+            ) : null}
+            <div className="asset-operation-actions">
+              <Button type="submit" disabled={domainSubmitting}>
+                {domainSubmitting ? '创建中…' : '创建域名记录'}
               </Button>
             </div>
           </form>
