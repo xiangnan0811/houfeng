@@ -2263,6 +2263,46 @@ html.theme-classic-light .dashboard-status-bar {
   vertical-align: top;
 }
 
+.asset-decision-window,
+.asset-decision-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.asset-decision-window {
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+}
+
+.asset-decision-window .input {
+  min-width: 136px;
+}
+
+.asset-decision-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.42fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.asset-decision-queues {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.asset-decision-panel {
+  position: sticky;
+  top: var(--space-4);
+}
+
+.asset-decision-actions {
+  justify-content: flex-end;
+}
+
 .asset-timeline {
   display: flex;
   flex-direction: column;
@@ -2446,6 +2486,14 @@ html.theme-classic-light .dashboard-status-bar {
 
   .asset-page .page-panel__actions {
     justify-content: flex-start;
+  }
+
+  .asset-decision-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-decision-panel {
+    position: static;
   }
 
   .asset-timeline-grid {

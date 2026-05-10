@@ -103,6 +103,7 @@ const DASHBOARD_LINKS = {
   targetsPaused: '/targets?run_status=暂停',
   targetsArchived: '/targets?run_status=已归档',
   settings: '/settings',
+  assetDecisions: '/asset-decisions',
   vps: '/vps',
   vpsUnreviewed: '/vps?renewal_decision=unreviewed',
   vpsToCancel: '/vps?lifecycle_status=to_cancel',
@@ -807,10 +808,6 @@ function AssetDecisionSummary({ summary }: { summary: DashboardAssetSummary }) {
     summary.unlinked_vps_count +
     summary.abnormal_linked_vps_count
   const lifecycleReviewCount = summary.to_cancel_vps_count + summary.to_migrate_vps_count
-  const lifecycleReviewLink =
-    summary.to_cancel_vps_count >= summary.to_migrate_vps_count
-      ? DASHBOARD_LINKS.vpsToCancel
-      : DASHBOARD_LINKS.vpsToMigrate
   const lifecycleReviewDetail =
     `待取消 ${summary.to_cancel_vps_count} · 待迁移 ${summary.to_migrate_vps_count}`
   const items = [
@@ -818,21 +815,21 @@ function AssetDecisionSummary({ summary }: { summary: DashboardAssetSummary }) {
       label: '30 天续费',
       value: summary.renewal_due_30d_vps_count,
       detail: `订阅 ${summary.renewal_due_30d_subscription_count}`,
-      to: DASHBOARD_LINKS.subscriptionsRenew30d,
+      to: DASHBOARD_LINKS.assetDecisions,
       tone: summary.renewal_due_30d_vps_count > 0 ? 'notice' : 'normal',
     },
     {
       label: '待决策',
       value: summary.unreviewed_vps_count,
       detail: '续费状态未评估',
-      to: DASHBOARD_LINKS.vpsUnreviewed,
+      to: DASHBOARD_LINKS.assetDecisions,
       tone: summary.unreviewed_vps_count > 0 ? 'notice' : 'normal',
     },
     {
       label: '取消/迁移',
       value: lifecycleReviewCount,
       detail: lifecycleReviewDetail,
-      to: lifecycleReviewLink,
+      to: DASHBOARD_LINKS.assetDecisions,
       tone: lifecycleReviewCount > 0 ? 'alert' : 'normal',
     },
     {
@@ -869,8 +866,8 @@ function AssetDecisionSummary({ summary }: { summary: DashboardAssetSummary }) {
               : '资产层暂无续费、关联或决策压力'}
           </p>
         </div>
-        <Link className="text-link" to={DASHBOARD_LINKS.vps}>
-          进入 VPS
+        <Link className="text-link" to={DASHBOARD_LINKS.assetDecisions}>
+          进入决策
         </Link>
       </div>
       <div className="dashboard-asset-summary__grid">

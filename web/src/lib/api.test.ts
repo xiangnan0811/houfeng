@@ -1384,6 +1384,12 @@ describe('api helpers', () => {
 })
 
 describe('router onboarding route', () => {
+  it('matches /asset-decisions', () => {
+    const matches = matchRoutes(appRoutes, '/asset-decisions')
+
+    expect(matches?.at(-1)?.route.path).toBe('asset-decisions')
+  })
+
   it('matches /nodes/:nodeId/onboarding', () => {
     const matches = matchRoutes(appRoutes, '/nodes/nd_001/onboarding')
 
