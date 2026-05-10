@@ -487,3 +487,36 @@ Added the asset renewal decision workbench route, dashboard entry links, decisio
 ### Next Steps
 
 - None - task complete
+
+
+## Session 74: VPS asset archive workflow
+
+**Date**: 2026-05-10
+**Task**: VPS asset archive workflow
+**Branch**: `feat/vps-archive-workflow`
+
+### Summary
+
+Added explicit VPS detail archive and restore lifecycle workflow with local confirmation, archived_at display, focused tests, and verify-web coverage.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1880297` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
