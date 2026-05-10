@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend entrypoint and checklist"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "VPS detail page React component conventions"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client and page state conventions"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "BEM and token styling guidance"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Branch and PR governance"}
