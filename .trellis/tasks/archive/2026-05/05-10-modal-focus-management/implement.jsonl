@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature work must stay on non-main branch and land through PR/CI."}
+{"file": ".trellis/spec/web/index.md", "reason": "Web spec index for frontend implementation work."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Implement reusable modal/focus behavior in the existing component layering style."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Avoid visual regressions and keep CSS token/BEM conventions."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Add/update atom and layout tests and run web quality gates."}

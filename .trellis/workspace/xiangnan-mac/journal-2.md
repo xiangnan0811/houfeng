@@ -727,3 +727,38 @@ Implemented EventsPage advanced filter Drawer flow with active chips, draft/appl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 81: Modal focus management
+
+**Date**: 2026-05-10
+**Task**: Modal focus management
+**Branch**: `fix/modal-focus-management`
+
+### Summary
+
+Closed modal focus accessibility gap by adding shared portal focus management for Drawer and ChangePasswordModal, updating tests and docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `319d0c4` | (see git log) |
+| `0b02426` | (see git log) |
+| `2095c65` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

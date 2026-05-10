@@ -104,7 +104,7 @@ parent: docs/design/v2-houfeng/design-language.md
 
 ### Drawer
 - 右侧/左侧滑入面板（`side: 'right'|'left'`，default `'right'`；桌面宽度 440px 且不超过 40vw，窄屏不超过 92vw）
-- 当前实现：fixed-position inline render + ESC 关闭 + overlay 点击关闭 + `aria-modal="true"`；React portal、初始焦点、Tab containment、触发器焦点恢复仍是可访问性 hardening follow-up，未在本轮视为已完成
+- 当前实现：fixed-position portal render 到 `document.body` + ESC 关闭 + overlay 点击关闭 + `aria-modal="true"`；打开时焦点进入第一个可聚焦元素，Tab / Shift+Tab containment，关闭后恢复到触发器焦点
 - header：title + × 关闭按钮 / body：scroll-y auto
 - 类名：`.drawer-overlay` `.drawer` `.drawer--right/--left` `.drawer--open`
 
@@ -242,10 +242,10 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
    - 「生命周期」（退役按钮 + 二次确认；已退役时显示「恢复到观察中」）
    - 「接入凭证状态」（当前 binding_status `<StatusBadge>` + `<Link>` 到 `/nodes/:id/onboarding` 接入工作台）
 6. 页面底部 mono 小字：数据快照时间 (`<Timestamp value={now} mode="absolute">`)，刷新页面获取最新（不做实时 polling，保留"页面打开 = 静态快照"模型）
-7. 历史抽屉（右侧 `min(440px, 40vw)` `<Drawer>`）：标题 `${display_name} · 历史`；抽屉内 `<Tabs variant="pill">` 切换 [事件时间线] / [历史异常]；
+7. 历史抽屉（右侧 `<Drawer>`，桌面 440px 且不超过 40vw，窄屏不超过 92vw）：标题 `${display_name} · 历史`；抽屉内 `<Tabs variant="pill">` 切换 [事件时间线] / [历史异常]；
    - 事件 tab：复用 `<EventList>`，数据来自 page 已加载的 `state.events`（节点详情主入口已拉取）
    - 历史异常 tab：调 `listHistoricalIncidents('node', nodeId)`（`/api/incidents?...&include_resolved=true`）懒加载；首次切换时触发 fetch；通过 ref 防止 setState 引起 effect 重入；切换节点 (nodeId 变化) 时清缓存以免显示前一节点的数据
-   - 抽屉支持 Esc 关闭 / overlay 点击关闭 / × 按钮关闭；当 `open=false` 时不渲染 children，避免 DOM 中事件文案重复
+   - 抽屉支持 Esc 关闭 / overlay 点击关闭 / × 按钮关闭；通过 portal 挂载到 `document.body`，打开后管理初始焦点与 Tab containment，关闭后恢复触发器焦点；当 `open=false` 时不渲染 children，避免 DOM 中事件文案重复
 
 ### EventsPage
 1. Hero panel

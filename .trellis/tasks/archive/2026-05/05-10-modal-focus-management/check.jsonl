@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch workflow and PR lifecycle remain correct."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check shared helper placement, named exports, and atom/layout boundaries."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check no visual/style convention regressions."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check tests, lint, build, and coverage of changed modal behavior."}
