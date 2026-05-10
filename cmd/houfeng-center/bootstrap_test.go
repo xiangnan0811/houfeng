@@ -186,6 +186,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.SettingsHandler == nil {
 		t.Fatal("router settings handler = nil, want non-nil")
 	}
+	if gotOpts.AssetServicesCollectionHandler == nil {
+		t.Fatal("router asset services collection handler = nil, want non-nil")
+	}
 	if gotOpts.ProvidersCollectionHandler == nil {
 		t.Fatal("router providers collection handler = nil, want non-nil")
 	}
@@ -212,6 +215,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	}
 	if gotOpts.VPSExperienceLogsHandler == nil {
 		t.Fatal("router vps experience logs handler = nil, want non-nil")
+	}
+	if gotOpts.VPSServicesHandler == nil {
+		t.Fatal("router vps services handler = nil, want non-nil")
 	}
 	if gotOpts.SubscriptionsCollectionHandler == nil {
 		t.Fatal("router subscriptions collection handler = nil, want non-nil")

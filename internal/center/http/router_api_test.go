@@ -125,6 +125,53 @@ func TestRouterKeepsProvidersOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsAssetServicesOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		AssetServicesCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"service_id":"svc_001"}]`))
+		}),
+		VPSServicesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"service_id":"svc_vps_001"}]`))
+		}),
+	})
+
+	tests := []struct {
+		name            string
+		path            string
+		wantBodySnippet string
+	}{
+		{name: "collection", path: "/api/services", wantBodySnippet: `"service_id":"svc_001"`},
+		{name: "vps services", path: "/api/vps/vps_001/services", wantBodySnippet: `"service_id":"svc_vps_001"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			}
+			body, err := io.ReadAll(recorder.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+			if strings.TrimSpace(string(body)) == spaShell {
+				t.Fatalf("expected asset service API response, got SPA fallback body %q", string(body))
+			}
+			if !strings.Contains(string(body), tt.wantBodySnippet) {
+				t.Fatalf("expected asset service payload, got %q", string(body))
+			}
+		})
+	}
+}
+
 func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",

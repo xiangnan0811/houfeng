@@ -554,3 +554,38 @@ Implemented VPS experience logs across Asset Ledger schema, Go API/store, timeli
 ### Next Steps
 
 - None - task complete
+
+
+## Session 76: Add VPS service assets
+
+**Date**: 2026-05-10
+**Task**: Add VPS service assets
+**Branch**: `feat/service-assets-mvp`
+
+### Summary
+
+Implemented the Service assets MVP: asset_services migration/domain/store/handlers/router/bootstrap, frontend service API/types and VPS detail service section, service asset contract specs, and full local verify.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `77a3ecb` | (see git log) |
+| `1ec9b7e` | (see git log) |
+| `01c92b6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

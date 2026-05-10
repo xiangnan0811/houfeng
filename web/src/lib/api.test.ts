@@ -4,12 +4,14 @@ import { matchRoutes } from 'react-router-dom'
 import {
   archiveTarget,
   confirmNodeRebind,
+  createAssetService,
   createProbeItem,
   createProvider,
   createSubscription,
   createTarget,
   createVPSAsset,
   createVPSExperienceLog,
+  createVPSService,
   deleteProbeItem,
   enterNodeMaintenance,
   enterTargetMaintenance,
@@ -24,6 +26,7 @@ import {
   getVPSTimeline,
   issueNodeEnrollmentToken,
   linkVPSNode,
+  listAssetServices,
   listVPSExperienceLogs,
   listProviders,
   listNodes,
@@ -50,8 +53,11 @@ import {
   listVPSAssets,
   listVPSForNode,
   listVPSNodes,
+  listVPSServices,
 } from './api'
 import type {
+  AssetServiceRecord,
+  CreateAssetServiceInput,
   CreateProviderInput,
   CreateProbeItemInput,
   CreateSubscriptionInput,
@@ -65,6 +71,7 @@ import type {
   SettingsUpdateInput,
   SubscriptionRecord,
   TargetRecord,
+  AssetServiceListFilter,
   UpdateNodeMetadataInput,
   UpdateProbeItemInput,
   UpdateProviderInput,
@@ -558,6 +565,112 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify(input),
+    })
+  })
+
+  it('serializes asset service collection and VPS-scoped operations', async () => {
+    const service = {
+      service_id: 'svc_001',
+      vps_id: 'vps_001',
+      target_id: 'tg_001',
+      name: 'Blog',
+      service_type: 'web',
+      status: 'active',
+      url: 'https://example.com',
+      port: 443,
+      labels: ['prod'],
+      note: 'primary',
+      created_at: '2026-05-10T08:00:00Z',
+      updated_at: '2026-05-10T08:00:00Z',
+    } satisfies AssetServiceRecord
+    const filter = {
+      vps_id: 'vps_001',
+      target_id: 'tg_001',
+      service_type: 'web',
+      status: 'active',
+    } satisfies AssetServiceListFilter
+    const collectionInput = {
+      vps_id: 'vps_001',
+      target_id: 'tg_001',
+      name: 'Blog',
+      service_type: 'web',
+      status: 'active',
+      url: 'https://example.com',
+      port: 443,
+      labels: ['prod'],
+      note: 'primary',
+    } satisfies CreateAssetServiceInput
+    const vpsScopedInput = {
+      vps_id: 'vps_body',
+      target_id: null,
+      name: 'Worker',
+      service_type: 'worker',
+      status: 'active',
+      url: '',
+      port: null,
+      labels: ['jobs'],
+      note: 'queue',
+    } satisfies CreateAssetServiceInput
+    const expectedVPSScopedBody = {
+      target_id: null,
+      name: 'Worker',
+      service_type: 'worker',
+      status: 'active',
+      url: '',
+      port: null,
+      labels: ['jobs'],
+      note: 'queue',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([service])))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify(service)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([service])))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify({ ...service, name: 'Worker', service_type: 'worker' })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listAssetServices(filter)).resolves.toEqual([service])
+    await expect(createAssetService(collectionInput)).resolves.toEqual(service)
+    await expect(listVPSServices('vps_001')).resolves.toEqual([service])
+    await expect(createVPSService('vps_001', vpsScopedInput)).resolves.toMatchObject({
+      service_id: 'svc_001',
+      name: 'Worker',
+      service_type: 'worker',
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/services?vps_id=vps_001&target_id=tg_001&service_type=web&status=active',
+      {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/services', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(collectionInput),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/services', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/services', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(expectedVPSScopedBody),
     })
   })
 

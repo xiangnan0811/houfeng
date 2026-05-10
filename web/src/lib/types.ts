@@ -589,6 +589,10 @@ export type VPSRenewalDecision =
 
 export type SubscriptionStatus = 'active' | 'paused' | 'cancelled' | 'expired' | 'unknown'
 
+export type AssetServiceType = 'web' | 'api' | 'database' | 'worker' | 'proxy' | 'other'
+
+export type AssetServiceStatus = 'active' | 'paused' | 'retired' | 'unknown'
+
 export type VPSExperienceCategory =
   | 'note'
   | 'stability'
@@ -650,6 +654,22 @@ export const VPS_EXPERIENCE_SEVERITY_LABELS: Record<VPSExperienceSeverity, strin
   info: '信息',
   warning: '关注',
   critical: '严重',
+}
+
+export const ASSET_SERVICE_TYPE_LABELS: Record<AssetServiceType, string> = {
+  web: 'Web',
+  api: 'API',
+  database: '数据库',
+  worker: 'Worker',
+  proxy: '代理',
+  other: '其他',
+}
+
+export const ASSET_SERVICE_STATUS_LABELS: Record<AssetServiceStatus, string> = {
+  active: '运行中',
+  paused: '已暂停',
+  retired: '已退役',
+  unknown: '未确认',
 }
 
 export type VPSAssetRecord = {
@@ -851,6 +871,40 @@ export type VPSExperienceLogRecord = {
   details: string
   occurred_at: string
   created_at: string
+}
+
+export type AssetServiceRecord = {
+  service_id: string
+  vps_id: string
+  target_id?: string | null
+  name: string
+  service_type: AssetServiceType
+  status: AssetServiceStatus
+  url: string
+  port?: number | null
+  labels: string[]
+  note: string
+  created_at: string
+  updated_at: string
+}
+
+export type CreateAssetServiceInput = {
+  vps_id?: string
+  target_id?: string | null
+  name: string
+  service_type?: AssetServiceType
+  status?: AssetServiceStatus
+  url?: string
+  port?: number | null
+  labels?: string[]
+  note?: string
+}
+
+export type AssetServiceListFilter = {
+  vps_id?: string | null
+  target_id?: string | null
+  service_type?: AssetServiceType | '' | null
+  status?: AssetServiceStatus | '' | null
 }
 
 export type CreateVPSExperienceLogInput = {

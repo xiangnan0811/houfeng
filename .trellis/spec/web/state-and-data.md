@@ -88,6 +88,71 @@ overview.asset_summary.vps_assets.map(...)
 <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
 ```
 
+### Asset service 数据流
+
+VPS 服务资产是 VPS 详情页内的独立手工记录区块，前端必须把它当作 `asset_services` contract 消费，而不是从 timeline、Dashboard 或 Target probe 状态推导。
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `web/src/lib/types.ts` 中 `AssetService*` 类型、`web/src/lib/api.ts` 中 service API helper，或 `web/src/pages/VPSDetailPage.tsx` 的服务资产区块。
+
+#### 2. Signatures
+
+- Frontend type: `AssetServiceRecord` 字段保持 center JSON snake_case：`service_id`、`vps_id`、`target_id`、`name`、`service_type`、`status`、`url`、`port`、`labels`、`note`、`created_at`、`updated_at`。
+- Frontend input: `CreateAssetServiceInput` 允许 collection create 带 `vps_id`，也允许 VPS scoped create 不带 `vps_id`。
+- Frontend API: `listAssetServices(filter)`, `createAssetService(input)`, `listVPSServices(vpsId)`, `createVPSService(vpsId, input)`。
+- Page data: `VPSDetailPage` 初始加载 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)` 和 `listVPSServices(vpsId)`；创建服务后只刷新 `listVPSServices(vpsId)`。
+
+#### 3. Contracts
+
+- 机器值标签集中在 `ASSET_SERVICE_TYPE_LABELS` 与 `ASSET_SERVICE_STATUS_LABELS`，组件内不得散落中文枚举文案。
+- `createVPSService(vpsId, input)` 必须去掉 `input.vps_id`，保证 path 是唯一 VPS 来源。
+- VPS 服务区块展示 name、type、status、url/port、optional Target link、labels、note；Target link 只跳转，不触发 Target 创建或修改。
+- 服务创建表单负责本地校验 blank name 和 port `1..65535`，但最终校验仍以后端为准。
+- 服务资产不是 timeline item；创建服务不得刷新或插入 `VPSTimeline.experience_logs`、续费历史、价格历史、IP 历史或规格快照。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| blank service name in form | 页面本地显示 `服务名称不能为空。`，不发 POST |
+| invalid port in form | 页面本地显示 `服务端口必须为 1 到 65535。`，不发 POST |
+| API returns `vps asset not found` | `ApiError.message` 原样展示在当前服务表单错误区 |
+| API returns `target not found` | `ApiError.message` 原样展示在当前服务表单错误区 |
+| services list is empty | `DataTable` emptyContent 显示 `尚未记录服务` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: 创建服务成功后显示 `服务记录已创建`，表格出现新服务，并且只追加一次 `/api/vps/{id}/services` refresh。
+- Base: 初始 services 为空时，页面仍正常展示 VPS facts、Node links、timeline 和连接摘要。
+- Bad: 页面直接 `fetch('/api/vps/.../services')`，绕过 `api.ts` 和 `ApiError`。
+- Bad: 把服务数量写进 Dashboard asset summary，或从 Target 列表自动反推 services。
+
+#### 6. Tests Required
+
+- `web/src/lib/api.test.ts`: collection list/create、VPS scoped list/create，并断言 scoped create body 不含 `vps_id`。
+- `web/src/pages/VPSDetailPage.test.tsx`: 初始 services 请求、空态、服务创建 happy path、本地校验失败。
+- 改 `AssetService*` 类型或标签时同步测试 fixture 和页面断言。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：业务 page 直接 fetch，错误处理和认证钩子会漂移。
+await fetch(`/api/vps/${vpsId}/services`)
+
+// 正确：统一通过 API client。
+await listVPSServices(vpsId)
+```
+
+```tsx
+// 错误：VPS scoped create 把 body 里的 vps_id 带过去。
+createVPSService(vpsId, { ...form, vps_id: otherVpsId })
+
+// 正确：helper 丢弃 vps_id，path 是唯一 VPS 来源。
+const { vps_id: _ignored, ...body } = input
+postJSONBody(`/api/vps/${vpsId}/services`, body)
+```
+
 ### Scenario: Dashboard Overview Contract
 
 #### 1. Scope / Trigger

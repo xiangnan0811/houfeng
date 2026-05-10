@@ -1,0 +1,14 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend guideline index for compliance checks"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "verify new backend files and wiring match repo layout"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "verify migration and Asset Ledger invariants"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify sentinel and HTTP error mapping"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify backend tests and quality gates"}
+{"file": ".trellis/spec/web/index.md", "reason": "frontend guideline index for compliance checks"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "verify frontend files remain in correct layers"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "verify React component boundaries"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "verify API helpers/types and no direct fetch"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "verify CSS follows token/BEM rules"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "verify frontend tests, lint, and build coverage"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "verify branch/PR workflow"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify end-to-end DB/API/frontend data flow"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "verify existing patterns were reused instead of duplicated"}
