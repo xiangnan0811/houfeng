@@ -589,6 +589,17 @@ export type VPSRenewalDecision =
 
 export type SubscriptionStatus = 'active' | 'paused' | 'cancelled' | 'expired' | 'unknown'
 
+export type VPSExperienceCategory =
+  | 'note'
+  | 'stability'
+  | 'network'
+  | 'support'
+  | 'billing'
+  | 'migration'
+  | 'cancellation'
+
+export type VPSExperienceSeverity = 'info' | 'warning' | 'critical'
+
 export const VPS_LIFECYCLE_STATUS_LABELS: Record<VPSLifecycleStatus, string> = {
   active: '在用',
   idle: '闲置',
@@ -623,6 +634,22 @@ export const SUBSCRIPTION_STATUS_LABELS: Record<SubscriptionStatus, string> = {
   cancelled: '已取消',
   expired: '已过期',
   unknown: '未确认',
+}
+
+export const VPS_EXPERIENCE_CATEGORY_LABELS: Record<VPSExperienceCategory, string> = {
+  note: '备注',
+  stability: '稳定性',
+  network: '网络',
+  support: '服务支持',
+  billing: '账单',
+  migration: '迁移',
+  cancellation: '取消',
+}
+
+export const VPS_EXPERIENCE_SEVERITY_LABELS: Record<VPSExperienceSeverity, string> = {
+  info: '信息',
+  warning: '关注',
+  critical: '严重',
 }
 
 export type VPSAssetRecord = {
@@ -815,12 +842,32 @@ export type VPSSpecSnapshotRecord = {
   created_at: string
 }
 
+export type VPSExperienceLogRecord = {
+  experience_log_id: string
+  vps_id: string
+  category: VPSExperienceCategory
+  severity: VPSExperienceSeverity
+  summary: string
+  details: string
+  occurred_at: string
+  created_at: string
+}
+
+export type CreateVPSExperienceLogInput = {
+  category: VPSExperienceCategory
+  severity: VPSExperienceSeverity
+  summary: string
+  details?: string
+  occurred_at?: string | null
+}
+
 export type VPSTimeline = {
   vps_id: string
   renewal_decisions: VPSDecisionHistoryRecord[]
   price_histories: VPSPriceHistoryRecord[]
   ip_histories: VPSIPHistoryRecord[]
   spec_snapshots: VPSSpecSnapshotRecord[]
+  experience_logs: VPSExperienceLogRecord[]
 }
 
 export type VPSSummary = {

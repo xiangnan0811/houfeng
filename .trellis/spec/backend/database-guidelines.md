@@ -166,7 +166,7 @@
 - `decided_at` 默认 `now()`，领域入口可传入 UTC 时间；timeline 按 `decided_at desc, created_at desc, decision_id desc` 排序。
 - `PATCH /api/vps/{vps_id}` 只有在显式设置 `renewal_decision` 且最终值发生变化时才插入历史；只改其他字段或设置为原值不得插入历史。
 - VPS 当前状态更新与 history insert 必须在同一个事务中完成，并先 `select ... for update` 锁定 VPS 行，避免当前状态和历史漂移。
-- `GET /api/vps/{vps_id}/timeline` 返回真实表驱动的 `renewal_decisions[]`、`price_histories[]`、`ip_histories[]`、`spec_snapshots[]`，不得返回占位假数据。
+- `GET /api/vps/{vps_id}/timeline` 返回真实表驱动的 `renewal_decisions[]`、`price_histories[]`、`ip_histories[]`、`spec_snapshots[]`、`experience_logs[]`，不得返回占位假数据。
 - 续费决策历史不得创建 `vps_node_links`，不得改写 `nodes.provider`、Node lifecycle / monitoring / health、Target、Agent 或 subscription。
 
 `db/migrations/0021_create_asset_histories.sql` 添加 `price_histories`、`ip_histories`、`vps_spec_snapshots`，用于补齐资产层价格、IP、规格变化历史。三张表补充当前状态字段，不替代 `subscriptions` 或 `vps_assets` 当前状态。
@@ -178,6 +178,84 @@
 - `vps_spec_snapshots` 记录变化后的规格快照：`product_name`、`ssh_host`、`ssh_port`、`ssh_user`、`os_name`、`virtualization`。VPS PATCH 只有这些字段最终发生变化时才插入 snapshot。
 - VPS 当前状态更新与 IP / spec history insert 必须复用 VPS history 事务路径，并先 `select ... for update` 锁定 VPS 行。
 - 所有 history 仍属于 Asset Ledger，不得创建 `vps_node_links`，不得改写 `nodes.provider`、Node lifecycle / monitoring / health、Target、Agent 或 provider。
+
+`db/migrations/0022_create_experience_logs.sql` 添加 `experience_logs`，用于记录单台 VPS 的人工体验、稳定性、网络、账单、服务支持、迁移或取消原因。它补充资产历史，不替代 `vps_assets.note` 或续费决策历史。
+
+- `experience_logs.experience_log_id` 使用 `ids.New("elog")` 生成。
+- `vps_id` 必须引用已存在的 `vps_assets(vps_id)`，并在 VPS 删除时级联清理历史。
+- `category` 使用稳定英文机器值：`note`、`stability`、`network`、`support`、`billing`、`migration`、`cancellation`；数据库 check 约束与领域校验共同保护。
+- `severity` 使用稳定英文机器值：`info`、`warning`、`critical`；数据库 check 约束与领域校验共同保护。
+- `summary` 必须 trim 后非空；`details` 是 trim 后的可空字符串语义，但数据库列必须 `not null default ''`，避免 timeline JSON 出现 null 文案。
+- `occurred_at` 默认 `now()`，领域入口可传入 UTC 时间；experience log 列表按 `occurred_at desc, created_at desc, experience_log_id desc` 排序。
+- `GET /api/vps/{vps_id}/experience-logs` 只返回该 VPS 的经验记录；VPS 不存在时返回 asset timeline not found 语义。
+- `POST /api/vps/{vps_id}/experience-logs` 的 path `vps_id` 是唯一 VPS 来源，请求 body 不接受覆盖 `vps_id`；写入只创建 experience log，不改写 VPS 当前字段。
+- experience log 不得创建 `vps_node_links`，不得改写 `nodes.provider`、Node lifecycle / monitoring / health、Target、Agent、Provider、VPS 当前状态或 subscription。
+
+#### Scenario: VPS experience logs contract
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `experience_logs` schema、`/api/vps/{vps_id}/experience-logs`、`GET /api/vps/{vps_id}/timeline` 的 `experience_logs[]` 字段，或前端 VPS 详情页经验记录表单。
+
+##### 2. Signatures
+
+- DB table: `experience_logs(experience_log_id text primary key, vps_id text references vps_assets(vps_id) on delete cascade, category text, severity text, summary text, details text, occurred_at timestamptz, created_at timestamptz)`.
+- Backend API: `GET /api/vps/{vps_id}/experience-logs` -> `[]renewals.ExperienceLogRecord`。
+- Backend API: `POST /api/vps/{vps_id}/experience-logs` with JSON body `{category, severity, summary, details?, occurred_at?}` -> `renewals.ExperienceLogRecord`。
+- Timeline API: `GET /api/vps/{vps_id}/timeline` includes `experience_logs: []`.
+- Frontend API: `createVPSExperienceLog(vpsId, input)` and `listVPSExperienceLogs(vpsId)`.
+
+##### 3. Contracts
+
+- `category` and `severity` are machine values; UI maps them to Chinese labels in `web/src/lib/types.ts`.
+- `occurred_at` is an RFC3339 timestamp when supplied; browser `datetime-local` values must be converted to ISO before posting.
+- `summary` is the short user-facing title; `details` carries optional longer context and is never `null` in responses.
+- `experience_logs[]` belongs to the VPS timeline contract; adding it requires updating Go DTOs, `web/src/lib/types.ts`, API tests, VPS detail tests, and timeline rendering together.
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| blank path `vps_id` | 400 from domain validation or 404 from route parsing |
+| missing VPS foreign key | 404 `vps asset not found` at HTTP layer |
+| invalid `category` / `severity` | 400 `invalid input` |
+| blank `summary` | 400 `invalid input` |
+| zero / invalid `occurred_at` | 400 `invalid input` / `invalid json` |
+| repository query failure | 500 `internal server error` |
+| unsupported method | 405 `method not allowed` |
+
+##### 5. Good/Base/Bad Cases
+
+- Good: 用户在 VPS 详情页记录“晚高峰丢包”，POST 成功后刷新 timeline，并在 `experience_logs[]` 里按发生时间展示。
+- Base: VPS 没有经验记录时，`experience_logs` 返回空数组，前端展示空态。
+- Bad: 把 `vps_id` 放进 body 并允许覆盖 path VPS；这会制造跨资产误写风险。
+- Bad: 经验记录写入后顺手修改 `vps_assets.note`、续费决策或 Node 状态。
+
+##### 6. Tests Required
+
+- Migration test: 断言表、外键、枚举 check、summary not blank、排序索引。
+- Domain test: normalize / validate 覆盖 trim、UTC、invalid category/severity、blank summary。
+- Store test: create/list/timeline 聚合、排序 SQL、missing VPS / foreign-key mapping。
+- Handler/router/bootstrap tests: GET/POST、invalid JSON、invalid input、not found、method not allowed、subtree routing、bootstrap non-nil wiring。
+- Frontend tests: API client URL/body，VPS 详情页创建经验记录后刷新 timeline，空态显示。
+
+##### 7. Wrong vs Correct
+
+```go
+// 错误：body 里的 vps_id 覆盖 path，可能写入另一台 VPS。
+input.VPSID = input.VPSID
+
+// 正确：path 是唯一 VPS 来源。
+input.VPSID = vpsID
+```
+
+```tsx
+// 错误：直接提交 datetime-local 字符串，Go time.Time 不能稳定解析。
+occurred_at: form.occurredAt
+
+// 正确：提交 ISO/RFC3339 时间。
+occurred_at: form.occurredAt ? new Date(form.occurredAt).toISOString() : null
+```
 
 ### Asset Ledger JSON import
 

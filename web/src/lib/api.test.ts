@@ -9,6 +9,7 @@ import {
   createSubscription,
   createTarget,
   createVPSAsset,
+  createVPSExperienceLog,
   deleteProbeItem,
   enterNodeMaintenance,
   enterTargetMaintenance,
@@ -23,6 +24,7 @@ import {
   getVPSTimeline,
   issueNodeEnrollmentToken,
   linkVPSNode,
+  listVPSExperienceLogs,
   listProviders,
   listNodes,
   listEvents,
@@ -55,6 +57,7 @@ import type {
   CreateSubscriptionInput,
   CreateTargetInput,
   CreateVPSAssetInput,
+  CreateVPSExperienceLogInput,
   NodeRecord,
   ProbeItemRecord,
   ProviderRecord,
@@ -68,6 +71,7 @@ import type {
   UpdateSubscriptionInput,
   UpdateTargetMetadataInput,
   VPSAssetRecord,
+  VPSExperienceLogRecord,
   VPSNodeLinkRecord,
   VPSTimeline,
 } from './types'
@@ -467,6 +471,7 @@ describe('api helpers', () => {
       price_histories: [],
       ip_histories: [],
       spec_snapshots: [],
+      experience_logs: [],
     } satisfies VPSTimeline
     const fetchMock = vi
       .fn()
@@ -501,6 +506,50 @@ describe('api helpers', () => {
       credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(input),
+    })
+  })
+
+  it('serializes VPS experience log operations', async () => {
+    const logRecord = {
+      experience_log_id: 'elog_001',
+      vps_id: 'vps_001',
+      category: 'network',
+      severity: 'warning',
+      summary: 'packet loss',
+      details: 'opened provider ticket',
+      occurred_at: '2026-05-10T09:30:00Z',
+      created_at: '2026-05-10T09:31:00Z',
+    } satisfies VPSExperienceLogRecord
+    const input = {
+      category: 'network',
+      severity: 'warning',
+      summary: 'packet loss',
+      details: 'opened provider ticket',
+      occurred_at: '2026-05-10T09:30:00Z',
+    } satisfies CreateVPSExperienceLogInput
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([logRecord])))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify(logRecord)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listVPSExperienceLogs('vps_001')).resolves.toEqual([logRecord])
+    await expect(createVPSExperienceLog('vps_001', input)).resolves.toEqual(logRecord)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/experience-logs', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001/experience-logs', {
       method: 'POST',
       headers: {
         Accept: 'application/json',

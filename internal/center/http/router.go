@@ -23,6 +23,7 @@ type RouterOptions struct {
 	VPSLinkNodeHandler              stdhttp.Handler
 	VPSUnlinkNodeHandler            stdhttp.Handler
 	VPSTimelineHandler              stdhttp.Handler
+	VPSExperienceLogsHandler        stdhttp.Handler
 	SubscriptionsCollectionHandler  stdhttp.Handler
 	SubscriptionItemHandler         stdhttp.Handler
 	NodesCollectionHandler          stdhttp.Handler
@@ -104,7 +105,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil || opts.VPSTimelineHandler != nil {
+	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -143,6 +144,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSTimelineHandler.ServeHTTP(w, r)
+			case vpsSubtreeExperienceLogs:
+				if opts.VPSExperienceLogsHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSExperienceLogsHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -308,12 +315,13 @@ func New(opts RouterOptions) stdhttp.Handler {
 type vpsSubtree string
 
 const (
-	vpsSubtreeUnknown    vpsSubtree = ""
-	vpsSubtreeItem       vpsSubtree = "item"
-	vpsSubtreeNodes      vpsSubtree = "nodes"
-	vpsSubtreeLinkNode   vpsSubtree = "link-node"
-	vpsSubtreeUnlinkNode vpsSubtree = "unlink-node"
-	vpsSubtreeTimeline   vpsSubtree = "timeline"
+	vpsSubtreeUnknown        vpsSubtree = ""
+	vpsSubtreeItem           vpsSubtree = "item"
+	vpsSubtreeNodes          vpsSubtree = "nodes"
+	vpsSubtreeLinkNode       vpsSubtree = "link-node"
+	vpsSubtreeUnlinkNode     vpsSubtree = "unlink-node"
+	vpsSubtreeTimeline       vpsSubtree = "timeline"
+	vpsSubtreeExperienceLogs vpsSubtree = "experience-logs"
 )
 
 func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
@@ -341,6 +349,8 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeUnlinkNode
 	case "timeline":
 		return segments[0], vpsSubtreeTimeline
+	case "experience-logs":
+		return segments[0], vpsSubtreeExperienceLogs
 	default:
 		return segments[0], vpsSubtreeUnknown
 	}

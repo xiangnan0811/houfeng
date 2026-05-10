@@ -6,6 +6,7 @@ import type {
   CreateSubscriptionInput,
   CreateTargetInput,
   CreateVPSAssetInput,
+  CreateVPSExperienceLogInput,
   LinkVPSNodeInput,
   UpdateProbeItemInput,
   DashboardOverview,
@@ -35,6 +36,7 @@ import type {
   VPSAssetDetail,
   VPSAssetListFilter,
   VPSAssetRecord,
+  VPSExperienceLogRecord,
   VPSNodeLinkRecord,
   VPSNodeSummary,
   VPSSummary,
@@ -447,6 +449,14 @@ export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promi
 
 export function getVPSTimeline(vpsId: string) {
   return requestJSON<VPSTimeline>(`/api/vps/${vpsId}/timeline`)
+}
+
+export function listVPSExperienceLogs(vpsId: string) {
+  return requestJSON<VPSExperienceLogRecord[]>(`/api/vps/${vpsId}/experience-logs`)
+}
+
+export function createVPSExperienceLog(vpsId: string, input: CreateVPSExperienceLogInput): Promise<VPSExperienceLogRecord> {
+  return postJSONBody<VPSExperienceLogRecord>(`/api/vps/${vpsId}/experience-logs`, input)
 }
 
 export function listVPSNodes(vpsId: string) {

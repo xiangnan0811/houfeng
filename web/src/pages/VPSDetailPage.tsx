@@ -5,6 +5,7 @@ import { Badge, Button, DataTable, Hostname, Input, MonoDigits, Timestamp, type 
 import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
 import {
   ApiError,
+  createVPSExperienceLog,
   getVPSAsset,
   getVPSTimeline,
   linkVPSNode,
@@ -14,10 +15,15 @@ import {
 import { formatDateTime, formatOptional } from '../lib/format'
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
+  VPS_EXPERIENCE_CATEGORY_LABELS,
+  VPS_EXPERIENCE_SEVERITY_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
   VPS_USAGE_STATUS_LABELS,
+  type CreateVPSExperienceLogInput,
   type UpdateVPSAssetInput,
   type VPSAssetDetail,
+  type VPSExperienceCategory,
+  type VPSExperienceSeverity,
   type VPSLifecycleStatus,
   type VPSNodeSummary,
   type VPSRenewalDecision,
@@ -59,6 +65,14 @@ const USAGE_OPTIONS = Object.entries(VPS_USAGE_STATUS_LABELS) as Array<[
   VPSUsageStatus,
   string,
 ]>
+const EXPERIENCE_CATEGORY_OPTIONS = Object.entries(VPS_EXPERIENCE_CATEGORY_LABELS) as Array<[
+  VPSExperienceCategory,
+  string,
+]>
+const EXPERIENCE_SEVERITY_OPTIONS = Object.entries(VPS_EXPERIENCE_SEVERITY_LABELS) as Array<[
+  VPSExperienceSeverity,
+  string,
+]>
 
 type FactEditFormState = {
   displayName: string
@@ -82,6 +96,22 @@ type FactEditFormState = {
   importance: string
   labels: string
   note: string
+}
+
+type ExperienceDraftState = {
+  category: VPSExperienceCategory
+  severity: VPSExperienceSeverity
+  summary: string
+  details: string
+  occurredAt: string
+}
+
+const INITIAL_EXPERIENCE_DRAFT: ExperienceDraftState = {
+  category: 'note',
+  severity: 'info',
+  summary: '',
+  details: '',
+  occurredAt: '',
 }
 
 function describeError(error: unknown, fallback: string): string {
@@ -159,6 +189,23 @@ function buildFactEditInput(form: FactEditFormState): UpdateVPSAssetInput {
   }
 }
 
+function buildExperienceLogInput(form: ExperienceDraftState): CreateVPSExperienceLogInput {
+  const summary = form.summary.trim()
+  if (!summary) {
+    throw new Error('经验摘要不能为空。')
+  }
+  const occurredAt = form.occurredAt.trim()
+  const occurredAtISO = occurredAt ? new Date(occurredAt).toISOString() : null
+
+  return {
+    category: form.category,
+    severity: form.severity,
+    summary,
+    details: form.details.trim(),
+    occurred_at: occurredAtISO,
+  }
+}
+
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
@@ -185,6 +232,10 @@ export function VPSDetailPage() {
   const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [lifecycleNotice, setLifecycleNotice] = useState<string | null>(null)
+  const [experienceDraft, setExperienceDraft] = useState<ExperienceDraftState>(INITIAL_EXPERIENCE_DRAFT)
+  const [experienceSubmitting, setExperienceSubmitting] = useState(false)
+  const [experienceError, setExperienceError] = useState<string | null>(null)
+  const [experienceNotice, setExperienceNotice] = useState<string | null>(null)
 
   useEffect(() => {
     if (!vpsId) {
@@ -211,6 +262,9 @@ export function VPSDetailPage() {
         setLifecycleConfirmingArchive(false)
         setLifecycleError(null)
         setLifecycleNotice(null)
+        setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
+        setExperienceError(null)
+        setExperienceNotice(null)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -407,6 +461,35 @@ export function VPSDetailPage() {
       setLifecycleError(describeError(error, '恢复 VPS 失败'))
     } finally {
       setLifecycleSubmitting(false)
+    }
+  }
+
+  async function handleExperienceSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = state.detail
+    if (!detail) return
+
+    setExperienceError(null)
+    setExperienceNotice(null)
+
+    let input: CreateVPSExperienceLogInput
+    try {
+      input = buildExperienceLogInput(experienceDraft)
+    } catch (error: unknown) {
+      setExperienceError(describeError(error, '经验记录输入无效'))
+      return
+    }
+
+    setExperienceSubmitting(true)
+    try {
+      await createVPSExperienceLog(detail.vps_id, input)
+      await refreshDetailAndTimeline(detail.vps_id)
+      setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
+      setExperienceNotice('经验记录已写入资产历史')
+    } catch (error: unknown) {
+      setExperienceError(describeError(error, '创建经验记录失败'))
+    } finally {
+      setExperienceSubmitting(false)
     }
   }
 
@@ -754,6 +837,96 @@ export function VPSDetailPage() {
               <p className="asset-operation-feedback" role="status">{lifecycleNotice}</p>
             ) : null}
           </div>
+
+          <form className="asset-operation-form" onSubmit={(event) => void handleExperienceSubmit(event)}>
+            <div className="asset-operation-form__header">
+              <div>
+                <h3>经验记录</h3>
+                <p>补充这台 VPS 的稳定性、网络、账单或迁移原因。</p>
+              </div>
+              <Badge variant="count" tone="neutral">{timeline.experience_logs.length} 条</Badge>
+            </div>
+            <label className="asset-operation-field">
+              <span>分类</span>
+              <select
+                value={experienceDraft.category}
+                onChange={(event) => {
+                  setExperienceDraft((current) => ({
+                    ...current,
+                    category: event.target.value as VPSExperienceCategory,
+                  }))
+                  setExperienceError(null)
+                  setExperienceNotice(null)
+                }}
+              >
+                {EXPERIENCE_CATEGORY_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="asset-operation-field">
+              <span>级别</span>
+              <select
+                value={experienceDraft.severity}
+                onChange={(event) => {
+                  setExperienceDraft((current) => ({
+                    ...current,
+                    severity: event.target.value as VPSExperienceSeverity,
+                  }))
+                  setExperienceError(null)
+                  setExperienceNotice(null)
+                }}
+              >
+                {EXPERIENCE_SEVERITY_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <Input
+              label="摘要"
+              value={experienceDraft.summary}
+              onChange={(event) => {
+                setExperienceDraft((current) => ({ ...current, summary: event.target.value }))
+                setExperienceError(null)
+                setExperienceNotice(null)
+              }}
+              placeholder="例如：晚高峰丢包明显"
+            />
+            <Input
+              label="发生时间"
+              type="datetime-local"
+              value={experienceDraft.occurredAt}
+              onChange={(event) => {
+                setExperienceDraft((current) => ({ ...current, occurredAt: event.target.value }))
+                setExperienceError(null)
+                setExperienceNotice(null)
+              }}
+            />
+            <label className="asset-operation-field asset-operation-field--wide">
+              <span>详情</span>
+              <textarea
+                value={experienceDraft.details}
+                onChange={(event) => {
+                  setExperienceDraft((current) => ({ ...current, details: event.target.value }))
+                  setExperienceError(null)
+                  setExperienceNotice(null)
+                }}
+                placeholder="例如：连续三天晚高峰 tcp probe 抖动，已向服务商提交工单"
+              />
+            </label>
+            {experienceError ? (
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+                {experienceError}
+              </p>
+            ) : experienceNotice ? (
+              <p className="asset-operation-feedback" role="status">{experienceNotice}</p>
+            ) : null}
+            <div className="asset-operation-actions">
+              <Button type="submit" disabled={experienceSubmitting}>
+                {experienceSubmitting ? '记录中…' : '写入经验记录'}
+              </Button>
+            </div>
+          </form>
         </div>
       </section>
 

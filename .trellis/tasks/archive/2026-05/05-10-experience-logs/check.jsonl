@@ -1,0 +1,12 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "shared Trellis thinking guide index"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "branch and PR workflow constraints"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "cross-layer API to UI data flow"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec index"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Postgres migration and repository guidelines"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "sentinel error and HTTP mapping guidelines"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "backend file placement and wiring guidelines"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "backend verification and tests"}
+{"file": ".trellis/spec/web/index.md", "reason": "web spec index"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "web API state and type contract guidelines"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "web component structure guidelines"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "web verification and tests"}

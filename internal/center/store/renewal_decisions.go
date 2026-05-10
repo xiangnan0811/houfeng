@@ -91,6 +91,16 @@ const specSnapshotSelectColumns = `
 	captured_at,
 	created_at`
 
+const experienceLogSelectColumns = `
+	experience_log_id,
+	vps_id,
+	category,
+	severity,
+	summary,
+	details,
+	occurred_at,
+	created_at`
+
 type renewalDecisionScanner interface {
 	Scan(dest ...any) error
 }
@@ -191,6 +201,27 @@ func scanSpecSnapshot(row renewalDecisionScanner) (renewals.SpecSnapshotRecord, 
 	); err != nil {
 		return renewals.SpecSnapshotRecord{}, err
 	}
+	return record, nil
+}
+
+func scanExperienceLog(row renewalDecisionScanner) (renewals.ExperienceLogRecord, error) {
+	var record renewals.ExperienceLogRecord
+	var category string
+	var severity string
+	if err := row.Scan(
+		&record.ExperienceLogID,
+		&record.VPSID,
+		&category,
+		&severity,
+		&record.Summary,
+		&record.Details,
+		&record.OccurredAt,
+		&record.CreatedAt,
+	); err != nil {
+		return renewals.ExperienceLogRecord{}, err
+	}
+	record.Category = renewals.ExperienceCategory(category)
+	record.Severity = renewals.ExperienceSeverity(severity)
 	return record, nil
 }
 
@@ -346,6 +377,57 @@ func (r *PostgresRenewalDecisionRepository) ListSpecSnapshotsForVPS(ctx context.
 	return records, nil
 }
 
+func (r *PostgresRenewalDecisionRepository) CreateExperienceLog(ctx context.Context, input renewals.CreateExperienceLogInput) (renewals.ExperienceLogRecord, error) {
+	record, err := createExperienceLog(ctx, r.db, input)
+	if err != nil {
+		return renewals.ExperienceLogRecord{}, err
+	}
+	return record, nil
+}
+
+func (r *PostgresRenewalDecisionRepository) ListExperienceLogsForVPS(ctx context.Context, vpsID string) ([]renewals.ExperienceLogRecord, error) {
+	vpsID = renewals.NormalizeVPSID(vpsID)
+	if vpsID == "" {
+		return nil, fmt.Errorf("%w: vps_id is required", renewals.ErrInvalidAssetHistoryInput)
+	}
+
+	var exists bool
+	if err := r.db.QueryRow(ctx, `
+		select exists (
+			select 1
+			from vps_assets
+			where vps_id = $1
+		)`, vpsID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("check vps asset %q for experience logs: %w", vpsID, err)
+	}
+	if !exists {
+		return nil, renewals.ErrAssetTimelineNotFound
+	}
+
+	rows, err := r.db.Query(ctx, `
+		select `+experienceLogSelectColumns+`
+		from experience_logs
+		where vps_id = $1
+		order by occurred_at desc, created_at desc, experience_log_id desc`, vpsID)
+	if err != nil {
+		return nil, fmt.Errorf("query experience logs for vps %q: %w", vpsID, err)
+	}
+	defer rows.Close()
+
+	records := make([]renewals.ExperienceLogRecord, 0)
+	for rows.Next() {
+		record, err := scanExperienceLog(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan experience log for vps %q: %w", vpsID, err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate experience logs for vps %q: %w", vpsID, err)
+	}
+	return records, nil
+}
+
 func (r *PostgresRenewalDecisionRepository) GetVPSTimeline(ctx context.Context, vpsID string) (renewals.VPSTimeline, error) {
 	vpsID = renewals.NormalizeVPSID(vpsID)
 	if vpsID == "" {
@@ -381,12 +463,17 @@ func (r *PostgresRenewalDecisionRepository) GetVPSTimeline(ctx context.Context, 
 	if err != nil {
 		return renewals.VPSTimeline{}, err
 	}
+	experienceLogs, err := r.ListExperienceLogsForVPS(ctx, vpsID)
+	if err != nil {
+		return renewals.VPSTimeline{}, err
+	}
 	return renewals.VPSTimeline{
 		VPSID:            vpsID,
 		RenewalDecisions: records,
 		PriceHistories:   priceHistories,
 		IPHistories:      ipHistories,
 		SpecSnapshots:    specSnapshots,
+		ExperienceLogs:   experienceLogs,
 	}, nil
 }
 
@@ -591,6 +678,50 @@ func createSpecSnapshot(ctx context.Context, db renewalDecisionQueryer, input re
 	))
 	if err != nil {
 		return renewals.SpecSnapshotRecord{}, mapAssetHistoryWriteError(err, "create vps spec snapshot for vps %q", input.VPSID)
+	}
+	return record, nil
+}
+
+func createExperienceLog(ctx context.Context, db renewalDecisionQueryer, input renewals.CreateExperienceLogInput) (renewals.ExperienceLogRecord, error) {
+	input = renewals.NormalizeCreateExperienceLogInput(input)
+	if err := renewals.ValidateCreateExperienceLogInput(input); err != nil {
+		return renewals.ExperienceLogRecord{}, err
+	}
+
+	experienceLogID, err := ids.New("elog")
+	if err != nil {
+		return renewals.ExperienceLogRecord{}, fmt.Errorf("generate experience log id: %w", err)
+	}
+
+	record, err := scanExperienceLog(db.QueryRow(ctx, `
+		insert into experience_logs (
+			experience_log_id,
+			vps_id,
+			category,
+			severity,
+			summary,
+			details,
+			occurred_at
+		) values (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			$6,
+			coalesce($7::timestamptz, now())
+		)
+		returning `+experienceLogSelectColumns,
+		experienceLogID,
+		input.VPSID,
+		string(input.Category),
+		string(input.Severity),
+		input.Summary,
+		input.Details,
+		input.OccurredAt,
+	))
+	if err != nil {
+		return renewals.ExperienceLogRecord{}, mapAssetHistoryWriteError(err, "create experience log for vps %q", input.VPSID)
 	}
 	return record, nil
 }

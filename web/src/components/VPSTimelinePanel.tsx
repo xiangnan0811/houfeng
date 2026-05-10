@@ -3,8 +3,12 @@ import type { ReactNode } from 'react'
 import { Badge, MonoDigits, Timestamp } from './atoms'
 import {
   SUBSCRIPTION_STATUS_LABELS,
+  VPS_EXPERIENCE_CATEGORY_LABELS,
+  VPS_EXPERIENCE_SEVERITY_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
   type SubscriptionStatus,
+  type VPSExperienceCategory,
+  type VPSExperienceSeverity,
   type VPSRenewalDecision,
   type VPSTimeline,
 } from '../lib/types'
@@ -87,7 +91,8 @@ function timelineCount(timeline: VPSTimeline): number {
     timeline.renewal_decisions.length +
     timeline.price_histories.length +
     timeline.ip_histories.length +
-    timeline.spec_snapshots.length
+    timeline.spec_snapshots.length +
+    timeline.experience_logs.length
   )
 }
 
@@ -98,6 +103,20 @@ function decisionTone(value: VPSRenewalDecision): TimelineTone {
   if (value === 'unreviewed' || value === 'observe') return 'notice'
   if (value === 'migrate') return 'maintenance'
   if (value === 'cancel' || value === 'auto_renew_cancelled' || value === 'replaced') return 'critical'
+  return 'neutral'
+}
+
+function experienceCategoryLabel(value: VPSExperienceCategory | string): string {
+  return VPS_EXPERIENCE_CATEGORY_LABELS[value as VPSExperienceCategory] ?? value
+}
+
+function experienceSeverityLabel(value: VPSExperienceSeverity | string): string {
+  return VPS_EXPERIENCE_SEVERITY_LABELS[value as VPSExperienceSeverity] ?? value
+}
+
+function experienceTone(value: VPSExperienceSeverity): TimelineTone {
+  if (value === 'critical') return 'critical'
+  if (value === 'warning') return 'notice'
   return 'neutral'
 }
 
@@ -278,6 +297,37 @@ export function VPSTimelinePanel({ timeline }: VPSTimelinePanelProps) {
                     { label: '操作系统', value: formatOptional(snapshot.os_name) },
                     { label: '虚拟化', value: formatOptional(snapshot.virtualization) },
                     { label: 'VPS ID', value: snapshot.vps_id },
+                  ]}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="asset-timeline-group" aria-label="经验记录">
+          <header className="asset-timeline-group__header">
+            <h3>经验记录</h3>
+            <span><MonoDigits>{timeline.experience_logs.length}</MonoDigits></span>
+          </header>
+          {timeline.experience_logs.length === 0 ? (
+            <TimelineEmpty>暂无经验记录</TimelineEmpty>
+          ) : (
+            <div className="asset-timeline-list">
+              {timeline.experience_logs.map((log) => (
+                <TimelineCard
+                  key={log.experience_log_id}
+                  tone={experienceTone(log.severity)}
+                  title={log.summary}
+                  subtitle={log.details || experienceCategoryLabel(log.category)}
+                  time={log.occurred_at}
+                  meta={[
+                    { label: '分类', value: experienceCategoryLabel(log.category) },
+                    { label: '级别', value: experienceSeverityLabel(log.severity) },
+                    { label: 'Log ID', value: log.experience_log_id },
+                    {
+                      label: '创建时间',
+                      value: <Timestamp value={log.created_at} mode="absolute" />,
+                    },
                   ]}
                 />
               ))}

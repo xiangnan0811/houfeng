@@ -520,3 +520,37 @@ Added explicit VPS detail archive and restore lifecycle workflow with local conf
 ### Next Steps
 
 - None - task complete
+
+
+## Session 75: Add VPS experience logs
+
+**Date**: 2026-05-10
+**Task**: Add VPS experience logs
+**Branch**: `feat/experience-logs`
+
+### Summary
+
+Implemented VPS experience logs across Asset Ledger schema, Go API/store, timeline aggregation, VPS detail UI, tests, and Trellis task context.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ce370fb` | (see git log) |
+| `7cde363` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

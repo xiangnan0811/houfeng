@@ -10,6 +10,7 @@ const timelineEmptyBody = {
   price_histories: [],
   ip_histories: [],
   spec_snapshots: [],
+  experience_logs: [],
 }
 
 function mockJSONResponse(body: unknown, status = 200) {
@@ -141,6 +142,18 @@ describe('VPSDetailPage', () => {
           created_at: '2026-05-09T08:15:00Z',
         },
       ],
+      experience_logs: [
+        {
+          experience_log_id: 'elog_001',
+          vps_id: 'vps_001',
+          category: 'network',
+          severity: 'warning',
+          summary: '晚高峰丢包',
+          details: '已向服务商提交工单',
+          occurred_at: '2026-05-09T08:16:00Z',
+          created_at: '2026-05-09T08:16:30Z',
+        },
+      ],
     }
     const fetchMock = vi
       .fn()
@@ -178,6 +191,8 @@ describe('VPSDetailPage', () => {
     expect(screen.getAllByText('USD 10.00 -> USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getByText('192.0.2.10 -> 192.0.2.1')).toBeInTheDocument()
     expect(screen.getByText('root@192.0.2.1:22')).toBeInTheDocument()
+    expect(screen.getByText('晚高峰丢包')).toBeInTheDocument()
+    expect(screen.getByText('已向服务商提交工单')).toBeInTheDocument()
   })
 
   it('updates the renewal decision and refreshes asset history', async () => {
@@ -237,6 +252,7 @@ describe('VPSDetailPage', () => {
       price_histories: [],
       ip_histories: [],
       spec_snapshots: [],
+      experience_logs: [],
     }
     const fetchMock = vi
       .fn()
@@ -369,6 +385,7 @@ describe('VPSDetailPage', () => {
           created_at: '2026-05-09T09:02:00Z',
         },
       ],
+      experience_logs: [],
     }
     const fetchMock = vi
       .fn()
@@ -571,6 +588,112 @@ describe('VPSDetailPage', () => {
     })
   })
 
+  it('creates an experience log and refreshes asset history', async () => {
+    const detailBody = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: 'ord-1',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: 'nrt',
+      ipv4: '192.0.2.1',
+      ipv6: '',
+      ssh_host: '192.0.2.1',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: 'Debian',
+      virtualization: 'kvm',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: 'primary',
+      active_node_link_count: 0,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+      node_links: [],
+    }
+    const experienceLog = {
+      experience_log_id: 'elog_001',
+      vps_id: 'vps_001',
+      category: 'network',
+      severity: 'warning',
+      summary: '晚高峰丢包',
+      details: '连续三天 tcp probe 抖动',
+      occurred_at: '2026-05-10T09:30:00.000Z',
+      created_at: '2026-05-10T09:31:00Z',
+    }
+    const refreshedTimeline = {
+      vps_id: 'vps_001',
+      renewal_decisions: [],
+      price_histories: [],
+      ip_histories: [],
+      spec_snapshots: [],
+      experience_logs: [experienceLog],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(experienceLog, 201))
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('分类'), { target: { value: 'network' } })
+    fireEvent.change(screen.getByLabelText('级别'), { target: { value: 'warning' } })
+    fireEvent.change(screen.getByLabelText('摘要'), { target: { value: '晚高峰丢包' } })
+    fireEvent.change(screen.getByLabelText('发生时间'), { target: { value: '2026-05-10T09:30' } })
+    fireEvent.change(screen.getByLabelText('详情'), { target: { value: '连续三天 tcp probe 抖动' } })
+    fireEvent.click(screen.getByRole('button', { name: '写入经验记录' }))
+
+    await waitFor(() => expect(screen.getByText('经验记录已写入资产历史')).toBeInTheDocument())
+    expect(screen.getAllByText('晚高峰丢包').length).toBeGreaterThan(0)
+    expect(screen.getByText('连续三天 tcp probe 抖动')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/experience-logs', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        category: 'network',
+        severity: 'warning',
+        summary: '晚高峰丢包',
+        details: '连续三天 tcp probe 抖动',
+        occurred_at: new Date('2026-05-10T09:30').toISOString(),
+      }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/timeline', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
   it('archives a VPS through the lifecycle card and refreshes detail plus timeline', async () => {
     const detailBody = {
       vps_id: 'vps_001',
@@ -614,6 +737,7 @@ describe('VPSDetailPage', () => {
       price_histories: [],
       ip_histories: [],
       spec_snapshots: [],
+      experience_logs: [],
     }
     const fetchMock = vi
       .fn()
@@ -843,6 +967,7 @@ describe('VPSDetailPage', () => {
       price_histories: [],
       ip_histories: [],
       spec_snapshots: [],
+      experience_logs: [],
     }
     const fetchMock = vi
       .fn()
@@ -863,5 +988,6 @@ describe('VPSDetailPage', () => {
     expect(screen.getByText('暂无价格变化历史')).toBeInTheDocument()
     expect(screen.getByText('暂无 IP 变化历史')).toBeInTheDocument()
     expect(screen.getByText('暂无规格快照')).toBeInTheDocument()
+    expect(screen.getByText('暂无经验记录')).toBeInTheDocument()
   })
 })

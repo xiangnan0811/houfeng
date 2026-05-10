@@ -197,3 +197,61 @@ func VPSTimeline(repo renewals.TimelineRepository) http.Handler {
 		writeJSON(w, http.StatusOK, timeline)
 	})
 }
+
+func VPSExperienceLogs(repo renewals.ExperienceLogRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "experience-logs")
+		if !ok {
+			writeError(w, http.StatusNotFound, "vps asset not found")
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			records, err := repo.ListExperienceLogsForVPS(r.Context(), vpsID)
+			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			if errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+				writeError(w, http.StatusNotFound, "vps asset not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusOK, records)
+		case http.MethodPost:
+			var input renewals.CreateExperienceLogInput
+			if err := decodeJSON(r, &input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+
+			input.VPSID = vpsID
+			input = renewals.NormalizeCreateExperienceLogInput(input)
+			if err := renewals.ValidateCreateExperienceLogInput(input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+
+			record, err := repo.CreateExperienceLog(r.Context(), input)
+			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			if errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+				writeError(w, http.StatusNotFound, "vps asset not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusCreated, record)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})
+}
