@@ -1,0 +1,13 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend task entrypoint and applicable guideline index"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "New domain package, store, handler, bootstrap, and migration placement"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "PostgreSQL migration, pgx repository, date/null handling, and Asset Ledger invariants"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Sentinel errors and HTTP/store error mapping"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required tests, router fallback checks, and verification gates"}
+{"file": ".trellis/spec/web/index.md", "reason": "Web task entrypoint and applicable guideline index"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Frontend file placement for API, types, and page changes"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client, data fetch, state, and cross-layer type contract"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "VPS detail page component and table conventions"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Frontend lint, tests, and build expectations"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Domain asset spans database, API, types, and UI"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing Asset Ledger service/subscription patterns"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature branch and PR workflow governance"}

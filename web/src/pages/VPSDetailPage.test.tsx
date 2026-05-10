@@ -14,6 +14,7 @@ const timelineEmptyBody = {
 }
 
 const servicesEmptyBody: unknown[] = []
+const domainsEmptyBody: unknown[] = []
 
 const serviceBody = {
   service_id: 'svc_001',
@@ -26,6 +27,24 @@ const serviceBody = {
   port: 443,
   labels: ['prod'],
   note: 'primary service',
+  created_at: '2026-05-10T08:00:00Z',
+  updated_at: '2026-05-10T08:00:00Z',
+}
+
+const domainBody = {
+  domain_id: 'dom_001',
+  vps_id: 'vps_001',
+  service_id: 'svc_001',
+  target_id: 'tg_001',
+  domain_name: 'www.example.com',
+  purpose: 'site',
+  status: 'active',
+  registrar: 'NameSilo',
+  expires_at: '2026-07-01',
+  auto_renew: true,
+  https_enabled: true,
+  labels: ['prod'],
+  note: 'primary domain',
   created_at: '2026-05-10T08:00:00Z',
   updated_at: '2026-05-10T08:00:00Z',
 }
@@ -177,6 +196,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(responseBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineBody))
       .mockResolvedValueOnce(mockJSONResponse([serviceBody]))
+      .mockResolvedValueOnce(mockJSONResponse([domainBody]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -203,6 +223,11 @@ describe('VPSDetailPage', () => {
       cache: 'no-store',
       credentials: 'include',
     })
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/domains', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
     expect(screen.getByText('基础信息')).toBeInTheDocument()
     expect(screen.getAllByText('192.0.2.1').length).toBeGreaterThan(0)
     expect(screen.getByText('关联 Node 监控')).toBeInTheDocument()
@@ -220,6 +245,10 @@ describe('VPSDetailPage', () => {
     expect(screen.getByText('Blog')).toBeInTheDocument()
     expect(screen.getByText('https://blog.example.com')).toBeInTheDocument()
     expect(screen.getByText('tg_001')).toBeInTheDocument()
+    expect(screen.getByText('域名资产')).toBeInTheDocument()
+    expect(screen.getByText('www.example.com')).toBeInTheDocument()
+    expect(screen.getByText('NameSilo')).toBeInTheDocument()
+    expect(screen.getByText('2026-07-01')).toBeInTheDocument()
   })
 
   it('updates the renewal decision and refreshes asset history', async () => {
@@ -286,10 +315,12 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(updatedRecord))
       .mockResolvedValueOnce(mockJSONResponse(refreshedDetail))
       .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -309,7 +340,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByText('续费决策已更新，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getByText('保留 -> 取消')).toBeInTheDocument()
     expect(screen.getByText('too expensive')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -322,17 +353,22 @@ describe('VPSDetailPage', () => {
         renewal_reason: 'too expensive',
       }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/timeline', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/timeline', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/services', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/domains', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -426,10 +462,12 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(updatedRecord))
       .mockResolvedValueOnce(mockJSONResponse(refreshedDetail))
       .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -459,7 +497,7 @@ describe('VPSDetailPage', () => {
     expect(screen.getByRole('heading', { name: 'Tokyo Edge 2' })).toBeInTheDocument()
     expect(screen.getByText('192.0.2.1 -> 198.51.100.5')).toBeInTheDocument()
     expect(screen.getByText('deploy@edge.example.com:2222')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -491,17 +529,22 @@ describe('VPSDetailPage', () => {
         note: 'updated',
       }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/timeline', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/timeline', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/services', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/domains', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -568,6 +611,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse({
         link_id: 'vpn_001',
         vps_id: 'vps_001',
@@ -604,7 +648,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('Seoul Node')).toBeInTheDocument())
     expect(screen.getByText('Node 关联已更新')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/link-node', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/link-node', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -618,7 +662,7 @@ describe('VPSDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '解除关联' }))
     await waitFor(() => expect(screen.queryByText('Seoul Node')).not.toBeInTheDocument())
     expect(screen.getByText('Node 关联已解除')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/unlink-node', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/unlink-node', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -684,10 +728,12 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(experienceLog, 201))
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -710,7 +756,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByText('经验记录已写入资产历史')).toBeInTheDocument())
     expect(screen.getAllByText('晚高峰丢包').length).toBeGreaterThan(0)
     expect(screen.getByText('连续三天 tcp probe 抖动')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/experience-logs', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/experience-logs', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -726,17 +772,22 @@ describe('VPSDetailPage', () => {
         occurred_at: new Date('2026-05-10T09:30').toISOString(),
       }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/timeline', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/timeline', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/services', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/domains', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -793,10 +844,12 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(archivedRecord))
       .mockResolvedValueOnce(mockJSONResponse({ ...archivedRecord, node_links: [] }))
       .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -819,7 +872,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByText('VPS 已归档，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getAllByText('已归档').length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: '恢复为闲置' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -829,17 +882,22 @@ describe('VPSDetailPage', () => {
       credentials: 'include',
       body: JSON.stringify({ lifecycle_status: 'archived' }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/timeline', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/timeline', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/services', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/domains', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -882,6 +940,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse({ error: 'archive failed' }, 409))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -901,7 +960,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByText('archive failed')).toBeInTheDocument())
     expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存续费决策' })).toBeDisabled()
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_archive_fail', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_archive_fail', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -955,10 +1014,12 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(archivedDetail))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(restoredRecord))
       .mockResolvedValueOnce(mockJSONResponse({ ...restoredRecord, node_links: [] }))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -977,7 +1038,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByText('VPS 已恢复为闲置，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: '归档 VPS' })).toBeInTheDocument()
     expect(screen.getAllByText('闲置').length).toBeGreaterThan(0)
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_archived', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_archived', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -1030,6 +1091,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(createdService, 201))
       .mockResolvedValueOnce(mockJSONResponse([createdService]))
     vi.stubGlobal('fetch', fetchMock)
@@ -1048,7 +1110,7 @@ describe('VPSDetailPage', () => {
     fireEvent.change(screen.getByLabelText('服务类型'), { target: { value: 'api' } })
     fireEvent.change(screen.getByLabelText('入口 URL'), { target: { value: 'https://blog.example.com' } })
     fireEvent.change(screen.getByLabelText('端口'), { target: { value: '443' } })
-    fireEvent.change(screen.getByLabelText('Target ID'), { target: { value: 'tg_001' } })
+    fireEvent.change(screen.getAllByLabelText('Target ID')[0], { target: { value: 'tg_001' } })
     fireEvent.change(screen.getByLabelText('服务标签'), { target: { value: 'prod, public' } })
     fireEvent.change(screen.getByLabelText('服务备注'), { target: { value: 'primary service' } })
     fireEvent.click(screen.getByRole('button', { name: '创建服务记录' }))
@@ -1057,7 +1119,7 @@ describe('VPSDetailPage', () => {
     expect(screen.getByText('Blog')).toBeInTheDocument()
     expect(screen.getByText('https://blog.example.com')).toBeInTheDocument()
     expect(screen.getByText('端口 443')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/services', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1076,7 +1138,7 @@ describe('VPSDetailPage', () => {
         note: 'primary service',
       }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/services', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -1119,6 +1181,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -1134,7 +1197,168 @@ describe('VPSDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建服务记录' }))
 
     expect(screen.getByText('服务名称不能为空。')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('creates a domain record for the current VPS and refreshes domains', async () => {
+    const detailBody = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: 'ord-1',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: 'nrt',
+      ipv4: '192.0.2.1',
+      ipv6: '',
+      ssh_host: '192.0.2.1',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: 'Debian',
+      virtualization: 'kvm',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: 'primary',
+      active_node_link_count: 0,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+      node_links: [],
+    }
+    const createdDomain = {
+      ...domainBody,
+      domain_name: 'api.example.com',
+      purpose: 'api',
+      service_id: 'svc_001',
+      target_id: 'tg_001',
+      registrar: 'NameSilo',
+      labels: ['prod', 'public'],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([serviceBody]))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(createdDomain, 201))
+      .mockResolvedValueOnce(mockJSONResponse([createdDomain]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('域名'), { target: { value: 'API.Example.COM.' } })
+    fireEvent.change(screen.getByLabelText('域名状态'), { target: { value: 'active' } })
+    fireEvent.change(screen.getByLabelText('用途'), { target: { value: 'api' } })
+    fireEvent.change(screen.getByLabelText('Service ID'), { target: { value: 'svc_001' } })
+    fireEvent.change(screen.getAllByLabelText('Target ID')[1], { target: { value: 'tg_001' } })
+    fireEvent.change(screen.getByLabelText('注册商'), { target: { value: 'NameSilo' } })
+    fireEvent.change(screen.getByLabelText('过期日期'), { target: { value: '2026-07-01' } })
+    fireEvent.click(screen.getByLabelText('自动续费'))
+    fireEvent.change(screen.getByLabelText('域名标签'), { target: { value: 'prod, public' } })
+    fireEvent.change(screen.getByLabelText('域名备注'), { target: { value: 'primary domain' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建域名记录' }))
+
+    await waitFor(() => expect(screen.getByText('域名记录已创建')).toBeInTheDocument())
+    expect(screen.getByText('api.example.com')).toBeInTheDocument()
+    expect(screen.getByText('NameSilo')).toBeInTheDocument()
+    expect(screen.getByText('2026-07-01')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/domains', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        service_id: 'svc_001',
+        target_id: 'tg_001',
+        domain_name: 'api.example.com',
+        purpose: 'api',
+        status: 'active',
+        registrar: 'NameSilo',
+        expires_at: '2026-07-01',
+        auto_renew: true,
+        https_enabled: true,
+        labels: ['prod', 'public'],
+        note: 'primary domain',
+      }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/domains', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('shows a domain-local validation error before creating domains', async () => {
+    const detailBody = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: null,
+      provider_name: '',
+      product_name: '',
+      order_ref: '',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: '',
+      ipv4: '192.0.2.1',
+      ipv6: '',
+      ssh_host: '192.0.2.1',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: 'Debian',
+      virtualization: 'kvm',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: [],
+      note: '',
+      active_node_link_count: 0,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+      node_links: [],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('域名'), { target: { value: 'https://example.com/path' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建域名记录' }))
+
+    expect(screen.getByText('域名必须是不带协议、路径和空格的完整域名。')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
   it('renders compact empty states when the VPS has no timeline records', async () => {
@@ -1181,6 +1405,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(responseBody))
       .mockResolvedValueOnce(mockJSONResponse(timelineBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -1198,5 +1423,6 @@ describe('VPSDetailPage', () => {
     expect(screen.getByText('暂无规格快照')).toBeInTheDocument()
     expect(screen.getByText('暂无经验记录')).toBeInTheDocument()
     expect(screen.getByText('尚未记录服务')).toBeInTheDocument()
+    expect(screen.getByText('尚未记录域名')).toBeInTheDocument()
   })
 })

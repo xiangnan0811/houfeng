@@ -72,6 +72,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
 	providerRepo := store.NewPostgresProviderRepository(db.Pool())
 	vpsAssetRepo := store.NewPostgresVPSAssetRepository(db.Pool())
+	assetDomainRepo := store.NewPostgresAssetDomainRepository(db.Pool())
 	assetServiceRepo := store.NewPostgresAssetServiceRepository(db.Pool())
 	subscriptionRepo := store.NewPostgresSubscriptionRepository(db.Pool())
 	vpsNodeLinkRepo := store.NewPostgresVPSNodeLinkRepository(db.Pool())
@@ -127,6 +128,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		EventsHandler:                   handlers.Events(dashboardRepo),
 		IncidentsHandler:                handlers.Incidents(incidentRepo),
 		SettingsHandler:                 handlers.Settings(settingsHandlerRepo),
+		AssetDomainsCollectionHandler:   handlers.AssetDomainsCollection(assetDomainRepo),
 		AssetServicesCollectionHandler:  handlers.AssetServicesCollection(assetServiceRepo),
 		ProvidersCollectionHandler:      handlers.ProvidersCollection(providerRepo),
 		ProviderItemHandler:             handlers.ProviderItem(providerRepo),
@@ -137,6 +139,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSUnlinkNodeHandler:            handlers.VPSUnlinkNode(vpsNodeLinkRepo),
 		VPSTimelineHandler:              handlers.VPSTimeline(renewalDecisionRepo),
 		VPSExperienceLogsHandler:        handlers.VPSExperienceLogs(renewalDecisionRepo),
+		VPSDomainsHandler:               handlers.VPSDomains(assetDomainRepo),
 		VPSServicesHandler:              handlers.VPSServices(assetServiceRepo),
 		SubscriptionsCollectionHandler:  handlers.SubscriptionsCollection(subscriptionRepo),
 		SubscriptionItemHandler:         handlers.SubscriptionItem(subscriptionRepo),

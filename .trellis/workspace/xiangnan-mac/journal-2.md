@@ -589,3 +589,38 @@ Implemented the Service assets MVP: asset_services migration/domain/store/handle
 ### Next Steps
 
 - None - task complete
+
+
+## Session 77: Domain assets MVP
+
+**Date**: 2026-05-10
+**Task**: Domain assets MVP
+**Branch**: `feat/domain-assets-mvp`
+
+### Summary
+
+Added VPS-scoped domain asset records across backend storage, HTTP APIs, and the VPS detail UI, with Trellis contracts documenting the domain asset data flow.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `10886ef` | (see git log) |
+| `5e0ec21` | (see git log) |
+| `7381b2a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

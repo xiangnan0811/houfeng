@@ -1,7 +1,10 @@
 import type {
   ActiveIncidentRecord,
+  AssetDomainListFilter,
+  AssetDomainRecord,
   AssetServiceListFilter,
   AssetServiceRecord,
+  CreateAssetDomainInput,
   CreateProviderInput,
   CreateAssetServiceInput,
   CreateNodeInput,
@@ -430,6 +433,21 @@ export function createAssetService(input: CreateAssetServiceInput): Promise<Asse
   return postJSONBody<AssetServiceRecord>('/api/services', input)
 }
 
+export function listAssetDomains(filter?: AssetDomainListFilter) {
+  return requestJSON<AssetDomainRecord[]>(
+    withQuery('/api/domains', {
+      vps_id: filter?.vps_id,
+      service_id: filter?.service_id,
+      target_id: filter?.target_id,
+      status: filter?.status,
+    }),
+  )
+}
+
+export function createAssetDomain(input: CreateAssetDomainInput): Promise<AssetDomainRecord> {
+  return postJSONBody<AssetDomainRecord>('/api/domains', input)
+}
+
 export function createProvider(input: CreateProviderInput): Promise<ProviderRecord> {
   return postJSONBody<ProviderRecord>('/api/providers', input)
 }
@@ -493,6 +511,27 @@ export function createVPSService(vpsId: string, input: CreateAssetServiceInput):
     note: input.note,
   }
   return postJSONBody<AssetServiceRecord>(`/api/vps/${vpsId}/services`, body)
+}
+
+export function listVPSDomains(vpsId: string) {
+  return requestJSON<AssetDomainRecord[]>(`/api/vps/${vpsId}/domains`)
+}
+
+export function createVPSDomain(vpsId: string, input: CreateAssetDomainInput): Promise<AssetDomainRecord> {
+  const body: Omit<CreateAssetDomainInput, 'vps_id'> = {
+    service_id: input.service_id,
+    target_id: input.target_id,
+    domain_name: input.domain_name,
+    purpose: input.purpose,
+    status: input.status,
+    registrar: input.registrar,
+    expires_at: input.expires_at,
+    auto_renew: input.auto_renew,
+    https_enabled: input.https_enabled,
+    labels: input.labels,
+    note: input.note,
+  }
+  return postJSONBody<AssetDomainRecord>(`/api/vps/${vpsId}/domains`, body)
 }
 
 export function listVPSNodes(vpsId: string) {
