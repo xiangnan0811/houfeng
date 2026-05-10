@@ -454,3 +454,36 @@ Added Provider, Subscription, and VPS fact edit workflows for Asset Ledger front
 ### Next Steps
 
 - None - task complete
+
+
+## Session 73: Asset renewal decision workbench
+
+**Date**: 2026-05-10
+**Task**: Asset renewal decision workbench
+**Branch**: `feat/asset-renewal-decision-workbench`
+
+### Summary
+
+Added the asset renewal decision workbench route, dashboard entry links, decision queue UI, inline VPS renewal decision updates, tests, and verification for the web quality gate.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e764c9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

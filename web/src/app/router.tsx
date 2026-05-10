@@ -2,6 +2,7 @@ import { createBrowserRouter, type RouteObject, Navigate } from 'react-router-do
 
 import { AppShell } from './layout/AppShell'
 import { RequireAuth } from './RequireAuth'
+import { AssetDecisionsPage } from '../pages/AssetDecisionsPage'
 import { DashboardPage } from '../pages/DashboardPage'
 import { EventsPage } from '../pages/EventsPage'
 import { LoginPage } from '../pages/LoginPage'
@@ -31,6 +32,7 @@ export const appRoutes: RouteObject[] = [
           { path: 'vps/:vpsId', element: <VPSDetailPage /> },
           { path: 'providers', element: <ProvidersPage /> },
           { path: 'subscriptions', element: <SubscriptionsPage /> },
+          { path: 'asset-decisions', element: <AssetDecisionsPage /> },
           { path: 'nodes', element: <NodesPage /> },
           { path: 'nodes/compare', element: <NodeComparePage /> },
           { path: 'nodes/:nodeId', element: <NodeDetailPage /> },

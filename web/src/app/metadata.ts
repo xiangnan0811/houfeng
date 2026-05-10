@@ -14,6 +14,7 @@ export const PRIMARY_NAV_ITEMS: NavItem[] = [
   { to: '/vps', label: 'VPS' },
   { to: '/providers', label: '服务商' },
   { to: '/subscriptions', label: '订阅' },
+  { to: '/asset-decisions', label: '资产决策' },
   { to: '/nodes', label: '节点' },
   { to: '/targets', label: '目标' },
   { to: '/events', label: '事件' },

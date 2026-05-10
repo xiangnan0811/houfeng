@@ -291,15 +291,15 @@ describe('DashboardPage', () => {
     expect(within(assetSummary).getByText('15 项资产信号需要复核')).toBeInTheDocument()
     expect(within(assetSummary).getByRole('link', { name: '30 天续费：订阅 3' })).toHaveAttribute(
       'href',
-      '/subscriptions?renew_within_days=30',
+      '/asset-decisions',
     )
     expect(within(assetSummary).getByRole('link', { name: '待决策：续费状态未评估' })).toHaveAttribute(
       'href',
-      '/vps?renewal_decision=unreviewed',
+      '/asset-decisions',
     )
     expect(within(assetSummary).getByRole('link', { name: '取消/迁移：待取消 1 · 待迁移 2' })).toHaveAttribute(
       'href',
-      '/vps?lifecycle_status=to_migrate',
+      '/asset-decisions',
     )
     expect(within(assetSummary).getByRole('link', { name: '未关联 Node：需人工核对' })).toHaveAttribute(
       'href',

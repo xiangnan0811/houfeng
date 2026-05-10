@@ -20,7 +20,7 @@ describe('Sidebar', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText('候风')).toBeInTheDocument()
-    for (const label of ['首页', 'VPS', '服务商', '订阅', '节点', '目标', '事件', '设置']) {
+    for (const label of ['首页', 'VPS', '服务商', '订阅', '资产决策', '节点', '目标', '事件', '设置']) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
   })
@@ -39,7 +39,7 @@ describe('Sidebar', () => {
     )
     const links = screen.getAllByRole('link')
     const linkText = links.map((link) => link.textContent)
-    expect(linkText).toEqual(['首页', 'VPS', '服务商', '订阅', '节点3', '目标1', '事件', '设置'])
+    expect(linkText).toEqual(['首页', 'VPS', '服务商', '订阅', '资产决策', '节点3', '目标1', '事件', '设置'])
     expect(screen.getByText('3')).toHaveClass('badge--count')
     expect(screen.getByText('3')).not.toHaveClass('tone--alert', 'tone--critical')
     expect(screen.getByText('1')).toHaveClass('badge--count')
