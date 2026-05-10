@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "React page and component conventions"}
+{"file": ".trellis/spec/web/index.md", "reason": "web entrypoint and frontend authority"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API helpers, typed data flow, page loading/error patterns"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "BEM and token styling conventions"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "test pattern reference while implementing"}

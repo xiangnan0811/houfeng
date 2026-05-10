@@ -289,6 +289,167 @@ describe('VPSDetailPage', () => {
     })
   })
 
+  it('updates VPS facts and refreshes detail plus timeline', async () => {
+    const detailBody = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: 'ord-1',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: 'nrt',
+      ipv4: '192.0.2.1',
+      ipv6: '',
+      ssh_host: '192.0.2.1',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: 'Debian',
+      virtualization: 'kvm',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: 'primary',
+      active_node_link_count: 0,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+      node_links: [],
+    }
+    const updatedRecord = {
+      ...detailBody,
+      display_name: 'Tokyo Edge 2',
+      product_name: 'cx32',
+      ipv4: '198.51.100.5',
+      ssh_host: 'edge.example.com',
+      ssh_port: 2222,
+      ssh_user: 'deploy',
+      os_name: 'Ubuntu 24.04',
+      usage_status: 'standby',
+      labels: ['edge', 'backup'],
+      note: 'updated',
+      updated_at: '2026-05-09T09:00:00Z',
+      active_node_link_count: 0,
+    }
+    const refreshedDetail = {
+      ...updatedRecord,
+      node_links: [],
+    }
+    const refreshedTimeline = {
+      vps_id: 'vps_001',
+      renewal_decisions: [],
+      price_histories: [],
+      ip_histories: [
+        {
+          ip_history_id: 'iph_002',
+          vps_id: 'vps_001',
+          from_ipv4: '192.0.2.1',
+          to_ipv4: '198.51.100.5',
+          from_ipv6: '',
+          to_ipv6: '',
+          changed_at: '2026-05-09T09:01:00Z',
+          created_at: '2026-05-09T09:01:00Z',
+        },
+      ],
+      spec_snapshots: [
+        {
+          snapshot_id: 'vss_002',
+          vps_id: 'vps_001',
+          product_name: 'cx32',
+          ssh_host: 'edge.example.com',
+          ssh_port: 2222,
+          ssh_user: 'deploy',
+          os_name: 'Ubuntu 24.04',
+          virtualization: 'kvm',
+          captured_at: '2026-05-09T09:02:00Z',
+          created_at: '2026-05-09T09:02:00Z',
+        },
+      ],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(updatedRecord))
+      .mockResolvedValueOnce(mockJSONResponse(refreshedDetail))
+      .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑基础信息' }))
+    fireEvent.change(screen.getByLabelText('VPS 名称'), { target: { value: 'Tokyo Edge 2' } })
+    fireEvent.change(screen.getByLabelText('产品名'), { target: { value: 'cx32' } })
+    fireEvent.change(screen.getByLabelText('IPv4'), { target: { value: '198.51.100.5' } })
+    fireEvent.change(screen.getByLabelText('SSH Host'), { target: { value: 'edge.example.com' } })
+    fireEvent.change(screen.getByLabelText('SSH 端口'), { target: { value: '2222' } })
+    fireEvent.change(screen.getByLabelText('SSH 用户'), { target: { value: 'deploy' } })
+    fireEvent.change(screen.getByLabelText('操作系统'), { target: { value: 'Ubuntu 24.04' } })
+    fireEvent.change(screen.getByLabelText('用途状态'), { target: { value: 'standby' } })
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'edge, backup' } })
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'updated' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存基础信息' }))
+
+    await waitFor(() => expect(screen.getByText('基础信息已更新，资产历史已刷新')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Tokyo Edge 2' })).toBeInTheDocument()
+    expect(screen.getByText('192.0.2.1 -> 198.51.100.5')).toBeInTheDocument()
+    expect(screen.getByText('deploy@edge.example.com:2222')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        display_name: 'Tokyo Edge 2',
+        provider_id: 'pv_001',
+        provider_name: 'Hetzner',
+        product_name: 'cx32',
+        order_ref: 'ord-1',
+        country: 'JP',
+        region: 'Kanto',
+        city: 'Tokyo',
+        datacenter: 'nrt',
+        ipv4: '198.51.100.5',
+        ipv6: '',
+        ssh_host: 'edge.example.com',
+        ssh_port: 2222,
+        ssh_user: 'deploy',
+        os_name: 'Ubuntu 24.04',
+        virtualization: 'kvm',
+        lifecycle_status: 'active',
+        usage_status: 'standby',
+        importance: 'normal',
+        labels: ['edge', 'backup'],
+        note: 'updated',
+      }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/timeline', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
   it('links and unlinks Node monitoring from a VPS asset', async () => {
     const detailBody = {
       vps_id: 'vps_001',

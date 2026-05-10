@@ -13,11 +13,16 @@ import {
 } from '../lib/api'
 import { formatOptional } from '../lib/format'
 import {
+  VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
+  VPS_USAGE_STATUS_LABELS,
+  type UpdateVPSAssetInput,
   type VPSAssetDetail,
+  type VPSLifecycleStatus,
   type VPSNodeSummary,
   type VPSRenewalDecision,
   type VPSTimeline,
+  type VPSUsageStatus,
 } from '../lib/types'
 import {
   AssetLabels,
@@ -26,6 +31,7 @@ import {
   RenewalBadge,
   UsageBadge,
 } from './assetPageBadges'
+import { parseLabels } from './assetPageUtils'
 
 type PageState = {
   vpsId: string | null
@@ -45,6 +51,38 @@ const RENEWAL_DECISION_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABELS) as 
   VPSRenewalDecision,
   string,
 ]>
+const LIFECYCLE_OPTIONS = Object.entries(VPS_LIFECYCLE_STATUS_LABELS) as Array<[
+  VPSLifecycleStatus,
+  string,
+]>
+const USAGE_OPTIONS = Object.entries(VPS_USAGE_STATUS_LABELS) as Array<[
+  VPSUsageStatus,
+  string,
+]>
+
+type FactEditFormState = {
+  displayName: string
+  providerID: string
+  providerName: string
+  productName: string
+  orderRef: string
+  country: string
+  region: string
+  city: string
+  datacenter: string
+  ipv4: string
+  ipv6: string
+  sshHost: string
+  sshPort: string
+  sshUser: string
+  osName: string
+  virtualization: string
+  lifecycleStatus: VPSLifecycleStatus
+  usageStatus: VPSUsageStatus
+  importance: string
+  labels: string
+  note: string
+}
 
 function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message
@@ -61,6 +99,66 @@ function DetailItem({ label, value }: { label: string; value: string | number | 
   )
 }
 
+function detailToFactEditForm(detail: VPSAssetDetail): FactEditFormState {
+  return {
+    displayName: detail.display_name,
+    providerID: detail.provider_id ?? '',
+    providerName: detail.provider_name,
+    productName: detail.product_name,
+    orderRef: detail.order_ref,
+    country: detail.country,
+    region: detail.region,
+    city: detail.city,
+    datacenter: detail.datacenter,
+    ipv4: detail.ipv4,
+    ipv6: detail.ipv6,
+    sshHost: detail.ssh_host,
+    sshPort: String(detail.ssh_port),
+    sshUser: detail.ssh_user,
+    osName: detail.os_name,
+    virtualization: detail.virtualization,
+    lifecycleStatus: detail.lifecycle_status,
+    usageStatus: detail.usage_status,
+    importance: detail.importance,
+    labels: detail.labels.join(', '),
+    note: detail.note,
+  }
+}
+
+function buildFactEditInput(form: FactEditFormState): UpdateVPSAssetInput {
+  if (form.displayName.trim() === '') {
+    throw new Error('VPS 名称不能为空。')
+  }
+  const sshPort = Number.parseInt(form.sshPort.trim(), 10)
+  if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) {
+    throw new Error('SSH 端口必须为 1 到 65535。')
+  }
+
+  return {
+    display_name: form.displayName.trim(),
+    provider_id: form.providerID.trim() || null,
+    provider_name: form.providerName.trim(),
+    product_name: form.productName.trim(),
+    order_ref: form.orderRef.trim(),
+    country: form.country.trim(),
+    region: form.region.trim(),
+    city: form.city.trim(),
+    datacenter: form.datacenter.trim(),
+    ipv4: form.ipv4.trim(),
+    ipv6: form.ipv6.trim(),
+    ssh_host: form.sshHost.trim(),
+    ssh_port: sshPort,
+    ssh_user: form.sshUser.trim(),
+    os_name: form.osName.trim(),
+    virtualization: form.virtualization.trim(),
+    lifecycle_status: form.lifecycleStatus,
+    usage_status: form.usageStatus,
+    importance: form.importance.trim() || 'normal',
+    labels: parseLabels(form.labels),
+    note: form.note.trim(),
+  }
+}
+
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
@@ -72,6 +170,11 @@ export function VPSDetailPage() {
   const [decisionSubmitting, setDecisionSubmitting] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [decisionNotice, setDecisionNotice] = useState<string | null>(null)
+  const [factEditOpen, setFactEditOpen] = useState(false)
+  const [factDraft, setFactDraft] = useState<FactEditFormState | null>(null)
+  const [factSubmitting, setFactSubmitting] = useState(false)
+  const [factError, setFactError] = useState<string | null>(null)
+  const [factNotice, setFactNotice] = useState<string | null>(null)
   const [linkDraft, setLinkDraft] = useState({ nodeId: '', note: '' })
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
@@ -93,6 +196,10 @@ export function VPSDetailPage() {
         setDecisionDraft({ renewalDecision: detail.renewal_decision, reason: '' })
         setDecisionError(null)
         setDecisionNotice(null)
+        setFactEditOpen(false)
+        setFactDraft(detailToFactEditForm(detail))
+        setFactError(null)
+        setFactNotice(null)
         setLinkDraft({ nodeId: '', note: '' })
         setLinkError(null)
         setLinkNotice(null)
@@ -155,6 +262,48 @@ export function VPSDetailPage() {
       setDecisionError(describeError(error, '更新续费决策失败'))
     } finally {
       setDecisionSubmitting(false)
+    }
+  }
+
+  function toggleFactEdit(detail: VPSAssetDetail) {
+    setFactEditOpen((open) => {
+      const next = !open
+      if (next) {
+        setFactDraft(detailToFactEditForm(detail))
+        setFactError(null)
+        setFactNotice(null)
+      }
+      return next
+    })
+  }
+
+  async function handleFactSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = state.detail
+    if (!detail || !factDraft) return
+
+    setFactError(null)
+    setFactNotice(null)
+
+    let input: UpdateVPSAssetInput
+    try {
+      input = buildFactEditInput(factDraft)
+    } catch (error: unknown) {
+      setFactError(describeError(error, 'VPS 基础信息输入无效'))
+      return
+    }
+
+    setFactSubmitting(true)
+    try {
+      await updateVPSAsset(detail.vps_id, input)
+      const refreshed = await refreshDetailAndTimeline(detail.vps_id)
+      setFactDraft(detailToFactEditForm(refreshed))
+      setFactEditOpen(false)
+      setFactNotice('基础信息已更新，资产历史已刷新')
+    } catch (error: unknown) {
+      setFactError(describeError(error, '更新基础信息失败'))
+    } finally {
+      setFactSubmitting(false)
     }
   }
 
@@ -466,8 +615,67 @@ export function VPSDetailPage() {
             <p className="section-heading__eyebrow">FACTS</p>
             <h2>基础信息</h2>
           </div>
-          <AssetLabels labels={detail.labels} />
+          <div className="section-heading__actions">
+            <AssetLabels labels={detail.labels} />
+            <Button variant={factEditOpen ? 'secondary' : 'primary'} size="sm" onClick={() => toggleFactEdit(detail)}>
+              {factEditOpen ? '收起编辑' : '编辑基础信息'}
+            </Button>
+          </div>
         </div>
+        {factError ? (
+          <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+            {factError}
+          </p>
+        ) : factNotice ? (
+          <p className="asset-operation-feedback" role="status">{factNotice}</p>
+        ) : null}
+        {factEditOpen && factDraft && (
+          <form className="asset-facts-edit-form" onSubmit={(event) => void handleFactSubmit(event)}>
+            <Input label="VPS 名称" value={factDraft.displayName} onChange={(event) => setFactDraft({ ...factDraft, displayName: event.target.value })} />
+            <Input label="Provider ID" value={factDraft.providerID} onChange={(event) => setFactDraft({ ...factDraft, providerID: event.target.value })} />
+            <Input label="服务商名称快照" value={factDraft.providerName} onChange={(event) => setFactDraft({ ...factDraft, providerName: event.target.value })} />
+            <Input label="产品名" value={factDraft.productName} onChange={(event) => setFactDraft({ ...factDraft, productName: event.target.value })} />
+            <Input label="订单号" value={factDraft.orderRef} onChange={(event) => setFactDraft({ ...factDraft, orderRef: event.target.value })} />
+            <Input label="国家 / 地区" value={factDraft.country} onChange={(event) => setFactDraft({ ...factDraft, country: event.target.value })} />
+            <Input label="区域" value={factDraft.region} onChange={(event) => setFactDraft({ ...factDraft, region: event.target.value })} />
+            <Input label="城市" value={factDraft.city} onChange={(event) => setFactDraft({ ...factDraft, city: event.target.value })} />
+            <Input label="数据中心" value={factDraft.datacenter} onChange={(event) => setFactDraft({ ...factDraft, datacenter: event.target.value })} />
+            <Input label="IPv4" value={factDraft.ipv4} onChange={(event) => setFactDraft({ ...factDraft, ipv4: event.target.value })} />
+            <Input label="IPv6" value={factDraft.ipv6} onChange={(event) => setFactDraft({ ...factDraft, ipv6: event.target.value })} />
+            <Input label="SSH Host" value={factDraft.sshHost} onChange={(event) => setFactDraft({ ...factDraft, sshHost: event.target.value })} />
+            <Input label="SSH 端口" type="number" min="1" max="65535" value={factDraft.sshPort} onChange={(event) => setFactDraft({ ...factDraft, sshPort: event.target.value })} />
+            <Input label="SSH 用户" value={factDraft.sshUser} onChange={(event) => setFactDraft({ ...factDraft, sshUser: event.target.value })} />
+            <Input label="操作系统" value={factDraft.osName} onChange={(event) => setFactDraft({ ...factDraft, osName: event.target.value })} />
+            <Input label="虚拟化" value={factDraft.virtualization} onChange={(event) => setFactDraft({ ...factDraft, virtualization: event.target.value })} />
+            <label className="input-field">
+              <span className="input-field__label">生命周期</span>
+              <select className="input" value={factDraft.lifecycleStatus} onChange={(event) => setFactDraft({ ...factDraft, lifecycleStatus: event.target.value as VPSLifecycleStatus })}>
+                {LIFECYCLE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="input-field">
+              <span className="input-field__label">用途状态</span>
+              <select className="input" value={factDraft.usageStatus} onChange={(event) => setFactDraft({ ...factDraft, usageStatus: event.target.value as VPSUsageStatus })}>
+                {USAGE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <Input label="重要性" value={factDraft.importance} onChange={(event) => setFactDraft({ ...factDraft, importance: event.target.value })} />
+            <Input label="标签" hint="用逗号分隔" value={factDraft.labels} onChange={(event) => setFactDraft({ ...factDraft, labels: event.target.value })} />
+            <Input label="备注" value={factDraft.note} onChange={(event) => setFactDraft({ ...factDraft, note: event.target.value })} />
+            <div className="page-form-actions">
+              <Button type="button" variant="secondary" disabled={factSubmitting} onClick={() => toggleFactEdit(detail)}>
+                取消编辑
+              </Button>
+              <Button type="submit" disabled={factSubmitting}>
+                {factSubmitting ? '保存中…' : '保存基础信息'}
+              </Button>
+            </div>
+          </form>
+        )}
         <dl className="asset-detail-grid">
           <DetailItem label="VPS ID" value={detail.vps_id} />
           <DetailItem label="Provider ID" value={detail.provider_id} />

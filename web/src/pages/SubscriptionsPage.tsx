@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { Button, DataTable, Input, MonoDigits, type DataTableColumn } from '../components/atoms'
 import { FilterBar, FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
-import { ApiError, createSubscription, listSubscriptions, listVPSAssets } from '../lib/api'
+import { ApiError, createSubscription, listSubscriptions, listVPSAssets, updateSubscription } from '../lib/api'
 import { formatDate, formatMoney, formatOptional } from '../lib/format'
 import {
   SUBSCRIPTION_STATUS_LABELS,
@@ -11,6 +11,7 @@ import {
   type SubscriptionListFilter,
   type SubscriptionRecord,
   type SubscriptionStatus,
+  type UpdateSubscriptionInput,
   type VPSAssetRecord,
 } from '../lib/types'
 import { SubscriptionStatusBadge } from './assetPageBadges'
@@ -151,6 +152,27 @@ function buildCreateInput(form: CreateSubscriptionFormState): CreateSubscription
   }
 }
 
+function subscriptionToForm(subscription: SubscriptionRecord): CreateSubscriptionFormState {
+  return {
+    vpsID: subscription.vps_id,
+    price: String(subscription.price),
+    currency: subscription.currency,
+    billingCycle: subscription.billing_cycle,
+    billingMonths: String(subscription.billing_months),
+    startedAt: subscription.started_at ?? '',
+    renewAt: subscription.renew_at ?? '',
+    autoRenew: subscription.auto_renew,
+    autoRenewCancelled: subscription.auto_renew_cancelled,
+    status: subscription.status,
+    paymentMethod: subscription.payment_method,
+    note: subscription.note,
+  }
+}
+
+function buildUpdateInput(form: CreateSubscriptionFormState): UpdateSubscriptionInput {
+  return buildCreateInput(form)
+}
+
 function vpsOptions(vps: VPSAssetRecord[]): FilterSelectOption[] {
   return vps.map((item) => ({
     value: item.vps_id,
@@ -166,6 +188,10 @@ export function SubscriptionsPage() {
   const [createForm, setCreateForm] = useState<CreateSubscriptionFormState>(INITIAL_CREATE_FORM)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [editingSubscriptionId, setEditingSubscriptionId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<CreateSubscriptionFormState>(INITIAL_CREATE_FORM)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -205,6 +231,8 @@ export function SubscriptionsPage() {
       if (!next) {
         setCreateForm(INITIAL_CREATE_FORM)
         setCreateError(null)
+      } else {
+        cancelEdit()
       }
       return next
     })
@@ -241,6 +269,52 @@ export function SubscriptionsPage() {
         setCreateError(describeError(error, '创建订阅失败'))
       })
       .finally(() => setCreateSubmitting(false))
+  }
+
+  function startEdit(subscription: SubscriptionRecord) {
+    setCreateOpen(false)
+    setCreateError(null)
+    setEditingSubscriptionId(subscription.subscription_id)
+    setEditForm(subscriptionToForm(subscription))
+    setEditError(null)
+  }
+
+  function cancelEdit() {
+    setEditingSubscriptionId(null)
+    setEditForm(INITIAL_CREATE_FORM)
+    setEditError(null)
+  }
+
+  function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingSubscriptionId) return
+    setEditError(null)
+
+    let input: UpdateSubscriptionInput
+    try {
+      input = buildUpdateInput(editForm)
+    } catch (error: unknown) {
+      setEditError(describeError(error, '订阅输入无效'))
+      return
+    }
+
+    setEditSubmitting(true)
+    updateSubscription(editingSubscriptionId, input)
+      .then((subscription) => {
+        setState((current) => ({
+          loading: false,
+          error: null,
+          subscriptions: current.subscriptions.map((item) =>
+            item.subscription_id === subscription.subscription_id ? subscription : item,
+          ),
+          vps: current.vps,
+        }))
+        cancelEdit()
+      })
+      .catch((error: unknown) => {
+        setEditError(describeError(error, '更新订阅失败'))
+      })
+      .finally(() => setEditSubmitting(false))
   }
 
   function vpsName(vpsID: string | null): string {
@@ -294,6 +368,21 @@ export function SubscriptionsPage() {
       label: '状态',
       render: (subscription) => <SubscriptionStatusBadge value={subscription.status} />,
     },
+    {
+      key: 'actions',
+      label: '操作',
+      align: 'right',
+      render: (subscription) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={`编辑 ${subscription.subscription_id}`}
+          onClick={() => startEdit(subscription)}
+        >
+          编辑
+        </Button>
+      ),
+    },
   ]
 
   const active = hasActiveFilters(filters)
@@ -337,7 +426,7 @@ export function SubscriptionsPage() {
             <Input label="开始日期" type="date" value={createForm.startedAt} onChange={(event) => setCreateForm({ ...createForm, startedAt: event.target.value })} />
             <Input label="续费日期" type="date" value={createForm.renewAt} onChange={(event) => setCreateForm({ ...createForm, renewAt: event.target.value })} />
             <label className="input-field">
-              <span className="input-field__label">状态</span>
+              <span className="input-field__label">订阅状态</span>
               <select className="input" value={createForm.status} onChange={(event) => setCreateForm({ ...createForm, status: event.target.value as SubscriptionStatus })}>
                 {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
@@ -356,6 +445,55 @@ export function SubscriptionsPage() {
             <div className="page-form-actions">
               <Button type="submit" disabled={createSubmitting}>
                 {createSubmitting ? '创建中…' : '创建订阅'}
+              </Button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {editingSubscriptionId && (
+        <section className="page-panel">
+          <div className="page-panel__eyebrow">EDIT</div>
+          <h2 className="page-panel__title">订阅编辑</h2>
+          <form onSubmit={handleEditSubmit}>
+            <label className="input-field">
+              <span className="input-field__label">订阅 VPS</span>
+              <select className="input" value={editForm.vpsID} onChange={(event) => setEditForm({ ...editForm, vpsID: event.target.value })}>
+                <option value="">选择 VPS</option>
+                {vpsSelectOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <Input label="价格" type="number" min="0" step="0.01" value={editForm.price} onChange={(event) => setEditForm({ ...editForm, price: event.target.value })} />
+            <Input label="币种" value={editForm.currency} onChange={(event) => setEditForm({ ...editForm, currency: event.target.value })} />
+            <Input label="计费周期" value={editForm.billingCycle} onChange={(event) => setEditForm({ ...editForm, billingCycle: event.target.value })} />
+            <Input label="计费月数" type="number" min="1" value={editForm.billingMonths} onChange={(event) => setEditForm({ ...editForm, billingMonths: event.target.value })} />
+            <Input label="开始日期" type="date" value={editForm.startedAt} onChange={(event) => setEditForm({ ...editForm, startedAt: event.target.value })} />
+            <Input label="续费日期" type="date" value={editForm.renewAt} onChange={(event) => setEditForm({ ...editForm, renewAt: event.target.value })} />
+            <label className="input-field">
+              <span className="input-field__label">订阅状态</span>
+              <select className="input" value={editForm.status} onChange={(event) => setEditForm({ ...editForm, status: event.target.value as SubscriptionStatus })}>
+                {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <Input label="支付方式" value={editForm.paymentMethod} onChange={(event) => setEditForm({ ...editForm, paymentMethod: event.target.value })} />
+            <label className="asset-checkbox">
+              <input type="checkbox" checked={editForm.autoRenew} onChange={(event) => setEditForm({ ...editForm, autoRenew: event.target.checked })} />
+              <span>自动续费</span>
+            </label>
+            <label className="asset-checkbox">
+              <input type="checkbox" checked={editForm.autoRenewCancelled} onChange={(event) => setEditForm({ ...editForm, autoRenewCancelled: event.target.checked })} />
+              <span>已取消自动续费</span>
+            </label>
+            <Input label="备注" value={editForm.note} onChange={(event) => setEditForm({ ...editForm, note: event.target.value })} />
+            {editError && <p className="create-form__error" role="alert">{editError}</p>}
+            <div className="page-form-actions">
+              <Button type="button" variant="secondary" onClick={cancelEdit} disabled={editSubmitting}>
+                取消编辑
+              </Button>
+              <Button type="submit" disabled={editSubmitting}>
+                {editSubmitting ? '保存中…' : '保存订阅'}
               </Button>
             </div>
           </form>

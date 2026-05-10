@@ -40,7 +40,9 @@ import {
   unlinkVPSNode,
   updateNodeMetadata,
   updateProbeItem,
+  updateProvider,
   updateSettings,
+  updateSubscription,
   updateTargetMetadata,
   updateVPSAsset,
   listVPSAssets,
@@ -62,6 +64,8 @@ import type {
   TargetRecord,
   UpdateNodeMetadataInput,
   UpdateProbeItemInput,
+  UpdateProviderInput,
+  UpdateSubscriptionInput,
   UpdateTargetMetadataInput,
   VPSAssetRecord,
   VPSNodeLinkRecord,
@@ -321,7 +325,7 @@ describe('api helpers', () => {
     })
   })
 
-  it('loads and creates providers through /api/providers', async () => {
+  it('loads, creates, and updates providers through /api/providers', async () => {
     const provider = {
       provider_id: 'pv_001',
       name: 'Hetzner',
@@ -345,16 +349,30 @@ describe('api helpers', () => {
       rating: 5,
       labels: ['core'],
     } satisfies CreateProviderInput
+    const patchBody = {
+      name: 'Hetzner Cloud',
+      rating: null,
+      labels: ['core', 'backup'],
+    } satisfies UpdateProviderInput
+    const updatedProvider = {
+      ...provider,
+      name: 'Hetzner Cloud',
+      rating: null,
+      labels: ['core', 'backup'],
+      updated_at: '2026-05-09T09:00:00Z',
+    } satisfies ProviderRecord
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([provider])))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(provider)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(provider)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(updatedProvider)))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listProviders()).resolves.toEqual([provider])
     await expect(getProvider('pv_001')).resolves.toEqual(provider)
     await expect(createProvider(input)).resolves.toEqual(provider)
+    await expect(updateProvider('pv_001', patchBody)).resolves.toEqual(updatedProvider)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/providers', {
       headers: { Accept: 'application/json' },
@@ -375,6 +393,16 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify(input),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/providers/pv_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(patchBody),
     })
   })
 
@@ -592,7 +620,7 @@ describe('api helpers', () => {
     })
   })
 
-  it('serializes subscription filters and creates subscriptions without monthly_price', async () => {
+  it('serializes subscription filters and creates or updates subscriptions without monthly_price', async () => {
     const subscription = {
       subscription_id: 'sub_001',
       vps_id: 'vps_001',
@@ -625,16 +653,44 @@ describe('api helpers', () => {
       payment_method: 'card',
       note: '',
     } satisfies CreateSubscriptionInput
+    const patchBody = {
+      price: 24,
+      currency: 'USD',
+      billing_cycle: 'quarterly',
+      billing_months: 3,
+      renew_at: '2026-08-01',
+      auto_renew: false,
+      auto_renew_cancelled: true,
+      status: 'paused',
+      payment_method: 'paypal',
+      note: 'review',
+    } satisfies UpdateSubscriptionInput
+    const updatedSubscription = {
+      ...subscription,
+      price: 24,
+      billing_cycle: 'quarterly',
+      billing_months: 3,
+      monthly_price: 8,
+      renew_at: '2026-08-01',
+      auto_renew: false,
+      auto_renew_cancelled: true,
+      status: 'paused',
+      payment_method: 'paypal',
+      note: 'review',
+      updated_at: '2026-05-09T09:00:00Z',
+    } satisfies SubscriptionRecord
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([subscription])))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(subscription)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(subscription)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(updatedSubscription)))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc' })).resolves.toEqual([subscription])
     await expect(getSubscription('sub_001')).resolves.toEqual(subscription)
     await expect(createSubscription(input)).resolves.toEqual(subscription)
+    await expect(updateSubscription('sub_001', patchBody)).resolves.toEqual(updatedSubscription)
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -659,6 +715,16 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify(input),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/subscriptions/sub_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(patchBody),
     })
   })
 
