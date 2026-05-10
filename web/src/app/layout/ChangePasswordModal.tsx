@@ -1,12 +1,17 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
+
 import { Button, Input } from '../../components/atoms'
 import { changePassword } from '../../lib/auth-client'
+import { useModalFocus } from '../../lib/useModalFocus'
 
 export interface ChangePasswordModalProps {
   onClose: () => void
 }
 
 export function ChangePasswordModal({ onClose }: ChangePasswordModalProps) {
+  const titleId = useId()
+  const modalRef = useModalFocus<HTMLFormElement>(true, onClose)
   const [oldPw, setOldPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
@@ -37,10 +42,21 @@ export function ChangePasswordModal({ onClose }: ChangePasswordModalProps) {
     }
   }
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <form className="modal" onSubmit={onSubmit} onMouseDown={(e) => e.stopPropagation()}>
-        <h2 className="modal__title">修改密码</h2>
+      <form
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onSubmit={onSubmit}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <h2 id={titleId} className="modal__title">
+          修改密码
+        </h2>
         {error && (
           <div role="alert" className="modal__error">
             {error}
@@ -56,7 +72,6 @@ export function ChangePasswordModal({ onClose }: ChangePasswordModalProps) {
           type="password"
           value={oldPw}
           onChange={(e) => setOldPw(e.target.value)}
-          autoFocus
         />
         <Input
           label="新密码"
@@ -79,6 +94,7 @@ export function ChangePasswordModal({ onClose }: ChangePasswordModalProps) {
           </Button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   )
 }
