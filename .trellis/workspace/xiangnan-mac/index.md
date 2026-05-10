@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 81
-- **Last Active**: 2026-05-10
+- **Total Sessions**: 82
+- **Last Active**: 2026-05-11
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~764 | Active |
+| `journal-2.md` | ~797 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 82 | 2026-05-11 | Command result durability | `a94b25b` | `fix/command-result-durability` |
 | 81 | 2026-05-10 | Modal focus management | `319d0c4`, `0b02426`, `2095c65` | `fix/modal-focus-management` |
 | 80 | 2026-05-10 | Events filter drawer | `ae8dd8e`, `645b3e1`, `a4a90e4` | `feat/events-filter-drawer` |
 | 79 | 2026-05-10 | Events backfill filter | `25bf75d`, `2016137` | `feat/events-backfill-filter` |
