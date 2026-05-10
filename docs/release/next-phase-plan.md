@@ -104,6 +104,8 @@ P0 全完成 / P1 全完成 / P2 接近完成：
 
 **Trigger condition**：Stage 1 全部 P0 + P1 closed → 触发 Stage 2 brainstorm task（创建于 `.trellis/tasks/`）。
 
+**2026-05-10 状态更新**：Stage 2 第一条具体扩展计划已经收敛为根目录 `houfeng_codex_下一步开发计划.md`（VPS Asset Ledger + Fleet Observability）。该计划的 Task 1-3、Task 5-8 与 VPS-scoped service/domain 轻量扩展已经完成；Task 4 的 dry-run/import 工具链完成，但真实 40+ VPS 数据执行仍为 user-data-dependent deferred。完成度审计见 `docs/release/asset-ledger-roadmap-completion.md`。
+
 **已知方向起点**（仅作 trigger 后讨论的种子，不锁定）：
 - 用户判定 MVP 比 V1 范围大；具体功能扩展待 brainstorm
 - 候选方向（来自 v1-baseline 自身的"intentionally out of scope"段，与本阶段无关）：
@@ -159,4 +161,5 @@ gap-checklist 42 个 Closed (⚠️ need-reassess) 行已全部现场验证完�
 
 | 日期 | 变更 |
 |---|---|
+| 2026-05-10 | 记录 Stage 2 第一条具体扩展计划已落地到 `houfeng_codex_下一步开发计划.md`，完成度审计见 `docs/release/asset-ledger-roadmap-completion.md`。 |
 | 2026-05-02 | 初版，由 T2 (`.trellis/tasks/05-02-roadmap-and-claude-md`) 起草。关联 T1 (docs-audit) + T3 (spec-sync) 已落地的成果。Stage 1 详细 + Stage 2/3 占位 + trigger condition。 |
