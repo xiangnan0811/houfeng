@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { Button, MonoDigits, Tabs, type TabItem } from '../components/atoms'
+import { Button, Drawer, MonoDigits, Tabs, type TabItem } from '../components/atoms'
 import { DetailSection } from '../components/DetailSection'
 import { EventList } from '../components/EventList'
 import {
@@ -371,6 +371,7 @@ export function EventsPage() {
     exhausted: false,
   })
   const [loadingMore, setLoadingMore] = useState(false)
+  const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false)
 
   useEffect(() => {
     const canonicalParams = searchParamsFromFilters(appliedFilters)
@@ -445,6 +446,37 @@ export function EventsPage() {
     })
   }
 
+  function updateDraftTimeRange(next: TimeRange) {
+    setDraftState((current) => {
+      const currentFilters =
+        current.filterKey === appliedFilterKey ? current.filters : appliedFilters
+      return {
+        filterKey: appliedFilterKey,
+        filters: applyTimeRange(currentFilters, next),
+      }
+    })
+  }
+
+  function openFiltersDrawer() {
+    setDraftState({ filterKey: appliedFilterKey, filters: appliedFilters })
+    setFiltersDrawerOpen(true)
+  }
+
+  function closeFiltersDrawer() {
+    setDraftState({ filterKey: appliedFilterKey, filters: appliedFilters })
+    setFiltersDrawerOpen(false)
+  }
+
+  function applyDraftFilters() {
+    commitFilters(filters)
+    setFiltersDrawerOpen(false)
+  }
+
+  function resetFilters() {
+    commitFilters(DEFAULT_FILTERS)
+    setFiltersDrawerOpen(false)
+  }
+
   function removeAppliedFilter(key: keyof FilterState) {
     commitFilters({
       ...appliedFilters,
@@ -458,6 +490,83 @@ export function EventsPage() {
       : appliedFilters.object_type === 'target'
         ? '目标'
         : ''
+
+  const activeFilterChips = (
+    <>
+      {appliedFilters.object_type ? (
+        <FilterChip
+          label={`对象类型: ${objectTypeLabel}`}
+          onRemove={() => removeAppliedFilter('object_type')}
+        />
+      ) : null}
+      {appliedFilters.severity ? (
+        <FilterChip
+          label={`严重程度: ${appliedFilters.severity}`}
+          onRemove={() => removeAppliedFilter('severity')}
+        />
+      ) : null}
+      {appliedFilters.event_type ? (
+        <FilterChip
+          label={`事件类型: ${STATE_CHANGE_EVENT_TYPE_LABELS[appliedFilters.event_type]}`}
+          onRemove={() => removeAppliedFilter('event_type')}
+        />
+      ) : null}
+      {appliedFilters.limit !== String(DEFAULT_LIMIT) ? (
+        <FilterChip
+          label={`数量: ${appliedFilters.limit}`}
+          onRemove={() => removeAppliedFilter('limit')}
+        />
+      ) : null}
+      {appliedFilters.time_range !== 'custom' ? (
+        <FilterChip
+          label={`时间范围: ${TIME_RANGE_LABELS[appliedFilters.time_range]}`}
+          onRemove={() => removeAppliedFilter('time_range')}
+        />
+      ) : null}
+      {appliedFilters.created_from ? (
+        <FilterChip
+          label={`开始时间: ${appliedFilters.created_from}`}
+          onRemove={() => removeAppliedFilter('created_from')}
+        />
+      ) : null}
+      {appliedFilters.created_to ? (
+        <FilterChip
+          label={`结束时间: ${appliedFilters.created_to}`}
+          onRemove={() => removeAppliedFilter('created_to')}
+        />
+      ) : null}
+      {appliedFilters.label ? (
+        <FilterChip
+          label={`标签: ${appliedFilters.label}`}
+          onRemove={() => removeAppliedFilter('label')}
+        />
+      ) : null}
+      {appliedFilters.notification_only ? (
+        <FilterChip
+          label="仅看通知事件"
+          onRemove={() => removeAppliedFilter('notification_only')}
+        />
+      ) : null}
+      {appliedFilters.recovery_only ? (
+        <FilterChip
+          label="仅看恢复事件"
+          onRemove={() => removeAppliedFilter('recovery_only')}
+        />
+      ) : null}
+      {appliedFilters.maintenance_only ? (
+        <FilterChip
+          label="仅看维护事件"
+          onRemove={() => removeAppliedFilter('maintenance_only')}
+        />
+      ) : null}
+      {appliedFilters.include_backfilled ? (
+        <FilterChip
+          label="包含补传事件"
+          onRemove={() => removeAppliedFilter('include_backfilled')}
+        />
+      ) : null}
+    </>
+  )
 
   if (state.loading) {
     return <section className="page-panel">正在加载事件…</section>
@@ -486,111 +595,48 @@ export function EventsPage() {
       </section>
 
       <DetailSection eyebrow="筛选条件" title="筛选条件">
+        <FilterBar
+          className="events-filter-overview"
+          hasActiveFilters={activeFilters}
+          onClearAll={() => commitFilters(DEFAULT_FILTERS)}
+          activeChips={activeFilterChips}
+        >
+          <div className="events-filter-overview__status">
+            <span className="events-filter-overview__label">当前筛选</span>
+            <span className="events-filter-overview__value">
+              {activeFilters ? '已应用筛选条件' : '默认事件流'}
+            </span>
+          </div>
+          <Button variant="secondary" size="sm" onClick={openFiltersDrawer}>
+            高级筛选
+          </Button>
+        </FilterBar>
+      </DetailSection>
+
+      <Drawer
+        open={filtersDrawerOpen}
+        onClose={closeFiltersDrawer}
+        title="事件筛选"
+        ariaLabel="事件高级筛选"
+      >
         <form
+          className="events-filter-drawer"
           onSubmit={(event) => {
             event.preventDefault()
-            commitFilters(filters)
+            applyDraftFilters()
           }}
         >
-          <div className="summary-card">
-            <span className="summary-card__label">时间范围</span>
+          <div className="events-filter-drawer__group">
+            <span className="events-filter-drawer__label">时间范围</span>
             <Tabs<TimeRange>
               variant="pill"
               value={filters.time_range}
-              onChange={(next) =>
-                setDraftState((current) => {
-                  const currentFilters =
-                    current.filterKey === appliedFilterKey ? current.filters : appliedFilters
-                  return {
-                    filterKey: appliedFilterKey,
-                    filters: applyTimeRange(currentFilters, next),
-                  }
-                })
-              }
+              onChange={updateDraftTimeRange}
               items={TIME_RANGE_TABS}
             />
           </div>
 
-          <FilterBar
-            hasActiveFilters={activeFilters}
-            onClearAll={() => commitFilters(DEFAULT_FILTERS)}
-            activeChips={
-              <>
-                {appliedFilters.object_type ? (
-                  <FilterChip
-                    label={`对象类型: ${objectTypeLabel}`}
-                    onRemove={() => removeAppliedFilter('object_type')}
-                  />
-                ) : null}
-                {appliedFilters.severity ? (
-                  <FilterChip
-                    label={`严重程度: ${appliedFilters.severity}`}
-                    onRemove={() => removeAppliedFilter('severity')}
-                  />
-                ) : null}
-                {appliedFilters.event_type ? (
-                  <FilterChip
-                    label={`事件类型: ${STATE_CHANGE_EVENT_TYPE_LABELS[appliedFilters.event_type]}`}
-                    onRemove={() => removeAppliedFilter('event_type')}
-                  />
-                ) : null}
-                {appliedFilters.limit !== String(DEFAULT_LIMIT) ? (
-                  <FilterChip
-                    label={`数量: ${appliedFilters.limit}`}
-                    onRemove={() => removeAppliedFilter('limit')}
-                  />
-                ) : null}
-                {appliedFilters.time_range !== 'custom' ? (
-                  <FilterChip
-                    label={`时间范围: ${TIME_RANGE_LABELS[appliedFilters.time_range]}`}
-                    onRemove={() => removeAppliedFilter('time_range')}
-                  />
-                ) : null}
-                {appliedFilters.created_from ? (
-                  <FilterChip
-                    label={`开始时间: ${appliedFilters.created_from}`}
-                    onRemove={() => removeAppliedFilter('created_from')}
-                  />
-                ) : null}
-                {appliedFilters.created_to ? (
-                  <FilterChip
-                    label={`结束时间: ${appliedFilters.created_to}`}
-                    onRemove={() => removeAppliedFilter('created_to')}
-                  />
-                ) : null}
-                {appliedFilters.label ? (
-                  <FilterChip
-                    label={`标签: ${appliedFilters.label}`}
-                    onRemove={() => removeAppliedFilter('label')}
-                  />
-                ) : null}
-                {appliedFilters.notification_only ? (
-                  <FilterChip
-                    label="仅看通知事件"
-                    onRemove={() => removeAppliedFilter('notification_only')}
-                  />
-                ) : null}
-                {appliedFilters.recovery_only ? (
-                  <FilterChip
-                    label="仅看恢复事件"
-                    onRemove={() => removeAppliedFilter('recovery_only')}
-                  />
-                ) : null}
-                {appliedFilters.maintenance_only ? (
-                  <FilterChip
-                    label="仅看维护事件"
-                    onRemove={() => removeAppliedFilter('maintenance_only')}
-                  />
-                ) : null}
-                {appliedFilters.include_backfilled ? (
-                  <FilterChip
-                    label="包含补传事件"
-                    onRemove={() => removeAppliedFilter('include_backfilled')}
-                  />
-                ) : null}
-              </>
-            }
-          >
+          <div className="events-filter-drawer__grid">
             <FilterSelect
               label="对象类型"
               value={filters.object_type || null}
@@ -650,11 +696,11 @@ export function EventsPage() {
               checked={filters.include_backfilled}
               onChange={(checked) => updateDraftFilter('include_backfilled', checked)}
             />
-          </FilterBar>
+          </div>
 
-          <div className="summary-grid">
-            <label className="summary-card">
-              <span className="summary-card__label">开始时间</span>
+          <div className="events-filter-drawer__fields">
+            <label className="events-filter-drawer__field">
+              <span className="events-filter-drawer__label">开始时间</span>
               <input
                 aria-label="开始时间"
                 placeholder="2026-04-25T00:00:00Z"
@@ -666,8 +712,8 @@ export function EventsPage() {
               />
             </label>
 
-            <label className="summary-card">
-              <span className="summary-card__label">结束时间</span>
+            <label className="events-filter-drawer__field">
+              <span className="events-filter-drawer__label">结束时间</span>
               <input
                 aria-label="结束时间"
                 placeholder="2026-04-26T00:00:00Z"
@@ -679,8 +725,8 @@ export function EventsPage() {
               />
             </label>
 
-            <label className="summary-card">
-              <span className="summary-card__label">标签</span>
+            <label className="events-filter-drawer__field">
+              <span className="events-filter-drawer__label">标签</span>
               <input
                 aria-label="标签"
                 placeholder="edge"
@@ -691,30 +737,30 @@ export function EventsPage() {
               />
             </label>
 
-            <div className="summary-card">
-              <span className="summary-card__label">包含补传事件</span>
-              <span className="summary-card__value">
+            <div className="events-filter-drawer__field">
+              <span className="events-filter-drawer__label">包含补传事件</span>
+              <span className="events-filter-drawer__value">
                 {filters.include_backfilled ? '已包含' : '未包含'}
               </span>
-              <span className="summary-card__value--text">
+              <span className="events-filter-drawer__hint">
                 {filters.include_backfilled ? '补传相关事件会进入列表' : '默认隐藏补传相关事件'}
               </span>
             </div>
           </div>
 
-          <div className="event-filter-actions">
-            <button type="submit">应用筛选</button>
-            <button
-              type="button"
-              onClick={() => {
-                commitFilters(DEFAULT_FILTERS)
-              }}
-            >
+          <div className="events-filter-drawer__actions">
+            <Button type="submit" size="sm">
+              应用筛选
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={resetFilters}>
               重置筛选
-            </button>
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={closeFiltersDrawer}>
+              关闭
+            </Button>
           </div>
         </form>
-      </DetailSection>
+      </Drawer>
 
       <DetailSection eyebrow="事件流" title="事件流">
         {state.events.length === 0 ? (
