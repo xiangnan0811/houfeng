@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch workflow and PR lifecycle docs remain accurate."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check URL/API/UI contract survives the UI refactor."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check EventsPage URL-state, API query, and draft/applied behavior."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check component reuse and page composition."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check tokenized styling and responsive layout."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check tests, lint, build, and page behavior coverage."}
