@@ -11,7 +11,7 @@ import {
   unlinkVPSNode,
   updateVPSAsset,
 } from '../lib/api'
-import { formatOptional } from '../lib/format'
+import { formatDateTime, formatOptional } from '../lib/format'
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
@@ -181,6 +181,10 @@ export function VPSDetailPage() {
   const [linkNotice, setLinkNotice] = useState<string | null>(null)
   const [unlinkingNodeId, setUnlinkingNodeId] = useState<string | null>(null)
   const [unlinkError, setUnlinkError] = useState<string | null>(null)
+  const [lifecycleConfirmingArchive, setLifecycleConfirmingArchive] = useState(false)
+  const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const [lifecycleNotice, setLifecycleNotice] = useState<string | null>(null)
 
   useEffect(() => {
     if (!vpsId) {
@@ -204,6 +208,9 @@ export function VPSDetailPage() {
         setLinkError(null)
         setLinkNotice(null)
         setUnlinkError(null)
+        setLifecycleConfirmingArchive(false)
+        setLifecycleError(null)
+        setLifecycleNotice(null)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -362,6 +369,47 @@ export function VPSDetailPage() {
     }
   }
 
+  async function handleArchiveVPS() {
+    const detail = state.detail
+    if (!detail) return
+
+    setLifecycleSubmitting(true)
+    setLifecycleError(null)
+    setLifecycleNotice(null)
+
+    try {
+      await updateVPSAsset(detail.vps_id, { lifecycle_status: 'archived' })
+      const refreshed = await refreshDetailAndTimeline(detail.vps_id)
+      setFactDraft(detailToFactEditForm(refreshed))
+      setLifecycleConfirmingArchive(false)
+      setLifecycleNotice('VPS 已归档，资产历史已刷新')
+    } catch (error: unknown) {
+      setLifecycleError(describeError(error, '归档 VPS 失败'))
+    } finally {
+      setLifecycleSubmitting(false)
+    }
+  }
+
+  async function handleRestoreVPS() {
+    const detail = state.detail
+    if (!detail) return
+
+    setLifecycleSubmitting(true)
+    setLifecycleError(null)
+    setLifecycleNotice(null)
+
+    try {
+      await updateVPSAsset(detail.vps_id, { lifecycle_status: 'idle' })
+      const refreshed = await refreshDetailAndTimeline(detail.vps_id)
+      setFactDraft(detailToFactEditForm(refreshed))
+      setLifecycleNotice('VPS 已恢复为闲置，资产历史已刷新')
+    } catch (error: unknown) {
+      setLifecycleError(describeError(error, '恢复 VPS 失败'))
+    } finally {
+      setLifecycleSubmitting(false)
+    }
+  }
+
   const nodeColumns: DataTableColumn<VPSNodeSummary>[] = [
     {
       key: 'node',
@@ -475,6 +523,7 @@ export function VPSDetailPage() {
   const timeline = state.timeline
   const decisionChanged = decisionDraft.renewalDecision !== detail.renewal_decision
   const linkControlsDisabled = linkSubmitting || unlinkingNodeId !== null
+  const isArchived = detail.lifecycle_status === 'archived'
 
   return (
     <div className="page-stack asset-page vps-detail-page">
@@ -606,6 +655,105 @@ export function VPSDetailPage() {
               </Button>
             </div>
           </form>
+
+          <div className="asset-operation-form asset-lifecycle-card">
+            <div className="asset-operation-form__header">
+              <div>
+                <h3>生命周期</h3>
+                <p>
+                  {isArchived
+                    ? '这台 VPS 已退出当前工作集，可恢复为闲置后重新纳入台账处理。'
+                    : '归档会让 VPS 退出当前工作集，但保留基础信息、历史与 Node 关联。'}
+                </p>
+              </div>
+              <LifecycleBadge value={detail.lifecycle_status} />
+            </div>
+            <dl className="asset-lifecycle-card__facts">
+              <div>
+                <dt>当前状态</dt>
+                <dd>{VPS_LIFECYCLE_STATUS_LABELS[detail.lifecycle_status]}</dd>
+              </div>
+              <div>
+                <dt>归档时间</dt>
+                <dd>{detail.archived_at ? <Timestamp value={detail.archived_at} /> : '—'}</dd>
+              </div>
+            </dl>
+            {lifecycleConfirmingArchive ? (
+              <section className="asset-lifecycle-confirm" role="alertdialog" aria-label="确认归档 VPS">
+                <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
+                <h4>确认归档 VPS</h4>
+                <div className="asset-lifecycle-confirm__flow">
+                  <span>当前：{detail.display_name} 仍在当前资产工作集中。</span>
+                  <span>操作后：生命周期变为已归档，并记录归档时间。</span>
+                </div>
+                <div className="asset-lifecycle-confirm__callouts">
+                  <p>归档后它不会作为活跃 VPS 进入续费、迁移或成本核对队列。</p>
+                  <p>不会删除 VPS、订阅、Node 关联或资产历史。后续可恢复为闲置。</p>
+                </div>
+                <div className="asset-operation-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={lifecycleSubmitting}
+                    onClick={() => {
+                      setLifecycleConfirmingArchive(false)
+                      setLifecycleError(null)
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    disabled={lifecycleSubmitting}
+                    onClick={() => void handleArchiveVPS()}
+                  >
+                    {lifecycleSubmitting ? '归档中…' : '确认归档'}
+                  </Button>
+                </div>
+              </section>
+            ) : (
+              <>
+                <p className="asset-lifecycle-card__note">
+                  {isArchived
+                    ? `已归档时间：${formatDateTime(detail.archived_at)}。恢复会把生命周期改为闲置，并由后端清空归档时间。`
+                    : '这是软归档，不是删除。归档后仍可通过 VPS 列表的“已归档”筛选找回。'}
+                </p>
+                <div className="asset-operation-actions">
+                  {isArchived ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={lifecycleSubmitting}
+                      onClick={() => void handleRestoreVPS()}
+                    >
+                      {lifecycleSubmitting ? '恢复中…' : '恢复为闲置'}
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      disabled={lifecycleSubmitting}
+                      onClick={() => {
+                        setLifecycleConfirmingArchive(true)
+                        setLifecycleError(null)
+                        setLifecycleNotice(null)
+                      }}
+                    >
+                      归档 VPS
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
+            {lifecycleError ? (
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+                {lifecycleError}
+              </p>
+            ) : lifecycleNotice ? (
+              <p className="asset-operation-feedback" role="status">{lifecycleNotice}</p>
+            ) : null}
+          </div>
         </div>
       </section>
 
@@ -690,6 +838,7 @@ export function VPSDetailPage() {
           <DetailItem label="SSH 用户" value={detail.ssh_user} />
           <DetailItem label="操作系统" value={detail.os_name} />
           <DetailItem label="虚拟化" value={detail.virtualization} />
+          <DetailItem label="归档时间" value={detail.archived_at ? formatDateTime(detail.archived_at) : null} />
           <DetailItem label="备注" value={detail.note} />
         </dl>
       </section>

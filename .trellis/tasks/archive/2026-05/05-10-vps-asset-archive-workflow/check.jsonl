@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend quality checklist"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Lint test build and verify-web expectations"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API request shape and stale update checks"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "User-visible UI style constraints"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Branch and PR verification"}
