@@ -229,10 +229,11 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 		results := make([]syncing.CommandResult, 0, len(req.CommandResults))
 		for _, cr := range req.CommandResults {
 			results = append(results, syncing.CommandResult{
-				ActionID: cr.ActionID,
-				Stdout:   cr.Stdout,
-				Stderr:   cr.Stderr,
-				ExitCode: cr.ExitCode,
+				ActionID:  cr.ActionID,
+				CommandID: cr.CommandID,
+				Stdout:    cr.Stdout,
+				Stderr:    cr.Stderr,
+				ExitCode:  cr.ExitCode,
 			})
 		}
 		batch.CommandResults = results

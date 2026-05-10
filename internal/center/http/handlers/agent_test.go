@@ -170,7 +170,7 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","is_backfilled":true}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"node_id":"nd_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","is_backfilled":true}],"command_results":[{"action_id":"act_001","command_id":"uptime","stdout":"up 1 day","stderr":"","exit_code":0}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -230,6 +230,15 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 	if !svc.syncBatch.Heartbeats[0].IsBackfilled {
 		t.Fatal("SyncBatch Heartbeats[0].IsBackfilled = false, want true")
+	}
+	if len(svc.syncBatch.CommandResults) != 1 {
+		t.Fatalf("len(SyncBatch.CommandResults) = %d, want 1", len(svc.syncBatch.CommandResults))
+	}
+	if svc.syncBatch.CommandResults[0].ActionID != "act_001" {
+		t.Fatalf("CommandResults[0].ActionID = %q, want act_001", svc.syncBatch.CommandResults[0].ActionID)
+	}
+	if svc.syncBatch.CommandResults[0].CommandID != "uptime" {
+		t.Fatalf("CommandResults[0].CommandID = %q, want uptime", svc.syncBatch.CommandResults[0].CommandID)
 	}
 }
 

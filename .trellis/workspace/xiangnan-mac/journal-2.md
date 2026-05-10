@@ -762,3 +762,36 @@ Closed modal focus accessibility gap by adding shared portal focus management fo
 ### Next Steps
 
 - None - task complete
+
+
+## Session 82: Command result durability
+
+**Date**: 2026-05-11
+**Task**: Command result durability
+**Branch**: `fix/command-result-durability`
+
+### Summary
+
+Closed the command result durability gap by carrying command_id through agent results, preserving pending last_action identity across dispatch, guarding result writes against stale actions, and updating frontend pending command display plus specs and release gap docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a94b25b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

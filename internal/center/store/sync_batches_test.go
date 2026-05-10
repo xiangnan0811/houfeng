@@ -177,17 +177,20 @@ type fakeSyncBatchTx struct {
 	nodeFingerprint   string
 	nodeSyncTokenHash string
 	nodeLabels        []string
+	pendingActionID   string
+	pendingCommandID  string
 
 	probeMetadataByItemID map[string]observations.ProbeMetadata
 	probeMetadataErr      map[string]error
 	planRows              []fakeAgentPlanScan
 
-	execErrForSQLSubstring string
-	execErr                error
-	execSQL                []string
-	execArgs               [][]any
-	commitCalls            int
-	rollbackCalls          int
+	execErrForSQLSubstring    string
+	execErr                   error
+	commandResultRowsAffected *int
+	execSQL                   []string
+	execArgs                  [][]any
+	commitCalls               int
+	rollbackCalls             int
 }
 
 func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -195,6 +198,12 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 	f.execArgs = append(f.execArgs, append([]any(nil), args...))
 	if f.execErr != nil && strings.Contains(sql, f.execErrForSQLSubstring) {
 		return pgconn.CommandTag{}, f.execErr
+	}
+	if strings.Contains(sql, "last_action->>'status'") {
+		if f.commandResultRowsAffected != nil && *f.commandResultRowsAffected == 0 {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
 	if strings.Contains(sql, "update nodes") {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
@@ -210,8 +219,16 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 			return nil
 		}}
 	case strings.Contains(sql, "pending_action_id"):
-		// Simulate no pending action queued.
-		return fakeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+		if f.pendingActionID == "" {
+			return fakeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+		}
+		actionID := f.pendingActionID
+		commandID := f.pendingCommandID
+		return fakeRow{scan: func(dest ...any) error {
+			*(dest[0].(**string)) = &actionID
+			*(dest[1].(**string)) = &commandID
+			return nil
+		}}
 	case strings.Contains(sql, "from nodes"):
 		return fakeRow{scan: func(dest ...any) error {
 			*(dest[0].(*string)) = f.nodeBindingStatus
@@ -355,6 +372,177 @@ func TestSyncBatchPlanReturnsAcceptedAtAndDerivedPlan(t *testing.T) {
 	}
 }
 
+func TestSyncBatchDispatchesPendingActionAsDurableLastAction(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		nodeBindingStatus: agentapi.BindingStatusBound,
+		nodeFingerprint:   "fp-001",
+		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
+		pendingActionID:   "act_001",
+		pendingCommandID:  "uptime",
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	result, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	if err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+	if result.Plan.PendingAction == nil {
+		t.Fatal("PendingAction = nil, want dispatched action")
+	}
+	if result.Plan.PendingAction.ActionID != "act_001" || result.Plan.PendingAction.CommandID != "uptime" {
+		t.Fatalf("PendingAction = %#v, want act_001/uptime", result.Plan.PendingAction)
+	}
+
+	args := tx.argsForSQL("pending_action_id = NULL")
+	if len(args) != 4 {
+		t.Fatalf("dispatch args = %#v, want node id, payload, action id, command id", args)
+	}
+	payload, ok := args[1].([]byte)
+	if !ok {
+		t.Fatalf("pending payload arg = %#v, want []byte JSON", args[1])
+	}
+	for _, want := range []string{`"action_id":"act_001"`, `"command_id":"uptime"`, `"status":"pending"`} {
+		if !strings.Contains(string(payload), want) {
+			t.Fatalf("pending last_action = %s, missing %s", payload, want)
+		}
+	}
+	if args[2] != "act_001" || args[3] != "uptime" {
+		t.Fatalf("dispatch guard args = %#v, want act_001/uptime", args[2:4])
+	}
+}
+
+func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		nodeBindingStatus: agentapi.BindingStatusBound,
+		nodeFingerprint:   "fp-001",
+		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	batch := testSyncBatch()
+	batch.CommandResults = []syncing.CommandResult{{
+		ActionID:  "act_001",
+		CommandID: "uptime",
+		Stdout:    "up 1 day",
+		ExitCode:  0,
+	}}
+
+	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	args := tx.argsForSQL("last_action->>'status'")
+	if len(args) != 5 {
+		t.Fatalf("result args = %#v, want payload, node id, status, action id, command id", args)
+	}
+	payload, ok := args[0].([]byte)
+	if !ok {
+		t.Fatalf("result payload arg = %#v, want []byte JSON", args[0])
+	}
+	for _, want := range []string{`"action_id":"act_001"`, `"command_id":"uptime"`, `"status":"done"`, `"stdout":"up 1 day"`} {
+		if !strings.Contains(string(payload), want) {
+			t.Fatalf("result last_action = %s, missing %s", payload, want)
+		}
+	}
+	if args[1] != "nd_001" || args[2] != commandActionStatusPending || args[3] != "act_001" || args[4] != "uptime" {
+		t.Fatalf("result guard args = %#v, want node/status/action/command guard", args[1:5])
+	}
+}
+
+func TestSyncBatchIgnoresMismatchedCommandResultRows(t *testing.T) {
+	t.Parallel()
+
+	zeroRows := 0
+	tx := &fakeSyncBatchTx{
+		nodeBindingStatus:         agentapi.BindingStatusBound,
+		nodeFingerprint:           "fp-001",
+		nodeSyncTokenHash:         hashSyncToken("sync-token-001"),
+		commandResultRowsAffected: &zeroRows,
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	batch := testSyncBatch()
+	batch.CommandResults = []syncing.CommandResult{{
+		ActionID:  "act_stale",
+		CommandID: "uptime",
+		Stdout:    "stale",
+		ExitCode:  0,
+	}}
+
+	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+		t.Fatalf("ApplyBatch() error = %v, want mismatch to be ignored", err)
+	}
+	if tx.commitCalls != 1 {
+		t.Fatalf("commitCalls = %d, want 1", tx.commitCalls)
+	}
+}
+
+func TestSyncBatchStoresCommandResultBeforeDispatchingQueuedAction(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		nodeBindingStatus: agentapi.BindingStatusBound,
+		nodeFingerprint:   "fp-001",
+		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
+		pendingActionID:   "act_next",
+		pendingCommandID:  "df_h",
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	batch := testSyncBatch()
+	batch.CommandResults = []syncing.CommandResult{{
+		ActionID:  "act_prev",
+		CommandID: "uptime",
+		Stdout:    "up 1 day",
+		ExitCode:  0,
+	}}
+
+	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	resultIndex := sqlIndex(tx.execSQL, "last_action->>'status'")
+	dispatchIndex := sqlIndex(tx.execSQL, "pending_action_id = NULL")
+	if resultIndex == -1 || dispatchIndex == -1 {
+		t.Fatalf("exec SQL missing result or dispatch update: %#v", tx.execSQL)
+	}
+	if resultIndex > dispatchIndex {
+		t.Fatalf("command result update index %d should run before dispatch index %d", resultIndex, dispatchIndex)
+	}
+}
+
 type fakeRow struct {
 	scan func(dest ...any) error
 }
@@ -364,12 +552,16 @@ func (f fakeRow) Scan(dest ...any) error {
 }
 
 func containsSQL(sqls []string, want string) bool {
-	for _, sql := range sqls {
+	return sqlIndex(sqls, want) != -1
+}
+
+func sqlIndex(sqls []string, want string) int {
+	for i, sql := range sqls {
 		if strings.Contains(sql, want) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 func (f *fakeSyncBatchTx) argsForSQL(want string) []any {

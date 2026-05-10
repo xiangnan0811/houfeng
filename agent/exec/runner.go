@@ -18,10 +18,11 @@ const (
 
 // Result holds the outcome of a whitelisted command execution.
 type Result struct {
-	ActionID string
-	Stdout   string
-	Stderr   string
-	ExitCode int
+	ActionID  string
+	CommandID string
+	Stdout    string
+	Stderr    string
+	ExitCode  int
 }
 
 // Run executes bin with args using exec.CommandContext (no shell) and

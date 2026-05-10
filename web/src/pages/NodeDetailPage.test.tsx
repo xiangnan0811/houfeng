@@ -3327,4 +3327,64 @@ describe('NodeDetailPage', () => {
     expect(screen.getByRole('button', { name: /docker ps/ })).toBeInTheDocument()
   })
 
+  it('shows pending command identity immediately after command dispatch', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          nodeRecord({
+            node_id: 'nd_cmd3',
+            binding_status: '已绑定',
+            monitoring_status: '启用',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_cmd3')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          action_id: 'act_001',
+          command_id: 'uptime',
+          status: 'pending',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_cmd3']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    const uptimeButton = await screen.findByRole('button', { name: /uptime/ })
+    fireEvent.click(uptimeButton)
+
+    await waitFor(() =>
+      expect(screen.getByText('uptime · 等待 agent 执行…')).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/已下发，等待 agent 执行/)).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_cmd3/actions', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ command_id: 'uptime' }),
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
 })

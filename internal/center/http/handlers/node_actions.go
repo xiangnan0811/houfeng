@@ -72,8 +72,9 @@ func NodeActions(repo nodeActionRepository) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, map[string]string{
-			"action_id": actionID,
-			"status":    "pending",
+			"action_id":  actionID,
+			"command_id": body.CommandID,
+			"status":     "pending",
 		})
 	})
 }

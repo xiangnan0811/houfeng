@@ -1333,13 +1333,17 @@ func (r *PostgresNodeRepository) RecordAcceptedHeartbeats(ctx context.Context, s
 	return nil
 }
 
-// SetPendingAction queues a command for the agent to execute on its next sync.
-// It also clears any previous last_action so the frontend can distinguish
-// "waiting for result" from "has result".
+// SetPendingAction queues a command for the agent to execute on its next sync
+// and stores a durable pending last_action for UI/API readers.
 func (r *PostgresNodeRepository) SetPendingAction(ctx context.Context, nodeID, actionID, commandID string) error {
+	raw, err := marshalPendingLastAction(actionID, commandID)
+	if err != nil {
+		return fmt.Errorf("marshal pending action for node %q: %w", nodeID, err)
+	}
+
 	tag, err := r.db.Exec(ctx,
-		`UPDATE nodes SET pending_action_id = $1, pending_action_command_id = $2, last_action = NULL, updated_at = now() WHERE node_id = $3`,
-		actionID, commandID, nodeID)
+		`UPDATE nodes SET pending_action_id = $1, pending_action_command_id = $2, last_action = $3, updated_at = now() WHERE node_id = $4`,
+		actionID, commandID, raw, nodeID)
 	if err != nil {
 		return fmt.Errorf("set pending action for node %q: %w", nodeID, err)
 	}

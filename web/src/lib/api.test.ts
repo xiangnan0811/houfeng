@@ -45,6 +45,7 @@ import {
   restoreTargetToPaused,
   resumeNodeMonitoring,
   resumeTarget,
+  postNodeAction,
   unlinkVPSNode,
   updateNodeMetadata,
   updateProbeItem,
@@ -1557,6 +1558,29 @@ describe('api helpers', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/nodes/nd_001/runtime/resume', {
       method: 'POST',
       headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('posts node command actions and preserves command identity', async () => {
+    const responseBody = {
+      action_id: 'act_001',
+      command_id: 'uptime',
+      status: 'pending',
+    }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(postNodeAction('nd_001', 'uptime')).resolves.toEqual(responseBody)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001/actions', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ command_id: 'uptime' }),
       cache: 'no-store',
       credentials: 'include',
     })

@@ -271,7 +271,7 @@ func TestNodeActionsQueuesPendingAction(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body["status"] != "pending" || body["action_id"] == "" {
+	if body["status"] != "pending" || body["action_id"] == "" || body["command_id"] != "systemd_status" {
 		t.Fatalf("body = %#v, want pending action response", body)
 	}
 }

@@ -1160,12 +1160,33 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     setCommandError(null)
 
     try {
-      await postNodeAction(actionNodeId, cmdId)
-      // Polling effect will pick up last_action when status='pending'.
+      const action = await postNodeAction(actionNodeId, cmdId)
+      if (
+        !isMountedRef.current ||
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
+      ) {
+        return
+      }
+      setState((current) => ({
+        ...current,
+        node:
+          current.requestedNodeId === actionNodeId && current.node
+            ? {
+                ...current.node,
+                last_action: {
+                  action_id: action.action_id,
+                  command_id: action.command_id,
+                  status: action.status,
+                },
+              }
+            : current.node,
+      }))
     } catch (error: unknown) {
       if (
         !isMountedRef.current ||
-        currentRouteNodeIdRef.current !== actionNodeId
+        currentRouteNodeIdRef.current !== actionNodeId ||
+        currentRequestedNodeIdRef.current !== actionNodeId
       ) {
         return
       }
@@ -1173,7 +1194,8 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     } finally {
       if (
         isMountedRef.current &&
-        currentRouteNodeIdRef.current === actionNodeId
+        currentRouteNodeIdRef.current === actionNodeId &&
+        currentRequestedNodeIdRef.current === actionNodeId
       ) {
         setCommandSubmitting(false)
       }
