@@ -1,0 +1,14 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend guideline index for the new Asset Ledger service slice"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "backend package, handler, store, migration, and bootstrap placement rules"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "PostgreSQL migration, Asset Ledger invariants, and no-mutation contracts"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "sentinel errors and HTTP error mapping rules"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "required tests, router/bootstrap wiring, and verification gates"}
+{"file": ".trellis/spec/web/index.md", "reason": "frontend guideline index for VPS detail UI updates"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "frontend file ownership and route/page conventions"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "React component structure and page/component boundaries"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client, types, loading/error/data, and Dashboard/VPS data-flow conventions"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "BEM/token styling rules for the VPS detail service section"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Vitest, lint, build, and API/page test requirements"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "non-main branch and PR workflow requirements"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "cross-layer DB/API/frontend contract checklist"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "reuse existing Asset Ledger patterns and avoid duplicated constants"}
