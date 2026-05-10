@@ -692,3 +692,38 @@ Added include_backfilled support across /api/events, store filtering, EventsPage
 ### Next Steps
 
 - None - task complete
+
+
+## Session 80: Events filter drawer
+
+**Date**: 2026-05-10
+**Task**: Events filter drawer
+**Branch**: `feat/events-filter-drawer`
+
+### Summary
+
+Implemented EventsPage advanced filter Drawer flow with active chips, draft/apply/reset behavior, responsive Drawer width, docs/spec sync, and verified web lint/tests/build.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ae8dd8e` | (see git log) |
+| `645b3e1` | (see git log) |
+| `a4a90e4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

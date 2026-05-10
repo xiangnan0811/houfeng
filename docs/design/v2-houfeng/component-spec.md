@@ -103,7 +103,7 @@ parent: docs/design/v2-houfeng/design-language.md
 - 类名：`.metric-chart` `.metric-chart--empty` `.metric-chart-shell`
 
 ### Drawer
-- 右侧/左侧滑入面板（`side: 'right'|'left'`，default `'right'`，width `min(440px, 40vw)`）
+- 右侧/左侧滑入面板（`side: 'right'|'left'`，default `'right'`；桌面宽度 440px 且不超过 40vw，窄屏不超过 92vw）
 - 当前实现：fixed-position inline render + ESC 关闭 + overlay 点击关闭 + `aria-modal="true"`；React portal、初始焦点、Tab containment、触发器焦点恢复仍是可访问性 hardening follow-up，未在本轮视为已完成
 - header：title + × 关闭按钮 / body：scroll-y auto
 - 类名：`.drawer-overlay` `.drawer` `.drawer--right/--left` `.drawer--open`
@@ -249,7 +249,8 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
 
 ### EventsPage
 1. Hero panel
-2. DetailSection `筛选条件`：使用 `FilterBar` / `FilterChip` / `FilterSelect` / `FilterToggle` 承载 URL-state 筛选。受支持 query：`object_type`、`severity`、`event_type`、`limit`、`created_from`、`created_to`、`label`、`notification_only=1`、`recovery_only=1`、`maintenance_only=1`、`include_backfilled=1`、`time_range=24h|7d|30d|custom`。Dashboard 深链使用 `/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1`；页面初次加载、应用筛选、重置、移除 chip 都必须同步 URL 与事件请求。
+2. DetailSection `筛选条件`：主视图使用 `FilterBar` + `FilterChip` 做轻量筛选概览，保留 `清空所有` 和 `高级筛选` 入口；完整筛选控件放入右侧 `Drawer`，使用 `Tabs` / `FilterSelect` / `FilterToggle` / 日期与标签输入承载 URL-state 筛选。受支持 query：`object_type`、`severity`、`event_type`、`limit`、`created_from`、`created_to`、`label`、`notification_only=1`、`recovery_only=1`、`maintenance_only=1`、`include_backfilled=1`、`time_range=24h|7d|30d|custom`。Dashboard 深链使用 `/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1`；页面初次加载、Drawer 应用筛选、Drawer 重置、主视图清空、移除 chip 都必须同步 URL 与事件请求。
+   - URL 是 applied filter truth；打开 Drawer 时 draft 从当前 applied filters 初始化。Esc、overlay、头部关闭和 Drawer 内 `关闭` 只丢弃 draft，不得更新 URL 或发起事件请求。
    - `time_range=24h|7d|30d` 在 URL 保留相对窗口，发 API 请求时动态计算 `created_from` / `created_to`；`time_range=custom` 使用显式日期。
    - `include_backfilled=1` 解除后端默认的补传相关事件排除；前端 API 请求使用 `include_backfilled=true`，chip 和 toggle 必须可移除 / 重置。
 3. DetailSection `事件流`：EventList（按日期 sticky 分组）

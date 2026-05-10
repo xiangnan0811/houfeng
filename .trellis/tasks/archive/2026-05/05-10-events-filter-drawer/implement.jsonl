@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature work must stay on non-main branch and land through PR/CI."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Events filters preserve URL/API/UI cross-layer state."}
+{"file": ".trellis/spec/web/index.md", "reason": "Web spec index for EventsPage UI work."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Reuse Drawer, FilterBar, FilterChip, FilterSelect, FilterToggle and page composition patterns."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Preserve EventsPage URL-state and listEvents filter contract."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Style Drawer/filter overview using existing design tokens and page CSS conventions."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Add/update page tests for drawer flow and query behavior."}

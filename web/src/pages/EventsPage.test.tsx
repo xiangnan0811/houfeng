@@ -34,6 +34,11 @@ function renderEventsPage(initialEntry = '/events') {
   }
 }
 
+async function openFilterDrawer() {
+  fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+  return screen.findByRole('dialog', { name: '事件高级筛选' })
+}
+
 describe('EventsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -87,11 +92,12 @@ describe('EventsPage', () => {
     expect(screen.getByText('较早的事件')).toBeInTheDocument()
     expect(screen.getByText('较新的事件').compareDocumentPosition(screen.getByText('较早的事件')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
-    fireEvent.change(screen.getByLabelText('对象类型'), { target: { value: 'target' } })
-    fireEvent.change(screen.getByLabelText('严重程度'), { target: { value: '严重' } })
-    fireEvent.change(screen.getByLabelText('事件类型'), { target: { value: 'incident_started' } })
-    fireEvent.change(screen.getByLabelText('数量'), { target: { value: '10' } })
-    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    const drawer = await openFilterDrawer()
+    fireEvent.change(within(drawer).getByLabelText('对象类型'), { target: { value: 'target' } })
+    fireEvent.change(within(drawer).getByLabelText('严重程度'), { target: { value: '严重' } })
+    fireEvent.change(within(drawer).getByLabelText('事件类型'), { target: { value: 'incident_started' } })
+    fireEvent.change(within(drawer).getByLabelText('数量'), { target: { value: '10' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(
@@ -143,10 +149,11 @@ describe('EventsPage', () => {
       expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
     )
 
-    fireEvent.change(screen.getByLabelText('事件类型'), {
+    const drawer = await openFilterDrawer()
+    fireEvent.change(within(drawer).getByLabelText('事件类型'), {
       target: { value: 'node_binding_reset' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith('/api/events?event_type=node_binding_reset&limit=50', {
@@ -170,7 +177,8 @@ describe('EventsPage', () => {
       expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
     )
 
-    const eventTypeSelect = screen.getByLabelText('事件类型')
+    const drawer = await openFilterDrawer()
+    const eventTypeSelect = within(drawer).getByLabelText('事件类型')
 
     expect(
       within(eventTypeSelect).getByRole('option', { name: '节点进入维护' }),
@@ -206,7 +214,7 @@ describe('EventsPage', () => {
     fireEvent.change(eventTypeSelect, {
       target: { value: 'target_restored_to_paused' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(
@@ -233,7 +241,8 @@ describe('EventsPage', () => {
       expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
     )
 
-    const eventTypeSelect = screen.getByLabelText('事件类型')
+    const drawer = await openFilterDrawer()
+    const eventTypeSelect = within(drawer).getByLabelText('事件类型')
 
     expect(
       within(eventTypeSelect).getByRole('option', { name: '节点已退役' }),
@@ -245,7 +254,7 @@ describe('EventsPage', () => {
     fireEvent.change(eventTypeSelect, {
       target: { value: 'node_restored_to_observing' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(
@@ -273,20 +282,21 @@ describe('EventsPage', () => {
       expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
     )
 
-    fireEvent.change(screen.getByLabelText('对象类型'), { target: { value: 'node' } })
-    fireEvent.change(screen.getByLabelText('数量'), { target: { value: '25' } })
-    fireEvent.change(screen.getByLabelText('开始时间'), {
+    const drawer = await openFilterDrawer()
+    fireEvent.change(within(drawer).getByLabelText('对象类型'), { target: { value: 'node' } })
+    fireEvent.change(within(drawer).getByLabelText('数量'), { target: { value: '25' } })
+    fireEvent.change(within(drawer).getByLabelText('开始时间'), {
       target: { value: '2026-04-25T00:00:00Z' },
     })
-    fireEvent.change(screen.getByLabelText('结束时间'), {
+    fireEvent.change(within(drawer).getByLabelText('结束时间'), {
       target: { value: '2026-04-26T00:00:00Z' },
     })
-    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'edge' } })
-    fireEvent.click(screen.getByLabelText('仅看通知事件'))
-    fireEvent.click(screen.getByLabelText('仅看恢复事件'))
-    fireEvent.click(screen.getByLabelText('仅看维护事件'))
-    fireEvent.click(screen.getByLabelText('包含补传事件'))
-    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    fireEvent.change(within(drawer).getByLabelText('标签'), { target: { value: 'edge' } })
+    fireEvent.click(within(drawer).getByLabelText('仅看通知事件'))
+    fireEvent.click(within(drawer).getByLabelText('仅看恢复事件'))
+    fireEvent.click(within(drawer).getByLabelText('仅看维护事件'))
+    fireEvent.click(within(drawer).getByLabelText('包含补传事件'))
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(
@@ -304,7 +314,8 @@ describe('EventsPage', () => {
       ),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '重置筛选' }))
+    const resetDrawer = await openFilterDrawer()
+    fireEvent.click(within(resetDrawer).getByRole('button', { name: '重置筛选' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith('/api/events?limit=50', {
@@ -330,11 +341,13 @@ describe('EventsPage', () => {
       expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
     )
 
-    const backfilledToggle = screen.getByLabelText('包含补传事件')
+    const drawer = await openFilterDrawer()
+    const backfilledToggle = within(drawer).getByLabelText('包含补传事件')
     expect(backfilledToggle).not.toBeDisabled()
-    expect(screen.getByText('未包含')).toBeInTheDocument()
+    expect(within(drawer).getByText('未包含')).toBeInTheDocument()
     fireEvent.click(backfilledToggle)
-    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    expect(within(drawer).getByText('已包含')).toBeInTheDocument()
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith('/api/events?limit=50&include_backfilled=true', {
@@ -345,7 +358,6 @@ describe('EventsPage', () => {
     )
     await waitFor(() => expect(page.getCurrentLocation()).toBe('/events?include_backfilled=1'))
     expect(screen.getByRole('button', { name: '移除筛选 包含补传事件' })).toBeInTheDocument()
-    expect(screen.getByText('已包含')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '移除筛选 包含补传事件' }))
 
@@ -357,6 +369,39 @@ describe('EventsPage', () => {
       }),
     )
     await waitFor(() => expect(page.getCurrentLocation()).toBe('/events'))
+  })
+
+  it('closes the filter drawer without applying draft changes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const page = renderEventsPage()
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+    )
+
+    const drawer = await openFilterDrawer()
+    fireEvent.change(within(drawer).getByLabelText('对象类型'), {
+      target: { value: 'target' },
+    })
+    fireEvent.click(within(drawer).getByText('关闭'))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '事件高级筛选' })).not.toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(page.getCurrentLocation()).toBe('/events')
+
+    const reopened = await openFilterDrawer()
+    expect(within(reopened).getByLabelText('对象类型')).toHaveValue('')
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '事件高级筛选' })).not.toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(page.getCurrentLocation()).toBe('/events')
   })
 
   it('removes active chips from URL state and refetches', async () => {
@@ -443,8 +488,14 @@ describe('EventsPage', () => {
       expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('tab', { name: '近 7 天' }))
-    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    const drawer = await openFilterDrawer()
+    fireEvent.click(within(drawer).getByRole('tab', { name: '近 7 天' }))
+
+    // Date inputs are disabled while a preset range is selected.
+    expect(within(drawer).getByLabelText('开始时间')).toBeDisabled()
+    expect(within(drawer).getByLabelText('结束时间')).toBeDisabled()
+
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     const lastCall = fetchMock.mock.calls.at(-1)
@@ -460,9 +511,6 @@ describe('EventsPage', () => {
     expect(toMs - fromMs).toBeLessThan(7.5 * 24 * 60 * 60 * 1000)
     await waitFor(() => expect(page.getCurrentLocation()).toBe('/events?time_range=7d'))
 
-    // Date inputs are disabled while a preset range is selected.
-    expect(screen.getByLabelText('开始时间')).toBeDisabled()
-    expect(screen.getByLabelText('结束时间')).toBeDisabled()
   })
 
   it('preserves relative time range in URL while sending dynamic API dates', async () => {

@@ -319,6 +319,7 @@ overview.asset_summary.subscriptions.map((item) => item.renew_at)
 - API query 用 `include_backfilled=true`，复用 `withQuery` 的 boolean 序列化和 false omission。
 - EventsPage 必须把该维度纳入 parse -> normalize -> URL serialize -> `buildFilterQuery` -> chip -> reset/remove 全链路。
 - “包含补传事件” toggle 不得禁用或显示“待后端支持”；如果后端 contract 未来撤销，必须同时更新 handler/store/spec/tests，而不是只改 UI 文案。
+- EventsPage 的高级筛选采用 applied/draft 分离：URL 与 `appliedFilters` 是请求真相；Drawer 打开时 draft 必须从当前 applied filters 初始化；只有点击 `应用筛选` 或 `重置筛选` 才能改 URL 和触发 `/api/events` 请求。Esc、overlay、头部关闭与 Drawer 内 `关闭` 必须丢弃 draft，不能提交筛选或发请求。
 
 #### 4. Validation & Error Matrix
 
@@ -329,6 +330,7 @@ overview.asset_summary.subscriptions.map((item) => item.renew_at)
 | 移除 chip | URL 和 API query 都清除 backfill 维度 |
 | 重置筛选 | 回到 `/events`，请求 `/api/events?limit=50` |
 | URL `include_backfilled=yes` | canonicalize 掉，不请求 backfill 维度 |
+| Drawer 内修改草稿后关闭 / Esc | URL 不变，不发新请求；下次打开恢复当前 applied filters |
 
 #### 5. Good/Base/Bad Cases
 
@@ -336,11 +338,12 @@ overview.asset_summary.subscriptions.map((item) => item.renew_at)
 - Base: 默认 `/events` 不显示 backfill chip，仍请求 `/api/events?limit=50`。
 - Bad: toggle 改变本地 UI 但 `listEvents` 未带 query，导致 inert filter。
 - Bad: 只在 URL 写 `include_backfilled=1`，但 active chip/remove/reset 没有纳入同一状态机。
+- Bad: Drawer 草稿通过 `onChange` 直接写 URL 或请求 API，导致关闭抽屉也会提交用户尚未确认的筛选。
 
 #### 6. Tests Required
 
 - `web/src/lib/api.test.ts`: `listEvents({ include_backfilled: true })` 序列化为 `include_backfilled=true`，false 被省略。
-- `web/src/pages/EventsPage.test.tsx`: 初始 URL、toggle apply、chip remove、reset、invalid URL canonicalization 全部覆盖。
+- `web/src/pages/EventsPage.test.tsx`: 初始 URL、Drawer apply、Drawer close / Esc discard、toggle apply、chip remove、reset、invalid URL canonicalization 全部覆盖。
 
 #### 7. Wrong vs Correct
 
