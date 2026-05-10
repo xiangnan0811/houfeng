@@ -153,6 +153,73 @@ const { vps_id: _ignored, ...body } = input
 postJSONBody(`/api/vps/${vpsId}/services`, body)
 ```
 
+### Asset domain 数据流
+
+VPS 域名资产是 VPS 详情页内的独立手工记录区块，前端必须把它当作 `asset_domains` contract 消费，而不是从 services、timeline、Dashboard、Target probe 或 DNS provider 自动推导。
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `web/src/lib/types.ts` 中 `AssetDomain*` 类型、`web/src/lib/api.ts` 中 domain API helper，或 `web/src/pages/VPSDetailPage.tsx` 的域名资产区块。
+
+#### 2. Signatures
+
+- Frontend type: `AssetDomainRecord` 字段保持 center JSON snake_case：`domain_id`、`vps_id`、`service_id`、`target_id`、`domain_name`、`purpose`、`status`、`registrar`、`expires_at`、`auto_renew`、`https_enabled`、`labels`、`note`、`created_at`、`updated_at`。
+- Frontend input: `CreateAssetDomainInput` 允许 collection create 带 `vps_id`，也允许 VPS scoped create 不带 `vps_id`。
+- Frontend API: `listAssetDomains(filter)`, `createAssetDomain(input)`, `listVPSDomains(vpsId)`, `createVPSDomain(vpsId, input)`。
+- Page data: `VPSDetailPage` 初始加载 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)` 和 `listVPSDomains(vpsId)`；创建域名后只刷新 `listVPSDomains(vpsId)`；刷新 detail + timeline 的动作必须保留 services/domains 两个独立列表。
+
+#### 3. Contracts
+
+- 机器值标签集中在 `ASSET_DOMAIN_STATUS_LABELS`，组件内不得散落中文枚举文案。
+- `createVPSDomain(vpsId, input)` 必须去掉 `input.vps_id`，保证 path 是唯一 VPS 来源。
+- VPS 域名区块展示 domain name、status、HTTPS、purpose、registrar、expires_at、auto_renew、optional Service / Target link、labels、note；Target link 只跳转，不触发 Target 创建或修改。
+- 域名创建表单负责本地校验 blank domain、URL/path/space 和裸主机名，但最终校验仍以后端为准。
+- 域名资产不是 timeline item；创建域名不得刷新或插入 `VPSTimeline.experience_logs`、续费历史、价格历史、IP 历史或规格快照。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| blank domain in form | 页面本地显示 `域名不能为空。`，不发 POST |
+| URL/path/space/bare host in form | 页面本地显示 `域名必须是不带协议、路径和空格的完整域名。`，不发 POST |
+| API returns `vps asset not found` | `ApiError.message` 原样展示在当前域名表单错误区 |
+| API returns `asset service not found` | `ApiError.message` 原样展示在当前域名表单错误区 |
+| API returns `target not found` | `ApiError.message` 原样展示在当前域名表单错误区 |
+| API returns `asset domain conflict` | `ApiError.message` 原样展示在当前域名表单错误区 |
+| domains list is empty | `DataTable` emptyContent 显示 `尚未记录域名` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: 创建域名成功后显示 `域名记录已创建`，表格出现新域名，并且只追加一次 `/api/vps/{id}/domains` refresh。
+- Base: 初始 domains 为空时，页面仍正常展示 VPS facts、Node links、services、timeline 和连接摘要。
+- Bad: 页面直接 `fetch('/api/vps/.../domains')`，绕过 `api.ts` 和 `ApiError`。
+- Bad: 把域名数量写进 Dashboard asset summary，或从 Target / service 列表自动反推 domains。
+
+#### 6. Tests Required
+
+- `web/src/lib/api.test.ts`: collection list/create、VPS scoped list/create，并断言 scoped create body 不含 `vps_id`。
+- `web/src/pages/VPSDetailPage.test.tsx`: 初始 domains 请求、空态、域名创建 happy path、本地校验失败。
+- 改 `AssetDomain*` 类型或标签时同步测试 fixture 和页面断言。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：业务 page 直接 fetch，错误处理和认证钩子会漂移。
+await fetch(`/api/vps/${vpsId}/domains`)
+
+// 正确：统一通过 API client。
+await listVPSDomains(vpsId)
+```
+
+```tsx
+// 错误：VPS scoped create 把 body 里的 vps_id 带过去。
+createVPSDomain(vpsId, { ...form, vps_id: otherVpsId })
+
+// 正确：helper 丢弃 vps_id，path 是唯一 VPS 来源。
+const { vps_id: _ignored, ...body } = input
+postJSONBody(`/api/vps/${vpsId}/domains`, body)
+```
+
 ### Scenario: Dashboard Overview Contract
 
 #### 1. Scope / Trigger

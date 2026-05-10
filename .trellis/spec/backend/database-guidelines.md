@@ -342,6 +342,90 @@ postJSONBody(`/api/vps/${vpsId}/services`, input)
 postJSONBody(`/api/vps/${vpsId}/services`, { name, service_type, status, target_id, url, port, labels, note })
 ```
 
+`db/migrations/0024_create_asset_domains.sql` 添加 `asset_domains`，用于记录一台 VPS 关联或承载的手工维护域名资产。它是 VPS-scoped 资产记录，不是 DNS provider、注册商同步、解析记录管理或服务发现入口。
+
+- `asset_domains.domain_id` 使用 `ids.New("dom")` 生成。
+- `vps_id` 必须引用已存在的 `vps_assets(vps_id)`，命名外键为 `asset_domains_vps_fk`，并在 VPS 删除时级联清理域名记录。
+- `service_id` 可为 `null`，存在时必须引用 `asset_services(service_id)`，命名外键为 `asset_domains_service_fk`，并在 Service 删除时置空。写入前仓库还必须确认该 `service_id` 属于同一个 `vps_id`，避免跨 VPS 误关联。
+- `target_id` 可为 `null`，存在时必须引用 `targets(target_id)`，命名外键为 `asset_domains_target_fk`，并在 Target 删除时置空；创建或列出域名不得修改 Target / ProbeItem。
+- `domain_name` 必须是归一化的小写 ASCII 域名，不含协议、路径、空白或尾随点；数据库用 `asset_domains_name_unique` 保证全局唯一，领域层负责 trim/lower/remove trailing dot 和 label 校验。
+- `status` 使用稳定英文机器值：`active`、`paused`、`retired`、`unknown`；空输入默认 `active`。
+- `expires_at` 是 nullable `date`，未知日期用 `null`，API 复用 subscription `Date` 的 `YYYY-MM-DD` JSON 语义。
+- `auto_renew` 与 `https_enabled` 只记录人工事实，不触发续费决策、证书检查或 Target probe 修改。
+- domain asset 写入不得改变 VPS 当前状态、subscription、experience log、service asset、Node、Target、ProbeItem、Agent 或 `nodes.provider`。
+
+#### Scenario: VPS domain assets contract
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `asset_domains` schema、`internal/center/assetdomains/`、`/api/domains`、`/api/vps/{vps_id}/domains`，或前端 VPS 详情页域名资产区块。
+
+##### 2. Signatures
+
+- DB table: `asset_domains(domain_id text primary key, vps_id text not null, service_id text null, target_id text null, domain_name text, purpose text, status text, registrar text, expires_at date null, auto_renew boolean, https_enabled boolean, labels text[], note text, created_at timestamptz, updated_at timestamptz)`。
+- Backend API: `GET /api/domains?vps_id=&service_id=&target_id=&status=` -> `[]assetdomains.Record`。
+- Backend API: `POST /api/domains` with JSON body `{vps_id, service_id?, target_id?, domain_name, purpose?, status?, registrar?, expires_at?, auto_renew?, https_enabled?, labels?, note?}` -> `assetdomains.Record`。
+- Backend API: `GET /api/vps/{vps_id}/domains` -> `[]assetdomains.Record`。
+- Backend API: `POST /api/vps/{vps_id}/domains` with JSON body `{service_id?, target_id?, domain_name, purpose?, status?, registrar?, expires_at?, auto_renew?, https_enabled?, labels?, note?}` -> `assetdomains.Record`。
+- Frontend API: `listAssetDomains(filter)`, `createAssetDomain(input)`, `listVPSDomains(vpsId)`, `createVPSDomain(vpsId, input)`。
+
+##### 3. Contracts
+
+- `POST /api/vps/{vps_id}/domains` 的 path `vps_id` 是唯一 VPS 来源；body 中的 `vps_id` 必须被忽略，不能覆盖 path。
+- `GET /api/vps/{vps_id}/domains` 必须先确认 VPS 存在；VPS 不存在时返回 not-found 语义，不把缺失 VPS 静默表现为空列表。
+- `service_id` 和 `target_id` 都是可选关联，只做引用校验和展示跳转；不得创建或修改 Service、Target、ProbeItem 或观测语义。
+- `service_id` 若存在，必须属于同一 VPS；跨 VPS service 关联应返回 `asset service not found` 语义。
+- 全局 `GET /api/domains` 可以按 VPS、Service、Target 和状态过滤；非法枚举必须在进入 store 查询前返回 400。
+- domain asset 不进入 `/api/dashboard` 的资产摘要，也不进入 `GET /api/vps/{vps_id}/timeline`；它在 VPS 详情页作为独立域名区块加载。
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| missing / blank `vps_id` on collection POST | 400 `invalid input` |
+| body `vps_id` conflicts with path VPS | path VPS wins; write to path VPS only |
+| missing VPS on path GET/POST or collection POST FK | 404 `vps asset not found` |
+| missing / cross-VPS Service FK | 404 `asset service not found` |
+| missing Target FK | 404 `target not found` |
+| duplicate `domain_name` | 409 `asset domain conflict` |
+| invalid `domain_name` | 400 `invalid input` |
+| invalid `status` | 400 `invalid input` |
+| repository query failure | 500 `internal server error` |
+| unsupported method | 405 `method not allowed` |
+
+##### 5. Good/Base/Bad Cases
+
+- Good: 用户在 VPS 详情页为 `vps_001` 创建 `api.example.com`，可选带 `service_id=svc_001` 与 `target_id=tg_001`，写入后只刷新域名列表。
+- Base: VPS 存在但没有域名时，path GET 返回空数组，前端展示 `尚未记录域名`。
+- Bad: VPS 不存在时 path GET 返回空数组，用户会误以为资产存在但没有域名。
+- Bad: 创建 domain asset 时自动创建 DNS 记录、创建 Target、修改 Target 探针或尝试注册商同步，越过了本 MVP 的人工维护边界。
+
+##### 6. Tests Required
+
+- Migration test: 断言表、命名外键、唯一约束、域名归一化 check、枚举 check、date 字段和索引。
+- Domain test: normalize / validate 覆盖空域名、URL/path、裸主机名、非法 label、枚举、labels、默认值。
+- Store test: create、list all、list by VPS、排序 SQL、missing VPS exists check、service 同 VPS 校验、missing Service/Target FK、unique/check violation 映射。
+- Handler/router/bootstrap tests: collection/path GET/POST、invalid JSON、invalid input、conflict、not found、method not allowed、subtree routing、bootstrap non-nil wiring。
+- Frontend tests: API helper URL/body，尤其 path-scoped create 不带 body `vps_id`；VPS 详情页域名加载、空态、创建成功和本地校验失败。
+
+##### 7. Wrong vs Correct
+
+```go
+// 错误：只靠 FK，允许 dom(vps_a) 关联 svc(vps_b)。
+insert into asset_domains (vps_id, service_id, domain_name) values (...)
+
+// 正确：写入前确认 service 属于同一个 VPS。
+select exists (select 1 from asset_services where service_id = $1 and vps_id = $2)
+```
+
+```tsx
+// 错误：VPS scoped create 仍把 body.vps_id 传给后端。
+postJSONBody(`/api/vps/${vpsId}/domains`, input)
+
+// 正确：path scoped create 去掉 vps_id，只传域名字段。
+postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, status, expires_at, labels, note })
+```
+
 ### Asset Ledger JSON import
 
 `internal/center/importing/` 是真实 VPS JSON dry-run/import 的领域入口。它复用 `providers`、`vpsassets`、`subscriptions` 的 normalize / validate 规则，不维护第二套枚举、金额、日期或 provider 校验。

@@ -1,0 +1,12 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend quality review entrypoint"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Review file placement and layering"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Review migration/store correctness and Asset Ledger database contract"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review sentinel errors and HTTP status mapping"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review backend tests and verification gates"}
+{"file": ".trellis/spec/web/index.md", "reason": "Web quality review entrypoint"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Review API helpers, types, and page data flow"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Review VPS detail page UI integration"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Review frontend tests, lint, and build"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review database/API/frontend contract consistency"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Review reuse of existing asset patterns"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Review branch and PR workflow compliance"}
