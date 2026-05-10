@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "feature branch and PR flow governance for the audit branch"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "plan completion audit spans database, API, web, and docs"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend guideline entrypoint for asset ledger modules"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "database and migration contracts for asset ledger evidence"}
+{"file": ".trellis/spec/web/index.md", "reason": "web guideline entrypoint for asset ledger pages"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "frontend API/type/data-flow contracts for asset ledger evidence"}
