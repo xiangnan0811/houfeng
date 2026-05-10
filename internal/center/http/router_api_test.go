@@ -172,6 +172,53 @@ func TestRouterKeepsAssetServicesOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsAssetDomainsOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		AssetDomainsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"domain_id":"dom_001"}]`))
+		}),
+		VPSDomainsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"domain_id":"dom_vps_001"}]`))
+		}),
+	})
+
+	tests := []struct {
+		name            string
+		path            string
+		wantBodySnippet string
+	}{
+		{name: "collection", path: "/api/domains", wantBodySnippet: `"domain_id":"dom_001"`},
+		{name: "vps domains", path: "/api/vps/vps_001/domains", wantBodySnippet: `"domain_id":"dom_vps_001"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			}
+			body, err := io.ReadAll(recorder.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+			if strings.TrimSpace(string(body)) == spaShell {
+				t.Fatalf("expected asset domain API response, got SPA fallback body %q", string(body))
+			}
+			if !strings.Contains(string(body), tt.wantBodySnippet) {
+				t.Fatalf("expected asset domain payload, got %q", string(body))
+			}
+		})
+	}
+}
+
 func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
@@ -205,6 +252,10 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"experience_log_id":"elog_001"}]`))
 		}),
+		VPSDomainsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"domain_id":"dom_001"}]`))
+		}),
 	})
 
 	tests := []struct {
@@ -220,6 +271,7 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 		{name: "unlink node", path: "/api/vps/vps_001/unlink-node", wantStatus: http.StatusOK, wantBodySnippet: `"link_id":"vnl_001"`},
 		{name: "timeline", path: "/api/vps/vps_001/timeline", wantStatus: http.StatusOK, wantBodySnippet: `"price_history_id":"ph_001"`},
 		{name: "experience logs", path: "/api/vps/vps_001/experience-logs", wantStatus: http.StatusOK, wantBodySnippet: `"experience_log_id":"elog_001"`},
+		{name: "domains", path: "/api/vps/vps_001/domains", wantStatus: http.StatusOK, wantBodySnippet: `"domain_id":"dom_001"`},
 	}
 
 	for _, tt := range tests {
