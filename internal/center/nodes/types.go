@@ -40,16 +40,15 @@ var allowedLifecycleStatuses = map[string]struct{}{
 	LifecycleRetired:           {},
 }
 
-// LastAction describes the outcome of the most recent pending action
-// executed on the node. It is nil when no action has ever been requested
-// or when a new pending action is queued (clearing the previous result).
+// LastAction describes the queued, in-flight, or completed command action for
+// the node. It is nil when no action has ever been requested.
 type LastAction struct {
 	ActionID  string `json:"action_id"`
 	CommandID string `json:"command_id"`
 	Status    string `json:"status"`
 	Stdout    string `json:"stdout,omitempty"`
 	Stderr    string `json:"stderr,omitempty"`
-	ExitCode  int    `json:"exit_code,omitempty"`
+	ExitCode  *int   `json:"exit_code,omitempty"`
 }
 
 type Record struct {

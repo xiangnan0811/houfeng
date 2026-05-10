@@ -1,0 +1,11 @@
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Work must stay on non-main branch and follow PR governance."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Command result durability spans agent contract, center handler/store, and UI state."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Before adding helper/state fields, reuse existing pending action and last_action patterns."}
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index for relevant implementation guides."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Command chain touches agent, contracts, center syncing/store/http layers."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"If last_action JSON shape or persistence semantics change, preserve DB conventions."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Result mismatch and store errors need existing sentinel/wrapping patterns."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Use backend quality gates and test conventions."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Any ignored mismatched command results should follow logging/sensitive-data rules."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"If frontend types change, preserve API helper/type contract conventions."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Frontend tests/build are required if web contract changes."}

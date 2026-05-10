@@ -229,10 +229,11 @@ func (r *Runtime) buildSyncRequest(ctx context.Context, nodeID, syncToken string
 	// Flush any pending command results from executed actions.
 	for _, pr := range r.pendingResults {
 		request.CommandResults = append(request.CommandResults, agentapi.CommandResult{
-			ActionID: pr.ActionID,
-			Stdout:   pr.Stdout,
-			Stderr:   pr.Stderr,
-			ExitCode: pr.ExitCode,
+			ActionID:  pr.ActionID,
+			CommandID: pr.CommandID,
+			Stdout:    pr.Stdout,
+			Stderr:    pr.Stderr,
+			ExitCode:  pr.ExitCode,
 		})
 	}
 	r.pendingResults = nil
@@ -297,6 +298,7 @@ func (r *Runtime) applySyncPlan(response *agentapi.SyncResponse) {
 			if ok {
 				result := agentexec.Run(context.Background(), bin, args)
 				result.ActionID = action.ActionID
+				result.CommandID = action.CommandID
 				r.pendingResults = append(r.pendingResults, result)
 			}
 			// Unknown command ID is silently ignored — the center

@@ -389,7 +389,7 @@ export function listIncidents(filter?: IncidentListFilter) {
  * `active_incidents`, so the resolved set is forward-compatible).
  */
 export function postNodeAction(nodeId: string, commandId: string) {
-  return postJSONBody<{ action_id: string; status: string }>(`/api/nodes/${nodeId}/actions`, {
+  return postJSONBody<{ action_id: string; command_id: string; status: 'pending' }>(`/api/nodes/${nodeId}/actions`, {
     command_id: commandId,
   })
 }

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -78,14 +77,14 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		return syncing.Result{}, err
 	}
 
-	// Dispatch pending action (if any) as part of the SyncPlan.
-	pendingAction, err := dispatchPendingAction(ctx, tx, batch.NodeID)
-	if err != nil {
+	// Store command results before dispatching a newly queued action so stale
+	// results cannot overwrite the new in-flight last_action.
+	if err := storeCommandResults(ctx, tx, batch); err != nil {
 		return syncing.Result{}, err
 	}
 
-	// Store command results from the agent.
-	if err := storeCommandResults(ctx, tx, batch); err != nil {
+	pendingAction, err := dispatchPendingAction(ctx, tx, batch.NodeID)
+	if err != nil {
 		return syncing.Result{}, err
 	}
 
@@ -269,9 +268,8 @@ func batchWithReceivedAt(batch observations.BatchWrite, receivedAt time.Time) ob
 	return out
 }
 
-// dispatchPendingAction reads and clears the pending action for a node
-// within the sync transaction, returning it so it can be attached to the
-// SyncPlan sent back to the agent.
+// dispatchPendingAction reads the queued action, clears the queue columns,
+// and leaves a durable in-flight last_action for result identity matching.
 func dispatchPendingAction(ctx context.Context, tx syncBatchTx, nodeID string) (*agentplan.PendingAction, error) {
 	var actionID, commandID *string
 	if err := tx.QueryRow(ctx,
@@ -285,10 +283,21 @@ func dispatchPendingAction(ctx context.Context, tx syncBatchTx, nodeID string) (
 		return nil, nil
 	}
 
-	// Clear immediately so the action is only dispatched once.
+	raw, err := marshalPendingLastAction(*actionID, *commandID)
+	if err != nil {
+		return nil, fmt.Errorf("marshal pending action for node %q: %w", nodeID, err)
+	}
+
 	if _, err := tx.Exec(ctx,
-		`UPDATE nodes SET pending_action_id = NULL, pending_action_command_id = NULL WHERE node_id = $1`,
-		nodeID); err != nil {
+		`UPDATE nodes
+		SET pending_action_id = NULL,
+			pending_action_command_id = NULL,
+			last_action = $2,
+			updated_at = now()
+		WHERE node_id = $1
+			AND pending_action_id = $3
+			AND pending_action_command_id = $4`,
+		nodeID, raw, *actionID, *commandID); err != nil {
 		return nil, fmt.Errorf("clear pending action for node %q: %w", nodeID, err)
 	}
 
@@ -298,33 +307,33 @@ func dispatchPendingAction(ctx context.Context, tx syncBatchTx, nodeID string) (
 	}, nil
 }
 
-// storeCommandResults persists command execution results from the agent
-// into the node's last_action JSONB column.
+// storeCommandResults persists command execution results only when they match
+// the action currently marked in-flight for the node.
 func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batch) error {
 	if len(batch.CommandResults) == 0 {
 		return nil
 	}
 
-	// Only the last result is stored (single last_action column).
-	last := batch.CommandResults[len(batch.CommandResults)-1]
-	payload := map[string]interface{}{
-		"action_id":  last.ActionID,
-		"command_id": "",
-		"status":     "done",
-		"stdout":     last.Stdout,
-		"stderr":     last.Stderr,
-		"exit_code":  last.ExitCode,
-	}
+	for _, result := range batch.CommandResults {
+		if result.ActionID == "" || result.CommandID == "" {
+			continue
+		}
+		raw, err := marshalCompletedLastAction(result.ActionID, result.CommandID, result.Stdout, result.Stderr, result.ExitCode)
+		if err != nil {
+			return fmt.Errorf("marshal command result for node %q: %w", batch.NodeID, err)
+		}
 
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal command result for node %q: %w", batch.NodeID, err)
-	}
-
-	if _, err := tx.Exec(ctx,
-		`UPDATE nodes SET last_action = $1, updated_at = now() WHERE node_id = $2`,
-		raw, batch.NodeID); err != nil {
-		return fmt.Errorf("store command result for node %q: %w", batch.NodeID, err)
+		if _, err := tx.Exec(ctx,
+			`UPDATE nodes
+			SET last_action = $1,
+				updated_at = now()
+			WHERE node_id = $2
+				AND last_action->>'status' = $3
+				AND last_action->>'action_id' = $4
+				AND last_action->>'command_id' = $5`,
+			raw, batch.NodeID, commandActionStatusPending, result.ActionID, result.CommandID); err != nil {
+			return fmt.Errorf("store command result for node %q: %w", batch.NodeID, err)
+		}
 	}
 
 	return nil

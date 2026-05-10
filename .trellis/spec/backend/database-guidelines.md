@@ -105,6 +105,76 @@
 
 > 例外：`db/migrations/0010_add_users_and_sessions.sql` 中的 `sessions_user_idx` / `sessions_expires_idx` 没有 `idx_` 前缀，是仓库现存差异；新增索引请遵循 `idx_<table>_<purpose>` 主流写法。
 
+### Node command action durability
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 Node action / remote command 链路时必须加载本节，包括 `POST /api/nodes/{node_id}/actions`、`agentapi.PendingAction`、`agentapi.CommandResult`、`syncing.CommandResult`、`nodes.last_action` 或 `store/sync_batches.go`。
+- 目标：单 pending action 模型下保持 command identity 可追踪，避免 agent 结果晚到时覆盖另一个已排队或派发中的 action。
+
+#### 2. Signatures
+
+- HTTP request: `POST /api/nodes/{node_id}/actions` with body `{"command_id":"uptime"}`。
+- HTTP response: `{"action_id":"act_xxx","command_id":"uptime","status":"pending"}`。
+- Agent plan: `agentapi.PendingAction{ActionID, CommandID}` serializes as `action_id` + `command_id`。
+- Agent result: `agentapi.CommandResult{ActionID, CommandID, Stdout, Stderr, ExitCode}` serializes as `action_id` + `command_id` + output fields。
+- DB state: `nodes.pending_action_id`, `nodes.pending_action_command_id`, and `nodes.last_action jsonb`。
+
+#### 3. Contracts
+
+- Queueing an action writes both pending columns and `last_action={"status":"pending","action_id":...,"command_id":...}` so API/UI readers see pending immediately.
+- Sync dispatch clears `pending_action_*` columns to prevent duplicate dispatch, but rewrites the same pending `last_action` to keep the in-flight identity durable until a matching result arrives.
+- Command result storage must include the real `command_id` and update `last_action` to `status="done"` only when current `last_action` is still `pending` with the same `action_id` and `command_id`.
+- `last_action.status` currently uses only `pending` and `done`; command success/failure is represented by `exit_code`, not by `success` / `failed` status strings.
+- Go `nodes.LastAction.ExitCode` must stay nullable (`*int`) with `omitempty`: pending actions omit it, while completed success still serializes `exit_code: 0`.
+- `last_action` is the current visible action state, not a full audit log. Do not infer historical command execution from it after another action is queued.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Missing `command_id` in Node action request | 400 `command_id required` |
+| Unknown node | 404 `node not found` |
+| Node is not bound | 409 `node agent not bound` |
+| Node monitoring is paused | 409 `node monitoring is paused` |
+| Agent result lacks `action_id` or `command_id` | Ignore the result row; do not overwrite `last_action` |
+| Agent result identity does not match current pending `last_action` | Ignore the result row; do not overwrite `last_action` |
+| DB write failure while queueing/dispatching/storing | Return wrapped repository error; handler maps to 500 where applicable |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: user queues `uptime`, API immediately returns `command_id`, `last_action` shows pending `uptime`, agent returns matching `action_id` + `command_id`, and `last_action` becomes done with stdout/stderr/exit code.
+- Base: no pending action and no command results in a sync batch leaves `last_action` unchanged.
+- Bad: writing `last_action.command_id=""` from command results makes the UI lose the command label.
+- Bad: storing command results with `WHERE node_id = $2` only can let a stale result overwrite a newer pending action.
+
+#### 6. Tests Required
+
+- Agent runtime test: pending action execution returns `CommandResult.ActionID` and `CommandResult.CommandID`.
+- Agent handler test: sync request conversion preserves `command_results[].command_id`.
+- Store tests: queueing writes pending `last_action`; dispatch clears pending columns while preserving pending JSON; result update SQL guards on pending status, action ID, and command ID; `UPDATE 0` mismatch is non-fatal; result storage runs before dispatching a newly queued action in the same sync transaction.
+- Frontend API/page tests: `postNodeAction` preserves `command_id`; Node detail command drawer shows pending command label immediately after dispatch.
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：丢失 command identity，且 stale result 可覆盖当前 action。
+payload := map[string]any{"action_id": result.ActionID, "command_id": "", "status": "done"}
+_, err := tx.Exec(ctx, `UPDATE nodes SET last_action = $1 WHERE node_id = $2`, payload, nodeID)
+```
+
+```go
+// 正确：结果只落到仍匹配的 pending action。
+_, err := tx.Exec(ctx, `
+	UPDATE nodes
+	SET last_action = $1, updated_at = now()
+	WHERE node_id = $2
+		AND last_action->>'status' = $3
+		AND last_action->>'action_id' = $4
+		AND last_action->>'command_id' = $5`,
+	raw, nodeID, "pending", result.ActionID, result.CommandID)
+```
+
 ### Asset Ledger providers
 
 `db/migrations/0016_create_asset_ledger.sql` 是 post-V1 Asset Ledger 的 schema 入口，当前落 `providers` 服务商主数据表：

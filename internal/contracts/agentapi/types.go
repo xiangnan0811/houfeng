@@ -175,10 +175,11 @@ type PendingAction struct {
 // CommandResult carries the output of an executed pending action back to
 // the center in the next SyncRequest.
 type CommandResult struct {
-	ActionID string `json:"action_id"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	ExitCode int    `json:"exit_code"`
+	ActionID  string `json:"action_id"`
+	CommandID string `json:"command_id"`
+	Stdout    string `json:"stdout"`
+	Stderr    string `json:"stderr"`
+	ExitCode  int    `json:"exit_code"`
 }
 
 type SyncResponse struct {

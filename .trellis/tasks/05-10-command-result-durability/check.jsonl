@@ -1,0 +1,9 @@
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Verify branch/PR governance and no main edits."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check agent-contract-center-UI data flow consistency."}
+{"file":".trellis/spec/backend/index.md","reason":"Backend quality/spec compliance index."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Check changes landed in expected backend/agent/contract layers."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Check JSONB persistence and SQL changes if any."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check result mismatch/error behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check Go tests and verification gates."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Check frontend type/API contract if touched."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Check web verification if touched."}

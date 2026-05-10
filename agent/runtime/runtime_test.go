@@ -625,6 +625,7 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	actionID := "act_001"
+	commandID := "uptime"
 	client := &fakeClient{
 		cancelAfterSyncs: 2,
 		syncResponses: []agentapi.SyncResponse{
@@ -634,7 +635,7 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 				Plan: &agentapi.SyncPlan{
 					HostSampleFrequencyTier: agentapi.FrequencyTier1m,
 					PendingAction: &agentapi.PendingAction{
-						CommandID: "uptime",
+						CommandID: commandID,
 						ActionID:  actionID,
 					},
 				},
@@ -666,6 +667,9 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 	cr := secondSync.CommandResults[0]
 	if cr.ActionID != actionID {
 		t.Fatalf("CommandResult.ActionID = %q, want %q", cr.ActionID, actionID)
+	}
+	if cr.CommandID != commandID {
+		t.Fatalf("CommandResult.CommandID = %q, want %q", cr.CommandID, commandID)
 	}
 	if cr.ExitCode != 0 {
 		t.Fatalf("CommandResult.ExitCode = %d, want 0 for uptime", cr.ExitCode)

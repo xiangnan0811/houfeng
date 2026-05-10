@@ -174,6 +174,43 @@ func TestNodeOnboardingMigrationAddsPersistenceColumns(t *testing.T) {
 	}
 }
 
+func TestSetPendingActionStoresDurablePendingLastAction(t *testing.T) {
+	t.Parallel()
+
+	var (
+		execSQL  string
+		execArgs []any
+	)
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			execSQL = sql
+			execArgs = append([]any(nil), args...)
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		},
+	}}
+
+	if err := repo.SetPendingAction(context.Background(), "nd_001", "act_001", "uptime"); err != nil {
+		t.Fatalf("SetPendingAction() error = %v", err)
+	}
+
+	if !strings.Contains(execSQL, "last_action = $3") {
+		t.Fatalf("exec SQL = %q, want last_action write", execSQL)
+	}
+	if len(execArgs) != 4 {
+		t.Fatalf("exec args = %#v, want action id, command id, payload, node id", execArgs)
+	}
+	raw, ok := execArgs[2].([]byte)
+	if !ok {
+		t.Fatalf("last_action arg = %#v, want []byte JSON", execArgs[2])
+	}
+	payload := string(raw)
+	for _, want := range []string{`"action_id":"act_001"`, `"command_id":"uptime"`, `"status":"pending"`} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("last_action payload = %s, missing %s", payload, want)
+		}
+	}
+}
+
 func TestNodeBindingEpochMigrationAddsBoundaryColumn(t *testing.T) {
 	t.Parallel()
 

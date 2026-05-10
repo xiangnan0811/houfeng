@@ -20,10 +20,11 @@ type HeartbeatPayload = enrollment.HeartbeatPayload
 
 // CommandResult carries the output of an executed pending action back from the agent.
 type CommandResult struct {
-	ActionID string
-	Stdout   string
-	Stderr   string
-	ExitCode int
+	ActionID  string
+	CommandID string
+	Stdout    string
+	Stderr    string
+	ExitCode  int
 }
 
 type Batch struct {
