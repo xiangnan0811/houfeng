@@ -152,7 +152,11 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 		}),
 		VPSTimelineHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"vps_id":"vps_001","renewal_decisions":[{"decision_id":"rdec_001"}],"price_histories":[{"price_history_id":"ph_001"}],"ip_histories":[{"ip_history_id":"iph_001"}],"spec_snapshots":[{"snapshot_id":"vss_001"}]}`))
+			_, _ = w.Write([]byte(`{"vps_id":"vps_001","renewal_decisions":[{"decision_id":"rdec_001"}],"price_histories":[{"price_history_id":"ph_001"}],"ip_histories":[{"ip_history_id":"iph_001"}],"spec_snapshots":[{"snapshot_id":"vss_001"}],"experience_logs":[{"experience_log_id":"elog_001"}]}`))
+		}),
+		VPSExperienceLogsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"experience_log_id":"elog_001"}]`))
 		}),
 	})
 
@@ -168,6 +172,7 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 		{name: "link node", path: "/api/vps/vps_001/link-node", wantStatus: http.StatusCreated, wantBodySnippet: `"link_id":"vnl_001"`},
 		{name: "unlink node", path: "/api/vps/vps_001/unlink-node", wantStatus: http.StatusOK, wantBodySnippet: `"link_id":"vnl_001"`},
 		{name: "timeline", path: "/api/vps/vps_001/timeline", wantStatus: http.StatusOK, wantBodySnippet: `"price_history_id":"ph_001"`},
+		{name: "experience logs", path: "/api/vps/vps_001/experience-logs", wantStatus: http.StatusOK, wantBodySnippet: `"experience_log_id":"elog_001"`},
 	}
 
 	for _, tt := range tests {

@@ -64,9 +64,15 @@ func (f *fakeVPSAssetRepository) PatchVPSAsset(_ context.Context, vpsID string, 
 }
 
 type fakeRenewalTimelineRepository struct {
-	timeline       renewals.VPSTimeline
-	err            error
-	requestedVPSID string
+	timeline             renewals.VPSTimeline
+	err                  error
+	requestedVPSID       string
+	createLogResult      renewals.ExperienceLogRecord
+	createLogErr         error
+	createLogInput       renewals.CreateExperienceLogInput
+	listLogsResult       []renewals.ExperienceLogRecord
+	listLogsErr          error
+	listLogsRequestedVPS string
 }
 
 func (f *fakeRenewalTimelineRepository) GetVPSTimeline(_ context.Context, vpsID string) (renewals.VPSTimeline, error) {
@@ -75,6 +81,22 @@ func (f *fakeRenewalTimelineRepository) GetVPSTimeline(_ context.Context, vpsID 
 		return renewals.VPSTimeline{}, f.err
 	}
 	return f.timeline, nil
+}
+
+func (f *fakeRenewalTimelineRepository) CreateExperienceLog(_ context.Context, input renewals.CreateExperienceLogInput) (renewals.ExperienceLogRecord, error) {
+	f.createLogInput = input
+	if f.createLogErr != nil {
+		return renewals.ExperienceLogRecord{}, f.createLogErr
+	}
+	return f.createLogResult, nil
+}
+
+func (f *fakeRenewalTimelineRepository) ListExperienceLogsForVPS(_ context.Context, vpsID string) ([]renewals.ExperienceLogRecord, error) {
+	f.listLogsRequestedVPS = vpsID
+	if f.listLogsErr != nil {
+		return nil, f.listLogsErr
+	}
+	return f.listLogsResult, nil
 }
 
 func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
@@ -478,6 +500,16 @@ func TestVPSTimelineReturnsAssetHistory(t *testing.T) {
 			CapturedAt:     now,
 			CreatedAt:      now,
 		}},
+		ExperienceLogs: []renewals.ExperienceLogRecord{{
+			ExperienceLogID: "elog_001",
+			VPSID:           "vps_001",
+			Category:        renewals.ExperienceNetwork,
+			Severity:        renewals.ExperienceSeverityWarning,
+			Summary:         "packet loss",
+			Details:         "opened provider ticket",
+			OccurredAt:      now,
+			CreatedAt:       now,
+		}},
 	}}
 
 	handler := handlers.VPSTimeline(repo)
@@ -501,12 +533,118 @@ func TestVPSTimelineReturnsAssetHistory(t *testing.T) {
 		len(body.PriceHistories) != 1 ||
 		len(body.IPHistories) != 1 ||
 		len(body.SpecSnapshots) != 1 ||
+		len(body.ExperienceLogs) != 1 ||
 		body.RenewalDecisions[0].FromDecision == nil ||
 		*body.RenewalDecisions[0].FromDecision != vpsassets.RenewalKeep ||
 		body.PriceHistories[0].PriceHistoryID != "ph_001" ||
 		body.IPHistories[0].ToIPv4 != "198.51.100.5" ||
-		body.SpecSnapshots[0].ProductName != "CPX31" {
+		body.SpecSnapshots[0].ProductName != "CPX31" ||
+		body.ExperienceLogs[0].Summary != "packet loss" {
 		t.Fatalf("timeline body = %#v, want all asset history arrays", body)
+	}
+}
+
+func TestVPSExperienceLogsListsAndCreates(t *testing.T) {
+	now := time.Date(2026, time.May, 10, 9, 30, 0, 0, time.UTC)
+	repo := &fakeRenewalTimelineRepository{
+		listLogsResult: []renewals.ExperienceLogRecord{{
+			ExperienceLogID: "elog_001",
+			VPSID:           "vps_001",
+			Category:        renewals.ExperienceNetwork,
+			Severity:        renewals.ExperienceSeverityWarning,
+			Summary:         "packet loss",
+			Details:         "opened provider ticket",
+			OccurredAt:      now,
+			CreatedAt:       now,
+		}},
+		createLogResult: renewals.ExperienceLogRecord{
+			ExperienceLogID: "elog_002",
+			VPSID:           "vps_001",
+			Category:        renewals.ExperienceSupport,
+			Severity:        renewals.ExperienceSeverityInfo,
+			Summary:         "support response improved",
+			Details:         "new ticket was answered quickly",
+			OccurredAt:      now,
+			CreatedAt:       now,
+		},
+	}
+
+	listRecorder := httptest.NewRecorder()
+	handlers.VPSExperienceLogs(repo).ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/experience-logs", nil))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d; body=%s", listRecorder.Code, http.StatusOK, listRecorder.Body.String())
+	}
+	if repo.listLogsRequestedVPS != "vps_001" {
+		t.Fatalf("list vps id = %q, want vps_001", repo.listLogsRequestedVPS)
+	}
+	var listBody []renewals.ExperienceLogRecord
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("unmarshal list response: %v", err)
+	}
+	if len(listBody) != 1 || listBody[0].ExperienceLogID != "elog_001" {
+		t.Fatalf("list body = %#v, want one experience log", listBody)
+	}
+
+	createRecorder := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/experience-logs", strings.NewReader(`{
+		"category":" support ",
+		"severity":" info ",
+		"summary":" support response improved ",
+		"details":" new ticket was answered quickly ",
+		"occurred_at":"2026-05-10T09:30:00Z"
+	}`))
+	handlers.VPSExperienceLogs(repo).ServeHTTP(createRecorder, createReq)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", createRecorder.Code, http.StatusCreated, createRecorder.Body.String())
+	}
+	if repo.createLogInput.VPSID != "vps_001" ||
+		repo.createLogInput.Category != renewals.ExperienceSupport ||
+		repo.createLogInput.Severity != renewals.ExperienceSeverityInfo ||
+		repo.createLogInput.Summary != "support response improved" ||
+		repo.createLogInput.Details != "new ticket was answered quickly" ||
+		repo.createLogInput.OccurredAt == nil {
+		t.Fatalf("create input = %#v, want normalized experience log input", repo.createLogInput)
+	}
+	var createBody renewals.ExperienceLogRecord
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createBody); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+	if createBody.ExperienceLogID != "elog_002" {
+		t.Fatalf("create body = %#v, want created experience log", createBody)
+	}
+}
+
+func TestVPSExperienceLogsMapsErrorsAndMethods(t *testing.T) {
+	tests := []struct {
+		name   string
+		repo   *fakeRenewalTimelineRepository
+		method string
+		path   string
+		body   string
+		want   int
+	}{
+		{name: "list missing vps", repo: &fakeRenewalTimelineRepository{listLogsErr: renewals.ErrAssetTimelineNotFound}, method: http.MethodGet, path: "/api/vps/vps_missing/experience-logs", want: http.StatusNotFound},
+		{name: "list invalid input", repo: &fakeRenewalTimelineRepository{listLogsErr: renewals.ErrInvalidAssetHistoryInput}, method: http.MethodGet, path: "/api/vps/vps_001/experience-logs", want: http.StatusBadRequest},
+		{name: "list repo failure", repo: &fakeRenewalTimelineRepository{listLogsErr: errors.New("query failed")}, method: http.MethodGet, path: "/api/vps/vps_001/experience-logs", want: http.StatusInternalServerError},
+		{name: "create invalid json", repo: &fakeRenewalTimelineRepository{}, method: http.MethodPost, path: "/api/vps/vps_001/experience-logs", body: `{`, want: http.StatusBadRequest},
+		{name: "create invalid input", repo: &fakeRenewalTimelineRepository{}, method: http.MethodPost, path: "/api/vps/vps_001/experience-logs", body: `{"category":"network","severity":"warning","summary":" "}`, want: http.StatusBadRequest},
+		{name: "create missing vps", repo: &fakeRenewalTimelineRepository{createLogErr: renewals.ErrAssetTimelineNotFound}, method: http.MethodPost, path: "/api/vps/vps_missing/experience-logs", body: `{"category":"network","severity":"warning","summary":"packet loss"}`, want: http.StatusNotFound},
+		{name: "create repo failure", repo: &fakeRenewalTimelineRepository{createLogErr: errors.New("insert failed")}, method: http.MethodPost, path: "/api/vps/vps_001/experience-logs", body: `{"category":"network","severity":"warning","summary":"packet loss"}`, want: http.StatusInternalServerError},
+		{name: "wrong method", repo: &fakeRenewalTimelineRepository{}, method: http.MethodPatch, path: "/api/vps/vps_001/experience-logs", body: `{}`, want: http.StatusMethodNotAllowed},
+		{name: "malformed path", repo: &fakeRenewalTimelineRepository{}, method: http.MethodGet, path: "/api/vps/vps_001/experience-logs/extra", want: http.StatusNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSExperienceLogs(tt.repo).ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.want {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tt.want, recorder.Body.String())
+			}
+		})
 	}
 }
 

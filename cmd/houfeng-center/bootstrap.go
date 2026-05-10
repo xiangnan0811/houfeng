@@ -134,6 +134,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSLinkNodeHandler:              handlers.VPSLinkNode(vpsNodeLinkRepo),
 		VPSUnlinkNodeHandler:            handlers.VPSUnlinkNode(vpsNodeLinkRepo),
 		VPSTimelineHandler:              handlers.VPSTimeline(renewalDecisionRepo),
+		VPSExperienceLogsHandler:        handlers.VPSExperienceLogs(renewalDecisionRepo),
 		SubscriptionsCollectionHandler:  handlers.SubscriptionsCollection(subscriptionRepo),
 		SubscriptionItemHandler:         handlers.SubscriptionItem(subscriptionRepo),
 		NodesCollectionHandler:          handlers.NodesCollection(nodeRepo),

@@ -210,6 +210,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSTimelineHandler == nil {
 		t.Fatal("router vps timeline handler = nil, want non-nil")
 	}
+	if gotOpts.VPSExperienceLogsHandler == nil {
+		t.Fatal("router vps experience logs handler = nil, want non-nil")
+	}
 	if gotOpts.SubscriptionsCollectionHandler == nil {
 		t.Fatal("router subscriptions collection handler = nil, want non-nil")
 	}

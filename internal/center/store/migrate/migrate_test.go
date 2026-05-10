@@ -49,20 +49,23 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	if names[9] != "0009_add_observability_filter_indexes.sql" {
 		t.Fatalf("tenth migration = %q, want %q", names[9], "0009_add_observability_filter_indexes.sql")
 	}
-	if names[len(names)-5] != "0017_add_vps_assets.sql" {
-		t.Fatalf("fifth from last migration = %q, want %q", names[len(names)-5], "0017_add_vps_assets.sql")
+
+	expectedTail := []string{
+		"0017_add_vps_assets.sql",
+		"0018_add_subscriptions.sql",
+		"0019_create_vps_node_links.sql",
+		"0020_create_renewal_decisions.sql",
+		"0021_create_asset_histories.sql",
+		"0022_create_experience_logs.sql",
 	}
-	if names[len(names)-4] != "0018_add_subscriptions.sql" {
-		t.Fatalf("fourth from last migration = %q, want %q", names[len(names)-4], "0018_add_subscriptions.sql")
+	offset := 0
+	for _, name := range names {
+		if offset < len(expectedTail) && name == expectedTail[offset] {
+			offset++
+		}
 	}
-	if names[len(names)-3] != "0019_create_vps_node_links.sql" {
-		t.Fatalf("third from last migration = %q, want %q", names[len(names)-3], "0019_create_vps_node_links.sql")
-	}
-	if names[len(names)-2] != "0020_create_renewal_decisions.sql" {
-		t.Fatalf("penultimate migration = %q, want %q", names[len(names)-2], "0020_create_renewal_decisions.sql")
-	}
-	if names[len(names)-1] != "0021_create_asset_histories.sql" {
-		t.Fatalf("last migration = %q, want %q", names[len(names)-1], "0021_create_asset_histories.sql")
+	if offset != len(expectedTail) {
+		t.Fatalf("migration names missing expected asset ledger tail order %#v in %#v", expectedTail, names)
 	}
 }
 

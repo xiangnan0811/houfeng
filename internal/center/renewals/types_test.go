@@ -165,3 +165,56 @@ func TestValidateIPAndSpecHistoryInputsRejectInvalidValues(t *testing.T) {
 		t.Fatalf("ValidateCreateSpecSnapshotInput(invalid ssh port) error = %v, want ErrInvalidAssetHistoryInput", err)
 	}
 }
+
+func TestNormalizeAndValidateCreateExperienceLogInput(t *testing.T) {
+	occurredAt := time.Date(2026, time.May, 10, 9, 30, 0, 0, time.FixedZone("CST", 8*60*60))
+	input := NormalizeCreateExperienceLogInput(CreateExperienceLogInput{
+		VPSID:      " vps_001 ",
+		Category:   " network ",
+		Severity:   " warning ",
+		Summary:    " intermittent packet loss ",
+		Details:    " support ticket opened ",
+		OccurredAt: &occurredAt,
+	})
+
+	if input.VPSID != "vps_001" ||
+		input.Category != ExperienceNetwork ||
+		input.Severity != ExperienceSeverityWarning ||
+		input.Summary != "intermittent packet loss" ||
+		input.Details != "support ticket opened" {
+		t.Fatalf("NormalizeCreateExperienceLogInput() = %#v, want trimmed values", input)
+	}
+	if input.OccurredAt == nil || input.OccurredAt.Location() != time.UTC {
+		t.Fatalf("OccurredAt = %#v, want UTC timestamp", input.OccurredAt)
+	}
+	if err := ValidateCreateExperienceLogInput(input); err != nil {
+		t.Fatalf("ValidateCreateExperienceLogInput() error = %v", err)
+	}
+}
+
+func TestValidateCreateExperienceLogInputRejectsInvalidValues(t *testing.T) {
+	valid := CreateExperienceLogInput{
+		VPSID:    "vps_001",
+		Category: ExperienceNetwork,
+		Severity: ExperienceSeverityWarning,
+		Summary:  "packet loss",
+	}
+	tests := []struct {
+		name  string
+		input CreateExperienceLogInput
+	}{
+		{name: "blank vps", input: CreateExperienceLogInput{VPSID: " ", Category: valid.Category, Severity: valid.Severity, Summary: valid.Summary}},
+		{name: "invalid category", input: CreateExperienceLogInput{VPSID: valid.VPSID, Category: "latency", Severity: valid.Severity, Summary: valid.Summary}},
+		{name: "invalid severity", input: CreateExperienceLogInput{VPSID: valid.VPSID, Category: valid.Category, Severity: "minor", Summary: valid.Summary}},
+		{name: "blank summary", input: CreateExperienceLogInput{VPSID: valid.VPSID, Category: valid.Category, Severity: valid.Severity, Summary: " "}},
+		{name: "zero occurred at", input: CreateExperienceLogInput{VPSID: valid.VPSID, Category: valid.Category, Severity: valid.Severity, Summary: valid.Summary, OccurredAt: &time.Time{}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateCreateExperienceLogInput(NormalizeCreateExperienceLogInput(tt.input)); !errors.Is(err, ErrInvalidAssetHistoryInput) {
+				t.Fatalf("ValidateCreateExperienceLogInput() error = %v, want ErrInvalidAssetHistoryInput", err)
+			}
+		})
+	}
+}

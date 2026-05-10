@@ -100,6 +100,46 @@ type SpecSnapshotRecord struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type ExperienceCategory string
+
+const (
+	ExperienceNote         ExperienceCategory = "note"
+	ExperienceStability    ExperienceCategory = "stability"
+	ExperienceNetwork      ExperienceCategory = "network"
+	ExperienceSupport      ExperienceCategory = "support"
+	ExperienceBilling      ExperienceCategory = "billing"
+	ExperienceMigration    ExperienceCategory = "migration"
+	ExperienceCancellation ExperienceCategory = "cancellation"
+)
+
+type ExperienceSeverity string
+
+const (
+	ExperienceSeverityInfo     ExperienceSeverity = "info"
+	ExperienceSeverityWarning  ExperienceSeverity = "warning"
+	ExperienceSeverityCritical ExperienceSeverity = "critical"
+)
+
+type ExperienceLogRecord struct {
+	ExperienceLogID string             `json:"experience_log_id"`
+	VPSID           string             `json:"vps_id"`
+	Category        ExperienceCategory `json:"category"`
+	Severity        ExperienceSeverity `json:"severity"`
+	Summary         string             `json:"summary"`
+	Details         string             `json:"details"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	CreatedAt       time.Time          `json:"created_at"`
+}
+
+type CreateExperienceLogInput struct {
+	VPSID      string             `json:"-"`
+	Category   ExperienceCategory `json:"category"`
+	Severity   ExperienceSeverity `json:"severity"`
+	Summary    string             `json:"summary"`
+	Details    string             `json:"details"`
+	OccurredAt *time.Time         `json:"occurred_at"`
+}
+
 type CreateSpecSnapshotInput struct {
 	VPSID          string
 	ProductName    string
@@ -112,11 +152,12 @@ type CreateSpecSnapshotInput struct {
 }
 
 type VPSTimeline struct {
-	VPSID            string               `json:"vps_id"`
-	RenewalDecisions []DecisionRecord     `json:"renewal_decisions"`
-	PriceHistories   []PriceHistoryRecord `json:"price_histories"`
-	IPHistories      []IPHistoryRecord    `json:"ip_histories"`
-	SpecSnapshots    []SpecSnapshotRecord `json:"spec_snapshots"`
+	VPSID            string                `json:"vps_id"`
+	RenewalDecisions []DecisionRecord      `json:"renewal_decisions"`
+	PriceHistories   []PriceHistoryRecord  `json:"price_histories"`
+	IPHistories      []IPHistoryRecord     `json:"ip_histories"`
+	SpecSnapshots    []SpecSnapshotRecord  `json:"spec_snapshots"`
+	ExperienceLogs   []ExperienceLogRecord `json:"experience_logs"`
 }
 
 type Repository interface {
@@ -128,7 +169,14 @@ type Repository interface {
 	ListIPHistoriesForVPS(context.Context, string) ([]IPHistoryRecord, error)
 	CreateSpecSnapshot(context.Context, CreateSpecSnapshotInput) (SpecSnapshotRecord, error)
 	ListSpecSnapshotsForVPS(context.Context, string) ([]SpecSnapshotRecord, error)
+	CreateExperienceLog(context.Context, CreateExperienceLogInput) (ExperienceLogRecord, error)
+	ListExperienceLogsForVPS(context.Context, string) ([]ExperienceLogRecord, error)
 	GetVPSTimeline(context.Context, string) (VPSTimeline, error)
+}
+
+type ExperienceLogRepository interface {
+	CreateExperienceLog(context.Context, CreateExperienceLogInput) (ExperienceLogRecord, error)
+	ListExperienceLogsForVPS(context.Context, string) ([]ExperienceLogRecord, error)
 }
 
 type TimelineRepository interface {
@@ -255,6 +303,56 @@ func ValidateCreateSpecSnapshotInput(input CreateSpecSnapshotInput) error {
 		return fmt.Errorf("%w: captured_at is required", ErrInvalidAssetHistoryInput)
 	}
 	return nil
+}
+
+func NormalizeCreateExperienceLogInput(input CreateExperienceLogInput) CreateExperienceLogInput {
+	input.VPSID = NormalizeVPSID(input.VPSID)
+	input.Category = ExperienceCategory(strings.TrimSpace(string(input.Category)))
+	input.Severity = ExperienceSeverity(strings.TrimSpace(string(input.Severity)))
+	input.Summary = strings.TrimSpace(input.Summary)
+	input.Details = strings.TrimSpace(input.Details)
+	if input.OccurredAt != nil {
+		occurredAt := input.OccurredAt.UTC()
+		input.OccurredAt = &occurredAt
+	}
+	return input
+}
+
+func ValidateCreateExperienceLogInput(input CreateExperienceLogInput) error {
+	if NormalizeVPSID(input.VPSID) == "" {
+		return fmt.Errorf("%w: vps_id is required", ErrInvalidAssetHistoryInput)
+	}
+	if !IsValidExperienceCategory(input.Category) {
+		return fmt.Errorf("%w: invalid category", ErrInvalidAssetHistoryInput)
+	}
+	if !IsValidExperienceSeverity(input.Severity) {
+		return fmt.Errorf("%w: invalid severity", ErrInvalidAssetHistoryInput)
+	}
+	if strings.TrimSpace(input.Summary) == "" {
+		return fmt.Errorf("%w: summary is required", ErrInvalidAssetHistoryInput)
+	}
+	if input.OccurredAt != nil && input.OccurredAt.IsZero() {
+		return fmt.Errorf("%w: occurred_at is required", ErrInvalidAssetHistoryInput)
+	}
+	return nil
+}
+
+func IsValidExperienceCategory(value ExperienceCategory) bool {
+	switch value {
+	case ExperienceNote, ExperienceStability, ExperienceNetwork, ExperienceSupport, ExperienceBilling, ExperienceMigration, ExperienceCancellation:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsValidExperienceSeverity(value ExperienceSeverity) bool {
+	switch value {
+	case ExperienceSeverityInfo, ExperienceSeverityWarning, ExperienceSeverityCritical:
+		return true
+	default:
+		return false
+	}
 }
 
 func NormalizeVPSID(vpsID string) string {

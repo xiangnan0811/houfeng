@@ -45,6 +45,37 @@ func TestPostgresRenewalDecisionMigrationDefinesTableConstraintsAndIndexes(t *te
 	}
 }
 
+func TestPostgresExperienceLogsMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0022_create_experience_logs.sql"))
+	if err != nil {
+		t.Fatalf("ReadFile(experience logs migration) error = %v", err)
+	}
+	text := string(source)
+	for _, snippet := range []string{
+		"create table if not exists experience_logs",
+		"experience_log_id text primary key",
+		"vps_id text not null references vps_assets(vps_id) on delete cascade",
+		"category text not null",
+		"severity text not null",
+		"summary text not null",
+		"details text not null default ''",
+		"occurred_at timestamptz not null default now()",
+		"experience_logs_category_allowed",
+		"experience_logs_severity_allowed",
+		"experience_logs_summary_not_blank",
+		"idx_experience_logs_vps_time",
+		"on experience_logs (vps_id, occurred_at desc, created_at desc)",
+		"idx_experience_logs_category",
+		"idx_experience_logs_severity",
+	} {
+		if !strings.Contains(text, snippet) {
+			t.Fatalf("experience logs migration missing %q", snippet)
+		}
+	}
+}
+
 func TestPostgresRenewalDecisionCreateListAndTimeline(t *testing.T) {
 	t.Parallel()
 
@@ -128,6 +159,13 @@ func TestPostgresRenewalDecisionCreateListAndTimeline(t *testing.T) {
 						return nil
 					},
 				}}}, nil
+			case strings.Contains(sql, "from experience_logs"):
+				return &fakeRenewalDecisionRows{rows: []fakeRenewalDecisionScan{{
+					scan: func(dest ...any) error {
+						scanExperienceLogRecordDestinations(dest, "elog_001", now)
+						return nil
+					},
+				}}}, nil
 			default:
 				t.Fatalf("unexpected Query SQL %q", sql)
 				return &fakeRenewalDecisionRows{}, nil
@@ -171,8 +209,61 @@ func TestPostgresRenewalDecisionCreateListAndTimeline(t *testing.T) {
 		len(timeline.RenewalDecisions) != 1 ||
 		len(timeline.PriceHistories) != 1 ||
 		len(timeline.IPHistories) != 1 ||
-		len(timeline.SpecSnapshots) != 1 {
+		len(timeline.SpecSnapshots) != 1 ||
+		len(timeline.ExperienceLogs) != 1 {
 		t.Fatalf("timeline = %#v, want one record per history type", timeline)
+	}
+
+	logs, err := repo.ListExperienceLogsForVPS(context.Background(), " vps_001 ")
+	if err != nil {
+		t.Fatalf("ListExperienceLogsForVPS() error = %v", err)
+	}
+	if len(logs) != 1 || logs[0].ExperienceLogID != "elog_001" {
+		t.Fatalf("logs = %#v, want one experience log", logs)
+	}
+	if !strings.Contains(queryCalls[len(queryCalls)-1], "order by occurred_at desc, created_at desc, experience_log_id desc") {
+		t.Fatalf("experience log query = %q, want timeline order", queryCalls[len(queryCalls)-1])
+	}
+}
+
+func TestPostgresRenewalDecisionCreatesExperienceLog(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 10, 9, 30, 0, 0, time.UTC)
+	var rowArgs [][]any
+	repo := &PostgresRenewalDecisionRepository{db: fakeRenewalDecisionDB{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			rowArgs = append(rowArgs, append([]any(nil), args...))
+			if !strings.Contains(sql, "insert into experience_logs") {
+				t.Fatalf("unexpected QueryRow SQL %q", sql)
+			}
+			return fakeRenewalDecisionRow{scan: func(dest ...any) error {
+				experienceLogID, ok := args[0].(string)
+				if !ok || !strings.HasPrefix(experienceLogID, "elog_") {
+					t.Fatalf("experience log id arg = %#v, want elog_ prefix", args[0])
+				}
+				scanExperienceLogRecordDestinations(dest, experienceLogID, now)
+				return nil
+			}}
+		},
+	}}
+
+	record, err := repo.CreateExperienceLog(context.Background(), renewals.CreateExperienceLogInput{
+		VPSID:      " vps_001 ",
+		Category:   " network ",
+		Severity:   " warning ",
+		Summary:    " packet loss ",
+		Details:    " opened provider ticket ",
+		OccurredAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("CreateExperienceLog() error = %v", err)
+	}
+	if !strings.HasPrefix(record.ExperienceLogID, "elog_") || record.Summary != "packet loss" || record.Category != renewals.ExperienceNetwork {
+		t.Fatalf("record = %#v, want normalized experience log", record)
+	}
+	if len(rowArgs[0]) != 7 || rowArgs[0][1] != "vps_001" || rowArgs[0][2] != "network" || rowArgs[0][3] != "warning" || rowArgs[0][4] != "packet loss" || rowArgs[0][5] != "opened provider ticket" {
+		t.Fatalf("create args = %#v, want normalized experience log args", rowArgs[0])
 	}
 }
 
@@ -184,6 +275,12 @@ func TestPostgresRenewalDecisionMapsErrors(t *testing.T) {
 	}
 	if _, err := (&PostgresRenewalDecisionRepository{db: fakeRenewalDecisionDB{}}).ListRenewalDecisionsForVPS(context.Background(), " "); !errors.Is(err, renewals.ErrInvalidRenewalDecisionInput) {
 		t.Fatalf("ListRenewalDecisionsForVPS(blank vps) error = %v, want ErrInvalidRenewalDecisionInput", err)
+	}
+	if _, err := (&PostgresRenewalDecisionRepository{db: fakeRenewalDecisionDB{}}).CreateExperienceLog(context.Background(), renewals.CreateExperienceLogInput{VPSID: " ", Category: renewals.ExperienceNetwork, Severity: renewals.ExperienceSeverityWarning, Summary: "packet loss"}); !errors.Is(err, renewals.ErrInvalidAssetHistoryInput) {
+		t.Fatalf("CreateExperienceLog(blank vps) error = %v, want ErrInvalidAssetHistoryInput", err)
+	}
+	if _, err := (&PostgresRenewalDecisionRepository{db: fakeRenewalDecisionDB{}}).ListExperienceLogsForVPS(context.Background(), " "); !errors.Is(err, renewals.ErrInvalidAssetHistoryInput) {
+		t.Fatalf("ListExperienceLogsForVPS(blank vps) error = %v, want ErrInvalidAssetHistoryInput", err)
 	}
 
 	repo := &PostgresRenewalDecisionRepository{db: fakeRenewalDecisionDB{
@@ -197,6 +294,9 @@ func TestPostgresRenewalDecisionMapsErrors(t *testing.T) {
 	if _, err := repo.GetVPSTimeline(context.Background(), "vps_missing"); !errors.Is(err, renewals.ErrRenewalTimelineNotFound) {
 		t.Fatalf("GetVPSTimeline(missing) error = %v, want ErrRenewalTimelineNotFound", err)
 	}
+	if _, err := repo.ListExperienceLogsForVPS(context.Background(), "vps_missing"); !errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+		t.Fatalf("ListExperienceLogsForVPS(missing) error = %v, want ErrAssetTimelineNotFound", err)
+	}
 
 	fkErr := &pgconn.PgError{Code: "23503", ConstraintName: "renewal_decisions_vps_id_fkey"}
 	repo = &PostgresRenewalDecisionRepository{db: fakeRenewalDecisionDB{
@@ -206,6 +306,15 @@ func TestPostgresRenewalDecisionMapsErrors(t *testing.T) {
 	}}
 	if _, err := repo.CreateRenewalDecision(context.Background(), renewals.CreateDecisionInput{VPSID: "vps_missing", ToDecision: vpsassets.RenewalCancel}); !errors.Is(err, renewals.ErrRenewalTimelineNotFound) {
 		t.Fatalf("CreateRenewalDecision(fk) error = %v, want ErrRenewalTimelineNotFound", err)
+	}
+
+	repo = &PostgresRenewalDecisionRepository{db: fakeRenewalDecisionDB{
+		queryRow: func(context.Context, string, ...any) pgx.Row {
+			return fakeRenewalDecisionRow{scan: func(dest ...any) error { return fkErr }}
+		},
+	}}
+	if _, err := repo.CreateExperienceLog(context.Background(), renewals.CreateExperienceLogInput{VPSID: "vps_missing", Category: renewals.ExperienceNetwork, Severity: renewals.ExperienceSeverityWarning, Summary: "packet loss"}); !errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+		t.Fatalf("CreateExperienceLog(fk) error = %v, want ErrAssetTimelineNotFound", err)
 	}
 }
 
@@ -277,4 +386,15 @@ func scanRenewalDecisionRecordDestinations(dest []any, record renewals.DecisionR
 	*(dest[4].(*string)) = record.Reason
 	*(dest[5].(*time.Time)) = record.DecidedAt
 	*(dest[6].(*time.Time)) = record.CreatedAt
+}
+
+func scanExperienceLogRecordDestinations(dest []any, experienceLogID string, now time.Time) {
+	*(dest[0].(*string)) = experienceLogID
+	*(dest[1].(*string)) = "vps_001"
+	*(dest[2].(*string)) = string(renewals.ExperienceNetwork)
+	*(dest[3].(*string)) = string(renewals.ExperienceSeverityWarning)
+	*(dest[4].(*string)) = "packet loss"
+	*(dest[5].(*string)) = "opened provider ticket"
+	*(dest[6].(*time.Time)) = now
+	*(dest[7].(*time.Time)) = now
 }
