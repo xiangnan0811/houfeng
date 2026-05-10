@@ -1,6 +1,9 @@
 import type {
   ActiveIncidentRecord,
+  AssetServiceListFilter,
+  AssetServiceRecord,
   CreateProviderInput,
+  CreateAssetServiceInput,
   CreateNodeInput,
   CreateProbeItemInput,
   CreateSubscriptionInput,
@@ -412,6 +415,21 @@ export function listProviders() {
   return requestJSON<ProviderRecord[]>('/api/providers')
 }
 
+export function listAssetServices(filter?: AssetServiceListFilter) {
+  return requestJSON<AssetServiceRecord[]>(
+    withQuery('/api/services', {
+      vps_id: filter?.vps_id,
+      target_id: filter?.target_id,
+      service_type: filter?.service_type,
+      status: filter?.status,
+    }),
+  )
+}
+
+export function createAssetService(input: CreateAssetServiceInput): Promise<AssetServiceRecord> {
+  return postJSONBody<AssetServiceRecord>('/api/services', input)
+}
+
 export function createProvider(input: CreateProviderInput): Promise<ProviderRecord> {
   return postJSONBody<ProviderRecord>('/api/providers', input)
 }
@@ -457,6 +475,24 @@ export function listVPSExperienceLogs(vpsId: string) {
 
 export function createVPSExperienceLog(vpsId: string, input: CreateVPSExperienceLogInput): Promise<VPSExperienceLogRecord> {
   return postJSONBody<VPSExperienceLogRecord>(`/api/vps/${vpsId}/experience-logs`, input)
+}
+
+export function listVPSServices(vpsId: string) {
+  return requestJSON<AssetServiceRecord[]>(`/api/vps/${vpsId}/services`)
+}
+
+export function createVPSService(vpsId: string, input: CreateAssetServiceInput): Promise<AssetServiceRecord> {
+  const body: Omit<CreateAssetServiceInput, 'vps_id'> = {
+    target_id: input.target_id,
+    name: input.name,
+    service_type: input.service_type,
+    status: input.status,
+    url: input.url,
+    port: input.port,
+    labels: input.labels,
+    note: input.note,
+  }
+  return postJSONBody<AssetServiceRecord>(`/api/vps/${vpsId}/services`, body)
 }
 
 export function listVPSNodes(vpsId: string) {

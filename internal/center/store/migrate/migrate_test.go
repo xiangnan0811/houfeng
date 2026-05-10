@@ -57,6 +57,7 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 		"0020_create_renewal_decisions.sql",
 		"0021_create_asset_histories.sql",
 		"0022_create_experience_logs.sql",
+		"0023_create_asset_services.sql",
 	}
 	offset := 0
 	for _, name := range names {

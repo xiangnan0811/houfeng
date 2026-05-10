@@ -15,6 +15,7 @@ type RouterOptions struct {
 	EventsHandler                   stdhttp.Handler
 	IncidentsHandler                stdhttp.Handler
 	SettingsHandler                 stdhttp.Handler
+	AssetServicesCollectionHandler  stdhttp.Handler
 	ProvidersCollectionHandler      stdhttp.Handler
 	ProviderItemHandler             stdhttp.Handler
 	VPSCollectionHandler            stdhttp.Handler
@@ -24,6 +25,7 @@ type RouterOptions struct {
 	VPSUnlinkNodeHandler            stdhttp.Handler
 	VPSTimelineHandler              stdhttp.Handler
 	VPSExperienceLogsHandler        stdhttp.Handler
+	VPSServicesHandler              stdhttp.Handler
 	SubscriptionsCollectionHandler  stdhttp.Handler
 	SubscriptionItemHandler         stdhttp.Handler
 	NodesCollectionHandler          stdhttp.Handler
@@ -96,6 +98,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.SettingsHandler != nil {
 		mux.Handle("/api/settings", protect(opts.SettingsHandler))
 	}
+	if opts.AssetServicesCollectionHandler != nil {
+		mux.Handle("/api/services", protect(opts.AssetServicesCollectionHandler))
+	}
 	if opts.ProvidersCollectionHandler != nil {
 		mux.Handle("/api/providers", protect(opts.ProvidersCollectionHandler))
 	}
@@ -105,7 +110,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil {
+	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSServicesHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -150,6 +155,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSExperienceLogsHandler.ServeHTTP(w, r)
+			case vpsSubtreeServices:
+				if opts.VPSServicesHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSServicesHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -322,6 +333,7 @@ const (
 	vpsSubtreeUnlinkNode     vpsSubtree = "unlink-node"
 	vpsSubtreeTimeline       vpsSubtree = "timeline"
 	vpsSubtreeExperienceLogs vpsSubtree = "experience-logs"
+	vpsSubtreeServices       vpsSubtree = "services"
 )
 
 func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
@@ -351,6 +363,8 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeTimeline
 	case "experience-logs":
 		return segments[0], vpsSubtreeExperienceLogs
+	case "services":
+		return segments[0], vpsSubtreeServices
 	default:
 		return segments[0], vpsSubtreeUnknown
 	}

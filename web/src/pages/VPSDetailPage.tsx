@@ -5,20 +5,28 @@ import { Badge, Button, DataTable, Hostname, Input, MonoDigits, Timestamp, type 
 import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
 import {
   ApiError,
+  createVPSService,
   createVPSExperienceLog,
   getVPSAsset,
   getVPSTimeline,
   linkVPSNode,
+  listVPSServices,
   unlinkVPSNode,
   updateVPSAsset,
 } from '../lib/api'
 import { formatDateTime, formatOptional } from '../lib/format'
 import {
+  ASSET_SERVICE_STATUS_LABELS,
+  ASSET_SERVICE_TYPE_LABELS,
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_EXPERIENCE_CATEGORY_LABELS,
   VPS_EXPERIENCE_SEVERITY_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
   VPS_USAGE_STATUS_LABELS,
+  type AssetServiceRecord,
+  type AssetServiceStatus,
+  type AssetServiceType,
+  type CreateAssetServiceInput,
   type CreateVPSExperienceLogInput,
   type UpdateVPSAssetInput,
   type VPSAssetDetail,
@@ -44,6 +52,7 @@ type PageState = {
   error: string | null
   detail: VPSAssetDetail | null
   timeline: VPSTimeline | null
+  services: AssetServiceRecord[]
 }
 
 const INITIAL_STATE: PageState = {
@@ -51,6 +60,7 @@ const INITIAL_STATE: PageState = {
   error: null,
   detail: null,
   timeline: null,
+  services: [],
 }
 
 const RENEWAL_DECISION_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABELS) as Array<[
@@ -71,6 +81,14 @@ const EXPERIENCE_CATEGORY_OPTIONS = Object.entries(VPS_EXPERIENCE_CATEGORY_LABEL
 ]>
 const EXPERIENCE_SEVERITY_OPTIONS = Object.entries(VPS_EXPERIENCE_SEVERITY_LABELS) as Array<[
   VPSExperienceSeverity,
+  string,
+]>
+const SERVICE_TYPE_OPTIONS = Object.entries(ASSET_SERVICE_TYPE_LABELS) as Array<[
+  AssetServiceType,
+  string,
+]>
+const SERVICE_STATUS_OPTIONS = Object.entries(ASSET_SERVICE_STATUS_LABELS) as Array<[
+  AssetServiceStatus,
   string,
 ]>
 
@@ -106,12 +124,34 @@ type ExperienceDraftState = {
   occurredAt: string
 }
 
+type ServiceDraftState = {
+  name: string
+  serviceType: AssetServiceType
+  status: AssetServiceStatus
+  targetID: string
+  url: string
+  port: string
+  labels: string
+  note: string
+}
+
 const INITIAL_EXPERIENCE_DRAFT: ExperienceDraftState = {
   category: 'note',
   severity: 'info',
   summary: '',
   details: '',
   occurredAt: '',
+}
+
+const INITIAL_SERVICE_DRAFT: ServiceDraftState = {
+  name: '',
+  serviceType: 'web',
+  status: 'active',
+  targetID: '',
+  url: '',
+  port: '',
+  labels: '',
+  note: '',
 }
 
 function describeError(error: unknown, fallback: string): string {
@@ -206,6 +246,33 @@ function buildExperienceLogInput(form: ExperienceDraftState): CreateVPSExperienc
   }
 }
 
+function buildServiceInput(form: ServiceDraftState): CreateAssetServiceInput {
+  const name = form.name.trim()
+  if (!name) {
+    throw new Error('服务名称不能为空。')
+  }
+  const rawPort = form.port.trim()
+  let port: number | null = null
+  if (rawPort) {
+    const parsed = Number.parseInt(rawPort, 10)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+      throw new Error('服务端口必须为 1 到 65535。')
+    }
+    port = parsed
+  }
+
+  return {
+    name,
+    service_type: form.serviceType,
+    status: form.status,
+    target_id: form.targetID.trim() || null,
+    url: form.url.trim(),
+    port,
+    labels: parseLabels(form.labels),
+    note: form.note.trim(),
+  }
+}
+
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
@@ -236,6 +303,10 @@ export function VPSDetailPage() {
   const [experienceSubmitting, setExperienceSubmitting] = useState(false)
   const [experienceError, setExperienceError] = useState<string | null>(null)
   const [experienceNotice, setExperienceNotice] = useState<string | null>(null)
+  const [serviceDraft, setServiceDraft] = useState<ServiceDraftState>(INITIAL_SERVICE_DRAFT)
+  const [serviceSubmitting, setServiceSubmitting] = useState(false)
+  const [serviceError, setServiceError] = useState<string | null>(null)
+  const [serviceNotice, setServiceNotice] = useState<string | null>(null)
 
   useEffect(() => {
     if (!vpsId) {
@@ -244,10 +315,10 @@ export function VPSDetailPage() {
 
     let cancelled = false
 
-    Promise.all([getVPSAsset(vpsId), getVPSTimeline(vpsId)])
-      .then(([detail, timeline]) => {
+    Promise.all([getVPSAsset(vpsId), getVPSTimeline(vpsId), listVPSServices(vpsId)])
+      .then(([detail, timeline, services]) => {
         if (cancelled) return
-        setState({ vpsId, error: null, detail, timeline })
+        setState({ vpsId, error: null, detail, timeline, services })
         setDecisionDraft({ renewalDecision: detail.renewal_decision, reason: '' })
         setDecisionError(null)
         setDecisionNotice(null)
@@ -265,6 +336,9 @@ export function VPSDetailPage() {
         setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
         setExperienceError(null)
         setExperienceNotice(null)
+        setServiceDraft(INITIAL_SERVICE_DRAFT)
+        setServiceError(null)
+        setServiceNotice(null)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -273,6 +347,7 @@ export function VPSDetailPage() {
           error: describeError(error, '加载 VPS 详情失败'),
           detail: null,
           timeline: null,
+          services: [],
         })
       })
 
@@ -291,9 +366,22 @@ export function VPSDetailPage() {
   }
 
   async function refreshDetailAndTimeline(targetVPSId: string): Promise<VPSAssetDetail> {
-    const [detail, timeline] = await Promise.all([getVPSAsset(targetVPSId), getVPSTimeline(targetVPSId)])
-    setState({ vpsId: targetVPSId, error: null, detail, timeline })
+    const [detail, timeline, services] = await Promise.all([
+      getVPSAsset(targetVPSId),
+      getVPSTimeline(targetVPSId),
+      listVPSServices(targetVPSId),
+    ])
+    setState({ vpsId: targetVPSId, error: null, detail, timeline, services })
     return detail
+  }
+
+  async function refreshServices(targetVPSId: string): Promise<AssetServiceRecord[]> {
+    const services = await listVPSServices(targetVPSId)
+    setState((current) => {
+      if (current.vpsId !== targetVPSId) return current
+      return { ...current, services }
+    })
+    return services
   }
 
   async function handleDecisionSubmit(event: FormEvent<HTMLFormElement>) {
@@ -493,6 +581,35 @@ export function VPSDetailPage() {
     }
   }
 
+  async function handleServiceSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = state.detail
+    if (!detail) return
+
+    setServiceError(null)
+    setServiceNotice(null)
+
+    let input: CreateAssetServiceInput
+    try {
+      input = buildServiceInput(serviceDraft)
+    } catch (error: unknown) {
+      setServiceError(describeError(error, '服务输入无效'))
+      return
+    }
+
+    setServiceSubmitting(true)
+    try {
+      await createVPSService(detail.vps_id, input)
+      await refreshServices(detail.vps_id)
+      setServiceDraft(INITIAL_SERVICE_DRAFT)
+      setServiceNotice('服务记录已创建')
+    } catch (error: unknown) {
+      setServiceError(describeError(error, '创建服务记录失败'))
+    } finally {
+      setServiceSubmitting(false)
+    }
+  }
+
   const nodeColumns: DataTableColumn<VPSNodeSummary>[] = [
     {
       key: 'node',
@@ -553,6 +670,64 @@ export function VPSDetailPage() {
           {unlinkingNodeId === node.node_id ? '解除中…' : '解除关联'}
         </Button>
       ),
+    },
+  ]
+  const serviceColumns: DataTableColumn<AssetServiceRecord>[] = [
+    {
+      key: 'service',
+      label: '服务',
+      render: (service) => (
+        <div className="asset-table__identity">
+          <strong>{service.name}</strong>
+          <span>{service.service_id}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'type',
+      label: '类型 / 状态',
+      render: (service) => (
+        <span className="asset-status-stack">
+          <Badge variant="info" tone="neutral">
+            {ASSET_SERVICE_TYPE_LABELS[service.service_type]}
+          </Badge>
+          <Badge variant="count" tone={service.status === 'active' ? 'normal' : 'neutral'}>
+            {ASSET_SERVICE_STATUS_LABELS[service.status]}
+          </Badge>
+        </span>
+      ),
+    },
+    {
+      key: 'endpoint',
+      label: '入口',
+      render: (service) => (
+        <div className="asset-table__stack">
+          <strong>{formatOptional(service.url)}</strong>
+          <span>{service.port ? `端口 ${service.port}` : '端口未记录'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'target',
+      label: 'Target',
+      render: (service) =>
+        service.target_id ? (
+          <Link className="text-link" to={`/targets/${service.target_id}`}>
+            {service.target_id}
+          </Link>
+        ) : (
+          <span className="text-muted">未关联</span>
+        ),
+    },
+    {
+      key: 'labels',
+      label: '标签',
+      render: (service) => <AssetLabels labels={service.labels} />,
+    },
+    {
+      key: 'note',
+      label: '备注',
+      render: (service) => formatOptional(service.note),
     },
   ]
 
@@ -1033,6 +1208,153 @@ export function VPSDetailPage() {
           rowKey={(node) => node.node_id}
           emptyContent={<span className="empty-inline">尚未关联 Node</span>}
         />
+      </section>
+
+      <section className="page-panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-heading__eyebrow">SERVICES</p>
+            <h2>服务资产</h2>
+          </div>
+          <span className="section-heading__meta">
+            <MonoDigits>{state.services.length}</MonoDigits> 个手工记录服务
+          </span>
+        </div>
+        <div className="asset-service-layout">
+          <div className="asset-service-list">
+            <DataTable
+              className="asset-table vps-service-table"
+              columns={serviceColumns}
+              rows={state.services}
+              rowKey={(service) => service.service_id}
+              emptyContent={<span className="empty-inline">尚未记录服务</span>}
+            />
+          </div>
+          <form className="asset-operation-form asset-service-form" onSubmit={(event) => void handleServiceSubmit(event)}>
+            <div className="asset-operation-form__header">
+              <div>
+                <h3>新增服务</h3>
+                <p>记录部署在这台 VPS 上的 Web、API、数据库、Worker 或代理服务。</p>
+              </div>
+              <Badge variant="count" tone="neutral">手工维护</Badge>
+            </div>
+            <Input
+              label="服务名称"
+              value={serviceDraft.name}
+              onChange={(event) => {
+                setServiceDraft((current) => ({ ...current, name: event.target.value }))
+                setServiceError(null)
+                setServiceNotice(null)
+              }}
+              placeholder="例如：Blog"
+            />
+            <label className="asset-operation-field">
+              <span>服务类型</span>
+              <select
+                value={serviceDraft.serviceType}
+                onChange={(event) => {
+                  setServiceDraft((current) => ({
+                    ...current,
+                    serviceType: event.target.value as AssetServiceType,
+                  }))
+                  setServiceError(null)
+                  setServiceNotice(null)
+                }}
+              >
+                {SERVICE_TYPE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="asset-operation-field">
+              <span>服务状态</span>
+              <select
+                value={serviceDraft.status}
+                onChange={(event) => {
+                  setServiceDraft((current) => ({
+                    ...current,
+                    status: event.target.value as AssetServiceStatus,
+                  }))
+                  setServiceError(null)
+                  setServiceNotice(null)
+                }}
+              >
+                {SERVICE_STATUS_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <Input
+              label="入口 URL"
+              type="url"
+              value={serviceDraft.url}
+              onChange={(event) => {
+                setServiceDraft((current) => ({ ...current, url: event.target.value }))
+                setServiceError(null)
+                setServiceNotice(null)
+              }}
+              placeholder="https://example.com"
+            />
+            <Input
+              label="端口"
+              type="number"
+              min="1"
+              max="65535"
+              value={serviceDraft.port}
+              onChange={(event) => {
+                setServiceDraft((current) => ({ ...current, port: event.target.value }))
+                setServiceError(null)
+                setServiceNotice(null)
+              }}
+              placeholder="443"
+            />
+            <Input
+              label="Target ID"
+              value={serviceDraft.targetID}
+              onChange={(event) => {
+                setServiceDraft((current) => ({ ...current, targetID: event.target.value }))
+                setServiceError(null)
+                setServiceNotice(null)
+              }}
+              placeholder="tg_..."
+            />
+            <Input
+              label="服务标签"
+              hint="用逗号分隔"
+              value={serviceDraft.labels}
+              onChange={(event) => {
+                setServiceDraft((current) => ({ ...current, labels: event.target.value }))
+                setServiceError(null)
+                setServiceNotice(null)
+              }}
+              placeholder="prod, public"
+            />
+            <label className="asset-operation-field asset-operation-field--wide">
+              <span>服务备注</span>
+              <textarea
+                value={serviceDraft.note}
+                onChange={(event) => {
+                  setServiceDraft((current) => ({ ...current, note: event.target.value }))
+                  setServiceError(null)
+                  setServiceNotice(null)
+                }}
+                placeholder="例如：主站反代到本机 3000 端口"
+              />
+            </label>
+            {serviceError ? (
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+                {serviceError}
+              </p>
+            ) : serviceNotice ? (
+              <p className="asset-operation-feedback" role="status">{serviceNotice}</p>
+            ) : null}
+            <div className="asset-operation-actions">
+              <Button type="submit" disabled={serviceSubmitting}>
+                {serviceSubmitting ? '创建中…' : '创建服务记录'}
+              </Button>
+            </div>
+          </form>
+        </div>
       </section>
 
       <VPSTimelinePanel timeline={timeline} />

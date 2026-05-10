@@ -2330,6 +2330,22 @@ html.theme-classic-light .dashboard-status-bar {
   margin: 0 0 var(--space-4);
 }
 
+.asset-service-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.36fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.asset-service-list {
+  min-width: 0;
+}
+
+.asset-service-form {
+  position: sticky;
+  top: var(--space-4);
+}
+
 .asset-access-line {
   display: flex;
   align-items: center;
@@ -2591,7 +2607,15 @@ html.theme-classic-light .dashboard-status-bar {
     grid-template-columns: 1fr;
   }
 
+  .asset-service-layout {
+    grid-template-columns: 1fr;
+  }
+
   .asset-decision-panel {
+    position: static;
+  }
+
+  .asset-service-form {
     position: static;
   }
 
