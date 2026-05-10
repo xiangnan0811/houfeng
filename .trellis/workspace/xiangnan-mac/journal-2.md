@@ -420,3 +420,37 @@ Closed the VPS asset operation frontend loop with renewal decision updates, VPS 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 72: Asset current-state edit workflows
+
+**Date**: 2026-05-10
+**Task**: Asset current-state edit workflows
+**Branch**: `feat/asset-current-state-edit-workflows`
+
+### Summary
+
+Added Provider, Subscription, and VPS fact edit workflows for Asset Ledger frontend, including typed PATCH API helpers and focused page/API tests; local verify-web passed.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dd9e593` | (see git log) |
+| `83e4837` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
