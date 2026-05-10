@@ -257,6 +257,91 @@ occurred_at: form.occurredAt
 occurred_at: form.occurredAt ? new Date(form.occurredAt).toISOString() : null
 ```
 
+### Asset Ledger service assets
+
+`db/migrations/0023_create_asset_services.sql` 添加 `asset_services`，用于记录一台 VPS 上人工维护的服务资产。它是 VPS-scoped 资产备注和可选 Target 关联，不是完整服务注册中心、服务发现、域名管理或 Agent 自动采集入口。
+
+- `asset_services.service_id` 使用 `ids.New("svc")` 生成。
+- `vps_id` 必须引用已存在的 `vps_assets(vps_id)`，命名外键为 `asset_services_vps_fk`，并在 VPS 删除时级联清理服务记录。
+- `target_id` 可为 `null`，存在时必须引用 `targets(target_id)`，命名外键为 `asset_services_target_fk`，并在 Target 删除时置空；创建或列出服务不得修改 Target / ProbeItem。
+- `name` 必须 trim 后非空；数据库约束为 `asset_services_name_not_blank`，领域 create 也必须校验。
+- `service_type` 使用稳定英文机器值：`web`、`api`、`database`、`worker`、`proxy`、`other`；空输入默认 `other`。
+- `status` 使用稳定英文机器值：`active`、`paused`、`retired`、`unknown`；空输入默认 `active`。
+- `port` 可为 `null`；存在时必须在 `1..65535`。
+- `labels` 使用 `text[] not null default '{}'`；领域层负责 trim、过滤空标签和去重。
+- service asset 写入不得改变 VPS 当前状态、subscription、experience log、Node、Target、ProbeItem、Agent 或 `nodes.provider`。
+
+#### Scenario: VPS service assets contract
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `asset_services` schema、`internal/center/assetservices/`、`/api/services`、`/api/vps/{vps_id}/services`，或前端 VPS 详情页服务资产区块。
+
+##### 2. Signatures
+
+- DB table: `asset_services(service_id text primary key, vps_id text not null, target_id text null, name text, service_type text, status text, url text, port integer null, labels text[], note text, created_at timestamptz, updated_at timestamptz)`。
+- Backend API: `GET /api/services?vps_id=&target_id=&service_type=&status=` -> `[]assetservices.Record`。
+- Backend API: `POST /api/services` with JSON body `{vps_id, target_id?, name, service_type?, status?, url?, port?, labels?, note?}` -> `assetservices.Record`。
+- Backend API: `GET /api/vps/{vps_id}/services` -> `[]assetservices.Record`。
+- Backend API: `POST /api/vps/{vps_id}/services` with JSON body `{target_id?, name, service_type?, status?, url?, port?, labels?, note?}` -> `assetservices.Record`。
+- Frontend API: `listAssetServices(filter)`, `createAssetService(input)`, `listVPSServices(vpsId)`, `createVPSService(vpsId, input)`。
+
+##### 3. Contracts
+
+- `POST /api/vps/{vps_id}/services` 的 path `vps_id` 是唯一 VPS 来源；body 中的 `vps_id` 必须被忽略，不能覆盖 path。
+- `GET /api/vps/{vps_id}/services` 必须先确认 VPS 存在；VPS 不存在时返回 not-found 语义，不把缺失 VPS 静默表现为空列表。
+- `target_id` 是可选关联，只做引用校验和展示跳转；不得创建 Target、改写 Target、改 ProbeItem 或改变观测语义。
+- 全局 `GET /api/services` 可以按 VPS、Target、类型和状态过滤；非法枚举必须在进入 store 查询前返回 400。
+- service asset 不进入 `/api/dashboard` 的资产摘要，也不进入 `GET /api/vps/{vps_id}/timeline`；它在 VPS 详情页作为独立服务区块加载。
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| missing / blank `vps_id` on collection POST | 400 `invalid input` |
+| body `vps_id` conflicts with path VPS | path VPS wins; write to path VPS only |
+| missing VPS on path GET/POST or collection POST FK | 404 `vps asset not found` |
+| missing Target FK | 404 `target not found` |
+| blank `name` | 400 `invalid input` |
+| invalid `service_type` / `status` | 400 `invalid input` |
+| `port < 1` or `port > 65535` | 400 `invalid input` |
+| repository query failure | 500 `internal server error` |
+| unsupported method | 405 `method not allowed` |
+
+##### 5. Good/Base/Bad Cases
+
+- Good: 用户在 VPS 详情页为 `vps_001` 创建 `Blog` 服务，带 `target_id=tg_001`，写入后只刷新服务列表。
+- Base: VPS 存在但没有服务时，path GET 返回空数组，前端展示 `尚未记录服务`。
+- Bad: VPS 不存在时 path GET 返回空数组，用户会误以为资产存在但没有服务。
+- Bad: 创建 service asset 时自动创建 Target 或修改 Target 探针，越过了本 MVP 的人工关联边界。
+
+##### 6. Tests Required
+
+- Migration test: 断言表、命名外键、枚举 check、name not blank、port range 和索引。
+- Domain test: normalize / validate 覆盖空名称、枚举、labels、optional Target、port 边界和默认值。
+- Store test: create、list all、list by VPS、排序 SQL、missing VPS exists check、missing Target FK、check violation 映射。
+- Handler/router/bootstrap tests: collection/path GET/POST、invalid JSON、invalid input、not found、method not allowed、subtree routing、bootstrap non-nil wiring。
+- Frontend tests: API helper URL/body，尤其 path-scoped create 不带 body `vps_id`；VPS 详情页服务加载、空态、创建成功和本地校验失败。
+
+##### 7. Wrong vs Correct
+
+```go
+// 错误：让 body 覆盖 path，可能写到另一台 VPS。
+input = assetservices.NormalizeCreateInput(input)
+
+// 正确：先用 path 写入，再 normalize/validate。
+input.VPSID = vpsID
+input = assetservices.NormalizeCreateInput(input)
+```
+
+```tsx
+// 错误：path scoped create 仍把 body.vps_id 传给后端。
+postJSONBody(`/api/vps/${vpsId}/services`, input)
+
+// 正确：path scoped create 去掉 vps_id，只传服务字段。
+postJSONBody(`/api/vps/${vpsId}/services`, { name, service_type, status, target_id, url, port, labels, note })
+```
+
 ### Asset Ledger JSON import
 
 `internal/center/importing/` 是真实 VPS JSON dry-run/import 的领域入口。它复用 `providers`、`vpsassets`、`subscriptions` 的 normalize / validate 规则，不维护第二套枚举、金额、日期或 provider 校验。
