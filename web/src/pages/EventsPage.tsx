@@ -32,8 +32,6 @@ type FilterState = {
   notification_only: boolean
   recovery_only: boolean
   maintenance_only: boolean
-  // Current backend events query has no backfill dimension; keep the UI
-  // truthful by disabling this until the handler/store contract exists.
   include_backfilled: boolean
   // Time range segmented control. 'custom' preserves the original behavior
   // (user-controlled date inputs) — keep that as default so first load keeps
@@ -172,7 +170,7 @@ function parseEventSearchParams(searchParams: URLSearchParams): FilterState {
     notification_only: searchParams.get('notification_only') === '1',
     recovery_only: searchParams.get('recovery_only') === '1',
     maintenance_only: searchParams.get('maintenance_only') === '1',
-    include_backfilled: false,
+    include_backfilled: searchParams.get('include_backfilled') === '1',
     time_range: timeRange,
   }
 }
@@ -195,7 +193,7 @@ function normalizeFilters(filters: FilterState): FilterState {
     notification_only: filters.notification_only,
     recovery_only: filters.recovery_only,
     maintenance_only: filters.maintenance_only,
-    include_backfilled: false,
+    include_backfilled: filters.include_backfilled,
     time_range: timeRange,
   }
 }
@@ -218,6 +216,7 @@ function searchParamsFromFilters(filters: FilterState): URLSearchParams {
   if (normalized.notification_only) next.set('notification_only', '1')
   if (normalized.recovery_only) next.set('recovery_only', '1')
   if (normalized.maintenance_only) next.set('maintenance_only', '1')
+  if (normalized.include_backfilled) next.set('include_backfilled', '1')
   return next
 }
 
@@ -242,6 +241,7 @@ function hasActiveFilters(filters: FilterState): boolean {
     normalized.notification_only ||
     normalized.recovery_only ||
     normalized.maintenance_only ||
+    normalized.include_backfilled ||
     normalized.time_range !== 'custom'
   )
 }
@@ -256,6 +256,7 @@ function buildFilterQuery(filters: FilterState, effectiveLimit: number): EventLi
     notification_only: filters.notification_only,
     recovery_only: filters.recovery_only,
     maintenance_only: filters.maintenance_only,
+    include_backfilled: filters.include_backfilled,
   }
 
   if (filters.time_range === 'custom') {
@@ -581,6 +582,12 @@ export function EventsPage() {
                     onRemove={() => removeAppliedFilter('maintenance_only')}
                   />
                 ) : null}
+                {appliedFilters.include_backfilled ? (
+                  <FilterChip
+                    label="包含补传事件"
+                    onRemove={() => removeAppliedFilter('include_backfilled')}
+                  />
+                ) : null}
               </>
             }
           >
@@ -640,9 +647,8 @@ export function EventsPage() {
             />
             <FilterToggle
               label="包含补传事件"
-              checked={false}
-              disabled
-              onChange={() => {}}
+              checked={filters.include_backfilled}
+              onChange={(checked) => updateDraftFilter('include_backfilled', checked)}
             />
           </FilterBar>
 
@@ -687,8 +693,12 @@ export function EventsPage() {
 
             <div className="summary-card">
               <span className="summary-card__label">包含补传事件</span>
-              <span className="summary-card__value">待后端支持</span>
-              <span className="summary-card__value--text">当前事件 API 尚未暴露补传维度</span>
+              <span className="summary-card__value">
+                {filters.include_backfilled ? '已包含' : '未包含'}
+              </span>
+              <span className="summary-card__value--text">
+                {filters.include_backfilled ? '补传相关事件会进入列表' : '默认隐藏补传相关事件'}
+              </span>
             </div>
           </div>
 

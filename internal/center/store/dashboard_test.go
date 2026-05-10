@@ -527,6 +527,65 @@ func TestPostgresDashboardRepositoryListEventsBuildsShortcutFilters(t *testing.T
 	}
 }
 
+func TestPostgresDashboardRepositoryListEventsExcludesBackfilledEventsByDefault(t *testing.T) {
+	capturedSQL := ""
+	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeRow{scan: func(dest ...any) error { return nil }}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedSQL = sql
+			return &fakeDashboardRows{}, nil
+		},
+	}}
+
+	_, err := repo.ListEvents(context.Background(), EventsFilter{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	for _, want := range []string{
+		"not (",
+		"from node_heartbeats nh",
+		"nh.is_backfilled",
+		"from host_samples hs",
+		"hs.is_backfilled",
+		"from probe_observations po",
+		"po.is_backfilled",
+		"observed_at = e.created_at",
+	} {
+		if !containsSQL([]string{capturedSQL}, want) {
+			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
+		}
+	}
+}
+
+func TestPostgresDashboardRepositoryListEventsIncludesBackfilledEventsWhenRequested(t *testing.T) {
+	capturedSQL := ""
+	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeRow{scan: func(dest ...any) error { return nil }}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedSQL = sql
+			return &fakeDashboardRows{}, nil
+		},
+	}}
+
+	_, err := repo.ListEvents(context.Background(), EventsFilter{IncludeBackfilled: true})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	for _, notWant := range []string{
+		"from node_heartbeats nh",
+		"from host_samples hs",
+		"from probe_observations po",
+	} {
+		if containsSQL([]string{capturedSQL}, notWant) {
+			t.Fatalf("capturedSQL = %q, did not want backfill exclusion %q", capturedSQL, notWant)
+		}
+	}
+}
+
 type fakeDashboardQueryer struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 	query    func(context.Context, string, ...any) (pgx.Rows, error)

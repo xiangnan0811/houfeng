@@ -372,6 +372,7 @@ export function listEvents(filter?: EventListFilter) {
             notification_only: filter.notification_only,
             recovery_only: filter.recovery_only,
             maintenance_only: filter.maintenance_only,
+            include_backfilled: filter.include_backfilled,
           }
         : undefined,
     ),

@@ -51,18 +51,24 @@ func Events(repo EventsRepository) http.Handler {
 			writeError(w, http.StatusBadRequest, "invalid maintenance_only")
 			return
 		}
+		includeBackfilled, err := parseOptionalBool(r, "include_backfilled")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid include_backfilled")
+			return
+		}
 		records, err := repo.ListEvents(r.Context(), store.EventsFilter{
-			ObjectType:       incidents.ObjectType(r.URL.Query().Get("object_type")),
-			ObjectID:         r.URL.Query().Get("object_id"),
-			Severity:         incidents.Severity(r.URL.Query().Get("severity")),
-			EventType:        incidents.EventType(r.URL.Query().Get("event_type")),
-			CreatedFrom:      createdFrom,
-			CreatedTo:        createdTo,
-			Label:            strings.TrimSpace(r.URL.Query().Get("label")),
-			NotificationOnly: notificationOnly,
-			RecoveryOnly:     recoveryOnly,
-			MaintenanceOnly:  maintenanceOnly,
-			Limit:            limit,
+			ObjectType:        incidents.ObjectType(r.URL.Query().Get("object_type")),
+			ObjectID:          r.URL.Query().Get("object_id"),
+			Severity:          incidents.Severity(r.URL.Query().Get("severity")),
+			EventType:         incidents.EventType(r.URL.Query().Get("event_type")),
+			CreatedFrom:       createdFrom,
+			CreatedTo:         createdTo,
+			Label:             strings.TrimSpace(r.URL.Query().Get("label")),
+			NotificationOnly:  notificationOnly,
+			RecoveryOnly:      recoveryOnly,
+			MaintenanceOnly:   maintenanceOnly,
+			IncludeBackfilled: includeBackfilled,
+			Limit:             limit,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
