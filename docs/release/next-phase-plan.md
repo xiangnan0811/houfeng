@@ -152,7 +152,7 @@ gap-checklist 42 个 Closed (⚠️ need-reassess) 行已全部现场验证完�
   - NodesPage createNode bypass lib/api.ts (gap #10) —— 2026-05-03 已闭
   - NodesPage 列表筛选缺 5/7 项 —— 2026-05-06 复核已闭
   - TargetsPage 完全无筛选条 —— 2026-05-06 复核已闭
-  - EventsPage 高级筛选缺 4 项 —— 2026-05-06 复核后仅 backfill API 维度 + v2 Drawer/chip flow 仍为后续项
+  - EventsPage 高级筛选缺 4 项 —— 2026-05-10 已补齐 backfill API 维度 + v2 Drawer/chip flow
 - 0 行 Not Closed / 0 Inconclusive
 
 **关键洞察**：用户判定"实现连 V0.1 都不到"的实证根因 = 前端 list-page 筛选完成度，**不是**后端 / 运行时 / 通知 / 部署 / 认证 / 视觉系统。Stage 1 收口因此应优先解决 list-page filter 工作项。
