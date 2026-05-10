@@ -658,3 +658,37 @@ Audited houfeng_codex Asset Ledger roadmap completion, recorded evidence matrice
 ### Next Steps
 
 - None - task complete
+
+
+## Session 79: Events backfill filter
+
+**Date**: 2026-05-10
+**Task**: Events backfill filter
+**Branch**: `feat/events-backfill-filter`
+
+### Summary
+
+Added include_backfilled support across /api/events, store filtering, EventsPage URL/API state, tests, docs, and Trellis specs; default event stream now excludes events associated with backfilled runtime facts until the filter is enabled.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25bf75d` | (see git log) |
+| `2016137` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
