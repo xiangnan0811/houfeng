@@ -565,6 +565,8 @@ export type CreateProviderInput = {
   labels: string[]
 }
 
+export type UpdateProviderInput = Partial<CreateProviderInput>
+
 export type VPSLifecycleStatus =
   | 'active'
   | 'idle'
@@ -872,6 +874,8 @@ export type CreateSubscriptionInput = {
   payment_method: string
   note: string
 }
+
+export type UpdateSubscriptionInput = Partial<CreateSubscriptionInput>
 
 export type SubscriptionListFilter = {
   vps_id?: string | null

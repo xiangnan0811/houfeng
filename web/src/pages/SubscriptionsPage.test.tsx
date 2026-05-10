@@ -147,4 +147,72 @@ describe('SubscriptionsPage', () => {
       }),
     })
   })
+
+  it('updates subscriptions through PATCH and shows backend monthly price', async () => {
+    const updated = {
+      ...subscription,
+      price: 24,
+      billing_cycle: 'quarterly',
+      billing_months: 3,
+      monthly_price: 8,
+      renew_at: '2026-08-01',
+      auto_renew: false,
+      auto_renew_cancelled: true,
+      status: 'paused',
+      payment_method: 'paypal',
+      note: 'review',
+      updated_at: '2026-05-09T09:00:00Z',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+      .mockResolvedValueOnce(mockJSONResponse(updated))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: '编辑 sub_001' }))
+    fireEvent.change(screen.getByLabelText('价格'), { target: { value: '24' } })
+    fireEvent.change(screen.getByLabelText('计费周期'), { target: { value: 'quarterly' } })
+    fireEvent.change(screen.getByLabelText('计费月数'), { target: { value: '3' } })
+    fireEvent.change(screen.getByLabelText('续费日期'), { target: { value: '2026-08-01' } })
+    fireEvent.click(screen.getByLabelText('自动续费'))
+    fireEvent.click(screen.getByLabelText('已取消自动续费'))
+    fireEvent.change(screen.getByLabelText('订阅状态'), { target: { value: 'paused' } })
+    fireEvent.change(screen.getByLabelText('支付方式'), { target: { value: 'paypal' } })
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'review' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅' }))
+
+    await waitFor(() => expect(screen.getByText('月付 USD 8.00')).toBeInTheDocument())
+    expect(screen.getAllByText('已暂停').length).toBeGreaterThan(0)
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/subscriptions/sub_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        vps_id: 'vps_001',
+        price: 24,
+        currency: 'USD',
+        billing_cycle: 'quarterly',
+        billing_months: 3,
+        started_at: '2026-05-01',
+        renew_at: '2026-08-01',
+        auto_renew: false,
+        auto_renew_cancelled: true,
+        status: 'paused',
+        payment_method: 'paypal',
+        note: 'review',
+      }),
+    })
+  })
 })

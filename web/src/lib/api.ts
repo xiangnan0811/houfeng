@@ -28,6 +28,8 @@ import type {
   TargetSparklinesResponse,
   UnlinkVPSNodeInput,
   UpdateNodeMetadataInput,
+  UpdateProviderInput,
+  UpdateSubscriptionInput,
   UpdateTargetMetadataInput,
   UpdateVPSAssetInput,
   VPSAssetDetail,
@@ -416,6 +418,10 @@ export function getProvider(providerId: string) {
   return requestJSON<ProviderRecord>(`/api/providers/${providerId}`)
 }
 
+export function updateProvider(providerId: string, input: UpdateProviderInput): Promise<ProviderRecord> {
+  return patchJSONBody<ProviderRecord>(`/api/providers/${providerId}`, input)
+}
+
 export function listVPSAssets(filter?: VPSAssetListFilter) {
   return requestJSON<VPSAssetRecord[]>(
     withQuery('/api/vps', {
@@ -479,4 +485,8 @@ export function createSubscription(input: CreateSubscriptionInput): Promise<Subs
 
 export function getSubscription(subscriptionId: string) {
   return requestJSON<SubscriptionRecord>(`/api/subscriptions/${subscriptionId}`)
+}
+
+export function updateSubscription(subscriptionId: string, input: UpdateSubscriptionInput): Promise<SubscriptionRecord> {
+  return patchJSONBody<SubscriptionRecord>(`/api/subscriptions/${subscriptionId}`, input)
 }

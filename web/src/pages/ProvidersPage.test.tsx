@@ -87,4 +87,62 @@ describe('ProvidersPage', () => {
     expect(screen.getByText('服务商名称不能为空。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it('updates an existing provider through PATCH and refreshes the row', async () => {
+    const provider = {
+      provider_id: 'pv_001',
+      name: 'Hetzner',
+      website: 'https://hetzner.com',
+      panel_url: 'https://console.hetzner.cloud',
+      account_hint: 'main',
+      country: 'DE',
+      note: '',
+      rating: 5,
+      labels: ['core'],
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+    }
+    const updated = {
+      ...provider,
+      name: 'Hetzner Cloud',
+      rating: null,
+      labels: ['core', 'backup'],
+      updated_at: '2026-05-09T09:00:00Z',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse(updated))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ProvidersPage />)
+
+    await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Hetzner' }))
+    fireEvent.change(screen.getByLabelText('服务商名称'), { target: { value: 'Hetzner Cloud' } })
+    fireEvent.change(screen.getByLabelText('评分'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'core, backup, core' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存服务商' }))
+
+    await waitFor(() => expect(screen.getByText('Hetzner Cloud')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/providers/pv_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        name: 'Hetzner Cloud',
+        website: 'https://hetzner.com',
+        panel_url: 'https://console.hetzner.cloud',
+        account_hint: 'main',
+        country: 'DE',
+        rating: null,
+        labels: ['core', 'backup'],
+        note: '',
+      }),
+    })
+  })
 })

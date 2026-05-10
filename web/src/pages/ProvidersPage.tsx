@@ -1,9 +1,9 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
 import { Button, DataTable, Input, MonoDigits, Timestamp, type DataTableColumn } from '../components/atoms'
-import { ApiError, createProvider, listProviders } from '../lib/api'
+import { ApiError, createProvider, listProviders, updateProvider } from '../lib/api'
 import { formatOptional } from '../lib/format'
-import type { CreateProviderInput, ProviderRecord } from '../lib/types'
+import type { CreateProviderInput, ProviderRecord, UpdateProviderInput } from '../lib/types'
 import { AssetLabels } from './assetPageBadges'
 import { parseLabels } from './assetPageUtils'
 
@@ -68,12 +68,33 @@ function buildCreateProviderInput(form: CreateProviderFormState): CreateProvider
   }
 }
 
+function providerToForm(provider: ProviderRecord): CreateProviderFormState {
+  return {
+    name: provider.name,
+    website: provider.website,
+    panelURL: provider.panel_url,
+    accountHint: provider.account_hint,
+    country: provider.country,
+    rating: provider.rating == null ? '' : String(provider.rating),
+    labels: provider.labels.join(', '),
+    note: provider.note,
+  }
+}
+
+function buildUpdateProviderInput(form: CreateProviderFormState): UpdateProviderInput {
+  return buildCreateProviderInput(form)
+}
+
 export function ProvidersPage() {
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState<CreateProviderFormState>(INITIAL_CREATE_FORM)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<CreateProviderFormState>(INITIAL_CREATE_FORM)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -103,6 +124,8 @@ export function ProvidersPage() {
       if (!next) {
         setCreateForm(INITIAL_CREATE_FORM)
         setCreateError(null)
+      } else {
+        cancelEdit()
       }
       return next
     })
@@ -135,6 +158,51 @@ export function ProvidersPage() {
         setCreateError(describeError(error, '创建服务商失败'))
       })
       .finally(() => setCreateSubmitting(false))
+  }
+
+  function startEdit(provider: ProviderRecord) {
+    setCreateOpen(false)
+    setCreateError(null)
+    setEditingProviderId(provider.provider_id)
+    setEditForm(providerToForm(provider))
+    setEditError(null)
+  }
+
+  function cancelEdit() {
+    setEditingProviderId(null)
+    setEditForm(INITIAL_CREATE_FORM)
+    setEditError(null)
+  }
+
+  function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingProviderId) return
+    setEditError(null)
+
+    let input: UpdateProviderInput
+    try {
+      input = buildUpdateProviderInput(editForm)
+    } catch (error: unknown) {
+      setEditError(describeError(error, '服务商输入无效'))
+      return
+    }
+
+    setEditSubmitting(true)
+    updateProvider(editingProviderId, input)
+      .then((provider) => {
+        setState((current) => ({
+          loading: false,
+          error: null,
+          providers: current.providers.map((item) =>
+            item.provider_id === provider.provider_id ? provider : item,
+          ),
+        }))
+        cancelEdit()
+      })
+      .catch((error: unknown) => {
+        setEditError(describeError(error, '更新服务商失败'))
+      })
+      .finally(() => setEditSubmitting(false))
   }
 
   const columns: DataTableColumn<ProviderRecord>[] = [
@@ -178,6 +246,21 @@ export function ProvidersPage() {
       label: '更新时间',
       render: (provider) => <Timestamp value={provider.updated_at} />,
     },
+    {
+      key: 'actions',
+      label: '操作',
+      align: 'right',
+      render: (provider) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={`编辑 ${provider.name}`}
+          onClick={() => startEdit(provider)}
+        >
+          编辑
+        </Button>
+      ),
+    },
   ]
 
   return (
@@ -218,6 +301,36 @@ export function ProvidersPage() {
             <div className="page-form-actions">
               <Button type="submit" disabled={createSubmitting}>
                 {createSubmitting ? '创建中…' : '创建服务商'}
+              </Button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {editingProviderId && (
+        <section className="page-panel">
+          <div className="page-panel__eyebrow">EDIT</div>
+          <h2 className="page-panel__title">服务商编辑</h2>
+          <form onSubmit={handleEditSubmit}>
+            <Input label="服务商名称" value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} />
+            <Input label="网站" value={editForm.website} onChange={(event) => setEditForm({ ...editForm, website: event.target.value })} />
+            <Input label="面板地址" value={editForm.panelURL} onChange={(event) => setEditForm({ ...editForm, panelURL: event.target.value })} />
+            <Input label="账号提示" value={editForm.accountHint} onChange={(event) => setEditForm({ ...editForm, accountHint: event.target.value })} />
+            <Input label="国家 / 地区" value={editForm.country} onChange={(event) => setEditForm({ ...editForm, country: event.target.value })} />
+            <Input label="评分" type="number" min="1" max="5" value={editForm.rating} onChange={(event) => setEditForm({ ...editForm, rating: event.target.value })} />
+            <Input label="标签" hint="用逗号分隔" value={editForm.labels} onChange={(event) => setEditForm({ ...editForm, labels: event.target.value })} />
+            <Input label="备注" value={editForm.note} onChange={(event) => setEditForm({ ...editForm, note: event.target.value })} />
+            {editError && (
+              <p className="create-form__error" role="alert">
+                {editError}
+              </p>
+            )}
+            <div className="page-form-actions">
+              <Button type="button" variant="secondary" onClick={cancelEdit} disabled={editSubmitting}>
+                取消编辑
+              </Button>
+              <Button type="submit" disabled={editSubmitting}>
+                {editSubmitting ? '保存中…' : '保存服务商'}
               </Button>
             </div>
           </form>

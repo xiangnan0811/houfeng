@@ -1271,6 +1271,13 @@ html.theme-classic-light .dashboard-status-bar {
   font-size: var(--type-small-size);
   color: var(--text-secondary);
 }
+.section-heading__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
 
 /* Detail section: collapsible sub-block with eyebrow + title + body */
 .detail-section {
@@ -2218,6 +2225,10 @@ html.theme-classic-light .dashboard-status-bar {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+.asset-facts-edit-form {
+  margin: 0 0 var(--space-4);
 }
 
 .asset-access-line {
