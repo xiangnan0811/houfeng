@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 80
+- **Total Sessions**: 81
 - **Last Active**: 2026-05-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~729 | Active |
+| `journal-2.md` | ~764 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 81 | 2026-05-10 | Modal focus management | `319d0c4`, `0b02426`, `2095c65` | `fix/modal-focus-management` |
 | 80 | 2026-05-10 | Events filter drawer | `ae8dd8e`, `645b3e1`, `a4a90e4` | `feat/events-filter-drawer` |
 | 79 | 2026-05-10 | Events backfill filter | `25bf75d`, `2016137` | `feat/events-backfill-filter` |
 | 78 | 2026-05-10 | Asset Ledger roadmap completion audit | `107a74e`, `b360a3d` | `feat/asset-ledger-roadmap-audit` |
