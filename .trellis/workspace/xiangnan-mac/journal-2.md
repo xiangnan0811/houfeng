@@ -1158,3 +1158,36 @@ Extracted NodeDetailPage page-private body composition while keeping route param
 ### Next Steps
 
 - None - task complete
+
+
+## Session 94: TargetDetailPage remaining section extraction
+
+**Date**: 2026-05-11
+**Task**: TargetDetailPage remaining section extraction
+**Branch**: `refactor/target-detail-page-remaining-sections`
+
+### Summary
+
+Extracted TargetDetailPage page-private body composition while keeping route params, API loading, runtime actions, probe mutations, metadata, history, confirmations, and time-window orchestration in the page owner. Verified with TargetDetailPage tests and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8731474` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
