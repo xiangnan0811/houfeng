@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -56,18 +56,53 @@ const vps = {
   archived_at: null,
 }
 
+const missingFactsVPS = {
+  ...vps,
+  vps_id: 'vps_missing',
+  display_name: 'Osaka Missing',
+  provider_id: null,
+  provider_name: '',
+  product_name: '',
+  country: '',
+  region: '',
+  city: '',
+  ipv4: '',
+  ssh_host: '',
+  usage_status: 'unknown',
+  renewal_decision: 'unreviewed',
+  active_node_link_count: 0,
+}
+
+const subscription = {
+  subscription_id: 'sub_001',
+  vps_id: 'vps_001',
+  price: 12,
+  currency: 'USD',
+  billing_cycle: 'monthly',
+  billing_months: 1,
+  monthly_price: 12,
+  started_at: '2026-05-01',
+  renew_at: '2026-05-20',
+  auto_renew: true,
+  auto_renew_cancelled: false,
+  status: 'active',
+  payment_method: 'card',
+  note: '',
+  created_at: '2026-05-09T08:00:00Z',
+  updated_at: '2026-05-09T08:00:00Z',
+}
+
 describe('VPSPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('renders VPS assets, applies filters, and navigates to detail on row click', async () => {
+  it('renders inventory quick views, applies drawer filters, and navigates to detail on row click', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([vps]))
+      .mockResolvedValueOnce(mockJSONResponse([vps, missingFactsVPS]))
       .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse([vps]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -80,20 +115,45 @@ describe('VPSPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '库存核对' })).toBeInTheDocument()
     expect(screen.getAllByText('在用').length).toBeGreaterThan(0)
     expect(screen.getAllByText('承载业务').length).toBeGreaterThan(0)
     expect(screen.getAllByText('保留').length).toBeGreaterThan(0)
+    expect(screen.getByText('USD 12.00/月')).toBeInTheDocument()
+    expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('未关联 Node').length).toBeGreaterThan(0)
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/providers', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/subscriptions?sort=renew_at&order=asc', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
 
-    fireEvent.change(screen.getByLabelText('生命周期'), { target: { value: 'testing' } })
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps?lifecycle_status=testing', {
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-        credentials: 'include',
-      }),
-    )
+    fireEvent.click(screen.getByRole('tab', { name: /未关联/ }))
+    expect(screen.getByText('Osaka Missing')).toBeInTheDocument()
+    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
+    expect(screen.getByText('视图: 未关联')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
     expect(screen.getByText('生命周期: 测试中')).toBeInTheDocument()
+    expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
 
+    fireEvent.click(screen.getByRole('button', { name: /移除筛选 生命周期/ }))
+    fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Tokyo Edge'))
     await waitFor(() => expect(screen.getByText('vps detail route')).toBeInTheDocument())
   })
@@ -104,6 +164,7 @@ describe('VPSPage', () => {
       .fn()
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse(created, 201))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -127,7 +188,7 @@ describe('VPSPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建 VPS' }))
 
     await waitFor(() => expect(screen.getByText('created vps detail')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps', {
       method: 'POST',
       headers: {
         Accept: 'application/json',

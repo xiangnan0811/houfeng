@@ -87,7 +87,7 @@ describe('AssetDecisionsPage', () => {
     vi.restoreAllMocks()
   })
 
-  it('renders decision queues and reloads subscription renewals when the window changes', async () => {
+  it('renders a unified decision queue and reloads subscription renewals when the window changes', async () => {
     const laterSubscription = {
       ...subscription,
       subscription_id: 'sub_002',
@@ -99,6 +99,7 @@ describe('AssetDecisionsPage', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([subscription, laterSubscription]))
       .mockResolvedValueOnce(mockJSONResponse([vps]))
       .mockResolvedValueOnce(mockJSONResponse([migrateVPS]))
       .mockResolvedValueOnce(mockJSONResponse([cancelVPS]))
@@ -113,6 +114,7 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '资产决策' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '资产决策工作队列' })).toBeInTheDocument()
     expect(screen.getByText('2026-05-20')).toBeInTheDocument()
     expect(screen.getByText('Frankfurt Migration')).toBeInTheDocument()
     expect(screen.getByText('Seoul Cancel')).toBeInTheDocument()
@@ -121,17 +123,22 @@ describe('AssetDecisionsPage', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps?renewal_decision=unreviewed', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/subscriptions?sort=renew_at&order=asc', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps?renewal_decision=migrate', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps?renewal_decision=unreviewed', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps?renewal_decision=cancel', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps?renewal_decision=migrate', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps?renewal_decision=cancel', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -140,7 +147,7 @@ describe('AssetDecisionsPage', () => {
     fireEvent.change(screen.getByLabelText('续费窗口'), { target: { value: '60' } })
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/subscriptions?renew_within_days=60&sort=renew_at&order=asc', {
+      expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/subscriptions?renew_within_days=60&sort=renew_at&order=asc', {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
         credentials: 'include',
@@ -158,6 +165,7 @@ describe('AssetDecisionsPage', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
       .mockResolvedValueOnce(mockJSONResponse([vps]))
       .mockResolvedValueOnce(mockJSONResponse([migrateVPS]))
       .mockResolvedValueOnce(mockJSONResponse([cancelVPS]))
@@ -172,12 +180,13 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '处理 vps_review' }))
-    fireEvent.change(screen.getByLabelText('续费决策'), { target: { value: 'migrate' } })
-    fireEvent.change(screen.getByLabelText('决策理由'), { target: { value: 'move to Osaka' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
+    const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
+    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
+    fireEvent.change(within(drawer).getByLabelText('决策理由'), { target: { value: 'move to Osaka' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '保存续费决策' }))
 
     await waitFor(() => expect(screen.getByText('续费决策已保存：Tokyo Review -> 迁移')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_review', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_review', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -190,7 +199,9 @@ describe('AssetDecisionsPage', () => {
         renewal_reason: 'move to Osaka',
       }),
     })
-    expect(within(screen.getByLabelText('待评估 VPS 队列')).queryByText('Tokyo Review')).not.toBeInTheDocument()
-    expect(within(screen.getByLabelText('待迁移 VPS 队列')).getByText('Tokyo Review')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /待评估/ }))
+    expect(within(screen.getByLabelText('资产决策工作队列')).queryByText('Tokyo Review')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /迁移/ }))
+    expect(within(screen.getByLabelText('资产决策工作队列')).getByText('Tokyo Review')).toBeInTheDocument()
   })
 })

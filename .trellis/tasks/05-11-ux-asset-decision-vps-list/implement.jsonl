@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend implementation entrypoint and active visual authority."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Component/page split rules, Drawer accessibility and API-free component constraints."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client, URL-state, Dashboard/VPS asset data credibility constraints."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Dark-first token/BEM CSS constraints for UX redesign."}
+{"file": "docs/release/core-pages-product-ux-replan.md", "reason": "Parent UX plan defining UX-3 scope and non-goals."}
+{"file": ".trellis/tasks/05-11-ux-asset-decision-vps-list/research/current-asset-pages-audit.md", "reason": "Current AssetDecisionsPage and VPSPage audit with implementation recommendation."}
