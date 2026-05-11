@@ -12,6 +12,8 @@ type EventType string
 
 type NotificationReason string
 
+type NotificationChannel string
+
 type DeliveryStatus string
 
 type IncidentRecord struct {
@@ -39,7 +41,7 @@ type StateChangeEventRecord struct {
 
 type NotificationDecision struct {
 	ShouldSend bool
-	Channel    string
+	Channel    NotificationChannel
 	Reason     NotificationReason
 	Severity   Severity
 	Summary    string
@@ -147,7 +149,7 @@ type NotificationRecordWrite struct {
 	IncidentID     string
 	ObjectType     ObjectType
 	ObjectID       string
-	Channel        string
+	Channel        NotificationChannel
 	DeliveryStatus DeliveryStatus
 	Summary        string
 	SentAt         *time.Time
@@ -253,6 +255,11 @@ const (
 	NotificationReasonStarted   NotificationReason = "started"
 	NotificationReasonEscalated NotificationReason = "escalated"
 	NotificationReasonRecovered NotificationReason = "recovered"
+)
+
+const (
+	NotificationChannelTelegram NotificationChannel = "telegram"
+	NotificationChannelFeishu   NotificationChannel = "feishu"
 )
 
 const (

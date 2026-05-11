@@ -225,7 +225,7 @@ func TestPostgresIncidentRepositoryAppliesMutationAndProjectsNodeSummary(t *test
 			IncidentID:     "inc_node_nd_001_node_disk_pressure",
 			ObjectType:     incidents.ObjectTypeNode,
 			ObjectID:       "nd_001",
-			Channel:        "telegram",
+			Channel:        incidents.NotificationChannelTelegram,
 			DeliveryStatus: incidents.DeliveryStatusSent,
 			Summary:        "磁盘使用率 92.0%",
 			SentAt:         &sentAt,

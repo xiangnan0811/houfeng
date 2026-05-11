@@ -103,6 +103,7 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
   - 完整的 enrollment token 内容（仅在请求路径校验，不 log）
   - cookie / Authorization 头
   - Telegram bot token / chat id（`internal/center/notify/telegram.go` 全程不 log payload 内容，仅 `fmt.Errorf` 包装失败）
+  - Feishu webhook URL（`internal/center/notify/feishu.go` 全程不 log webhook URL，仅 `fmt.Errorf` 包装失败）
 - ❌ **完整的 SQL / 完整的 JSON body**：体积大且可能含敏感字段。失败时记录 `error` 包装后的链路即可。
 - ❌ **`fmt.Println` / `println` / `fmt.Printf`**：`grep` 结果为空，新代码不要引入。
 
@@ -127,7 +128,7 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 - ❌ **同时 log + 返回 error，导致重复输出**：调用栈每一层都 log 同一个 err。约定**只在最外层 worker / handler / main 处 log**；内层只 `fmt.Errorf("...: %w", err)` 包装。当前代码遵循这一点（参考 `incidents/service.go` 内部 `evaluateNode` 返回 wrapped error，最外层 `AfterSuccessfulSync` 才 `s.logger.Error`）。
 - ❌ **在 worker 内 log info 后吞掉 error**：`logger.Info("...", "error", err)` 会让监控系统漏掉异常。所有错误必须用 `Error` level。
 - ❌ **拼字符串 log**：`logger.Info(fmt.Sprintf("node %s started", id))`。slog 提供 key-value，**直接 `logger.Info("node started", "node_id", id)`**。
-- ❌ **log 含 token / 密码 / Telegram chat 内容**：见上节"不该 log"。
+- ❌ **log 含 token / 密码 / Telegram chat 内容 / Feishu webhook URL**：见上节"不该 log"。
 - ❌ **新增第三方 logger 依赖（zap、logrus、zerolog 等）**：项目硬性约束，stdlib `log/slog` 已足够。
 
 ---

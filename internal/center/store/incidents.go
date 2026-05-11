@@ -270,7 +270,7 @@ func insertNotificationRecords(ctx context.Context, tx incidentStoreTx, notifica
 			notification.IncidentID,
 			string(notification.ObjectType),
 			notification.ObjectID,
-			notification.Channel,
+			string(notification.Channel),
 			string(notification.DeliveryStatus),
 			notification.Summary,
 			notification.SentAt,

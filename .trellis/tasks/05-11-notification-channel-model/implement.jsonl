@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "feature branch, PR, CI and protected main workflow constraints"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "notification result flows through evaluator, service, store and dashboard contract boundaries"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec index and authoritative backend development context"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "notification code belongs in incidents/notify/store/cmd wiring boundaries"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "notification_records channel persistence and no schema change unless migration is required"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "channel dispatch errors must preserve wrapped errors and suppression sentinel behavior"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "notification failure logging must avoid Telegram and Feishu secrets"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go test, fmt, vet and verify expectations for backend task"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard notification_status must remain boolean-only without leaking notification secrets"}
