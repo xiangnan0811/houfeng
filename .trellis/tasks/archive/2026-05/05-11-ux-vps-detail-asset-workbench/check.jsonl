@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend quality check entrypoint."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify VPS detail data uses existing APIs without false inference."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Verify UX CSS follows dark-first token/BEM rules."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required lint/test/build and page test quality gate."}
+{"file": "docs/release/core-pages-product-ux-replan.md", "reason": "Verify implementation stays inside UX-4 scope."}
+{"file": ".trellis/tasks/05-11-ux-vps-detail-asset-workbench/prd.md", "reason": "Verify acceptance criteria are met."}
+{"file": ".trellis/tasks/05-11-ux-vps-detail-asset-workbench/research/current-vps-detail-audit.md", "reason": "Verify current-page problems were actually addressed."}
