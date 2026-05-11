@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Verify controlled component extraction follows frontend conventions"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify API loading, mutations, and URL query ownership remain in NodesPage"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Local lint, test, build, and verification gate requirements"}
