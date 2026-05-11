@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Branch and PR workflow must remain enforced for documentation tasks"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality gate and CI workflow reference"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Frontend verification context for deferred page work"}
+{"file": ".trellis/tasks/05-11-current-state-roadmap-audit/research/current-state-audit.md", "reason": "Current-state evidence and planning conclusion"}

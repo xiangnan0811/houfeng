@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project identity
 
-**候风 / Houfeng Fleet Control Plane** — a single-user, monitoring-and-probe-first fleet control plane. This repo is the V1 **implementation** repo, currently in V1 **收口期**（V1 closing).
+**候风 / Houfeng Fleet Control Plane** — a single-user, monitoring-and-probe-first fleet control plane. This repo started as the V1 implementation repo and now has passed the V1 release-gate judgment recorded in `docs/release/next-phase-plan.md`.
 
-**重要**：V1 ≠ MVP。用户判定当前实现"连 V0.1 都不到"；V1 是当前阶段目标，但用户心目中的 MVP 范围比 v1-baseline 更大（具体见 `docs/release/next-phase-plan.md`）。
+**重要**：V1 ≠ MVP。V1 frozen 业务结构仍是基础边界，但 post-V1 第一条扩展计划（VPS Asset Ledger + Fleet Observability）已闭合到当前计划边界。下一步不要自动继续旧计划；先查 `docs/release/current-state-and-next-stage-plan.md`。
 
 V1 业务结构（数据模型 / 规则 / 技术选型 / 交互原型）frozen 在 `docs/design/v1-baseline/` 的 4 份子集（`architecture-data-model.md` + `rules-and-interaction.md` + `tech-selection.md` + `interactive-prototype-and-operation-flow.md`）。视觉部分已 unfrozen，权威指向 `docs/design/v2-houfeng/`。
 
-实现阶段不重新设计 V1 一级能力。如发现实现与 frozen 业务子集 mismatch，先记录到 `docs/release/v1-gap-checklist.md`，再参考 `docs/release/next-phase-plan.md` 决定优先级。
+实现阶段不重新设计 V1 一级能力。如发现实现与 frozen 业务子集 mismatch，先记录到 `docs/release/v1-gap-checklist.md`，再参考 `docs/release/next-phase-plan.md` 与 `docs/release/current-state-and-next-stage-plan.md` 决定优先级。
 
 Naming 不变：product `候风 / Houfeng Fleet Control Plane`；binaries `houfeng-center` 和 `houfeng-agent`。
 
@@ -104,27 +104,29 @@ When adding a new endpoint: add the handler in `http/handlers/`, register it in 
 - `syncqueue/` — durable on-disk buffer (single JSON file at `HOUFENG_AGENT_BUFFER_FILE`, bounded by `MAX_ENTRIES` and `MAX_AGE`). Stays pure-Go; no embedded DB.
 - `runtime/` — main loop: collect → buffer → sync to `/api/agent/sync` → apply returned plan.
 
-Agents must remain "thin": observe, buffer, sync, fetch plan, and apply center-issued plans. They must not accept arbitrary scripts, user-supplied command args, or local rule evaluation. Current exceptions are intentionally bounded but still early: whitelisted node actions (`agent/exec`) and best-effort Docker CLI sampling (`agent/containersample`). Command-result durability, channel/audit semantics, and the product boundary for these post-V1 surfaces remain tracked follow-ups, not closed V1 guarantees.
+Agents must remain "thin": observe, buffer, sync, fetch plan, and apply center-issued plans. They must not accept arbitrary scripts, user-supplied command args, or local rule evaluation. Current exceptions are intentionally bounded: whitelisted node actions (`agent/exec`) and best-effort Docker CLI sampling (`agent/containersample`). Command-result durability and the Agent command / Docker product boundary are closed to the current scope; do not expand into arbitrary scripts, user-defined command args, Docker control, or orchestration without a new product plan.
 
 ## Frontend (`web/`)
 
 React 19 + TypeScript + Vite SPA, Vitest + jsdom for tests, ESLint flat config. Routing in `src/app/router.tsx`, layout shell in `src/app/layout/`, page components in `src/pages/` (one `*.tsx` + colocated `*.test.tsx` per page), shared atoms in `src/components/atoms/`, composite components in `src/components/`, API client + types + formatters in `src/lib/`.
 
-Atoms (`web/src/components/atoms/`): `Badge` / `Button` / `Card` / `Input` / `Toggle` / `Tabs` / `Sparkline` (SVG 64×16 mini chart) / `TrendArrow` / `StatusGlyph` (6-state shape indicator) / `Mono` (`MonoDigits` / `Hostname` / `Timestamp`) / `DataTable` (compact 36px / standard 44px) / `MetricChart` (SVG 360×140 full chart — X/Y axes, thresholds, maintenance windows, crosshair tooltip) / `Drawer` (right/left slide-in panel, fixed-position inline render + overlay + ESC; portal/focus-trap hardening is still a follow-up) / `Stepper` (horizontal 4-step progress bar). All pure CSS + BEM + design tokens; no Tailwind / CSS-in-JS / chart library introduced (per `design-language.md` §12).
+Atoms (`web/src/components/atoms/`): `Badge` / `Button` / `Card` / `Input` / `Toggle` / `Tabs` / `Sparkline` (SVG 64×16 mini chart) / `TrendArrow` / `StatusGlyph` (6-state shape indicator) / `Mono` (`MonoDigits` / `Hostname` / `Timestamp`) / `DataTable` (compact 36px / standard 44px) / `MetricChart` (SVG 360×140 full chart — X/Y axes, thresholds, maintenance windows, crosshair tooltip) / `Drawer` (right/left slide-in panel with portal, overlay, ESC, focus containment, and focus restore) / `Stepper` (horizontal 4-step progress bar). All pure CSS + BEM + design tokens; no Tailwind / CSS-in-JS / chart library introduced (per `design-language.md` §12).
 
 Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-houfeng/component-spec.md`. v2-houfeng has superseded the earlier v1-baseline visual sections (`ui-ux-spec`, `baseline-screens`, `visual-review-round2`, `stitch/*`) and the entire `v1.x-frontend-redesign/` package. Those historical materials have been moved to `docs/_archive/design/` and are kept for traceability only — do not regress to them. Dark-first, Chinese as the primary UI language, high-density engineering-tool feel.
 
-## V1 verification artifacts
+## Planning and verification artifacts
 
-V1 收口期间的运维与发布证据：
+当前规划、运维与发布证据：
 
 - `docs/operations/v1-smoke-run.md` — fresh-install smoke against a real Postgres (V1 release gate 的核心证据).
 - `docs/operations/` — v2 visual evidence screenshots (Dashboard / 节点列表 / 节点详情 / 目标列表 / 目标详情，2026-05-06)。
 - `docs/release/v1-gap-checklist.md` — implementation-vs-design gap 清单（含 V1 release gate 与 12 条 2026-05-02 新增 gap）.
 - `docs/release/docs-audit.md` — docs 审计与 archive 决策（T1 落地，决定哪些 docs 是 keep / archive）.
 - `docs/release/next-phase-plan.md` — 下一阶段开发计划（Stage 1 V1 收口 / Stage 2 post-V1 → MVP / Stage 3+ 远期）.
+- `docs/release/asset-ledger-roadmap-completion.md` — VPS Asset Ledger 计划完成度审计。
+- `docs/release/current-state-and-next-stage-plan.md` — 当前项目剩余工作审计与下一阶段入口；明确旧计划无立即任务、真实数据条件性延期、前端机械拆分暂停。
 - `docs/deploy/local-and-systemd.md` 与 `docs/deploy/systemd/*.service` — canonical 部署 recipe.
 
 注：早期的 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，stitch 已 archive 后这两份也已迁至 `docs/_archive/operations/`，仅作历史记录。当前已有一次性 v2 截图证据直接存放在 `docs/operations/*.jpg`；正式、可重复的 v2 视觉证据收集流程仍待后续建立。
 
-When changing user-visible behavior, first record the gap in `docs/release/v1-gap-checklist.md` and consult `docs/release/next-phase-plan.md` for prioritization, rather than editing the frozen baseline docs.
+When changing user-visible behavior, first record the gap in `docs/release/v1-gap-checklist.md` and consult `docs/release/next-phase-plan.md` plus `docs/release/current-state-and-next-stage-plan.md` for prioritization, rather than editing the frozen baseline docs.
