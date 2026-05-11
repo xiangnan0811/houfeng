@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 92
+- **Total Sessions**: 93
 - **Last Active**: 2026-05-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1127 | Active |
+| `journal-2.md` | ~1160 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 93 | 2026-05-11 | NodeDetailPage remaining section extraction | `cb8a830` | `refactor/node-detail-page-remaining-sections` |
 | 92 | 2026-05-11 | DashboardPage section extraction | `632a827` | `refactor/dashboard-page-sections` |
 | 91 | 2026-05-11 | TargetsPage section extraction | `4ee93e9` | `refactor/targets-page-sections` |
 | 90 | 2026-05-11 | Target detail page section extraction | `994d3a4` | `refactor/target-detail-page-sections` |
