@@ -15,6 +15,10 @@ type EventsRepository interface {
 	ListEvents(context.Context, store.EventsFilter) ([]store.EventListItem, error)
 }
 
+type eventsResponse struct {
+	Items []store.EventListItem `json:"items"`
+}
+
 func Events(repo EventsRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -74,7 +78,10 @@ func Events(repo EventsRepository) http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
-		writeJSON(w, http.StatusOK, records)
+		if records == nil {
+			records = []store.EventListItem{}
+		}
+		writeJSON(w, http.StatusOK, eventsResponse{Items: records})
 	})
 }
 

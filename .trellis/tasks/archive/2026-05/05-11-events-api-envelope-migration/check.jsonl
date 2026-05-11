@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec entrypoint for review"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "verify event API contract documentation matches implementation"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify error responses remain unchanged"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "backend quality gate and test checklist"}
+{"file": ".trellis/spec/web/index.md", "reason": "web spec entrypoint for review"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "verify listEvents envelope unwrapping and page data flow"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "verify UI components do not duplicate API shape handling"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "frontend quality gate and test checklist"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify the API shape migration is consistent across layers"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "verify branch/PR workflow constraints remain respected"}

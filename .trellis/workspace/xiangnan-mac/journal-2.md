@@ -861,3 +861,36 @@ Hardened the agent command and Docker facts boundary: whitelist lookups now retu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 85: Events API envelope migration
+
+**Date**: 2026-05-11
+**Task**: Events API envelope migration
+**Branch**: `fix/events-api-envelope`
+
+### Summary
+
+Migrated GET /api/events success responses to an items envelope, kept listEvents returning arrays for UI consumers, updated tests/specs/smoke docs, and closed v1 gap #16.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e0fe8a9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

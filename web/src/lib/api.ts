@@ -17,6 +17,7 @@ import type {
   UpdateProbeItemInput,
   DashboardOverview,
   EventListFilter,
+  EventListResponse,
   IncidentListFilter,
   NodeEnrollmentTokenIssue,
   NodeOnboardingState,
@@ -356,7 +357,7 @@ export function updateSettings(settings: SettingsUpdateInput) {
 }
 
 export function listEvents(filter?: EventListFilter) {
-  return requestJSON<StateChangeEventRecord[]>(
+  return requestJSON<EventListResponse | StateChangeEventRecord[]>(
     withQuery(
       '/api/events',
       filter
@@ -376,7 +377,7 @@ export function listEvents(filter?: EventListFilter) {
           }
         : undefined,
     ),
-  )
+  ).then((response) => Array.isArray(response) ? response : response.items)
 }
 
 export function listIncidents(filter?: IncidentListFilter) {

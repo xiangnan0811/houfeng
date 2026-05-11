@@ -528,13 +528,13 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 
 #### 2. Signatures
 
-- Backend API: `GET /api/events?include_backfilled=<bool>`。
+- Backend API: `GET /api/events?include_backfilled=<bool>` -> `{"items":[]}`。
 - Handler field: `store.EventsFilter.IncludeBackfilled bool`。
 - DB source rows: `state_change_events e`；backfill provenance lives in `node_heartbeats.is_backfilled`、`host_samples.is_backfilled`、`probe_observations.is_backfilled`。
 
 #### 3. Contracts
 
-- `/api/events` 继续返回 bare JSON array，不引入 `{items: []}` envelope。
+- `/api/events` 成功响应返回 envelope：`{"items":[...]}`；错误响应保持通用 `{"error":"..."}`。
 - `include_backfilled` 使用 Go `strconv.ParseBool` 解析；前端 URL 用 `include_backfilled=1`，API 请求用 `include_backfilled=true`。
 - 默认 `IncludeBackfilled=false` 时，`ListEvents` 必须排除可关联到 backfilled runtime facts 的事件。
 - `IncludeBackfilled=true` 时不得添加 backfill exclusion predicate。
@@ -562,6 +562,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 
 #### 6. Tests Required
 
+- Handler test: 成功响应顶层必须是 object，并包含 `items` 数组，不能回退为 bare JSON array。
 - Handler test: `include_backfilled=true` 进入 `store.EventsFilter.IncludeBackfilled`。
 - Handler test: `include_backfilled=bad` 返回 400。
 - Store test: 默认 SQL 包含 node heartbeat / host sample / probe observation 的 `is_backfilled` exclusion。
