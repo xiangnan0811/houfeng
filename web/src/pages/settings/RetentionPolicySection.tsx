@@ -1,0 +1,61 @@
+import { DetailSection } from '../../components/DetailSection'
+import type { SettingsRetentionPolicyForm } from './types'
+import { SectionIntro } from './SectionIntro'
+
+type RetentionPolicySectionProps = {
+  value: SettingsRetentionPolicyForm
+  onChange: (patch: Partial<SettingsRetentionPolicyForm>) => void
+}
+
+type RetentionInputProps = {
+  ariaLabel: string
+  value: string
+  onChange: (value: string) => void
+}
+
+function RetentionInput({ ariaLabel, value, onChange }: RetentionInputProps) {
+  return (
+    <label className="summary-card">
+      <span className="summary-card__label">{ariaLabel}</span>
+      <span className="input-with-suffix">
+        <input
+          aria-label={ariaLabel}
+          inputMode="numeric"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <span className="input-with-suffix__unit">天</span>
+      </span>
+    </label>
+  )
+}
+
+export function RetentionPolicySection({ value, onChange }: RetentionPolicySectionProps) {
+  return (
+    <DetailSection eyebrow="保留策略" title="数据保留策略">
+      <div className="summary-grid summary-grid--numeric">
+        <RetentionInput
+          ariaLabel="原始层保留天数"
+          value={value.rawLayerDays}
+          onChange={(nextValue) => onChange({ rawLayerDays: nextValue })}
+        />
+        <RetentionInput
+          ariaLabel="聚合层保留天数"
+          value={value.aggregateLayerDays}
+          onChange={(nextValue) => onChange({ aggregateLayerDays: nextValue })}
+        />
+        <RetentionInput
+          ariaLabel="事件层保留天数"
+          value={value.eventLayerDays}
+          onChange={(nextValue) => onChange({ eventLayerDays: nextValue })}
+        />
+        <RetentionInput
+          ariaLabel="通知层保留天数"
+          value={value.notificationLayerDays}
+          onChange={(nextValue) => onChange({ notificationLayerDays: nextValue })}
+        />
+      </div>
+      <SectionIntro>中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础。</SectionIntro>
+    </DetailSection>
+  )
+}

@@ -1,73 +1,22 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
-import { DetailSection } from '../components/DetailSection'
-import { MonoDigits, Tabs } from '../components/atoms'
-import { useThemeOptional, type Preset, type Mode } from '../lib/theme-context'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
 import type {
   FeishuSettingsInput,
   NodeLabelOverrideRule,
-  ProbeFrequencyDefaults,
   SettingsRecord,
   SettingsUpdateInput,
   TargetLabelOverrideRule,
   TargetTypeOverrideRule,
 } from '../lib/types'
-
-const FREQUENCY_TIER_OPTIONS = [
-  { value: '1m', label: '1 分钟' },
-  { value: '5m', label: '5 分钟' },
-  { value: '15m', label: '15 分钟' },
-  { value: '6h', label: '6 小时' },
-] as const
-
-const TARGET_TYPE_OPTIONS = [
-  { value: 'service', label: 'service' },
-  { value: 'china_reference', label: 'china_reference' },
-] as const
-
-type FormState = {
-  telegramBotToken: string
-  telegramChatId: string
-  telegramRuntimeManaged: boolean
-  feishuEnabled: boolean
-  feishuWebhookUrl: string
-  hostSampleFrequencyTier: string
-  probeFrequencyDefaults: ProbeFrequencyDefaults
-  incidentDefaults: {
-    heartbeatIntervalSeconds: string
-    staleThresholdIntervals: string
-    sweepIntervalSeconds: string
-    notifyOnStarted: boolean
-    notifyOnEscalated: boolean
-    notifyOnRecovered: boolean
-    cpuWarningPct: string
-    cpuAlertPct: string
-    cpuCriticalPct: string
-    memWarningPct: string
-    memAlertPct: string
-    memCriticalPct: string
-    diskWarningPct: string
-    diskAlertPct: string
-    diskCriticalPct: string
-    inodeWarningPct: string
-    inodeAlertPct: string
-    inodeCriticalPct: string
-    iowaitWarningPct: string
-    iowaitCriticalPct: string
-    load5Warning: string
-    load5Critical: string
-  }
-  nodeLabelOverridesText: string
-  targetTypeOverridesText: string
-  targetLabelOverridesText: string
-  retentionPolicy: {
-    rawLayerDays: string
-    aggregateLayerDays: string
-    eventLayerDays: string
-    notificationLayerDays: string
-  }
-}
+import { FeishuSettingsSection } from './settings/FeishuSettingsSection'
+import { FrequencyDefaultsSection } from './settings/FrequencyDefaultsSection'
+import { IncidentDefaultsSection } from './settings/IncidentDefaultsSection'
+import { OverrideRulesSection } from './settings/OverrideRulesSection'
+import { RetentionPolicySection } from './settings/RetentionPolicySection'
+import { TelegramSettingsSection } from './settings/TelegramSettingsSection'
+import { ThemeSettingsSection } from './settings/ThemeSettingsSection'
+import type { SettingsFormState } from './settings/types'
 
 type State = {
   loading: boolean
@@ -76,7 +25,7 @@ type State = {
   saveError: string | null
   saveSuccess: string | null
   settings: SettingsRecord | null
-  form: FormState | null
+  form: SettingsFormState | null
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -89,7 +38,7 @@ function formatJSON(value: unknown) {
   return JSON.stringify(value, null, 2)
 }
 
-function buildFormState(settings: SettingsRecord): FormState {
+function buildFormState(settings: SettingsRecord): SettingsFormState {
   return {
     telegramBotToken: '',
     telegramChatId: settings.telegram.chat_id,
@@ -176,7 +125,7 @@ type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram' | 'feishu'> & {
   feishu: FeishuSettingsInput
 }
 
-function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): SettingsUpdateDraft {
+function buildUpdateInput(form: SettingsFormState, currentSettings: SettingsRecord): SettingsUpdateDraft {
   const botToken = form.telegramBotToken.trim()
   const chatId = form.telegramChatId.trim()
   const runtimeManaged = form.telegramRuntimeManaged
@@ -347,348 +296,6 @@ function buildUpdateInput(form: FormState, currentSettings: SettingsRecord): Set
   }
 }
 
-function SectionIntro({ children }: { children: string }) {
-  return <p className="empty-inline">{children}</p>
-}
-
-function FrequencySelect({
-  ariaLabel,
-  value,
-  onChange,
-}: {
-  ariaLabel: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <label className="summary-card">
-      <span className="summary-card__label">{ariaLabel}</span>
-      <select aria-label={ariaLabel} value={value} onChange={(event) => onChange(event.target.value)}>
-        {FREQUENCY_TIER_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
-function RetentionInput({
-  ariaLabel,
-  value,
-  onChange,
-}: {
-  ariaLabel: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <label className="summary-card">
-      <span className="summary-card__label">{ariaLabel}</span>
-      <span className="input-with-suffix">
-        <input
-          aria-label={ariaLabel}
-          inputMode="numeric"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <span className="input-with-suffix__unit">天</span>
-      </span>
-    </label>
-  )
-}
-
-function ThresholdInput({
-  ariaLabel,
-  value,
-  onChange,
-}: {
-  ariaLabel: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <label className="summary-card">
-      <span className="summary-card__label">{ariaLabel}</span>
-      <span className="input-with-suffix">
-        <input
-          aria-label={ariaLabel}
-          inputMode="numeric"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <span className="input-with-suffix__unit">%</span>
-      </span>
-    </label>
-  )
-}
-
-function MetricThresholdGroup({
-  label,
-  warning,
-  alert,
-  critical,
-  hasAlert,
-  onUpdate,
-}: {
-  label: string
-  warning: string
-  alert: string
-  critical: string
-  hasAlert: boolean
-  onUpdate: (field: string, value: string) => void
-}) {
-  return (
-    <div className="settings-cluster settings-cluster--tight">
-      <span className="section-heading__eyebrow">{label}</span>
-      <div className="summary-grid summary-grid--numeric">
-        <ThresholdInput
-          ariaLabel={`${label} 关注阈值`}
-          value={warning}
-          onChange={(value) => onUpdate('warning', value)}
-        />
-        {hasAlert ? (
-          <ThresholdInput
-            ariaLabel={`${label} 告警阈值`}
-            value={alert}
-            onChange={(value) => onUpdate('alert', value)}
-          />
-        ) : null}
-        <ThresholdInput
-          ariaLabel={`${label} 严重阈值`}
-          value={critical}
-          onChange={(value) => onUpdate('critical', value)}
-        />
-      </div>
-    </div>
-  )
-}
-
-function IncidentDefaultsEditor({
-  value,
-  onChange,
-}: {
-  value: FormState['incidentDefaults']
-  onChange: (next: FormState['incidentDefaults']) => void
-}) {
-  function update<K extends keyof FormState['incidentDefaults']>(
-    field: K,
-    nextValue: FormState['incidentDefaults'][K],
-  ) {
-    onChange({ ...value, [field]: nextValue })
-  }
-
-  return (
-    <div className="settings-cluster">
-      <div className="summary-grid">
-        <label className="summary-card">
-          <span className="summary-card__label">心跳间隔秒数</span>
-          <input
-            aria-label="心跳间隔秒数"
-            inputMode="numeric"
-            value={value.heartbeatIntervalSeconds}
-            onChange={(event) => update('heartbeatIntervalSeconds', event.target.value)}
-          />
-        </label>
-
-        <label className="summary-card">
-          <span className="summary-card__label">失联判定阈值</span>
-          <input
-            aria-label="失联判定阈值"
-            inputMode="numeric"
-            value={value.staleThresholdIntervals}
-            onChange={(event) => update('staleThresholdIntervals', event.target.value)}
-          />
-        </label>
-
-        <label className="summary-card">
-          <span className="summary-card__label">扫描间隔秒数</span>
-          <input
-            aria-label="扫描间隔秒数"
-            inputMode="numeric"
-            value={value.sweepIntervalSeconds}
-            onChange={(event) => update('sweepIntervalSeconds', event.target.value)}
-          />
-        </label>
-
-        <label className="summary-card">
-          <span className="summary-card__label">异常开始通知</span>
-          <input
-            aria-label="异常开始通知"
-            type="checkbox"
-            checked={value.notifyOnStarted}
-            onChange={(event) => update('notifyOnStarted', event.target.checked)}
-          />
-        </label>
-
-        <label className="summary-card">
-          <span className="summary-card__label">异常升级通知</span>
-          <input
-            aria-label="异常升级通知"
-            type="checkbox"
-            checked={value.notifyOnEscalated}
-            onChange={(event) => update('notifyOnEscalated', event.target.checked)}
-          />
-        </label>
-
-        <label className="summary-card">
-          <span className="summary-card__label">异常恢复通知</span>
-          <input
-            aria-label="异常恢复通知"
-            type="checkbox"
-            checked={value.notifyOnRecovered}
-            onChange={(event) => update('notifyOnRecovered', event.target.checked)}
-          />
-        </label>
-      </div>
-
-      <MetricThresholdGroup
-        label="CPU 阈值"
-        warning={value.cpuWarningPct}
-        alert={value.cpuAlertPct}
-        critical={value.cpuCriticalPct}
-        hasAlert
-        onUpdate={(field, nextValue) => {
-          const key = cpuThresholdKey(field)
-          if (key) update(key, nextValue)
-        }}
-      />
-
-      <MetricThresholdGroup
-        label="内存阈值"
-        warning={value.memWarningPct}
-        alert={value.memAlertPct}
-        critical={value.memCriticalPct}
-        hasAlert
-        onUpdate={(field, nextValue) => {
-          const key = memThresholdKey(field)
-          if (key) update(key, nextValue)
-        }}
-      />
-
-      <MetricThresholdGroup
-        label="磁盘阈值"
-        warning={value.diskWarningPct}
-        alert={value.diskAlertPct}
-        critical={value.diskCriticalPct}
-        hasAlert
-        onUpdate={(field, nextValue) => {
-          const key = diskThresholdKey(field)
-          if (key) update(key, nextValue)
-        }}
-      />
-
-      <MetricThresholdGroup
-        label="Inode 阈值"
-        warning={value.inodeWarningPct}
-        alert={value.inodeAlertPct}
-        critical={value.inodeCriticalPct}
-        hasAlert
-        onUpdate={(field, nextValue) => {
-          const key = inodeThresholdKey(field)
-          if (key) update(key, nextValue)
-        }}
-      />
-
-      <MetricThresholdGroup
-        label="IOWait 阈值"
-        warning={value.iowaitWarningPct}
-        alert=""
-        critical={value.iowaitCriticalPct}
-        hasAlert={false}
-        onUpdate={(field, nextValue) => {
-          const key = iowaitThresholdKey(field)
-          if (key) update(key, nextValue)
-        }}
-      />
-
-      <MetricThresholdGroup
-        label="Load5 阈值"
-        warning={value.load5Warning}
-        alert=""
-        critical={value.load5Critical}
-        hasAlert={false}
-        onUpdate={(field, nextValue) => {
-          const key = load5ThresholdKey(field)
-          if (key) update(key, nextValue)
-        }}
-      />
-    </div>
-  )
-}
-
-function thresholdKey(prefix: string, field: string): keyof FormState['incidentDefaults'] | null {
-  switch (field) {
-    case 'warning': return `${prefix}WarningPct` as keyof FormState['incidentDefaults']
-    case 'alert': return `${prefix}AlertPct` as keyof FormState['incidentDefaults']
-    case 'critical': return `${prefix}CriticalPct` as keyof FormState['incidentDefaults']
-    default: return null
-  }
-}
-
-const cpuThresholdKey = (field: string) => thresholdKey('cpu', field)
-const memThresholdKey = (field: string) => thresholdKey('mem', field)
-const diskThresholdKey = (field: string) => thresholdKey('disk', field)
-const inodeThresholdKey = (field: string) => thresholdKey('inode', field)
-const iowaitThresholdKey = (field: string) => thresholdKey('iowait', field)
-
-function load5ThresholdKey(field: string): keyof FormState['incidentDefaults'] | null {
-  switch (field) {
-    case 'warning': return 'load5Warning'
-    case 'critical': return 'load5Critical'
-    default: return null
-  }
-}
-
-function OverrideTextarea({
-  ariaLabel,
-  value,
-  onChange,
-}: {
-  ariaLabel: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  let previewContent: string | null = null
-  if (value.trim()) {
-    try {
-      previewContent = JSON.stringify(JSON.parse(value), null, 2)
-    } catch {
-      previewContent = null
-    }
-  }
-
-  return (
-    <div className="override-rule-field">
-      <label>
-        <span>{ariaLabel}</span>
-        <textarea
-          aria-label={ariaLabel}
-          className="mono"
-          rows={10}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </label>
-      {previewContent ? (
-        <details className="override-rule-preview">
-          <summary>预览</summary>
-          <pre><code>{previewContent}</code></pre>
-        </details>
-      ) : null}
-    </div>
-  )
-}
-
-function TargetTypeSummary() {
-  return (
-    <p className="empty-inline">
-      允许的目标类型选择器：{TARGET_TYPE_OPTIONS.map((option) => option.value).join('、')}。
-    </p>
-  )
-}
-
 export function SettingsPage() {
   const [state, setState] = useState<State>({
     loading: true,
@@ -750,6 +357,15 @@ export function SettingsPage() {
 
   const { settings, form } = state
 
+  function patchForm(updater: (form: SettingsFormState) => SettingsFormState) {
+    setState((current) => ({
+      ...current,
+      form: current.form ? updater(current.form) : current.form,
+      saveError: null,
+      saveSuccess: null,
+    }))
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -799,351 +415,50 @@ export function SettingsPage() {
 
       <ThemeSettingsSection />
 
-      <DetailSection
-        eyebrow="Telegram"
-        title="Telegram 通知设置"
-        aside={settings.telegram.token_present ? '已存在持久化 Token' : '当前未配置'}
-      >
-        <div className="summary-grid">
-          <label className="summary-card">
-            <span className="summary-card__label">新的 Telegram Bot Token</span>
-            <input
-              aria-label="新的 Telegram Bot Token"
-              type="password"
-              autoComplete="off"
-              value={form.telegramBotToken}
-              onChange={(event) =>
-                setState((current) => ({
-                  ...current,
-                  form: current.form
-                    ? { ...current.form, telegramBotToken: event.target.value }
-                    : current.form,
-                  saveError: null,
-                  saveSuccess: null,
-                }))
-              }
-            />
-          </label>
+      <TelegramSettingsSection
+        settings={settings.telegram}
+        form={form}
+        onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
+      />
 
-          <label className="summary-card">
-            <span className="summary-card__label">Telegram Chat ID</span>
-            <input
-              aria-label="Telegram Chat ID"
-              value={form.telegramChatId}
-              onChange={(event) =>
-                setState((current) => ({
-                  ...current,
-                  form: current.form
-                    ? { ...current.form, telegramChatId: event.target.value }
-                    : current.form,
-                  saveError: null,
-                  saveSuccess: null,
-                }))
-              }
-            />
-          </label>
+      <FeishuSettingsSection
+        form={form}
+        onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
+      />
 
-          <article className="summary-card">
-            <span className="summary-card__label">当前持久化状态</span>
-            <strong className="summary-card__value summary-card__value--text">
-              {settings.telegram.token_present ? (
-                <>
-                  已配置 Telegram Bot Token：
-                  <MonoDigits>{settings.telegram.token_masked_summary}</MonoDigits>
-                </>
-              ) : (
-                '当前未保存 Telegram Bot Token'
-              )}
-            </strong>
-          </article>
+      <FrequencyDefaultsSection
+        hostSampleFrequencyTier={form.hostSampleFrequencyTier}
+        probeFrequencyDefaults={form.probeFrequencyDefaults}
+        onHostSampleFrequencyChange={(value) =>
+          patchForm((currentForm) => ({ ...currentForm, hostSampleFrequencyTier: value }))
+        }
+        onProbeFrequencyDefaultsChange={(patch) =>
+          patchForm((currentForm) => ({
+            ...currentForm,
+            probeFrequencyDefaults: { ...currentForm.probeFrequencyDefaults, ...patch },
+          }))
+        }
+      />
 
-          <label className="summary-card">
-            <span className="summary-card__label">运行时接管</span>
-            <input
-              aria-label="使用持久化 Telegram 配置接管运行中的通知器"
-              type="checkbox"
-              checked={form.telegramRuntimeManaged}
-              onChange={(event) =>
-                setState((current) => ({
-                  ...current,
-                  form: current.form
-                    ? { ...current.form, telegramRuntimeManaged: event.target.checked }
-                    : current.form,
-                  saveError: null,
-                  saveSuccess: null,
-                }))
-              }
-            />
-          </label>
-        </div>
+      <IncidentDefaultsSection
+        value={form.incidentDefaults}
+        onChange={(next) => patchForm((currentForm) => ({ ...currentForm, incidentDefaults: next }))}
+      />
 
-        <SectionIntro>
-          {!settings.telegram.runtime_managed
-            ? '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'
-            : settings.telegram.runtime_apply_active
-              ? '当前持久化配置已接入正在运行的通知路径。'
-              : '当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。'}
-        </SectionIntro>
-        <SectionIntro>
-          接口不会回显明文 Token。留空会继续保留当前已保存的 Token；只有在需要替换时才输入新的 Token。
-        </SectionIntro>
-      </DetailSection>
+      <OverrideRulesSection
+        form={form}
+        onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
+      />
 
-      <DetailSection
-        eyebrow="飞书"
-        title="飞书通知设置"
-        ribbon="accent-2"
-        aside={form.feishuEnabled && form.feishuWebhookUrl.trim() ? '已配置' : '未配置'}
-      >
-        <div className="summary-grid">
-          <label className="summary-card">
-            <span className="summary-card__label">启用飞书通知</span>
-            <input
-              aria-label="启用飞书通知"
-              type="checkbox"
-              checked={form.feishuEnabled}
-              onChange={(event) =>
-                setState((current) => ({
-                  ...current,
-                  form: current.form
-                    ? { ...current.form, feishuEnabled: event.target.checked }
-                    : current.form,
-                  saveError: null,
-                  saveSuccess: null,
-                }))
-              }
-            />
-          </label>
-
-          <label className="summary-card">
-            <span className="summary-card__label">Webhook URL</span>
-            <input
-              aria-label="飞书 Webhook URL"
-              type="text"
-              placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
-              value={form.feishuWebhookUrl}
-              onChange={(event) =>
-                setState((current) => ({
-                  ...current,
-                  form: current.form
-                    ? { ...current.form, feishuWebhookUrl: event.target.value }
-                    : current.form,
-                  saveError: null,
-                  saveSuccess: null,
-                }))
-              }
-            />
-          </label>
-        </div>
-
-        <SectionIntro>
-          {form.feishuEnabled && form.feishuWebhookUrl.trim()
-            ? '飞书通知已启用，incident 发生时将同时通过飞书群机器人推送消息。'
-            : '当前未配置飞书通知。填写 Webhook URL 并启用后，incident 推送将同时投递到飞书群。'}
-        </SectionIntro>
-      </DetailSection>
-
-      <DetailSection eyebrow="频率档位" title="默认频率档位">
-        <SectionIntro>当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。</SectionIntro>
-        <div className="summary-grid summary-grid--numeric">
-          <FrequencySelect
-            ariaLabel="当前节点主机样本频率"
-            value={form.hostSampleFrequencyTier}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form ? { ...current.form, hostSampleFrequencyTier: value } : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-          <FrequencySelect
-            ariaLabel="TCP 默认频率"
-            value={form.probeFrequencyDefaults.tcp}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form
-                  ? {
-                      ...current.form,
-                      probeFrequencyDefaults: { ...current.form.probeFrequencyDefaults, tcp: value },
-                    }
-                  : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-          <FrequencySelect
-            ariaLabel="HTTP 默认频率"
-            value={form.probeFrequencyDefaults.http}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form
-                  ? {
-                      ...current.form,
-                      probeFrequencyDefaults: { ...current.form.probeFrequencyDefaults, http: value },
-                    }
-                  : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-          <FrequencySelect
-            ariaLabel="TLS 默认频率"
-            value={form.probeFrequencyDefaults.tls}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form
-                  ? {
-                      ...current.form,
-                      probeFrequencyDefaults: { ...current.form.probeFrequencyDefaults, tls: value },
-                    }
-                  : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-        </div>
-      </DetailSection>
-
-      <DetailSection eyebrow="全局默认" title="全局默认规则">
-        <SectionIntro>heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路。</SectionIntro>
-        <IncidentDefaultsEditor
-          value={form.incidentDefaults}
-          onChange={(next) =>
-            setState((current) => ({
-              ...current,
-              form: current.form ? { ...current.form, incidentDefaults: next } : current.form,
-              saveError: null,
-              saveSuccess: null,
-            }))
-          }
-        />
-      </DetailSection>
-
-      <DetailSection eyebrow="覆盖规则" title="少量覆盖规则" aside={<TargetTypeSummary />}>
-        <SectionIntro>
-          仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；异常默认覆盖仍仅作为持久化策略保存。
-        </SectionIntro>
-        <div className="settings-cluster">
-          <OverrideTextarea
-            ariaLabel="节点标签覆盖规则 JSON"
-            value={form.nodeLabelOverridesText}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form ? { ...current.form, nodeLabelOverridesText: value } : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-          <OverrideTextarea
-            ariaLabel="目标类型覆盖规则 JSON"
-            value={form.targetTypeOverridesText}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form ? { ...current.form, targetTypeOverridesText: value } : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-          <OverrideTextarea
-            ariaLabel="目标标签覆盖规则 JSON"
-            value={form.targetLabelOverridesText}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form ? { ...current.form, targetLabelOverridesText: value } : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-        </div>
-      </DetailSection>
-
-      <DetailSection eyebrow="保留策略" title="数据保留策略">
-        <div className="summary-grid summary-grid--numeric">
-          <RetentionInput
-            ariaLabel="原始层保留天数"
-            value={form.retentionPolicy.rawLayerDays}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form
-                  ? {
-                      ...current.form,
-                      retentionPolicy: { ...current.form.retentionPolicy, rawLayerDays: value },
-                    }
-                  : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-          <RetentionInput
-            ariaLabel="聚合层保留天数"
-            value={form.retentionPolicy.aggregateLayerDays}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form
-                  ? {
-                      ...current.form,
-                      retentionPolicy: { ...current.form.retentionPolicy, aggregateLayerDays: value },
-                    }
-                  : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-          <RetentionInput
-            ariaLabel="事件层保留天数"
-            value={form.retentionPolicy.eventLayerDays}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form
-                  ? {
-                      ...current.form,
-                      retentionPolicy: { ...current.form.retentionPolicy, eventLayerDays: value },
-                    }
-                  : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-          <RetentionInput
-            ariaLabel="通知层保留天数"
-            value={form.retentionPolicy.notificationLayerDays}
-            onChange={(value) =>
-              setState((current) => ({
-                ...current,
-                form: current.form
-                  ? {
-                      ...current.form,
-                      retentionPolicy: { ...current.form.retentionPolicy, notificationLayerDays: value },
-                    }
-                  : current.form,
-                saveError: null,
-                saveSuccess: null,
-              }))
-            }
-          />
-        </div>
-        <SectionIntro>中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础。</SectionIntro>
-      </DetailSection>
+      <RetentionPolicySection
+        value={form.retentionPolicy}
+        onChange={(patch) =>
+          patchForm((currentForm) => ({
+            ...currentForm,
+            retentionPolicy: { ...currentForm.retentionPolicy, ...patch },
+          }))
+        }
+      />
 
       {state.saveError ? <section className="page-panel">{state.saveError}</section> : null}
       {state.saveSuccess ? <section className="page-panel">{state.saveSuccess}</section> : null}
@@ -1154,50 +469,5 @@ export function SettingsPage() {
         </button>
       </div>
     </form>
-  )
-}
-
-const PRESET_TABS = [
-  { value: 'houfeng' as const, label: '候风原色' },
-  { value: 'classic' as const, label: '经典' },
-]
-
-const MODE_TABS = [
-  { value: 'dark' as const, label: '深色' },
-  { value: 'light' as const, label: '浅色' },
-  { value: 'system' as const, label: '跟随系统' },
-]
-
-function ThemeSettingsSection() {
-  const theme = useThemeOptional()
-  if (!theme) return null
-  const { preset, mode, setPreset, setMode } = theme
-  return (
-    <DetailSection
-      eyebrow="主题"
-      title="主题"
-      aside="本地浏览器偏好"
-    >
-      <div className="settings-cluster">
-        <div className="settings-fieldset">
-          <p className="section-heading__eyebrow">风格</p>
-          <Tabs<Preset>
-            variant="pill"
-            value={preset}
-            onChange={setPreset}
-            items={PRESET_TABS}
-          />
-        </div>
-        <div className="settings-fieldset">
-          <p className="section-heading__eyebrow">明暗</p>
-          <Tabs<Mode>
-            variant="pill"
-            value={mode}
-            onChange={setMode}
-            items={MODE_TABS}
-          />
-        </div>
-      </div>
-    </DetailSection>
   )
 }
