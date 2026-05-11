@@ -62,12 +62,28 @@ type Notifier interface {
 	Send(context.Context, string) error
 }
 
+type NotificationDelivery struct {
+	Channel NotificationChannel
+	Status  DeliveryStatus
+	Error   error
+}
+
+type NotificationDispatcher interface {
+	Dispatch(context.Context, string) []NotificationDelivery
+}
+
+type NotificationChannelResolver interface {
+	NotificationChannels(context.Context) []NotificationChannel
+}
+
 type SettingsAwareNotifierFactory func(botToken, chatID string) Notifier
+type FeishuNotifierFactory func(webhookURL string) Notifier
 
 type settingsAwareNotifier struct {
-	settingsRepo SettingsRepository
-	newNotifier  SettingsAwareNotifierFactory
-	fallback     Notifier
+	settingsRepo        SettingsRepository
+	newTelegramNotifier SettingsAwareNotifierFactory
+	newFeishuNotifier   FeishuNotifierFactory
+	fallback            Notifier
 }
 
 func NewSettingsAwareNotifier(settingsRepo SettingsRepository, newNotifier SettingsAwareNotifierFactory, fallback Notifier) Notifier {
@@ -75,18 +91,35 @@ func NewSettingsAwareNotifier(settingsRepo SettingsRepository, newNotifier Setti
 		return fallback
 	}
 	return &settingsAwareNotifier{
-		settingsRepo: settingsRepo,
-		newNotifier:  newNotifier,
-		fallback:     fallback,
+		settingsRepo:        settingsRepo,
+		newTelegramNotifier: newNotifier,
+		newFeishuNotifier: func(webhookURL string) Notifier {
+			return notify.NewFeishuNotifier(webhookURL)
+		},
+		fallback: fallback,
+	}
+}
+
+func NewSettingsAwareNotificationDispatcher(settingsRepo SettingsRepository, newTelegramNotifier SettingsAwareNotifierFactory, newFeishuNotifier FeishuNotifierFactory, fallback Notifier) NotificationDispatcher {
+	if settingsRepo == nil {
+		return notifierDispatcher{channel: NotificationChannelTelegram, notifier: fallback}
+	}
+	return &settingsAwareNotifier{
+		settingsRepo:        settingsRepo,
+		newTelegramNotifier: newTelegramNotifier,
+		newFeishuNotifier:   newFeishuNotifier,
+		fallback:            fallback,
 	}
 }
 
 func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error {
+	return dispatchError(n.Dispatch(ctx, summary))
+}
+
+func (n *settingsAwareNotifier) NotificationChannels(ctx context.Context) []NotificationChannel {
 	var telegramTelegram *centersettings.TelegramSettings
 	var telegramExists bool
 
-	// If the repo supports the optimized persisted Telegram path, pre-load
-	// Telegram settings via that path (avoids decoding full JSONB columns).
 	if source, ok := n.settingsRepo.(persistedTelegramSettingsSource); ok {
 		t, exists, err := source.GetPersistedTelegramSettings(ctx)
 		if err == nil {
@@ -95,18 +128,49 @@ func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error 
 		}
 	}
 
-	// Load full settings for the unified send path (needed for Feishu).
 	settings, err := n.settingsRepo.GetSettings(ctx)
 	if err != nil {
-		// If we have Telegram-only settings from the persisted path, send just
-		// Telegram and return.
+		if telegramTelegram != nil || n.fallback != nil {
+			return []NotificationChannel{NotificationChannelTelegram}
+		}
+		return nil
+	}
+	if telegramTelegram != nil {
+		settings.Telegram = *telegramTelegram
+	}
+
+	feishuConfigured := settings.FeishuEnabled && settings.FeishuWebhookURL != ""
+	channels := make([]NotificationChannel, 0, 2)
+	if telegramChannel(settings.Telegram, telegramExists, n.fallback != nil, feishuConfigured) {
+		channels = append(channels, NotificationChannelTelegram)
+	}
+	if feishuConfigured {
+		channels = append(channels, NotificationChannelFeishu)
+	}
+	return uniqueNotificationChannels(channels)
+}
+
+func (n *settingsAwareNotifier) Dispatch(ctx context.Context, summary string) []NotificationDelivery {
+	var telegramTelegram *centersettings.TelegramSettings
+	var telegramExists bool
+
+	if source, ok := n.settingsRepo.(persistedTelegramSettingsSource); ok {
+		t, exists, err := source.GetPersistedTelegramSettings(ctx)
+		if err == nil {
+			telegramTelegram = &t
+			telegramExists = exists
+		}
+	}
+
+	settings, err := n.settingsRepo.GetSettings(ctx)
+	if err != nil {
 		if telegramTelegram != nil {
-			return n.sendTelegram(ctx, summary, *telegramTelegram, telegramExists)
+			return []NotificationDelivery{n.dispatchTelegram(ctx, summary, *telegramTelegram, telegramExists)}
 		}
 		if n.fallback != nil {
-			return n.fallback.Send(ctx, summary)
+			return []NotificationDelivery{dispatchWithNotifier(ctx, NotificationChannelTelegram, n.fallback, summary)}
 		}
-		return fmt.Errorf("get persisted center settings: %w", err)
+		return []NotificationDelivery{{Channel: NotificationChannelTelegram, Status: DeliveryStatusFailed, Error: fmt.Errorf("get persisted center settings: %w", err)}}
 	}
 
 	// Override Telegram settings with persisted-telegram source if available.
@@ -114,62 +178,124 @@ func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error 
 		settings.Telegram = *telegramTelegram
 	}
 
-	var lastErr error
-	anyChannel := false
-	settingsSuppressed := false
+	feishuConfigured := settings.FeishuEnabled && settings.FeishuWebhookURL != ""
+	deliveries := make([]NotificationDelivery, 0, 2)
 
-	// Telegram: let sendTelegram decide whether to send or suppress.
-	telegramErr := n.sendTelegram(ctx, summary, settings.Telegram, true)
-	if telegramErr == nil {
-		anyChannel = true
-	} else if errors.Is(telegramErr, errNotificationSuppressed) {
-		settingsSuppressed = true
-	} else {
-		lastErr = telegramErr
-		anyChannel = true
+	telegramDelivery := n.dispatchTelegram(ctx, summary, settings.Telegram, true)
+	if telegramDelivery.Status != DeliveryStatusSuppressed || (!feishuConfigured && (telegramExists || settings.Telegram.RuntimeManaged)) {
+		deliveries = append(deliveries, telegramDelivery)
 	}
 
-	// Feishu
-	if settings.FeishuEnabled && settings.FeishuWebhookURL != "" {
-		anyChannel = true
-		feishu := notify.NewFeishuNotifier(settings.FeishuWebhookURL)
-		if err := feishu.Send(ctx, summary); err != nil {
-			lastErr = err
-		}
+	if feishuConfigured {
+		deliveries = append(deliveries, n.dispatchFeishu(ctx, summary, settings.FeishuWebhookURL))
 	}
 
-	if !anyChannel {
-		// If settings explicitly suppressed notification, do not fallback to env.
-		if settingsSuppressed {
-			return errNotificationSuppressed
-		}
+	if len(deliveries) == 0 {
+		return []NotificationDelivery{{Channel: NotificationChannelTelegram, Status: DeliveryStatusSuppressed, Error: errNotificationSuppressed}}
+	}
+
+	return deliveries
+}
+
+func (n *settingsAwareNotifier) dispatchTelegram(ctx context.Context, summary string, telegram centersettings.TelegramSettings, exists bool) NotificationDelivery {
+	if !exists || !telegram.RuntimeManaged {
 		if n.fallback != nil {
-			return n.fallback.Send(ctx, summary)
+			return dispatchWithNotifier(ctx, NotificationChannelTelegram, n.fallback, summary)
 		}
-		return errNotificationSuppressed
+		return NotificationDelivery{Channel: NotificationChannelTelegram, Status: DeliveryStatusSuppressed, Error: errNotificationSuppressed}
 	}
+	if !telegram.Enabled() {
+		return NotificationDelivery{Channel: NotificationChannelTelegram, Status: DeliveryStatusSuppressed, Error: errNotificationSuppressed}
+	}
+	if n.newTelegramNotifier == nil {
+		return NotificationDelivery{Channel: NotificationChannelTelegram, Status: DeliveryStatusFailed, Error: errors.New("telegram notifier factory is nil")}
+	}
+	notifier := n.newTelegramNotifier(telegram.BotToken, telegram.ChatID)
+	if notifier == nil {
+		return NotificationDelivery{Channel: NotificationChannelTelegram, Status: DeliveryStatusFailed, Error: errors.New("telegram notifier is nil")}
+	}
+	return dispatchWithNotifier(ctx, NotificationChannelTelegram, notifier, summary)
+}
 
+func (n *settingsAwareNotifier) dispatchFeishu(ctx context.Context, summary, webhookURL string) NotificationDelivery {
+	if n.newFeishuNotifier == nil {
+		return NotificationDelivery{Channel: NotificationChannelFeishu, Status: DeliveryStatusFailed, Error: errors.New("feishu notifier factory is nil")}
+	}
+	notifier := n.newFeishuNotifier(webhookURL)
+	if notifier == nil {
+		return NotificationDelivery{Channel: NotificationChannelFeishu, Status: DeliveryStatusFailed, Error: errors.New("feishu notifier is nil")}
+	}
+	return dispatchWithNotifier(ctx, NotificationChannelFeishu, notifier, summary)
+}
+
+type notifierDispatcher struct {
+	channel  NotificationChannel
+	notifier Notifier
+}
+
+func (d notifierDispatcher) NotificationChannels(context.Context) []NotificationChannel {
+	if d.notifier == nil {
+		return nil
+	}
+	return []NotificationChannel{d.channel}
+}
+
+func (d notifierDispatcher) Dispatch(ctx context.Context, summary string) []NotificationDelivery {
+	if d.notifier == nil {
+		return []NotificationDelivery{{Channel: d.channel, Status: DeliveryStatusSuppressed, Error: errNotificationSuppressed}}
+	}
+	return []NotificationDelivery{dispatchWithNotifier(ctx, d.channel, d.notifier, summary)}
+}
+
+func dispatchWithNotifier(ctx context.Context, channel NotificationChannel, notifier Notifier, summary string) NotificationDelivery {
+	if notifier == nil {
+		return NotificationDelivery{Channel: channel, Status: DeliveryStatusSuppressed, Error: errNotificationSuppressed}
+	}
+	if err := notifier.Send(ctx, summary); err != nil {
+		if errors.Is(err, errNotificationSuppressed) {
+			return NotificationDelivery{Channel: channel, Status: DeliveryStatusSuppressed, Error: err}
+		}
+		return NotificationDelivery{Channel: channel, Status: DeliveryStatusFailed, Error: err}
+	}
+	return NotificationDelivery{Channel: channel, Status: DeliveryStatusSent}
+}
+
+func dispatchError(deliveries []NotificationDelivery) error {
+	var lastErr error
+	sent := false
+	for _, delivery := range deliveries {
+		switch delivery.Status {
+		case DeliveryStatusFailed:
+			lastErr = delivery.Error
+		case DeliveryStatusSent:
+			sent = true
+		case DeliveryStatusSuppressed:
+			if lastErr == nil {
+				lastErr = delivery.Error
+			}
+		}
+	}
+	if sent && (lastErr == nil || errors.Is(lastErr, errNotificationSuppressed)) {
+		return nil
+	}
 	return lastErr
 }
 
-func (n *settingsAwareNotifier) sendTelegram(ctx context.Context, summary string, telegram centersettings.TelegramSettings, exists bool) error {
-	if !exists || !telegram.RuntimeManaged {
-		if n.fallback != nil {
-			return n.fallback.Send(ctx, summary)
-		}
-		return errNotificationSuppressed
+func telegramChannel(settings centersettings.TelegramSettings, exists, hasFallback, feishuConfigured bool) bool {
+	if !exists || !settings.RuntimeManaged {
+		return hasFallback
 	}
-	if !telegram.Enabled() {
-		return errNotificationSuppressed
-	}
-	if n.newNotifier == nil {
-		return errors.New("telegram notifier factory is nil")
-	}
-	notifier := n.newNotifier(telegram.BotToken, telegram.ChatID)
+	return settings.Enabled() || !feishuConfigured
+}
+
+func notificationDispatcherFor(notifier Notifier) NotificationDispatcher {
 	if notifier == nil {
-		return errors.New("telegram notifier is nil")
+		return nil
 	}
-	return notifier.Send(ctx, summary)
+	if dispatcher, ok := notifier.(NotificationDispatcher); ok {
+		return dispatcher
+	}
+	return notifierDispatcher{channel: NotificationChannelTelegram, notifier: notifier}
 }
 
 type Service struct {
@@ -177,7 +303,7 @@ type Service struct {
 	targets                   TargetRepository
 	snapshots                 SnapshotReader
 	writer                    MutationWriter
-	notifier                  Notifier
+	dispatcher                NotificationDispatcher
 	settingsRepo              SettingsRepository
 	logger                    *slog.Logger
 	now                       func() time.Time
@@ -204,7 +330,7 @@ func NewSettingsBackedService(nodesRepo NodeRepository, targetsRepo TargetReposi
 		targets:                   targetsRepo,
 		snapshots:                 snapshots,
 		writer:                    writer,
-		notifier:                  notifier,
+		dispatcher:                notificationDispatcherFor(notifier),
 		settingsRepo:              settingsRepo,
 		logger:                    logger,
 		now:                       func() time.Time { return time.Now().UTC() },
@@ -584,35 +710,94 @@ func (s *Service) appendNotificationRecords(ctx context.Context, objectType Obje
 			continue
 		}
 		decision := evaluation.result.Notification
-		record := NotificationRecordWrite{
-			IncidentID:     incidentIdentity(evaluation),
-			ObjectType:     objectType,
-			ObjectID:       objectID,
-			Channel:        decision.Channel,
-			DeliveryStatus: DeliveryStatusSuppressed,
-			Summary:        decision.Summary,
-		}
+		base := notificationRecordBase(evaluation, objectType, objectID, decision)
 		shouldSend := decision.ShouldSend && policy.enabled(decision.Reason)
-		if shouldSend && s.notifier != nil {
-			if err := s.notifier.Send(ctx, decision.Summary); err != nil {
-				if errors.Is(err, errNotificationSuppressed) {
-					records = append(records, record)
-					continue
-				}
-				s.logger.Error("send incident notification failed", "object_type", objectType, "object_id", objectID, "error", err)
-				record.DeliveryStatus = DeliveryStatusFailed
-			} else {
-				record.DeliveryStatus = DeliveryStatusSent
-				now := s.now()
-				record.SentAt = &now
-			}
+		if shouldSend && s.dispatcher != nil {
+			deliveries := s.dispatcher.Dispatch(ctx, decision.Summary)
+			records = append(records, s.notificationRecordsFromDeliveries(base, deliveries)...)
+			continue
 		}
-		records = append(records, record)
+		records = append(records, s.suppressedNotificationRecords(ctx, base)...)
 	}
 	if len(records) == 0 {
 		return nil
 	}
 	return s.writer.AppendNotificationRecords(ctx, records)
+}
+
+func notificationRecordBase(evaluation classEvaluation, objectType ObjectType, objectID string, decision *NotificationDecision) NotificationRecordWrite {
+	channel := decision.Channel
+	if channel == "" {
+		channel = NotificationChannelTelegram
+	}
+	return NotificationRecordWrite{
+		IncidentID:     incidentIdentity(evaluation),
+		ObjectType:     objectType,
+		ObjectID:       objectID,
+		Channel:        channel,
+		DeliveryStatus: DeliveryStatusSuppressed,
+		Summary:        decision.Summary,
+	}
+}
+
+func (s *Service) notificationRecordsFromDeliveries(base NotificationRecordWrite, deliveries []NotificationDelivery) []NotificationRecordWrite {
+	if len(deliveries) == 0 {
+		return []NotificationRecordWrite{base}
+	}
+	records := make([]NotificationRecordWrite, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		record := base
+		if delivery.Channel != "" {
+			record.Channel = delivery.Channel
+		}
+		record.DeliveryStatus = delivery.Status
+		if record.DeliveryStatus == "" {
+			record.DeliveryStatus = DeliveryStatusFailed
+		}
+		if record.DeliveryStatus == DeliveryStatusSent {
+			now := s.now()
+			record.SentAt = &now
+		}
+		if record.DeliveryStatus == DeliveryStatusFailed && delivery.Error != nil {
+			s.logger.Error("send incident notification failed", "object_type", base.ObjectType, "object_id", base.ObjectID, "channel", record.Channel, "error", delivery.Error)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func (s *Service) suppressedNotificationRecords(ctx context.Context, base NotificationRecordWrite) []NotificationRecordWrite {
+	channels := []NotificationChannel(nil)
+	if resolver, ok := s.dispatcher.(NotificationChannelResolver); ok {
+		channels = resolver.NotificationChannels(ctx)
+	}
+	if len(channels) == 0 {
+		channels = []NotificationChannel{base.Channel}
+	}
+	records := make([]NotificationRecordWrite, 0, len(channels))
+	for _, channel := range uniqueNotificationChannels(channels) {
+		record := base
+		record.Channel = channel
+		record.DeliveryStatus = DeliveryStatusSuppressed
+		records = append(records, record)
+	}
+	return records
+}
+
+func uniqueNotificationChannels(channels []NotificationChannel) []NotificationChannel {
+	seen := map[NotificationChannel]struct{}{}
+	out := make([]NotificationChannel, 0, len(channels))
+	for _, channel := range channels {
+		if channel == "" {
+			continue
+		}
+		if _, ok := seen[channel]; ok {
+			continue
+		}
+		seen[channel] = struct{}{}
+		out = append(out, channel)
+	}
+	return out
 }
 
 func incidentIdentity(evaluation classEvaluation) string {

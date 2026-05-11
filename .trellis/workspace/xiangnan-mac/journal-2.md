@@ -795,3 +795,36 @@ Closed the command result durability gap by carrying command_id through agent re
 ### Next Steps
 
 - None - task complete
+
+
+## Session 83: Notification channel model
+
+**Date**: 2026-05-11
+**Task**: Notification channel model
+**Branch**: `fix/notification-channel-model`
+
+### Summary
+
+Closed the formal notification channel model gap by adding channel-aware Telegram/Feishu dispatch, per-channel notification_records statuses, regression tests, and updated release/spec docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `099df3b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

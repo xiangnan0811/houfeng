@@ -83,6 +83,21 @@ func (f *fakeNotifier) Send(_ context.Context, summary string) error {
 	return f.err
 }
 
+type fakeNotificationDispatcher struct {
+	deliveries []NotificationDelivery
+	channels   []NotificationChannel
+	summaries  []string
+}
+
+func (f *fakeNotificationDispatcher) Dispatch(_ context.Context, summary string) []NotificationDelivery {
+	f.summaries = append(f.summaries, summary)
+	return append([]NotificationDelivery(nil), f.deliveries...)
+}
+
+func (f *fakeNotificationDispatcher) NotificationChannels(context.Context) []NotificationChannel {
+	return append([]NotificationChannel(nil), f.channels...)
+}
+
 type fakeSettingsRepository struct {
 	getSettingsResult            centersettings.CenterSettings
 	getSettingsErr               error
@@ -138,7 +153,7 @@ func TestServiceNotificationFlags(t *testing.T) {
 				},
 				Notification: &NotificationDecision{
 					ShouldSend: true,
-					Channel:    "telegram",
+					Channel:    NotificationChannelTelegram,
 					Reason:     reason,
 					Summary:    "summary",
 				},
@@ -333,6 +348,98 @@ func TestServiceRecordsFailedNotificationDelivery(t *testing.T) {
 	}
 }
 
+func TestServiceRecordsNotificationDeliveryPerChannel(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+	}
+	writer := &fakeMutationWriter{}
+	dispatcher := &fakeNotificationDispatcher{
+		deliveries: []NotificationDelivery{
+			{Channel: NotificationChannelTelegram, Status: DeliveryStatusSent},
+			{Channel: NotificationChannelFeishu, Status: DeliveryStatusFailed, Error: errors.New("feishu failed")},
+		},
+		channels: []NotificationChannel{NotificationChannelTelegram, NotificationChannelFeishu},
+	}
+	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service.dispatcher = dispatcher
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if len(dispatcher.summaries) != 1 {
+		t.Fatalf("dispatcher summaries = %#v, want one send", dispatcher.summaries)
+	}
+	if len(writer.notifications) != 1 || len(writer.notifications[0]) != 2 {
+		t.Fatalf("notifications = %#v, want two channel records", writer.notifications)
+	}
+	gotByChannel := map[NotificationChannel]NotificationRecordWrite{}
+	for _, record := range writer.notifications[0] {
+		gotByChannel[record.Channel] = record
+	}
+	telegram := gotByChannel[NotificationChannelTelegram]
+	if telegram.DeliveryStatus != DeliveryStatusSent || telegram.SentAt == nil {
+		t.Fatalf("telegram record = %#v, want sent with sent_at", telegram)
+	}
+	feishu := gotByChannel[NotificationChannelFeishu]
+	if feishu.DeliveryStatus != DeliveryStatusFailed || feishu.SentAt != nil {
+		t.Fatalf("feishu record = %#v, want failed without sent_at", feishu)
+	}
+}
+
+func TestServiceSuppressesNotificationPerResolvedChannel(t *testing.T) {
+	writer := &fakeMutationWriter{}
+	dispatcher := &fakeNotificationDispatcher{
+		channels: []NotificationChannel{NotificationChannelTelegram, NotificationChannelFeishu},
+	}
+	settingsRepo := &fakeSettingsRepository{
+		persistedIncidentDefaults: centersettings.IncidentDefaults{
+			NotifyOnStarted:   false,
+			NotifyOnEscalated: true,
+			NotifyOnRecovered: true,
+		},
+		persistedIncidentExists: true,
+	}
+	service := NewSettingsBackedService(nil, nil, nil, writer, nil, settingsRepo, slog.Default(), 30*time.Second, time.Minute)
+	service.dispatcher = dispatcher
+
+	evaluation := classEvaluation{
+		class: IncidentNodeDiskPressure,
+		result: EvaluationResult{
+			Current: &IncidentRecord{
+				IncidentID:    "inc_node_nd_001_node_disk_pressure",
+				ObjectType:    ObjectTypeNode,
+				ObjectID:      "nd_001",
+				IncidentClass: IncidentNodeDiskPressure,
+			},
+			Notification: &NotificationDecision{
+				ShouldSend: true,
+				Channel:    NotificationChannelTelegram,
+				Reason:     NotificationReasonStarted,
+				Summary:    "summary",
+			},
+		},
+	}
+
+	if err := service.appendNotificationRecords(context.Background(), ObjectTypeNode, "nd_001", []classEvaluation{evaluation}); err != nil {
+		t.Fatalf("appendNotificationRecords() error = %v", err)
+	}
+	if len(dispatcher.summaries) != 0 {
+		t.Fatalf("dispatcher summaries = %#v, want no sends when policy suppresses", dispatcher.summaries)
+	}
+	if len(writer.notifications) != 1 || len(writer.notifications[0]) != 2 {
+		t.Fatalf("notifications = %#v, want two suppressed records", writer.notifications)
+	}
+	for _, record := range writer.notifications[0] {
+		if record.DeliveryStatus != DeliveryStatusSuppressed {
+			t.Fatalf("record = %#v, want suppressed", record)
+		}
+	}
+}
+
 func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
@@ -515,6 +622,95 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	}
 	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSent {
 		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSent)
+	}
+}
+
+func TestSettingsAwareNotificationDispatcherSendsFeishuOnly(t *testing.T) {
+	settings := centersettings.Default()
+	settings.FeishuEnabled = true
+	settings.FeishuWebhookURL = "https://open.feishu.cn/open-apis/bot/v2/hook/test"
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult: settings,
+		persistedTelegram: centersettings.TelegramSettings{RuntimeManaged: true},
+		persistedExists:   true,
+	}
+	feishuNotifier := &fakeNotifier{}
+	buildTelegramCalls := 0
+	var gotWebhookURL string
+	dispatcher := NewSettingsAwareNotificationDispatcher(
+		settingsRepo,
+		func(botToken, chatID string) Notifier {
+			buildTelegramCalls++
+			return &fakeNotifier{}
+		},
+		func(webhookURL string) Notifier {
+			gotWebhookURL = webhookURL
+			return feishuNotifier
+		},
+		&fakeNotifier{},
+	)
+
+	deliveries := dispatcher.Dispatch(context.Background(), "incident started")
+	if len(deliveries) != 1 {
+		t.Fatalf("deliveries = %#v, want one feishu delivery", deliveries)
+	}
+	gotByChannel := deliveriesByChannel(deliveries)
+	if gotByChannel[NotificationChannelFeishu].Status != DeliveryStatusSent {
+		t.Fatalf("feishu delivery = %#v, want sent", gotByChannel[NotificationChannelFeishu])
+	}
+	if gotWebhookURL != settings.FeishuWebhookURL {
+		t.Fatalf("got webhook URL = %q, want settings webhook", gotWebhookURL)
+	}
+	if len(feishuNotifier.messages) != 1 || feishuNotifier.messages[0] != "incident started" {
+		t.Fatalf("feishu messages = %#v, want one summary", feishuNotifier.messages)
+	}
+	if buildTelegramCalls != 0 {
+		t.Fatalf("buildTelegramCalls = %d, want 0 for disabled persisted Telegram", buildTelegramCalls)
+	}
+}
+
+func TestSettingsAwareNotificationDispatcherSendsTelegramAndFeishu(t *testing.T) {
+	settings := centersettings.Default()
+	settings.Telegram = centersettings.TelegramSettings{
+		BotToken:       "persisted-bot-token",
+		ChatID:         "persisted-chat-id",
+		RuntimeManaged: true,
+	}
+	settings.FeishuEnabled = true
+	settings.FeishuWebhookURL = "https://open.feishu.cn/open-apis/bot/v2/hook/test"
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult: settings,
+		persistedTelegram: settings.Telegram,
+		persistedExists:   true,
+	}
+	telegramNotifier := &fakeNotifier{}
+	feishuNotifier := &fakeNotifier{err: errors.New("feishu failed")}
+	dispatcher := NewSettingsAwareNotificationDispatcher(
+		settingsRepo,
+		func(botToken, chatID string) Notifier {
+			if botToken != settings.Telegram.BotToken || chatID != settings.Telegram.ChatID {
+				t.Fatalf("telegram config = %q/%q, want persisted settings", botToken, chatID)
+			}
+			return telegramNotifier
+		},
+		func(string) Notifier { return feishuNotifier },
+		&fakeNotifier{},
+	)
+
+	deliveries := dispatcher.Dispatch(context.Background(), "incident started")
+	if len(deliveries) != 2 {
+		t.Fatalf("deliveries = %#v, want two channel deliveries", deliveries)
+	}
+	gotByChannel := deliveriesByChannel(deliveries)
+	if gotByChannel[NotificationChannelTelegram].Status != DeliveryStatusSent {
+		t.Fatalf("telegram delivery = %#v, want sent", gotByChannel[NotificationChannelTelegram])
+	}
+	feishu := gotByChannel[NotificationChannelFeishu]
+	if feishu.Status != DeliveryStatusFailed || feishu.Error == nil {
+		t.Fatalf("feishu delivery = %#v, want failed with error", feishu)
+	}
+	if len(telegramNotifier.messages) != 1 || len(feishuNotifier.messages) != 1 {
+		t.Fatalf("telegram messages = %#v, feishu messages = %#v, want one each", telegramNotifier.messages, feishuNotifier.messages)
 	}
 }
 
@@ -1050,6 +1246,14 @@ func storeProbeBatch(targetID string) observations.BatchWrite {
 			ErrorSummary: "503",
 		}},
 	}
+}
+
+func deliveriesByChannel(deliveries []NotificationDelivery) map[NotificationChannel]NotificationDelivery {
+	out := make(map[NotificationChannel]NotificationDelivery, len(deliveries))
+	for _, delivery := range deliveries {
+		out[delivery.Channel] = delivery
+	}
+	return out
 }
 
 func mutationsContainIncident(mutations []IncidentMutation, class IncidentClass) bool {

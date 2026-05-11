@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "confirm branch and PR workflow compliance before completion"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify channel values survive evaluator/service/store boundaries"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec index for check context"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "verify notification record persistence contract and migration decision"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify suppression/error semantics and wrapped error behavior"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "verify notification failure paths do not log secrets"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify tests and Makefile quality gate coverage"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "verify Dashboard notification_status boundary remains boolean-only"}

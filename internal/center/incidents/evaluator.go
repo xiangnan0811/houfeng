@@ -302,7 +302,7 @@ func recoverIfNeeded(previous *IncidentRecord, when time.Time, summary string) E
 		},
 		Notification: &NotificationDecision{
 			ShouldSend: true,
-			Channel:    "telegram",
+			Channel:    NotificationChannelTelegram,
 			Reason:     NotificationReasonRecovered,
 			Severity:   previous.Severity,
 			Summary:    summary,
@@ -327,7 +327,7 @@ func evaluateTransition(previous *IncidentRecord, objectType ObjectType, objectI
 			Current:      current,
 			Transition:   TransitionStarted,
 			Event:        &StateChangeEventRecord{IncidentID: current.IncidentID, IncidentClass: class, ObjectType: objectType, ObjectID: objectID, EventType: EventIncidentStarted, Severity: severity, Summary: summary, CreatedAt: when},
-			Notification: &NotificationDecision{ShouldSend: true, Channel: "telegram", Reason: NotificationReasonStarted, Severity: severity, Summary: summary},
+			Notification: &NotificationDecision{ShouldSend: true, Channel: NotificationChannelTelegram, Reason: NotificationReasonStarted, Severity: severity, Summary: summary},
 		}
 	}
 	current.StartedAt = previous.StartedAt
@@ -336,7 +336,7 @@ func evaluateTransition(previous *IncidentRecord, objectType ObjectType, objectI
 			Current:      current,
 			Transition:   TransitionEscalated,
 			Event:        &StateChangeEventRecord{IncidentID: current.IncidentID, IncidentClass: class, ObjectType: objectType, ObjectID: objectID, EventType: EventIncidentEscalated, Severity: severity, Summary: summary, CreatedAt: when},
-			Notification: &NotificationDecision{ShouldSend: true, Channel: "telegram", Reason: NotificationReasonEscalated, Severity: severity, Summary: summary},
+			Notification: &NotificationDecision{ShouldSend: true, Channel: NotificationChannelTelegram, Reason: NotificationReasonEscalated, Severity: severity, Summary: summary},
 		}
 	}
 	return EvaluationResult{Current: current, Transition: TransitionNoop}

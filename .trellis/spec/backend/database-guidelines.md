@@ -602,9 +602,10 @@ where not exists (
 3. **V1 探针种类只有 `tcp` / `http` / `https` / `tls`**（`internal/contracts/agentapi/types.go:30-34` 中的 `ProbeKind*` 常量）。新增种类必须先获得基线批准，并同步更新设计文档与契约包。
 4. **健康状态 (`current_health_status`) 是派生量**（`正常 / 关注 / 告警 / 严重`），由 incident service 在写后计算并回写；**不要直接接受外部 API 的健康字段写入**。
 5. **生命周期状态 (`lifecycle_status`) 是托管量**（`待接入 / 在用 / 观察中 / 不续费 / 已退役`），通过专用 handler (`runtime_controls.go` + `node_onboarding.go`) 改变；其他写路径不应触碰该列。
-6. **维护模式 (`monitoring_status = '维护中'` / `'暂停'`) 是 runtime control，不是健康状态**。维护期间观测照常落库（`maintenance_context = true`），但 incident / Telegram 处理需识别该上下文（参考 `store/nodes.go:74-77`、`incidents/service.go`）。
+6. **维护模式 (`monitoring_status = '维护中'` / `'暂停'`) 是 runtime control，不是健康状态**。维护期间观测照常落库（`maintenance_context = true`），但 incident / notification 处理需识别该上下文（参考 `store/nodes.go:74-77`、`incidents/service.go`）。
 7. **请求路径只写原始观测**：handler 接收 sync batch 后通过 `internal/center/syncing/` 落 `node_heartbeats` / `host_samples` / `probe_observations`，**不在请求路径里跑 incident 判定 / 通知**。incident 与通知由 `incidentSvc`（`incidents.NewSettingsBackedService`，启动时作为 `Worker.Run(ctx)` 跑）异步产出。
 8. **回填观测 (`is_backfilled = true`) 必须落库但不得触发实时告警**。请求路径仍旧 `insert`（参见 `store/sync_batches.go:188`），但 incident service 在 select 阶段对历史数据的处理需带条件分支。**不要在 incident 判定里忽略 `is_backfilled` 字段，也不要在写路径里干脆丢弃这条数据**。
+9. **notification_records.channel 是真实发送通道，不是 evaluator 默认值**。`incidents.NotificationChannel` 当前只允许 `telegram` / `feishu` 作为生产通道语义；Feishu-only 发送只写 `channel='feishu'`，Telegram+Feishu 混合发送必须按 channel 写多条 record，单个 channel 失败只能把该 channel 标为 `failed`。通知策略关闭、维护/回填抑制或无可用 channel 时写 `suppressed`，但不能把 Feishu-only 或 mixed delivery 误记成 Telegram-only。
 
 ---
 
@@ -616,7 +617,7 @@ where not exists (
 - ❌ **在 handler / service 里直接拼 SQL**。所有 SQL 必须落到 `internal/center/store/<aggregate>.go`，handler 只调用仓库方法。
 - ❌ **绕过迁移文件改 schema**。任何 DDL 都要走 `db/migrations/`，并保持迁移幂等。
 - ❌ **修改已合入的迁移**。需要修复就追加新迁移做 `alter`，不要回写历史。
-- ❌ **在请求路径内做 incident 判定 / 发 Telegram**。判定 + 通知是 in-process worker 的职责（`incidentSvc`、`notify` 包）。
+- ❌ **在请求路径内做 incident 判定 / 发通知**。判定 + 通知是 in-process worker 的职责（`incidentSvc`、`notify` 包）。
 - ❌ **在多个包重复定义同一张表的列结构**。仓库内的 select/insert 列清单是单一来源；DTO 与领域类型放对应包（`nodes/`、`targets/`、`incidents/` 等）。
 - ❌ **写路径里偷偷跳过回填数据**。`is_backfilled = true` 仍要落库，只是不能反向触发告警。
 - ❌ **直接 `select *`**。请求只取需要的列，便于追踪 schema 演进。
