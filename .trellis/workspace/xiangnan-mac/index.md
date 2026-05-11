@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 87
+- **Total Sessions**: 88
 - **Last Active**: 2026-05-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~962 | Active |
+| `journal-2.md` | ~995 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 88 | 2026-05-11 | VPS detail page section extraction | `c57d72c` | `refactor/vps-detail-page-sections` |
 | 87 | 2026-05-11 | Nodes page section extraction | `b153395` | `refactor/nodes-page-sections` |
 | 86 | 2026-05-11 | Settings page section extraction | `86677cc` | `refactor/settings-page-sections` |
 | 85 | 2026-05-11 | Events API envelope migration | `e0fe8a9` | `fix/events-api-envelope` |

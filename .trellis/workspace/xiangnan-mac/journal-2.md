@@ -960,3 +960,36 @@ Extracted NodesPage hero, create drawer, toolbar, filters, batch panels, runtime
 ### Next Steps
 
 - None - task complete
+
+
+## Session 88: VPS detail page section extraction
+
+**Date**: 2026-05-11
+**Task**: VPS detail page section extraction
+**Branch**: `refactor/vps-detail-page-sections`
+
+### Summary
+
+Split VPSDetailPage presentation sections into page-private components while keeping API calls, validation, refresh order, and state ownership in the page. Verified lint, focused VPS detail tests, build, and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c57d72c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
