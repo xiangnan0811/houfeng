@@ -1191,3 +1191,36 @@ Extracted TargetDetailPage page-private body composition while keeping route par
 ### Next Steps
 
 - None - task complete
+
+
+## Session 95: EventsPage section extraction
+
+**Date**: 2026-05-11
+**Task**: EventsPage section extraction
+**Branch**: `refactor/events-page-sections`
+
+### Summary
+
+Extracted EventsPage page-private filter overview, filter drawer, and grouped event stream sections while keeping URL state, API query construction, loading, and load-more orchestration in the page owner. Verified with lint, EventsPage tests, and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4486983` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
