@@ -1125,3 +1125,36 @@ Extracted DashboardPage page-private status panel, trend pulse, attention queue,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 93: NodeDetailPage remaining section extraction
+
+**Date**: 2026-05-11
+**Task**: NodeDetailPage remaining section extraction
+**Branch**: `refactor/node-detail-page-remaining-sections`
+
+### Summary
+
+Extracted NodeDetailPage page-private body composition while keeping route params, API loading, mutations, polling, history, command, metadata, binding, lifecycle, and linked VPS orchestration in the page owner. Verified with NodeDetailPage tests and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cb8a830` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
