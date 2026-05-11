@@ -9,7 +9,7 @@
       (function () {
         try {
           var p = localStorage.getItem('houfeng.theme.preset') || 'houfeng';
-          var m = localStorage.getItem('houfeng.theme.mode') || 'system';
+          var m = localStorage.getItem('houfeng.theme.mode') || 'dark';
           var scheme = m === 'system'
             ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
             : m;

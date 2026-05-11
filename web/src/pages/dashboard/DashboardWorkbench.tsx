@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 
 import { DetailSection } from '../../components/DetailSection'
 import type { DashboardOverview } from '../../lib/types'
-import { AssetDecisionSummary } from './AssetDecisionSummary'
 import { AttentionQueue } from './AttentionQueue'
 import { DashboardContextStrip } from './DashboardContextStrip'
 import { DASHBOARD_LINKS } from './dashboardLinks'
@@ -83,7 +82,6 @@ export function DashboardWorkbench({
             </div>
             <aside className="dashboard-incident-console__aside" aria-label="异常上下文">
               <DashboardContextStrip items={buildContextItems(overview, abnormalTotal, maintenanceTotal)} />
-              <AssetDecisionSummary summary={overview.asset_summary} />
               <ManagementEntries overview={overview} showEventLink={false} />
             </aside>
           </div>

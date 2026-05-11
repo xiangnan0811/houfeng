@@ -22,14 +22,14 @@ describe('ThemeProvider', () => {
     localStorage.clear()
   })
 
-  it('starts at houfeng/system and applies html class', () => {
+  it('starts at houfeng/dark and applies html class', () => {
     render(
       <ThemeProvider>
         <Probe />
       </ThemeProvider>,
     )
-    expect(screen.getByTestId('state')).toHaveTextContent('houfeng/system')
-    expect(document.documentElement.className).toMatch(/^theme-houfeng-(dark|light)$/)
+    expect(screen.getByTestId('state')).toHaveTextContent('houfeng/dark')
+    expect(document.documentElement.classList.contains('theme-houfeng-dark')).toBe(true)
   })
 
   it('switching preset updates storage and class', () => {
