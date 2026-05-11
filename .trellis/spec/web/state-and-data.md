@@ -87,6 +87,53 @@ overview.asset_summary.vps_assets.map(...)
 <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
 ```
 
+### Asset Ledger 列表与决策队列数据流
+
+Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端做轻量 join，用于人工核对和资料质量提示；这不是后端字段扩展，也不能创造未存在的健康语义。
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `web/src/pages/AssetDecisionsPage.tsx`、`web/src/pages/VPSPage.tsx`、`web/src/pages/assetPageUtils.ts`、`AssetDecisionWorkPanel`、或改变 VPS/Subscription 列表页的筛选 URL-state。
+
+#### 2. Signatures
+
+- Frontend API: `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。
+- Decision queue data: `AssetDecisionsPage` 拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
+- VPS inventory data: `VPSPage` 拉取全量 `listVPSAssets()`、`listProviders()` 和 `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views。
+- URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|archived`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
+
+#### 3. Contracts
+
+- Asset Decisions 首屏主 surface 必须是一个统一工作队列；不得恢复三张同权 VPS queue table。
+- 决策编辑必须在 drawer 或同等次级 surface 中完成；保存成功 notice 应在队列 surface 可见。
+- `VPSAssetRecord.active_node_link_count` 只能展示 Node 关联数量或未关联状态，**不得**展示 linked node health、最近心跳或异常，除非后端 contract 新增并同步类型/测试。
+- 资料质量提示只能来自已有字段：缺订阅、`active_node_link_count <= 0`、缺 provider、缺 location、缺 SSH/IP access。不要从 provider 名称、region 文案或标签推断风险。
+- VPS inventory quick views 中 derived filters 在前端执行即可；40+ VPS 量级不引入新缓存/状态库，不新增 API 字段。
+- Dashboard 深链进入 VPS 页时，query 必须被页面首屏可见的 tab/chip/drawer 状态承接；不能静默丢弃。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| subscriptions list failed in Asset Decisions renewal window | 续费候选 evidence 显示错误，VPS 决策队列仍可显示已加载 VPS |
+| all subscriptions failed while building decision queue | VPS 队列显示加载错误，避免把全量缺订阅误报为真实数据质量 |
+| VPS inventory subscriptions empty | 行级展示 `缺订阅`，quick view `缺订阅` 可筛出对应 VPS |
+| VPS inventory URL has unsupported `view` | 降级为 `all`，下次用户操作时写回合法 query |
+| user removes a chip or clears all filters | URL-state 与 visible rows 同步更新，不重新请求 `/api/vps?...` derived query |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: `/vps?view=unlinked&renewal_decision=unreviewed` 首屏显示 `视图: 未关联` 和 `续费: 未评估` chips，列表只显示同时满足条件的 rows。
+- Good: 资产决策保存 `migrate` 后，VPS 从 `待评估` tab 消失并出现在 `迁移` tab，notice 留在队列 surface。
+- Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
+- Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked node health。
+- Bad: Page 直接 `fetch('/api/vps')` 或在组件层调 API；业务请求必须走 `lib/api.ts`。
+
+#### 6. Tests Required
+
+- `AssetDecisionsPage.test.tsx`: 续费窗口请求、统一工作队列渲染、drawer 更新决策、保存后队列移动/移除、错误/空态。
+- `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/Node/资料质量展示、创建 VPS 流程。
+
 ### Asset service 数据流
 
 VPS 服务资产是 VPS 详情页内的独立手工记录区块，前端必须把它当作 `asset_services` contract 消费，而不是从 timeline、Dashboard 或 Target probe 状态推导。

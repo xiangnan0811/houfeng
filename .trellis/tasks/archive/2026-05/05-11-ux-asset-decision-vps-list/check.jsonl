@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend quality check entrypoint."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify API/URL-state and asset data contracts are not invented."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Verify UX CSS follows dark-first token/BEM rules."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required lint/test/build and page test quality gate."}
+{"file": "docs/release/core-pages-product-ux-replan.md", "reason": "Verify implementation stays inside UX-3 scope."}
+{"file": ".trellis/tasks/05-11-ux-asset-decision-vps-list/research/current-asset-pages-audit.md", "reason": "Verify current-page problems were actually addressed."}

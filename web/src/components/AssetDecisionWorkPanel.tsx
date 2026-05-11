@@ -20,6 +20,7 @@ type AssetDecisionWorkPanelProps = {
   submitting: boolean
   error: string | null
   notice: string | null
+  surface?: 'panel' | 'drawer'
   onDraftChange: (draft: AssetDecisionDraft) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onCancel: () => void
@@ -36,18 +37,26 @@ export function AssetDecisionWorkPanel({
   submitting,
   error,
   notice,
+  surface = 'panel',
   onDraftChange,
   onSubmit,
   onCancel,
 }: AssetDecisionWorkPanelProps) {
+  const wrapperClass =
+    surface === 'drawer'
+      ? 'asset-decision-panel asset-decision-panel--drawer'
+      : 'page-panel asset-decision-panel'
+
   return (
-    <section className="page-panel asset-decision-panel" aria-label="续费决策处理">
-      <div className="section-heading">
-        <div>
-          <p className="section-heading__eyebrow">DECISION</p>
-          <h2>处理面板</h2>
+    <section className={wrapperClass} aria-label="续费决策处理">
+      {surface === 'panel' && (
+        <div className="section-heading">
+          <div>
+            <p className="section-heading__eyebrow">DECISION</p>
+            <h2>处理面板</h2>
+          </div>
         </div>
-      </div>
+      )}
       {selectedVPS ? (
         <form className="asset-operation-form" onSubmit={onSubmit}>
           <div className="asset-operation-form__header">

@@ -1,17 +1,26 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, DataTable, Input, MonoDigits, type DataTableColumn } from '../components/atoms'
+import {
+  Badge,
+  Button,
+  DataTable,
+  Drawer,
+  Input,
+  MonoDigits,
+  Tabs,
+  type DataTableColumn,
+} from '../components/atoms'
 import { FilterBar, FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
-import { ApiError, createVPSAsset, listProviders, listVPSAssets } from '../lib/api'
-import { formatOptional } from '../lib/format'
+import { ApiError, createVPSAsset, listProviders, listSubscriptions, listVPSAssets } from '../lib/api'
+import { formatDate, formatMoney, formatOptional } from '../lib/format'
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
   VPS_USAGE_STATUS_LABELS,
   type CreateVPSAssetInput,
   type ProviderRecord,
-  type VPSAssetListFilter,
+  type SubscriptionRecord,
   type VPSAssetRecord,
   type VPSLifecycleStatus,
   type VPSRenewalDecision,
@@ -24,17 +33,44 @@ import {
   UsageBadge,
 } from './assetPageBadges'
 import {
+  buildVPSQualityIssues,
+  daysUntilDate,
+  groupSubscriptionsByVPS,
+  hasMissingVPSFacts,
+  isSubscriptionInRenewalWindow,
   lifecycleLabel,
   parseLabels,
   renewalLabel,
+  renewalTimingLabel,
+  selectPrimarySubscription,
   usageLabel,
+  vpsAccessLabel,
+  vpsLocationLabel,
+  type AssetQualityIssue,
 } from './assetPageUtils'
+
+type VPSQuickView =
+  | 'all'
+  | 'renewal'
+  | 'unreviewed'
+  | 'unlinked'
+  | 'missing_subscription'
+  | 'missing_facts'
+  | 'archived'
+
+type InventoryRow = {
+  vps: VPSAssetRecord
+  subscription: SubscriptionRecord | null
+  qualityIssues: AssetQualityIssue[]
+  renewalDue: boolean
+}
 
 type PageState = {
   loading: boolean
   error: string | null
   vps: VPSAssetRecord[]
   providers: ProviderRecord[]
+  subscriptions: SubscriptionRecord[]
 }
 
 type CreateVPSFormState = {
@@ -63,6 +99,7 @@ type CreateVPSFormState = {
 }
 
 type FilterState = {
+  view: VPSQuickView
   provider_id: string | null
   lifecycle_status: VPSLifecycleStatus | null
   usage_status: VPSUsageStatus | null
@@ -74,6 +111,7 @@ const INITIAL_PAGE_STATE: PageState = {
   error: null,
   vps: [],
   providers: [],
+  subscriptions: [],
 }
 
 const INITIAL_CREATE_FORM: CreateVPSFormState = {
@@ -101,6 +139,14 @@ const INITIAL_CREATE_FORM: CreateVPSFormState = {
   note: '',
 }
 
+const INITIAL_FILTER_STATE: FilterState = {
+  view: 'all',
+  provider_id: null,
+  lifecycle_status: null,
+  usage_status: null,
+  renewal_decision: null,
+}
+
 const LIFECYCLE_OPTIONS = Object.entries(VPS_LIFECYCLE_STATUS_LABELS).map(([value, label]) => ({
   value,
   label,
@@ -113,6 +159,15 @@ const RENEWAL_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABELS).map(([value,
   value,
   label,
 }))
+const QUICK_VIEW_VALUES: VPSQuickView[] = [
+  'all',
+  'renewal',
+  'unreviewed',
+  'unlinked',
+  'missing_subscription',
+  'missing_facts',
+  'archived',
+]
 
 function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message
@@ -124,7 +179,9 @@ function parseFilters(searchParams: URLSearchParams): FilterState {
   const lifecycle = searchParams.get('lifecycle_status') as VPSLifecycleStatus | null
   const usage = searchParams.get('usage_status') as VPSUsageStatus | null
   const renewal = searchParams.get('renewal_decision') as VPSRenewalDecision | null
+  const view = searchParams.get('view') as VPSQuickView | null
   return {
+    view: view && QUICK_VIEW_VALUES.includes(view) ? view : 'all',
     provider_id: searchParams.get('provider_id') || null,
     lifecycle_status: lifecycle && lifecycle in VPS_LIFECYCLE_STATUS_LABELS ? lifecycle : null,
     usage_status: usage && usage in VPS_USAGE_STATUS_LABELS ? usage : null,
@@ -134,6 +191,7 @@ function parseFilters(searchParams: URLSearchParams): FilterState {
 
 function filterToQuery(filters: FilterState): URLSearchParams {
   const params = new URLSearchParams()
+  if (filters.view !== 'all') params.set('view', filters.view)
   if (filters.provider_id) params.set('provider_id', filters.provider_id)
   if (filters.lifecycle_status) params.set('lifecycle_status', filters.lifecycle_status)
   if (filters.usage_status) params.set('usage_status', filters.usage_status)
@@ -141,18 +199,10 @@ function filterToQuery(filters: FilterState): URLSearchParams {
   return params
 }
 
-function filterToAPI(filters: FilterState): VPSAssetListFilter {
-  return {
-    provider_id: filters.provider_id,
-    lifecycle_status: filters.lifecycle_status,
-    usage_status: filters.usage_status,
-    renewal_decision: filters.renewal_decision,
-  }
-}
-
 function hasActiveFilters(filters: FilterState): boolean {
   return Boolean(
-    filters.provider_id ||
+    filters.view !== 'all' ||
+      filters.provider_id ||
       filters.lifecycle_status ||
       filters.usage_status ||
       filters.renewal_decision,
@@ -202,10 +252,118 @@ function providerOptions(providers: ProviderRecord[]): FilterSelectOption[] {
   }))
 }
 
+function buildInventoryRows(
+  vpsRows: VPSAssetRecord[],
+  subscriptionsByVPS: Map<string, SubscriptionRecord[]>,
+): InventoryRow[] {
+  return vpsRows.map((vps) => {
+    const subscription = selectPrimarySubscription(subscriptionsByVPS, vps.vps_id)
+    return {
+      vps,
+      subscription,
+      qualityIssues: buildVPSQualityIssues(vps, subscription),
+      renewalDue: isSubscriptionInRenewalWindow(subscription, 30),
+    }
+  })
+}
+
+function applyInventoryFilters(rows: InventoryRow[], filters: FilterState): InventoryRow[] {
+  return rows
+    .filter((row) => {
+      if (filters.provider_id && row.vps.provider_id !== filters.provider_id) return false
+      if (filters.lifecycle_status && row.vps.lifecycle_status !== filters.lifecycle_status) return false
+      if (filters.usage_status && row.vps.usage_status !== filters.usage_status) return false
+      if (filters.renewal_decision && row.vps.renewal_decision !== filters.renewal_decision) return false
+      return matchesQuickView(row, filters.view)
+    })
+    .sort((left, right) => {
+      const leftRank = inventoryRank(left)
+      const rightRank = inventoryRank(right)
+      if (leftRank !== rightRank) return rightRank - leftRank
+      const leftDays = daysUntilDate(left.subscription?.renew_at) ?? Number.POSITIVE_INFINITY
+      const rightDays = daysUntilDate(right.subscription?.renew_at) ?? Number.POSITIVE_INFINITY
+      if (leftDays !== rightDays) return leftDays - rightDays
+      return left.vps.display_name.localeCompare(right.vps.display_name)
+    })
+}
+
+function matchesQuickView(row: InventoryRow, view: VPSQuickView): boolean {
+  if (view === 'all') return true
+  if (view === 'renewal') return row.renewalDue
+  if (view === 'unreviewed') return row.vps.renewal_decision === 'unreviewed'
+  if (view === 'unlinked') return row.vps.active_node_link_count <= 0
+  if (view === 'missing_subscription') return !row.subscription
+  if (view === 'missing_facts') return hasMissingVPSFacts(row.vps)
+  if (view === 'archived') return row.vps.lifecycle_status === 'archived'
+  return true
+}
+
+function inventoryRank(row: InventoryRow): number {
+  let rank = 0
+  if (row.vps.renewal_decision === 'unreviewed') rank += 120
+  if (row.renewalDue) rank += 100
+  if (!row.subscription) rank += 80
+  if (row.vps.active_node_link_count <= 0) rank += 60
+  if (hasMissingVPSFacts(row.vps)) rank += 30
+  return rank
+}
+
+function quickViewLabel(value: VPSQuickView): string {
+  if (value === 'all') return '全部'
+  if (value === 'renewal') return '30天续费'
+  if (value === 'unreviewed') return '未评估'
+  if (value === 'unlinked') return '未关联'
+  if (value === 'missing_subscription') return '缺订阅'
+  if (value === 'missing_facts') return '缺基础信息'
+  return '已归档'
+}
+
+function renderQualityIssues(issues: AssetQualityIssue[]) {
+  if (issues.length === 0) return <Badge tone="normal">资料完整</Badge>
+  return issues.map((issue) => (
+    <Badge key={issue.key} tone={issue.tone}>
+      {issue.label}
+    </Badge>
+  ))
+}
+
+function renderSubscriptionCell(subscription: SubscriptionRecord | null) {
+  if (!subscription) {
+    return (
+      <div className="asset-subscription-cell asset-subscription-cell--missing">
+        <strong>缺订阅</strong>
+        <span>无法核算续费</span>
+      </div>
+    )
+  }
+
+  const days = daysUntilDate(subscription.renew_at)
+  const autoRenewLabel = subscription.auto_renew_cancelled
+    ? '已取消自动续费'
+    : subscription.auto_renew
+      ? '自动续费'
+      : '手动续费'
+
+  return (
+    <div className="asset-subscription-cell">
+      <strong>{formatMoney(subscription.monthly_price, subscription.currency)}/月</strong>
+      <span>{subscription.renew_at ? `${formatDate(subscription.renew_at)} · ${renewalTimingLabel(days)}` : '续费日缺失'}</span>
+      <small>{autoRenewLabel}</small>
+    </div>
+  )
+}
+
+function providerName(providerID: string | null, providers: ProviderRecord[]): string {
+  if (!providerID) return ''
+  return providers.find((provider) => provider.provider_id === providerID)?.name ?? providerID
+}
+
 export function VPSPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
+  const [draftFilters, setDraftFilters] = useState<FilterState>(filters)
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false)
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState<CreateVPSFormState>(INITIAL_CREATE_FORM)
@@ -215,10 +373,14 @@ export function VPSPage() {
   useEffect(() => {
     let cancelled = false
 
-    Promise.all([listVPSAssets(filterToAPI(filters)), listProviders()])
-      .then(([vps, providers]) => {
+    Promise.all([
+      listVPSAssets(),
+      listProviders(),
+      listSubscriptions({ sort: 'renew_at', order: 'asc' }),
+    ])
+      .then(([vps, providers, subscriptions]) => {
         if (cancelled) return
-        setState({ loading: false, error: null, vps, providers })
+        setState({ loading: false, error: null, vps, providers, subscriptions })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -227,13 +389,38 @@ export function VPSPage() {
           error: describeError(error, '加载 VPS 资产失败'),
           vps: [],
           providers: [],
+          subscriptions: [],
         })
       })
 
     return () => {
       cancelled = true
     }
-  }, [filters])
+  }, [])
+
+  const subscriptionsByVPS = useMemo(
+    () => groupSubscriptionsByVPS(state.subscriptions),
+    [state.subscriptions],
+  )
+  const inventoryRows = useMemo(
+    () => buildInventoryRows(state.vps, subscriptionsByVPS),
+    [state.vps, subscriptionsByVPS],
+  )
+  const filteredRows = useMemo(
+    () => applyInventoryFilters(inventoryRows, filters),
+    [inventoryRows, filters],
+  )
+  const providerSelectOptions = providerOptions(state.providers)
+  const active = hasActiveFilters(filters)
+  const quickViews = [
+    { value: 'all', label: '全部', count: inventoryRows.length },
+    { value: 'renewal', label: '30天续费', count: inventoryRows.filter((row) => row.renewalDue).length },
+    { value: 'unreviewed', label: '未评估', count: inventoryRows.filter((row) => row.vps.renewal_decision === 'unreviewed').length },
+    { value: 'unlinked', label: '未关联', count: inventoryRows.filter((row) => row.vps.active_node_link_count <= 0).length },
+    { value: 'missing_subscription', label: '缺订阅', count: inventoryRows.filter((row) => !row.subscription).length },
+    { value: 'missing_facts', label: '缺信息', count: inventoryRows.filter((row) => hasMissingVPSFacts(row.vps)).length },
+    { value: 'archived', label: '已归档', count: inventoryRows.filter((row) => row.vps.lifecycle_status === 'archived').length },
+  ] satisfies Array<{ value: VPSQuickView; label: string; count: number }>
 
   function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     const next = { ...filters, [key]: value }
@@ -242,6 +429,16 @@ export function VPSPage() {
 
   function clearFilters() {
     setSearchParams(new URLSearchParams(), { replace: true })
+  }
+
+  function openFilterDrawer() {
+    setDraftFilters(filters)
+    setFilterDrawerOpen(true)
+  }
+
+  function applyDrawerFilters() {
+    setSearchParams(filterToQuery(draftFilters), { replace: true })
+    setFilterDrawerOpen(false)
   }
 
   function toggleCreatePanel() {
@@ -278,37 +475,39 @@ export function VPSPage() {
       .finally(() => setCreateSubmitting(false))
   }
 
-  function providerName(providerID: string | null): string {
-    if (!providerID) return ''
-    return state.providers.find((provider) => provider.provider_id === providerID)?.name ?? providerID
-  }
-
-  const columns: DataTableColumn<VPSAssetRecord>[] = [
+  const columns: DataTableColumn<InventoryRow>[] = [
     {
       key: 'identity',
-      label: '名称',
-      width: '22%',
-      render: (vps) => (
+      label: 'VPS',
+      width: '24%',
+      render: ({ vps }) => (
         <div className="asset-table__identity">
           <strong>{vps.display_name}</strong>
           <span>{vps.vps_id}</span>
+          <small>{vpsAccessLabel(vps)}</small>
         </div>
       ),
     },
     {
       key: 'provider',
       label: '服务商 / 区域',
-      render: (vps) => (
+      render: ({ vps }) => (
         <div className="asset-table__stack">
           <strong>{formatOptional(vps.provider_name)}</strong>
-          <span>{[vps.country, vps.region, vps.city].filter(Boolean).join(' · ') || '—'}</span>
+          <span>{vpsLocationLabel(vps)}</span>
+          <small>{formatOptional(vps.product_name)}</small>
         </div>
       ),
     },
     {
-      key: 'status',
-      label: '状态',
-      render: (vps) => (
+      key: 'subscription',
+      label: '订阅 / 续费',
+      render: ({ subscription }) => renderSubscriptionCell(subscription),
+    },
+    {
+      key: 'decision',
+      label: '决策',
+      render: ({ vps }) => (
         <span className="asset-status-stack">
           <LifecycleBadge value={vps.lifecycle_status} />
           <UsageBadge value={vps.usage_status} />
@@ -317,20 +516,29 @@ export function VPSPage() {
       ),
     },
     {
-      key: 'nodes',
-      label: '关联 Node',
-      align: 'center',
-      render: (vps) => <MonoDigits>{vps.active_node_link_count}</MonoDigits>,
+      key: 'observation',
+      label: '关联 / 质量',
+      render: ({ vps, qualityIssues }) => (
+        <div className="asset-quality-list">
+          <span className={['asset-quality-pill', vps.active_node_link_count <= 0 && 'asset-quality-pill--alert'].filter(Boolean).join(' ')}>
+            {vps.active_node_link_count > 0 ? (
+              <>
+                <MonoDigits>{vps.active_node_link_count}</MonoDigits> Node
+              </>
+            ) : (
+              '未关联 Node'
+            )}
+          </span>
+          <span className="asset-quality-list__badges">{renderQualityIssues(qualityIssues)}</span>
+        </div>
+      ),
     },
     {
       key: 'labels',
       label: '标签',
-      render: (vps) => <AssetLabels labels={vps.labels} />,
+      render: ({ vps }) => <AssetLabels labels={vps.labels} />,
     },
   ]
-
-  const providerSelectOptions = providerOptions(state.providers)
-  const active = hasActiveFilters(filters)
 
   return (
     <div className="page-stack asset-page vps-page">
@@ -339,7 +547,7 @@ export function VPSPage() {
           <div className="page-panel__eyebrow">ASSET LEDGER</div>
           <h1 className="page-panel__title">VPS</h1>
           <p className="page-panel__description">
-            面向续费、迁移和监控关联的 VPS 资产列表。列表优先展示决策字段，IP、SSH 和系统信息进入详情页。
+            面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。
           </p>
         </div>
         <div className="page-panel__actions">
@@ -411,34 +619,51 @@ export function VPSPage() {
         </section>
       )}
 
-      <section className="page-panel">
+      <section className="page-panel vps-inventory-command">
+        <div className="section-heading">
+          <div>
+            <p className="section-heading__eyebrow">INVENTORY VIEWS</p>
+            <h2>库存核对</h2>
+          </div>
+          <span className="section-heading__meta">
+            <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台 VPS
+          </span>
+        </div>
+        <Tabs
+          items={quickViews}
+          value={filters.view}
+          onChange={(view) => setFilter('view', view)}
+          variant="pill"
+        />
         <FilterBar
+          className="vps-filter-bar"
           hasActiveFilters={active}
           onClearAll={clearFilters}
           activeChips={
             <>
-              {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id)}`} onRemove={() => setFilter('provider_id', null)} />}
+              {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
+              {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
               {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
               {filters.usage_status && <FilterChip label={`用途: ${usageLabel(filters.usage_status)}`} onRemove={() => setFilter('usage_status', null)} />}
               {filters.renewal_decision && <FilterChip label={`续费: ${renewalLabel(filters.renewal_decision)}`} onRemove={() => setFilter('renewal_decision', null)} />}
             </>
           }
         >
-          <FilterSelect label="服务商" value={filters.provider_id} options={providerSelectOptions} onChange={(value) => setFilter('provider_id', value)} />
-          <FilterSelect label="生命周期" value={filters.lifecycle_status} options={LIFECYCLE_OPTIONS} onChange={(value) => setFilter('lifecycle_status', value as VPSLifecycleStatus | null)} />
-          <FilterSelect label="用途状态" value={filters.usage_status} options={USAGE_OPTIONS} onChange={(value) => setFilter('usage_status', value as VPSUsageStatus | null)} />
-          <FilterSelect label="续费决策" value={filters.renewal_decision} options={RENEWAL_OPTIONS} onChange={(value) => setFilter('renewal_decision', value as VPSRenewalDecision | null)} />
+          <div className="vps-filter-bar__summary">
+            <span>主屏只保留 quick views，字段筛选在 drawer 中调整。</span>
+          </div>
+          <Button variant="secondary" onClick={openFilterDrawer}>高级筛选</Button>
         </FilterBar>
       </section>
 
-      <section className="page-panel">
+      <section className="page-panel page-panel--scroll-x">
         <div className="section-heading">
           <div>
             <p className="section-heading__eyebrow">VPS ASSETS</p>
-            <h2>VPS 列表</h2>
+            <h2>VPS 库存表</h2>
           </div>
           <span className="section-heading__meta">
-            <MonoDigits>{state.vps.length}</MonoDigits> 台 VPS
+            <MonoDigits>{filteredRows.length}</MonoDigits> 台 VPS
           </span>
         </div>
 
@@ -448,15 +673,60 @@ export function VPSPage() {
           <div className="empty-state">{state.error}</div>
         ) : (
           <DataTable
-            className="asset-table vps-table"
+            className="asset-table vps-table vps-inventory-table"
             columns={columns}
-            rows={state.vps}
-            rowKey={(vps) => vps.vps_id}
-            onRowClick={(vps) => navigate(`/vps/${vps.vps_id}`)}
-            emptyContent={<span className="empty-inline">暂无 VPS 资产</span>}
+            rows={filteredRows}
+            rowKey={(row) => row.vps.vps_id}
+            onRowClick={(row) => navigate(`/vps/${row.vps.vps_id}`)}
+            emptyContent={<span className="empty-inline">当前筛选下暂无 VPS 资产</span>}
           />
         )}
       </section>
+
+      <Drawer
+        open={filterDrawerOpen}
+        onClose={() => setFilterDrawerOpen(false)}
+        title="高级筛选"
+        ariaLabel="VPS 高级筛选"
+      >
+        <div className="asset-filter-drawer">
+          <FilterSelect
+            label="服务商"
+            value={draftFilters.provider_id}
+            options={providerSelectOptions}
+            onChange={(value) => setDraftFilters({ ...draftFilters, provider_id: value })}
+          />
+          <FilterSelect
+            label="生命周期"
+            value={draftFilters.lifecycle_status}
+            options={LIFECYCLE_OPTIONS}
+            onChange={(value) => setDraftFilters({ ...draftFilters, lifecycle_status: value as VPSLifecycleStatus | null })}
+          />
+          <FilterSelect
+            label="用途状态"
+            value={draftFilters.usage_status}
+            options={USAGE_OPTIONS}
+            onChange={(value) => setDraftFilters({ ...draftFilters, usage_status: value as VPSUsageStatus | null })}
+          />
+          <FilterSelect
+            label="续费决策"
+            value={draftFilters.renewal_decision}
+            options={RENEWAL_OPTIONS}
+            onChange={(value) => setDraftFilters({ ...draftFilters, renewal_decision: value as VPSRenewalDecision | null })}
+          />
+          <div className="asset-filter-drawer__actions">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setDraftFilters(INITIAL_FILTER_STATE)
+              }}
+            >
+              重置
+            </Button>
+            <Button onClick={applyDrawerFilters}>应用筛选</Button>
+          </div>
+        </div>
+      </Drawer>
     </div>
   )
 }

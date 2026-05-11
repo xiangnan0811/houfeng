@@ -218,6 +218,20 @@ parent: docs/design/v2-houfeng/design-language.md
 7. Dashboard 默认不展示所有 `/api/dashboard` contract 字段。`group_summaries` 与 `recent_events` 是次级详情入口的数据来源，不在 Dashboard 首屏展开为 `Group 摘要` 或 `最近事件摘要` 列表；用户通过节点、目标、事件页深链查看完整上下文。需要重新展示这些字段时必须先证明它们服务当前状态的主决策路径，并同步测试防止信息摊开。
 8. 首次接入态只渲染 onboarding 主工作台和必要入口，不渲染摘要指标、运行上下文、空 Group、空最近事件、API facts 或其它暗示系统已有数据的大区块。四步入口分别为 `/nodes`、`/nodes?onboarding=pending`、`/targets`、`/targets`。
 
+### AssetDecisionsPage
+1. 资产决策页是 Asset Ledger 的主工作队列，不是三张 VPS 状态表的拼接。首屏必须出现一个统一 `资产决策工作队列` surface，按未评估、续费窗口、迁移/取消、未关联 Node、缺订阅等人工处理优先级排序。
+2. 顶部 summary 只保留能指导处理顺序的少量数字：续费窗口订阅数、统一队列数量、缺订阅/未关联数量、迁移/取消数量。不要恢复同权 KPI 卡片墙。
+3. 队列行必须服务扫描和判断：rank、VPS identity、provider/region/access、生命周期/用途/续费决策、订阅/月化成本/续费日/自动续费、Node 关联数量、数据质量 badge、详情与处理 action。当前 `VPSAssetRecord` 只有 `active_node_link_count`，不得展示或暗示 linked node health。
+4. 决策编辑使用 `Drawer` 中的 `AssetDecisionWorkPanel`。Drawer 打开时处理单台 VPS；关闭后队列保持可扫描。保存成功的 notice 留在工作队列 surface 内，而不是只出现在已关闭 drawer 内。
+5. 续费候选表是 `RENEWAL EVIDENCE` 次级证据区。它保留续费窗口切换和订阅入口，但视觉权重低于统一工作队列。
+
+### VPSPage
+1. VPS 页是高密度资产库存表，用于 40+ VPS 核对、比较和补录，不是普通后台资源表。首屏结构：页面标题 → quick views / chips / 高级筛选入口 → `VPS 库存表`。
+2. Quick views 使用 `Tabs variant="pill"`，至少覆盖全部、30 天续费、未评估、未关联、缺订阅、缺信息、已归档。URL-state 支持 `view`，同时继续承接 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
+3. 主屏不常驻完整筛选控件。字段筛选进入右侧 `Drawer`，应用后以 `FilterChip` 反馈并同步 URL；清空和移除 chip 必须回写 URL。
+4. 库存表列必须优先展示真实核对信号：VPS identity/access、provider/region/product、订阅/月化成本/续费日/自动续费、生命周期/用途/续费决策、Node 关联数量、数据质量 badge、labels。创建 VPS 仍可折叠展开，但不抢首屏主视觉。
+5. 页面可以通过 `listVPSAssets()` + `listSubscriptions({ sort: 'renew_at', order: 'asc' })` 在前端做轻量 join，标出缺订阅、未关联 Node、缺 provider、缺访问入口等资料缺口。不得新增未存在的后端健康语义；linked node health 只能等后端 contract 明确后再展示。
+
 ### NodesPage
 1. Section heading + 「新建节点」按钮
 2. （可选）创建节点表单（page-panel）
