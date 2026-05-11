@@ -51,6 +51,7 @@ export function AttentionQueue({ items }: AttentionQueueProps) {
                   {item.health}
                 </Badge>
                 <p>
+                  <span className="dashboard-attention-item__issue-label">当前问题</span>
                   <span>
                     活跃问题 <MonoDigits>{item.incidentCount}</MonoDigits>
                   </span>

@@ -30,10 +30,10 @@ describe('theme runtime', () => {
     expect(document.documentElement.classList.contains('theme-houfeng-dark')).toBe(false)
   })
 
-  it('detectInitialTheme defaults to houfeng + system', () => {
+  it('detectInitialTheme defaults to houfeng + dark', () => {
     const t = detectInitialTheme()
     expect(t.preset).toBe('houfeng')
-    expect(t.mode).toBe('system')
+    expect(t.mode).toBe('dark')
   })
 
   it('detectInitialTheme reads localStorage', () => {
@@ -48,7 +48,7 @@ describe('theme runtime', () => {
     localStorage.setItem(THEME_STORAGE_KEYS.mode, 'sunshine')
     const t = detectInitialTheme()
     expect(t.preset).toBe('houfeng')
-    expect(t.mode).toBe('system')
+    expect(t.mode).toBe('dark')
   })
 
   it('preferredScheme returns dark when matchMedia matches', () => {

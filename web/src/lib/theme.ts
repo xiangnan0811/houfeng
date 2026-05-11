@@ -20,7 +20,7 @@ export function detectInitialTheme(): ThemeChoice {
   const modeRaw = safeLocalStorage(THEME_STORAGE_KEYS.mode)
   return {
     preset: PRESET_VALUES.has(presetRaw as Preset) ? (presetRaw as Preset) : 'houfeng',
-    mode: MODE_VALUES.has(modeRaw as Mode) ? (modeRaw as Mode) : 'system',
+    mode: MODE_VALUES.has(modeRaw as Mode) ? (modeRaw as Mode) : 'dark',
   }
 }
 

@@ -200,11 +200,14 @@ parent: docs/design/v2-houfeng/design-language.md
 ## 五、页面模板
 
 ### DashboardPage
-1. Fleet State 降级为紧凑状态栏：动态状态结论作为 h1（`需要处理严重异常` / `存在活跃异常` / `系统处于维护观察中` / `系统运行正常` / `开始接入第一台服务器`），可见 eyebrow 用中文操作语义（如 `全局状态`）；说明文案必须基于现有 `/api/dashboard` 事实，不声明 shell health。
-   - 不渲染右侧 boxed facts、API loaded 卡、库存卡或队列卡。`snapshot_generated_at` 只能作为 muted inline metadata，例如 `摘要生成 <Timestamp>`；生成时间只代表 dashboard response 生成时间，不等同 AppShell SyncStatus、Center health 或 agent sync freshness。
-   - CTA：主按钮随状态切换并使用 PR4 filtered URL contract：有严重项 → `/events?severity=严重`，有异常但无严重 → `/events?time_range=24h`，维护态 → `/events?maintenance_only=1`，正常态 / 首次接入 → `/nodes`。异常 / 维护 / 正常态可保留轻量 `查看事件流` → `/events?time_range=24h` 与 `进入设置` → `/settings`；首次接入态只保留创建节点主入口。
-2. **关键状态指标** 内联在状态栏 metadata 下方，最多 4 个紧凑 Link metric，不再作为独立 Dashboard summary strip，也不是 5 列大型 KPI card strip；metric 本身不展示 Sparkline。状态栏可在生成时间旁显示一个轻量 `24h 事件趋势` Link，使用 `/api/dashboard` 已有的 24h 趋势/新增恢复事实和 `Sparkline` atom，作为趋势提示而非第五个 KPI。视觉上应采用 compact rail/chip，而不是小卡片堆叠：label、value、detail 分层，hover/focus 明确，但整体低于 h1 与主 CTA。异常态优先显示异常对象、严重、`24h 变化`、维护；正常 / 维护态优先显示节点、目标、`24h 变化`、通知或维护。每个 metric 保留 PR4 filtered URL：异常节点 `/nodes?abnormal=1`、异常目标 `/targets?abnormal=1`、严重 `/events?severity=严重`、维护 `/events?maintenance_only=1`、`24h 变化` `/events?time_range=24h`、节点 / 目标管理入口按库存状态优先跳转。首次接入态不渲染关键状态指标，也不渲染 24h 趋势 Link。
-3. Dashboard 主流程收敛为一个 DetailSection 工作台，而不是 `当前需要处理` / `系统入口` / `按 Group 分布` / `最近事件` 四个同权 section 线性堆叠。工作台 title 随状态切换：
+1. Dashboard 首屏是 asset-decision-first `Command Surface`，不是 fleet KPI hero。h1 回答“今天先处理什么”：资产有压力且有严重异常 → `先处理资产压力与严重异常`；仅资产有压力 → `先处理资产决策队列`；仅严重 / 异常 → `先处理严重异常` / `先处理观测异常`；维护 → `维护对象正在观察`；正常 → `今日没有紧急处理项`；首次接入 → `建立第一条资产与观测链路`。
+   - `snapshot_generated_at` 只能作为 command surface 内 muted inline metadata，例如 `摘要生成 <Timestamp>`；生成时间只代表 dashboard response 生成时间，不等同 AppShell SyncStatus、Center health 或 agent sync freshness。
+   - 可见文案统一使用 `工作台`，不再用 `首页 / Dashboard` 或 `首页不可用`。
+2. Command Surface 固定包含三条 lane：
+   - `资产决策队列`：30 天续费、待决策、取消/迁移、未关联 Node、关联异常、成本。它是 `asset_summary` 的唯一高权重展示位置，只展示聚合入口，不展开 VPS / subscription 明细。
+   - `观测异常队列`：复用最多 4 个 dashboard metric（异常对象 / 严重 / 24h 变化 / 维护，或正常态节点 / 目标 / 24h / 通知），保留 PR4 filtered URL contract：异常节点 `/nodes?abnormal=1`、异常目标 `/targets?abnormal=1`、严重 `/events?severity=严重`、维护 `/events?maintenance_only=1`、`24h 变化` `/events?time_range=24h`、节点 / 目标管理入口按库存状态优先跳转。可在 lane 底部展示最高优先级 3 个异常对象作为跳转，不替代下方完整处理队列。
+   - `下一步动作`：根据资产压力、严重/异常对象、未关联 VPS、维护态或正常态生成 3-4 条有序动作。主按钮等于第一条动作；正常态主动作是核对 VPS 库存，首次接入主动作是创建第一个节点。
+3. Command Surface 下方保留一个 DetailSection 工作台，而不是 `当前需要处理` / `系统入口` / `按 Group 分布` / `最近事件` 四个同权 section 线性堆叠。工作台 title 随状态切换：
    - 异常态：`当前需要处理`，主体优先展示统一处理队列，合并异常节点与异常目标，按 severity + active incident count 排序；默认只展示最高优先级少量对象，完整处理跳 Nodes / Targets / Events。队列下方可在同一 DetailSection surface 内展示 `运行上下文` 与 `管理入口`，但不得拆回多个同权 page section。
    - 维护态：`维护观察`，eyebrow `维护观察`，主体展示维护观察、库存、事件和一个紧凑管理入口，不把维护态伪装成紧急异常。
    - 正常态：`运行概览`，eyebrow `运行概览`，主体展示库存健康、24h 变化和一个紧凑管理入口，不渲染大型空处理队列表格。

@@ -8,8 +8,8 @@ import {
   buildDashboardMetrics,
   buildFleetState,
 } from './dashboard/dashboardHelpers'
+import { DashboardCommandSurface } from './dashboard/DashboardCommandSurface'
 import { DashboardWorkbench } from './dashboard/DashboardWorkbench'
-import { FleetStatePanel } from './dashboard/FleetStatePanel'
 
 type State = {
   loading: boolean
@@ -36,7 +36,7 @@ export function DashboardPage() {
       })
       .catch((error: unknown) => {
         if (!mountedRef.current) return
-        const message = error instanceof ApiError ? error.message : '加载首页 / Dashboard 失败'
+        const message = error instanceof ApiError ? error.message : '加载工作台失败'
         setState({ loading: false, error: message, overview: null })
         setRefreshing(false)
       })
@@ -56,14 +56,14 @@ export function DashboardPage() {
   }
 
   if (state.loading) {
-    return <section className="page-panel">正在加载首页 / Dashboard…</section>
+    return <section className="page-panel">正在加载工作台…</section>
   }
 
   if (state.error || !state.overview) {
     return (
       <section className="page-panel">
-        <p className="page-panel__eyebrow">Dashboard</p>
-        <h2 className="page-panel__title">首页不可用</h2>
+        <p className="page-panel__eyebrow">工作台</p>
+        <h2 className="page-panel__title">工作台不可用</h2>
         <p className="page-panel__description">{state.error ?? '未获取到概览数据'}</p>
       </section>
     )
@@ -92,10 +92,15 @@ export function DashboardPage() {
 
   return (
     <div className="page-stack dashboard-page">
-      <FleetStatePanel
+      <DashboardCommandSurface
         overview={overview}
         fleetState={fleetState}
         metrics={metrics}
+        attentionItems={attentionItems}
+        abnormalTotal={abnormalTotal}
+        severeTotal={severeTotal}
+        maintenanceTotal={maintenanceTotal}
+        isFreshInstall={isFreshInstall}
         refreshing={refreshing}
         onRefresh={handleRefresh}
         autoRefresh={autoRefresh}

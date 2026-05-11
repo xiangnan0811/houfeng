@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 
 import { MonoDigits, StatusGlyph } from '../../components/atoms'
 import type { DashboardOverview } from '../../lib/types'
-import { AssetDecisionSummary } from './AssetDecisionSummary'
 import { DashboardContextStrip } from './DashboardContextStrip'
 import { DASHBOARD_LINKS } from './dashboardLinks'
 import { ManagementEntries } from './ManagementEntries'
@@ -67,7 +66,6 @@ export function RunningOverview({ overview, maintenanceTotal, contextItems }: Ru
           </small>
         </Link>
       </div>
-      <AssetDecisionSummary summary={overview.asset_summary} />
       <ManagementEntries overview={overview} />
       <DashboardContextStrip items={contextItems} />
     </div>
