@@ -2265,12 +2265,6 @@ html.theme-classic-light .dashboard-command-surface {
   overflow-wrap: anywhere;
 }
 
-.asset-operation-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--space-4);
-}
-
 .asset-operation-form {
   display: flex;
   flex-direction: column;
@@ -2482,6 +2476,179 @@ html.theme-classic-light .dashboard-command-surface {
 .asset-access-line .hostname,
 .asset-access-line .mono-digits {
   color: var(--text-primary);
+}
+
+.vps-detail-hero .page-panel__actions {
+  flex-wrap: wrap;
+}
+
+.vps-workbench {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 52%),
+    var(--surface);
+}
+
+.vps-workbench__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.vps-workbench-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 184px;
+  padding: var(--space-4);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--surface-elevated) 86%, transparent);
+}
+
+.vps-workbench-card--decision {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+}
+
+.vps-workbench-card--normal {
+  border-color: color-mix(in srgb, var(--color-state-normal) 34%, var(--border));
+}
+
+.vps-workbench-card--notice {
+  border-color: color-mix(in srgb, var(--color-state-notice) 40%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-state-notice) 10%, transparent), transparent 64%),
+    var(--surface-elevated);
+}
+
+.vps-workbench-card--critical {
+  border-color: color-mix(in srgb, var(--color-state-critical) 42%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-state-critical) 10%, transparent), transparent 64%),
+    var(--surface-elevated);
+}
+
+.vps-workbench-card__header,
+.vps-workbench-card__footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.vps-workbench-card__header p,
+.vps-workbench-metric span,
+.vps-workbench__access span:first-child {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+}
+
+.vps-workbench-card__header h3,
+.vps-workbench-metric strong {
+  margin: var(--space-1) 0 0;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--type-h3-size);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.vps-workbench-card__summary {
+  flex: 1;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.vps-workbench-card__footer {
+  align-items: center;
+  padding-top: var(--space-2);
+  border-top: var(--border-w) solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--type-small-size);
+  line-height: 1.4;
+}
+
+.vps-workbench-quality {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.vps-workbench__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.vps-workbench-metric {
+  min-width: 0;
+  padding: var(--space-3);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-1);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+}
+
+.vps-workbench-metric--normal {
+  border-color: color-mix(in srgb, var(--color-state-normal) 28%, var(--border));
+}
+
+.vps-workbench-metric--notice {
+  border-color: color-mix(in srgb, var(--color-state-notice) 32%, var(--border));
+}
+
+.vps-workbench-metric--alert {
+  border-color: color-mix(in srgb, var(--color-state-alert) 36%, var(--border));
+}
+
+.vps-workbench-metric--critical {
+  border-color: color-mix(in srgb, var(--color-state-critical) 38%, var(--border));
+}
+
+.vps-workbench-metric small {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.vps-workbench__access {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  border: var(--border-w) dashed var(--border-dashed);
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--surface-elevated) 64%, transparent);
+}
+
+.vps-detail-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.vps-detail-drawer .asset-operation-form,
+.vps-detail-drawer .asset-facts-edit-form {
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .asset-checkbox {
@@ -3066,10 +3233,20 @@ html.theme-classic-light .dashboard-command-surface {
   .asset-timeline-card__header {
     flex-direction: column;
   }
+
+  .vps-workbench__grid,
+  .vps-workbench__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
   .asset-workbench-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .vps-workbench__grid,
+  .vps-workbench__metrics {
     grid-template-columns: 1fr;
   }
 

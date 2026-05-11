@@ -6,10 +6,20 @@ import { HealthBadge } from '../assetPageBadges'
 type VPSNodeLinksSectionProps = {
   nodes: VPSNodeSummary[]
   unlinkingNodeId: string | null
+  linkFeedback: string | null
+  linkFeedbackIsError: boolean
+  onOpenLink: () => void
   onUnlinkNode: (node: VPSNodeSummary) => void
 }
 
-export function VPSNodeLinksSection({ nodes, unlinkingNodeId, onUnlinkNode }: VPSNodeLinksSectionProps) {
+export function VPSNodeLinksSection({
+  nodes,
+  unlinkingNodeId,
+  linkFeedback,
+  linkFeedbackIsError,
+  onOpenLink,
+  onUnlinkNode,
+}: VPSNodeLinksSectionProps) {
   const nodeColumns: DataTableColumn<VPSNodeSummary>[] = [
     {
       key: 'node',
@@ -83,7 +93,19 @@ export function VPSNodeLinksSection({ nodes, unlinkingNodeId, onUnlinkNode }: VP
         <span className="section-heading__meta">
           <MonoDigits>{nodes.length}</MonoDigits> 个 active link
         </span>
+        <Button variant="secondary" size="sm" onClick={onOpenLink}>关联 Node</Button>
       </div>
+      {linkFeedback ? (
+        <p
+          className={[
+            'asset-operation-feedback',
+            linkFeedbackIsError && 'asset-operation-feedback--error',
+          ].filter(Boolean).join(' ')}
+          role={linkFeedbackIsError ? 'alert' : 'status'}
+        >
+          {linkFeedback}
+        </p>
+      ) : null}
       <DataTable
         className="asset-table vps-node-table"
         columns={nodeColumns}

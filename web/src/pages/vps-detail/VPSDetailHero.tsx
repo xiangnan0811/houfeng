@@ -8,11 +8,18 @@ import { LifecycleBadge, RenewalBadge, UsageBadge } from '../assetPageBadges'
 type VPSDetailHeroProps = {
   detail: VPSAssetDetail
   onBack: () => void
+  onDecisionEdit: () => void
+  onFactEdit: () => void
 }
 
-export function VPSDetailHero({ detail, onBack }: VPSDetailHeroProps) {
+export function VPSDetailHero({
+  detail,
+  onBack,
+  onDecisionEdit,
+  onFactEdit,
+}: VPSDetailHeroProps) {
   return (
-    <section className="page-panel page-panel--inline">
+    <section className="page-panel page-panel--inline vps-detail-hero">
       <div>
         <div className="page-panel__eyebrow">VPS DETAIL</div>
         <h1 className="page-panel__title">{detail.display_name}</h1>
@@ -27,8 +34,10 @@ export function VPSDetailHero({ detail, onBack }: VPSDetailHeroProps) {
         </div>
       </div>
       <div className="page-panel__actions">
+        <Button variant="primary" onClick={onDecisionEdit}>处理决策</Button>
+        <Button variant="secondary" onClick={onFactEdit}>编辑资料</Button>
         <Button variant="secondary" onClick={onBack}>返回</Button>
-        <Link className="btn btn--primary btn--md" to="/vps">VPS 列表</Link>
+        <Link className="btn btn--secondary btn--md" to="/vps">VPS 列表</Link>
       </div>
     </section>
   )

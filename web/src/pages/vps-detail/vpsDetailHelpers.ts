@@ -21,6 +21,8 @@ export const INITIAL_STATE: VPSDetailPageState = {
   timeline: null,
   services: [],
   domains: [],
+  subscriptions: [],
+  subscriptionsError: null,
 }
 
 export const INITIAL_EXPERIENCE_DRAFT: ExperienceDraftState = {

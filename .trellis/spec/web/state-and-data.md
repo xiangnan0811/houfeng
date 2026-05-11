@@ -147,7 +147,7 @@ VPS 服务资产是 VPS 详情页内的独立手工记录区块，前端必须�
 - Frontend type: `AssetServiceRecord` 字段保持 center JSON snake_case：`service_id`、`vps_id`、`target_id`、`name`、`service_type`、`status`、`url`、`port`、`labels`、`note`、`created_at`、`updated_at`。
 - Frontend input: `CreateAssetServiceInput` 允许 collection create 带 `vps_id`，也允许 VPS scoped create 不带 `vps_id`。
 - Frontend API: `listAssetServices(filter)`, `createAssetService(input)`, `listVPSServices(vpsId)`, `createVPSService(vpsId, input)`。
-- Page data: `VPSDetailPage` 初始加载 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)` 和 `listVPSServices(vpsId)`；创建服务后只刷新 `listVPSServices(vpsId)`。
+- Page data: `VPSDetailPage` 初始加载 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`；创建服务后只刷新 `listVPSServices(vpsId)`。
 
 #### 3. Contracts
 
@@ -156,6 +156,7 @@ VPS 服务资产是 VPS 详情页内的独立手工记录区块，前端必须�
 - VPS 服务区块展示 name、type、status、url/port、optional Target link、labels、note；Target link 只跳转，不触发 Target 创建或修改。
 - 服务创建表单负责本地校验 blank name 和 port `1..65535`，但最终校验仍以后端为准。
 - 服务资产不是 timeline item；创建服务不得刷新或插入 `VPSTimeline.experience_logs`、续费历史、价格历史、IP 历史或规格快照。
+- 服务创建表单应在 Drawer 或同等次级 surface 中打开。主扫描路径展示服务表格和保存后的 notice，不常驻创建表单。
 
 #### 4. Validation & Error Matrix
 
@@ -212,7 +213,7 @@ VPS 域名资产是 VPS 详情页内的独立手工记录区块，前端必须�
 - Frontend type: `AssetDomainRecord` 字段保持 center JSON snake_case：`domain_id`、`vps_id`、`service_id`、`target_id`、`domain_name`、`purpose`、`status`、`registrar`、`expires_at`、`auto_renew`、`https_enabled`、`labels`、`note`、`created_at`、`updated_at`。
 - Frontend input: `CreateAssetDomainInput` 允许 collection create 带 `vps_id`，也允许 VPS scoped create 不带 `vps_id`。
 - Frontend API: `listAssetDomains(filter)`, `createAssetDomain(input)`, `listVPSDomains(vpsId)`, `createVPSDomain(vpsId, input)`。
-- Page data: `VPSDetailPage` 初始加载 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)` 和 `listVPSDomains(vpsId)`；创建域名后只刷新 `listVPSDomains(vpsId)`；刷新 detail + timeline 的动作必须保留 services/domains 两个独立列表。
+- Page data: `VPSDetailPage` 初始加载 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 VPS scoped `listSubscriptions`；创建域名后只刷新 `listVPSDomains(vpsId)`；刷新 detail + timeline 的动作必须保留 services/domains 两个独立列表，并重新读取 subscription evidence。
 
 #### 3. Contracts
 
@@ -221,6 +222,29 @@ VPS 域名资产是 VPS 详情页内的独立手工记录区块，前端必须�
 - VPS 域名区块展示 domain name、status、HTTPS、purpose、registrar、expires_at、auto_renew、optional Service / Target link、labels、note；Target link 只跳转，不触发 Target 创建或修改。
 - 域名创建表单负责本地校验 blank domain、URL/path/space 和裸主机名，但最终校验仍以后端为准。
 - 域名资产不是 timeline item；创建域名不得刷新或插入 `VPSTimeline.experience_logs`、续费历史、价格历史、IP 历史或规格快照。
+- 域名创建表单应在 Drawer 或同等次级 surface 中打开。主扫描路径展示域名表格和保存后的 notice，不常驻创建表单。
+
+### VPS detail 判断工作台数据流
+
+VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS scoped services/domains 组合成单台资产判断 workbench。它只使用现有 contract，不能发明不存在的资产风险或 provider facts。
+
+#### Contracts
+
+- `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。
+- VPS scoped subscription 只作为续费/成本 evidence。订阅请求失败时显示请求错误和未知状态，不得把 failure 当成真实 `缺订阅`。
+- `VPSAssetDetail.node_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_node_link_count` 在列表页只能代表数量的限制。
+- 决策、facts、Node link、experience log、service create、domain create 的复杂输入使用 Drawer。关闭 Drawer 后，保存成功 notice 必须留在主页面可见 surface 内。
+- Archive/restore 仍是 lifecycle 危险操作，使用独立 confirmation，不放入 routine edit Drawer。
+
+#### Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| scoped subscriptions request fails | Workbench 显示订阅读取失败和错误提示，不显示真实 `缺订阅` 质量缺口 |
+| scoped subscriptions empty | Workbench 显示 `缺订阅`，资料质量 badge 标记缺订阅 |
+| decision/facts/experience save succeeds | Drawer 关闭，主页面出现成功 notice，detail/timeline/services/domains/subscriptions 刷新 |
+| service/domain create succeeds | Drawer 关闭，只刷新对应 service/domain list，主页面表格出现新记录 |
+| local service/domain validation fails | Drawer 内显示本地错误，不发 POST；主页面不重复渲染同一错误 |
 
 #### 4. Validation & Error Matrix
 

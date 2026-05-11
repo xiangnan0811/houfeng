@@ -1,6 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
+import { Drawer } from '../components/atoms'
 import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
 import {
   ApiError,
@@ -10,6 +11,7 @@ import {
   getVPSAsset,
   getVPSTimeline,
   linkVPSNode,
+  listSubscriptions,
   listVPSDomains,
   listVPSServices,
   unlinkVPSNode,
@@ -21,19 +23,27 @@ import type {
   CreateAssetDomainInput,
   CreateAssetServiceInput,
   CreateVPSExperienceLogInput,
+  SubscriptionRecord,
   UpdateVPSAssetInput,
   VPSAssetDetail,
   VPSNodeSummary,
 } from '../lib/types'
 import { VPSAccessSummarySection } from './vps-detail/VPSAccessSummarySection'
+import { VPSDecisionWorkbench } from './vps-detail/VPSDecisionWorkbench'
 import { VPSDetailErrorPanel } from './vps-detail/VPSDetailErrorPanel'
 import { VPSDetailHero } from './vps-detail/VPSDetailHero'
 import { VPSDetailLoading } from './vps-detail/VPSDetailLoading'
 import { VPSDetailMissingID } from './vps-detail/VPSDetailMissingID'
+import { VPSDomainsForm } from './vps-detail/VPSDomainsForm'
 import { VPSDomainsSection } from './vps-detail/VPSDomainsSection'
+import { VPSExperienceLogForm } from './vps-detail/VPSExperienceLogForm'
+import { VPSFactsEditForm } from './vps-detail/VPSFactsEditForm'
 import { VPSFactsSection } from './vps-detail/VPSFactsSection'
+import { VPSLifecycleCard } from './vps-detail/VPSLifecycleCard'
+import { VPSNodeLinkForm } from './vps-detail/VPSNodeLinkForm'
 import { VPSNodeLinksSection } from './vps-detail/VPSNodeLinksSection'
-import { VPSOperationsPanel } from './vps-detail/VPSOperationsPanel'
+import { VPSRenewalDecisionForm } from './vps-detail/VPSRenewalDecisionForm'
+import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import type {
   DecisionDraftState,
@@ -42,6 +52,7 @@ import type {
   FactEditFormState,
   LinkDraftState,
   ServiceDraftState,
+  VPSDetailDrawerMode,
 } from './vps-detail/types'
 import {
   buildDomainInput,
@@ -61,6 +72,29 @@ function describeError(error: unknown, fallback: string): string {
   return fallback
 }
 
+async function loadSubscriptions(targetVPSId: string): Promise<{
+  subscriptions: SubscriptionRecord[]
+  subscriptionsError: string | null
+}> {
+  try {
+    const subscriptions = await listSubscriptions({
+      vps_id: targetVPSId,
+      sort: 'renew_at',
+      order: 'asc',
+    })
+    return { subscriptions, subscriptionsError: null }
+  } catch (error: unknown) {
+    return {
+      subscriptions: [],
+      subscriptionsError: describeError(error, '加载 VPS 订阅失败'),
+    }
+  }
+}
+
+function selectPrimarySubscription(subscriptions: SubscriptionRecord[]): SubscriptionRecord | null {
+  return subscriptions[0] ?? null
+}
+
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
@@ -72,7 +106,7 @@ export function VPSDetailPage() {
   const [decisionSubmitting, setDecisionSubmitting] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [decisionNotice, setDecisionNotice] = useState<string | null>(null)
-  const [factEditOpen, setFactEditOpen] = useState(false)
+  const [activeDrawer, setActiveDrawer] = useState<VPSDetailDrawerMode>(null)
   const [factDraft, setFactDraft] = useState<FactEditFormState | null>(null)
   const [factSubmitting, setFactSubmitting] = useState(false)
   const [factError, setFactError] = useState<string | null>(null)
@@ -107,14 +141,29 @@ export function VPSDetailPage() {
 
     let cancelled = false
 
-    Promise.all([getVPSAsset(vpsId), getVPSTimeline(vpsId), listVPSServices(vpsId), listVPSDomains(vpsId)])
-      .then(([detail, timeline, services, domains]) => {
+    Promise.all([
+      getVPSAsset(vpsId),
+      getVPSTimeline(vpsId),
+      listVPSServices(vpsId),
+      listVPSDomains(vpsId),
+      loadSubscriptions(vpsId),
+    ])
+      .then(([detail, timeline, services, domains, subscriptionState]) => {
         if (cancelled) return
-        setState({ vpsId, error: null, detail, timeline, services, domains })
+        setState({
+          vpsId,
+          error: null,
+          detail,
+          timeline,
+          services,
+          domains,
+          subscriptions: subscriptionState.subscriptions,
+          subscriptionsError: subscriptionState.subscriptionsError,
+        })
         setDecisionDraft({ renewalDecision: detail.renewal_decision, reason: '' })
         setDecisionError(null)
         setDecisionNotice(null)
-        setFactEditOpen(false)
+        setActiveDrawer(null)
         setFactDraft(detailToFactEditForm(detail))
         setFactError(null)
         setFactNotice(null)
@@ -144,6 +193,8 @@ export function VPSDetailPage() {
           timeline: null,
           services: [],
           domains: [],
+          subscriptions: [],
+          subscriptionsError: null,
         })
       })
 
@@ -162,13 +213,23 @@ export function VPSDetailPage() {
   }
 
   async function refreshDetailAndTimeline(targetVPSId: string): Promise<VPSAssetDetail> {
-    const [detail, timeline, services, domains] = await Promise.all([
+    const [detail, timeline, services, domains, subscriptionState] = await Promise.all([
       getVPSAsset(targetVPSId),
       getVPSTimeline(targetVPSId),
       listVPSServices(targetVPSId),
       listVPSDomains(targetVPSId),
+      loadSubscriptions(targetVPSId),
     ])
-    setState({ vpsId: targetVPSId, error: null, detail, timeline, services, domains })
+    setState({
+      vpsId: targetVPSId,
+      error: null,
+      detail,
+      timeline,
+      services,
+      domains,
+      subscriptions: subscriptionState.subscriptions,
+      subscriptionsError: subscriptionState.subscriptionsError,
+    })
     return detail
   }
 
@@ -247,6 +308,30 @@ export function VPSDetailPage() {
     }
   }
 
+  function openDrawer(mode: NonNullable<VPSDetailDrawerMode>) {
+    if (mode === 'decision') {
+      clearDecisionFeedback()
+    }
+    if (mode === 'node-link') {
+      clearLinkFormFeedback()
+      setUnlinkError(null)
+    }
+    if (mode === 'experience') {
+      clearExperienceFeedback()
+    }
+    if (mode === 'service') {
+      clearServiceFeedback()
+    }
+    if (mode === 'domain') {
+      clearDomainFeedback()
+    }
+    setActiveDrawer(mode)
+  }
+
+  function closeDrawer() {
+    setActiveDrawer(null)
+  }
+
   async function handleDecisionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const detail = state.detail
@@ -269,6 +354,7 @@ export function VPSDetailPage() {
       const refreshed = await refreshDetailAndTimeline(detail.vps_id)
       setDecisionDraft({ renewalDecision: refreshed.renewal_decision, reason: '' })
       setDecisionNotice('续费决策已更新，资产历史已刷新')
+      setActiveDrawer(null)
     } catch (error: unknown) {
       setDecisionError(describeError(error, '更新续费决策失败'))
     } finally {
@@ -276,16 +362,11 @@ export function VPSDetailPage() {
     }
   }
 
-  function toggleFactEdit(detail: VPSAssetDetail) {
-    setFactEditOpen((open) => {
-      const next = !open
-      if (next) {
-        setFactDraft(detailToFactEditForm(detail))
-        setFactError(null)
-        setFactNotice(null)
-      }
-      return next
-    })
+  function openFactEdit(detail: VPSAssetDetail) {
+    setFactDraft(detailToFactEditForm(detail))
+    setFactError(null)
+    setFactNotice(null)
+    setActiveDrawer('facts')
   }
 
   async function handleFactSubmit(event: FormEvent<HTMLFormElement>) {
@@ -309,7 +390,7 @@ export function VPSDetailPage() {
       await updateVPSAsset(detail.vps_id, input)
       const refreshed = await refreshDetailAndTimeline(detail.vps_id)
       setFactDraft(detailToFactEditForm(refreshed))
-      setFactEditOpen(false)
+      setActiveDrawer(null)
       setFactNotice('基础信息已更新，资产历史已刷新')
     } catch (error: unknown) {
       setFactError(describeError(error, '更新基础信息失败'))
@@ -343,6 +424,7 @@ export function VPSDetailPage() {
       await refreshDetail(detail.vps_id)
       setLinkDraft({ nodeId: '', note: '' })
       setLinkNotice('Node 关联已更新')
+      setActiveDrawer(null)
     } catch (error: unknown) {
       setLinkError(describeError(error, '关联 Node 失败'))
     } finally {
@@ -435,6 +517,7 @@ export function VPSDetailPage() {
       await refreshDetailAndTimeline(detail.vps_id)
       setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
       setExperienceNotice('经验记录已写入资产历史')
+      setActiveDrawer(null)
     } catch (error: unknown) {
       setExperienceError(describeError(error, '创建经验记录失败'))
     } finally {
@@ -463,6 +546,7 @@ export function VPSDetailPage() {
       await refreshServices(detail.vps_id)
       setServiceDraft(INITIAL_SERVICE_DRAFT)
       setServiceNotice('服务记录已创建')
+      setActiveDrawer(null)
     } catch (error: unknown) {
       setServiceError(describeError(error, '创建服务记录失败'))
     } finally {
@@ -491,6 +575,7 @@ export function VPSDetailPage() {
       await refreshDomains(detail.vps_id)
       setDomainDraft(INITIAL_DOMAIN_DRAFT)
       setDomainNotice('域名记录已创建')
+      setActiveDrawer(null)
     } catch (error: unknown) {
       setDomainError(describeError(error, '创建域名记录失败'))
     } finally {
@@ -519,90 +604,195 @@ export function VPSDetailPage() {
   const isArchived = detail.lifecycle_status === 'archived'
   const linkFeedback = linkError ?? unlinkError ?? linkNotice
   const linkFeedbackIsError = linkError !== null || unlinkError !== null
+  const primarySubscription = selectPrimarySubscription(state.subscriptions)
+  const subscriptionLoadFailed = state.subscriptionsError !== null
+
+  function drawerTitle(): string {
+    if (activeDrawer === 'decision') return '续费决策'
+    if (activeDrawer === 'facts') return '编辑基础信息'
+    if (activeDrawer === 'node-link') return '关联 Node'
+    if (activeDrawer === 'experience') return '经验记录'
+    if (activeDrawer === 'service') return '新增服务'
+    if (activeDrawer === 'domain') return '新增域名'
+    return 'VPS 操作'
+  }
+
+  function renderDrawerContent(): ReactNode {
+    if (activeDrawer === 'decision') {
+      return (
+        <VPSRenewalDecisionForm
+          detail={detail}
+          draft={decisionDraft}
+          submitting={decisionSubmitting}
+          error={decisionError}
+          notice={decisionNotice}
+          decisionChanged={decisionChanged}
+          onDraftChange={handleDecisionDraftChange}
+          onFeedbackClear={clearDecisionFeedback}
+          onSubmit={(event) => void handleDecisionSubmit(event)}
+        />
+      )
+    }
+    if (activeDrawer === 'facts') {
+      return factDraft ? (
+        <VPSFactsEditForm
+          draft={factDraft}
+          submitting={factSubmitting}
+          error={factError}
+          notice={factNotice}
+          onCancel={closeDrawer}
+          onDraftChange={handleFactDraftChange}
+          onSubmit={(event) => void handleFactSubmit(event)}
+        />
+      ) : null
+    }
+    if (activeDrawer === 'node-link') {
+      return (
+        <VPSNodeLinkForm
+          detail={detail}
+          draft={linkDraft}
+          controlsDisabled={linkControlsDisabled}
+          submitting={linkSubmitting}
+          error={linkError}
+          notice={linkNotice}
+          onDraftChange={handleLinkDraftChange}
+          onFeedbackClear={clearLinkFormFeedback}
+          onSubmit={(event) => void handleLinkSubmit(event)}
+        />
+      )
+    }
+    if (activeDrawer === 'experience') {
+      return (
+        <VPSExperienceLogForm
+          timeline={timeline}
+          draft={experienceDraft}
+          submitting={experienceSubmitting}
+          error={experienceError}
+          notice={experienceNotice}
+          onDraftChange={handleExperienceDraftChange}
+          onFeedbackClear={clearExperienceFeedback}
+          onSubmit={(event) => void handleExperienceSubmit(event)}
+        />
+      )
+    }
+    if (activeDrawer === 'service') {
+      return (
+        <VPSServicesForm
+          draft={serviceDraft}
+          submitting={serviceSubmitting}
+          error={serviceError}
+          notice={serviceNotice}
+          onDraftChange={handleServiceDraftChange}
+          onFeedbackClear={clearServiceFeedback}
+          onSubmit={(event) => void handleServiceSubmit(event)}
+        />
+      )
+    }
+    if (activeDrawer === 'domain') {
+      return (
+        <VPSDomainsForm
+          draft={domainDraft}
+          submitting={domainSubmitting}
+          error={domainError}
+          notice={domainNotice}
+          onDraftChange={handleDomainDraftChange}
+          onFeedbackClear={clearDomainFeedback}
+          onSubmit={(event) => void handleDomainSubmit(event)}
+        />
+      )
+    }
+    return null
+  }
 
   return (
     <div className="page-stack asset-page vps-detail-page">
-      <VPSDetailHero detail={detail} onBack={() => navigate(-1)} />
+      <VPSDetailHero
+        detail={detail}
+        onBack={() => navigate(-1)}
+        onDecisionEdit={() => openDrawer('decision')}
+        onFactEdit={() => openFactEdit(detail)}
+      />
 
-      <VPSOperationsPanel
+      <VPSDecisionWorkbench
         detail={detail}
         timeline={timeline}
-        decisionDraft={decisionDraft}
-        decisionSubmitting={decisionSubmitting}
-        decisionError={decisionError}
-        decisionNotice={decisionNotice}
-        decisionChanged={decisionChanged}
-        onDecisionDraftChange={handleDecisionDraftChange}
-        onDecisionFeedbackClear={clearDecisionFeedback}
-        onDecisionSubmit={(event) => void handleDecisionSubmit(event)}
-        linkDraft={linkDraft}
-        linkControlsDisabled={linkControlsDisabled}
-        linkSubmitting={linkSubmitting}
-        linkFeedback={linkFeedback}
-        linkFeedbackIsError={linkFeedbackIsError}
-        onLinkDraftChange={handleLinkDraftChange}
-        onLinkFeedbackClear={clearLinkFormFeedback}
-        onLinkSubmit={(event) => void handleLinkSubmit(event)}
+        primarySubscription={primarySubscription}
+        subscriptionLoadFailed={subscriptionLoadFailed}
+        servicesCount={state.services.length}
+        domainsCount={state.domains.length}
+        onDecisionEdit={() => openDrawer('decision')}
+        onExperienceLog={() => openDrawer('experience')}
+        onNodeLink={() => openDrawer('node-link')}
+      />
+
+      {state.subscriptionsError ? (
+        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+          {state.subscriptionsError}
+        </p>
+      ) : null}
+      {decisionNotice ? (
+        <p className="asset-operation-feedback" role="status">{decisionNotice}</p>
+      ) : null}
+      {experienceNotice ? (
+        <p className="asset-operation-feedback" role="status">{experienceNotice}</p>
+      ) : null}
+
+      <VPSLifecycleCard
+        detail={detail}
         isArchived={isArchived}
-        lifecycleConfirmingArchive={lifecycleConfirmingArchive}
-        lifecycleSubmitting={lifecycleSubmitting}
-        lifecycleError={lifecycleError}
-        lifecycleNotice={lifecycleNotice}
-        onLifecycleConfirmingArchiveChange={handleLifecycleConfirmingArchiveChange}
+        confirmingArchive={lifecycleConfirmingArchive}
+        submitting={lifecycleSubmitting}
+        error={lifecycleError}
+        notice={lifecycleNotice}
+        onArchiveConfirmOpenChange={handleLifecycleConfirmingArchiveChange}
         onArchive={() => void handleArchiveVPS()}
         onRestore={() => void handleRestoreVPS()}
-        experienceDraft={experienceDraft}
-        experienceSubmitting={experienceSubmitting}
-        experienceError={experienceError}
-        experienceNotice={experienceNotice}
-        onExperienceDraftChange={handleExperienceDraftChange}
-        onExperienceFeedbackClear={clearExperienceFeedback}
-        onExperienceSubmit={(event) => void handleExperienceSubmit(event)}
       />
 
       <VPSFactsSection
         detail={detail}
-        editOpen={factEditOpen}
-        draft={factDraft}
-        submitting={factSubmitting}
-        error={factError}
+        error={activeDrawer === 'facts' ? null : factError}
         notice={factNotice}
-        onToggleEdit={() => toggleFactEdit(detail)}
-        onDraftChange={handleFactDraftChange}
-        onSubmit={(event) => void handleFactSubmit(event)}
+        onEdit={() => openFactEdit(detail)}
       />
 
       <VPSNodeLinksSection
         nodes={detail.node_links}
         unlinkingNodeId={unlinkingNodeId}
+        linkFeedback={activeDrawer === 'node-link' ? null : linkFeedback}
+        linkFeedbackIsError={linkFeedbackIsError}
+        onOpenLink={() => openDrawer('node-link')}
         onUnlinkNode={(node) => void handleUnlinkNode(node)}
       />
 
       <VPSServicesSection
         services={state.services}
-        draft={serviceDraft}
-        submitting={serviceSubmitting}
-        error={serviceError}
+        error={activeDrawer === 'service' ? null : serviceError}
         notice={serviceNotice}
-        onDraftChange={handleServiceDraftChange}
-        onFeedbackClear={clearServiceFeedback}
-        onSubmit={(event) => void handleServiceSubmit(event)}
+        onCreate={() => openDrawer('service')}
       />
 
       <VPSDomainsSection
         domains={state.domains}
-        draft={domainDraft}
-        submitting={domainSubmitting}
-        error={domainError}
+        error={activeDrawer === 'domain' ? null : domainError}
         notice={domainNotice}
-        onDraftChange={handleDomainDraftChange}
-        onFeedbackClear={clearDomainFeedback}
-        onSubmit={(event) => void handleDomainSubmit(event)}
+        onCreate={() => openDrawer('domain')}
       />
 
       <VPSTimelinePanel timeline={timeline} />
 
       <VPSAccessSummarySection detail={detail} />
+
+      <Drawer
+        open={activeDrawer !== null}
+        onClose={closeDrawer}
+        title={drawerTitle()}
+        ariaLabel={drawerTitle()}
+      >
+        <div className="vps-detail-drawer">
+          {renderDrawerContent()}
+        </div>
+      </Drawer>
     </div>
   )
 }
