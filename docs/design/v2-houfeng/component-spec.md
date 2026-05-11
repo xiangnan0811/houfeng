@@ -232,6 +232,14 @@ parent: docs/design/v2-houfeng/design-language.md
 4. 库存表列必须优先展示真实核对信号：VPS identity/access、provider/region/product、订阅/月化成本/续费日/自动续费、生命周期/用途/续费决策、Node 关联数量、数据质量 badge、labels。创建 VPS 仍可折叠展开，但不抢首屏主视觉。
 5. 页面可以通过 `listVPSAssets()` + `listSubscriptions({ sort: 'renew_at', order: 'asc' })` 在前端做轻量 join，标出缺订阅、未关联 Node、缺 provider、缺访问入口等资料缺口。不得新增未存在的后端健康语义；linked node health 只能等后端 contract 明确后再展示。
 
+### VPSDetailPage
+1. VPS 详情页是单台 VPS 的资产判断工作台，不是操作表单集合。首屏顺序为 identity hero → `资产判断` workbench → 生命周期 → 基础信息 → Node 证据 → 服务/域名上下文 → timeline → access summary。
+2. `资产判断` workbench 必须同时展示当前续费决策、当前订阅/月化成本/续费日、linked Node health evidence、服务/域名数量和资料质量缺口。它可以消费 `VPSAssetDetail.node_links` 中已有 health/heartbeat/incident summary，因为 Detail contract 明确返回 Node summary；这条权限不外推到 VPS 列表。
+3. Detail 页通过 `listSubscriptions({ vps_id, sort: 'renew_at', order: 'asc' })` 读取 VPS scoped subscription。订阅读取失败时显示错误和未知状态，不得把请求失败渲染成真实 `缺订阅`。
+4. 决策、基础信息、Node 关联、经验记录、服务创建、域名创建都使用 `Drawer`。主页面只保留 action button、表格、证据和保存后的 notice；不要让创建/编辑表单常驻主扫描路径。
+5. 生命周期 archive/restore 是独立危险区，保留 alertdialog 确认；它不放进 routine action grid，也不和服务/域名创建同权。
+6. 服务/域名在 Detail 页是 VPS scoped manual records，只展示和创建当前 VPS 的上下文记录；不要在这里扩成完整服务注册表、域名管理或 DNS 记录管理。
+
 ### NodesPage
 1. Section heading + 「新建节点」按钮
 2. （可选）创建节点表单（page-panel）

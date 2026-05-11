@@ -4,6 +4,7 @@ import type {
   AssetServiceRecord,
   AssetServiceStatus,
   AssetServiceType,
+  SubscriptionRecord,
   VPSAssetDetail,
   VPSExperienceCategory,
   VPSExperienceSeverity,
@@ -20,7 +21,18 @@ export type VPSDetailPageState = {
   timeline: VPSTimeline | null
   services: AssetServiceRecord[]
   domains: AssetDomainRecord[]
+  subscriptions: SubscriptionRecord[]
+  subscriptionsError: string | null
 }
+
+export type VPSDetailDrawerMode =
+  | 'decision'
+  | 'facts'
+  | 'node-link'
+  | 'experience'
+  | 'service'
+  | 'domain'
+  | null
 
 export type FactEditFormState = {
   displayName: string
