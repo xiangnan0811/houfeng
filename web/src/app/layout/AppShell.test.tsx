@@ -2,7 +2,12 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { PRIMARY_NAV_ITEMS, PRODUCT_FULL_NAME_ZH, PRODUCT_NAME_ZH } from '../metadata'
+import {
+  PRIMARY_NAV_GROUPS,
+  PRIMARY_NAV_ITEMS,
+  PRODUCT_FULL_NAME_ZH,
+  PRODUCT_NAME_ZH,
+} from '../metadata'
 import { AppShell } from './AppShell'
 import * as authCtx from '../../lib/auth-context'
 import type { User } from '../../lib/auth-client'
@@ -85,12 +90,20 @@ describe('AppShell', () => {
 
   it('renders sidebar chrome and sets document title when authenticated', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
-    renderAuthenticatedAppShell()
+    const { container } = renderAuthenticatedAppShell()
 
     expect(screen.getByText(PRODUCT_NAME_ZH)).toBeInTheDocument()
+    PRIMARY_NAV_GROUPS.forEach((group) => {
+      expect(
+        Array.from(container.querySelectorAll('.sidebar__nav-group-title')).some(
+          (title) => title.textContent === group.label,
+        ),
+      ).toBe(true)
+    })
     PRIMARY_NAV_ITEMS.forEach((item) => {
       expect(screen.getByRole('link', { name: item.label })).toBeInTheDocument()
     })
+    expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
     expect(screen.getByText('admin')).toBeInTheDocument()
     expect(document.title).toBe(PRODUCT_FULL_NAME_ZH)
   })

@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Branch and PR workflow constraints"}
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend spec index"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "App layout file ownership and test placement"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "React component conventions for layout components"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Dark-first token and BEM styling constraints"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Frontend test and verification commands"}
+{"file": ".trellis/tasks/05-11-ux-app-shell-navigation-baseline/research/app-shell-navigation-audit.md", "reason": "Current shell navigation audit and implementation constraints"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Active Sidebar visual contract updated for grouped navigation"}

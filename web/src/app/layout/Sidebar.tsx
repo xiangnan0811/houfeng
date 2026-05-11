@@ -2,7 +2,8 @@ import { NavLink } from 'react-router-dom'
 import {
   PRODUCT_NAME_ZH,
   PRODUCT_FULL_NAME_EN,
-  PRIMARY_NAV_ITEMS,
+  PRIMARY_NAV_GROUPS,
+  type NavItem,
 } from '../metadata'
 import { Badge } from '../../components/atoms'
 import type { User } from '../../lib/auth-client'
@@ -31,39 +32,50 @@ export function Sidebar({
         <p className="sidebar__brand-en">{PRODUCT_FULL_NAME_EN.toUpperCase()}</p>
       </div>
       <nav className="sidebar__nav" aria-label="主导航">
-        {PRIMARY_NAV_ITEMS.map((item) => {
-          const count =
-            item.to === '/nodes'
-              ? anomalyCounts.nodes
-              : item.to === '/targets'
-                ? anomalyCounts.targets
-                : 0
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `sidebar__nav-link${isActive ? ' is-active' : ''}`
-              }
-            >
-              <span>{item.label}</span>
-              {count > 0 && (
-                /* v2: tone fixed to 'neutral'. Nav items must not carry
-                 * alarm semantics — the count is informational, not a state
-                 * indicator. Visual emphasis on the active route comes from
-                 * the accent ribbon + soft background, not Badge color. */
-                <Badge variant="count" tone="neutral">
-                  {count}
-                </Badge>
-              )}
-            </NavLink>
-          )
-        })}
+        {PRIMARY_NAV_GROUPS.map((group) => (
+          <div className="sidebar__nav-group" key={group.label}>
+            <p className="sidebar__nav-group-title">{group.label}</p>
+            <div className="sidebar__nav-list">
+              {group.items.map((item) => renderNavItem(item, anomalyCounts))}
+            </div>
+          </div>
+        ))}
       </nav>
       <div className="sidebar__spacer" />
       <SyncStatus {...sync} />
       <UserChip user={user} onLogout={onLogout} onChangePassword={onChangePassword} />
     </aside>
+  )
+}
+
+function renderNavItem(
+  item: NavItem,
+  anomalyCounts: SidebarProps['anomalyCounts'],
+) {
+  const count =
+    item.to === '/nodes'
+      ? anomalyCounts.nodes
+      : item.to === '/targets'
+        ? anomalyCounts.targets
+        : 0
+
+  return (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      end={item.end}
+      className={({ isActive }) => `sidebar__nav-link${isActive ? ' is-active' : ''}`}
+    >
+      <span>{item.label}</span>
+      {count > 0 && (
+        /* v2: tone fixed to 'neutral'. Nav items must not carry
+         * alarm semantics — the count is informational, not a state
+         * indicator. Visual emphasis on the active route comes from
+         * the accent ribbon + soft background, not Badge color. */
+        <Badge variant="count" tone="neutral">
+          {count}
+        </Badge>
+      )}
+    </NavLink>
   )
 }

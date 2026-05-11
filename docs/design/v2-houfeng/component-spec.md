@@ -160,9 +160,15 @@ parent: docs/design/v2-houfeng/design-language.md
 ## 四、壳层
 
 ### Sidebar
-- 宽 220px、`bg-sidebar` 色
+- 宽 232px、`bg-sidebar` 色
 - 品牌区：`候风` serif 22px + `HOUFENG FLEET CONTROL PLANE` sans 9px / 0.25em tracking + 一道 hairline divider
-- nav：8×10px padding / 13px / 6px 圆角
+- nav 按产品心智分组，不再连续平铺后端资源表：
+  - `总览`：工作台
+  - `资产`：资产决策 / VPS / 服务商 / 订阅
+  - `观测`：节点 / 目标 / 事件
+  - `系统`：设置
+- 分组标题使用 eyebrow 风格，组间用弱 hairline 分隔；移动宽度下可压缩为多列分组。
+- nav item：7×10px padding / 13px / 6px 圆角 / 34px min-height
   - 默认：`text-secondary`
   - hover：`surface` 背景
   - active：`accent-soft` + `accent-border` + `text-primary` + 左侧 2px accent 实心条
