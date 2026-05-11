@@ -150,7 +150,73 @@ agent 子包扁平化拆分，每个职责一个包：
 
 - `config/`、`token/`、`fingerprint/`、`enroll/`、`hostsample/`、`probe/`、`containersample/`、`exec/`、`syncqueue/`、`runtime/`
 - `runtime/` 是装配中心，把其余子包按 `collect → buffer → sync → apply plan` 串起来
-- agent 必须保持"thin"：不接受任意脚本 / 用户自定义参数、不本地评估规则；当前仅允许 `exec/` 中编译期白名单命令，以及 `containersample/` 对本机 Docker CLI 的 best-effort 采样（Docker 不存在时静默跳过）。这两类 post-V1 面的产品边界与审计/耐久语义仍需后续任务收敛。
+- agent 必须保持"thin"：不接受任意脚本 / 用户自定义参数、不本地评估规则；当前仅允许 `exec/` 中编译期白名单命令，以及 `containersample/` 对本机 Docker CLI 的 best-effort 事实采样（Docker 不存在或 daemon 不可用时静默跳过）。`exec.Lookup` 必须返回参数副本，避免调用方篡改编译期白名单；`exec.Run` 必须使用 `exec.CommandContext` 而不是 shell；Docker 采样只能调用固定参数形状的 `docker ps --all --no-trunc --format ...` 与 `docker stats --no-stream --format ...`，不得扩展为 Docker 控制、编排或容器生命周期操作。
+
+#### Scenario: agent command / Docker 边界
+
+1. **Scope / Trigger**
+   - 触发：修改 `agent/exec/`、`agent/containersample/`、`agent/runtime` 的 pending action 执行或 Docker container facts 采样路径。
+   - 目标：保持 Agent 是薄 observe / buffer / sync / apply-plan 进程，只允许白名单命令执行和 best-effort 本机 Docker facts，防止被误扩展成任意远程执行或容器编排面。
+
+2. **Signatures**
+   - 命令下发：center 只通过 `agentapi.PendingAction{ActionID, CommandID}` 下发稳定 `command_id`，不下发二进制路径、参数或 shell snippet。
+   - 白名单解析：`agent/exec.Lookup(commandID)` 返回 `(bin, args, ok)`，`args` 必须是内部白名单参数的 defensive copy。
+   - 命令执行：`agent/exec.Run(ctx, bin, args)` 使用 `exec.CommandContext`，带 30s timeout 与 stdout/stderr 独立 64KB 截断。
+   - Docker facts：`agent/containersample.Collect(ctx)` 在 host sample 时 best-effort 调用 Docker CLI，返回 `[]agentapi.ContainerInfo` 或 `nil`。
+
+3. **Contracts**
+   - 白名单命令 ID 当前固定为：`df_h`、`free_m`、`uptime`、`top_head`、`journalctl_u`、`systemctl_status`、`dmesg_err`、`docker_ps`。
+   - 命令参数全部编译进 agent，不接受中心、Web 或用户传入的动态参数。
+   - 未知 `command_id` 由 agent runtime 静默忽略，不阻塞 sync loop，不生成 command result。
+   - Docker CLI 不存在、daemon 不可用、`docker ps` 失败或 context 已取消时返回 `nil, nil`，不得让 host sample 失败。
+   - `docker stats` 失败时仍返回 `docker ps` 的 container identity/status facts，CPU/mem 百分比留空。
+   - Docker facts 只描述本机容器快照，不代表 Docker runtime 是必需部署依赖，不提供 start/stop/restart/logs/exec/compose/kubernetes 等控制能力。
+
+4. **Validation & Error Matrix**
+   - `Lookup` 未知 ID -> `ok=false`，bin/args 零值。
+   - 调用方修改 `Lookup` 返回的 args -> 后续 `Lookup` 结果不变。
+   - shell metacharacter 作为参数传给 `Run` -> 被当作普通参数，不执行额外 shell 语义。
+   - `docker ps` 输出空或无法解析 -> `nil, nil`。
+   - `docker stats` 输出字段无法解析 -> 对应 CPU/mem 字段保持 nil。
+
+5. **Good / Base / Bad Cases**
+   - Good: center 下发 `command_id=uptime`，agent 通过 whitelist 解析为 `uptime` + nil args，执行后回传带 action/command identity 的 `CommandResult`。
+   - Good: Docker 可用时 host sample 附带 container name/image/status 和可选 CPU/mem 百分比；Docker 不可用时 host sample 仍正常上传且 `containers` 为空。
+   - Base: 当前 whitelist 有 `docker_ps`，但这只是诊断命令，不等于 Docker 编排能力。
+   - Bad: 让 center 或 Web 传入 `args:["-c","..."]`、`bin:"sh"`、`command:"docker rm ..."`，会把薄 Agent 扩成任意执行面。
+   - Bad: 在 `containersample` 中增加 `docker start/stop/restart/logs/exec` 或 Docker SDK 控制路径，违反 best-effort facts 边界。
+
+6. **Tests Required**
+   - `agent/exec/whitelist_test.go`：固定 whitelist command IDs、bin、args；未知 ID 拒绝；返回 args 是 defensive copy。
+   - `agent/exec/runner_test.go`：正常/非零/timeout/not-found/output truncation；必须覆盖不隐式调用 shell。
+   - `agent/containersample/sample_test.go`：Docker 不可用、`ps` 失败、`stats` 失败、状态归一化、固定 Docker CLI 参数形状。
+   - `agent/runtime/runtime_test.go`：pending action 结果携带 action/command identity，未知 command ID 不产生结果，host sample 可附带 container facts。
+
+7. **Wrong vs Correct**
+
+```go
+// 错误：把内部 whitelist args 直接暴露给调用方，调用方可篡改后续执行参数。
+return cmd.Bin, cmd.Args, true
+```
+
+```go
+// 正确：返回参数副本，白名单定义仍由编译期 map 独占。
+args := append([]string(nil), cmd.Args...)
+return cmd.Bin, args, true
+```
+
+```go
+// 错误：把 command_id 当 shell 脚本执行，等价于开放任意远程命令。
+cmd := exec.CommandContext(ctx, "sh", "-c", commandID)
+```
+
+```go
+// 正确：只执行 whitelist 解析出的二进制和固定参数，不经过 shell。
+bin, args, ok := agentexec.Lookup(action.CommandID)
+if ok {
+	result := agentexec.Run(ctx, bin, args)
+}
+```
 
 #### Scenario: `agent/hostsample` 平台采集边界
 

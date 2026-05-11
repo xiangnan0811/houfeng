@@ -48,6 +48,16 @@ func TestRunCommandNotFoundReturnsMinusOne(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotInvokeShellImplicitly(t *testing.T) {
+	result := Run(context.Background(), "printf", []string{"%s", "hello; echo injected"})
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
+	}
+	if result.Stdout != "hello; echo injected" {
+		t.Fatalf("Stdout = %q, want literal shell metacharacters", result.Stdout)
+	}
+}
+
 func TestRunStdoutTruncationAt64KB(t *testing.T) {
 	// dd writes to stdout by default; 66000 bytes > 64KB triggers truncation.
 	result := Run(context.Background(), "dd", []string{"if=/dev/zero", "bs=66000", "count=1"})

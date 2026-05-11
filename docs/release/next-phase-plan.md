@@ -109,11 +109,11 @@ P0 全完成 / P1 全完成 / P2 接近完成：
 **已知方向起点**（仅作 trigger 后讨论的种子，不锁定）：
 - 用户判定 MVP 比 V1 范围大；具体功能扩展待 brainstorm
 - 候选方向（来自 v1-baseline 自身的"intentionally out of scope"段，与本阶段无关）：
-  - 通用脚本执行 / 远程操作面（v1 明确划在外；当前仅有编译期白名单 node actions，命令结果 command_id / in-flight durability 仍为 follow-up）
-  - Docker / 容器编排（v1 明确划在外；当前仅有 best-effort Docker CLI container facts / `docker ps` 白名单，不等于容器编排能力）
+  - 通用脚本执行 / 远程操作面（v1 明确划在外；当前仅有编译期白名单 node actions；command identity / in-flight durability 已在 `05-10-command-result-durability` 收口，产品边界已在 `05-11-agent-command-boundary-hardening` 收口）
+  - Docker / 容器编排（v1 明确划在外；当前仅有 best-effort Docker CLI container facts / `docker ps` 白名单，且 Docker CLI 参数形状已测试锁定；这不等于容器编排能力）
   - 复杂规则引擎（v1 强调"统一规则集中在中心，不下放 agent"）
   - 多目标分组与批量操作 / 模板化探针（v1 强调单用户、低密度配置面）
-- 是否引入新存储后端（TSDB？）或继续扩展邮件 / 企微等通知通道，仍属于后续 Stage 2 brainstorm 决议。**2026-05-11 更新**：正式 Telegram / Feishu notification channel model 已由 `05-11-notification-channel-model` 收口，notification record 现在按真实 channel 写入；本计划不再把 Feishu-only / mixed delivery 语义列为未完成项。
+- 是否引入新存储后端（TSDB？）或继续扩展邮件 / 企微等通知通道，仍属于后续 Stage 2 brainstorm 决议。**2026-05-11 更新**：正式 Telegram / Feishu notification channel model 已由 `05-11-notification-channel-model` 收口，notification record 现在按真实 channel 写入；本计划不再把 Feishu-only / mixed delivery 语义列为未完成项。同日，Agent command / Docker boundary 已由 `05-11-agent-command-boundary-hardening` 收口；本计划不再把当前白名单命令或 best-effort Docker facts 误描述为 unresolved scope。
 
 **Out of scope（即使 MVP 也不做）**：参考 `docs/design/v2-houfeng/design-language.md` 的"避免反例"段与"不做的事（约束）"段；本阶段不复述。
 

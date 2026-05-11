@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for Go center and agent work"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Agent package boundaries and thin-agent command/Docker contract"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Node command action durability and command identity contract"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Agent/backend error handling and no-panic conventions"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go test and verification requirements"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature branch and PR workflow requirements"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Boundary spans agent code, contracts, and release docs"}
