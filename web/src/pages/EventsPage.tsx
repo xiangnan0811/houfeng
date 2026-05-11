@@ -6,6 +6,7 @@ import type { EventListFilter, StateChangeEventType } from '../lib/types'
 import { EventsFilterDrawer } from './events/EventsFilterDrawer'
 import { EventsFilterOverview } from './events/EventsFilterOverview'
 import { EventsStreamSection } from './events/EventsStreamSection'
+import { EventsSupportSurface } from './events/EventsSupportSurface'
 import {
   ALLOWED_EVENT_TYPES,
   ALLOWED_LIMITS,
@@ -355,6 +356,13 @@ export function EventsPage() {
           查看最新状态变更事件，并按对象类型、严重程度、事件类型与数量快速筛选。
         </p>
       </section>
+
+      <EventsSupportSurface
+        events={state.events}
+        filters={appliedFilters}
+        hasActiveFilters={activeFilters}
+        onOpenFilters={openFiltersDrawer}
+      />
 
       <EventsFilterOverview
         filters={appliedFilters}

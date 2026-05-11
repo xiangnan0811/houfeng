@@ -22,6 +22,7 @@ import { type AutoRefreshOption, useAutoRefresh } from '../lib/useAutoRefresh'
 import { CreateNodeDrawer } from './nodes/CreateNodeDrawer'
 import { NodesHero } from './nodes/NodesHero'
 import { NodesListSection } from './nodes/NodesListSection'
+import { NodesSupportSurface } from './nodes/NodesSupportSurface'
 import { buildNodesTableColumns } from './nodes/NodesTableColumns'
 import { NodesToolbar } from './nodes/NodesToolbar'
 import {
@@ -639,6 +640,20 @@ export function NodesPage() {
             }
             return !current
           })
+        }
+      />
+
+      <NodesSupportSurface
+        totalNodeCount={nodes.length}
+        displayedNodeCount={sortedFilteredNodes.length}
+        abnormalNodeCount={abnormalNodeCount}
+        pendingOnboardingNodeCount={pendingOnboardingNodeCount}
+        maintenanceOrPausedNodeCount={maintenanceOrPausedNodeCount}
+        hasActiveFilters={hasActiveFilters}
+        onAbnormalClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
+        onOnboardingClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
+        onRuntimeAttentionClick={() =>
+          setSingleFilter('run_status', runtimeAttentionFilter(nodes))
         }
       />
 

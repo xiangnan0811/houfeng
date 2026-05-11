@@ -1455,3 +1455,36 @@ Redesigned VPS detail into an asset decision workbench with drawer-based edits, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 103: UX-5 observability support convergence
+
+**Date**: 2026-05-11
+**Task**: UX-5 observability support convergence
+**Branch**: `ux/observability-support-convergence`
+
+### Summary
+
+Redesigned Nodes, Targets, and Events into observability support surfaces for the asset workflow; updated v2 page contracts, tests, and verification evidence.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e28d6d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

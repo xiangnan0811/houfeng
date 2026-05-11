@@ -241,17 +241,18 @@ parent: docs/design/v2-houfeng/design-language.md
 6. 服务/域名在 Detail 页是 VPS scoped manual records，只展示和创建当前 VPS 的上下文记录；不要在这里扩成完整服务注册表、域名管理或 DNS 记录管理。
 
 ### NodesPage
-1. Section heading + 「新建节点」按钮
-2. （可选）创建节点表单（page-panel）
-3. 视图切换：segmented control 「全部节点 N」/「绑定异常 M」
-4. 筛选栏：URL-state 承接 Dashboard 深链；`onboarding=pending` 显示 `待接入/绑定待处理` chip/toggle，匹配生命周期待接入、未绑定或指纹变更待确认节点。
-5. **DataTable**（density compact）：列 `[StatusGlyph, 节点(Hostname + 名字 + 心跳/同步 mono), 位置, 标签, 当前主问题, 近 24h 趋势(sparkline strip), 操作 hover]`
+1. Section heading「节点观测」+ 「新建节点」按钮。文案必须把 Node 定位为 VPS 资产判断的运行证据，而不是独立的资源中心。
+2. 观测支撑面「资产判断支撑」放在 hero 之后、创建 drawer/列表控制之前，展示四个证据 lane：异常证据、接入/绑定、维护/暂停、VPS 关联。支撑面只能使用当前 Node 列表已加载状态派生数字和入口，不做逐行 VPS 查询，也不展示列表 contract 中不存在的 linked VPS health。
+3. （可选）创建节点表单/Drawer；创建入口不抢占首屏扫描路径。
+4. 视图切换：segmented control 「全部节点 N」/「绑定异常 M」
+5. 筛选栏：URL-state 承接 Dashboard 深链；`onboarding=pending` 显示 `待接入/绑定待处理` chip/toggle，匹配生命周期待接入、未绑定或指纹变更待确认节点。支撑面快捷按钮可复用 `abnormal=1`、`onboarding=pending`、运行状态筛选，但必须保持清空和 chip 移除回写 URL。
+6. **DataTable**（density compact）：列 `[StatusGlyph, 节点(Hostname + 名字 + 心跳/同步 mono), 位置, 标签, 当前主问题, 近 24h 趋势(sparkline strip), 操作 hover]`
    - 节点身份列三行：第 1 行 `<Hostname truncate>` node_id（mono 小字）、第 2 行 display_name（sans 粗体 link）、第 3 行 `心跳 X 分钟前 · 同步 Y 分钟前`（mono 10px `--text-muted`）
    - 趋势列（~220px）：CPU / Mem / Disk 三指标 mini sparkline strip，每项含上方 mono 当前值（9px）+ 下方 `<Sparkline>` 64×14，tone 按阈值择色（CPU 80/95、Mem 85/95、Disk 80/95）
    - Sparklines 延迟加载（不阻塞列表首屏），缺失 / 加载中 / 失败均显示 "—"
    - 原"心跳·同步"独立列已删除，信息合并入节点身份列第三行
-6. 行 hover：操作列显示「快速编辑标签」「进入维护」「暂停监控」三个 ghost 按钮
-7. 行点击：导航到节点详情
+7. 行 hover：操作列显示「快速编辑标签」「进入维护」「暂停监控」三个 ghost 按钮
+8. 行点击：导航到节点详情
 
 ### NodeDetailPage（watchtower）
 
@@ -279,12 +280,13 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
    - 抽屉支持 Esc 关闭 / overlay 点击关闭 / × 按钮关闭；通过 portal 挂载到 `document.body`，打开后管理初始焦点与 Tab containment，关闭后恢复触发器焦点；当 `open=false` 时不渲染 children，避免 DOM 中事件文案重复
 
 ### EventsPage
-1. Hero panel
-2. DetailSection `筛选条件`：主视图使用 `FilterBar` + `FilterChip` 做轻量筛选概览，保留 `清空所有` 和 `高级筛选` 入口；完整筛选控件放入右侧 `Drawer`，使用 `Tabs` / `FilterSelect` / `FilterToggle` / 日期与标签输入承载 URL-state 筛选。受支持 query：`object_type`、`severity`、`event_type`、`limit`、`created_from`、`created_to`、`label`、`notification_only=1`、`recovery_only=1`、`maintenance_only=1`、`include_backfilled=1`、`time_range=24h|7d|30d|custom`。Dashboard 深链使用 `/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1`；页面初次加载、Drawer 应用筛选、Drawer 重置、主视图清空、移除 chip 都必须同步 URL 与事件请求。
+1. Hero panel 把页面定位为审计与诊断时间线，承接 Dashboard、VPS、Node 和 Target 深链。
+2. 诊断支撑面「诊断时间线」放在 hero 之后、筛选概览之前，展示当前事件数量、筛选项数量、对象上下文、严重度/类型、时间/来源入口。支撑面只读取 `appliedFilters` 和当前已加载 events，不直接修改 Drawer draft；按钮「调整筛选」打开既有 Drawer。
+3. DetailSection `筛选条件`：主视图使用 `FilterBar` + `FilterChip` 做轻量筛选概览，保留 `清空所有` 和 `高级筛选` 入口；完整筛选控件放入右侧 `Drawer`，使用 `Tabs` / `FilterSelect` / `FilterToggle` / 日期与标签输入承载 URL-state 筛选。受支持 query：`object_type`、`severity`、`event_type`、`limit`、`created_from`、`created_to`、`label`、`notification_only=1`、`recovery_only=1`、`maintenance_only=1`、`include_backfilled=1`、`time_range=24h|7d|30d|custom`。Dashboard 深链使用 `/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1`；页面初次加载、Drawer 应用筛选、Drawer 重置、主视图清空、移除 chip 都必须同步 URL 与事件请求。
    - URL 是 applied filter truth；打开 Drawer 时 draft 从当前 applied filters 初始化。Esc、overlay、头部关闭和 Drawer 内 `关闭` 只丢弃 draft，不得更新 URL 或发起事件请求。
    - `time_range=24h|7d|30d` 在 URL 保留相对窗口，发 API 请求时动态计算 `created_from` / `created_to`；`time_range=custom` 使用显式日期。
    - `include_backfilled=1` 解除后端默认的补传相关事件排除；前端 API 请求使用 `include_backfilled=true`，chip 和 toggle 必须可移除 / 重置。
-3. DetailSection `事件流`：EventList（按日期 sticky 分组）
+4. DetailSection `事件流`：EventList（按日期 sticky 分组）。默认事实必须继续显示对象类型、对象 ID、严重度、事件类型、时间和摘要，不能被支撑面取代。
 
 ### SettingsPage
 1. Hero panel
@@ -297,12 +299,13 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
 8. 底部统一保存按钮 + 错误/成功就地展示
 
 ### TargetsPage
-1. Section heading + 「新建目标」按钮（右对齐，primary）
+1. Section heading「入口观测」+ 「新建目标」按钮（右对齐，primary）。文案必须把 Target 定位为服务入口和探测覆盖证据，而不是完整服务注册表。
 2. （可选）创建目标表单（page-panel，可折叠）
-3. 筛选栏：6 项（type / run_status / health / labels / execution_node_labels / abnormal toggle），URL-state 承接 Dashboard 深链（`abnormal=1`、`run_status=暂停`、`run_status=已归档`）并显示对应 chip/toggle。
-4. **DataTable**（density compact）：列 `[StatusGlyph, 目标(名字 + Hostname target_id), 类型, Host(Hostname host[:base_port]), 标签(截断+overflow+inline 编辑), 状态(StatusBadge run_status + health + 执行节点标签), 最近成功/失败(Timestamp relative), 当前主问题(MonoDigits incident_count + 摘要), 操作]`
-5. 行 hover：操作列显示「快速编辑标签 / 进入维护 / 暂停 / 归档 / 恢复」等条件性 ghost 按钮（hover-only opacity 模式）
-6. 行点击：导航到目标详情；操作列内部 `event.stopPropagation()` 防误触发
+3. 入口观测支撑面「服务入口支撑」放在创建面板之后、列表空态/筛选栏之前，展示四个证据 lane：异常入口、暂停/归档、执行覆盖、资产服务上下文。支撑面只能从当前 Target 列表派生数字，链接到 VPS 台账和资产决策，不扩展跨页 service registry。
+4. 筛选栏：6 项（type / run_status / health / labels / execution_node_labels / abnormal toggle），URL-state 承接 Dashboard 深链（`abnormal=1`、`run_status=暂停`、`run_status=已归档`）并显示对应 chip/toggle。支撑面快捷按钮可复用这些筛选，但必须保持清空和 chip 移除回写 URL。
+5. **DataTable**（density compact）：列 `[StatusGlyph, 目标(名字 + Hostname target_id), 类型, Host(Hostname host[:base_port]), 标签(截断+overflow+inline 编辑), 状态(StatusBadge run_status + health + 执行节点标签), 最近成功/失败(Timestamp relative), 当前主问题(MonoDigits incident_count + 摘要), 操作]`
+6. 行 hover：操作列显示「快速编辑标签 / 进入维护 / 暂停 / 归档 / 恢复」等条件性 ghost 按钮（hover-only opacity 模式）
+7. 行点击：导航到目标详情；操作列内部 `event.stopPropagation()` 防误触发
 
 ### TargetDetailPage
 1. Hero：目标名 (display_name) + 4 个 hero meta card（标签 / 执行节点标签 / 最近成功 Timestamp / 最近失败 Timestamp，全部 mono 包装）
