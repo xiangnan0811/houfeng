@@ -1059,3 +1059,36 @@ Extracted TargetDetailPage page-private sections, constants, types, and helpers 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 91: TargetsPage section extraction
+
+**Date**: 2026-05-11
+**Task**: TargetsPage section extraction
+**Branch**: `refactor/targets-page-sections`
+
+### Summary
+
+Extracted TargetsPage page-private create form, filters, batch actions, table columns, cells, runtime overlays, helpers, and types while preserving page-owned data loading, URL search state, mutations, and focus restoration. Verified with lint, TargetsPage tests, and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4ee93e9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
