@@ -60,7 +60,11 @@ esac
 }
 
 func TestCollect_DockerUnavailable_ReturnsNil(t *testing.T) {
-	// No docker in PATH (we don't set up a fake), so Collect should return nil, nil.
+	dir := t.TempDir()
+	origPath := os.Getenv("PATH")
+	os.Setenv("PATH", dir)
+	defer os.Setenv("PATH", origPath)
+
 	containers, err := containersample.Collect(context.Background())
 	if err != nil {
 		t.Fatalf("expected nil error when docker unavailable, got: %v", err)
@@ -220,10 +224,10 @@ esac
 func TestCollect_LookPathFails_ReturnsNil(t *testing.T) {
 	// Set PATH to an empty directory so exec.LookPath("docker") fails.
 	dir := t.TempDir()
+	origPath := os.Getenv("PATH")
 	os.Setenv("PATH", dir)
 	defer func() {
-		// Restore a minimal PATH so other tests aren't affected.
-		os.Setenv("PATH", "/usr/bin:/bin")
+		os.Setenv("PATH", origPath)
 	}()
 
 	containers, err := containersample.Collect(context.Background())
@@ -232,6 +236,68 @@ func TestCollect_LookPathFails_ReturnsNil(t *testing.T) {
 	}
 	if containers != nil {
 		t.Fatalf("expected nil containers when docker not in PATH, got: %v", containers)
+	}
+}
+
+func TestCollect_UsesFixedDockerCLIArgumentShapes(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "docker-argv.log")
+	script := filepath.Join(dir, "docker")
+	content := `#!/bin/sh
+printf '%s\n' "$*" >> "$DOCKER_ARG_LOG"
+case "$1" in
+  ps)
+    if [ "$2" != "--all" ] || [ "$3" != "--no-trunc" ] || [ "$4" != "--format" ]; then
+      exit 2
+    fi
+    if [ "$5" != "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}" ]; then
+      exit 3
+    fi
+    printf 'abc123\tapp\talpine:latest\tUp 1 hour\n'
+    ;;
+  stats)
+    if [ "$2" != "--no-stream" ] || [ "$3" != "--format" ]; then
+      exit 4
+    fi
+    if [ "$4" != "{{.CPUPerc}}\t{{.MemPerc}}\t{{.Name}}" ]; then
+      exit 5
+    fi
+    printf '1.25%%\t2.50%%\tapp\n'
+    ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake docker script: %v", err)
+	}
+	origPath := os.Getenv("PATH")
+	origLog := os.Getenv("DOCKER_ARG_LOG")
+	os.Setenv("PATH", dir+":"+origPath)
+	os.Setenv("DOCKER_ARG_LOG", logPath)
+	defer func() {
+		os.Setenv("PATH", origPath)
+		os.Setenv("DOCKER_ARG_LOG", origLog)
+	}()
+
+	containers, err := containersample.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(containers) != 1 {
+		t.Fatalf("len(containers) = %d, want 1", len(containers))
+	}
+	if containers[0].Name != "app" || containers[0].CPUPct == nil || *containers[0].CPUPct != 1.25 {
+		t.Fatalf("containers[0] = %#v, want app with stats", containers[0])
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker arg log: %v", err)
+	}
+	want := "ps --all --no-trunc --format {{.ID}}\\t{{.Names}}\\t{{.Image}}\\t{{.Status}}\n" +
+		"stats --no-stream --format {{.CPUPerc}}\\t{{.MemPerc}}\\t{{.Name}}\n"
+	if string(logData) != want {
+		t.Fatalf("docker argv log = %q, want %q", string(logData), want)
 	}
 }
 

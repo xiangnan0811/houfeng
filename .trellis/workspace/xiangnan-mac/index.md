@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 83
+- **Total Sessions**: 84
 - **Last Active**: 2026-05-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~830 | Active |
+| `journal-2.md` | ~863 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 84 | 2026-05-11 | Agent command boundary hardening | `24733ce` | `fix/agent-command-boundary` |
 | 83 | 2026-05-11 | Notification channel model | `099df3b` | `fix/notification-channel-model` |
 | 82 | 2026-05-11 | Command result durability | `a94b25b` | `fix/command-result-durability` |
 | 81 | 2026-05-10 | Modal focus management | `319d0c4`, `0b02426`, `2095c65` | `fix/modal-focus-management` |

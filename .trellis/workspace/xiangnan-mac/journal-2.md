@@ -828,3 +828,36 @@ Closed the formal notification channel model gap by adding channel-aware Telegra
 ### Next Steps
 
 - None - task complete
+
+
+## Session 84: Agent command boundary hardening
+
+**Date**: 2026-05-11
+**Task**: Agent command boundary hardening
+**Branch**: `fix/agent-command-boundary`
+
+### Summary
+
+Hardened the agent command and Docker facts boundary: whitelist lookups now return defensive argument copies, tests lock fixed command and Docker CLI shapes, and release/Trellis docs close gap #23 without expanding arbitrary exec or Docker orchestration scope.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `24733ce` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

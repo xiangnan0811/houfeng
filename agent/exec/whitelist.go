@@ -32,5 +32,8 @@ func Lookup(id string) (bin string, args []string, ok bool) {
 	if !ok {
 		return "", nil, false
 	}
-	return cmd.Bin, cmd.Args, true
+	if len(cmd.Args) > 0 {
+		args = append([]string(nil), cmd.Args...)
+	}
+	return cmd.Bin, args, true
 }

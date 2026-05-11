@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for final quality check"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify thin-agent command/Docker boundary"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify command identity contract is not regressed"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify no-panic and error behavior"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify Go quality gate expectations"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch workflow governance"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify code/docs/spec consistency"}
