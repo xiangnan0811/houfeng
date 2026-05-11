@@ -4,7 +4,7 @@
 >
 > 范围：基于 `houfeng_codex_下一步开发计划.md`、`docs/release/asset-ledger-roadmap-completion.md`、`docs/release/next-phase-plan.md` 与当前仓库实现状态，确认旧计划剩余工作和下一阶段进入方式。
 >
-> 结论：旧计划没有新的立即开发任务；真实 VPS 数据验证保持条件性延期；前端大文件机械拆分暂停，等待页面产品/UX 方向重新确定。
+> 结论：旧计划没有新的立即开发任务；真实 VPS 数据验证保持条件性延期；前端大文件机械拆分暂停。用户已确认下一阶段先做核心页面产品/UX 重新规划，规划入口见 `docs/release/core-pages-product-ux-replan.md`。
 
 ## 决策摘要
 
@@ -13,6 +13,7 @@
 3. Provider/DNS 同步、Web SSH、插件系统、服务发现/完整注册表、完整域名管理、多用户 RBAC、汇率换算、复杂评分算法等方向不能继续挂在旧计划下推进；它们需要新的产品计划与 Trellis task。
 4. 前端长页面/大文件继续拆分不再作为下一步默认任务。当前页面体验尚未被接受，继续机械拆分会把代码结构固化在可能被大改的页面形态上。
 5. 下一阶段应在“真实数据验证”和“新产品/UX 规划”之间明确选择；如果目标是页面大调整，应先做 UX/信息架构规划，再决定具体组件拆分。
+6. **2026-05-11 决策更新**：用户已选择“核心页面产品/UX 重新规划”。该方向的父级规划见 `docs/release/core-pages-product-ux-replan.md`；后续应从 UX-1 App shell / 导航 / 视觉基线重置开始拆具体实现任务。
 
 ## 当前已完成状态
 
@@ -130,6 +131,8 @@ release/publish workflow 当前按用户决策后续再考虑，本规划不把�
 
 适用场景：用户对当前页面不满意，希望大幅调整页面体验。
 
+**当前状态：已被用户确认选中。规划文档见 `docs/release/core-pages-product-ux-replan.md`。**
+
 下一步任务范围：
 
 - 选定要重做的核心页面集。
@@ -138,6 +141,15 @@ release/publish workflow 当前按用户决策后续再考虑，本规划不把�
 - 形成 UI/UX PRD，再拆实现任务。
 
 该入口优先于继续拆分大文件。
+
+后续实现批次以 `docs/release/core-pages-product-ux-replan.md` 为准：
+
+- UX-1：App shell / 导航 / 视觉基线重置。
+- UX-2：Dashboard 工作台重塑。
+- UX-3：资产决策 + VPS 列表重塑。
+- UX-4：VPS 详情页重塑。
+- UX-5：节点 / 目标 / 事件支撑页收敛。
+- UX-6：视觉证据与验收流程。
 
 ### 入口 3：新能力产品计划
 
@@ -163,4 +175,5 @@ release/publish workflow 当前按用户决策后续再考虑，本规划不把�
 - `houfeng_codex_下一步开发计划.md`：旧计划正文与任务拆分来源；当前状态段仍有效。
 - `docs/release/asset-ledger-roadmap-completion.md`：Asset Ledger 完成度证据矩阵。
 - `docs/release/next-phase-plan.md`：Stage 1 / Stage 2 总体 roadmap 入口。
+- `docs/release/core-pages-product-ux-replan.md`：用户已确认的下一阶段核心页面产品/UX 重新规划入口。
 - 本文档：2026-05-11 之后判断“接下来做什么 / 不做什么”的当前状态快照。

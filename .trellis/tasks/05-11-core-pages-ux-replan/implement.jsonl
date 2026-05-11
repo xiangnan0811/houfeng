@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Git branch and PR workflow constraints"}
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend authority index for UX planning"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Dark-first styling and token constraints"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Frontend component and abstraction constraints"}
+{"file": ".trellis/tasks/05-11-core-pages-ux-replan/research/current-ui-ux-audit.md", "reason": "Current UI UX audit and replan rationale"}

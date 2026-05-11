@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **候风 / Houfeng Fleet Control Plane** — a single-user, monitoring-and-probe-first fleet control plane. This repo started as the V1 implementation repo and now has passed the V1 release-gate judgment recorded in `docs/release/next-phase-plan.md`.
 
-**重要**：V1 ≠ MVP。V1 frozen 业务结构仍是基础边界，但 post-V1 第一条扩展计划（VPS Asset Ledger + Fleet Observability）已闭合到当前计划边界。下一步不要自动继续旧计划；先查 `docs/release/current-state-and-next-stage-plan.md`。
+**重要**：V1 ≠ MVP。V1 frozen 业务结构仍是基础边界，但 post-V1 第一条扩展计划（VPS Asset Ledger + Fleet Observability）已闭合到当前计划边界。下一步不要自动继续旧计划；先查 `docs/release/current-state-and-next-stage-plan.md`。用户已确认当前下一阶段入口是核心页面产品/UX 重新规划，父级规划见 `docs/release/core-pages-product-ux-replan.md`。
 
 V1 业务结构（数据模型 / 规则 / 技术选型 / 交互原型）frozen 在 `docs/design/v1-baseline/` 的 4 份子集（`architecture-data-model.md` + `rules-and-interaction.md` + `tech-selection.md` + `interactive-prototype-and-operation-flow.md`）。视觉部分已 unfrozen，权威指向 `docs/design/v2-houfeng/`。
 
@@ -125,8 +125,9 @@ Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-
 - `docs/release/next-phase-plan.md` — 下一阶段开发计划（Stage 1 V1 收口 / Stage 2 post-V1 → MVP / Stage 3+ 远期）.
 - `docs/release/asset-ledger-roadmap-completion.md` — VPS Asset Ledger 计划完成度审计。
 - `docs/release/current-state-and-next-stage-plan.md` — 当前项目剩余工作审计与下一阶段入口；明确旧计划无立即任务、真实数据条件性延期、前端机械拆分暂停。
+- `docs/release/core-pages-product-ux-replan.md` — 用户已确认的核心页面产品/UX 重新规划；后续前端实现应从 UX-1 App shell / 导航 / 视觉基线重置开始拆任务。
 - `docs/deploy/local-and-systemd.md` 与 `docs/deploy/systemd/*.service` — canonical 部署 recipe.
 
 注：早期的 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，stitch 已 archive 后这两份也已迁至 `docs/_archive/operations/`，仅作历史记录。当前已有一次性 v2 截图证据直接存放在 `docs/operations/*.jpg`；正式、可重复的 v2 视觉证据收集流程仍待后续建立。
 
-When changing user-visible behavior, first record the gap in `docs/release/v1-gap-checklist.md` and consult `docs/release/next-phase-plan.md` plus `docs/release/current-state-and-next-stage-plan.md` for prioritization, rather than editing the frozen baseline docs.
+When changing user-visible behavior, first record the gap in `docs/release/v1-gap-checklist.md` and consult `docs/release/next-phase-plan.md`, `docs/release/current-state-and-next-stage-plan.md`, and `docs/release/core-pages-product-ux-replan.md` for prioritization, rather than editing the frozen baseline docs.
