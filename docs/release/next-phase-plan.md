@@ -1,6 +1,6 @@
 # 候风 / Houfeng Fleet Control Plane — 下一阶段开发计划
 
-> **关联文档**：`docs/release/docs-audit.md`（docs 审计与 archive 决策）+ `docs/release/v1-gap-checklist.md`（gap 清单与 V1 release gate）+ `docs/release/current-state-and-next-stage-plan.md`（当前剩余工作审计与下一阶段规划）+ `CLAUDE.md`（AI session 项目入口）+ `docs/design/v1-baseline/`（V1 业务结构 frozen 子集）+ `docs/design/v2-houfeng/`（视觉权威）+ `docs/operations/v1-smoke-run.md`（真实环境冒烟脚本）。
+> **关联文档**：`docs/release/docs-audit.md`（docs 审计与 archive 决策）+ `docs/release/v1-gap-checklist.md`（gap 清单与 V1 release gate）+ `docs/release/current-state-and-next-stage-plan.md`（当前剩余工作审计与下一阶段规划）+ `docs/release/core-pages-product-ux-replan.md`（核心页面产品/UX 重新规划）+ `CLAUDE.md`（AI session 项目入口）+ `docs/design/v1-baseline/`（V1 业务结构 frozen 子集）+ `docs/design/v2-houfeng/`（视觉权威）+ `docs/operations/v1-smoke-run.md`（真实环境冒烟脚本）。
 >
 > **状态判定**（2026-05-02）：用户判定当前实现"连 V0.1 都不到"；V1 是当前阶段的收口期目标，且 **V1 ≠ MVP**——用户心目中的 MVP 范围比 v1-baseline 更大。本文档作为 V1 收口期间的统一指引，明确"现在做什么 / 何时触发下一阶段 / 哪些事确定不做"。
 
@@ -108,6 +108,8 @@ P0 全完成 / P1 全完成 / P2 接近完成：
 
 **2026-05-11 状态更新**：当前项目剩余工作审计见 `docs/release/current-state-and-next-stage-plan.md`。结论是：旧 Asset Ledger 计划没有新的立即开发任务；真实 VPS 数据 dry-run/import 保持条件性延期；Provider/DNS 同步、Web SSH、插件、服务发现/完整注册表、完整域名管理、RBAC、汇率、评分算法等方向必须另起产品计划；前端长页面/大文件机械拆分暂停，等待页面产品/UX 方向重新确定后再决定是否拆分。
 
+**2026-05-11 UX 入口更新**：用户已确认下一阶段先做“核心页面产品/UX 重新规划”。父级规划见 `docs/release/core-pages-product-ux-replan.md`。后续具体实现应从 UX-1 App shell / 导航 / 视觉基线重置开始，而不是回到旧计划、真实数据导入或机械拆分。
+
 **已知方向起点**（仅作 trigger 后讨论的种子，不锁定）：
 - 用户判定 MVP 比 V1 范围大；具体功能扩展待 brainstorm
 - 候选方向（来自 v1-baseline 自身的"intentionally out of scope"段，与本阶段无关）：
@@ -163,6 +165,7 @@ gap-checklist 42 个 Closed (⚠️ need-reassess) 行已全部现场验证完�
 
 | 日期 | 变更 |
 |---|---|
+| 2026-05-11 | 增加 `docs/release/core-pages-product-ux-replan.md` 作为用户已确认的核心页面产品/UX 重规划入口。 |
 | 2026-05-11 | 增加 `docs/release/current-state-and-next-stage-plan.md` 作为当前剩余工作审计入口，明确旧计划无立即任务、真实数据条件性延期、前端机械拆分暂停。 |
 | 2026-05-10 | 记录 Stage 2 第一条具体扩展计划已落地到 `houfeng_codex_下一步开发计划.md`，完成度审计见 `docs/release/asset-ledger-roadmap-completion.md`。 |
 | 2026-05-02 | 初版，由 T2 (`.trellis/tasks/05-02-roadmap-and-claude-md`) 起草。关联 T1 (docs-audit) + T3 (spec-sync) 已落地的成果。Stage 1 详细 + Stage 2/3 占位 + trigger condition。 |

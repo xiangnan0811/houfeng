@@ -1290,3 +1290,36 @@ Recorded the current remaining-work audit and next-stage planning entry, includi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 98: Core pages product UX replan
+
+**Date**: 2026-05-11
+**Task**: Core pages product UX replan
+**Branch**: `docs/core-pages-ux-replan`
+
+### Summary
+
+Planned the next core page UX direction after user rejected the current page experience. Added the parent UX replan doc, linked current roadmap entries, recorded UI/UX audit research, and preserved the no-real-data/no-mechanical-splitting boundary.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `788e98c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
