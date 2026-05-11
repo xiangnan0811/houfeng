@@ -993,3 +993,36 @@ Split VPSDetailPage presentation sections into page-private components while kee
 ### Next Steps
 
 - None - task complete
+
+
+## Session 89: Node detail page section extraction
+
+**Date**: 2026-05-11
+**Task**: Node detail page section extraction
+**Branch**: `refactor/node-detail-page-sections`
+
+### Summary
+
+Split NodeDetailPage presentation sections, drawers, table helpers, constants, and pure helpers into page-private modules while keeping API calls, lazy loading, stale-route guards, focus restoration, and state ownership in the page. Verified lint, focused Node detail tests, build, and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4f7cad0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
