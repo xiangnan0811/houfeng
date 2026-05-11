@@ -1,29 +1,7 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
-import { StatusBadge } from '../components/StatusBadge'
-import {
-  Button,
-  DataTable,
-  type DataTableColumn,
-  type DataTableSortState,
-  Drawer,
-  Hostname,
-  type HealthState,
-  MonoDigits,
-  Sparkline,
-  StatusGlyph,
-  Tabs,
-  Timestamp,
-} from '../components/atoms'
-import {
-  FilterBar,
-  FilterChip,
-  FilterMultiSelect,
-  FilterSelect,
-  FilterToggle,
-} from '../components/filters'
+import { DataTable, type DataTableSortState } from '../components/atoms'
 import {
   ApiError,
   createNode,
@@ -40,214 +18,40 @@ import {
 } from '../lib/api'
 import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { CreateNodeInput, NodeRecord, NodeSparklinesResponse } from '../lib/types'
-import { formatPercent } from '../lib/format'
-import { DEFAULT_THRESHOLDS } from '../config/thresholds'
+import { type AutoRefreshOption, useAutoRefresh } from '../lib/useAutoRefresh'
+import { CreateNodeDrawer } from './nodes/CreateNodeDrawer'
+import { NodesBatchPanel } from './nodes/NodesBatchPanel'
+import { NodesFilterPanel } from './nodes/NodesFilterPanel'
+import { NodesHero } from './nodes/NodesHero'
+import { NodesRuntimeOverlays } from './nodes/NodesRuntimeOverlays'
+import { buildNodesTableColumns } from './nodes/NodesTableColumns'
+import { NodesToolbar } from './nodes/NodesToolbar'
 import {
-  AUTO_REFRESH_OPTIONS,
-  type AutoRefreshOption,
-  useAutoRefresh,
-} from '../lib/useAutoRefresh'
-
-const NODE_LIFECYCLE_FILTER_OPTIONS = [
-  { value: '待接入', label: '待接入' },
-  { value: '在用', label: '在用' },
-  { value: '观察中', label: '观察中' },
-  { value: '不续费', label: '不续费' },
-  { value: '已退役', label: '已退役' },
-] as const
-
-const NODE_RUN_STATUS_FILTER_OPTIONS = [
-  { value: '启用', label: '启用' },
-  { value: '暂停', label: '暂停' },
-  { value: '维护中', label: '维护中' },
-] as const
-
-const NODE_HEALTH_STATUS_FILTER_OPTIONS = [
-  { value: '正常', label: '正常' },
-  { value: '关注', label: '关注' },
-  { value: '告警', label: '告警' },
-  { value: '严重', label: '严重' },
-] as const
-
-type NodeFilterState = {
-  group: string | null
-  region: string | null
-  city: string | null
-  provider: string | null
-  lifecycle: string | null
-  runStatus: string | null
-  health: string | null
-  labels: string[]
-  abnormal: boolean
-  onboardingPending: boolean
-}
-
-function parseMultiValue(value: string | null): string[] {
-  if (!value) return []
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function distinctSorted(values: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const value of values) {
-    if (!value) continue
-    if (!seen.has(value)) {
-      seen.add(value)
-      out.push(value)
-    }
-  }
-  return out.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
-}
-
-const initialCreateForm: CreateNodeInput = {
-  display_name: '',
-  group: '',
-  region: '',
-  city: '',
-  provider: '',
-  labels: [],
-  note: '',
-}
-
-const NODE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
-const NODE_BINDING_UNBOUND_STATUS = '未绑定'
-const NODE_BINDING_CONFLICT_SUMMARY = '等待绑定确认'
-
-type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
-type NodeListView = 'all' | 'binding-conflict'
-type PendingNodeConfirmation = {
-  nodeId: string
-  action: 'pause'
-}
-
-type FocusRestoreRequest = {
-  nodeId: string
-  preferredAction: NodeRuntimeAction
-}
-
-/** Map backend Chinese health-status into the StatusGlyph state vocabulary.
- *  Health is derived (正常/关注/告警/严重) per architecture-data-model §node;
- *  monitoring 维护中/暂停 visually outranks health for at-a-glance scanning. */
-function nodeGlyphState(node: NodeRecord): HealthState {
-  if (node.monitoring_status === '维护中') return 'maintenance'
-  if (node.monitoring_status === '暂停') return 'offline'
-  switch (node.current_health_status) {
-    case '正常':
-      return 'normal'
-    case '关注':
-      return 'notice'
-    case '告警':
-      return 'alert'
-    case '严重':
-      return 'critical'
-    default:
-      return 'offline'
-  }
-}
+  actionButtonKey,
+  countAbnormalNodes,
+  countMaintenanceOrPausedNodes,
+  countPendingOnboardingNodes,
+  distinctSorted,
+  initialCreateForm,
+  isBindingConflictNode,
+  isPendingOnboardingNode,
+  mergeNonMetadataNodeRecord,
+  parseLabels,
+  parseMultiValue,
+  runtimeAttentionFilter,
+} from './nodes/nodeHelpers'
+import type {
+  FocusRestoreRequest,
+  NodeFilterState,
+  NodeListView,
+  NodeRuntimeAction,
+  PendingNodeConfirmation,
+} from './nodes/types'
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
-}
-
-function parseLabels(value: string) {
-  const result: string[] = []
-  const seen = new Set<string>()
-
-  for (const label of value.split(/[,，]/).map((item) => item.trim()).filter(Boolean)) {
-    if (seen.has(label)) continue
-    seen.add(label)
-    result.push(label)
-  }
-
-  return result
-}
-
-function nodeRuntimeActions(node: NodeRecord): Array<{ action: NodeRuntimeAction; label: string }> {
-  if (node.monitoring_status === '启用') {
-    return [
-      { action: 'enter-maintenance', label: '进入维护' },
-      { action: 'pause', label: '暂停监控' },
-    ]
-  }
-
-  if (node.monitoring_status === '维护中') {
-    return [
-      { action: 'exit-maintenance', label: '退出维护' },
-      { action: 'pause', label: '暂停监控' },
-    ]
-  }
-
-  if (node.monitoring_status === '暂停') {
-    return [{ action: 'resume', label: '恢复监控' }]
-  }
-
-  return []
-}
-
-function isBindingConflictNode(node: NodeRecord) {
-  return node.binding_status === NODE_BINDING_CONFLICT_STATUS
-}
-
-function isPendingOnboardingNode(node: NodeRecord) {
-  return (
-    node.lifecycle_status === '待接入' ||
-    node.binding_status === NODE_BINDING_UNBOUND_STATUS ||
-    node.binding_status === NODE_BINDING_CONFLICT_STATUS
-  )
-}
-
-function countAbnormalNodes(nodes: NodeRecord[]) {
-  return nodes.filter((node) => node.current_health_status !== '正常').length
-}
-
-function countPendingOnboardingNodes(nodes: NodeRecord[]) {
-  return nodes.filter(isPendingOnboardingNode).length
-}
-
-function countMaintenanceOrPausedNodes(nodes: NodeRecord[]) {
-  return nodes.filter(
-    (node) => node.monitoring_status === '维护中' || node.monitoring_status === '暂停',
-  ).length
-}
-
-function runtimeAttentionFilter(nodes: NodeRecord[]): string | null {
-  if (nodes.some((node) => node.monitoring_status === '维护中')) return '维护中'
-  if (nodes.some((node) => node.monitoring_status === '暂停')) return '暂停'
-  return null
-}
-
-function pauseConfirmationCurrent(node: NodeRecord) {
-  return node.monitoring_status === '维护中'
-    ? '当前：监控运行状态为维护中。'
-    : '当前：监控运行状态为启用。'
-}
-
-function mergeNonMetadataNodeRecord(current: NodeRecord, updated: NodeRecord): NodeRecord {
-  return {
-    ...updated,
-    labels: current.labels,
-    note: current.note,
-  }
-}
-
-function renderLabelsCell(node: NodeRecord): ReactNode {
-  if (node.labels.length === 0) return <span className="empty-inline">—</span>
-  const visible = node.labels.slice(0, 3)
-  const overflow = node.labels.length - visible.length
-  return (
-    <span className="nodes-table__labels">
-      {visible.join(' · ')}
-      {overflow > 0 ? (
-        <span className="nodes-table__labels-more"> +{overflow}</span>
-      ) : null}
-    </span>
-  )
 }
 
 export function NodesPage() {
@@ -324,17 +128,17 @@ export function NodesPage() {
   useEffect(() => {
     let cancelled = false
     listNodeSparklines(['cpu_usage_pct', 'mem_used_pct', 'disk_used_pct'])
-      .then(data => { if (!cancelled) setSparklines(data) })
+      .then((data) => {
+        if (!cancelled) setSparklines(data)
+      })
       .catch(() => {}) // silent fail
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   function updateField<K extends keyof CreateNodeInput>(field: K, value: CreateNodeInput[K]) {
     setCreateForm((current) => ({ ...current, [field]: value }))
-  }
-
-  function actionButtonKey(nodeId: string, action: NodeRuntimeAction) {
-    return `${nodeId}:${action}`
   }
 
   function queueFocusRestore(nodeId: string, preferredAction: NodeRuntimeAction) {
@@ -636,10 +440,10 @@ export function NodesPage() {
     }
     setBatchSubmitting(true)
     setBatchError(null)
-    const nodeIDs = filteredNodes.map((n) => n.node_id)
+    const nodeIDs = filteredNodes.map((node) => node.node_id)
     try {
       const res = await postNodeBatch(nodeIDs, action)
-      const failed = res.results.filter((r) => !r.ok)
+      const failed = res.results.filter((result) => !result.ok)
       if (failed.length > 0) {
         setBatchError(`${failed.length}/${nodeIDs.length} 个节点失败`)
       }
@@ -655,10 +459,10 @@ export function NodesPage() {
     setPendingBatchAction(null)
     setBatchSubmitting(true)
     setBatchError(null)
-    const nodeIDs = filteredNodes.map((n) => n.node_id)
+    const nodeIDs = filteredNodes.map((node) => node.node_id)
     try {
       const res = await postNodeBatch(nodeIDs, 'pause')
-      const failed = res.results.filter((r) => !r.ok)
+      const failed = res.results.filter((result) => !result.ok)
       if (failed.length > 0) {
         setBatchError(`${failed.length}/${nodeIDs.length} 个节点失败`)
       }
@@ -675,7 +479,7 @@ export function NodesPage() {
     setCommandOpen(false)
     setBatchSubmitting(true)
     setBatchError(null)
-    const nodeIDs = filteredNodes.map((n) => n.node_id)
+    const nodeIDs = filteredNodes.map((node) => node.node_id)
     let failCount = 0
     for (const nodeID of nodeIDs) {
       try {
@@ -766,295 +570,52 @@ export function NodesPage() {
     })
   }
 
-  const columns: DataTableColumn<NodeRecord>[] = [
-    {
-      key: 'compare',
-      label: '',
-      width: 28,
-      align: 'center',
-      render: (node) => {
-        const checked = compareSet.has(node.node_id)
-        const disabled = !checked && compareSet.size >= 2
-        return (
-          <input
-            type="checkbox"
-            className="nodes-table__compare-check"
-            checked={checked}
-            disabled={disabled}
-            onChange={() => toggleCompare(node.node_id)}
-            onClick={(event) => event.stopPropagation()}
-            aria-label={`选择 ${node.display_name} 进行对比`}
-          />
-        )
-      },
-    },
-    {
-      key: 'glyph',
-      label: '',
-      width: 32,
-      align: 'center',
-      render: (node) => (
-        <StatusGlyph
-          state={nodeGlyphState(node)}
-          size="md"
-          ariaLabel={`${node.display_name} 健康 ${node.current_health_status}`}
-        />
-      ),
-    },
-    {
-      key: 'identity',
-      label: '节点',
-      sortable: true,
-      render: (node) => (
-        <div className="nodes-table__identity">
-          <Hostname truncate maxChars={14} className="nodes-table__id">
-            {node.node_id}
-          </Hostname>
-          <Link
-            className="text-link nodes-table__name"
-            to={`/nodes/${node.node_id}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {node.display_name}
-          </Link>
-          <span className="nodes-table__freshness">
-            心跳 <Timestamp value={node.last_heartbeat_at} mode="relative" />
-            {node.last_sync_at ? <> · 同步 <Timestamp value={node.last_sync_at} mode="relative" /></> : null}
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: 'location',
-      label: '位置',
-      sortable: true,
-      render: (node) => (
-        <span className="nodes-table__location">
-          {[node.group, node.region, node.city, node.provider].filter(Boolean).join(' · ') || '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'labels',
-      label: '标签',
-      render: (node) => {
-        if (editingLabelNodeId === node.node_id) {
-          return (
-            <div
-              className="nodes-table__label-editor"
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.stopPropagation()
-                }
-              }}
-            >
-              <label className="nodes-table__label-editor-field">
-                <span className="visually-hidden">Group</span>
-                <input
-                  name={`group-${node.node_id}`}
-                  value={groupDraft}
-                  onChange={(event) => setGroupDraft(event.target.value)}
-                  aria-label="Group"
-                  placeholder="Group"
-                />
-              </label>
-              <label className="nodes-table__label-editor-field">
-                <span className="visually-hidden">标签</span>
-                <input
-                  name={`labels-${node.node_id}`}
-                  value={labelDraft}
-                  onChange={(event) => setLabelDraft(event.target.value)}
-                  aria-label="标签"
-                />
-              </label>
-              <div className="nodes-table__label-editor-actions">
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled={metadataBusyNodeId === node.node_id}
-                  onClick={() => void handleSaveLabels(node)}
-                >
-                  {metadataBusyNodeId === node.node_id ? '正在保存…' : '保存标签'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={metadataBusyNodeId === node.node_id}
-                  onClick={() => {
-                    setEditingLabelNodeId((current) =>
-                      current === node.node_id ? null : current,
-                    )
-                    setLabelDraft('')
-                    setGroupDraft('')
-                    setMetadataErrors((current) => {
-                      if (!current[node.node_id]) return current
-                      const next = { ...current }
-                      delete next[node.node_id]
-                      return next
-                    })
-                  }}
-                >
-                  取消
-                </Button>
-              </div>
-              {metadataErrors[node.node_id] ? (
-                <p className="nodes-table__inline-error" role="alert">
-                  {metadataErrors[node.node_id]}
-                </p>
-              ) : null}
-            </div>
-          )
-        }
-        return renderLabelsCell(node)
-      },
-    },
-    {
-      key: 'issue',
-      label: '当前主问题',
-      sortable: true,
-      render: (node) => {
-        const summary = isBindingConflictNode(node)
-          ? NODE_BINDING_CONFLICT_SUMMARY
-          : node.current_primary_issue_summary || '暂无明显异常'
-        return (
-          <div className="nodes-table__issue">
-            <MonoDigits className="nodes-table__issue-count">
-              {node.current_active_incident_count}
-            </MonoDigits>
-            <span className="nodes-table__issue-summary">{summary}</span>
-            {isBindingConflictNode(node) ? (
-              <StatusBadge label={NODE_BINDING_CONFLICT_STATUS} />
-            ) : null}
-          </div>
-        )
-      },
-    },
-    {
-      key: 'trends',
-      label: '近 24h',
-      cellClassName: 'nodes-table__trends',
-      render: (node) => {
-        const series = sparklines?.nodes?.[node.node_id]
-        if (!series) {
-          return <span className="nodes-table__trends-empty">—</span>
-        }
-        const cpu = series.cpu_usage_pct
-        const mem = series.mem_used_pct
-        const disk = series.disk_used_pct
-        const latestCpu = cpu?.[cpu.length - 1] ?? null
-        const latestMem = mem?.[mem.length - 1] ?? null
-        const latestDisk = disk?.[disk.length - 1] ?? null
+  function cancelLabelEdit(node: NodeRecord) {
+    setEditingLabelNodeId((current) =>
+      current === node.node_id ? null : current,
+    )
+    setLabelDraft('')
+    setGroupDraft('')
+    setMetadataErrors((current) => {
+      if (!current[node.node_id]) return current
+      const next = { ...current }
+      delete next[node.node_id]
+      return next
+    })
+  }
 
-        const t = DEFAULT_THRESHOLDS
-        const cpuTone = !latestCpu ? 'default' : latestCpu >= t.cpu.critical ? 'critical' : latestCpu >= t.cpu.notice ? 'alert' : 'accent'
-        const memTone = !latestMem ? 'default' : latestMem >= t.mem.critical ? 'critical' : latestMem >= t.mem.notice ? 'alert' : 'accent'
-        const diskTone = !latestDisk ? 'default' : latestDisk >= t.disk.critical ? 'critical' : latestDisk >= t.disk.notice ? 'alert' : 'accent'
+  function startLabelEdit(node: NodeRecord) {
+    if (metadataBusyNodeId !== null) return
+    setEditingLabelNodeId(node.node_id)
+    setLabelDraft(node.labels.join(', '))
+    setGroupDraft(node.group || '')
+    setMetadataErrors((current) => {
+      if (!current[node.node_id]) return current
+      const next = { ...current }
+      delete next[node.node_id]
+      return next
+    })
+  }
 
-        return (
-          <span className="nodes-table__trend-strip">
-            <span className="nodes-table__trend-item">
-              <span className="nodes-table__trend-value">
-                {latestCpu != null ? <MonoDigits>{formatPercent(latestCpu)}</MonoDigits> : '—'}
-              </span>
-              {cpu && cpu.length > 0 ? (
-                <Sparkline values={cpu.filter((v): v is number => v != null)} tone={cpuTone} width={64} height={14} />
-              ) : (
-                <span className="nodes-table__trends-empty">—</span>
-              )}
-            </span>
-            <span className="nodes-table__trend-item">
-              <span className="nodes-table__trend-value">
-                {latestMem != null ? <MonoDigits>{formatPercent(latestMem)}</MonoDigits> : '—'}
-              </span>
-              {mem && mem.length > 0 ? (
-                <Sparkline values={mem.filter((v): v is number => v != null)} tone={memTone} width={64} height={14} />
-              ) : (
-                <span className="nodes-table__trends-empty">—</span>
-              )}
-            </span>
-            <span className="nodes-table__trend-item">
-              <span className="nodes-table__trend-value">
-                {latestDisk != null ? <MonoDigits>{formatPercent(latestDisk)}</MonoDigits> : '—'}
-              </span>
-              {disk && disk.length > 0 ? (
-                <Sparkline values={disk.filter((v): v is number => v != null)} tone={diskTone} width={64} height={14} />
-              ) : (
-                <span className="nodes-table__trends-empty">—</span>
-              )}
-            </span>
-          </span>
-        )
-      },
-    },
-    {
-      key: 'actions',
-      label: '操作',
-      align: 'right',
-      render: (node) => {
-        const actions = nodeRuntimeActions(node)
-        return (
-          <div
-            className="nodes-table__actions"
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.stopPropagation()
-              }
-            }}
-          >
-            {editingLabelNodeId === node.node_id ? null : (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={metadataBusyNodeId !== null}
-                onClick={() => {
-                  if (metadataBusyNodeId !== null) return
-                  setEditingLabelNodeId(node.node_id)
-                  setLabelDraft(node.labels.join(', '))
-                  setGroupDraft(node.group || '')
-                  setMetadataErrors((current) => {
-                    if (!current[node.node_id]) return current
-                    const next = { ...current }
-                    delete next[node.node_id]
-                    return next
-                  })
-                }}
-              >
-                快速编辑标签
-              </Button>
-            )}
-            <Link
-              className="btn btn--ghost btn--sm"
-              to={`/nodes/${node.node_id}/onboarding`}
-              onClick={(event) => event.stopPropagation()}
-            >
-              接入工作台
-            </Link>
-            {actions.map(({ action, label }) => (
-              <button
-                key={action}
-                type="button"
-                className="btn btn--ghost btn--sm"
-                ref={(element) => {
-                  actionButtonRefs.current[actionButtonKey(node.node_id, action)] = element
-                }}
-                disabled={runtimeBusyNodeId === node.node_id}
-                onClick={() => {
-                  if (action === 'pause') {
-                    queueFocusRestore(node.node_id, action)
-                  }
-                  void handleRuntimeAction(node, action)
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )
-      },
-    },
-  ]
+  const columns = buildNodesTableColumns({
+    compareSet,
+    sparklines,
+    editingLabelNodeId,
+    labelDraft,
+    groupDraft,
+    metadataBusyNodeId,
+    metadataErrors,
+    runtimeBusyNodeId,
+    actionButtonRefs,
+    onToggleCompare: toggleCompare,
+    onLabelDraftChange: setLabelDraft,
+    onGroupDraftChange: setGroupDraft,
+    onSaveLabels: (node) => void handleSaveLabels(node),
+    onCancelLabels: cancelLabelEdit,
+    onStartLabelEdit: startLabelEdit,
+    onRuntimeAction: (node, action) => void handleRuntimeAction(node, action),
+    onQueueFocusRestore: queueFocusRestore,
+  })
 
   function shouldNavigateOnRowClick(node: NodeRecord): boolean {
     // Block navigation while the row is in edit mode or has a pending pause confirmation.
@@ -1065,227 +626,51 @@ export function NodesPage() {
 
   return (
     <section className="page-stack nodes-page">
-      <header className="section-heading section-heading--inline nodes-hero">
-        <div>
-          <p className="section-heading__eyebrow">节点</p>
-          <h2 className="section-heading__title">节点列表</h2>
-          <p className="section-heading__description">
-            按健康风险、接入状态和最近运行事实管理服务器节点。
-          </p>
-        </div>
-        <div className="nodes-hero__aside" aria-label="节点库存摘要">
-          <div className="nodes-hero__stats">
-            <Link className="nodes-hero-stat nodes-hero-stat--normal" to="/nodes" aria-label={`全部节点：${nodes.length}`}>
-              <span>全部</span>
-              <strong>
-                <MonoDigits>{nodes.length}</MonoDigits>
-              </strong>
-            </Link>
-            <button
-              type="button"
-              className="nodes-hero-stat nodes-hero-stat--alert"
-              aria-label={`异常节点：${abnormalNodeCount}`}
-              onClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
-            >
-              <span>异常</span>
-              <strong>
-                <MonoDigits>{abnormalNodeCount}</MonoDigits>
-              </strong>
-            </button>
-            <button
-              type="button"
-              className="nodes-hero-stat nodes-hero-stat--notice"
-              aria-label={`待接入节点：${pendingOnboardingNodeCount}`}
-              onClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
-            >
-              <span>待接入</span>
-              <strong>
-                <MonoDigits>{pendingOnboardingNodeCount}</MonoDigits>
-              </strong>
-            </button>
-            <button
-              type="button"
-              className="nodes-hero-stat nodes-hero-stat--maintenance"
-              aria-label={`维护或暂停节点：${maintenanceOrPausedNodeCount}`}
-              onClick={() => {
-                setSingleFilter('run_status', runtimeAttentionFilter(nodes))
-              }}
-            >
-              <span>维护/暂停</span>
-              <strong>
-                <MonoDigits>{maintenanceOrPausedNodeCount}</MonoDigits>
-              </strong>
-            </button>
-          </div>
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() =>
-              setCreateOpen((current) => {
-                if (current) {
-                  resetCreateFlow()
-                }
-                return !current
-              })
+      <NodesHero
+        totalNodeCount={nodes.length}
+        abnormalNodeCount={abnormalNodeCount}
+        pendingOnboardingNodeCount={pendingOnboardingNodeCount}
+        maintenanceOrPausedNodeCount={maintenanceOrPausedNodeCount}
+        onAbnormalClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
+        onOnboardingClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
+        onRuntimeAttentionClick={() => setSingleFilter('run_status', runtimeAttentionFilter(nodes))}
+        onCreateClick={() =>
+          setCreateOpen((current) => {
+            if (current) {
+              resetCreateFlow()
             }
-          >
-            新建节点
-          </Button>
-        </div>
-      </header>
+            return !current
+          })
+        }
+      />
 
-      <Drawer
+      <CreateNodeDrawer
         open={createOpen}
+        form={createForm}
+        labelInput={labelInput}
+        submitting={createSubmitting}
+        error={createError}
         onClose={() => {
           setCreateOpen(false)
           resetCreateFlow()
         }}
-        title="节点创建"
-        ariaLabel="创建节点表单"
-      >
-        <p className="page-panel__description">创建完成后将立即生成接入 Token，并跳转到节点接入准备页。</p>
-        <form onSubmit={handleCreate}>
-          <p>
-            <label>
-              显示名称
-              <input
-                name="display_name"
-                value={createForm.display_name}
-                onChange={(event) => updateField('display_name', event.target.value)}
-                required
-              />
-            </label>
-          </p>
-          <p>
-            <label>
-              Group
-              <input
-                name="group"
-                value={createForm.group}
-                onChange={(event) => updateField('group', event.target.value)}
-              />
-            </label>
-          </p>
-          <p>
-            <label>
-              地区
-              <input
-                name="region"
-                value={createForm.region}
-                onChange={(event) => updateField('region', event.target.value)}
-                required
-              />
-            </label>
-          </p>
-          <p>
-            <label>
-              城市
-              <input
-                name="city"
-                value={createForm.city}
-                onChange={(event) => updateField('city', event.target.value)}
-                required
-              />
-            </label>
-          </p>
-          <p>
-            <label>
-              供应商
-              <input
-                name="provider"
-                value={createForm.provider}
-                onChange={(event) => updateField('provider', event.target.value)}
-                required
-              />
-            </label>
-          </p>
-          <p>
-            <label>
-              生命周期状态固定为待接入
-            </label>
-          </p>
-          <p>
-            <label>
-              标签
-              <input
-                name="labels"
-                value={labelInput}
-                onChange={(event) => setLabelInput(event.target.value)}
-              />
-            </label>
-          </p>
-          <p>
-            <label>
-              备注
-              <textarea
-                name="note"
-                value={createForm.note}
-                onChange={(event) => updateField('note', event.target.value)}
-                rows={3}
-              />
-            </label>
-          </p>
-          {createError ? <p>{createError}</p> : null}
-          <div>
-            <button type="submit" disabled={createSubmitting}>
-              {createSubmitting ? '正在创建…' : '创建并生成 Token'}
-            </button>
-          </div>
-        </form>
-      </Drawer>
+        onSubmit={handleCreate}
+        onFieldChange={updateField}
+        onLabelInputChange={setLabelInput}
+      />
 
-      <div className="nodes-toolbar" aria-label="节点列表工具栏">
-        <div className="nodes-toolbar__primary">
-          <Tabs<NodeListView>
-            variant="pill"
-            items={viewTabs}
-            value={nodeListView}
-            onChange={setNodeListView}
-          />
-          <span className="nodes-toolbar__result">
-            当前显示 <MonoDigits>{sortedFilteredNodes.length}</MonoDigits> / <MonoDigits>{baseNodes.length}</MonoDigits>
-          </span>
-        </div>
-        <div className="nodes-toolbar__actions">
-          <button
-            type="button"
-            className={`btn btn--ghost btn--sm ${!showTrends ? 'btn--active' : ''}`}
-            onClick={() => setShowTrends((v) => !v)}
-          >
-            {showTrends ? '隐藏趋势' : '显示趋势'}
-          </button>
-          {compareSet.size === 2 ? (
-            <Link
-              className="btn btn--secondary btn--sm"
-              to={`/nodes/compare?id=${[...compareSet].join('&id=')}`}
-            >
-              对比选中节点
-            </Link>
-          ) : (
-            <span className="nodes-toolbar__hint">
-              选择 2 个节点可对比
-            </span>
-          )}
-          <label className="nodes-toolbar__refresh">
-            <span>自动刷新</span>
-            <select
-              className="auto-refresh-select"
-              value={autoRefresh == null ? '' : String(autoRefresh)}
-              onChange={(e) => {
-                const v = e.target.value
-                setAutoRefresh(v === '' ? null : Number(v))
-              }}
-              aria-label="自动刷新间隔"
-            >
-              {AUTO_REFRESH_OPTIONS.map((opt) => (
-                <option key={opt.label} value={opt.value == null ? '' : String(opt.value)}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </div>
+      <NodesToolbar
+        viewTabs={viewTabs}
+        nodeListView={nodeListView}
+        displayedCount={sortedFilteredNodes.length}
+        baseCount={baseNodes.length}
+        showTrends={showTrends}
+        compareSet={compareSet}
+        autoRefresh={autoRefresh}
+        onNodeListViewChange={setNodeListView}
+        onShowTrendsChange={setShowTrends}
+        onAutoRefreshChange={setAutoRefresh}
+      />
 
       {baseNodes.length === 0 ? (
         <div className="empty-state">
@@ -1298,244 +683,39 @@ export function NodesPage() {
         </div>
       ) : (
         <>
-          <FilterBar
+          <NodesFilterPanel
             hasActiveFilters={hasActiveFilters}
+            filterState={filterState}
+            groupOptions={groupOptions}
+            regionOptions={regionOptions}
+            cityOptions={cityOptions}
+            providerOptions={providerOptions}
+            labelOptions={labelOptions}
             onClearAll={clearAllFilters}
-            activeChips={
-              <>
-                {filterState.group ? (
-                  <FilterChip
-                    label={`Group: ${filterState.group}`}
-                    onRemove={() => setSingleFilter('group', null)}
-                  />
-                ) : null}
-                {filterState.region ? (
-                  <FilterChip
-                    label={`地区: ${filterState.region}`}
-                    onRemove={() => setSingleFilter('region', null)}
-                  />
-                ) : null}
-                {filterState.city ? (
-                  <FilterChip
-                    label={`城市: ${filterState.city}`}
-                    onRemove={() => setSingleFilter('city', null)}
-                  />
-                ) : null}
-                {filterState.provider ? (
-                  <FilterChip
-                    label={`供应商: ${filterState.provider}`}
-                    onRemove={() => setSingleFilter('provider', null)}
-                  />
-                ) : null}
-                {filterState.lifecycle ? (
-                  <FilterChip
-                    label={`生命周期: ${filterState.lifecycle}`}
-                    onRemove={() => setSingleFilter('lifecycle', null)}
-                  />
-                ) : null}
-                {filterState.runStatus ? (
-                  <FilterChip
-                    label={`运行状态: ${filterState.runStatus}`}
-                    onRemove={() => setSingleFilter('run_status', null)}
-                  />
-                ) : null}
-                {filterState.health ? (
-                  <FilterChip
-                    label={`健康状态: ${filterState.health}`}
-                    onRemove={() => setSingleFilter('health', null)}
-                  />
-                ) : null}
-                {filterState.labels.map((label) => (
-                  <FilterChip
-                    key={`label-${label}`}
-                    label={`标签: ${label}`}
-                    onRemove={() =>
-                      setMultiFilter(
-                        'labels',
-                        filterState.labels.filter((item) => item !== label),
-                      )
-                    }
-                  />
-                ))}
-                {filterState.abnormal ? (
-                  <FilterChip
-                    label="仅看异常"
-                    onRemove={() => setAbnormalFilter(false)}
-                  />
-                ) : null}
-                {filterState.onboardingPending ? (
-                  <FilterChip
-                    label="待接入/绑定待处理"
-                    onRemove={() => setOnboardingFilter(false)}
-                  />
-                ) : null}
-              </>
-            }
-          >
-            <FilterSelect
-              label="Group"
-              value={filterState.group}
-              options={groupOptions}
-              onChange={(value) => setSingleFilter('group', value)}
-            />
-            <FilterSelect
-              label="地区"
-              value={filterState.region}
-              options={regionOptions}
-              onChange={(value) => setSingleFilter('region', value)}
-            />
-            <FilterSelect
-              label="城市"
-              value={filterState.city}
-              options={cityOptions}
-              onChange={(value) => setSingleFilter('city', value)}
-            />
-            <FilterSelect
-              label="供应商"
-              value={filterState.provider}
-              options={providerOptions}
-              onChange={(value) => setSingleFilter('provider', value)}
-            />
-            <FilterSelect
-              label="生命周期"
-              value={filterState.lifecycle}
-              options={NODE_LIFECYCLE_FILTER_OPTIONS}
-              onChange={(value) => setSingleFilter('lifecycle', value)}
-            />
-            <FilterSelect
-              label="运行状态"
-              value={filterState.runStatus}
-              options={NODE_RUN_STATUS_FILTER_OPTIONS}
-              onChange={(value) => setSingleFilter('run_status', value)}
-            />
-            <FilterSelect
-              label="健康状态"
-              value={filterState.health}
-              options={NODE_HEALTH_STATUS_FILTER_OPTIONS}
-              onChange={(value) => setSingleFilter('health', value)}
-            />
-            <FilterMultiSelect
-              label="标签"
-              values={filterState.labels}
-              options={labelOptions}
-              onChange={(values) => setMultiFilter('labels', values)}
-            />
-            <FilterToggle
-              label="仅看异常"
-              checked={filterState.abnormal}
-              onChange={setAbnormalFilter}
-            />
-            <FilterToggle
-              label="待接入/绑定待处理"
-              checked={filterState.onboardingPending}
-              onChange={setOnboardingFilter}
-            />
-          </FilterBar>
-          {hasActiveFilters && filteredNodes.length > 0 ? (
-            <div className={`batch-bar${selectAll ? ' batch-bar--active' : ''}`}>
-              <label className="batch-bar__toggle">
-                <input
-                  type="checkbox"
-                  checked={selectAll}
-                  onChange={(e) => setSelectAll(e.target.checked)}
-                />
-                全选 ({filteredNodes.length})
-              </label>
-              {selectAll ? (
-                <div className="batch-bar__actions">
-                  <button
-                    className="btn btn--secondary btn--sm"
-                    disabled={batchSubmitting}
-                    onClick={() => executeBatchAction('enter-maintenance')}
-                  >
-                    进入维护
-                  </button>
-                  <button
-                    className="btn btn--secondary btn--sm"
-                    disabled={batchSubmitting}
-                    onClick={() => executeBatchAction('exit-maintenance')}
-                  >
-                    退出维护
-                  </button>
-                  <button
-                    className="btn btn--secondary btn--sm"
-                    disabled={batchSubmitting}
-                    onClick={() => executeBatchAction('pause')}
-                  >
-                    暂停监控
-                  </button>
-                  <button
-                    className="btn btn--secondary btn--sm"
-                    disabled={batchSubmitting}
-                    onClick={() => executeBatchAction('resume')}
-                  >
-                    恢复监控
-                  </button>
-                  <button
-                    className="btn btn--secondary btn--sm"
-                    disabled={batchSubmitting}
-                    onClick={() => setCommandOpen(true)}
-                  >
-                    执行命令…
-                  </button>
-                </div>
-              ) : null}
-              {batchError ? (
-                <span className="batch-bar__error">{batchError}</span>
-              ) : null}
-              {batchSubmitting ? <span>批量操作中…</span> : null}
-            </div>
-          ) : null}
-          {commandOpen ? (
-            <div className="page-panel">
-              <p className="page-panel__eyebrow">批量命令执行</p>
-              <h3 className="page-panel__title">下发命令到已选节点</h3>
-              <p className="page-panel__description">
-                将对 {filteredNodes.length} 个节点下发命令。请输入命令 ID。
-              </p>
-              <p>
-                <label>
-                  命令 ID
-                  <input
-                    value={commandID}
-                    onChange={(e) => setCommandID(e.target.value)}
-                    placeholder="例如：whoami"
-                  />
-                </label>
-              </p>
-              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                <button
-                  className="btn btn--primary btn--md"
-                  disabled={!commandID.trim() || batchSubmitting}
-                  onClick={() => void executeBatchCommand()}
-                >
-                  下发命令
-                </button>
-                <button
-                  className="btn btn--ghost btn--md"
-                  onClick={() => {
-                    setCommandOpen(false)
-                    setCommandID('')
-                  }}
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {pendingBatchAction === 'pause' ? (
-            <ActionConfirmationCard
-              title="确认批量暂停节点监控"
-              current={`将对 ${filteredNodes.length} 个节点执行暂停操作。`}
-              result="操作后：所有已选节点的监控运行状态变为暂停。"
-              impact="会停止主机指标采集，并停止这些节点承担的探针执行。趋势图会从此开始出现数据空档。"
-              unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
-              confirmLabel="确认批量暂停监控"
-              disabled={batchSubmitting}
-              onConfirm={() => void executeBatchPauseConfirmed()}
-              onCancel={() => setPendingBatchAction(null)}
-            />
-          ) : null}
+            onSingleFilterChange={setSingleFilter}
+            onMultiFilterChange={setMultiFilter}
+            onAbnormalFilterChange={setAbnormalFilter}
+            onOnboardingFilterChange={setOnboardingFilter}
+          />
+
+          <NodesBatchPanel
+            hasActiveFilters={hasActiveFilters}
+            filteredNodeCount={filteredNodes.length}
+            selectAll={selectAll}
+            batchSubmitting={batchSubmitting}
+            batchError={batchError}
+            commandOpen={commandOpen}
+            commandID={commandID}
+            pendingBatchAction={pendingBatchAction}
+            onSelectAllChange={setSelectAll}
+            onBatchAction={(action) => void executeBatchAction(action)}
+            onCommandOpenChange={setCommandOpen}
+            onCommandIDChange={setCommandID}
+            onExecuteBatchCommand={() => void executeBatchCommand()}
+            onConfirmBatchPause={() => void executeBatchPauseConfirmed()}
+            onCancelBatchPause={() => setPendingBatchAction(null)}
+          />
+
           {sortedFilteredNodes.length === 0 ? (
             <div className="empty-state">
               <h3>没有匹配当前筛选的节点</h3>
@@ -1548,7 +728,7 @@ export function NodesPage() {
             </div>
           ) : (
             <DataTable<NodeRecord>
-              columns={showTrends ? columns : columns.filter((col) => col.key !== 'trends')}
+              columns={showTrends ? columns : columns.filter((column) => column.key !== 'trends')}
               rows={sortedFilteredNodes}
               rowKey={(node) => node.node_id}
               density="compact"
@@ -1562,40 +742,19 @@ export function NodesPage() {
             />
           )}
 
-          {sortedFilteredNodes.map((node) => {
-            const runtimeError = runtimeErrors[node.node_id]
-            const showPauseConfirmation =
-              pendingConfirmation?.nodeId === node.node_id &&
-              pendingConfirmation.action === 'pause'
-            if (!runtimeError && !showPauseConfirmation) return null
-            return (
-              <div key={`runtime-${node.node_id}`} className="nodes-table__row-overlay">
-                {showPauseConfirmation ? (
-                  <ActionConfirmationCard
-                    title="确认暂停节点监控"
-                    current={pauseConfirmationCurrent(node)}
-                    result="操作后：监控运行状态变为暂停。"
-                    impact="会停止主机指标采集，并停止该节点承担的探针执行。趋势图会从此开始出现数据空档。"
-                    unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"
-                    confirmLabel="确认暂停监控"
-                    disabled={runtimeBusyNodeId === node.node_id}
-                    onConfirm={() => void handleRuntimeAction(node, 'pause', true)}
-                    onCancel={() => {
-                      queueFocusRestore(node.node_id, 'pause')
-                      setPendingConfirmation((current) =>
-                        current?.nodeId === node.node_id ? null : current,
-                      )
-                    }}
-                  />
-                ) : null}
-                {runtimeError ? (
-                  <p className="nodes-table__inline-error" role="alert">
-                    {node.display_name}：{runtimeError}
-                  </p>
-                ) : null}
-              </div>
-            )
-          })}
+          <NodesRuntimeOverlays
+            nodes={sortedFilteredNodes}
+            runtimeErrors={runtimeErrors}
+            pendingConfirmation={pendingConfirmation}
+            runtimeBusyNodeId={runtimeBusyNodeId}
+            onConfirmPause={(node) => void handleRuntimeAction(node, 'pause', true)}
+            onCancelPause={(node) => {
+              queueFocusRestore(node.node_id, 'pause')
+              setPendingConfirmation((current) =>
+                current?.nodeId === node.node_id ? null : current,
+              )
+            }}
+          />
         </>
       )}
     </section>

@@ -927,3 +927,36 @@ Extracted SettingsPage form sections into page-private components under web/src/
 ### Next Steps
 
 - None - task complete
+
+
+## Session 87: Nodes page section extraction
+
+**Date**: 2026-05-11
+**Task**: Nodes page section extraction
+**Branch**: `refactor/nodes-page-sections`
+
+### Summary
+
+Extracted NodesPage hero, create drawer, toolbar, filters, batch panels, runtime overlays, table columns, and cell helpers into page-private modules while preserving URL/filter/runtime behavior. Verified lint, focused NodesPage tests, build, and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b153395` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
