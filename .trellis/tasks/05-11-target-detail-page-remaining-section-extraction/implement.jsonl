@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Frontend route/page-private component placement rules"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "React component/export/props conventions for page section extraction"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Keep API loading and mutations in the page owner while extracting presentational composition"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse the existing page-private detail extraction pattern without premature shared abstractions"}
