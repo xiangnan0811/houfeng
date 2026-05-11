@@ -1,116 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { Button, Drawer, MonoDigits, Tabs, type TabItem } from '../components/atoms'
-import { DetailSection } from '../components/DetailSection'
-import { EventList } from '../components/EventList'
-import {
-  FilterBar,
-  FilterChip,
-  FilterSelect,
-  FilterToggle,
-  type FilterSelectOption,
-} from '../components/filters'
 import { ApiError, listEvents } from '../lib/api'
+import type { EventListFilter, StateChangeEventType } from '../lib/types'
+import { EventsFilterDrawer } from './events/EventsFilterDrawer'
+import { EventsFilterOverview } from './events/EventsFilterOverview'
+import { EventsStreamSection } from './events/EventsStreamSection'
 import {
-  STATE_CHANGE_EVENT_TYPE_LABELS,
-  type EventListFilter,
-  type StateChangeEventRecord,
-  type StateChangeEventType,
-} from '../lib/types'
-
-type TimeRange = '24h' | '7d' | '30d' | 'custom'
-
-type FilterState = {
-  object_type: '' | 'node' | 'target'
-  severity: '' | '关注' | '告警' | '严重'
-  event_type: '' | StateChangeEventType
-  limit: string
-  created_from: string
-  created_to: string
-  label: string
-  notification_only: boolean
-  recovery_only: boolean
-  maintenance_only: boolean
-  include_backfilled: boolean
-  // Time range segmented control. 'custom' preserves the original behavior
-  // (user-controlled date inputs) — keep that as default so first load keeps
-  // the previous "all recent events" semantics.
-  time_range: TimeRange
-}
-
-type State = {
-  loading: boolean
-  error: string | null
-  events: StateChangeEventRecord[]
-  // True after a load-more fetch returns fewer rows than requested — meaning
-  // backend has no more events to give for the current filter.
-  exhausted: boolean
-}
-
-const DEFAULT_LIMIT = 50
-const LIMIT_OPTIONS = ['10', '25', '50', '100'] as const
-const OBJECT_TYPE_OPTIONS: FilterSelectOption[] = [
-  { value: 'node', label: '节点' },
-  { value: 'target', label: '目标' },
-]
-const SEVERITY_OPTIONS: FilterSelectOption[] = [
-  { value: '关注', label: '关注' },
-  { value: '告警', label: '告警' },
-  { value: '严重', label: '严重' },
-]
-const LIMIT_SELECT_OPTIONS: FilterSelectOption[] = LIMIT_OPTIONS.map((value) => ({
-  value,
-  label: value,
-}))
-
-const DEFAULT_FILTERS: FilterState = {
-  object_type: '',
-  severity: '',
-  event_type: '',
-  limit: String(DEFAULT_LIMIT),
-  created_from: '',
-  created_to: '',
-  label: '',
-  notification_only: false,
-  recovery_only: false,
-  maintenance_only: false,
-  include_backfilled: false,
-  time_range: 'custom',
-}
-
-const EVENT_TYPE_OPTIONS = Object.entries(STATE_CHANGE_EVENT_TYPE_LABELS) as Array<
-  [StateChangeEventType, string]
->
-const EVENT_TYPE_SELECT_OPTIONS: FilterSelectOption[] = EVENT_TYPE_OPTIONS.map(
-  ([value, label]) => ({ value, label }),
-)
-
-const TIME_RANGE_TABS: TabItem<TimeRange>[] = [
-  { value: '24h', label: '近 24 小时' },
-  { value: '7d', label: '近 7 天' },
-  { value: '30d', label: '近 30 天' },
-  { value: 'custom', label: '自定义' },
-]
-
-const TIME_RANGE_DURATIONS_MS: Record<Exclude<TimeRange, 'custom'>, number> = {
-  '24h': 24 * 60 * 60 * 1000,
-  '7d': 7 * 24 * 60 * 60 * 1000,
-  '30d': 30 * 24 * 60 * 60 * 1000,
-}
-
-const TIME_RANGE_LABELS: Record<TimeRange, string> = {
-  '24h': '近 24 小时',
-  '7d': '近 7 天',
-  '30d': '近 30 天',
-  custom: '自定义',
-}
-
-const ALLOWED_EVENT_TYPES = new Set<StateChangeEventType>(
-  EVENT_TYPE_OPTIONS.map(([value]) => value),
-)
-const ALLOWED_LIMITS = new Set<string>(LIMIT_OPTIONS)
-const ALLOWED_TIME_RANGES = new Set<TimeRange>(['24h', '7d', '30d', 'custom'])
+  ALLOWED_EVENT_TYPES,
+  ALLOWED_LIMITS,
+  ALLOWED_TIME_RANGES,
+  DEFAULT_FILTERS,
+  DEFAULT_LIMIT,
+  TIME_RANGE_DURATIONS_MS,
+} from './events/eventsPageConstants'
+import type { EventsPageState, FilterState, TimeRange } from './events/types'
 
 function isObjectType(value: string | null): value is 'node' | 'target' {
   return value === 'node' || value === 'target'
@@ -281,61 +185,6 @@ function applyTimeRange(filters: FilterState, range: TimeRange): FilterState {
   }
 }
 
-type EventGroupKey = 'today' | 'yesterday' | 'this_week' | 'earlier'
-
-const EVENT_GROUP_LABELS: Record<EventGroupKey, string> = {
-  today: '今天',
-  yesterday: '昨天',
-  this_week: '本周',
-  earlier: '更早',
-}
-
-const EVENT_GROUP_ORDER: EventGroupKey[] = ['today', 'yesterday', 'this_week', 'earlier']
-
-function startOfDay(date: Date): Date {
-  const next = new Date(date)
-  next.setHours(0, 0, 0, 0)
-  return next
-}
-
-function bucketKey(eventDate: Date, now: Date): EventGroupKey {
-  const startToday = startOfDay(now)
-  const startYesterday = new Date(startToday.getTime() - 24 * 60 * 60 * 1000)
-  // ISO week start: Monday. Use locale-independent logic.
-  const day = startToday.getDay() // 0 (Sun) .. 6 (Sat)
-  const offsetToMonday = day === 0 ? 6 : day - 1
-  const startWeek = new Date(startToday.getTime() - offsetToMonday * 24 * 60 * 60 * 1000)
-
-  if (eventDate >= startToday) return 'today'
-  if (eventDate >= startYesterday) return 'yesterday'
-  if (eventDate >= startWeek) return 'this_week'
-  return 'earlier'
-}
-
-function groupEventsByTime(
-  events: StateChangeEventRecord[],
-): Array<{ key: EventGroupKey; events: StateChangeEventRecord[] }> {
-  const buckets: Record<EventGroupKey, StateChangeEventRecord[]> = {
-    today: [],
-    yesterday: [],
-    this_week: [],
-    earlier: [],
-  }
-  const now = new Date()
-  for (const event of events) {
-    const eventDate = new Date(event.created_at)
-    if (Number.isNaN(eventDate.getTime())) {
-      buckets.earlier.push(event)
-      continue
-    }
-    buckets[bucketKey(eventDate, now)].push(event)
-  }
-  return EVENT_GROUP_ORDER.filter((key) => buckets[key].length > 0).map((key) => ({
-    key,
-    events: buckets[key],
-  }))
-}
-
 export function EventsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const appliedFilterKey = useMemo(
@@ -364,7 +213,7 @@ export function EventsPage() {
     limitState.filterKey === appliedFilterKey
       ? limitState.effectiveLimit
       : filterLimit(appliedFilters)
-  const [state, setState] = useState<State>({
+  const [state, setState] = useState<EventsPageState>({
     loading: true,
     error: null,
     events: [],
@@ -422,7 +271,6 @@ export function EventsPage() {
     }
   }, [appliedFilters, appliedFilterKey, effectiveLimit])
 
-  const groupedEvents = useMemo(() => groupEventsByTime(state.events), [state.events])
   const activeFilters = hasActiveFilters(appliedFilters)
 
   function handleLoadMore() {
@@ -484,90 +332,6 @@ export function EventsPage() {
     })
   }
 
-  const objectTypeLabel =
-    appliedFilters.object_type === 'node'
-      ? '节点'
-      : appliedFilters.object_type === 'target'
-        ? '目标'
-        : ''
-
-  const activeFilterChips = (
-    <>
-      {appliedFilters.object_type ? (
-        <FilterChip
-          label={`对象类型: ${objectTypeLabel}`}
-          onRemove={() => removeAppliedFilter('object_type')}
-        />
-      ) : null}
-      {appliedFilters.severity ? (
-        <FilterChip
-          label={`严重程度: ${appliedFilters.severity}`}
-          onRemove={() => removeAppliedFilter('severity')}
-        />
-      ) : null}
-      {appliedFilters.event_type ? (
-        <FilterChip
-          label={`事件类型: ${STATE_CHANGE_EVENT_TYPE_LABELS[appliedFilters.event_type]}`}
-          onRemove={() => removeAppliedFilter('event_type')}
-        />
-      ) : null}
-      {appliedFilters.limit !== String(DEFAULT_LIMIT) ? (
-        <FilterChip
-          label={`数量: ${appliedFilters.limit}`}
-          onRemove={() => removeAppliedFilter('limit')}
-        />
-      ) : null}
-      {appliedFilters.time_range !== 'custom' ? (
-        <FilterChip
-          label={`时间范围: ${TIME_RANGE_LABELS[appliedFilters.time_range]}`}
-          onRemove={() => removeAppliedFilter('time_range')}
-        />
-      ) : null}
-      {appliedFilters.created_from ? (
-        <FilterChip
-          label={`开始时间: ${appliedFilters.created_from}`}
-          onRemove={() => removeAppliedFilter('created_from')}
-        />
-      ) : null}
-      {appliedFilters.created_to ? (
-        <FilterChip
-          label={`结束时间: ${appliedFilters.created_to}`}
-          onRemove={() => removeAppliedFilter('created_to')}
-        />
-      ) : null}
-      {appliedFilters.label ? (
-        <FilterChip
-          label={`标签: ${appliedFilters.label}`}
-          onRemove={() => removeAppliedFilter('label')}
-        />
-      ) : null}
-      {appliedFilters.notification_only ? (
-        <FilterChip
-          label="仅看通知事件"
-          onRemove={() => removeAppliedFilter('notification_only')}
-        />
-      ) : null}
-      {appliedFilters.recovery_only ? (
-        <FilterChip
-          label="仅看恢复事件"
-          onRemove={() => removeAppliedFilter('recovery_only')}
-        />
-      ) : null}
-      {appliedFilters.maintenance_only ? (
-        <FilterChip
-          label="仅看维护事件"
-          onRemove={() => removeAppliedFilter('maintenance_only')}
-        />
-      ) : null}
-      {appliedFilters.include_backfilled ? (
-        <FilterChip
-          label="包含补传事件"
-          onRemove={() => removeAppliedFilter('include_backfilled')}
-        />
-      ) : null}
-    </>
-  )
-
   if (state.loading) {
     return <section className="page-panel">正在加载事件…</section>
   }
@@ -582,8 +346,6 @@ export function EventsPage() {
     )
   }
 
-  const customRange = filters.time_range === 'custom'
-
   return (
     <div className="page-stack events-page">
       <section className="page-panel">
@@ -594,207 +356,30 @@ export function EventsPage() {
         </p>
       </section>
 
-      <DetailSection eyebrow="筛选条件" title="筛选条件">
-        <FilterBar
-          className="events-filter-overview"
-          hasActiveFilters={activeFilters}
-          onClearAll={() => commitFilters(DEFAULT_FILTERS)}
-          activeChips={activeFilterChips}
-        >
-          <div className="events-filter-overview__status">
-            <span className="events-filter-overview__label">当前筛选</span>
-            <span className="events-filter-overview__value">
-              {activeFilters ? '已应用筛选条件' : '默认事件流'}
-            </span>
-          </div>
-          <Button variant="secondary" size="sm" onClick={openFiltersDrawer}>
-            高级筛选
-          </Button>
-        </FilterBar>
-      </DetailSection>
+      <EventsFilterOverview
+        filters={appliedFilters}
+        hasActiveFilters={activeFilters}
+        onClearAll={() => commitFilters(DEFAULT_FILTERS)}
+        onOpenFilters={openFiltersDrawer}
+        onRemoveFilter={removeAppliedFilter}
+      />
 
-      <Drawer
+      <EventsFilterDrawer
         open={filtersDrawerOpen}
         onClose={closeFiltersDrawer}
-        title="事件筛选"
-        ariaLabel="事件高级筛选"
-      >
-        <form
-          className="events-filter-drawer"
-          onSubmit={(event) => {
-            event.preventDefault()
-            applyDraftFilters()
-          }}
-        >
-          <div className="events-filter-drawer__group">
-            <span className="events-filter-drawer__label">时间范围</span>
-            <Tabs<TimeRange>
-              variant="pill"
-              value={filters.time_range}
-              onChange={updateDraftTimeRange}
-              items={TIME_RANGE_TABS}
-            />
-          </div>
+        filters={filters}
+        onApply={applyDraftFilters}
+        onReset={resetFilters}
+        onTimeRangeChange={updateDraftTimeRange}
+        onFilterChange={updateDraftFilter}
+      />
 
-          <div className="events-filter-drawer__grid">
-            <FilterSelect
-              label="对象类型"
-              value={filters.object_type || null}
-              options={OBJECT_TYPE_OPTIONS}
-              onChange={(value) => updateDraftFilter('object_type', value === 'node' || value === 'target' ? value : '')}
-            />
-            <FilterSelect
-              label="严重程度"
-              value={filters.severity || null}
-              options={SEVERITY_OPTIONS}
-              onChange={(value) =>
-                updateDraftFilter(
-                  'severity',
-                  value === '关注' || value === '告警' || value === '严重' ? value : '',
-                )
-              }
-            />
-            <FilterSelect
-              label="事件类型"
-              value={filters.event_type || null}
-              options={EVENT_TYPE_SELECT_OPTIONS}
-              onChange={(value) =>
-                updateDraftFilter(
-                  'event_type',
-                  isEventType(value) ? value : '',
-                )
-              }
-            />
-            <FilterSelect
-              label="数量"
-              value={filters.limit}
-              options={LIMIT_SELECT_OPTIONS}
-              onChange={(value) =>
-                updateDraftFilter(
-                  'limit',
-                  value !== null && ALLOWED_LIMITS.has(value) ? value : String(DEFAULT_LIMIT),
-                )
-              }
-            />
-            <FilterToggle
-              label="仅看通知事件"
-              checked={filters.notification_only}
-              onChange={(checked) => updateDraftFilter('notification_only', checked)}
-            />
-            <FilterToggle
-              label="仅看恢复事件"
-              checked={filters.recovery_only}
-              onChange={(checked) => updateDraftFilter('recovery_only', checked)}
-            />
-            <FilterToggle
-              label="仅看维护事件"
-              checked={filters.maintenance_only}
-              onChange={(checked) => updateDraftFilter('maintenance_only', checked)}
-            />
-            <FilterToggle
-              label="包含补传事件"
-              checked={filters.include_backfilled}
-              onChange={(checked) => updateDraftFilter('include_backfilled', checked)}
-            />
-          </div>
-
-          <div className="events-filter-drawer__fields">
-            <label className="events-filter-drawer__field">
-              <span className="events-filter-drawer__label">开始时间</span>
-              <input
-                aria-label="开始时间"
-                placeholder="2026-04-25T00:00:00Z"
-                value={filters.created_from}
-                disabled={!customRange}
-                onChange={(event) =>
-                  updateDraftFilter('created_from', event.target.value)
-                }
-              />
-            </label>
-
-            <label className="events-filter-drawer__field">
-              <span className="events-filter-drawer__label">结束时间</span>
-              <input
-                aria-label="结束时间"
-                placeholder="2026-04-26T00:00:00Z"
-                value={filters.created_to}
-                disabled={!customRange}
-                onChange={(event) =>
-                  updateDraftFilter('created_to', event.target.value)
-                }
-              />
-            </label>
-
-            <label className="events-filter-drawer__field">
-              <span className="events-filter-drawer__label">标签</span>
-              <input
-                aria-label="标签"
-                placeholder="edge"
-                value={filters.label}
-                onChange={(event) =>
-                  updateDraftFilter('label', event.target.value)
-                }
-              />
-            </label>
-
-            <div className="events-filter-drawer__field">
-              <span className="events-filter-drawer__label">包含补传事件</span>
-              <span className="events-filter-drawer__value">
-                {filters.include_backfilled ? '已包含' : '未包含'}
-              </span>
-              <span className="events-filter-drawer__hint">
-                {filters.include_backfilled ? '补传相关事件会进入列表' : '默认隐藏补传相关事件'}
-              </span>
-            </div>
-          </div>
-
-          <div className="events-filter-drawer__actions">
-            <Button type="submit" size="sm">
-              应用筛选
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={resetFilters}>
-              重置筛选
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={closeFiltersDrawer}>
-              关闭
-            </Button>
-          </div>
-        </form>
-      </Drawer>
-
-      <DetailSection eyebrow="事件流" title="事件流">
-        {state.events.length === 0 ? (
-          <EventList events={state.events} />
-        ) : (
-          <div className="probe-list">
-            {groupedEvents.map((group) => (
-              <div key={group.key} className="event-group">
-                <header className="section-heading">
-                  <h3 className="section-heading__title">{EVENT_GROUP_LABELS[group.key]}</h3>
-                  <span className="section-heading__eyebrow">
-                    <MonoDigits>{group.events.length}</MonoDigits>
-                  </span>
-                </header>
-                <EventList events={group.events} />
-              </div>
-            ))}
-          </div>
-        )}
-        <div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleLoadMore}
-            disabled={state.exhausted || loadingMore}
-          >
-            {loadingMore
-              ? '正在加载…'
-              : state.exhausted
-                ? '无更多事件'
-                : '加载更早事件 ↓'}
-          </Button>
-        </div>
-      </DetailSection>
+      <EventsStreamSection
+        events={state.events}
+        exhausted={state.exhausted}
+        loadingMore={loadingMore}
+        onLoadMore={handleLoadMore}
+      />
     </div>
   )
 }
