@@ -1389,3 +1389,36 @@ Redesigned Dashboard into an asset-decision-first command surface, made dark mod
 ### Next Steps
 
 - None - task complete
+
+
+## Session 101: UX-3 Asset decision and VPS inventory redesign
+
+**Date**: 2026-05-11
+**Task**: UX-3 Asset decision and VPS inventory redesign
+**Branch**: `ux/asset-decision-vps-list`
+
+### Summary
+
+Redesigned Asset Decisions as a unified work queue with drawer editing, rebuilt VPS as a quick-view inventory table with subscription and data-quality signals, updated tests/specs, and verified lint/full Vitest/build plus desktop/mobile visual sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b8ff474` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
