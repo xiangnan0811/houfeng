@@ -1026,3 +1026,36 @@ Split NodeDetailPage presentation sections, drawers, table helpers, constants, a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 90: Target detail page section extraction
+
+**Date**: 2026-05-11
+**Task**: Target detail page section extraction
+**Branch**: `refactor/target-detail-page-sections`
+
+### Summary
+
+Extracted TargetDetailPage page-private sections, constants, types, and helpers while preserving route-owned data loading, mutations, confirmations, and focus restoration. Verified with TargetDetailPage tests and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `994d3a4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
