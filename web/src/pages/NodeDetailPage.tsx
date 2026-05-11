@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
-import {
-  NodeWatchtowerHeader,
-  NodeWatchtowerMetrics,
-  type NodeRuntimeAction,
-} from '../components/node-detail'
+import type { NodeRuntimeAction } from '../components/node-detail'
 import {
   ApiError,
   confirmNodeRebind,
@@ -28,36 +24,20 @@ import {
   updateNodeMetadata,
 } from '../lib/api'
 import type { ActiveIncidentRecord, NodeOnboardingState } from '../lib/types'
-import { NodeAccessCredentialSection } from './node-detail/NodeAccessCredentialSection'
-import { NodeBindingConflictSection } from './node-detail/NodeBindingConflictSection'
-import { NodeCommandDrawer } from './node-detail/NodeCommandDrawer'
-import { NodeContainersSection } from './node-detail/NodeContainersSection'
-import { NodeDangerCard } from './node-detail/NodeDangerCard'
+import { NodeDetailPageBody } from './node-detail/NodeDetailPageBody'
 import { NodeDetailLoading } from './node-detail/NodeDetailLoading'
 import { NodeDetailUnavailable } from './node-detail/NodeDetailUnavailable'
-import { NodeDiagnosisSummary } from './node-detail/NodeDiagnosisSummary'
-import { NodeHistoryDrawer } from './node-detail/NodeHistoryDrawer'
-import { NodeLifecycleSection } from './node-detail/NodeLifecycleSection'
-import { NodeLinkedVPSSection } from './node-detail/NodeLinkedVPSSection'
-import { NodeMetadataSection } from './node-detail/NodeMetadataSection'
-import { NodeRuntimePauseConfirmation } from './node-detail/NodeRuntimePauseConfirmation'
-import { NodeSnapshotMeta } from './node-detail/NodeSnapshotMeta'
-import { NodeTimeWindowTabs } from './node-detail/NodeTimeWindowTabs'
 import {
-  COMMAND_LABELS,
-  COMMAND_LIST,
   NODE_BINDING_ACTION_ERROR,
   NODE_BINDING_CONFLICT_LOAD_ERROR,
   NODE_BINDING_CONFLICT_STATUS,
   NODE_LIFECYCLE_ACTION_ERROR,
-  NODE_LIFECYCLE_RETIRED,
 } from './node-detail/nodeDetailConstants'
 import {
   INITIAL_NODE_DETAIL_STATE,
   applyOnboardingRecordToNode,
   describeError,
   mergeNonMetadataNodeRecord,
-  nodeRuntimeActions,
   parseLabels,
 } from './node-detail/nodeDetailHelpers'
 import type {
@@ -686,25 +666,11 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     return <NodeDetailUnavailable message={error ?? '未找到节点'} />
   }
 
-  const sample = runtimeFacts?.latest_host_sample ?? null
-  const recentSamples = runtimeFacts?.recent_host_samples ?? []
-  const isMaintenance = node.monitoring_status === '维护中'
-  const showBindingConflict = node.binding_status === NODE_BINDING_CONFLICT_STATUS
-  const isRetiredNode = node.lifecycle_status === NODE_LIFECYCLE_RETIRED
   const hasCurrentBindingConflictState = bindingConflictState.requestedNodeId === nodeId
   const bindingConflict = hasCurrentBindingConflictState ? bindingConflictState.onboarding : null
   const bindingConflictError = hasCurrentBindingConflictState ? bindingConflictState.error : null
   const bindingConflictLoading =
     hasCurrentBindingConflictState && bindingConflictState.loading && !bindingConflict
-  const bindingActionsDisabled = bindingAction !== null || bindingConflictLoading || !bindingConflict
-  const runtimeActions = nodeRuntimeActions(node)
-  const showDangerZone = node.current_active_incident_count > 0
-  const firstIncident =
-    incidents.length > 0
-      ? [...incidents].sort(
-          (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        )[0]
-      : null
 
   function registerActionRef(action: NodeRuntimeAction, element: HTMLButtonElement | null) {
     actionButtonRefs.current[action] = element
@@ -892,135 +858,69 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   }
 
   return (
-    <div className="page-stack">
-      <NodeWatchtowerHeader
-        node={node}
-        latestSample={sample}
-        runtimeActions={runtimeActions}
-        runtimeSubmitting={runtimeSubmitting}
-        onRuntimeAction={(action) => void handleRuntimeAction(action)}
-        registerActionRef={registerActionRef}
-        onOpenHistory={() => openHistory('events')}
-        onOpenCommands={openCommandDrawer}
-      />
-
-      <NodeDiagnosisSummary
-        node={node}
-        sample={sample}
-        incidents={incidents}
-        eventsError={eventsError}
-        onOpenEvents={() => openHistory('events')}
-        onOpenIncidents={() => openHistory('incidents')}
-      />
-
-      <NodeLinkedVPSSection
-        sectionRef={linkedVPSSectionRef}
-        records={linkedVPS}
-        loading={linkedVPSLoading}
-        loaded={linkedVPSLoaded}
-        error={linkedVPSError}
-      />
-
-      {showBindingConflict ? (
-        <NodeBindingConflictSection
-          node={node}
-          bindingConflict={bindingConflict}
-          loading={bindingConflictLoading}
-          error={bindingConflictError}
-          bindingAction={bindingAction}
-          actionsDisabled={bindingActionsDisabled}
-          onConfirm={() => void handleBindingAction('confirm', confirmNodeRebind)}
-          onReject={() => void handleBindingAction('reject', rejectPendingNodeBinding)}
-          onReset={() => void handleBindingAction('reset', resetNodeBinding)}
-        />
-      ) : null}
-
-      {showDangerZone ? (
-        <NodeDangerCard
-          node={node}
-          firstIncident={firstIncident}
-          onOpenEvents={() => openHistory('events')}
-        />
-      ) : null}
-
-      <NodeTimeWindowTabs value={timeWindow} onChange={handleTimeWindowChange} />
-
-      <NodeWatchtowerMetrics
-        sample={sample}
-        samples={recentSamples}
-        isMaintenance={isMaintenance}
-      />
-
-      {pendingRuntimeConfirmation?.action === 'pause' ? (
-        <NodeRuntimePauseConfirmation
-          node={node}
-          disabled={runtimeSubmitting}
-          onConfirm={() => void handleRuntimeAction('pause', true)}
-          onCancel={() => {
-            pendingFocusRestoreRef.current = 'pause'
-            setPendingRuntimeConfirmation(null)
-          }}
-        />
-      ) : null}
-      {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
-
-      <NodeMetadataSection
-        node={node}
-        editing={metadataEditing}
-        groupDraft={metadataGroupDraft}
-        labelDraft={metadataLabelDraft}
-        noteDraft={metadataNoteDraft}
-        submitting={metadataSubmitting}
-        error={metadataError}
-        onGroupDraftChange={handleMetadataGroupDraftChange}
-        onLabelDraftChange={handleMetadataLabelDraftChange}
-        onNoteDraftChange={handleMetadataNoteDraftChange}
-        onStartEdit={() => startMetadataEdit(node)}
-        onCancelEdit={cancelMetadataEdit}
-        onSave={() => void handleMetadataSave()}
-      />
-
-      <NodeLifecycleSection
-        isRetiredNode={isRetiredNode}
-        showRetireConfirmation={showRetireConfirmation}
-        submitting={lifecycleSubmitting}
-        error={lifecycleError}
-        onRestore={() => void handleLifecycleAction('restore-to-observing')}
-        onStartRetire={startRetireConfirmation}
-        onConfirmRetire={() => void handleLifecycleAction('retire')}
-        onCancelRetire={cancelRetireConfirmation}
-      />
-
-      <NodeAccessCredentialSection node={node} />
-
-      <NodeContainersSection sample={sample} />
-
-      <NodeSnapshotMeta sample={sample} />
-
-      <NodeHistoryDrawer
-        node={node}
-        open={historyOpen}
-        tab={historyTab}
-        events={events}
-        eventsError={eventsError}
-        historyIncidents={historyIncidents}
-        historyIncidentsLoading={historyIncidentsLoading}
-        historyIncidentsError={historyIncidentsError}
-        onClose={closeHistoryDrawer}
-        onTabChange={handleHistoryTabChange}
-        onRetryHistoryIncidents={retryHistoryIncidents}
-      />
-
-      <NodeCommandDrawer
-        node={node}
-        open={commandOpen}
-        commands={COMMAND_LIST}
-        commandLabels={COMMAND_LABELS}
-        submitting={commandSubmitting}
-        error={commandError}
-        onClose={closeCommandDrawer}
-        onExecute={(commandId) => void handleCommandExecute(commandId)}
-      />
-    </div>
+    <NodeDetailPageBody
+      node={node}
+      runtimeFacts={runtimeFacts}
+      runtimeSubmitting={runtimeSubmitting}
+      runtimeError={runtimeError}
+      pendingRuntimeConfirmation={pendingRuntimeConfirmation}
+      onRuntimeAction={(action, confirmed) => void handleRuntimeAction(action, confirmed)}
+      onCancelRuntimeConfirmation={() => {
+        pendingFocusRestoreRef.current = 'pause'
+        setPendingRuntimeConfirmation(null)
+      }}
+      registerActionRef={registerActionRef}
+      incidents={incidents}
+      events={events}
+      eventsError={eventsError}
+      linkedVPSSectionRef={linkedVPSSectionRef}
+      linkedVPS={linkedVPS}
+      linkedVPSLoading={linkedVPSLoading}
+      linkedVPSLoaded={linkedVPSLoaded}
+      linkedVPSError={linkedVPSError}
+      bindingConflict={bindingConflict}
+      bindingConflictLoading={bindingConflictLoading}
+      bindingConflictError={bindingConflictError}
+      bindingAction={bindingAction}
+      onBindingConfirm={() => void handleBindingAction('confirm', confirmNodeRebind)}
+      onBindingReject={() => void handleBindingAction('reject', rejectPendingNodeBinding)}
+      onBindingReset={() => void handleBindingAction('reset', resetNodeBinding)}
+      timeWindow={timeWindow}
+      onTimeWindowChange={handleTimeWindowChange}
+      metadataEditing={metadataEditing}
+      metadataGroupDraft={metadataGroupDraft}
+      metadataLabelDraft={metadataLabelDraft}
+      metadataNoteDraft={metadataNoteDraft}
+      metadataSubmitting={metadataSubmitting}
+      metadataError={metadataError}
+      onMetadataGroupDraftChange={handleMetadataGroupDraftChange}
+      onMetadataLabelDraftChange={handleMetadataLabelDraftChange}
+      onMetadataNoteDraftChange={handleMetadataNoteDraftChange}
+      onStartMetadataEdit={() => startMetadataEdit(node)}
+      onCancelMetadataEdit={cancelMetadataEdit}
+      onSaveMetadata={() => void handleMetadataSave()}
+      showRetireConfirmation={showRetireConfirmation}
+      lifecycleSubmitting={lifecycleSubmitting}
+      lifecycleError={lifecycleError}
+      onLifecycleRestore={() => void handleLifecycleAction('restore-to-observing')}
+      onStartRetire={startRetireConfirmation}
+      onConfirmRetire={() => void handleLifecycleAction('retire')}
+      onCancelRetire={cancelRetireConfirmation}
+      historyOpen={historyOpen}
+      historyTab={historyTab}
+      historyIncidents={historyIncidents}
+      historyIncidentsLoading={historyIncidentsLoading}
+      historyIncidentsError={historyIncidentsError}
+      onOpenHistory={openHistory}
+      onCloseHistory={closeHistoryDrawer}
+      onHistoryTabChange={handleHistoryTabChange}
+      onRetryHistoryIncidents={retryHistoryIncidents}
+      commandOpen={commandOpen}
+      commandSubmitting={commandSubmitting}
+      commandError={commandError}
+      onOpenCommands={openCommandDrawer}
+      onCloseCommand={closeCommandDrawer}
+      onExecuteCommand={(commandId) => void handleCommandExecute(commandId)}
+    />
   )
 }
