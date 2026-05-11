@@ -1257,3 +1257,36 @@ Extracted NodesPage list/table composition into a page-private NodesListSection 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 97: Current state roadmap audit
+
+**Date**: 2026-05-11
+**Task**: Current state roadmap audit
+**Branch**: `docs/current-state-roadmap-audit`
+
+### Summary
+
+Recorded the current remaining-work audit and next-stage planning entry, including old Asset Ledger plan closure, real-data deferred boundary, frontend mechanical split pause, and updated roadmap entry points.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f42f252` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
