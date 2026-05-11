@@ -4098,3 +4098,9 @@ html.theme-classic-light .dashboard-status-bar {
   font-size: var(--type-small-size);
   color: color-mix(in srgb, var(--color-state-critical) 70%, white 30%);
 }
+
+.batch-command__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
