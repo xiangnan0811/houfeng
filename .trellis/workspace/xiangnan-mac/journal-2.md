@@ -1092,3 +1092,36 @@ Extracted TargetsPage page-private create form, filters, batch actions, table co
 ### Next Steps
 
 - None - task complete
+
+
+## Session 92: DashboardPage section extraction
+
+**Date**: 2026-05-11
+**Task**: DashboardPage section extraction
+**Branch**: `refactor/dashboard-page-sections`
+
+### Summary
+
+Extracted DashboardPage page-private status panel, trend pulse, attention queue, asset summary, context strip, management entries, running overview, onboarding workbench, helpers, links, and types while preserving API loading and page composition in DashboardPage. Verified with lint, DashboardPage tests, build, and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `632a827` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
