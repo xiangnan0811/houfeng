@@ -1224,3 +1224,36 @@ Extracted EventsPage page-private filter overview, filter drawer, and grouped ev
 ### Next Steps
 
 - None - task complete
+
+
+## Session 96: NodesPage list section extraction
+
+**Date**: 2026-05-11
+**Task**: NodesPage list section extraction
+**Branch**: `refactor/nodes-page-list-section`
+
+### Summary
+
+Extracted NodesPage list/table composition into a page-private NodesListSection while keeping URL filters, API calls, mutations, sorting, batch actions, compare state, runtime controls, and row navigation in the page owner. Verified with lint, NodesPage tests, and make verify-web.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `82a3615` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

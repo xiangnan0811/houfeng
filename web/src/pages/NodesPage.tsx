@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { DataTable, type DataTableSortState } from '../components/atoms'
+import { type DataTableSortState } from '../components/atoms'
 import {
   ApiError,
   createNode,
@@ -20,10 +20,8 @@ import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { CreateNodeInput, NodeRecord, NodeSparklinesResponse } from '../lib/types'
 import { type AutoRefreshOption, useAutoRefresh } from '../lib/useAutoRefresh'
 import { CreateNodeDrawer } from './nodes/CreateNodeDrawer'
-import { NodesBatchPanel } from './nodes/NodesBatchPanel'
-import { NodesFilterPanel } from './nodes/NodesFilterPanel'
 import { NodesHero } from './nodes/NodesHero'
-import { NodesRuntimeOverlays } from './nodes/NodesRuntimeOverlays'
+import { NodesListSection } from './nodes/NodesListSection'
 import { buildNodesTableColumns } from './nodes/NodesTableColumns'
 import { NodesToolbar } from './nodes/NodesToolbar'
 import {
@@ -672,91 +670,54 @@ export function NodesPage() {
         onAutoRefreshChange={setAutoRefresh}
       />
 
-      {baseNodes.length === 0 ? (
-        <div className="empty-state">
-          <h3>{nodeListView === 'binding-conflict' ? '没有绑定异常节点' : '暂无节点'}</h3>
-          <p>
-            {nodeListView === 'binding-conflict'
-              ? '当前没有等待绑定确认的节点。'
-              : '请先创建第一个节点。'}
-          </p>
-        </div>
-      ) : (
-        <>
-          <NodesFilterPanel
-            hasActiveFilters={hasActiveFilters}
-            filterState={filterState}
-            groupOptions={groupOptions}
-            regionOptions={regionOptions}
-            cityOptions={cityOptions}
-            providerOptions={providerOptions}
-            labelOptions={labelOptions}
-            onClearAll={clearAllFilters}
-            onSingleFilterChange={setSingleFilter}
-            onMultiFilterChange={setMultiFilter}
-            onAbnormalFilterChange={setAbnormalFilter}
-            onOnboardingFilterChange={setOnboardingFilter}
-          />
-
-          <NodesBatchPanel
-            hasActiveFilters={hasActiveFilters}
-            filteredNodeCount={filteredNodes.length}
-            selectAll={selectAll}
-            batchSubmitting={batchSubmitting}
-            batchError={batchError}
-            commandOpen={commandOpen}
-            commandID={commandID}
-            pendingBatchAction={pendingBatchAction}
-            onSelectAllChange={setSelectAll}
-            onBatchAction={(action) => void executeBatchAction(action)}
-            onCommandOpenChange={setCommandOpen}
-            onCommandIDChange={setCommandID}
-            onExecuteBatchCommand={() => void executeBatchCommand()}
-            onConfirmBatchPause={() => void executeBatchPauseConfirmed()}
-            onCancelBatchPause={() => setPendingBatchAction(null)}
-          />
-
-          {sortedFilteredNodes.length === 0 ? (
-            <div className="empty-state">
-              <h3>没有匹配当前筛选的节点</h3>
-              <p>请尝试调整筛选条件，或清空筛选恢复完整列表。</p>
-              <p>
-                <button type="button" onClick={clearAllFilters}>
-                  清空筛选
-                </button>
-              </p>
-            </div>
-          ) : (
-            <DataTable<NodeRecord>
-              columns={showTrends ? columns : columns.filter((column) => column.key !== 'trends')}
-              rows={sortedFilteredNodes}
-              rowKey={(node) => node.node_id}
-              density="compact"
-              className="nodes-table"
-              sortState={sortState}
-              onSortChange={handleSortChange}
-              onRowClick={(node) => {
-                if (!shouldNavigateOnRowClick(node)) return
-                navigate(`/nodes/${node.node_id}`)
-              }}
-            />
-          )}
-
-          <NodesRuntimeOverlays
-            nodes={sortedFilteredNodes}
-            runtimeErrors={runtimeErrors}
-            pendingConfirmation={pendingConfirmation}
-            runtimeBusyNodeId={runtimeBusyNodeId}
-            onConfirmPause={(node) => void handleRuntimeAction(node, 'pause', true)}
-            onCancelPause={(node) => {
-              queueFocusRestore(node.node_id, 'pause')
-              setPendingConfirmation((current) =>
-                current?.nodeId === node.node_id ? null : current,
-              )
-            }}
-          />
-        </>
-      )}
+      <NodesListSection
+        nodeListView={nodeListView}
+        baseNodes={baseNodes}
+        nodes={sortedFilteredNodes}
+        columns={columns}
+        showTrends={showTrends}
+        sortState={sortState}
+        hasActiveFilters={hasActiveFilters}
+        filterState={filterState}
+        groupOptions={groupOptions}
+        regionOptions={regionOptions}
+        cityOptions={cityOptions}
+        providerOptions={providerOptions}
+        labelOptions={labelOptions}
+        selectAll={selectAll}
+        batchSubmitting={batchSubmitting}
+        batchError={batchError}
+        commandOpen={commandOpen}
+        commandID={commandID}
+        pendingBatchAction={pendingBatchAction}
+        runtimeErrors={runtimeErrors}
+        pendingConfirmation={pendingConfirmation}
+        runtimeBusyNodeId={runtimeBusyNodeId}
+        onClearAllFilters={clearAllFilters}
+        onSingleFilterChange={setSingleFilter}
+        onMultiFilterChange={setMultiFilter}
+        onAbnormalFilterChange={setAbnormalFilter}
+        onOnboardingFilterChange={setOnboardingFilter}
+        onSelectAllChange={setSelectAll}
+        onBatchAction={(action) => void executeBatchAction(action)}
+        onCommandOpenChange={setCommandOpen}
+        onCommandIDChange={setCommandID}
+        onExecuteBatchCommand={() => void executeBatchCommand()}
+        onConfirmBatchPause={() => void executeBatchPauseConfirmed()}
+        onCancelBatchPause={() => setPendingBatchAction(null)}
+        onSortChange={handleSortChange}
+        onRowClick={(node) => {
+          if (!shouldNavigateOnRowClick(node)) return
+          navigate(`/nodes/${node.node_id}`)
+        }}
+        onConfirmPause={(node) => void handleRuntimeAction(node, 'pause', true)}
+        onCancelPause={(node) => {
+          queueFocusRestore(node.node_id, 'pause')
+          setPendingConfirmation((current) =>
+            current?.nodeId === node.node_id ? null : current,
+          )
+        }}
+      />
     </section>
   )
 }
