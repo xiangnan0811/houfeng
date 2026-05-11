@@ -2,11 +2,9 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import {
-  TargetLatencyTrends,
   type ProbeCreateFormState,
   type ProbeFormMode,
   type PendingProbeConfirmation,
-  TargetWatchtowerHeader,
   type TargetRuntimeAction,
 } from '../components/target-detail'
 import {
@@ -37,17 +35,9 @@ import type {
   TargetRecord,
   UpdateProbeItemInput,
 } from '../lib/types'
-import { TargetDangerCard } from './target-detail/TargetDangerCard'
+import { TargetDetailPageBody } from './target-detail/TargetDetailPageBody'
 import { TargetDetailLoading } from './target-detail/TargetDetailLoading'
 import { TargetDetailUnavailable } from './target-detail/TargetDetailUnavailable'
-import { TargetHistoryDrawer } from './target-detail/TargetHistoryDrawer'
-import { TargetLifecycleSection } from './target-detail/TargetLifecycleSection'
-import { TargetMetadataSection } from './target-detail/TargetMetadataSection'
-import { TargetProbeListSection } from './target-detail/TargetProbeListSection'
-import { TargetProbeManagementSection } from './target-detail/TargetProbeManagementSection'
-import { TargetRuntimePauseConfirmation } from './target-detail/TargetRuntimePauseConfirmation'
-import { TargetSnapshotMeta } from './target-detail/TargetSnapshotMeta'
-import { TargetTimeWindowTabs } from './target-detail/TargetTimeWindowTabs'
 import { INITIAL_PROBE_CREATE_FORM } from './target-detail/targetDetailConstants'
 import {
   buildProbeCreateInput,
@@ -395,15 +385,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const eventsError = hasCurrentActivity ? state.eventsError : null
   const runtimeConfirmationActive = pendingRuntimeConfirmation !== null
   const probeConfirmationActive = pendingProbeConfirmation !== null
-
-  const showDangerZone = target ? target.current_active_incident_count > 0 : false
-  const firstIncident =
-    incidents.length > 0
-      ? [...incidents].sort(
-          (a, b) =>
-            new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        )[0]
-      : null
 
   function openHistory(tab: 'events' | 'incidents' = 'events') {
     setHistoryTab(tab)
@@ -832,172 +813,111 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     return <TargetDetailUnavailable error={error} />
   }
 
-  const probeRowMutationBusy = probeMutationBusyId !== null
-  const probeActionsDisabled =
-    probeCreateSubmitting || probeRowMutationBusy || runtimeConfirmationActive || probeConfirmationActive
-  const isArchived = target.run_status === '已归档'
-
   return (
-    <div className="page-stack">
-      <TargetWatchtowerHeader
-        target={target}
-        runtimeSubmitting={runtimeSubmitting}
-        disabled={probeConfirmationActive}
-        onRuntimeAction={(action) => void handleRuntimeAction(action)}
-        registerActionRef={registerActionRef}
-        onOpenHistory={() => openHistory('events')}
-      />
-
-      {showDangerZone ? (
-        <TargetDangerCard
-          target={target}
-          firstIncident={firstIncident}
-          onOpenEvents={() => openHistory('events')}
-        />
-      ) : null}
-
-      {pendingRuntimeConfirmation?.action === 'pause' ? (
-        <TargetRuntimePauseConfirmation
-          target={target}
-          disabled={runtimeSubmitting}
-          onConfirm={() => void handleRuntimeAction('pause', true)}
-          onCancel={() => {
-            pendingRuntimeFocusRestoreRef.current = 'pause'
-            setPendingRuntimeConfirmation(null)
-          }}
-        />
-      ) : null}
-      {runtimeError ? (
-        <p className="watchtower-runtime-error" role="alert">
-          {runtimeError}
-        </p>
-      ) : null}
-
-      <TargetTimeWindowTabs value={timeWindow} onChange={setTimeWindow} />
-
-      <TargetLatencyTrends
-        probeItems={probeItems}
-        recentObservations={recentObservations}
-        isMaintenance={target.run_status === '维护中'}
-        watchtower
-      />
-
-      <TargetProbeManagementSection
-        addProbeButtonRef={addProbeButtonRef}
-        probeCreateOpen={probeCreateOpen}
-        probeFormMode={probeFormMode}
-        probeCreateForm={probeCreateForm}
-        probeCreateSubmitting={probeCreateSubmitting}
-        probeCreateError={probeCreateError}
-        probeMutationError={probeMutationError}
-        addDisabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
-        onToggleCreate={() => {
-          if (probeCreateSubmitting) return
-          if (probeCreateOpen && probeFormMode.kind === 'create') {
-            probeFormRequestRef.current += 1
-            setProbeCreateOpen(false)
-            return
-          }
-          openProbeCreateForm(target)
-        }}
-        onSubmit={handleProbeCreate}
-        onProbeKindChange={(probeKind) => {
-          if (probeFormMode.kind === 'edit') {
-            updateProbeCreateField('probeKind', probeKind)
-            return
-          }
-          setProbeCreateForm((current) => probeCreateFormForKind(current, probeKind))
-        }}
-        onFieldChange={updateProbeCreateField}
-      />
-
-      <TargetMetadataSection
-        target={target}
-        editing={metadataEditing}
-        groupDraft={metadataForm.group}
-        labelDraft={metadataForm.labels}
-        noteDraft={metadataForm.note}
-        submitting={metadataSubmitting}
-        error={metadataError}
-        onGroupDraftChange={(value) => updateMetadataField('group', value)}
-        onLabelDraftChange={(value) => updateMetadataField('labels', value)}
-        onNoteDraftChange={(value) => updateMetadataField('note', value)}
-        onStartEdit={() => {
-          setMetadataEditing(true)
-          setMetadataError(null)
-          setMetadataForm({
-            group: target.group || '',
-            labels: target.labels.join(', '),
-            note: target.note,
-          })
-        }}
-        onCancelEdit={() => {
-          setMetadataEditing(false)
-          setMetadataError(null)
-          setMetadataForm({
-            group: target.group || '',
-            labels: target.labels.join(', '),
-            note: target.note,
-          })
-        }}
-        onSubmit={handleMetadataSave}
-      />
-
-      <TargetProbeListSection
-        probeItems={probeItems}
-        observationsByProbe={observationsByProbe}
-        actionsDisabled={probeActionsDisabled}
-        pendingProbeConfirmation={pendingProbeConfirmation}
-        confirmationCardDisabled={probeCreateSubmitting || probeRowMutationBusy}
-        pendingProbeConfirmationCardRef={pendingProbeConfirmationCardRef}
-        registerDeleteButtonRef={(probeItemId, element) => {
-          probeDeleteButtonRefs.current[probeItemId] = element
-        }}
-        onAddProbe={() => openProbeCreateForm(target)}
-        onEdit={(probeItem) => openProbeEditForm(probeItem)}
-        onToggle={(probeItem) => void handleToggleProbeItem(probeItem)}
-        onDelete={(probeItem) => void handleDeleteProbeItem(probeItem)}
-        onConfirmDelete={(probeItem) => void handleDeleteProbeItem(probeItem, true)}
-        onCancelDeleteConfirmation={(probeItem) => {
-          pendingProbeFocusRestoreRef.current = {
-            probeItemId: probeItem.probe_item_id,
-          }
-          setPendingProbeConfirmation((current) =>
-            current?.probeItemId === probeItem.probe_item_id ? null : current,
-          )
-        }}
-      />
-
-      <TargetLifecycleSection
-        isArchived={isArchived}
-        runtimeSubmitting={runtimeSubmitting}
-        probeConfirmationActive={probeConfirmationActive}
-        showArchiveConfirmation={pendingRuntimeConfirmation?.action === 'archive'}
-        onRestore={() => void handleRuntimeAction('restore-to-paused')}
-        onStartArchive={() => void handleRuntimeAction('archive')}
-        onConfirmArchive={() => void handleRuntimeAction('archive', true)}
-        onCancelArchive={() => {
-          pendingRuntimeFocusRestoreRef.current = 'archive'
-          setPendingRuntimeConfirmation(null)
-        }}
-        registerActionRef={registerActionRef}
-      />
-
-      <TargetSnapshotMeta />
-
-      <TargetHistoryDrawer
-        target={target}
-        open={historyOpen}
-        tab={historyTab}
-        events={events}
-        eventsError={eventsError}
-        historyIncidents={historyIncidents}
-        historyIncidentsLoading={historyIncidentsLoading}
-        historyIncidentsError={historyIncidentsError}
-        onClose={() => setHistoryOpen(false)}
-        onTabChange={setHistoryTab}
-        onRetryHistoryIncidents={retryHistoryIncidents}
-      />
-    </div>
+    <TargetDetailPageBody
+      target={target}
+      probeItems={probeItems}
+      incidents={incidents}
+      events={events}
+      eventsError={eventsError}
+      recentObservations={recentObservations}
+      observationsByProbe={observationsByProbe}
+      runtimeSubmitting={runtimeSubmitting}
+      runtimeError={runtimeError}
+      pendingRuntimeConfirmation={pendingRuntimeConfirmation}
+      runtimeConfirmationActive={runtimeConfirmationActive}
+      probeConfirmationActive={probeConfirmationActive}
+      onRuntimeAction={(action, confirmed) => void handleRuntimeAction(action, confirmed)}
+      onCancelPauseConfirmation={() => {
+        pendingRuntimeFocusRestoreRef.current = 'pause'
+        setPendingRuntimeConfirmation(null)
+      }}
+      onCancelArchiveConfirmation={() => {
+        pendingRuntimeFocusRestoreRef.current = 'archive'
+        setPendingRuntimeConfirmation(null)
+      }}
+      registerActionRef={registerActionRef}
+      timeWindow={timeWindow}
+      onTimeWindowChange={setTimeWindow}
+      addProbeButtonRef={addProbeButtonRef}
+      probeCreateOpen={probeCreateOpen}
+      probeFormMode={probeFormMode}
+      probeCreateForm={probeCreateForm}
+      probeCreateSubmitting={probeCreateSubmitting}
+      probeCreateError={probeCreateError}
+      probeMutationError={probeMutationError}
+      onToggleCreate={() => {
+        if (probeCreateSubmitting) return
+        if (probeCreateOpen && probeFormMode.kind === 'create') {
+          probeFormRequestRef.current += 1
+          setProbeCreateOpen(false)
+          return
+        }
+        openProbeCreateForm(target)
+      }}
+      onProbeSubmit={handleProbeCreate}
+      onProbeKindChange={(probeKind) => {
+        if (probeFormMode.kind === 'edit') {
+          updateProbeCreateField('probeKind', probeKind)
+          return
+        }
+        setProbeCreateForm((current) => probeCreateFormForKind(current, probeKind))
+      }}
+      onProbeFieldChange={updateProbeCreateField}
+      metadataEditing={metadataEditing}
+      metadataSubmitting={metadataSubmitting}
+      metadataError={metadataError}
+      metadataForm={metadataForm}
+      onMetadataGroupChange={(value) => updateMetadataField('group', value)}
+      onMetadataLabelChange={(value) => updateMetadataField('labels', value)}
+      onMetadataNoteChange={(value) => updateMetadataField('note', value)}
+      onStartMetadataEdit={() => {
+        setMetadataEditing(true)
+        setMetadataError(null)
+        setMetadataForm({
+          group: target.group || '',
+          labels: target.labels.join(', '),
+          note: target.note,
+        })
+      }}
+      onCancelMetadataEdit={() => {
+        setMetadataEditing(false)
+        setMetadataError(null)
+        setMetadataForm({
+          group: target.group || '',
+          labels: target.labels.join(', '),
+          note: target.note,
+        })
+      }}
+      onMetadataSubmit={handleMetadataSave}
+      probeMutationBusyId={probeMutationBusyId}
+      pendingProbeConfirmation={pendingProbeConfirmation}
+      pendingProbeConfirmationCardRef={pendingProbeConfirmationCardRef}
+      registerDeleteButtonRef={(probeItemId, element) => {
+        probeDeleteButtonRefs.current[probeItemId] = element
+      }}
+      onAddProbe={() => openProbeCreateForm(target)}
+      onEditProbe={(probeItem) => openProbeEditForm(probeItem)}
+      onToggleProbe={(probeItem) => void handleToggleProbeItem(probeItem)}
+      onDeleteProbe={(probeItem) => void handleDeleteProbeItem(probeItem)}
+      onConfirmDeleteProbe={(probeItem) => void handleDeleteProbeItem(probeItem, true)}
+      onCancelDeleteConfirmation={(probeItem) => {
+        pendingProbeFocusRestoreRef.current = {
+          probeItemId: probeItem.probe_item_id,
+        }
+        setPendingProbeConfirmation((current) =>
+          current?.probeItemId === probeItem.probe_item_id ? null : current,
+        )
+      }}
+      historyOpen={historyOpen}
+      historyTab={historyTab}
+      historyIncidents={historyIncidents}
+      historyIncidentsLoading={historyIncidentsLoading}
+      historyIncidentsError={historyIncidentsError}
+      onOpenHistory={openHistory}
+      onCloseHistory={() => setHistoryOpen(false)}
+      onHistoryTabChange={setHistoryTab}
+      onRetryHistoryIncidents={retryHistoryIncidents}
+    />
   )
 }
