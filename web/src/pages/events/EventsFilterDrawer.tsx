@@ -1,0 +1,178 @@
+import type { FormEvent } from 'react'
+
+import { Button, Drawer, Tabs } from '../../components/atoms'
+import { FilterSelect, FilterToggle } from '../../components/filters'
+import type { StateChangeEventType } from '../../lib/types'
+import {
+  ALLOWED_EVENT_TYPES,
+  ALLOWED_LIMITS,
+  DEFAULT_LIMIT,
+  EVENT_TYPE_SELECT_OPTIONS,
+  LIMIT_SELECT_OPTIONS,
+  OBJECT_TYPE_OPTIONS,
+  SEVERITY_OPTIONS,
+  TIME_RANGE_TABS,
+} from './eventsPageConstants'
+import type { FilterState, TimeRange } from './types'
+
+type EventsFilterDrawerProps = {
+  open: boolean
+  filters: FilterState
+  onClose: () => void
+  onApply: () => void
+  onReset: () => void
+  onTimeRangeChange: (value: TimeRange) => void
+  onFilterChange: <K extends keyof FilterState>(key: K, value: FilterState[K]) => void
+}
+
+function isEventTypeValue(value: string | null): value is StateChangeEventType {
+  return value !== null && ALLOWED_EVENT_TYPES.has(value as StateChangeEventType)
+}
+
+export function EventsFilterDrawer({
+  open,
+  filters,
+  onClose,
+  onApply,
+  onReset,
+  onTimeRangeChange,
+  onFilterChange,
+}: EventsFilterDrawerProps) {
+  const customRange = filters.time_range === 'custom'
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    onApply()
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="事件筛选" ariaLabel="事件高级筛选">
+      <form className="events-filter-drawer" onSubmit={handleSubmit}>
+        <div className="events-filter-drawer__group">
+          <span className="events-filter-drawer__label">时间范围</span>
+          <Tabs<TimeRange>
+            variant="pill"
+            value={filters.time_range}
+            onChange={onTimeRangeChange}
+            items={TIME_RANGE_TABS}
+          />
+        </div>
+
+        <div className="events-filter-drawer__grid">
+          <FilterSelect
+            label="对象类型"
+            value={filters.object_type || null}
+            options={OBJECT_TYPE_OPTIONS}
+            onChange={(value) =>
+              onFilterChange('object_type', value === 'node' || value === 'target' ? value : '')
+            }
+          />
+          <FilterSelect
+            label="严重程度"
+            value={filters.severity || null}
+            options={SEVERITY_OPTIONS}
+            onChange={(value) =>
+              onFilterChange(
+                'severity',
+                value === '关注' || value === '告警' || value === '严重' ? value : '',
+              )
+            }
+          />
+          <FilterSelect
+            label="事件类型"
+            value={filters.event_type || null}
+            options={EVENT_TYPE_SELECT_OPTIONS}
+            onChange={(value) => onFilterChange('event_type', isEventTypeValue(value) ? value : '')}
+          />
+          <FilterSelect
+            label="数量"
+            value={filters.limit}
+            options={LIMIT_SELECT_OPTIONS}
+            onChange={(value) =>
+              onFilterChange(
+                'limit',
+                value !== null && ALLOWED_LIMITS.has(value) ? value : String(DEFAULT_LIMIT),
+              )
+            }
+          />
+          <FilterToggle
+            label="仅看通知事件"
+            checked={filters.notification_only}
+            onChange={(checked) => onFilterChange('notification_only', checked)}
+          />
+          <FilterToggle
+            label="仅看恢复事件"
+            checked={filters.recovery_only}
+            onChange={(checked) => onFilterChange('recovery_only', checked)}
+          />
+          <FilterToggle
+            label="仅看维护事件"
+            checked={filters.maintenance_only}
+            onChange={(checked) => onFilterChange('maintenance_only', checked)}
+          />
+          <FilterToggle
+            label="包含补传事件"
+            checked={filters.include_backfilled}
+            onChange={(checked) => onFilterChange('include_backfilled', checked)}
+          />
+        </div>
+
+        <div className="events-filter-drawer__fields">
+          <label className="events-filter-drawer__field">
+            <span className="events-filter-drawer__label">开始时间</span>
+            <input
+              aria-label="开始时间"
+              placeholder="2026-04-25T00:00:00Z"
+              value={filters.created_from}
+              disabled={!customRange}
+              onChange={(event) => onFilterChange('created_from', event.target.value)}
+            />
+          </label>
+
+          <label className="events-filter-drawer__field">
+            <span className="events-filter-drawer__label">结束时间</span>
+            <input
+              aria-label="结束时间"
+              placeholder="2026-04-26T00:00:00Z"
+              value={filters.created_to}
+              disabled={!customRange}
+              onChange={(event) => onFilterChange('created_to', event.target.value)}
+            />
+          </label>
+
+          <label className="events-filter-drawer__field">
+            <span className="events-filter-drawer__label">标签</span>
+            <input
+              aria-label="标签"
+              placeholder="edge"
+              value={filters.label}
+              onChange={(event) => onFilterChange('label', event.target.value)}
+            />
+          </label>
+
+          <div className="events-filter-drawer__field">
+            <span className="events-filter-drawer__label">包含补传事件</span>
+            <span className="events-filter-drawer__value">
+              {filters.include_backfilled ? '已包含' : '未包含'}
+            </span>
+            <span className="events-filter-drawer__hint">
+              {filters.include_backfilled ? '补传相关事件会进入列表' : '默认隐藏补传相关事件'}
+            </span>
+          </div>
+        </div>
+
+        <div className="events-filter-drawer__actions">
+          <Button type="submit" size="sm">
+            应用筛选
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={onReset}>
+            重置筛选
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            关闭
+          </Button>
+        </div>
+      </form>
+    </Drawer>
+  )
+}
