@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 84
+- **Total Sessions**: 85
 - **Last Active**: 2026-05-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~863 | Active |
+| `journal-2.md` | ~896 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 85 | 2026-05-11 | Events API envelope migration | `e0fe8a9` | `fix/events-api-envelope` |
 | 84 | 2026-05-11 | Agent command boundary hardening | `24733ce` | `fix/agent-command-boundary` |
 | 83 | 2026-05-11 | Notification channel model | `099df3b` | `fix/notification-channel-model` |
 | 82 | 2026-05-11 | Command result durability | `a94b25b` | `fix/command-result-durability` |
