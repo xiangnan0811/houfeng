@@ -1422,3 +1422,36 @@ Redesigned Asset Decisions as a unified work queue with drawer editing, rebuilt 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 102: UX-4 VPS detail asset workbench
+
+**Date**: 2026-05-11
+**Task**: UX-4 VPS detail asset workbench
+**Branch**: `ux/vps-detail-asset-workbench`
+
+### Summary
+
+Redesigned VPS detail into an asset decision workbench with drawer-based edits, VPS-scoped subscription evidence, service/domain context tables, tests, and spec updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `69abf40` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
