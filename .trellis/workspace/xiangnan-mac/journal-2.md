@@ -1323,3 +1323,36 @@ Planned the next core page UX direction after user rejected the current page exp
 ### Next Steps
 
 - None - task complete
+
+
+## Session 99: UX-1 app shell navigation baseline
+
+**Date**: 2026-05-11
+**Task**: UX-1 app shell navigation baseline
+**Branch**: `ux/app-shell-navigation-baseline`
+
+### Summary
+
+Implemented the first UX replan batch by replacing flat primary navigation with grouped AppShell navigation, renaming the root nav item to 工作台, tightening shell chrome, syncing the active Sidebar visual contract, and verifying layout behavior with tests, lint, build, dev server, and Playwright screenshots.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3a65276` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
