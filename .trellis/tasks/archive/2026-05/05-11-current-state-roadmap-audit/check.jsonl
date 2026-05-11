@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch and PR workflow compliance"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify quality gate selection"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Verify frontend-related planning stays within scope"}
+{"file": ".trellis/tasks/05-11-current-state-roadmap-audit/research/current-state-audit.md", "reason": "Check planning doc against recorded evidence"}

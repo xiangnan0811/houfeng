@@ -952,8 +952,9 @@ make verify-go
 
 本计划的 Task 1-3、Task 5-8 以及 VPS-scoped service/domain 轻量扩展已经按仓库当前实现闭合；Task 4 的 dry-run/import 工具链已经完成，但真实 40 多台 VPS 数据执行仍是 user-data-dependent deferred，不能在没有真实数据文件和授权的情况下宣称完成。
 
-完成度审计和证据矩阵见 `docs/release/asset-ledger-roadmap-completion.md`。后续继续推进前应先查该审计文档：
+完成度审计和证据矩阵见 `docs/release/asset-ledger-roadmap-completion.md`。2026-05-11 的当前项目剩余工作审计与下一阶段规划见 `docs/release/current-state-and-next-stage-plan.md`。后续继续推进前应先查这些审计文档：
 
 - 如果只是为了继续完成本计划，不应再创建新的立即开发任务。
 - 如果用户提供真实 VPS JSON，应先运行 dry-run，依据报告决定是否 import 或新建模型修正任务。
 - 如果要扩张到 Provider/DNS 同步、Web SSH、插件、服务发现、完整服务注册表、完整域名管理、RBAC、汇率或评分算法，应先建立新的产品计划和 Trellis task，不应把这些范围自动归入本计划。
+- 如果只是继续降低前端页面文件行数，应暂停；当前页面产品/UX 方向需要重新确认，机械拆分应等 redesign 方向明确后再决定。
