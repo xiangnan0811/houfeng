@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature branch PR workflow and main protection requirements"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Web lint test build and verify-web quality gate"}
