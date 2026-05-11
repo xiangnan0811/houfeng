@@ -49,23 +49,32 @@ func TestEventsHandlerReturnsListWithFilters(t *testing.T) {
 	if repo.filter.ObjectType != incidents.ObjectTypeNode || repo.filter.ObjectID != "nd_001" || repo.filter.EventType != incidents.EventIncidentStarted || repo.filter.Limit != 25 {
 		t.Fatalf("filter = %#v, want parsed filters", repo.filter)
 	}
-	var body []map[string]any
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if len(body) != 1 {
+	if len(body.Items) != 1 {
 		t.Fatalf("body = %#v, want one event", body)
 	}
 	for _, key := range []string{"event_id", "incident_id", "incident_class", "object_type", "object_id", "event_type", "severity", "summary", "created_at"} {
-		if _, ok := body[0][key]; !ok {
-			t.Fatalf("event = %#v, want key %q", body[0], key)
+		if _, ok := body.Items[0][key]; !ok {
+			t.Fatalf("event = %#v, want key %q", body.Items[0], key)
 		}
 	}
-	if _, ok := body[0]["EventID"]; ok {
-		t.Fatalf("event = %#v, want snake_case keys only", body[0])
+	if _, ok := body.Items[0]["EventID"]; ok {
+		t.Fatalf("event = %#v, want snake_case keys only", body.Items[0])
 	}
-	if body[0]["event_id"] != "evt_001" {
-		t.Fatalf("event = %#v, want event_id=evt_001", body[0])
+	if body.Items[0]["event_id"] != "evt_001" {
+		t.Fatalf("event = %#v, want event_id=evt_001", body.Items[0])
+	}
+	var topLevel map[string]json.RawMessage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &topLevel); err != nil {
+		t.Fatalf("unmarshal top-level response: %v", err)
+	}
+	if _, ok := topLevel["items"]; !ok {
+		t.Fatalf("top-level response = %#v, want items envelope", topLevel)
 	}
 }
 
@@ -88,6 +97,29 @@ func TestEventsHandlerReturnsListWithAdvancedFilters(t *testing.T) {
 	}
 	if repo.filter.Label != "edge" || !repo.filter.NotificationOnly || !repo.filter.RecoveryOnly || !repo.filter.MaintenanceOnly || !repo.filter.IncludeBackfilled {
 		t.Fatalf("filter = %#v, want advanced filters", repo.filter)
+	}
+}
+
+func TestEventsHandlerReturnsEmptyItemsArray(t *testing.T) {
+	handler := handlers.Events(&fakeEventsRepository{})
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Items == nil {
+		t.Fatalf("items = nil, want empty array")
+	}
+	if len(body.Items) != 0 {
+		t.Fatalf("items = %#v, want empty array", body.Items)
 	}
 }
 

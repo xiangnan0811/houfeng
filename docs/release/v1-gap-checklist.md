@@ -170,7 +170,7 @@ Before tagging or declaring V1 fully release-ready, collect:
 | 13 | `POST /api/nodes/{id}/enrollment-token` 实际响应键名是 `token`，docs Step 2 写 `plaintext_token` | 2026-05-02 smoke evidence: `research/v1-smoke-evidence-2026-05-02.md` (already archived); `docs/operations/v1-smoke-run.md` Step 2 当前文档 | → Closed (2026-05-03, see commit 92e5b6f) |
 | 14 | `agent/hostsample` 曾依赖 Linux `/proc/loadavg`，macOS local dev 无法完成 host sample | 2026-05-02 smoke Step 3 PARTIAL: agent enrolls 但 host sample 段失败；2026-05-03 已增加 Darwin collector（`sysctl` / `vm_stat`），Linux procfs 路径保持不变；macOS rerun 收到 `latest_host_sample.observed_at=2026-05-03T14:50:01.228739+08:00` | → Closed (2026-05-03, task `05-03-fix-agent-macos-host-sampling`) |
 | 15 | Center `/` 返回 404 当 `HOUFENG_WEB_DIST_DIR` 未配置——生产部署必须配 | smoke Step 9 INCONCLUSIVE: 改用 vite :5173 验 SPA | → Closed (2026-05-03, see commit 92e5b6f) |
-| 16 | `GET /api/events` 返回 bare JSON array，非 `{items:[...]}` envelope；后续如引入 envelope，所有 caller + smoke 同时破 | smoke Step 8 实测；`internal/center/http/handlers/events.go` | → Open (deferred — design follow-up) |
+| 16 | `GET /api/events` 返回 bare JSON array，非 `{items:[...]}` envelope；后续如引入 envelope，所有 caller + smoke 同时破 | smoke Step 8 实测；`internal/center/http/handlers/events.go`；2026-05-11 `05-11-events-api-envelope-migration` 已迁移 handler success response 为 `{"items":[...]}`，`web/src/lib/api.ts` 统一解包，API/page 测试与 smoke 文档同步 | → Closed (2026-05-11, task `05-11-events-api-envelope-migration`) |
 
 ### Comprehensive audit follow-up (4 条，新增 2026-05-06)
 

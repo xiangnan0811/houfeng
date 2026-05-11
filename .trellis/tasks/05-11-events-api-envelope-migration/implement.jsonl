@@ -1,0 +1,12 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec entrypoint for the events HTTP handler change"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "confirm backend handler/test ownership and placement"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "events backfill/API contract currently documents the /api/events response shape"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "keep existing JSON error envelope behavior unchanged while changing success envelope"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "backend test and verification expectations"}
+{"file": ".trellis/spec/web/index.md", "reason": "web spec entrypoint for API client and page tests"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "listEvents response contract and cross-page data flow"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "ensure page components keep data unwrapping in API client rather than UI"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "frontend test/lint/build expectations"}
+{"file": ".trellis/spec/guides/index.md", "reason": "shared guide entrypoint for cross-layer and branch workflow thinking"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "data format migration spans backend API, API client, pages, tests, and docs"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "feature branch and PR-based workflow must remain enforced"}

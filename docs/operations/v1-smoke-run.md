@@ -198,7 +198,7 @@ curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/events?object_type=target&
 Expected:
 
 - an active target incident appears after repeated failing observations;
-- an `incident_started` event is recorded;
+- the event response is an object with an `items` array, and `items[]` contains an `incident_started` event;
 - Telegram notification is sent only if Telegram settings are configured and notification policy allows it.
 
 ## Step 7: Recover the incident
@@ -213,7 +213,7 @@ curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/events?object_type=target&
 Expected:
 
 - active incident clears or moves out of the active list;
-- an `incident_recovered` event is recorded;
+- the event response is an object with an `items` array, and `items[]` contains an `incident_recovered` event;
 - recovery notification follows current settings.
 
 ## Step 8: Verify notification record surface
@@ -226,8 +226,8 @@ curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/events?object_type=target&
 
 Expected:
 
-- if the incident transition emitted a notification decision, the response contains notification-backed event rows even when delivery was suppressed or failed;
-- if the response is empty, verify whether the transition produced no notification decision for the current policy/state before treating the result as expected.
+- if the incident transition emitted a notification decision, the response is an object with an `items` array containing notification-backed event rows even when delivery was suppressed or failed;
+- if `items` is empty, verify whether the transition produced no notification decision for the current policy/state before treating the result as expected.
 
 ## Step 9: UI verification checkpoints
 
@@ -339,7 +339,7 @@ comparison.
 1. **`POST /api/nodes/{id}/enrollment-token` response key is `token`** (not `plaintext_token` as the Step-2 doc text suggests). Anyone scripting strictly against the doc will break on the first parse — Step-2 should clarify the actual key.
 2. **agent `agent/hostsample` required Linux `/proc/loadavg` during this run** — it failed on macOS every 30s, so `latest_host_sample` stayed `null` and `has_host_sample=false`. Follow-up 2026-05-03 added a Darwin collector backed by `sysctl` / `vm_stat`; a short rerun against `nd_cc1c47a6803a648c` produced `latest_host_sample.observed_at=2026-05-03T14:50:01.228739+08:00`.
 3. **Center `/` returns HTTP 404 when `HOUFENG_WEB_DIST_DIR` is unset** — production deploys must set it; the smoke prerequisite section already exports it, but operators reusing a long-lived dev center must verify the env var or the Step-9 visual checks cannot be performed against the center process itself.
-4. **`GET /api/events` returns a bare JSON array, not `{items:[...]}`** — internal contract; if/when an envelope is introduced, all callers and any polling scripts written against the bare-array shape will break.
+4. **Historical note:** this 2026-05-02 smoke observed `GET /api/events` returning a bare JSON array. The active contract was migrated on 2026-05-11 to `{"items":[...]}`; update any local scripts that still parse the old bare-array shape.
 
 ### Cleanup state
 

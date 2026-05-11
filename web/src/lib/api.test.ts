@@ -1351,16 +1351,16 @@ describe('api helpers', () => {
   })
 
   it('serializes only non-empty event filters', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '[]'))
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '{"items":[]}'))
     vi.stubGlobal('fetch', fetchMock)
 
-    await listEvents({
+    await expect(listEvents({
       object_type: 'node',
       object_id: '',
       severity: '',
       event_type: 'incident_started',
       limit: 25,
-    })
+    })).resolves.toEqual([])
 
     expect(fetchMock).toHaveBeenCalledWith('/api/events?object_type=node&event_type=incident_started&limit=25', {
       headers: { Accept: 'application/json' },
@@ -1370,7 +1370,7 @@ describe('api helpers', () => {
   })
 
   it('serializes advanced event filters and omits false booleans', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '[]'))
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '{"items":[]}'))
     vi.stubGlobal('fetch', fetchMock)
 
     await listEvents({
@@ -1393,6 +1393,29 @@ describe('api helpers', () => {
       credentials: 'include',
       },
     )
+  })
+
+  it('unwraps event list envelopes', async () => {
+    const event = {
+      event_id: 'evt_001',
+      incident_id: 'inc_001',
+      incident_class: 'target_probe_failure',
+      object_type: 'target',
+      object_id: 'tg_001',
+      event_type: 'incident_started',
+      severity: '告警',
+      summary: 'HTTPS 探测失败',
+      created_at: '2026-04-25T08:00:00Z',
+    }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify({ items: [event] })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listEvents()).resolves.toEqual([event])
+    expect(fetchMock).toHaveBeenCalledWith('/api/events', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
   })
 
   it('serializes only non-empty incident filters', async () => {

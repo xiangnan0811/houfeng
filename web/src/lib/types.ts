@@ -267,6 +267,10 @@ export type StateChangeEventRecord = {
   created_at: string
 }
 
+export type EventListResponse = {
+  items: StateChangeEventRecord[]
+}
+
 export type DashboardOverview = {
   snapshot_generated_at: string
   total_node_count: number

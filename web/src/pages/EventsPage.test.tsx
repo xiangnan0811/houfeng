@@ -13,6 +13,10 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
+function mockEventsResponse(events: unknown[], status = 200) {
+  return mockJSONResponse({ items: events }, status)
+}
+
 function renderEventsPage(initialEntry = '/events') {
   const locationSnapshots: string[] = []
 
@@ -48,7 +52,7 @@ describe('EventsPage', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        mockJSONResponse([
+        mockEventsResponse([
           {
             event_id: 'evt_002',
             incident_id: 'inc_002',
@@ -73,7 +77,7 @@ describe('EventsPage', () => {
           },
         ]),
       )
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     renderEventsPage()
@@ -112,7 +116,7 @@ describe('EventsPage', () => {
   })
 
   it('uses valid URL filters for the initial events request', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse([]))
+    const fetchMock = vi.fn().mockResolvedValue(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     renderEventsPage(
@@ -139,8 +143,8 @@ describe('EventsPage', () => {
   it('offers binding audit event filters for node onboarding actions', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     renderEventsPage()
@@ -167,8 +171,8 @@ describe('EventsPage', () => {
   it('offers runtime-control event filters and submits them', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     renderEventsPage()
@@ -231,8 +235,8 @@ describe('EventsPage', () => {
   it('offers node lifecycle event filters and submits them', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     renderEventsPage()
@@ -271,9 +275,9 @@ describe('EventsPage', () => {
   it('submits advanced context filters and can reset to the default event stream', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = renderEventsPage()
@@ -330,9 +334,9 @@ describe('EventsPage', () => {
   it('applies and removes the backfilled event toggle', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = renderEventsPage()
@@ -372,7 +376,7 @@ describe('EventsPage', () => {
   })
 
   it('closes the filter drawer without applying draft changes', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse([]))
+    const fetchMock = vi.fn().mockResolvedValue(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = renderEventsPage()
@@ -407,8 +411,8 @@ describe('EventsPage', () => {
   it('removes active chips from URL state and refetches', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = renderEventsPage('/events?severity=%E4%B8%A5%E9%87%8D&label=edge')
@@ -434,7 +438,7 @@ describe('EventsPage', () => {
   })
 
   it('ignores invalid URL params and invalid backfilled filters', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse([]))
+    const fetchMock = vi.fn().mockResolvedValue(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = renderEventsPage(
@@ -452,7 +456,7 @@ describe('EventsPage', () => {
   })
 
   it('renders an explicit empty state when no events exist', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse([])))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockEventsResponse([])))
 
     renderEventsPage()
 
@@ -478,8 +482,8 @@ describe('EventsPage', () => {
   it('selects a 7d time range preset and forwards created_from/created_to', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = renderEventsPage()
@@ -514,7 +518,7 @@ describe('EventsPage', () => {
   })
 
   it('preserves relative time range in URL while sending dynamic API dates', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse([]))
+    const fetchMock = vi.fn().mockResolvedValue(mockEventsResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = renderEventsPage('/events?time_range=24h')
@@ -548,8 +552,8 @@ describe('EventsPage', () => {
     }))
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse(firstBatch))
-      .mockResolvedValueOnce(mockJSONResponse([...firstBatch, ...firstBatch.slice(0, 10)]))
+      .mockResolvedValueOnce(mockEventsResponse(firstBatch))
+      .mockResolvedValueOnce(mockEventsResponse([...firstBatch, ...firstBatch.slice(0, 10)]))
     vi.stubGlobal('fetch', fetchMock)
 
     renderEventsPage()

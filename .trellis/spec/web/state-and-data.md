@@ -309,14 +309,15 @@ overview.asset_summary.subscriptions.map((item) => item.renew_at)
 
 - URL-state: `/events?include_backfilled=1`。
 - Frontend filter type: `EventListFilter.include_backfilled?: boolean`。
-- API client: `listEvents({ include_backfilled: true })` -> `/api/events?...&include_backfilled=true`。
-- Backend contract: `/api/events?include_backfilled=true` 解除默认 backfilled event exclusion。
+- API client: `listEvents({ include_backfilled: true })` -> `/api/events?...&include_backfilled=true`，读取 `{"items":[]}` 并向 page 返回 `StateChangeEventRecord[]`。
+- Backend contract: `/api/events?include_backfilled=true` 解除默认 backfilled event exclusion，成功响应为 `{"items":[...]}`。
 
 #### 3. Contracts
 
 - `include_backfilled` 是显式 opt-in；默认 `false` 时不写 URL，也不写 API query。
 - URL 只接受 `include_backfilled=1` 为 active；`yes`、`true`、`0` 等 URL 值在 EventsPage canonicalize 时被移除。
 - API query 用 `include_backfilled=true`，复用 `withQuery` 的 boolean 序列化和 false omission。
+- `listEvents(...)` 是唯一解包点：page / component 继续消费数组，不在 UI 层重复判断 `{items}` envelope。
 - EventsPage 必须把该维度纳入 parse -> normalize -> URL serialize -> `buildFilterQuery` -> chip -> reset/remove 全链路。
 - “包含补传事件” toggle 不得禁用或显示“待后端支持”；如果后端 contract 未来撤销，必须同时更新 handler/store/spec/tests，而不是只改 UI 文案。
 - EventsPage 的高级筛选采用 applied/draft 分离：URL 与 `appliedFilters` 是请求真相；Drawer 打开时 draft 必须从当前 applied filters 初始化；只有点击 `应用筛选` 或 `重置筛选` 才能改 URL 和触发 `/api/events` 请求。Esc、overlay、头部关闭与 Drawer 内 `关闭` 必须丢弃 draft，不能提交筛选或发请求。
@@ -342,7 +343,7 @@ overview.asset_summary.subscriptions.map((item) => item.renew_at)
 
 #### 6. Tests Required
 
-- `web/src/lib/api.test.ts`: `listEvents({ include_backfilled: true })` 序列化为 `include_backfilled=true`，false 被省略。
+- `web/src/lib/api.test.ts`: `listEvents({ include_backfilled: true })` 序列化为 `include_backfilled=true`，false 被省略，并从 `{"items":[...]}` envelope 解包为数组。
 - `web/src/pages/EventsPage.test.tsx`: 初始 URL、Drawer apply、Drawer close / Esc discard、toggle apply、chip remove、reset、invalid URL canonicalization 全部覆盖。
 
 #### 7. Wrong vs Correct

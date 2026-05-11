@@ -89,7 +89,7 @@ No immediate implementation task remains in this plan. The remaining work is con
 | Import UI/API | The CLI flow becomes insufficient for repeated operator use | Plan separately; current plan only required dry-run/import tooling. |
 | Full service registry or domain management | Product plan explicitly expands beyond VPS-scoped manual records | New plan required; do not infer this from the lightweight service/domain MVP. |
 
-Of the follow-up items called out here, the event envelope design remains open in `docs/release/v1-gap-checklist.md`. Formal notification channel modeling and Docker/exec boundary hardening were handled after this Asset Ledger audit and remain separate from the Asset Ledger plan itself.
+Of the follow-up items called out here, the event envelope design has since been closed in `docs/release/v1-gap-checklist.md` by the 2026-05-11 `05-11-events-api-envelope-migration` task. Formal notification channel modeling and Docker/exec boundary hardening were handled after this Asset Ledger audit and remain separate from the Asset Ledger plan itself.
 
 ## Verification
 
