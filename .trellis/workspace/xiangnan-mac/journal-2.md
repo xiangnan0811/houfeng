@@ -894,3 +894,36 @@ Migrated GET /api/events success responses to an items envelope, kept listEvents
 ### Next Steps
 
 - None - task complete
+
+
+## Session 86: Settings page section extraction
+
+**Date**: 2026-05-11
+**Task**: Settings page section extraction
+**Branch**: `refactor/settings-page-sections`
+
+### Summary
+
+Extracted SettingsPage form sections into page-private components under web/src/pages/settings while preserving SettingsPage state, validation, API calls, labels, and tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `86677cc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
