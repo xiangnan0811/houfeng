@@ -114,7 +114,8 @@ describe('NodesPage', () => {
       expect(screen.getByRole('button', { name: '新建节点' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '节点观测' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /全部节点/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
@@ -284,7 +285,7 @@ describe('NodesPage', () => {
     await waitFor(() =>
       expect(screen.getByText('display name already exists')).toBeInTheDocument(),
     )
-    expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '节点观测' })).toBeInTheDocument()
     expect(screen.queryByText('onboarding workspace')).not.toBeInTheDocument()
     expect(getOnboardingTokenCache('nd_001')).toBeNull()
   })
@@ -718,7 +719,7 @@ describe('NodesPage', () => {
     )
     expect(screen.getByRole('alertdialog', { name: '确认暂停节点监控' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认暂停监控' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '节点列表' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '节点观测' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
@@ -1163,6 +1164,78 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
     expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
+  })
+
+  it('surfaces observability support lanes and applies support quick filters', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_healthy',
+            display_name: 'Healthy Edge',
+            current_health_status: '正常',
+          }),
+          nodeRecord({
+            node_id: 'nd_alert',
+            display_name: 'Alerting Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            current_health_status: '告警',
+          }),
+          nodeRecord({
+            node_id: 'nd_pending',
+            display_name: 'Pending Edge',
+            lifecycle_status: '待接入',
+            binding_status: '未绑定',
+          }),
+          nodeRecord({
+            node_id: 'nd_maint',
+            display_name: 'Maintenance Edge',
+            monitoring_status: '维护中',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
+
+    expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
+    expect(screen.getByText('VPS 关联')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '未关联 VPS' })).toHaveAttribute(
+      'href',
+      '/vps?view=unlinked',
+    )
+    expect(screen.getByRole('link', { name: '决策队列' })).toHaveAttribute(
+      'href',
+      '/asset-decisions',
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: '仅看异常' })[0])
+
+    await waitFor(() =>
+      expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '清空所有' }))
+    await waitFor(() => expect(screen.getByText('Pending Edge')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '待接入/绑定' }))
+
+    await waitFor(() =>
+      expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Pending Edge')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '移除筛选 待接入/绑定待处理' })).toBeInTheDocument()
   })
 
   it('navigates to the node detail page when a row is clicked', async () => {

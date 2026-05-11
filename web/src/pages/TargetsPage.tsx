@@ -20,6 +20,7 @@ import { CreateTargetPanel } from './targets/CreateTargetPanel'
 import { TargetsBatchPanel } from './targets/TargetsBatchPanel'
 import { TargetsFilterPanel } from './targets/TargetsFilterPanel'
 import { TargetsRuntimeOverlays } from './targets/TargetsRuntimeOverlays'
+import { TargetsSupportSurface } from './targets/TargetsSupportSurface'
 import { buildTargetsTableColumns } from './targets/TargetsTableColumns'
 import {
   actionButtonKey,
@@ -361,6 +362,12 @@ export function TargetsPage() {
     filterState.abnormal
 
   const groupFilterActive = filterState.group !== null
+  const abnormalTargetCount = targets.filter(
+    (target) => target.current_health_status !== '正常',
+  ).length
+  const pausedTargetCount = targets.filter((target) => target.run_status === '暂停').length
+  const archivedTargetCount = targets.filter((target) => target.run_status === '已归档').length
+  const serviceTargetCount = targets.filter((target) => target.target_type === 'service').length
 
   async function executeBatchTargetAction(action: TargetRuntimeAction) {
     if (action === 'pause' || action === 'archive') {
@@ -500,9 +507,9 @@ export function TargetsPage() {
       <header className="page-panel page-panel--inline">
         <div>
           <p className="page-panel__eyebrow">目标</p>
-          <h2 className="page-panel__title">目标列表</h2>
+          <h2 className="page-panel__title">入口观测</h2>
           <p className="page-panel__description">
-            以 ProbeItem 视角组织目标状态，并保留执行节点标签与最近成功/失败摘要。
+            以 ProbeItem 视角组织服务入口状态，并保留执行节点标签与最近成功/失败摘要。
           </p>
         </div>
         <div className="page-panel__actions">
@@ -532,6 +539,22 @@ export function TargetsPage() {
           onFieldChange={updateCreateField}
         />
       ) : null}
+
+      <TargetsSupportSurface
+        totalTargetCount={targets.length}
+        displayedTargetCount={filteredTargets.length}
+        abnormalTargetCount={abnormalTargetCount}
+        pausedTargetCount={pausedTargetCount}
+        archivedTargetCount={archivedTargetCount}
+        executionLabelCount={executionLabelOptions.length}
+        serviceTargetCount={serviceTargetCount}
+        hasActiveFilters={hasActiveFilters}
+        onAbnormalClick={() => setAbnormalFilter(abnormalTargetCount > 0)}
+        onPausedClick={() => setSingleFilter('run_status', pausedTargetCount > 0 ? '暂停' : null)}
+        onArchivedClick={() =>
+          setSingleFilter('run_status', archivedTargetCount > 0 ? '已归档' : null)
+        }
+      />
 
       {targets.length === 0 ? (
         <div className="empty-state">

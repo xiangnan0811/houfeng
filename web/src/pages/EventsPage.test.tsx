@@ -90,6 +90,16 @@ describe('EventsPage', () => {
 
     expect(screen.getAllByText('筛选条件').length).toBeGreaterThanOrEqual(2)
     expect(screen.getAllByText('事件流').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('heading', { name: '诊断时间线' })).toBeInTheDocument()
+    expect(screen.getByText('对象上下文')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '异常节点' })).toHaveAttribute(
+      'href',
+      '/nodes?abnormal=1',
+    )
+    expect(screen.getByRole('link', { name: '异常目标' })).toHaveAttribute(
+      'href',
+      '/targets?abnormal=1',
+    )
 
     expect(screen.getAllByText('事件').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('较新的事件')).toBeInTheDocument()
@@ -138,6 +148,9 @@ describe('EventsPage', () => {
     expect(screen.getByText('事件类型: 异常开始')).toBeInTheDocument()
     expect(screen.getByText('标签: edge')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '移除筛选 包含补传事件' })).toBeInTheDocument()
+    expect(screen.getByText('11 项筛选')).toBeInTheDocument()
+    expect(screen.getByText('对象类型决定后续处理入口：Node 关联 VPS 证据，Target 关联服务入口证据。')).toBeInTheDocument()
+    expect(screen.getByText('自定义时间')).toBeInTheDocument()
   })
 
   it('offers binding audit event filters for node onboarding actions', async () => {

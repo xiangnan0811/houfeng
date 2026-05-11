@@ -243,7 +243,8 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('target already exists')).toBeInTheDocument())
     expect(screen.getByText('Existing API')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '目标列表' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '入口观测' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -1225,6 +1226,76 @@ describe('TargetsPage', () => {
       expect(screen.getByText('Healthy API')).toBeInTheDocument(),
     )
     expect(screen.getByText('Failing API')).toBeInTheDocument()
+  })
+
+  it('surfaces entry support lanes and applies support quick filters', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_healthy',
+          name: 'Healthy API',
+          current_health_status: '正常',
+          run_status: '启用',
+          execution_node_labels: ['edge'],
+        }),
+        targetRecord({
+          target_id: 'tg_alert',
+          name: 'Failing API',
+          current_health_status: '告警',
+          run_status: '启用',
+          execution_node_labels: ['edge'],
+        }),
+        targetRecord({
+          target_id: 'tg_paused',
+          name: 'Paused API',
+          run_status: '暂停',
+          execution_node_labels: ['core'],
+        }),
+        targetRecord({
+          target_id: 'tg_archived',
+          name: 'Archived API',
+          run_status: '已归档',
+          execution_node_labels: ['archive'],
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Healthy API')).toBeInTheDocument())
+
+    expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
+    expect(screen.getByText('执行覆盖')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'VPS 台账' })).toHaveAttribute('href', '/vps')
+    expect(screen.getByRole('link', { name: '资产决策' })).toHaveAttribute(
+      'href',
+      '/asset-decisions',
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: '仅看异常' })[0])
+
+    await waitFor(() =>
+      expect(screen.queryByText('Healthy API')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Failing API')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '清空所有' }))
+    await waitFor(() => expect(screen.getByText('Paused API')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停目标' }))
+
+    await waitFor(() =>
+      expect(screen.queryByText('Healthy API')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Paused API')).toBeInTheDocument()
+    expect(screen.getByText('运行状态: 暂停')).toBeInTheDocument()
   })
 
   it('cancels target quick label editing without sending PATCH', async () => {
