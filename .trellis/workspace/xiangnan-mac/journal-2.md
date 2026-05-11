@@ -1356,3 +1356,36 @@ Implemented the first UX replan batch by replacing flat primary navigation with 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 100: UX-2 Dashboard command surface
+
+**Date**: 2026-05-11
+**Task**: UX-2 Dashboard command surface
+**Branch**: `ux/dashboard-command-surface`
+
+### Summary
+
+Redesigned Dashboard into an asset-decision-first command surface, made dark mode the default first impression, updated Dashboard tests and synchronized active design/data specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2683fde` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
