@@ -31,7 +31,7 @@
 
 - 不要回归早期 concept 屏 / `stitch/` 子目录视觉——这些是历史素材。
 - 不要修改 `docs/design/v1-baseline/` frozen 业务结构文档来承载视觉变更；视觉确实需要变更时，先在 `docs/release/v1-gap-checklist.md` 或当前任务 PRD 记录差异，再更新 v2 文档 / 代码。
-- 当前已有一次性 v2 截图证据直接存放在 `docs/operations/*.jpg`（Dashboard / 节点列表 / 节点详情 / 目标列表 / 目标详情，2026-05-06）。正式、可重复的 v2 截图流程尚未建立；不要再引用 archived 的 `docs/operations/v1-visual-verification.md` 或 `docs/operations/visual-evidence/` 作为 active workflow。
+- 当前 v2 预览、浏览器 sanity 与截图证据流程见 `docs/operations/v2-visual-evidence.md`。一次性历史截图仍直接存放在 `docs/operations/*.jpg`（Dashboard / 节点列表 / 节点详情 / 目标列表 / 目标详情，2026-05-06）；新截图如需提交应使用 `docs/operations/v2-visual-evidence/`。不要再引用 archived 的 `docs/operations/v1-visual-verification.md` 或 `docs/operations/visual-evidence/` 作为 active workflow。
 
 ---
 

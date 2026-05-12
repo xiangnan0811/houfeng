@@ -259,7 +259,7 @@ Open `http://127.0.0.1:8080/` and check:
 | incident recovered | Local PostgreSQL required | Active incident count returned to `0`; recovered event `evt_b7416f1f3da1f506` |
 | notification-backed event query checked | Local PostgreSQL / Telegram policy dependent | `notification_only=true` returned 2 event rows for the incident start/recovery transitions |
 | Telegram notification sent or intentionally disabled | Manual / Telegram required | Telegram env vars were intentionally empty for this smoke; outbound Telegram delivery was not attempted |
-| primary UI pages checked | Manual | Not checked in browser during this live PostgreSQL run; current v2 screenshot evidence is kept directly under `docs/operations/*.jpg` |
+| primary UI pages checked | Manual | Not checked in browser during this live PostgreSQL run; historical v2 screenshot evidence is kept directly under `docs/operations/*.jpg`; active v2 preview / browser sanity / screenshot evidence workflow is `docs/operations/v2-visual-evidence.md` |
 
 ### 2026-05-02 Run Evidence
 

@@ -119,7 +119,8 @@ Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-
 当前规划、运维与发布证据：
 
 - `docs/operations/v1-smoke-run.md` — fresh-install smoke against a real Postgres (V1 release gate 的核心证据).
-- `docs/operations/` — v2 visual evidence screenshots (Dashboard / 节点列表 / 节点详情 / 目标列表 / 目标详情，2026-05-06)。
+- `docs/operations/v2-visual-evidence.md` — v2 preview / browser sanity / screenshot evidence workflow.
+- `docs/operations/` — v2 historical screenshot evidence (Dashboard / 节点列表 / 节点详情 / 目标列表 / 目标详情，2026-05-06)。
 - `docs/release/v1-gap-checklist.md` — implementation-vs-design gap 清单（含 V1 release gate 与 12 条 2026-05-02 新增 gap）.
 - `docs/release/docs-audit.md` — docs 审计与 archive 决策（T1 落地，决定哪些 docs 是 keep / archive）.
 - `docs/release/next-phase-plan.md` — 下一阶段开发计划（Stage 1 V1 收口 / Stage 2 post-V1 → MVP / Stage 3+ 远期）.
@@ -128,6 +129,6 @@ Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-
 - `docs/release/core-pages-product-ux-replan.md` — 用户已确认的核心页面产品/UX 重新规划；后续前端实现应从 UX-1 App shell / 导航 / 视觉基线重置开始拆任务。
 - `docs/deploy/local-and-systemd.md` 与 `docs/deploy/systemd/*.service` — canonical 部署 recipe.
 
-注：早期的 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，stitch 已 archive 后这两份也已迁至 `docs/_archive/operations/`，仅作历史记录。当前已有一次性 v2 截图证据直接存放在 `docs/operations/*.jpg`；正式、可重复的 v2 视觉证据收集流程仍待后续建立。
+注：早期的 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，stitch 已 archive 后这两份也已迁至 `docs/_archive/operations/`，仅作历史记录。当前 v2 预览、浏览器 sanity 与截图证据流程见 `docs/operations/v2-visual-evidence.md`；一次性历史截图仍保留在 `docs/operations/*.jpg`。
 
 When changing user-visible behavior, first record the gap in `docs/release/v1-gap-checklist.md` and consult `docs/release/next-phase-plan.md`, `docs/release/current-state-and-next-stage-plan.md`, and `docs/release/core-pages-product-ux-replan.md` for prioritization, rather than editing the frozen baseline docs.

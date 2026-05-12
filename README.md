@@ -64,11 +64,12 @@ V1 业务结构 frozen 在 v1-baseline 的 4 份子集（加 README，共 5 份�
 
 - 部署 recipe：`docs/deploy/local-and-systemd.md` + `docs/deploy/systemd/houfeng-center.service` + `docs/deploy/systemd/houfeng-agent.service`
 - 真实环境冒烟脚本：`docs/operations/v1-smoke-run.md`
+- v2 视觉预览与证据流程：`docs/operations/v2-visual-evidence.md`
 - gap 清单（含 V1 release gate 与 12 条 2026-05-02 新增 gap）：`docs/release/v1-gap-checklist.md`
 - docs 审计与 archive 决策：`docs/release/docs-audit.md`
 - 下一阶段开发计划（Stage 1/2/3）：`docs/release/next-phase-plan.md`
 
-注：早期 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，已迁至 `docs/_archive/operations/`。当前已有一次性 v2 截图证据直接存放在 `docs/operations/*.jpg`；正式、可重复的 v2 视觉证据流程仍待后续建立。
+注：早期 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，已迁至 `docs/_archive/operations/`。当前 v2 预览、浏览器 sanity 与截图证据流程见 `docs/operations/v2-visual-evidence.md`；一次性历史截图仍保留在 `docs/operations/*.jpg`。
 
 Automated verification:
 
