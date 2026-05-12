@@ -346,9 +346,9 @@ Node 详情继续作为观测对象详情；VPS 详情是资产和决策对象�
 
 范围：
 
-- 为核心页面建立可复核截图或本地预览流程。
-- 实现任务完成时必须启动 dev server，并给出预览 URL。
-- 需要时补充 Playwright 截图或轻量视觉证据。
+- 为核心页面建立可复核截图或本地预览流程。当前 active 流程见 `docs/operations/v2-visual-evidence.md`。
+- 实现任务完成时必须启动 dev server，并给出预览 URL、检查路由和视口。
+- 需要时补充本地浏览器 sanity、截图或轻量视觉证据；不把临时 Playwright/浏览器工具变成 repo 依赖。
 
 非目标：
 

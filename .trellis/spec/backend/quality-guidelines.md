@@ -223,7 +223,7 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 2. [ ] **改了 `web/` 里任何文件 → `cd web && npm run lint && npm run test`**（CLAUDE.md 第 31 行）。
 3. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完。
 4. [ ] **改了迁移 / 表结构** → 跑一次 `docs/operations/v1-smoke-run.md` 的 fresh-install，补 `docs/release/v1-gap-checklist.md`。
-5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，必要时补 `docs/operations/*.jpg` 或在任务 / release gap 中记录待补证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。早期 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 已 archive，不是 active workflow。
+5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity 或截图证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。早期 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 已 archive，不是 active workflow。
 6. [ ] 如果 worker / 调度类改动，本地用注入的小间隔跑 `go test -count=10` 看下抖动。
 
 ---

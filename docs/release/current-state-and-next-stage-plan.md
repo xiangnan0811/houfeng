@@ -149,7 +149,7 @@ release/publish workflow 当前按用户决策后续再考虑，本规划不把�
 - UX-3：资产决策 + VPS 列表重塑。
 - UX-4：VPS 详情页重塑。
 - UX-5：节点 / 目标 / 事件支撑页收敛。
-- UX-6：视觉证据与验收流程。
+- UX-6：视觉证据与验收流程（active 流程见 `docs/operations/v2-visual-evidence.md`）。
 
 ### 入口 3：新能力产品计划
 

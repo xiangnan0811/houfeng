@@ -80,7 +80,7 @@ P0 全完成 / P1 全完成 / P2 接近完成：
 
 - ✅ **gap #6**：已闭（CLAUDE.md:89 明确 `https` = http + TLS config，与代码一致）
 - ✅ **gap #8**：已闭（CLAUDE.md + component-spec.md 均列出全部 14 个 atoms，含 MetricChart / Drawer / Stepper 等 v2 新增）
-- ✅ **视觉证据**：v2 5 page screenshots 已捕捉到 `docs/operations/*.jpg`（2026-05-06）
+- ✅ **视觉证据**：v2 5 page historical screenshots 已捕捉到 `docs/operations/*.jpg`（2026-05-06）；active preview / browser sanity / screenshot evidence workflow 见 `docs/operations/v2-visual-evidence.md`（2026-05-12）
 - 🔲 **长 page 文件全部拆分**：SettingsPage 899 / NodesPage 1136 / TargetsPage 1192 / TargetDetailPage 1321 / NodeDetailPage 1009 → deferred to Stage 2（watchtower 改造显著增加了页面长度，需要单独拆分 task）
 
 ### Stage 1 完成判定（V1 release gate）

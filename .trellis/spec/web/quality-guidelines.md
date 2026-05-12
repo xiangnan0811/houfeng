@@ -161,7 +161,7 @@ it('applies variant class', () => {
 
 ### 不在 verify 链路里的东西
 
-- **可视化回归 / 截图对比**不在 `make verify-web`。当前 active visual authority 是 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`；已有一次性 v2 截图证据在 `docs/operations/*.jpg`。正式、可重复的 v2 截图流程尚未建立，改动 user-visible UI 时应在任务 PRD / `docs/release/v1-gap-checklist.md` 记录证据需求，不要再使用 archived 的 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 作为 active workflow。
+- **可视化回归 / 截图对比**不在 `make verify-web`。当前 active visual authority 是 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`；v2 预览、浏览器 sanity 与截图证据流程见 `docs/operations/v2-visual-evidence.md`。已有一次性历史截图仍保留在 `docs/operations/*.jpg`，新截图如需提交应使用 `docs/operations/v2-visual-evidence/` 并记录 manifest。不要再使用 archived 的 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 作为 active workflow。
 - **真实 center 烟囱**由 `docs/operations/v1-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
 ---
@@ -209,7 +209,7 @@ export default defineConfig([
 2. [ ] **`cd web && npm run test -- --run`** —— 跑 vitest 一遍。
 3. [ ] **`cd web && npm run build`** —— 跑 `tsc -b && vite build`，确保 TS strict + Vite 产物都干净。
 4. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完（前后端都过）。
-5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，必要时补 `docs/operations/*.jpg` 或在任务 / release gap 中记录待补证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。
+5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity 或截图证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。
 6. [ ] **改了 API 形状（增减字段 / 改命名 / 改可选性）** → 同 PR 把 `web/src/lib/types.ts` + `web/src/lib/api.ts` 改完，并补 page / 测试断言。
 
 ---
@@ -249,6 +249,5 @@ export default defineConfig([
 > 用于喂 `docs/release/v1-gap-checklist.md`。
 
 1. **没有 coverage 阈值 / coverage 上传**：当前不强制；如未来引入 `vitest --coverage` 与阈值，需同步更新 `.github/workflows/ci.yml` + 本文件。
-2. **没有 e2e 框架**（Playwright / Cypress）：当前由人工烟囱 + 手动截图回归覆盖，CI 不跑浏览器自动化。如未来引入，需独立技术决策。
-3. **正式、可重复的 v2 视觉截图流程尚未建立**：当前只有 `docs/operations/*.jpg` 的一次性 v2 证据。不要恢复使用 archived v1/stitch visual verification。
-4. **`web/src/lib/types.ts` 与 Go contract 全靠人工同步**：没有 codegen。reviewer 在 contract 改动 PR 里必须同时检查 `lib/types.ts`。
+2. **没有 e2e 框架**（Playwright / Cypress）：当前 CI 不跑浏览器自动化；`docs/operations/v2-visual-evidence.md` 只定义本地预览、browser sanity 和按需截图证据。如未来引入正式浏览器自动化，需独立技术决策。
+3. **`web/src/lib/types.ts` 与 Go contract 全靠人工同步**：没有 codegen。reviewer 在 contract 改动 PR 里必须同时检查 `lib/types.ts`。
