@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Entry point for active web development guidelines."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check token usage, theme quality, and visual evidence obligations."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check component/page structure against established conventions."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check Dashboard/AppShell/data truth and deep-link semantics."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check required frontend validation coverage."}
+{"file": ".trellis/tasks/archive/2026-05/05-13-ui-evolution-roadmap/research/local-ui-context.md", "reason": "Check roadmap decisions against local UI findings."}

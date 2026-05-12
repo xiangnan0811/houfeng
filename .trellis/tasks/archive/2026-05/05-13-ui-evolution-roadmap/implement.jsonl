@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Entry point for active web development guidelines."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Token, theme, visual evidence, and CSS constraints for UI work."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Component composition and page structure conventions for future UI implementation."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard, AppShell, URL-state, and asset data truth constraints."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required local validation and frontend test expectations."}
+{"file": ".trellis/tasks/archive/2026-05/05-13-ui-evolution-roadmap/research/local-ui-context.md", "reason": "Local findings that shaped the roadmap and UX-1 entry point."}
