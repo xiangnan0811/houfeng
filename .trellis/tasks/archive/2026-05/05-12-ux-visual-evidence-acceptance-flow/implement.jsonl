@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "Trellis thinking guide index for branch workflow and documentation changes."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Non-main branch and PR workflow governance applies to UX-6 delivery."}
+{"file": ".trellis/spec/web/index.md", "reason": "Web spec index for active frontend quality and visual authority docs."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Primary quality gate and visual evidence rules to update for UX-6."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Active v2 visual authority and screenshot workflow references to update."}
+{"file": "docs/release/core-pages-product-ux-replan.md", "reason": "Parent UX plan defining UX-6 scope and non-goals."}
+{"file": "docs/release/current-state-and-next-stage-plan.md", "reason": "Current-stage roadmap that lists UX-6 as remaining UX work."}
+{"file": "docs/release/v1-gap-checklist.md", "reason": "Existing visual evidence status rows need to point to the active v2 process."}
+{"file": ".trellis/tasks/05-12-ux-visual-evidence-acceptance-flow/research/current-visual-evidence-audit.md", "reason": "Task audit findings and implementation recommendation."}

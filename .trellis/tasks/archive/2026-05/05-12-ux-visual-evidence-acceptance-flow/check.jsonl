@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch, PR, CI, and post-merge workflow compliance."}
+{"file": ".trellis/spec/web/index.md", "reason": "Verify relevant web specs were considered."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Verify quality gate and visual evidence instructions are internally consistent."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Verify active visual authority and screenshot workflow references are correct."}
+{"file": "docs/release/core-pages-product-ux-replan.md", "reason": "Verify UX-6 scope and completion status are reflected accurately."}
+{"file": "docs/release/current-state-and-next-stage-plan.md", "reason": "Verify current-stage planning no longer says UX-6 process is missing."}
+{"file": "docs/release/v1-gap-checklist.md", "reason": "Verify visual evidence status rows distinguish one-time screenshots from active process."}
+{"file": ".trellis/tasks/05-12-ux-visual-evidence-acceptance-flow/research/current-visual-evidence-audit.md", "reason": "Verify implementation satisfies task audit findings."}
