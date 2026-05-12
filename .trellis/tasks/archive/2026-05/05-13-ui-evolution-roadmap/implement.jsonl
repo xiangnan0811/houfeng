@@ -3,4 +3,4 @@
 {"file": ".trellis/spec/web/component-conventions.md", "reason": "Component composition and page structure conventions for future UI implementation."}
 {"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard, AppShell, URL-state, and asset data truth constraints."}
 {"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required local validation and frontend test expectations."}
-{"file": ".trellis/tasks/05-13-ui-evolution-roadmap/research/local-ui-context.md", "reason": "Local findings that shaped the roadmap and UX-1 entry point."}
+{"file": ".trellis/tasks/archive/2026-05/05-13-ui-evolution-roadmap/research/local-ui-context.md", "reason": "Local findings that shaped the roadmap and UX-1 entry point."}
