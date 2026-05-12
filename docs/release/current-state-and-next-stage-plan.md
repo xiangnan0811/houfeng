@@ -131,7 +131,7 @@ release/publish workflow 当前按用户决策后续再考虑，本规划不把�
 
 适用场景：用户对当前页面不满意，希望大幅调整页面体验。
 
-**当前状态：已被用户确认选中。规划文档见 `docs/release/core-pages-product-ux-replan.md`。**
+**当前状态：已被用户确认选中。父级规划见 `docs/release/core-pages-product-ux-replan.md`，具体 UI 执行路线见 `docs/release/ui-evolution-roadmap.md`。**
 
 下一步任务范围：
 
@@ -150,6 +150,8 @@ release/publish workflow 当前按用户决策后续再考虑，本规划不把�
 - UX-4：VPS 详情页重塑。
 - UX-5：节点 / 目标 / 事件支撑页收敛。
 - UX-6：视觉证据与验收流程（active 流程见 `docs/operations/v2-visual-evidence.md`）。
+
+2026-05-13 之后的执行顺序、每批验收和非目标以 `docs/release/ui-evolution-roadmap.md` 为准；该文档继承上述父级规划，不重新定义 v2 设计语言。
 
 ### 入口 3：新能力产品计划
 
@@ -176,4 +178,5 @@ release/publish workflow 当前按用户决策后续再考虑，本规划不把�
 - `docs/release/asset-ledger-roadmap-completion.md`：Asset Ledger 完成度证据矩阵。
 - `docs/release/next-phase-plan.md`：Stage 1 / Stage 2 总体 roadmap 入口。
 - `docs/release/core-pages-product-ux-replan.md`：用户已确认的下一阶段核心页面产品/UX 重新规划入口。
+- `docs/release/ui-evolution-roadmap.md`：2026-05-13 之后的 UI 执行路线，明确 UX-1 到 UX-6 的顺序、验收和非目标。
 - 本文档：2026-05-11 之后判断“接下来做什么 / 不做什么”的当前状态快照。
