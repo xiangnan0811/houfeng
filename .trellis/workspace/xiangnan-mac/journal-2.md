@@ -1488,3 +1488,40 @@ Redesigned Nodes, Targets, and Events into observability support surfaces for th
 ### Next Steps
 
 - None - task complete
+
+
+## Session 104: UX-6 visual evidence workflow
+
+**Date**: 2026-05-12
+**Task**: UX-6 visual evidence workflow
+**Branch**: `ux/visual-evidence-acceptance-flow`
+
+### Summary
+
+Established the active v2 preview, browser sanity, and screenshot evidence workflow; updated Trellis specs and release docs so future user-visible UI work reports preview URL, routes, viewports, and evidence limitations.
+
+### Main Changes
+
+- Added docs/operations/v2-visual-evidence.md as the active v2 workflow for local preview, browser sanity, screenshot storage, route matrix, viewport expectations, and PR/final-report evidence format.
+- Updated README, CLAUDE, release planning docs, smoke evidence, and Trellis backend/web quality/styling specs to point at the active workflow and keep archived v1 visual verification out of the active path.
+- Verification: task.py validate passed; stale-flow grep passed except intentional "No current v2 screenshot" route-matrix rows; git diff --check passed; make verify-web passed with 60 files / 457 tests and production build; make verify-go passed; Vite preview URL http://127.0.0.1:5178/ returned HTTP 200.
+- Release/publish workflow intentionally deferred per user instruction.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `374c0af` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
