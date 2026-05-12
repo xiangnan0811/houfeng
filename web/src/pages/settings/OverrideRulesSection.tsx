@@ -34,17 +34,18 @@ function OverrideTextarea({ ariaLabel, value, onChange }: OverrideTextareaProps)
   }
 
   return (
-    <div className="override-rule-field">
-      <label>
-        <span>{ariaLabel}</span>
+    <div className="input-field" style={{ maxWidth: '960px' }}>
+      <label className="input-field__label">{ariaLabel}</label>
+      <div className="input-field__shell">
         <textarea
           aria-label={ariaLabel}
-          className="mono"
+          className="input mono"
+          style={{ height: 'auto', minHeight: '120px', padding: '12px', resize: 'vertical' }}
           rows={10}
           value={value}
           onChange={(event) => onChange(event.target.value)}
         />
-      </label>
+      </div>
       {previewContent ? (
         <details className="override-rule-preview">
           <summary>预览</summary>

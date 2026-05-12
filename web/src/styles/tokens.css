@@ -138,92 +138,96 @@ html.theme-houfeng-light {
   --chart-6: #93362A;
 
   --bg-aurora:
-    radial-gradient(ellipse at top right,    rgba(154, 122, 61, 0.06) 0%, transparent 55%),
-    radial-gradient(ellipse at bottom left,  rgba(64,  109, 134, 0.04) 0%, transparent 55%);
+    radial-gradient(ellipse at top right, rgba(154, 122, 61, 0.08) 0%, transparent 55%),
+    radial-gradient(ellipse at bottom left, rgba(64, 109, 134, 0.05) 0%, transparent 55%);
 
-  --shadow-glow:    0 0 16px rgba(154, 122, 61, 0.18);
-  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 8px rgba(0, 0, 0, 0.04);
-  --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.10);
+  --shadow-glow: 0 0 12px rgba(154, 122, 61, 0.22);
+  --shadow-soft: 0 1px 2px rgba(31, 28, 22, 0.10), 0 4px 10px rgba(31, 28, 22, 0.06);
+  --shadow-overlay: 0 12px 40px rgba(31, 28, 22, 0.20), 0 4px 12px rgba(31, 28, 22, 0.12);
 }
 
-/* ---------- classic-dark (preserved, with new tokens added) ---------- */
+/* ---------- classic-dark (深蓝灰基底，供偏好 darker 的用户使用) ---------- */
 html.theme-classic-dark {
-  --bg:               #15140F;
-  --bg-sidebar:       #100F0B;
-  --surface:          rgba(255, 255, 255, 0.020);
-  --surface-elevated: rgba(255, 255, 255, 0.035);
-  --surface-pressed:  rgba(255, 255, 255, 0.060);
-  --border:           #2A2823;
-  --border-strong:    #3A3833;
-  --border-dashed:    #3A3833;
-  --text-primary:     #E8E1D5;
-  --text-secondary:   #A39884;
-  --text-muted:       #8C8472;
-  --text-disabled:    #5C584F;
+  --bg:               #0A0C10;
+  --bg-sidebar:       #07090D;
+  --surface:          rgba(255, 255, 255, 0.025);
+  --surface-elevated: rgba(255, 255, 255, 0.050);
+  --surface-pressed:  rgba(255, 255, 255, 0.075);
+  --border:           #1E2027;
+  --border-strong:    #292C35;
+  --border-dashed:    #363945;
+  --text-primary:     #E8E3D6;
+  --text-secondary:   #9B9FAA;
+  --text-muted:       #787C85;
+  --text-disabled:    #47484D;
 
-  --accent:        #C09A5C;
-  --accent-strong: #D4B876;
-  --accent-soft:   rgba(192, 154, 92, 0.10);
-  --accent-border: rgba(192, 154, 92, 0.30);
-  --accent-2:      #618BA8;
+  --accent:        #C9A56F;
+  --accent-strong: #E0BE85;
+  --accent-soft:   rgba(201, 165, 111, 0.12);
+  --accent-border: rgba(201, 165, 111, 0.32);
+  --accent-2:      #5C8FA8;
 
-  --color-state-normal:      #4D9C7C;
-  --color-state-notice:      #C09A5C;
-  --color-state-alert:       #C97847;
-  --color-state-critical:    #B85042;
-  --color-state-maintenance: #618BA8;
-  --color-state-offline:     #6B6760;
+  --color-state-normal:      #4FA08A;
+  --color-state-notice:      #D4A053;
+  --color-state-alert:       #C97247;
+  --color-state-critical:    #B6493A;
+  --color-state-maintenance: #638DA9;
+  --color-state-offline:     #6F6B62;
 
-  --chart-1: #C09A5C;
-  --chart-2: #618BA8;
-  --chart-3: #4D9C7C;
-  --chart-4: #C09A5C;
-  --chart-5: #C97847;
-  --chart-6: #B85042;
+  --chart-1: #C9A56F;
+  --chart-2: #5C8FA8;
+  --chart-3: #4FA08A;
+  --chart-4: #D4A053;
+  --chart-5: #C97247;
+  --chart-6: #B6493A;
 
-  --bg-aurora: none;
+  --bg-aurora:
+    radial-gradient(ellipse at top right,    rgba(201, 165, 111, 0.10) 0%, transparent 55%),
+    radial-gradient(ellipse at bottom left,  rgba(92, 143, 168, 0.06) 0%, transparent 55%);
 }
 
-/* ---------- classic-light (preserved) ---------- */
+/* ---------- classic-light (传统浅灰基底，供偏好 lighter 的用户使用) ---------- */
 html.theme-classic-light {
-  --bg:               #F5F0E1;
-  --bg-sidebar:       #ECE5D2;
-  --surface:          #FBF7E8;
-  --surface-elevated: #FFFEFA;
-  --surface-pressed:  #EFE7CF;
-  --border:           #D8CFB8;
-  --border-strong:    #C4B89E;
-  --border-dashed:    #C7BCA0;
-  --text-primary:     #2A2620;
-  --text-secondary:   #5C5849;
-  --text-muted:       #7A6F58;
+  --bg:               #F0EEE8;
+  --bg-sidebar:       #E8E4DA;
+  --surface:          #FAF8F2;
+  --surface-elevated: #FFFFFF;
+  --surface-pressed:  #F2EEE4;
+  --border:           #D4CFC0;
+  --border-strong:    #C0B9A6;
+  --border-dashed:    #C3BCA2;
+  --text-primary:     #1F1C16;
+  --text-secondary:   #4A4638;
+  --text-muted:       #6E6856;
   --text-disabled:    #B5AC95;
 
   --accent:        #9A7A3D;
   --accent-strong: #7E6128;
-  --accent-soft:   rgba(154, 122, 61, 0.08);
+  --accent-soft:   rgba(154, 122, 61, 0.10);
   --accent-border: rgba(154, 122, 61, 0.30);
-  --accent-2:      #4F7393;
+  --accent-2:      #406D86;
 
   --color-state-normal:      #2F8265;
-  --color-state-notice:      #9A7A3D;
-  --color-state-alert:       #A06434;
-  --color-state-critical:    #A53D2F;
+  --color-state-notice:      #A37B2C;
+  --color-state-alert:       #A05A2C;
+  --color-state-critical:    #93362A;
   --color-state-maintenance: #4F7393;
   --color-state-offline:     #7A7568;
 
   --chart-1: #9A7A3D;
-  --chart-2: #4F7393;
+  --chart-2: #406D86;
   --chart-3: #2F8265;
-  --chart-4: #9A7A3D;
-  --chart-5: #A06434;
-  --chart-6: #A53D2F;
+  --chart-4: #A37B2C;
+  --chart-5: #A05A2C;
+  --chart-6: #93362A;
 
-  --bg-aurora: none;
+  --bg-aurora:
+    radial-gradient(ellipse at top right, rgba(154, 122, 61, 0.08) 0%, transparent 55%),
+    radial-gradient(ellipse at bottom left, rgba(64, 109, 134, 0.05) 0%, transparent 55%);
 
-  --shadow-glow:    0 0 16px rgba(154, 122, 61, 0.18);
-  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 8px rgba(0, 0, 0, 0.04);
-  --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-glow: 0 0 12px rgba(154, 122, 61, 0.22);
+  --shadow-soft: 0 1px 2px rgba(31, 28, 22, 0.10), 0 4px 10px rgba(31, 28, 22, 0.06);
+  --shadow-overlay: 0 12px 40px rgba(31, 28, 22, 0.20), 0 4px 12px rgba(31, 28, 22, 0.12);
 }
 
 /* ---------- Reduced motion ---------- */

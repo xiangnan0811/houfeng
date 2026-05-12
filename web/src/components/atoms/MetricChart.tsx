@@ -1,5 +1,4 @@
-import { type CSSProperties, type MouseEvent, useState } from 'react'
-
+import { type CSSProperties, type MouseEvent, useState, useEffect, useRef } from 'react'
 export type MetricChartTone =
   | 'normal'
   | 'notice'
@@ -35,13 +34,14 @@ export interface MetricChartProps {
   ariaLabel?: string
   /** Y-axis tick + tooltip value formatter. Defaults to `v.toFixed(1)`. */
   formatValue?: (value: number) => string
+  /** Y-axis tick label formatter. If omitted, uses an integer compact format. */
+  formatAxisValue?: (value: number) => string
   /** Lock Y-axis lower bound. When omitted, derived from data. */
   yMin?: number
   /** Lock Y-axis upper bound. When omitted, derived from data. */
   yMax?: number
   className?: string
 }
-
 const TONE_VAR: Record<MetricChartTone, string> = {
   normal: 'var(--color-state-normal)',
   notice: 'var(--color-state-notice)',
@@ -112,28 +112,65 @@ function computeXTickIndices(sampleCount: number, targetCount = 5): number[] {
 
 export function MetricChart({
   samples,
-  width = 360,
-  height = 140,
+  width: propsWidth,
+  height = 160,
   tone = 'accent',
   thresholds,
   maintenanceWindows,
   ariaLabel,
   formatValue = (v) => v.toFixed(1),
+  formatAxisValue = (v) => {
+    const abs = Math.abs(v)
+    if (abs >= 1000000000) return (v / 1000000000).toFixed(1) + 'B'
+    if (abs >= 1000000) return (v / 1000000).toFixed(1) + 'M'
+    if (abs >= 1000) return (v / 1000).toFixed(1) + 'k'
+    return v.toFixed(0)
+  },
   yMin,
   yMax,
   className = '',
 }: MetricChartProps) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [measuredWidth, setMeasuredWidth] = useState<number>(0)
+
+  useEffect(() => {
+    if (propsWidth || !containerRef.current) return
+
+    const measureCurrentWidth = () => {
+      if (!containerRef.current) return
+      const nextWidth = containerRef.current.getBoundingClientRect().width
+      if (nextWidth > 0) {
+        setMeasuredWidth(nextWidth)
+      }
+    }
+
+    measureCurrentWidth()
+
+    if (typeof globalThis.ResizeObserver === 'undefined') return
+
+    const resizeObserver = new globalThis.ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width ?? 0
+      if (nextWidth > 0) {
+        setMeasuredWidth(nextWidth)
+      }
+    })
+    resizeObserver.observe(containerRef.current)
+    return () => resizeObserver.disconnect()
+  }, [propsWidth])
+
   const stroke = TONE_VAR[tone]
+  const width = propsWidth || measuredWidth || 360
 
   // Empty state
   if (samples.length === 0) {
     return (
       <span
+        ref={containerRef}
         className={['metric-chart', 'metric-chart--empty', className].filter(Boolean).join(' ')}
         role="img"
         aria-label={ariaLabel ?? '暂无观测数据'}
-        style={{ width, height }}
+        style={{ width: propsWidth ? width : '100%', height }}
       >
         <span className="metric-chart__placeholder">暂无观测数据</span>
       </span>
@@ -180,8 +217,18 @@ export function MetricChart({
   const lastX = projectX(lastIdx)
   const lastY = projectY(samples[lastIdx].value)
 
-  // Y ticks
-  const yTicks = computeYTicks(effectiveYMin, effectiveYMax, 4)
+  // Y ticks (deduplicated by formatted string)
+  const rawYTicks = computeYTicks(effectiveYMin, effectiveYMax, 4)
+  const uniqueYTicksMap = new Map<string, number>()
+  rawYTicks.forEach((t) => {
+    const s = formatAxisValue(t)
+    // Keep the highest numerical value for a given formatted string
+    // This looks better (e.g. if 0.9 rounds to 1, put it closer to 1)
+    if (!uniqueYTicksMap.has(s) || uniqueYTicksMap.get(s)! < t) {
+      uniqueYTicksMap.set(s, t)
+    }
+  })
+  const yTicks = Array.from(uniqueYTicksMap.values())
 
   // X ticks (sample indices)
   const xTickIndices = computeXTickIndices(samples.length, 5)
@@ -274,7 +321,7 @@ export function MetricChart({
   const svg = (
     <svg
       className={['metric-chart', className].filter(Boolean).join(' ')}
-      width={width}
+      width={propsWidth ? width : '100%'}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
@@ -306,8 +353,11 @@ export function MetricChart({
               y={y}
               textAnchor="end"
               dominantBaseline="middle"
+              fontSize={10}
+              fill="var(--text-muted)"
+              opacity={0.8}
             >
-              {formatValue(tickValue)}
+              {formatAxisValue(tickValue)}
             </text>
           </g>
         )
@@ -317,14 +367,21 @@ export function MetricChart({
       {xTickIndices.map((idx) => {
         const x = projectX(idx)
         const sample = samples[idx]
+        let anchor: 'start' | 'middle' | 'end' = 'middle'
+        if (idx === 0) anchor = 'start'
+        else if (idx === samples.length - 1) anchor = 'end'
+
         return (
           <text
             key={`x-${idx}`}
             className="metric-chart__axis-text"
             x={x}
             y={PADDING.top + innerH + 14}
-            textAnchor="middle"
+            textAnchor={anchor}
             dominantBaseline="hanging"
+            fontSize={10}
+            fill="var(--text-muted)"
+            opacity={0.8}
           >
             {formatAxisTime(sample.observedAt)}
           </text>
@@ -408,6 +465,7 @@ export function MetricChart({
 
   return (
     <span
+      ref={containerRef}
       className={[
         'metric-chart-shell',
         isSingle && 'metric-chart-shell--single',
@@ -417,7 +475,7 @@ export function MetricChart({
       style={{
         position: 'relative',
         display: 'inline-block',
-        width,
+        width: propsWidth ? width : '100%',
         height,
         verticalAlign: 'middle',
       }}

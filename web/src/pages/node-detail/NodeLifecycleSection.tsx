@@ -1,4 +1,5 @@
-import { CollapsibleSection } from '../../components/CollapsibleSection'
+import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { Button } from '../../components/atoms/Button'
 import {
   NODE_LIFECYCLE_V1_LIMITATION_COPY,
 } from './nodeDetailConstants'
@@ -25,52 +26,53 @@ export function NodeLifecycleSection({
   onConfirmRetire,
   onCancelRetire,
 }: NodeLifecycleSectionProps) {
+  const stacked = showRetireConfirmation || Boolean(error)
+
   return (
-    <CollapsibleSection title="生命周期" className="watchtower-secondary">
-      <div className="page-stack">
-        {isRetiredNode ? <p>{NODE_LIFECYCLE_V1_LIMITATION_COPY}</p> : null}
-        <div className="badge-row badge-row--wrap">
-          {isRetiredNode ? (
-            <button
-              type="button"
-              disabled={submitting !== null}
-              onClick={onRestore}
-            >
-              {submitting === 'restore-to-observing' ? '正在恢复…' : '恢复到观察中'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={submitting !== null}
-              onClick={onStartRetire}
-            >
-              退役节点
-            </button>
-          )}
-        </div>
-        {!isRetiredNode && showRetireConfirmation ? (
-          <div className="page-stack">
-            <p>退役会让节点退出当前工作集，但会保留历史记录。这不是删除，也不会清空事件、观测记录或 agent 绑定历史。</p>
-            <div className="badge-row badge-row--wrap">
-              <button
-                type="button"
-                disabled={submitting !== null}
-                onClick={onConfirmRetire}
-              >
-                {submitting === 'retire' ? '正在退役…' : '确认退役'}
-              </button>
-              <button
-                type="button"
-                disabled={submitting !== null}
-                onClick={onCancelRetire}
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {error ? <p role="alert">{error}</p> : null}
+    <div className={`watchtower-property-item${stacked ? ' watchtower-property-item--stacked' : ''}`}>
+      <div className="watchtower-property-item__main">
+        <span className="watchtower-property-item__title">生命周期操作</span>
+        <span className="watchtower-property-item__desc">
+          {isRetiredNode ? NODE_LIFECYCLE_V1_LIMITATION_COPY : '退役会让节点退出当前工作集，但保留历史观测记录。'}
+        </span>
       </div>
-    </CollapsibleSection>
+      <div className="watchtower-property-item__actions">
+        {isRetiredNode ? (
+          <Button
+            variant="primary"
+            disabled={submitting !== null}
+            onClick={onRestore}
+          >
+            {submitting === 'restore-to-observing' ? '正在恢复…' : '恢复到观察中'}
+          </Button>
+        ) : showRetireConfirmation ? null : (
+          <Button
+            variant="secondary"
+            disabled={submitting !== null}
+            onClick={onStartRetire}
+          >
+            退役节点
+          </Button>
+        )}
+      </div>
+      {!isRetiredNode && showRetireConfirmation ? (
+        <ActionConfirmationCard
+          title="确认退役节点"
+          current="当前：节点仍在当前工作集中。"
+          result="操作后：节点生命周期变为已退役。"
+          impact="这不是删除，会让节点退出当前工作集并停止承担观测任务。"
+          unchanged="不会清空事件、观测记录或 agent 绑定历史。"
+          confirmLabel={submitting === 'retire' ? '正在退役…' : '确认退役'}
+          error={error}
+          disabled={submitting !== null}
+          onConfirm={onConfirmRetire}
+          onCancel={onCancelRetire}
+        />
+      ) : error ? (
+        <p className="watchtower-runtime-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
   )
 }

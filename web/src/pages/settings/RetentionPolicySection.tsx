@@ -1,4 +1,5 @@
 import { DetailSection } from '../../components/DetailSection'
+import { Input } from '../../components/atoms'
 import type { SettingsRetentionPolicyForm } from './types'
 import { SectionIntro } from './SectionIntro'
 
@@ -15,25 +16,20 @@ type RetentionInputProps = {
 
 function RetentionInput({ ariaLabel, value, onChange }: RetentionInputProps) {
   return (
-    <label className="summary-card">
-      <span className="summary-card__label">{ariaLabel}</span>
-      <span className="input-with-suffix">
-        <input
-          aria-label={ariaLabel}
-          inputMode="numeric"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <span className="input-with-suffix__unit">天</span>
-      </span>
-    </label>
+    <Input
+      label={ariaLabel}
+      inputMode="numeric"
+      value={value}
+      trailingIcon="天"
+      onChange={(event) => onChange(event.target.value)}
+    />
   )
 }
 
 export function RetentionPolicySection({ value, onChange }: RetentionPolicySectionProps) {
   return (
     <DetailSection eyebrow="保留策略" title="数据保留策略">
-      <div className="summary-grid summary-grid--numeric">
+      <div className="settings-form-grid settings-form-grid--tight">
         <RetentionInput
           ariaLabel="原始层保留天数"
           value={value.rawLayerDays}

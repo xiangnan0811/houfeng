@@ -151,7 +151,7 @@ export function NodesListSection({
           <h3>没有匹配当前筛选的节点</h3>
           <p>请尝试调整筛选条件，或清空筛选恢复完整列表。</p>
           <p>
-            <button type="button" onClick={onClearAllFilters}>
+            <button type="button" className="btn btn--ghost btn--md" onClick={onClearAllFilters}>
               清空筛选
             </button>
           </p>

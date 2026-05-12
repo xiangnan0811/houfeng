@@ -1,5 +1,5 @@
 import { DetailSection } from '../../components/DetailSection'
-import { MonoDigits } from '../../components/atoms'
+import { MonoDigits, Input, Toggle } from '../../components/atoms'
 import type { SettingsRecord } from '../../lib/types'
 import type { SettingsFormState } from './types'
 import { SectionIntro } from './SectionIntro'
@@ -13,37 +13,30 @@ type TelegramSettingsSectionProps = {
   settings: SettingsRecord['telegram']
   form: TelegramSettingsForm
   onChange: (patch: Partial<TelegramSettingsForm>) => void
+  wrapper?: 'detail' | 'none'
+  isExpanded?: boolean
+  onToggleExpand?: () => void
 }
 
-export function TelegramSettingsSection({ settings, form, onChange }: TelegramSettingsSectionProps) {
-  return (
-    <DetailSection
-      eyebrow="Telegram"
-      title="Telegram 通知设置"
-      aside={settings.token_present ? '已存在持久化 Token' : '当前未配置'}
-    >
-      <div className="summary-grid">
-        <label className="summary-card">
-          <span className="summary-card__label">新的 Telegram Bot Token</span>
-          <input
-            aria-label="新的 Telegram Bot Token"
-            type="password"
-            autoComplete="off"
-            value={form.telegramBotToken}
-            onChange={(event) => onChange({ telegramBotToken: event.target.value })}
-          />
-        </label>
+export function TelegramSettingsSection({ settings, form, onChange, wrapper = 'detail', isExpanded = true, onToggleExpand }: TelegramSettingsSectionProps) {
+  const innerContent = (
+    <div style={{ paddingTop: wrapper === 'detail' ? 'var(--space-4)' : 0 }}>
+      <div className="settings-form-grid">
+        <Input
+          label="新的 Telegram Bot Token"
+          type="password"
+          autoComplete="off"
+          value={form.telegramBotToken}
+          onChange={(event) => onChange({ telegramBotToken: event.target.value })}
+        />
 
-        <label className="summary-card">
-          <span className="summary-card__label">Telegram Chat ID</span>
-          <input
-            aria-label="Telegram Chat ID"
-            value={form.telegramChatId}
-            onChange={(event) => onChange({ telegramChatId: event.target.value })}
-          />
-        </label>
+        <Input
+          label="Telegram Chat ID"
+          value={form.telegramChatId}
+          onChange={(event) => onChange({ telegramChatId: event.target.value })}
+        />
 
-        <article className="summary-card">
+        <article className="summary-card" style={{ gridColumn: '1 / -1', maxWidth: '960px' }}>
           <span className="summary-card__label">当前持久化状态</span>
           <strong className="summary-card__value summary-card__value--text">
             {settings.token_present && settings.token_masked_summary ? (
@@ -57,27 +50,52 @@ export function TelegramSettingsSection({ settings, form, onChange }: TelegramSe
           </strong>
         </article>
 
-        <label className="summary-card">
-          <span className="summary-card__label">运行时接管</span>
-          <input
-            aria-label="使用持久化 Telegram 配置接管运行中的通知器"
-            type="checkbox"
+        <div className="settings-fieldset" style={{ gridColumn: '1 / -1' }}>
+          <Toggle
+            label="运行时接管"
             checked={form.telegramRuntimeManaged}
-            onChange={(event) => onChange({ telegramRuntimeManaged: event.target.checked })}
+            onChange={(checked) => onChange({ telegramRuntimeManaged: checked })}
           />
-        </label>
+          <SectionIntro>使用持久化 Telegram 配置接管运行中的通知器</SectionIntro>
+        </div>
       </div>
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <SectionIntro>
+          {!settings.runtime_managed
+            ? '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'
+            : settings.runtime_apply_active
+              ? '当前持久化配置已接入正在运行的通知路径。'
+              : '当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。'}
+        </SectionIntro>
+        <SectionIntro>
+          接口不会回显明文 Token。留空会继续保留当前已保存的 Token；只有在需要替换时才输入新的 Token。
+        </SectionIntro>
+      </div>
+    </div>
+  )
 
-      <SectionIntro>
-        {!settings.runtime_managed
-          ? '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'
-          : settings.runtime_apply_active
-            ? '当前持久化配置已接入正在运行的通知路径。'
-            : '当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。'}
-      </SectionIntro>
-      <SectionIntro>
-        接口不会回显明文 Token。留空会继续保留当前已保存的 Token；只有在需要替换时才输入新的 Token。
-      </SectionIntro>
+  if (wrapper === 'none') {
+    return innerContent
+  }
+
+  return (
+    <DetailSection
+      eyebrow="Telegram"
+      title="Telegram 通知设置"
+      aside={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <span className={`badge ${settings.token_present ? 'badge--success' : ''}`}>
+            {settings.token_present ? '已配置持久化 Token' : '未配置'}
+          </span>
+          {onToggleExpand && (
+            <button type="button" className="btn btn--secondary btn--sm" onClick={onToggleExpand}>
+              {isExpanded ? '收起' : '编辑'}
+            </button>
+          )}
+        </div>
+      }
+    >
+      {isExpanded && innerContent}
     </DetailSection>
   )
 }

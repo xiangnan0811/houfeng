@@ -24,16 +24,18 @@ type FrequencySelectProps = {
 
 function FrequencySelect({ ariaLabel, value, onChange }: FrequencySelectProps) {
   return (
-    <label className="summary-card">
-      <span className="summary-card__label">{ariaLabel}</span>
-      <select aria-label={ariaLabel} value={value} onChange={(event) => onChange(event.target.value)}>
-        {FREQUENCY_TIER_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="input-field">
+      <label className="input-field__label">{ariaLabel}</label>
+      <div className="input-field__shell">
+        <select className="input" aria-label={ariaLabel} value={value} onChange={(event) => onChange(event.target.value)}>
+          {FREQUENCY_TIER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
   )
 }
 
@@ -46,7 +48,7 @@ export function FrequencyDefaultsSection({
   return (
     <DetailSection eyebrow="频率档位" title="默认频率档位">
       <SectionIntro>当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。</SectionIntro>
-      <div className="summary-grid summary-grid--numeric">
+      <div className="settings-form-grid">
         <FrequencySelect
           ariaLabel="当前节点主机样本频率"
           value={hostSampleFrequencyTier}

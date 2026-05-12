@@ -1,4 +1,3 @@
-import { CollapsibleSection } from '../../components/CollapsibleSection'
 import {
   DataTable,
   Hostname,
@@ -62,7 +61,7 @@ export function NodeContainersSection({ sample }: NodeContainersSectionProps) {
   ]
 
   return (
-    <CollapsibleSection title="容器列表" className="watchtower-secondary">
+    <>
       {sample?.containers && sample.containers.length > 0 ? (
         <DataTable
           density="compact"
@@ -72,8 +71,8 @@ export function NodeContainersSection({ sample }: NodeContainersSectionProps) {
           emptyContent="暂无容器数据"
         />
       ) : (
-        <p>暂无容器数据</p>
+        <p style={{ color: 'var(--text-muted)' }}>暂无容器数据</p>
       )}
-    </CollapsibleSection>
+    </>
   )
 }

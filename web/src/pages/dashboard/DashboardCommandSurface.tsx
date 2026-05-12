@@ -331,6 +331,26 @@ export function DashboardCommandSurface({
   const tone = commandTone(fleetState)
   const visibleAttention = attentionItems.slice(0, 3)
 
+  const filteredAssetRows = assetRows(summary).filter(
+    (item) => item.value !== 0 && item.value !== '0/0' && item.value !== '0'
+  )
+  const filteredObservabilityRows = observabilityRows(metrics, overview).filter(
+    (item) => item.value !== 0 && item.value !== '0/0' && item.value !== '0'
+  )
+
+  const renderEmptyState = (label: string) => (
+    <div className="dashboard-command-row dashboard-command-row--normal">
+      <span className="dashboard-command-row__glyph" aria-hidden="true">
+        <StatusGlyph state="normal" size="sm" />
+      </span>
+      <span className="dashboard-command-row__label">{label}</span>
+      <strong className="dashboard-command-row__value">
+        <MonoDigits>0</MonoDigits>
+      </strong>
+      <span className="dashboard-command-row__detail">暂无待处理项</span>
+    </div>
+  )
+
   return (
     <section
       className={`dashboard-command-surface dashboard-command-surface--${tone}`}
@@ -402,23 +422,25 @@ export function DashboardCommandSurface({
             </Badge>
           </div>
           <div className="dashboard-command-list">
-            {assetRows(summary).map((item) => (
-              <Link
-                className={`dashboard-command-row dashboard-command-row--${item.tone}`}
-                to={item.to}
-                key={item.label}
-                aria-label={`${item.label}：${item.detail}`}
-              >
-                <span className="dashboard-command-row__glyph" aria-hidden="true">
-                  <StatusGlyph state={laneTone(item.tone)} size="sm" />
-                </span>
-                <span className="dashboard-command-row__label">{item.label}</span>
-                <strong className="dashboard-command-row__value">
-                  <MonoDigits>{item.value}</MonoDigits>
-                </strong>
-                <span className="dashboard-command-row__detail">{item.detail}</span>
-              </Link>
-            ))}
+            {filteredAssetRows.length > 0
+              ? filteredAssetRows.map((item) => (
+                  <Link
+                    className={`dashboard-command-row dashboard-command-row--${item.tone}`}
+                    to={item.to}
+                    key={item.label}
+                    aria-label={`${item.label}：${item.detail}`}
+                  >
+                    <span className="dashboard-command-row__glyph" aria-hidden="true">
+                      <StatusGlyph state={laneTone(item.tone)} size="sm" />
+                    </span>
+                    <span className="dashboard-command-row__label">{item.label}</span>
+                    <strong className="dashboard-command-row__value">
+                      <MonoDigits>{item.value}</MonoDigits>
+                    </strong>
+                    <span className="dashboard-command-row__detail">{item.detail}</span>
+                  </Link>
+                ))
+              : renderEmptyState('资产状态全绿')}
           </div>
         </section>
 
@@ -433,23 +455,25 @@ export function DashboardCommandSurface({
             </Badge>
           </div>
           <div className="dashboard-command-list">
-            {observabilityRows(metrics, overview).map((item) => (
-              <Link
-                className={`dashboard-command-row dashboard-command-row--${item.tone}`}
-                to={item.to}
-                key={item.label}
-                aria-label={`${item.label}：${item.detail}`}
-              >
-                <span className="dashboard-command-row__glyph" aria-hidden="true">
-                  <StatusGlyph state={laneTone(item.tone)} size="sm" />
-                </span>
-                <span className="dashboard-command-row__label">{item.label}</span>
-                <strong className="dashboard-command-row__value">
-                  <MonoDigits>{item.value}</MonoDigits>
-                </strong>
-                <span className="dashboard-command-row__detail">{item.detail}</span>
-              </Link>
-            ))}
+            {filteredObservabilityRows.length > 0
+              ? filteredObservabilityRows.map((item) => (
+                  <Link
+                    className={`dashboard-command-row dashboard-command-row--${item.tone}`}
+                    to={item.to}
+                    key={item.label}
+                    aria-label={`${item.label}：${item.detail}`}
+                  >
+                    <span className="dashboard-command-row__glyph" aria-hidden="true">
+                      <StatusGlyph state={laneTone(item.tone)} size="sm" />
+                    </span>
+                    <span className="dashboard-command-row__label">{item.label}</span>
+                    <strong className="dashboard-command-row__value">
+                      <MonoDigits>{item.value}</MonoDigits>
+                    </strong>
+                    <span className="dashboard-command-row__detail">{item.detail}</span>
+                  </Link>
+                ))
+              : renderEmptyState('观测对象全绿')}
           </div>
           {visibleAttention.length > 0 ? (
             <div className="dashboard-command-attention" aria-label="最高优先级异常对象">

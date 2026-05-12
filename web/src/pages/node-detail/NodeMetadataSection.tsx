@@ -1,4 +1,3 @@
-import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { NodeLabelsAndNote } from '../../components/node-detail'
 import type { NodeRecord } from '../../lib/types'
 
@@ -34,22 +33,20 @@ export function NodeMetadataSection({
   onSave,
 }: NodeMetadataSectionProps) {
   return (
-    <CollapsibleSection title="标签与备注" className="watchtower-secondary">
-      <NodeLabelsAndNote
-        node={node}
-        editing={editing}
-        groupDraft={groupDraft}
-        labelDraft={labelDraft}
-        noteDraft={noteDraft}
-        submitting={submitting}
-        error={error}
-        onGroupDraftChange={onGroupDraftChange}
-        onLabelDraftChange={onLabelDraftChange}
-        onNoteDraftChange={onNoteDraftChange}
-        onStartEdit={onStartEdit}
-        onCancelEdit={onCancelEdit}
-        onSave={onSave}
-      />
-    </CollapsibleSection>
+    <NodeLabelsAndNote
+      node={node}
+      editing={editing}
+      groupDraft={groupDraft}
+      labelDraft={labelDraft}
+      noteDraft={noteDraft}
+      submitting={submitting}
+      error={error}
+      onGroupDraftChange={onGroupDraftChange}
+      onLabelDraftChange={onLabelDraftChange}
+      onNoteDraftChange={onNoteDraftChange}
+      onStartEdit={onStartEdit}
+      onCancelEdit={onCancelEdit}
+      onSave={onSave}
+    />
   )
 }

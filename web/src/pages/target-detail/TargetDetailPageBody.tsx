@@ -166,6 +166,8 @@ export function TargetDetailPageBody({
   const probeActionsDisabled =
     probeCreateSubmitting || probeRowMutationBusy || runtimeConfirmationActive || probeConfirmationActive
   const isArchived = target.run_status === '已归档'
+  const archiveRuntimeError =
+    pendingRuntimeConfirmation?.action === 'archive' ? runtimeError : null
 
   return (
     <div className="page-stack">
@@ -178,14 +180,6 @@ export function TargetDetailPageBody({
         onOpenHistory={() => onOpenHistory('events')}
       />
 
-      {showDangerZone ? (
-        <TargetDangerCard
-          target={target}
-          firstIncident={firstIncident}
-          onOpenEvents={() => onOpenHistory('events')}
-        />
-      ) : null}
-
       {pendingRuntimeConfirmation?.action === 'pause' ? (
         <TargetRuntimePauseConfirmation
           target={target}
@@ -194,10 +188,18 @@ export function TargetDetailPageBody({
           onCancel={onCancelPauseConfirmation}
         />
       ) : null}
-      {runtimeError ? (
+      {runtimeError && pendingRuntimeConfirmation?.action !== 'archive' ? (
         <p className="watchtower-runtime-error" role="alert">
           {runtimeError}
         </p>
+      ) : null}
+
+      {showDangerZone ? (
+        <TargetDangerCard
+          target={target}
+          firstIncident={firstIncident}
+          onOpenEvents={() => onOpenHistory('events')}
+        />
       ) : null}
 
       <TargetTimeWindowTabs value={timeWindow} onChange={onTimeWindowChange} />
@@ -207,37 +209,6 @@ export function TargetDetailPageBody({
         recentObservations={recentObservations}
         isMaintenance={target.run_status === '维护中'}
         watchtower
-      />
-
-      <TargetProbeManagementSection
-        addProbeButtonRef={addProbeButtonRef}
-        probeCreateOpen={probeCreateOpen}
-        probeFormMode={probeFormMode}
-        probeCreateForm={probeCreateForm}
-        probeCreateSubmitting={probeCreateSubmitting}
-        probeCreateError={probeCreateError}
-        probeMutationError={probeMutationError}
-        addDisabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
-        onToggleCreate={onToggleCreate}
-        onSubmit={onProbeSubmit}
-        onProbeKindChange={onProbeKindChange}
-        onFieldChange={onProbeFieldChange}
-      />
-
-      <TargetMetadataSection
-        target={target}
-        editing={metadataEditing}
-        groupDraft={metadataForm.group}
-        labelDraft={metadataForm.labels}
-        noteDraft={metadataForm.note}
-        submitting={metadataSubmitting}
-        error={metadataError}
-        onGroupDraftChange={onMetadataGroupChange}
-        onLabelDraftChange={onMetadataLabelChange}
-        onNoteDraftChange={onMetadataNoteChange}
-        onStartEdit={onStartMetadataEdit}
-        onCancelEdit={onCancelMetadataEdit}
-        onSubmit={onMetadataSubmit}
       />
 
       <TargetProbeListSection
@@ -256,17 +227,51 @@ export function TargetDetailPageBody({
         onCancelDeleteConfirmation={onCancelDeleteConfirmation}
       />
 
-      <TargetLifecycleSection
-        isArchived={isArchived}
-        runtimeSubmitting={runtimeSubmitting}
-        probeConfirmationActive={probeConfirmationActive}
-        showArchiveConfirmation={pendingRuntimeConfirmation?.action === 'archive'}
-        onRestore={() => onRuntimeAction('restore-to-paused')}
-        onStartArchive={() => onRuntimeAction('archive')}
-        onConfirmArchive={() => onRuntimeAction('archive', true)}
-        onCancelArchive={onCancelArchiveConfirmation}
-        registerActionRef={registerActionRef}
-      />
+      <div className="watchtower-property-list">
+        <TargetProbeManagementSection
+          addProbeButtonRef={addProbeButtonRef}
+          probeCreateOpen={probeCreateOpen}
+          probeFormMode={probeFormMode}
+          probeCreateForm={probeCreateForm}
+          probeCreateSubmitting={probeCreateSubmitting}
+          probeCreateError={probeCreateError}
+          probeMutationError={probeMutationError}
+          addDisabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
+          onToggleCreate={onToggleCreate}
+          onSubmit={onProbeSubmit}
+          onProbeKindChange={onProbeKindChange}
+          onFieldChange={onProbeFieldChange}
+        />
+
+        <TargetMetadataSection
+          target={target}
+          editing={metadataEditing}
+          groupDraft={metadataForm.group}
+          labelDraft={metadataForm.labels}
+          noteDraft={metadataForm.note}
+          submitting={metadataSubmitting}
+          error={metadataError}
+          onGroupDraftChange={onMetadataGroupChange}
+          onLabelDraftChange={onMetadataLabelChange}
+          onNoteDraftChange={onMetadataNoteChange}
+          onStartEdit={onStartMetadataEdit}
+          onCancelEdit={onCancelMetadataEdit}
+          onSubmit={onMetadataSubmit}
+        />
+
+        <TargetLifecycleSection
+          isArchived={isArchived}
+          runtimeSubmitting={runtimeSubmitting}
+          probeConfirmationActive={probeConfirmationActive}
+          showArchiveConfirmation={pendingRuntimeConfirmation?.action === 'archive'}
+          error={archiveRuntimeError}
+          onRestore={() => onRuntimeAction('restore-to-paused')}
+          onStartArchive={() => onRuntimeAction('archive')}
+          onConfirmArchive={() => onRuntimeAction('archive', true)}
+          onCancelArchive={onCancelArchiveConfirmation}
+          registerActionRef={registerActionRef}
+        />
+      </div>
 
       <TargetSnapshotMeta />
 

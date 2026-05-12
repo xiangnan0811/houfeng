@@ -127,7 +127,7 @@ export function TargetProbeList({
         <p>当前还没有 ProbeItem，请为该入口添加至少一种观测方式。</p>
         {onAddProbe ? (
           <div>
-            <button type="button" onClick={() => onAddProbe()}>
+            <button type="button" className="btn btn--primary btn--md" onClick={() => onAddProbe()}>
               添加第一个 Probe
             </button>
           </div>
@@ -157,6 +157,7 @@ export function TargetProbeList({
             <div className="badge-row badge-row--wrap">
               <button
                 type="button"
+                className="btn btn--secondary btn--sm"
                 aria-label={probeActionAccessibleName('编辑', probeItem)}
                 disabled={actionsDisabled}
                 onClick={() => onEdit(probeItem)}
@@ -165,6 +166,7 @@ export function TargetProbeList({
               </button>
               <button
                 type="button"
+                className="btn btn--secondary btn--sm"
                 aria-label={probeActionAccessibleName(
                   probeItem.enabled ? '停用' : '启用',
                   probeItem,
@@ -179,6 +181,7 @@ export function TargetProbeList({
                   registerDeleteButtonRef(probeItem.probe_item_id, element)
                 }}
                 type="button"
+                className="btn btn--danger btn--sm"
                 aria-label={probeActionAccessibleName('删除', probeItem)}
                 disabled={actionsDisabled}
                 onClick={() => onDelete(probeItem)}

@@ -119,8 +119,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
           <MetricChart
             samples={toSeries(ascending, (s) => s.cpu_usage_pct)}
             tone={cpuPriority > 0 ? priorityTone(cpuPriority) : baseTone}
-            width={360}
-            height={140}
+            height={160}
             yMin={0}
             yMax={100}
             thresholds={[
@@ -157,8 +156,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
           <MetricChart
             samples={toSeries(ascending, (s) => s.mem_used_pct)}
             tone={memPriority > 0 ? priorityTone(memPriority) : baseTone}
-            width={360}
-            height={140}
+            height={160}
             yMin={0}
             yMax={100}
             thresholds={[
@@ -201,8 +199,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
           <MetricChart
             samples={toSeries(ascending, (s) => s.disk_used_pct)}
             tone={diskPriority > 0 ? priorityTone(diskPriority) : baseTone}
-            width={360}
-            height={140}
+            height={160}
             yMin={0}
             yMax={100}
             thresholds={[
@@ -248,8 +245,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
           <MetricChart
             samples={toSeries(ascending, (s) => s.inode_used_pct)}
             tone={inodePriority > 0 ? priorityTone(inodePriority) : baseTone}
-            width={360}
-            height={140}
+            height={160}
             yMin={0}
             yMax={100}
             thresholds={[
@@ -278,8 +274,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
           <MetricChart
             samples={toSeries(ascending, (s) => s.load_5)}
             tone={load5Priority > 0 ? priorityTone(load5Priority) : baseTone}
-            width={360}
-            height={140}
+            height={160}
             yMin={0}
             thresholds={[
               { value: t.load5.notice, tone: 'notice', label: String(t.load5.notice) },
@@ -317,8 +312,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
           <MetricChart
             samples={toSeries(ascending, (s) => s.cpu_iowait_pct)}
             tone={iowaitPriority > 0 ? priorityTone(iowaitPriority) : baseTone}
-            width={360}
-            height={140}
+            height={160}
             yMin={0}
             thresholds={[
               { value: t.iowait.notice, tone: 'notice', label: `${t.iowait.notice}%` },
@@ -346,8 +340,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
           <MetricChart
             samples={toSeries(ascending, (s) => s.net_in_bytes_per_sec)}
             tone={altTone}
-            width={360}
-            height={140}
+            height={160}
             yMin={0}
             formatValue={(v) => formatBytesPerSecond(v)}
             ariaLabel="网络入站近 24h 趋势"
@@ -371,8 +364,7 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
           <MetricChart
             samples={toSeries(ascending, (s) => s.net_out_bytes_per_sec)}
             tone={baseTone}
-            width={360}
-            height={140}
+            height={160}
             yMin={0}
             formatValue={(v) => formatBytesPerSecond(v)}
             ariaLabel="网络出站近 24h 趋势"

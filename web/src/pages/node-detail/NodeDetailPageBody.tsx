@@ -1,5 +1,6 @@
 import type { RefObject } from 'react'
 
+import { CollapsibleSection } from '../../components/CollapsibleSection'
 import {
   NodeWatchtowerHeader,
   NodeWatchtowerMetrics,
@@ -18,7 +19,6 @@ import { NodeBindingConflictSection } from './NodeBindingConflictSection'
 import { NodeCommandDrawer } from './NodeCommandDrawer'
 import { NodeContainersSection } from './NodeContainersSection'
 import { NodeDangerCard } from './NodeDangerCard'
-import { NodeDiagnosisSummary } from './NodeDiagnosisSummary'
 import { NodeHistoryDrawer } from './NodeHistoryDrawer'
 import { NodeLifecycleSection } from './NodeLifecycleSection'
 import { NodeLinkedVPSSection } from './NodeLinkedVPSSection'
@@ -192,22 +192,23 @@ export function NodeDetailPageBody({
         onOpenCommands={onOpenCommands}
       />
 
-      <NodeDiagnosisSummary
-        node={node}
-        sample={sample}
-        incidents={incidents}
-        eventsError={eventsError}
-        onOpenEvents={() => onOpenHistory('events')}
-        onOpenIncidents={() => onOpenHistory('incidents')}
-      />
+      {pendingRuntimeConfirmation?.action === 'pause' ? (
+        <NodeRuntimePauseConfirmation
+          node={node}
+          disabled={runtimeSubmitting}
+          onConfirm={() => onRuntimeAction('pause', true)}
+          onCancel={onCancelRuntimeConfirmation}
+        />
+      ) : null}
+      {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
 
-      <NodeLinkedVPSSection
-        sectionRef={linkedVPSSectionRef}
-        records={linkedVPS}
-        loading={linkedVPSLoading}
-        loaded={linkedVPSLoaded}
-        error={linkedVPSError}
-      />
+      {showDangerZone ? (
+        <NodeDangerCard
+          node={node}
+          firstIncident={firstIncident}
+          onOpenEvents={() => onOpenHistory('events')}
+        />
+      ) : null}
 
       {showBindingConflict ? (
         <NodeBindingConflictSection
@@ -223,14 +224,6 @@ export function NodeDetailPageBody({
         />
       ) : null}
 
-      {showDangerZone ? (
-        <NodeDangerCard
-          node={node}
-          firstIncident={firstIncident}
-          onOpenEvents={() => onOpenHistory('events')}
-        />
-      ) : null}
-
       <NodeTimeWindowTabs value={timeWindow} onChange={onTimeWindowChange} />
 
       <NodeWatchtowerMetrics
@@ -239,46 +232,54 @@ export function NodeDetailPageBody({
         isMaintenance={isMaintenance}
       />
 
-      {pendingRuntimeConfirmation?.action === 'pause' ? (
-        <NodeRuntimePauseConfirmation
-          node={node}
-          disabled={runtimeSubmitting}
-          onConfirm={() => onRuntimeAction('pause', true)}
-          onCancel={onCancelRuntimeConfirmation}
-        />
-      ) : null}
-      {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
-
-      <NodeMetadataSection
-        node={node}
-        editing={metadataEditing}
-        groupDraft={metadataGroupDraft}
-        labelDraft={metadataLabelDraft}
-        noteDraft={metadataNoteDraft}
-        submitting={metadataSubmitting}
-        error={metadataError}
-        onGroupDraftChange={onMetadataGroupDraftChange}
-        onLabelDraftChange={onMetadataLabelDraftChange}
-        onNoteDraftChange={onMetadataNoteDraftChange}
-        onStartEdit={onStartMetadataEdit}
-        onCancelEdit={onCancelMetadataEdit}
-        onSave={onSaveMetadata}
+      <NodeLinkedVPSSection
+        sectionRef={linkedVPSSectionRef}
+        records={linkedVPS}
+        loading={linkedVPSLoading}
+        loaded={linkedVPSLoaded}
+        error={linkedVPSError}
       />
 
-      <NodeLifecycleSection
-        isRetiredNode={isRetiredNode}
-        showRetireConfirmation={showRetireConfirmation}
-        submitting={lifecycleSubmitting}
-        error={lifecycleError}
-        onRestore={onLifecycleRestore}
-        onStartRetire={onStartRetire}
-        onConfirmRetire={onConfirmRetire}
-        onCancelRetire={onCancelRetire}
-      />
+      <div className="watchtower-property-list">
+        <CollapsibleSection title="标签与备注" className="watchtower-secondary">
+          <NodeMetadataSection
+            node={node}
+            editing={metadataEditing}
+            groupDraft={metadataGroupDraft}
+            labelDraft={metadataLabelDraft}
+            noteDraft={metadataNoteDraft}
+            submitting={metadataSubmitting}
+            error={metadataError}
+            onGroupDraftChange={onMetadataGroupDraftChange}
+            onLabelDraftChange={onMetadataLabelDraftChange}
+            onNoteDraftChange={onMetadataNoteDraftChange}
+            onStartEdit={onStartMetadataEdit}
+            onCancelEdit={onCancelMetadataEdit}
+            onSave={onSaveMetadata}
+          />
+        </CollapsibleSection>
 
-      <NodeAccessCredentialSection node={node} />
+        <CollapsibleSection title="生命周期" className="watchtower-secondary">
+          <NodeLifecycleSection
+            isRetiredNode={isRetiredNode}
+            showRetireConfirmation={showRetireConfirmation}
+            submitting={lifecycleSubmitting}
+            error={lifecycleError}
+            onRestore={onLifecycleRestore}
+            onStartRetire={onStartRetire}
+            onConfirmRetire={onConfirmRetire}
+            onCancelRetire={onCancelRetire}
+          />
+        </CollapsibleSection>
 
-      <NodeContainersSection sample={sample} />
+        <CollapsibleSection title="接入凭证状态" className="watchtower-secondary">
+          <NodeAccessCredentialSection node={node} />
+        </CollapsibleSection>
+
+        <CollapsibleSection title="容器列表" className="watchtower-secondary">
+          <NodeContainersSection sample={sample} />
+        </CollapsibleSection>
+      </div>
 
       <NodeSnapshotMeta sample={sample} />
 

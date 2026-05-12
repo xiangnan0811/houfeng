@@ -1,0 +1,21 @@
+{"file": "web/src/styles/atoms.css", "reason": "补回被删除的 50+ 个 CSS 类：metric-chart, sparkline, collapsible-section, data-table 排序, drawer 方向, card--ribbon, btn:focus-visible, hostname, mono-digits, timestamp__abs, stepper, toggle, badge--success"}
+{"file": "web/src/styles/tokens.css", "reason": "移除 Google Fonts 外部依赖；恢复候风金色 accent；补回 --chart-* 调色板；修复 light theme --color-state-* 缺失"}
+{"file": "web/src/styles/reset.css", "reason": "修复全局 :focus-visible !important 覆盖"}
+{"file": "web/src/components/atoms/Modal.tsx", "reason": "移除与 useModalFocus hook 冲突的 previousFocusRef 焦点恢复逻辑"}
+{"file": "web/src/styles/pages.css", "reason": "修复 .page-body animation 重复触发问题"}
+{"file": "web/src/components/atoms/MetricChart.tsx", "reason": "修复 viewBox 与 width 不一致（width='100%' 但 viewBox 用固定像素）"}
+{"file": "web/src/pages/SettingsPage.tsx", "reason": "Modal 按钮文案改为'添加并编辑'"}
+{"file": "web/src/app/layout/layout.css", "reason": "恢复 GlobalSearch 菜单样式与移动端响应式断点，避免注释替代真实 CSS 契约"}
+{"file": "web/src/pages/node-detail/NodeDetailPageBody.tsx", "reason": "确认 watchtower-property-list 新契约并同步 Node detail 测试/行为"}
+{"file": "web/src/pages/target-detail/TargetDetailPageBody.tsx", "reason": "确认 watchtower-property-list 新契约并同步 Target detail 测试/行为"}
+{"file": "web/src/pages/NodeDetailPage.test.tsx", "reason": "同步 Node detail 属性列表、MetricChart ResizeObserver fallback 和二级信息新契约"}
+{"file": "web/src/pages/TargetDetailPage.test.tsx", "reason": "同步 Target detail 属性列表和二级信息新契约"}
+{"file": "web/src/pages/SettingsPage.test.tsx", "reason": "同步 Settings tabs / 通知渠道管理 Modal 新交互契约"}
+{"file": "web/src/components/ActionConfirmationCard.tsx", "reason": "允许确认卡承载本地错误，归档/退役失败留在对应确认区域"}
+{"file": "web/src/components/node-detail/NodeLabelsAndNote.tsx", "reason": "恢复标签/备注只读态 heading 与 标签/备注 前缀，保持可访问查询和信息语义"}
+{"file": "web/src/components/target-detail/TargetLabelsAndNote.tsx", "reason": "恢复标签/备注只读态 heading 与 标签/备注 前缀，保持可访问查询和信息语义"}
+{"file": "web/src/pages/node-detail/NodeAccessCredentialSection.tsx", "reason": "恢复接入凭证状态入口语义和 打开接入工作台 链接"}
+{"file": "web/src/pages/node-detail/NodeContainersSection.tsx", "reason": "将容器内容交给 NodeDetail 的折叠区承载，避免嵌套详情卡"}
+{"file": "web/src/pages/node-detail/NodeLifecycleSection.tsx", "reason": "恢复生命周期操作的本地确认/错误展示，并适配折叠区密度"}
+{"file": "web/src/pages/target-detail/TargetLifecycleSection.tsx", "reason": "恢复目标归档确认 alertdialog 与本地错误，同时保留详情页低频信息区"}
+{"file": "web/src/pages/target-detail/TargetProbeManagementSection.tsx", "reason": "编辑保存期间保留 添加 ProbeItem 禁用按钮，明确并发锁定状态"}
