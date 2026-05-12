@@ -1525,3 +1525,36 @@ Established the active v2 preview, browser sanity, and screenshot evidence workf
 ### Next Steps
 
 - None - task complete
+
+
+## Session 105: Harden glassmorphism web redesign
+
+**Date**: 2026-05-13
+**Task**: Harden glassmorphism web redesign
+**Branch**: `fix/glassmorphism-web-hardening`
+
+### Summary
+
+Reviewed and hardened the staged frontend glassmorphism redesign: restored missing styles and responsive search contracts, fixed MetricChart ResizeObserver fallback, corrected Settings notification-channel draft state, restored Node/Target detail secondary-section and confirmation contracts, and verified lint, typecheck, tests, build, and diff checks.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1c7385b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
