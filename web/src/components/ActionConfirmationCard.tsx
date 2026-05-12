@@ -10,6 +10,7 @@ export type ActionConfirmationCardProps = {
   unchanged: string
   confirmLabel: string
   cancelLabel?: string
+  error?: string | null
   disabled?: boolean
   onConfirm: () => void
   onCancel: () => void
@@ -38,6 +39,7 @@ export function ActionConfirmationCard({
   unchanged,
   confirmLabel,
   cancelLabel,
+  error = null,
   disabled = false,
   onConfirm,
   onCancel,
@@ -96,6 +98,11 @@ export function ActionConfirmationCard({
             {unchanged}
           </p>
         </div>
+        {error ? (
+          <p className="watchtower-runtime-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         <div className="action-confirm__actions">
           <Button variant="secondary" disabled={disabled} onClick={onCancel}>
             {cancelLabel ?? '取消'}

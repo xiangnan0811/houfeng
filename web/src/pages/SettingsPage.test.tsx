@@ -94,6 +94,15 @@ describe('SettingsPage', () => {
     vi.restoreAllMocks()
   })
 
+  function openTab(name: string) {
+    fireEvent.click(screen.getByRole('tab', { name }))
+  }
+
+  function openTelegramSettings() {
+    openTab('通知与告警')
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+  }
+
   it('loads persisted settings into the required sections and keeps Telegram and retention copy truthful', async () => {
     vi.stubGlobal(
       'fetch',
@@ -107,21 +116,19 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     expect(screen.getByText('设置', { selector: '.page-panel__eyebrow' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument()
     expect(screen.getByText('频率档位')).toBeInTheDocument()
-    expect(screen.getByText('全局默认')).toBeInTheDocument()
-    expect(screen.getByText('覆盖规则')).toBeInTheDocument()
-    expect(screen.getByText('保留策略')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '默认频率档位' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '全局默认规则' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '少量覆盖规则' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '数据保留策略' })).toBeInTheDocument()
-
-    expect(screen.getByLabelText('Telegram Chat ID')).toHaveValue('chat-id')
     expect(screen.getByLabelText('当前节点主机样本频率')).toHaveValue('5m')
-    expect((screen.getByLabelText('节点标签覆盖规则 JSON') as HTMLTextAreaElement).value).toContain(
-      '"label": "edge"',
-    )
+    expect(
+      screen.getByText('当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。'),
+    ).toBeInTheDocument()
+
+    openTelegramSettings()
+
+    expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument()
+    expect(screen.getByText('全局默认')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '全局默认规则' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Telegram Chat ID')).toHaveValue('chat-id')
 
     expect(
       screen.getByText(
@@ -131,14 +138,21 @@ describe('SettingsPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('****************oken')).toBeInTheDocument()
     expect(screen.queryByText('bot-token')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器')).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: '运行时接管' })).not.toBeChecked()
     expect(screen.getByText('当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。')).toBeInTheDocument()
-    expect(
-      screen.getByText('当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。'),
-    ).toBeInTheDocument()
     expect(
       screen.getByText('heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路。'),
     ).toBeInTheDocument()
+
+    openTab('高级与策略')
+
+    expect(screen.getByText('覆盖规则')).toBeInTheDocument()
+    expect(screen.getByText('保留策略')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '少量覆盖规则' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '数据保留策略' })).toBeInTheDocument()
+    expect((screen.getByLabelText('节点标签覆盖规则 JSON') as HTMLTextAreaElement).value).toContain(
+      '"label": "edge"',
+    )
     expect(
       screen.getByText(
         '仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；异常默认覆盖仍仅作为持久化策略保存。',
@@ -172,7 +186,9 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
-    expect(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器')).toBeChecked()
+    openTelegramSettings()
+
+    expect(screen.getByRole('switch', { name: '运行时接管' })).toBeChecked()
     expect(screen.getByText('当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。')).toBeInTheDocument()
   })
 
@@ -199,6 +215,7 @@ describe('SettingsPage', () => {
     fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
       target: { value: '1m' },
     })
+    openTab('高级与策略')
     fireEvent.change(screen.getByLabelText('原始层保留天数'), {
       target: { value: '14' },
     })
@@ -288,13 +305,16 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器'))
+    openTelegramSettings()
+    fireEvent.click(screen.getByRole('switch', { name: '运行时接管' }))
     fireEvent.change(screen.getByLabelText('新的 Telegram Bot Token'), {
       target: { value: 'replacement-token' },
     })
+    openTab('通用与外观')
     fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
       target: { value: '1m' },
     })
+    openTab('高级与策略')
     fireEvent.change(screen.getByLabelText('原始层保留天数'), {
       target: { value: '14' },
     })
@@ -388,7 +408,8 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByLabelText('使用持久化 Telegram 配置接管运行中的通知器'))
+    openTelegramSettings()
+    fireEvent.click(screen.getByRole('switch', { name: '运行时接管' }))
     fireEvent.change(screen.getByLabelText('Telegram Chat ID'), {
       target: { value: 'new-chat-id' },
     })
@@ -458,6 +479,8 @@ describe('SettingsPage', () => {
       expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument(),
     )
 
+    openTab('高级与策略')
+
     // Three OverrideTextarea instances (node labels / target types / target labels)
     // each load with valid JSON from the persisted settings, so each renders a 预览 summary.
     const previewSummaries = screen.getAllByText('预览')
@@ -482,6 +505,8 @@ describe('SettingsPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument(),
     )
+
+    openTab('高级与策略')
 
     // Initially three valid previews appear.
     expect(screen.getAllByText('预览').length).toBe(3)
@@ -509,6 +534,8 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
+    openTab('通知与告警')
+
     fireEvent.change(screen.getByLabelText('心跳间隔秒数'), {
       target: { value: '30abc' },
     })
@@ -524,5 +551,61 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('心跳间隔秒数必须为正整数。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not persist notification channel draft fields when the add-channel modal is dismissed', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          ...settingsResponseBody,
+          telegram: {
+            chat_id: '',
+            token_present: false,
+            token_masked_summary: '',
+            runtime_managed: false,
+            runtime_apply_active: false,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          ...settingsResponseBody,
+          telegram: {
+            chat_id: '',
+            token_present: false,
+            token_masked_summary: '',
+            runtime_managed: false,
+            runtime_apply_active: false,
+          },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SettingsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument(),
+    )
+
+    openTab('通知与告警')
+    fireEvent.click(screen.getByRole('button', { name: '+ 新增通知渠道' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Telegram' }))
+    fireEvent.change(screen.getByLabelText('新的 Telegram Bot Token'), {
+      target: { value: 'draft-token' },
+    })
+    fireEvent.change(screen.getByLabelText('Telegram Chat ID'), {
+      target: { value: 'draft-chat' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      telegram: {
+        chat_id: '',
+        runtime_managed: false,
+      },
+    })
   })
 })

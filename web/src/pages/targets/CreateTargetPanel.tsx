@@ -154,7 +154,7 @@ export function CreateTargetPanel({
           </p>
         ) : null}
         <div className="page-form-actions">
-          <button type="submit" disabled={submitting}>
+          <button type="submit" className="btn btn--primary btn--md" disabled={submitting}>
             {submitting ? '正在创建…' : '创建目标'}
           </button>
         </div>

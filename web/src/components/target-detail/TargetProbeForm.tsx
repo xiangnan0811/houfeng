@@ -212,8 +212,8 @@ export function TargetProbeForm({
           </p>
         ) : null}
         {error ? <p>{error}</p> : null}
-        <div>
-          <button type="submit" disabled={submitting}>
+        <div className="page-form-actions">
+          <button type="submit" className="btn btn--primary btn--md" disabled={submitting}>
             {submitting
               ? mode.kind === 'edit'
                 ? '正在保存…'

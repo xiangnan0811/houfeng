@@ -5,5 +5,5 @@ type SectionIntroProps = {
 }
 
 export function SectionIntro({ children }: SectionIntroProps) {
-  return <p className="empty-inline">{children}</p>
+  return <div style={{ fontSize: 'var(--type-small-size)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{children}</div>
 }

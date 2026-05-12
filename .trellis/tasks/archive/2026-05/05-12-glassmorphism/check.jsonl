@@ -1,0 +1,27 @@
+{"check": "npm run build", "expected": "success"}
+{"check": "npm run lint", "expected": "no errors"}
+{"check": "npx tsc --noEmit", "expected": "no errors"}
+{"check": "TMPDIR=$PWD/.tmp npm run test -- --run", "expected": "success"}
+{"check": "git diff --cached --check", "expected": "success"}
+{"check": "grep -c 'https://fonts.googleapis.com' web/src/styles/tokens.css", "expected": "0"}
+{"check": "grep -R -- '--ease-fluid\\|--ease-bounce\\|--dur-normal\\|--ease-spring\\|--type-h3-size\\|--type-heading-line\\|--type-display-font\\|--type-h1-font' web/src/styles web/src/app/layout/layout.css", "expected": "not found"}
+{"check": "grep '.global-search__menu' web/src/app/layout/layout.css", "expected": "found"}
+{"check": "grep '@media (max-width: 860px)' web/src/app/layout/layout.css", "expected": "found"}
+{"check": "grep '.badge--success' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.metric-chart' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.sparkline' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.collapsible-section' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.drawer--left' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.drawer--right' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.card--state' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.btn:focus-visible' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.stepper' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '.data-table__sort' web/src/styles/atoms.css", "expected": "found"}
+{"check": "grep '!important' web/src/styles/reset.css | grep focus-visible", "expected": "not found"}
+{"check": "cd web && TMPDIR=$PWD/.tmp npx vitest run src/components/node-detail/NodeLabelsAndNote.test.tsx src/components/target-detail/TargetLabelsAndNote.test.tsx src/pages/NodeDetailPage.test.tsx src/pages/TargetDetailPage.test.tsx --run", "result": "pass", "actual": "4 files passed, 94 tests passed"}
+{"check": "cd web && TMPDIR=$PWD/.tmp npm run test -- --run", "result": "pass", "actual": "60 files passed, 458 tests passed; Node warned about --localstorage-file path"}
+{"check": "cd web && npm run lint", "result": "pass", "actual": "no errors"}
+{"check": "cd web && npx tsc --noEmit", "result": "pass", "actual": "no errors"}
+{"check": "git diff --check", "result": "pass", "actual": "no whitespace errors"}
+{"check": "rg undefined token / transition-all / outline-none / pure-color scan", "result": "pass", "actual": "no scoped matches"}
+{"check": "cd web && npm run build", "result": "pass", "actual": "build succeeded; Vite emitted existing >500 kB chunk warning"}

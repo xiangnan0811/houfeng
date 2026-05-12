@@ -737,51 +737,53 @@ export function VPSDetailPage() {
         <p className="asset-operation-feedback" role="status">{experienceNotice}</p>
       ) : null}
 
-      <VPSLifecycleCard
-        detail={detail}
-        isArchived={isArchived}
-        confirmingArchive={lifecycleConfirmingArchive}
-        submitting={lifecycleSubmitting}
-        error={lifecycleError}
-        notice={lifecycleNotice}
-        onArchiveConfirmOpenChange={handleLifecycleConfirmingArchiveChange}
-        onArchive={() => void handleArchiveVPS()}
-        onRestore={() => void handleRestoreVPS()}
-      />
-
-      <VPSFactsSection
-        detail={detail}
-        error={activeDrawer === 'facts' ? null : factError}
-        notice={factNotice}
-        onEdit={() => openFactEdit(detail)}
-      />
-
-      <VPSNodeLinksSection
-        nodes={detail.node_links}
-        unlinkingNodeId={unlinkingNodeId}
-        linkFeedback={activeDrawer === 'node-link' ? null : linkFeedback}
-        linkFeedbackIsError={linkFeedbackIsError}
-        onOpenLink={() => openDrawer('node-link')}
-        onUnlinkNode={(node) => void handleUnlinkNode(node)}
-      />
-
-      <VPSServicesSection
-        services={state.services}
-        error={activeDrawer === 'service' ? null : serviceError}
-        notice={serviceNotice}
-        onCreate={() => openDrawer('service')}
-      />
-
-      <VPSDomainsSection
-        domains={state.domains}
-        error={activeDrawer === 'domain' ? null : domainError}
-        notice={domainNotice}
-        onCreate={() => openDrawer('domain')}
-      />
-
       <VPSTimelinePanel timeline={timeline} />
 
-      <VPSAccessSummarySection detail={detail} />
+      <div className="page-stack">
+        <VPSLifecycleCard
+          detail={detail}
+          isArchived={isArchived}
+          confirmingArchive={lifecycleConfirmingArchive}
+          submitting={lifecycleSubmitting}
+          error={lifecycleError}
+          notice={lifecycleNotice}
+          onArchiveConfirmOpenChange={handleLifecycleConfirmingArchiveChange}
+          onArchive={() => void handleArchiveVPS()}
+          onRestore={() => void handleRestoreVPS()}
+        />
+
+        <VPSFactsSection
+          detail={detail}
+          error={activeDrawer === 'facts' ? null : factError}
+          notice={factNotice}
+          onEdit={() => openFactEdit(detail)}
+        />
+
+        <VPSNodeLinksSection
+          nodes={detail.node_links}
+          unlinkingNodeId={unlinkingNodeId}
+          linkFeedback={activeDrawer === 'node-link' ? null : linkFeedback}
+          linkFeedbackIsError={linkFeedbackIsError}
+          onOpenLink={() => openDrawer('node-link')}
+          onUnlinkNode={(node) => void handleUnlinkNode(node)}
+        />
+
+        <VPSServicesSection
+          services={state.services}
+          error={activeDrawer === 'service' ? null : serviceError}
+          notice={serviceNotice}
+          onCreate={() => openDrawer('service')}
+        />
+
+        <VPSDomainsSection
+          domains={state.domains}
+          error={activeDrawer === 'domain' ? null : domainError}
+          notice={domainNotice}
+          onCreate={() => openDrawer('domain')}
+        />
+
+        <VPSAccessSummarySection detail={detail} />
+      </div>
 
       <Drawer
         open={activeDrawer !== null}

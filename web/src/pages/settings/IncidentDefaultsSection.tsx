@@ -1,4 +1,5 @@
 import { DetailSection } from '../../components/DetailSection'
+import { Input, Toggle } from '../../components/atoms'
 import type { SettingsIncidentDefaultsForm } from './types'
 import { SectionIntro } from './SectionIntro'
 
@@ -17,18 +18,13 @@ type ThresholdInputProps = {
 
 function ThresholdInput({ ariaLabel, value, onChange }: ThresholdInputProps) {
   return (
-    <label className="summary-card">
-      <span className="summary-card__label">{ariaLabel}</span>
-      <span className="input-with-suffix">
-        <input
-          aria-label={ariaLabel}
-          inputMode="numeric"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <span className="input-with-suffix__unit">%</span>
-      </span>
-    </label>
+    <Input
+      label={ariaLabel}
+      inputMode="numeric"
+      value={value}
+      trailingIcon="%"
+      onChange={(event) => onChange(event.target.value)}
+    />
   )
 }
 
@@ -50,9 +46,9 @@ function MetricThresholdGroup({
   onUpdate,
 }: MetricThresholdGroupProps) {
   return (
-    <div className="settings-cluster settings-cluster--tight">
+    <div className="settings-fieldset">
       <span className="section-heading__eyebrow">{label}</span>
-      <div className="summary-grid summary-grid--numeric">
+      <div className="settings-form-grid settings-form-grid--tight">
         <ThresholdInput
           ariaLabel={`${label} 关注阈值`}
           value={warning}
@@ -85,66 +81,45 @@ function IncidentDefaultsEditor({ value, onChange }: IncidentDefaultsSectionProp
 
   return (
     <div className="settings-cluster">
-      <div className="summary-grid">
-        <label className="summary-card">
-          <span className="summary-card__label">心跳间隔秒数</span>
-          <input
-            aria-label="心跳间隔秒数"
-            inputMode="numeric"
-            value={value.heartbeatIntervalSeconds}
-            onChange={(event) => update('heartbeatIntervalSeconds', event.target.value)}
-          />
-        </label>
+      <div className="settings-form-grid">
+        <Input
+          label="心跳间隔秒数"
+          inputMode="numeric"
+          value={value.heartbeatIntervalSeconds}
+          onChange={(event) => update('heartbeatIntervalSeconds', event.target.value)}
+        />
 
-        <label className="summary-card">
-          <span className="summary-card__label">失联判定阈值</span>
-          <input
-            aria-label="失联判定阈值"
-            inputMode="numeric"
-            value={value.staleThresholdIntervals}
-            onChange={(event) => update('staleThresholdIntervals', event.target.value)}
-          />
-        </label>
+        <Input
+          label="失联判定阈值"
+          inputMode="numeric"
+          value={value.staleThresholdIntervals}
+          onChange={(event) => update('staleThresholdIntervals', event.target.value)}
+        />
 
-        <label className="summary-card">
-          <span className="summary-card__label">扫描间隔秒数</span>
-          <input
-            aria-label="扫描间隔秒数"
-            inputMode="numeric"
-            value={value.sweepIntervalSeconds}
-            onChange={(event) => update('sweepIntervalSeconds', event.target.value)}
-          />
-        </label>
+        <Input
+          label="扫描间隔秒数"
+          inputMode="numeric"
+          value={value.sweepIntervalSeconds}
+          onChange={(event) => update('sweepIntervalSeconds', event.target.value)}
+        />
 
-        <label className="summary-card">
-          <span className="summary-card__label">异常开始通知</span>
-          <input
-            aria-label="异常开始通知"
-            type="checkbox"
+        <div className="settings-fieldset" style={{ gridColumn: '1 / -1' }}>
+          <Toggle
+            label="异常开始通知"
             checked={value.notifyOnStarted}
-            onChange={(event) => update('notifyOnStarted', event.target.checked)}
+            onChange={(checked) => update('notifyOnStarted', checked)}
           />
-        </label>
-
-        <label className="summary-card">
-          <span className="summary-card__label">异常升级通知</span>
-          <input
-            aria-label="异常升级通知"
-            type="checkbox"
+          <Toggle
+            label="异常升级通知"
             checked={value.notifyOnEscalated}
-            onChange={(event) => update('notifyOnEscalated', event.target.checked)}
+            onChange={(checked) => update('notifyOnEscalated', checked)}
           />
-        </label>
-
-        <label className="summary-card">
-          <span className="summary-card__label">异常恢复通知</span>
-          <input
-            aria-label="异常恢复通知"
-            type="checkbox"
+          <Toggle
+            label="异常恢复通知"
             checked={value.notifyOnRecovered}
-            onChange={(event) => update('notifyOnRecovered', event.target.checked)}
+            onChange={(checked) => update('notifyOnRecovered', checked)}
           />
-        </label>
+        </div>
       </div>
 
       <MetricThresholdGroup

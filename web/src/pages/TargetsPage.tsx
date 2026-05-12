@@ -561,7 +561,7 @@ export function TargetsPage() {
           <h3>当前还没有目标</h3>
           <p>创建第一个目标后，可以继续为它配置 ProbeItem。</p>
           <p>
-            <button type="button" onClick={() => setCreateOpen(true)}>
+            <button type="button" className="btn btn--primary btn--md" onClick={() => setCreateOpen(true)}>
               创建第一个目标
             </button>
           </p>
@@ -596,7 +596,7 @@ export function TargetsPage() {
               <h3>没有匹配当前筛选的目标</h3>
               <p>请尝试调整筛选条件，或清空筛选恢复完整列表。</p>
               <p>
-                <button type="button" onClick={clearAllFilters}>
+                <button type="button" className="btn btn--ghost btn--md" onClick={clearAllFilters}>
                   清空筛选
                 </button>
               </p>

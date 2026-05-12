@@ -1,5 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
+import { Tabs } from '../components/atoms/Tabs'
+import { Modal } from '../components/atoms/Modal'
+import { DetailSection } from '../components/DetailSection'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
 import type {
   FeishuSettingsInput,
@@ -27,6 +30,8 @@ type State = {
   settings: SettingsRecord | null
   form: SettingsFormState | null
 }
+
+type NotificationChannel = 'telegram' | 'feishu'
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -297,6 +302,7 @@ function buildUpdateInput(form: SettingsFormState, currentSettings: SettingsReco
 }
 
 export function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<'general' | 'notifications' | 'advanced'>('general')
   const [state, setState] = useState<State>({
     loading: true,
     saving: false,
@@ -306,6 +312,32 @@ export function SettingsPage() {
     settings: null,
     form: null,
   })
+
+  // Channel Manager State
+  const [modalState, setModalState] = useState<'closed' | 'select' | 'configure-telegram' | 'configure-feishu'>('closed')
+  const [channelDraft, setChannelDraft] = useState<SettingsFormState | null>(null)
+  const [activeChannels, setActiveChannels] = useState<Set<NotificationChannel>>(new Set())
+  const [expandedChannels, setExpandedChannels] = useState<Set<NotificationChannel>>(new Set())
+
+  // Initialize active channels once settings are loaded
+  useEffect(() => {
+    if (state.settings && state.form) {
+      const active = new Set<NotificationChannel>()
+      if (
+        state.settings.telegram.token_present ||
+        state.settings.telegram.runtime_managed ||
+        state.form.telegramBotToken ||
+        state.form.telegramChatId
+      ) {
+        active.add('telegram')
+      }
+      if (state.form.feishuEnabled || state.form.feishuWebhookUrl.trim()) {
+        active.add('feishu')
+      }
+      // Only set initial active channels once when loaded
+      setActiveChannels((prev) => (prev.size === 0 ? active : prev))
+    }
+  }, [state.settings, state.form])
 
   useEffect(() => {
     let cancelled = false
@@ -366,6 +398,38 @@ export function SettingsPage() {
     }))
   }
 
+  function closeChannelModal() {
+    setChannelDraft(null)
+    setModalState('closed')
+  }
+
+  function backToChannelSelect() {
+    setChannelDraft(null)
+    setModalState('select')
+  }
+
+  function openChannelConfig(channel: NotificationChannel) {
+    setChannelDraft(form)
+    setModalState(channel === 'telegram' ? 'configure-telegram' : 'configure-feishu')
+  }
+
+  function patchChannelDraft(updater: (draft: SettingsFormState) => SettingsFormState) {
+    setChannelDraft((currentDraft) => updater(currentDraft ?? form))
+  }
+
+  function confirmChannel(channel: NotificationChannel) {
+    const nextForm = channelDraft ?? form
+    setState((current) => ({
+      ...current,
+      form: nextForm,
+      saveError: null,
+      saveSuccess: null,
+    }))
+    setActiveChannels((prev) => new Set(prev).add(channel))
+    setExpandedChannels((prev) => new Set(prev).add(channel))
+    closeChannelModal()
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -411,63 +475,213 @@ export function SettingsPage() {
         <p className="page-panel__description">
           集中维护 Telegram 通知、默认频率、全局规则、少量覆盖与保留策略，保持页面信息密度低于观测页。
         </p>
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          <Tabs
+            variant="pill"
+            value={activeTab}
+            onChange={setActiveTab}
+            items={[
+              { value: 'general', label: '通用与外观' },
+              { value: 'notifications', label: '通知与告警' },
+              { value: 'advanced', label: '高级与策略' },
+            ]}
+          />
+        </div>
       </section>
 
-      <ThemeSettingsSection />
+      <div style={{ display: activeTab === 'general' ? 'contents' : 'none' }}>
+        <ThemeSettingsSection />
+        <FrequencyDefaultsSection
+          hostSampleFrequencyTier={form.hostSampleFrequencyTier}
+          probeFrequencyDefaults={form.probeFrequencyDefaults}
+          onHostSampleFrequencyChange={(value) =>
+            patchForm((currentForm) => ({ ...currentForm, hostSampleFrequencyTier: value }))
+          }
+          onProbeFrequencyDefaultsChange={(patch) =>
+            patchForm((currentForm) => ({
+              ...currentForm,
+              probeFrequencyDefaults: { ...currentForm.probeFrequencyDefaults, ...patch },
+            }))
+          }
+        />
+      </div>
 
-      <TelegramSettingsSection
-        settings={settings.telegram}
-        form={form}
-        onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
-      />
+      <div style={{ display: activeTab === 'notifications' ? 'contents' : 'none' }}>
+        {activeChannels.has('telegram') && (
+          <TelegramSettingsSection
+            settings={settings.telegram}
+            form={form}
+            isExpanded={expandedChannels.has('telegram')}
+            onToggleExpand={() => setExpandedChannels(prev => {
+              const next = new Set(prev)
+              if (next.has('telegram')) next.delete('telegram')
+              else next.add('telegram')
+              return next
+            })}
+            onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
+          />
+        )}
 
-      <FeishuSettingsSection
-        form={form}
-        onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
-      />
+        {activeChannels.has('feishu') && (
+          <FeishuSettingsSection
+            form={form}
+            isExpanded={expandedChannels.has('feishu')}
+            onToggleExpand={() => setExpandedChannels(prev => {
+              const next = new Set(prev)
+              if (next.has('feishu')) next.delete('feishu')
+              else next.add('feishu')
+              return next
+            })}
+            onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
+          />
+        )}
 
-      <FrequencyDefaultsSection
-        hostSampleFrequencyTier={form.hostSampleFrequencyTier}
-        probeFrequencyDefaults={form.probeFrequencyDefaults}
-        onHostSampleFrequencyChange={(value) =>
-          patchForm((currentForm) => ({ ...currentForm, hostSampleFrequencyTier: value }))
-        }
-        onProbeFrequencyDefaultsChange={(patch) =>
-          patchForm((currentForm) => ({
-            ...currentForm,
-            probeFrequencyDefaults: { ...currentForm.probeFrequencyDefaults, ...patch },
-          }))
-        }
-      />
+        <DetailSection eyebrow="渠道管理" title="新增通知渠道">
+          {activeChannels.size === 0 && (
+            <p style={{ fontSize: 'var(--type-small-size)', color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>当前未配置任何通知渠道，请点击下方按钮添加。</p>
+          )}
+          <button
+            type="button"
+            className="btn btn--secondary btn--md"
+            onClick={() => {
+              setChannelDraft(null)
+              setModalState('select')
+            }}
+          >
+            + 新增通知渠道
+          </button>
+        </DetailSection>
 
-      <IncidentDefaultsSection
-        value={form.incidentDefaults}
-        onChange={(next) => patchForm((currentForm) => ({ ...currentForm, incidentDefaults: next }))}
-      />
+        <IncidentDefaultsSection
+          value={form.incidentDefaults}
+          onChange={(next) => patchForm((currentForm) => ({ ...currentForm, incidentDefaults: next }))}
+        />
+      </div>
 
-      <OverrideRulesSection
-        form={form}
-        onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
-      />
+      <div style={{ display: activeTab === 'advanced' ? 'contents' : 'none' }}>
+        <OverrideRulesSection
+          form={form}
+          onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
+        />
 
-      <RetentionPolicySection
-        value={form.retentionPolicy}
-        onChange={(patch) =>
-          patchForm((currentForm) => ({
-            ...currentForm,
-            retentionPolicy: { ...currentForm.retentionPolicy, ...patch },
-          }))
-        }
-      />
+        <RetentionPolicySection
+          value={form.retentionPolicy}
+          onChange={(patch) =>
+            patchForm((currentForm) => ({
+              ...currentForm,
+              retentionPolicy: { ...currentForm.retentionPolicy, ...patch },
+            }))
+          }
+        />
+      </div>
 
       {state.saveError ? <section className="page-panel">{state.saveError}</section> : null}
       {state.saveSuccess ? <section className="page-panel">{state.saveSuccess}</section> : null}
 
       <div className="settings-actions">
-        <button type="submit" disabled={state.saving}>
+        <button type="submit" className="btn btn--primary btn--md" disabled={state.saving}>
           {state.saving ? '正在保存…' : '保存设置'}
         </button>
       </div>
+
+      <Modal
+        open={modalState !== 'closed'}
+        onClose={closeChannelModal}
+        title={
+          modalState === 'select' ? '新增通知渠道' :
+          modalState === 'configure-telegram' ? '配置 Telegram 通知' :
+          modalState === 'configure-feishu' ? '配置飞书通知' : ''
+        }
+        footer={
+          modalState === 'configure-telegram' ? (
+            <>
+              <button type="button" className="btn btn--ghost btn--md" onClick={backToChannelSelect}>
+                返回
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary btn--md"
+                onClick={() => confirmChannel('telegram')}
+              >
+                添加并编辑
+              </button>
+            </>
+          ) : modalState === 'configure-feishu' ? (
+            <>
+              <button type="button" className="btn btn--ghost btn--md" onClick={backToChannelSelect}>
+                返回
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary btn--md"
+                onClick={() => confirmChannel('feishu')}
+              >
+                添加并编辑
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {modalState === 'select' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <p className="empty-inline" style={{ marginBottom: 'var(--space-2)' }}>
+              请选择要配置的通知渠道：
+            </p>
+            <button
+              type="button"
+              className="settings-channel-option"
+              aria-label="Telegram"
+              disabled={activeChannels.has('telegram')}
+              onClick={() => openChannelConfig('telegram')}
+            >
+              <div className="settings-channel-option__content">
+                <span className="settings-channel-option__icon" aria-hidden="true">
+                  TG
+                </span>
+                <div>
+                  <strong style={{ display: 'block' }}>Telegram</strong>
+                  <span className="empty-inline" style={{ fontSize: '12px' }}>通过 Telegram Bot 发送告警通知，支持运行时接管</span>
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="settings-channel-option"
+              aria-label="飞书 (Feishu)"
+              disabled={activeChannels.has('feishu')}
+              onClick={() => openChannelConfig('feishu')}
+            >
+              <div className="settings-channel-option__content">
+                <span className="settings-channel-option__icon" aria-hidden="true">
+                  FS
+                </span>
+                <div>
+                  <strong style={{ display: 'block' }}>飞书 (Feishu)</strong>
+                  <span className="empty-inline" style={{ fontSize: '12px' }}>通过飞书群组 Webhook 机器人发送告警卡片</span>
+                </div>
+              </div>
+            </button>
+          </div>
+        )}
+
+        {modalState === 'configure-telegram' && (
+          <TelegramSettingsSection
+            wrapper="none"
+            settings={settings.telegram}
+            form={channelDraft ?? form}
+            onChange={(patch) => patchChannelDraft((currentForm) => ({ ...currentForm, ...patch }))}
+          />
+        )}
+
+        {modalState === 'configure-feishu' && (
+          <FeishuSettingsSection
+            wrapper="none"
+            form={channelDraft ?? form}
+            onChange={(patch) => patchChannelDraft((currentForm) => ({ ...currentForm, ...patch }))}
+          />
+        )}
+      </Modal>
     </form>
   )
 }

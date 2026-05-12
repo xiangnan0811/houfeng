@@ -109,8 +109,8 @@ export function CreateNodeDrawer({
           </label>
         </p>
         {error ? <p>{error}</p> : null}
-        <div>
-          <button type="submit" disabled={submitting}>
+        <div className="page-form-actions">
+          <button type="submit" className="btn btn--primary btn--md" disabled={submitting}>
             {submitting ? '正在创建…' : '创建并生成 Token'}
           </button>
         </div>

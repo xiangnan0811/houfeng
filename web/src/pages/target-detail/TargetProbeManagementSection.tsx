@@ -1,4 +1,5 @@
 import type { FormEvent, RefObject } from 'react'
+import { Button } from '../../components/atoms/Button'
 
 import {
   TargetProbeForm,
@@ -40,26 +41,36 @@ export function TargetProbeManagementSection({
   onFieldChange,
 }: TargetProbeManagementSectionProps) {
   return (
-    <div>
-      <button
-        ref={addProbeButtonRef}
-        type="button"
-        disabled={addDisabled}
-        onClick={onToggleCreate}
-      >
-        添加 ProbeItem
-      </button>
-      {probeMutationError ? <p>{probeMutationError}</p> : null}
+    <div className="watchtower-property-item" style={{ flexDirection: probeCreateOpen ? 'column' : 'row', alignItems: probeCreateOpen ? 'stretch' : 'center' }}>
+      <div className="watchtower-property-item__main">
+        <span className="watchtower-property-item__title">探测项目配置</span>
+        <span className="watchtower-property-item__desc">配置目标的主机存活与应用探测规则。</span>
+        {probeMutationError ? <span role="alert" style={{ color: 'var(--color-state-critical)' }}>{probeMutationError}</span> : null}
+      </div>
+
+      <div className="watchtower-property-item__actions">
+        <Button
+          ref={addProbeButtonRef}
+          variant="secondary"
+          disabled={addDisabled || probeCreateOpen}
+          onClick={onToggleCreate}
+        >
+          添加 ProbeItem
+        </Button>
+      </div>
+
       {probeCreateOpen ? (
-        <TargetProbeForm
-          mode={probeFormMode}
-          form={probeCreateForm}
-          submitting={probeCreateSubmitting}
-          error={probeCreateError}
-          onSubmit={onSubmit}
-          onProbeKindChange={onProbeKindChange}
-          onFieldChange={onFieldChange}
-        />
+        <div style={{ marginTop: 'var(--space-4)', width: '100%' }}>
+          <TargetProbeForm
+            mode={probeFormMode}
+            form={probeCreateForm}
+            submitting={probeCreateSubmitting}
+            error={probeCreateError}
+            onSubmit={onSubmit}
+            onProbeKindChange={onProbeKindChange}
+            onFieldChange={onFieldChange}
+          />
+        </div>
       ) : null}
     </div>
   )
