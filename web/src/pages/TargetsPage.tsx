@@ -25,8 +25,14 @@ import { buildTargetsTableColumns } from './targets/TargetsTableColumns'
 import {
   actionButtonKey,
   buildCreateTargetInput,
+  buildTargetEvidenceLead,
+  countAbnormalTargets,
+  countArchivedTargets,
+  countCoverageGapTargets,
+  countPausedTargets,
   dedupeLabels,
   describeError,
+  describeTargetFilterContext,
   distinctSorted,
   focusRestoreActionAfterSuccess,
   initialCreateForm,
@@ -34,6 +40,7 @@ import {
   mergeRuntimeTargetRecord,
   parseLabels,
   parseMultiValue,
+  pickTopTargetEvidence,
 } from './targets/targetHelpers'
 import type {
   CreateTargetFormState,
@@ -362,12 +369,56 @@ export function TargetsPage() {
     filterState.abnormal
 
   const groupFilterActive = filterState.group !== null
-  const abnormalTargetCount = targets.filter(
-    (target) => target.current_health_status !== '正常',
-  ).length
-  const pausedTargetCount = targets.filter((target) => target.run_status === '暂停').length
-  const archivedTargetCount = targets.filter((target) => target.run_status === '已归档').length
-  const serviceTargetCount = targets.filter((target) => target.target_type === 'service').length
+  const filterContext = useMemo(() => describeTargetFilterContext(filterState), [filterState])
+  const topEvidence = useMemo(
+    () => pickTopTargetEvidence(filteredTargets),
+    [filteredTargets],
+  )
+  const abnormalTargetCount = useMemo(() => countAbnormalTargets(targets), [targets])
+  const pausedTargetCount = useMemo(() => countPausedTargets(targets), [targets])
+  const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
+  const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
+  const displayedAbnormalTargetCount = useMemo(
+    () => countAbnormalTargets(filteredTargets),
+    [filteredTargets],
+  )
+  const displayedPausedTargetCount = useMemo(
+    () => countPausedTargets(filteredTargets),
+    [filteredTargets],
+  )
+  const displayedArchivedTargetCount = useMemo(
+    () => countArchivedTargets(filteredTargets),
+    [filteredTargets],
+  )
+  const displayedCoverageGapTargetCount = useMemo(
+    () => countCoverageGapTargets(filteredTargets),
+    [filteredTargets],
+  )
+  const serviceTargetCount = useMemo(
+    () => targets.filter((target) => target.target_type === 'service').length,
+    [targets],
+  )
+  const evidenceLead = useMemo(
+    () =>
+      buildTargetEvidenceLead({
+        totalTargetCount: targets.length,
+        displayedTargetCount: filteredTargets.length,
+        abnormalTargetCount: displayedAbnormalTargetCount,
+        pausedTargetCount: displayedPausedTargetCount,
+        archivedTargetCount: displayedArchivedTargetCount,
+        coverageGapTargetCount: displayedCoverageGapTargetCount,
+        hasActiveFilters,
+      }),
+    [
+      targets.length,
+      filteredTargets.length,
+      displayedAbnormalTargetCount,
+      displayedPausedTargetCount,
+      displayedArchivedTargetCount,
+      displayedCoverageGapTargetCount,
+      hasActiveFilters,
+    ],
+  )
 
   async function executeBatchTargetAction(action: TargetRuntimeAction) {
     if (action === 'pause' || action === 'archive') {
@@ -546,14 +597,21 @@ export function TargetsPage() {
         abnormalTargetCount={abnormalTargetCount}
         pausedTargetCount={pausedTargetCount}
         archivedTargetCount={archivedTargetCount}
+        coverageGapTargetCount={coverageGapTargetCount}
         executionLabelCount={executionLabelOptions.length}
         serviceTargetCount={serviceTargetCount}
+        evidenceLead={evidenceLead}
+        topEvidence={topEvidence}
+        filterContext={filterContext}
         hasActiveFilters={hasActiveFilters}
         onAbnormalClick={() => setAbnormalFilter(abnormalTargetCount > 0)}
         onPausedClick={() => setSingleFilter('run_status', pausedTargetCount > 0 ? '暂停' : null)}
         onArchivedClick={() =>
           setSingleFilter('run_status', archivedTargetCount > 0 ? '已归档' : null)
         }
+        onCoverageClick={() => navigate('/nodes')}
+        onClearFilters={clearAllFilters}
+        onCreateClick={() => setCreateOpen(true)}
       />
 
       {targets.length === 0 ? (

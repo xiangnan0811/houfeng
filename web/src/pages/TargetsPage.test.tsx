@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type * as ApiModule from '../lib/api'
@@ -51,6 +51,11 @@ function deferred<T>() {
     resolve = innerResolve
   })
   return { promise, resolve }
+}
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output aria-label="location">{`${location.pathname}${location.search}`}</output>
 }
 
 describe('TargetsPage', () => {
@@ -1127,6 +1132,10 @@ describe('TargetsPage', () => {
     expect(
       screen.getByRole('button', { name: '移除筛选 仅看异常' }),
     ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '先处理 1 个异常入口' })).toBeInTheDocument()
+    expect(within(screen.getByLabelText('当前入口证据筛选')).getByText('仅看异常')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '优先核对：Failing API' })).toBeInTheDocument()
+    expect(screen.getByText('健康状态：告警')).toBeInTheDocument()
   })
 
   it('uses run_status=暂停 from Dashboard deep links as the initial target filter', async () => {
@@ -1154,6 +1163,10 @@ describe('TargetsPage', () => {
 
     expect(screen.queryByText('Enabled API')).not.toBeInTheDocument()
     expect(screen.getByText('运行状态: 暂停')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '核对 1 个暂停 / 归档入口' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('运行 暂停')).toBeInTheDocument()
   })
 
   it('uses run_status=已归档 from Dashboard deep links as the initial target filter', async () => {
@@ -1181,6 +1194,10 @@ describe('TargetsPage', () => {
 
     expect(screen.queryByText('Enabled API')).not.toBeInTheDocument()
     expect(screen.getByText('运行状态: 已归档')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '核对 1 个暂停 / 归档入口' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('运行 已归档')).toBeInTheDocument()
   })
 
   it('toggles "仅看异常" and clears all filters via FilterBar', async () => {
@@ -1272,8 +1289,14 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(screen.getByText('Healthy API')).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '先处理 1 个异常入口' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '优先核对：Failing API' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看入口证据' })).toHaveAttribute(
+      'href',
+      '/targets/tg_alert',
+    )
     expect(screen.getByText('执行覆盖')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'VPS 台账' })).toHaveAttribute('href', '/vps')
+    expect(screen.getAllByRole('link', { name: 'VPS 台账' })[0]).toHaveAttribute('href', '/vps')
     expect(screen.getByRole('link', { name: '资产决策' })).toHaveAttribute(
       'href',
       '/asset-decisions',
@@ -1296,6 +1319,111 @@ describe('TargetsPage', () => {
     )
     expect(screen.getByText('Paused API')).toBeInTheDocument()
     expect(screen.getByText('运行状态: 暂停')).toBeInTheDocument()
+  })
+
+  it('clears an empty Dashboard target filter from the evidence lead', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_healthy',
+          name: 'Healthy API',
+          current_health_status: '正常',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets?abnormal=1']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '没有匹配当前入口证据' })).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('location')).toHaveTextContent('/targets?abnormal=1')
+
+    fireEvent.click(screen.getByRole('button', { name: '清空入口筛选' }))
+
+    await waitFor(() => expect(screen.getByText('Healthy API')).toBeInTheDocument())
+    expect(screen.getByLabelText('location')).toHaveTextContent('/targets')
+  })
+
+  it('surfaces target coverage gaps without inventing service registry facts', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_gap',
+          name: 'Coverage Gap',
+          execution_node_labels: [],
+          current_health_status: '正常',
+          run_status: '启用',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+          <Route path="/nodes" element={<div>nodes route</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Coverage Gap')).toBeInTheDocument())
+
+    expect(
+      screen.getByRole('heading', { name: '补齐 1 个执行覆盖标签' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '优先核对：Coverage Gap' })).toBeInTheDocument()
+    expect(screen.getByText('缺少执行节点标签，探测覆盖边界不明确')).toBeInTheDocument()
+    expect(screen.queryByText(/服务注册表/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '核对节点覆盖' }))
+    await waitFor(() => expect(screen.getByText('nodes route')).toBeInTheDocument())
+  })
+
+  it('shows a stable target evidence lead when the current list has no priority item', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_stable',
+          name: 'Stable API',
+          execution_node_labels: ['edge'],
+          current_health_status: '正常',
+          run_status: '启用',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Stable API')).toBeInTheDocument())
+
+    expect(
+      screen.getByRole('heading', { name: 'Target 入口证据当前稳定' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('完整 Target 库存')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '没有需要优先核对的 Target' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: '查看资产决策' })[0]).toHaveAttribute(
+      'href',
+      '/asset-decisions',
+    )
   })
 
   it('cancels target quick label editing without sending PATCH', async () => {

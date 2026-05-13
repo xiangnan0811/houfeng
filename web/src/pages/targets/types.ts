@@ -1,4 +1,4 @@
-import type { CreateTargetInput } from '../../lib/types'
+import type { CreateTargetInput, TargetRecord } from '../../lib/types'
 
 export type TargetFilterState = {
   group: string | null
@@ -43,4 +43,31 @@ export type FocusRestoreRequest = {
 export type TargetFilterOption = {
   value: string
   label: string
+}
+
+export type TargetEvidenceActionKind =
+  | 'abnormal'
+  | 'paused'
+  | 'archived'
+  | 'coverage'
+  | 'clear'
+  | 'create'
+  | 'asset'
+
+export type TargetEvidenceLead = {
+  eyebrow: string
+  title: string
+  description: string
+  actionKind: TargetEvidenceActionKind
+  actionLabel: string
+  tone: 'normal' | 'notice' | 'alert' | 'maintenance' | 'offline'
+}
+
+export type TargetEvidenceItem = {
+  target: TargetRecord
+  title: string
+  reason: string
+  meta: string
+  route: string
+  actionLabel: string
 }
