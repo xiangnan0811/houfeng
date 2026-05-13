@@ -254,10 +254,14 @@ describe('VPSDetailPage', () => {
       credentials: 'include',
     })
     expect(screen.getByText('资产判断')).toBeInTheDocument()
+    expect(screen.getByText('下一步动作')).toBeInTheDocument()
+    expect(screen.getByText('先核对运行异常')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看 Node' })).toHaveAttribute('href', '/nodes/nd_001')
+    expect(screen.getByLabelText('资产判断证据状态')).toBeInTheDocument()
     expect(screen.getByText('续费与成本')).toBeInTheDocument()
-    expect(screen.getByText('USD 12.00')).toBeInTheDocument()
+    expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getByText(/续费日 2026-06-01/)).toBeInTheDocument()
-    expect(screen.getByText('Node 证据')).toBeInTheDocument()
+    expect(screen.getAllByText('Node 证据').length).toBeGreaterThan(0)
     expect(screen.getByText('基础信息')).toBeInTheDocument()
     expect(screen.getAllByText('192.0.2.1').length).toBeGreaterThan(0)
     expect(screen.getByText('关联 Node 监控')).toBeInTheDocument()
@@ -350,9 +354,86 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     expect(screen.getByText('订阅读取失败')).toBeInTheDocument()
-    expect(screen.getByText('subscription backend down')).toBeInTheDocument()
-    expect(screen.getByText('资料可用')).toBeInTheDocument()
+    expect(screen.getByText('先恢复订阅证据')).toBeInTheDocument()
+    expect(screen.getByText('读取失败')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions')
+    expect(screen.getAllByText('subscription backend down').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('资料可用').length).toBeGreaterThan(0)
     expect(screen.queryByText('缺订阅')).not.toBeInTheDocument()
+  })
+
+  it('treats an empty successful subscription response as a true missing-subscription issue', async () => {
+    const responseBody = {
+      vps_id: 'vps_missing_subscription',
+      display_name: 'Missing Subscription Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: 'ord-1',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: 'nrt',
+      ipv4: '192.0.2.1',
+      ipv6: '',
+      ssh_host: '192.0.2.1',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: 'Debian',
+      virtualization: 'kvm',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: 'primary',
+      active_node_link_count: 1,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+      node_links: [
+        {
+          node_id: 'nd_001',
+          display_name: 'Tokyo Node',
+          group: 'edge',
+          region: 'JP',
+          city: 'Tokyo',
+          provider: 'Node Hint',
+          lifecycle_status: '在用',
+          monitoring_status: '启用',
+          binding_status: '已绑定',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-05-09T08:10:00Z',
+          last_sync_at: '2026-05-09T08:11:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          linked_at: '2026-05-09T08:00:00Z',
+          note: 'primary',
+        },
+      ],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(responseBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_missing_subscription']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
+    expect(screen.getByText('补录续费成本')).toBeInTheDocument()
+    expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: '补订阅' })).toHaveAttribute('href', '/subscriptions')
+    expect(screen.queryByText('订阅读取失败')).not.toBeInTheDocument()
   })
 
   it('updates the renewal decision and refreshes asset history', async () => {

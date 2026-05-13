@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend spec index for UX-5 VPS detail workbench implementation."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "React component, state, and accessibility conventions for page-level UI changes."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Existing API and client-state contracts for scoped VPS detail data."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "v2 visual language, responsive layout, and visual evidence expectations."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required lint, test, build, and visual verification workflow."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared guide index required before development."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Non-main branch, PR, CI, and archive workflow constraints."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Guard against unnecessary new abstractions while reshaping existing VPS detail modules."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check that UI evidence wording stays aligned with existing API semantics."}

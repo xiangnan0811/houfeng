@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Quality-check entrypoint for changed frontend files."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Verify updated components preserve local conventions and accessible controls."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify subscription evidence and detail data states remain honest."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Verify responsive v2 styling and visual evidence requirements."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Verify required lint, test, build, and browser sanity checks."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared quality guide index for final review."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch, PR, CI, merge, sync, and task archive workflow."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check for unnecessary duplication or premature abstraction."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check UI wording against existing API evidence semantics."}

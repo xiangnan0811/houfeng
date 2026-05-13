@@ -84,7 +84,7 @@ export function VPSNodeLinksSection({
   ]
 
   return (
-    <section className="page-panel">
+    <section className="page-panel page-panel--scroll-x">
       <div className="section-heading">
         <div>
           <p className="section-heading__eyebrow">OBSERVABILITY LINK</p>

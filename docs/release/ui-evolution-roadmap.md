@@ -4,7 +4,7 @@
 >
 > 状态：Active route for the next UI implementation batch
 >
-> 前置状态：PR #53 `Improve dashboard command surface polish` 已合并，当前进入 UX-4 `Asset decision + VPS inventory real-data path`。
+> 前置状态：PR #54 `Improve asset inventory real-data path` 已合并，当前进入 UX-5 `VPS detail decision workbench`。
 
 ## 结论
 
@@ -127,7 +127,7 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 
 ## UX-4：Asset Decision + VPS Inventory Real-Data Path
 
-> 状态：进行中，当前任务 `05-13-ux4-asset-vps-real-data-path`。
+> 状态：已完成，落地于 PR #54。
 
 ### 目标
 
@@ -149,6 +149,8 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 - linked node health 只在 contract 明确支持的页面展示，不在 VPS 列表中推导。
 
 ## UX-5：VPS Detail Decision Workbench
+
+> 状态：进行中，当前任务 `05-13-ux5-vps-detail-decision-workbench`。
 
 ### 目标
 
@@ -218,6 +220,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前执行 UX-4 Trellis task：`Asset decision + VPS inventory real-data path`。
+当前执行 UX-5 Trellis task：`VPS detail decision workbench`。
 
-UX-4 完成后，推荐进入 UX-5：`VPS detail decision workbench`。原因是 UX-4 解决 40+ VPS 的列表扫描和队列优先级，UX-5 则承接单台 VPS 的深入判断：续费、成本、Node 证据、服务/域名和时间线需要被组织成“是否保留/迁移/取消”的决策工作台。
+UX-5 完成后，推荐进入 UX-6：`Observability support pages`。原因是 UX-5 会把单台 VPS 的判断路径收敛到续费、成本、Node 证据、服务/域名和时间线；UX-6 应继续把 Nodes、Targets、Events 收敛成资产判断的运行证据系统，避免观测对象与资产主线割裂。
