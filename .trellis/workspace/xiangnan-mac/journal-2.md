@@ -1791,3 +1791,36 @@ Completed UX-6A by turning Nodes into an asset-evidence workbench with an eviden
 ### Next Steps
 
 - None - task complete
+
+
+## Session 113: UX-6B Targets evidence convergence
+
+**Date**: 2026-05-13
+**Task**: UX-6B Targets evidence convergence
+**Branch**: `archive-ux6b-targets-evidence`
+
+### Summary
+
+Completed UX-6B Targets evidence convergence: added service-entry evidence lead, current filter context, priority Target focus, coverage-gap handling, v2 screenshots, and roadmap/manifest updates; PR #61 CI passed and merged.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `317fe4e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
