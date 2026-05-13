@@ -1692,3 +1692,36 @@ Polished Dashboard command surface with a compact daily focus rail, clearer asse
 ### Next Steps
 
 - None - task complete
+
+
+## Session 110: UX-4 asset inventory real-data path
+
+**Date**: 2026-05-13
+**Task**: UX-4 asset inventory real-data path
+**Branch**: `chore/archive-ux4-task`
+
+### Summary
+
+Completed UX-4 by merging PR #54: Asset Decisions gained a processing-focus strip, VPS inventory now separates subscription evidence loading/ready/error to avoid false missing-subscription facts, tests and visual evidence were added, and the UI roadmap advanced toward UX-5.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `72a9a90` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

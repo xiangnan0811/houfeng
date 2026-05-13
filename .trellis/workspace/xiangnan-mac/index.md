@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 109
+- **Total Sessions**: 110
 - **Last Active**: 2026-05-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1694 | Active |
+| `journal-2.md` | ~1727 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 110 | 2026-05-13 | UX-4 asset inventory real-data path | `72a9a90` | `chore/archive-ux4-task` |
 | 109 | 2026-05-13 | UX-3 Dashboard command surface polish | `f1e0470` | `ux3-dashboard-command-surface-polish` |
 | 108 | 2026-05-13 | UX-2 page body responsive hierarchy | `8a843c4` | `ux2-page-body-responsive-hierarchy` |
 | 107 | 2026-05-13 | UX-1 app shell visual baseline | `bbc88d5` | `ux1-app-shell-visual-baseline` |
