@@ -1,8 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { VPSPage } from './VPSPage'
+
+function LocationProbe() {
+  const location = useLocation()
+  return <span data-testid="location">{location.pathname}{location.search}</span>
+}
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -187,6 +192,63 @@ describe('VPSPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
     await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
     expect(screen.queryByText('视图: 缺订阅')).not.toBeInTheDocument()
+  })
+
+  it('does not apply draft drawer filters when closed by button, Escape, or overlay', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([vps, missingFactsVPS]))
+      .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps?view=unlinked']}>
+        <Routes>
+          <Route
+            path="/vps"
+            element={(
+              <>
+                <LocationProbe />
+                <VPSPage />
+              </>
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
+    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
+
+    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    let drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 高级筛选' })).not.toBeInTheDocument())
+    expect(screen.getByText('Osaka Missing')).toBeInTheDocument()
+    expect(screen.queryByText('生命周期: 测试中')).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
+
+    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    fireEvent.change(within(drawer).getByLabelText('用途状态'), { target: { value: 'in_use' } })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 高级筛选' })).not.toBeInTheDocument())
+    expect(screen.queryByText('用途: 承载业务')).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
+
+    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'keep' } })
+    const overlay = document.body.querySelector('.drawer-overlay')
+    expect(overlay).not.toBeNull()
+    fireEvent.mouseDown(overlay!)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 高级筛选' })).not.toBeInTheDocument())
+    expect(screen.queryByText('续费: 保留')).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('marks missing subscriptions only after subscription evidence is ready', async () => {

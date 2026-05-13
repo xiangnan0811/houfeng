@@ -16,6 +16,18 @@ const columns: DataTableColumn<Row>[] = [
   { key: 'name', label: '名字', render: (r) => r.name },
   { key: 'value', label: '值', align: 'right', cellClassName: 'mono', render: (r) => r.value },
 ]
+const interactiveColumns: DataTableColumn<Row>[] = [
+  ...columns,
+  {
+    key: 'action',
+    label: '操作',
+    render: (r) => (
+      <button type="button" aria-label={`编辑 ${r.name}`}>
+        编辑
+      </button>
+    ),
+  },
+]
 
 describe('DataTable', () => {
   it('renders rows with semantic table roles', () => {
@@ -32,6 +44,40 @@ describe('DataTable', () => {
     )
     fireEvent.click(screen.getByRole('row', { name: /Beta/ }))
     expect(onRowClick).toHaveBeenCalledWith(rows[1])
+  })
+
+  it('does not emit row click when an interactive cell action is used', () => {
+    const onRowClick = vi.fn()
+    render(
+      <DataTable
+        columns={interactiveColumns}
+        rows={rows}
+        rowKey={(r) => r.id}
+        onRowClick={onRowClick}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Alpha' }))
+    expect(onRowClick).not.toHaveBeenCalled()
+  })
+
+  it('keeps row keyboard navigation on the row while ignoring child controls', () => {
+    const onRowClick = vi.fn()
+    render(
+      <DataTable
+        columns={interactiveColumns}
+        rows={rows}
+        rowKey={(r) => r.id}
+        onRowClick={onRowClick}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByRole('row', { name: /Beta/ }), { key: 'Enter' })
+    expect(onRowClick).toHaveBeenCalledWith(rows[1])
+
+    onRowClick.mockClear()
+    fireEvent.keyDown(screen.getByRole('button', { name: '编辑 Beta' }), { key: 'Enter' })
+    expect(onRowClick).not.toHaveBeenCalled()
   })
 
   it('applies cell class for column', () => {

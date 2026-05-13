@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "前端质量门与测试约定"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "PageState与组件合同检查"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "URL和资产语义检查"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "样式落点和视觉状态检查"}
+{"file": ".trellis/tasks/05-13-ux7d-interaction-state-contract-hardening/research/main-session-audit.md", "reason": "目标缺口检查清单"}

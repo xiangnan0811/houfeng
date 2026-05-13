@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { AssetDecisionRenewalTable } from '../components/AssetDecisionRenewalTable'
 import {
@@ -7,6 +7,7 @@ import {
   type AssetDecisionDraft,
 } from '../components/AssetDecisionWorkPanel'
 import { Badge, Button, Drawer, MonoDigits, Tabs } from '../components/atoms'
+import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, listSubscriptions, listVPSAssets, updateVPSAsset } from '../lib/api'
 import { formatDate, formatMoney, formatOptional } from '../lib/format'
 import {
@@ -235,10 +236,15 @@ function renderDecisionQueueItem(
   item: DecisionQueueItem,
   index: number,
   onSelect: (vps: VPSAssetRecord) => void,
+  onNavigate: (vps: VPSAssetRecord) => void,
 ) {
   const vps = item.vps
   return (
-    <li className={['asset-decision-row', queueRowClass(item)].join(' ')} key={vps.vps_id}>
+    <li
+      className={['asset-decision-row', 'asset-decision-row--clickable', queueRowClass(item)].join(' ')}
+      key={vps.vps_id}
+      onClick={() => onNavigate(vps)}
+    >
       <div className="asset-decision-row__rank">
         <strong>P{index + 1}</strong>
         <span>{queueReasonLabel(item)}</span>
@@ -279,12 +285,22 @@ function renderDecisionQueueItem(
         </div>
       </div>
       <div className="asset-decision-actions">
-        <Link className="text-link" to={`/vps/${vps.vps_id}`}>详情</Link>
+        <Link
+          className="text-link"
+          to={`/vps/${vps.vps_id}`}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          详情
+        </Link>
         <Button
           size="sm"
           variant="secondary"
           aria-label={`处理 ${vps.vps_id}`}
-          onClick={() => onSelect(vps)}
+          onClick={(event) => {
+            event.stopPropagation()
+            onSelect(vps)
+          }}
         >
           处理
         </Button>
@@ -294,6 +310,7 @@ function renderDecisionQueueItem(
 }
 
 export function AssetDecisionsPage() {
+  const navigate = useNavigate()
   const [renewalWindow, setRenewalWindow] = useState<RenewalWindow>(30)
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
@@ -450,6 +467,10 @@ export function AssetDecisionsPage() {
     setDecisionNotice(null)
   }
 
+  function navigateToVPS(vps: VPSAssetRecord) {
+    navigate(`/vps/${vps.vps_id}`)
+  }
+
   function closeDecisionDrawer() {
     setSelectedVPS(null)
     setDecisionDraft(INITIAL_DECISION_DRAFT)
@@ -562,14 +583,34 @@ export function AssetDecisionsPage() {
         </div>
         {decisionNotice && <p className="asset-operation-feedback">{decisionNotice}</p>}
         {state.vpsLoading ? (
-          <div className="empty-state">正在加载 VPS 决策队列…</div>
+          <PageStateView
+            kind="loading"
+            title="正在加载 VPS 决策队列…"
+            surface="empty"
+            compact
+          />
         ) : state.vpsError ? (
-          <div className="empty-state">{state.vpsError}</div>
+          <PageStateView
+            kind="error"
+            title="资产决策队列不可用"
+            description={state.vpsError}
+            technicalSummary={state.vpsError}
+            surface="empty"
+            compact
+          />
         ) : visibleDecisionQueue.length === 0 ? (
-          <div className="empty-state">当前视图暂无待处理 VPS</div>
+          <PageStateView
+            kind="empty"
+            title="当前视图暂无待处理 VPS"
+            description="切换队列视图或进入 VPS 库存继续核对资产资料。"
+            surface="empty"
+            compact
+          />
         ) : (
           <ol className="asset-decision-queue" aria-label="资产决策队列列表">
-            {visibleDecisionQueue.map((item, index) => renderDecisionQueueItem(item, index, selectVPS))}
+            {visibleDecisionQueue.map((item, index) =>
+              renderDecisionQueueItem(item, index, selectVPS, navigateToVPS),
+            )}
           </ol>
         )}
       </section>

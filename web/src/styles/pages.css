@@ -3849,6 +3849,18 @@ html.theme-classic-light .dashboard-command-surface {
   background: color-mix(in srgb, var(--surface-elevated) 88%, transparent);
 }
 
+.asset-decision-row--clickable {
+  cursor: pointer;
+}
+
+.asset-decision-row--clickable:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.asset-decision-row--clickable:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
+
 .asset-decision-row--critical {
   border-color: color-mix(in srgb, var(--color-state-critical) 42%, var(--border));
   background:

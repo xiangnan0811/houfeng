@@ -1,5 +1,19 @@
 import type { ReactNode } from 'react'
 
+const INTERACTIVE_ROW_TARGET_SELECTOR = [
+  'a[href]',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="link"]',
+].join(',')
+
+function isInteractiveRowTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(INTERACTIVE_ROW_TARGET_SELECTOR) != null
+}
+
 export interface DataTableColumn<T> {
   key: string
   label: ReactNode
@@ -126,11 +140,15 @@ export function DataTable<T>({
               key={rowKey(row)}
               role="row"
               className={trCls}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              onClick={onRowClick ? (e) => {
+                if (isInteractiveRowTarget(e.target)) return
+                onRowClick(row)
+              } : undefined}
               tabIndex={onRowClick ? 0 : undefined}
               onKeyDown={
                 onRowClick
                   ? (e) => {
+                      if (isInteractiveRowTarget(e.target)) return
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
                         onRowClick(row)

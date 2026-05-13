@@ -42,6 +42,8 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **atoms/ 不依赖 `lib/types.ts`**：原子要复用，必须保持业务无关；需要业务感知就升一层到 `components/`。
 - **跨页业务组合组件可接收 action/meta/glyph 这类 `ReactNode` 插槽**：当组件需要保持 route-agnostic，但页面仍要传入 `<Link>`、`<Button>`、`<StatusGlyph>`、`<Hostname>` 等具体组合时，使用受控插槽，不在组件内 import `react-router-dom` 或领域 helper。参考 `web/src/components/ObservabilityEvidenceLead.tsx` 与 `web/src/components/ObservabilityEvidenceFocus.tsx`：Nodes / Targets / Events 共享 lead/focus 骨架，但页面自己决定 action、glyph、meta 和路由。
 - **route/detail/list 的 loading / error / empty 状态优先复用 `PageState`**：`web/src/components/PageState.tsx` 是跨页展示 primitive，保持 route-agnostic，通过 `action` slot 接收 `<Link>` / `<Button>` / page callback；页面不要继续手写裸 `page-panel` loading/error，列表空态需要 v2 空态装饰和 CTA 时使用 `surface="empty"`。错误摘要用 `technicalSummary`，组件会截断并避免和 description 重复显示。
+- **DataTable 可点击行与行内操作的合同**：`web/src/components/atoms/DataTable.tsx` 的 `onRowClick` 只处理非交互子节点上的 click / Enter / Space；事件目标落在 `a[href]`、`button`、`input`、`select`、`textarea`、`role="button"`、`role="link"` 内时，表格行不得触发行导航。page 的 action cell 不需要再为了 DataTable 行点击重复写 `stopPropagation`，但自绘 list/queue 不是 DataTable 时仍必须在内部 `<Link>` / `<Button>` 上显式阻止冒泡。
+- **自绘可点击队列不要制造嵌套交互语义**：如果一个 `<li>` / `<article>` 内部已经有可见 `<Link>` 和 `<Button>`，可以让鼠标点击行背景进入主详情，但不要给外层容器加 `role="link"` / `tabIndex=0` 再包住内部交互控件；键盘入口应落在可见 action 上，外层只用 `:focus-within` 做焦点视觉辅助。
 - 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。
 - **modal / drawer focus 行为复用 `web/src/lib/useModalFocus.ts`**：可访问性弹层必须 portal 到 `document.body`，声明 `role="dialog"` / `aria-modal="true"`（确认类用 `alertdialog`），打开后移动初始焦点，Tab / Shift+Tab containment，Escape 关闭，关闭后恢复触发器焦点；不要在各组件里复制 ad-hoc `document.addEventListener('keydown')` + 手写 focus trap。
 
@@ -132,6 +134,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - ❌ **从 `pages/` import 别的 page**：要复用就升到 `components/`。
 - ❌ **共享业务组件内写死 `<Link to=...>` 或 import page-private helper**：这会让组件反向感知路由或领域排名逻辑。正确做法是由 page 传入 `action` / `secondaryAction` / `glyph` / `meta` 节点。
 - ❌ **绕过 `app/router.tsx` 私加路由 / 用 `<BrowserRouter>` 包裹**：路由唯一入口在 `web/src/app/router.tsx`。
+- ❌ **把可点击容器伪装成 link 再嵌套真实 link/button**：这会让屏幕阅读器与键盘行为变得含混。自绘队列需要整行鼠标点击时，外层只处理 pointer click，键盘路径交给内部可见 action；DataTable 行点击使用原子内置的 interactive target guard。
 
 ---
 
@@ -149,6 +152,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 参考实现，新组件请对齐这些范式：
 
 - **设计系统原子（atoms）**：`web/src/components/atoms/Sparkline.tsx`（`export interface SparklineProps` + 默认值解构 + tokens 变量映射）。
+- **可点击表格行（DataTable）**：`web/src/components/atoms/DataTable.tsx`（`onRowClick` + interactive descendant guard，内部 action 不触发行导航）。
 - **设计系统原子带 ref 转发**：`web/src/components/atoms/Input.tsx`（`forwardRef` + 命名 const 导出）。
 - **跨页业务组合组件**：`web/src/components/IncidentList.tsx`（`type IncidentListProps`、纯展示、引用 `lib/types.ts`、按 severity 排序后渲染）。
 - **跨页业务组合组件使用插槽保持路由无关**：`web/src/components/ObservabilityEvidenceLead.tsx` / `ObservabilityEvidenceFocus.tsx`（纯展示、`ReactNode` action/meta/glyph 插槽、页面传入 Link/Button/StatusGlyph/Hostname）。

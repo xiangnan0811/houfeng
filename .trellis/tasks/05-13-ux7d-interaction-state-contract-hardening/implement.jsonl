@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/index.md", "reason": "前端规范入口"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "URL状态与资产数据合同"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "组件分层与PageState约定"}
+{"file": ".trellis/tasks/05-13-ux7d-interaction-state-contract-hardening/research/main-session-audit.md", "reason": "本轮主会话代码审查结论"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "PageState样式与BEM令牌约定"}

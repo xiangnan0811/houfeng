@@ -12,6 +12,7 @@ import {
   type DataTableColumn,
 } from '../components/atoms'
 import { FilterBar, FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
+import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createVPSAsset, listProviders, listSubscriptions, listVPSAssets } from '../lib/api'
 import { formatDate, formatMoney, formatOptional } from '../lib/format'
 import {
@@ -799,9 +800,21 @@ export function VPSPage() {
         </div>
 
         {state.inventoryLoading ? (
-          <div className="empty-state">正在加载 VPS…</div>
+          <PageStateView
+            kind="loading"
+            title="正在加载 VPS…"
+            surface="empty"
+            compact
+          />
         ) : state.inventoryError ? (
-          <div className="empty-state">{state.inventoryError}</div>
+          <PageStateView
+            kind="error"
+            title="VPS 库存不可用"
+            description={state.inventoryError}
+            technicalSummary={state.inventoryError}
+            surface="empty"
+            compact
+          />
         ) : (
           <DataTable
             className="asset-table vps-table vps-inventory-table"

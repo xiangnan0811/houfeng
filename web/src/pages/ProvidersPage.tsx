@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
 import { Button, DataTable, Input, MonoDigits, Timestamp, type DataTableColumn } from '../components/atoms'
+import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createProvider, listProviders, updateProvider } from '../lib/api'
 import { formatOptional } from '../lib/format'
 import type { CreateProviderInput, ProviderRecord, UpdateProviderInput } from '../lib/types'
@@ -349,9 +350,21 @@ export function ProvidersPage() {
         </div>
 
         {state.loading ? (
-          <div className="empty-state">正在加载服务商…</div>
+          <PageStateView
+            kind="loading"
+            title="正在加载服务商…"
+            surface="empty"
+            compact
+          />
         ) : state.error ? (
-          <div className="empty-state">{state.error}</div>
+          <PageStateView
+            kind="error"
+            title="服务商列表不可用"
+            description={state.error}
+            technicalSummary={state.error}
+            surface="empty"
+            compact
+          />
         ) : (
           <DataTable
             className="asset-table providers-table"
