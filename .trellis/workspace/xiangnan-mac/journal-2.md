@@ -1758,3 +1758,36 @@ Delivered UX-5 through PR #56: redesigned VPS detail around a next-action decisi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 112: UX-6A Nodes evidence convergence
+
+**Date**: 2026-05-13
+**Task**: UX-6A Nodes evidence convergence
+**Branch**: `chore/archive-ux6a-task`
+
+### Summary
+
+Completed UX-6A by turning Nodes into an asset-evidence workbench with an evidence lead, top node focus, URL-state filter context, linked-VPS health boundary, regression tests, visual evidence, PR #59 CI green, and merge to main.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `92cc187` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
