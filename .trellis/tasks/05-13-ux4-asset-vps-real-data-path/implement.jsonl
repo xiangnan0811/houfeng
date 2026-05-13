@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/web/index.md", "reason": "前端规范索引与权威来源"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "页面组件拆分和命名约定"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API状态、资产账本数据流和错误矩阵"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "设计令牌、CSS类名和响应式约束"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "分支保护和PR工作流约束"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "前端测试与评审禁止模式"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "修改共享资产工具前先复用既有模式"}

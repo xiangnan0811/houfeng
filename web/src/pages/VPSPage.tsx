@@ -58,16 +58,21 @@ type VPSQuickView =
   | 'missing_facts'
   | 'archived'
 
+type SubscriptionEvidenceStatus = 'loading' | 'ready' | 'error'
+
 type InventoryRow = {
   vps: VPSAssetRecord
   subscription: SubscriptionRecord | null
+  subscriptionEvidence: SubscriptionEvidenceStatus
   qualityIssues: AssetQualityIssue[]
   renewalDue: boolean
 }
 
 type PageState = {
-  loading: boolean
-  error: string | null
+  inventoryLoading: boolean
+  inventoryError: string | null
+  subscriptionsLoading: boolean
+  subscriptionsError: string | null
   vps: VPSAssetRecord[]
   providers: ProviderRecord[]
   subscriptions: SubscriptionRecord[]
@@ -107,8 +112,10 @@ type FilterState = {
 }
 
 const INITIAL_PAGE_STATE: PageState = {
-  loading: true,
-  error: null,
+  inventoryLoading: true,
+  inventoryError: null,
+  subscriptionsLoading: true,
+  subscriptionsError: null,
   vps: [],
   providers: [],
   subscriptions: [],
@@ -255,14 +262,23 @@ function providerOptions(providers: ProviderRecord[]): FilterSelectOption[] {
 function buildInventoryRows(
   vpsRows: VPSAssetRecord[],
   subscriptionsByVPS: Map<string, SubscriptionRecord[]>,
+  subscriptionEvidence: SubscriptionEvidenceStatus,
 ): InventoryRow[] {
   return vpsRows.map((vps) => {
-    const subscription = selectPrimarySubscription(subscriptionsByVPS, vps.vps_id)
+    const subscription =
+      subscriptionEvidence === 'ready'
+        ? selectPrimarySubscription(subscriptionsByVPS, vps.vps_id)
+        : null
     return {
       vps,
       subscription,
-      qualityIssues: buildVPSQualityIssues(vps, subscription),
-      renewalDue: isSubscriptionInRenewalWindow(subscription, 30),
+      subscriptionEvidence,
+      qualityIssues: buildVPSQualityIssues(vps, subscription, {
+        includeMissingSubscription: subscriptionEvidence === 'ready',
+      }),
+      renewalDue:
+        subscriptionEvidence === 'ready' &&
+        isSubscriptionInRenewalWindow(subscription, 30),
     }
   })
 }
@@ -292,7 +308,7 @@ function matchesQuickView(row: InventoryRow, view: VPSQuickView): boolean {
   if (view === 'renewal') return row.renewalDue
   if (view === 'unreviewed') return row.vps.renewal_decision === 'unreviewed'
   if (view === 'unlinked') return row.vps.active_node_link_count <= 0
-  if (view === 'missing_subscription') return !row.subscription
+  if (view === 'missing_subscription') return row.subscriptionEvidence === 'ready' && !row.subscription
   if (view === 'missing_facts') return hasMissingVPSFacts(row.vps)
   if (view === 'archived') return row.vps.lifecycle_status === 'archived'
   return true
@@ -302,7 +318,7 @@ function inventoryRank(row: InventoryRow): number {
   let rank = 0
   if (row.vps.renewal_decision === 'unreviewed') rank += 120
   if (row.renewalDue) rank += 100
-  if (!row.subscription) rank += 80
+  if (row.subscriptionEvidence === 'ready' && !row.subscription) rank += 80
   if (row.vps.active_node_link_count <= 0) rank += 60
   if (hasMissingVPSFacts(row.vps)) rank += 30
   return rank
@@ -327,8 +343,26 @@ function renderQualityIssues(issues: AssetQualityIssue[]) {
   ))
 }
 
-function renderSubscriptionCell(subscription: SubscriptionRecord | null) {
-  if (!subscription) {
+function renderSubscriptionCell(row: InventoryRow) {
+  if (row.subscriptionEvidence === 'loading') {
+    return (
+      <div className="asset-subscription-cell asset-subscription-cell--unknown">
+        <strong>订阅读取中</strong>
+        <span>暂不判定缺订阅</span>
+      </div>
+    )
+  }
+
+  if (row.subscriptionEvidence === 'error') {
+    return (
+      <div className="asset-subscription-cell asset-subscription-cell--unknown">
+        <strong>订阅未知</strong>
+        <span>证据不可用</span>
+      </div>
+    )
+  }
+
+  if (!row.subscription) {
     return (
       <div className="asset-subscription-cell asset-subscription-cell--missing">
         <strong>缺订阅</strong>
@@ -337,20 +371,26 @@ function renderSubscriptionCell(subscription: SubscriptionRecord | null) {
     )
   }
 
-  const days = daysUntilDate(subscription.renew_at)
-  const autoRenewLabel = subscription.auto_renew_cancelled
+  const days = daysUntilDate(row.subscription.renew_at)
+  const autoRenewLabel = row.subscription.auto_renew_cancelled
     ? '已取消自动续费'
-    : subscription.auto_renew
+    : row.subscription.auto_renew
       ? '自动续费'
       : '手动续费'
 
   return (
     <div className="asset-subscription-cell">
-      <strong>{formatMoney(subscription.monthly_price, subscription.currency)}/月</strong>
-      <span>{subscription.renew_at ? `${formatDate(subscription.renew_at)} · ${renewalTimingLabel(days)}` : '续费日缺失'}</span>
+      <strong>{formatMoney(row.subscription.monthly_price, row.subscription.currency)}/月</strong>
+      <span>{row.subscription.renew_at ? `${formatDate(row.subscription.renew_at)} · ${renewalTimingLabel(days)}` : '续费日缺失'}</span>
       <small>{autoRenewLabel}</small>
     </div>
   )
+}
+
+function subscriptionEvidenceLabel(status: SubscriptionEvidenceStatus, error: string | null): string {
+  if (status === 'loading') return '正在读取订阅证据'
+  if (status === 'error') return error ? `订阅证据不可用：${error}` : '订阅证据不可用'
+  return '订阅证据已读取'
 }
 
 function providerName(providerID: string | null, providers: ProviderRecord[]): string {
@@ -373,24 +413,54 @@ export function VPSPage() {
   useEffect(() => {
     let cancelled = false
 
-    Promise.all([
-      listVPSAssets(),
-      listProviders(),
-      listSubscriptions({ sort: 'renew_at', order: 'asc' }),
-    ])
-      .then(([vps, providers, subscriptions]) => {
+    Promise.all([listVPSAssets(), listProviders()])
+      .then(([vps, providers]) => {
         if (cancelled) return
-        setState({ loading: false, error: null, vps, providers, subscriptions })
+        setState((current) => ({
+          ...current,
+          inventoryLoading: false,
+          inventoryError: null,
+          vps,
+          providers,
+        }))
       })
       .catch((error: unknown) => {
         if (cancelled) return
-        setState({
-          loading: false,
-          error: describeError(error, '加载 VPS 资产失败'),
+        setState((current) => ({
+          ...current,
+          inventoryLoading: false,
+          inventoryError: describeError(error, '加载 VPS 资产失败'),
           vps: [],
           providers: [],
+        }))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    listSubscriptions({ sort: 'renew_at', order: 'asc' })
+      .then((subscriptions) => {
+        if (cancelled) return
+        setState((current) => ({
+          ...current,
+          subscriptionsLoading: false,
+          subscriptionsError: null,
+          subscriptions,
+        }))
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setState((current) => ({
+          ...current,
+          subscriptionsLoading: false,
+          subscriptionsError: describeError(error, '加载订阅证据失败'),
           subscriptions: [],
-        })
+        }))
       })
 
     return () => {
@@ -402,9 +472,14 @@ export function VPSPage() {
     () => groupSubscriptionsByVPS(state.subscriptions),
     [state.subscriptions],
   )
+  const subscriptionEvidence: SubscriptionEvidenceStatus = state.subscriptionsLoading
+    ? 'loading'
+    : state.subscriptionsError
+      ? 'error'
+      : 'ready'
   const inventoryRows = useMemo(
-    () => buildInventoryRows(state.vps, subscriptionsByVPS),
-    [state.vps, subscriptionsByVPS],
+    () => buildInventoryRows(state.vps, subscriptionsByVPS, subscriptionEvidence),
+    [state.vps, subscriptionsByVPS, subscriptionEvidence],
   )
   const filteredRows = useMemo(
     () => applyInventoryFilters(inventoryRows, filters),
@@ -412,15 +487,54 @@ export function VPSPage() {
   )
   const providerSelectOptions = providerOptions(state.providers)
   const active = hasActiveFilters(filters)
+  const missingSubscriptionCount = subscriptionEvidence === 'ready'
+    ? inventoryRows.filter((row) => !row.subscription).length
+    : 0
+  const unreviewedCount = inventoryRows.filter((row) => row.vps.renewal_decision === 'unreviewed').length
+  const unlinkedCount = inventoryRows.filter((row) => row.vps.active_node_link_count <= 0).length
+  const missingFactsCount = inventoryRows.filter((row) => hasMissingVPSFacts(row.vps)).length
+  const renewalDueCount = inventoryRows.filter((row) => row.renewalDue).length
   const quickViews = [
     { value: 'all', label: '全部', count: inventoryRows.length },
-    { value: 'renewal', label: '30天续费', count: inventoryRows.filter((row) => row.renewalDue).length },
-    { value: 'unreviewed', label: '未评估', count: inventoryRows.filter((row) => row.vps.renewal_decision === 'unreviewed').length },
-    { value: 'unlinked', label: '未关联', count: inventoryRows.filter((row) => row.vps.active_node_link_count <= 0).length },
-    { value: 'missing_subscription', label: '缺订阅', count: inventoryRows.filter((row) => !row.subscription).length },
-    { value: 'missing_facts', label: '缺信息', count: inventoryRows.filter((row) => hasMissingVPSFacts(row.vps)).length },
+    { value: 'renewal', label: '30天续费', count: renewalDueCount },
+    { value: 'unreviewed', label: '未评估', count: unreviewedCount },
+    { value: 'unlinked', label: '未关联', count: unlinkedCount },
+    { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
+    { value: 'missing_facts', label: '缺信息', count: missingFactsCount },
     { value: 'archived', label: '已归档', count: inventoryRows.filter((row) => row.vps.lifecycle_status === 'archived').length },
   ] satisfies Array<{ value: VPSQuickView; label: string; count: number }>
+  const focusItems = [
+    {
+      label: '当前可见',
+      value: `${filteredRows.length} / ${inventoryRows.length}`,
+      meta: active ? '已应用筛选' : '全量库存',
+      tone: 'normal',
+    },
+    {
+      label: '续费窗口',
+      value: `${renewalDueCount}`,
+      meta: subscriptionEvidence === 'ready' ? '30 天内需核对' : '等待订阅证据',
+      tone: renewalDueCount > 0 ? 'alert' : 'neutral',
+    },
+    {
+      label: '未评估 / 未关联',
+      value: `${unreviewedCount} / ${unlinkedCount}`,
+      meta: '优先补判断与 Node 证据',
+      tone: unreviewedCount + unlinkedCount > 0 ? 'alert' : 'normal',
+    },
+    {
+      label: '订阅证据',
+      value: subscriptionEvidence === 'ready' ? `${missingSubscriptionCount} 缺订阅` : '未知',
+      meta: subscriptionEvidenceLabel(subscriptionEvidence, state.subscriptionsError),
+      tone: subscriptionEvidence === 'error' ? 'notice' : missingSubscriptionCount > 0 ? 'critical' : 'normal',
+    },
+    {
+      label: '资料缺口',
+      value: `${missingFactsCount}`,
+      meta: '服务商、位置或访问入口',
+      tone: missingFactsCount > 0 ? 'notice' : 'normal',
+    },
+  ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'notice' | 'alert' | 'critical' | 'neutral' }>
 
   function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     const next = { ...filters, [key]: value }
@@ -502,7 +616,7 @@ export function VPSPage() {
     {
       key: 'subscription',
       label: '订阅 / 续费',
-      render: ({ subscription }) => renderSubscriptionCell(subscription),
+      render: (row) => renderSubscriptionCell(row),
     },
     {
       key: 'decision',
@@ -629,12 +743,29 @@ export function VPSPage() {
             <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台 VPS
           </span>
         </div>
+        <div className="vps-inventory-focus" aria-label="VPS 盘点焦点">
+          {focusItems.map((item) => (
+            <article
+              key={item.label}
+              className={['vps-inventory-focus__item', `vps-inventory-focus__item--${item.tone}`].join(' ')}
+            >
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <small>{item.meta}</small>
+            </article>
+          ))}
+        </div>
         <Tabs
           items={quickViews}
           value={filters.view}
           onChange={(view) => setFilter('view', view)}
           variant="pill"
         />
+        {subscriptionEvidence === 'error' && (
+          <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+            订阅证据不可用，缺订阅视图暂不作为事实。{state.subscriptionsError}
+          </p>
+        )}
         <FilterBar
           className="vps-filter-bar"
           hasActiveFilters={active}
@@ -667,10 +798,10 @@ export function VPSPage() {
           </span>
         </div>
 
-        {state.loading ? (
+        {state.inventoryLoading ? (
           <div className="empty-state">正在加载 VPS…</div>
-        ) : state.error ? (
-          <div className="empty-state">{state.error}</div>
+        ) : state.inventoryError ? (
+          <div className="empty-state">{state.inventoryError}</div>
         ) : (
           <DataTable
             className="asset-table vps-table vps-inventory-table"

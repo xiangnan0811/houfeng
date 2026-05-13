@@ -158,6 +158,58 @@ describe('VPSPage', () => {
     await waitFor(() => expect(screen.getByText('vps detail route')).toBeInTheDocument())
   })
 
+  it('keeps VPS rows visible and does not mark missing subscriptions when subscription evidence fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([missingFactsVPS]))
+      .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'subscription database unavailable' }, 500))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps?view=unknown&renewal_decision=unreviewed']}>
+        <Routes>
+          <Route path="/vps" element={<VPSPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
+    expect(screen.getByText('订阅未知')).toBeInTheDocument()
+    expect(screen.getByText('证据不可用')).toBeInTheDocument()
+    expect(screen.getByText(/订阅证据不可用，缺订阅视图暂不作为事实/)).toBeInTheDocument()
+    expect(within(screen.getByRole('table')).queryByText('缺订阅')).not.toBeInTheDocument()
+    expect(screen.queryByText('无法核算续费')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '缺订阅' }))
+    expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
+    await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
+    expect(screen.queryByText('视图: 缺订阅')).not.toBeInTheDocument()
+  })
+
+  it('marks missing subscriptions only after subscription evidence is ready', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([missingFactsVPS]))
+      .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps?view=missing_subscription']}>
+        <Routes>
+          <Route path="/vps" element={<VPSPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
+    expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
+    expect(screen.getByText('无法核算续费')).toBeInTheDocument()
+  })
+
   it('creates a VPS and navigates to the created detail route', async () => {
     const created = { ...vps, vps_id: 'vps_new', display_name: 'Osaka Standby' }
     const fetchMock = vi

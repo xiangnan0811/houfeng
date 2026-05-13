@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/index.md", "reason": "前端规范索引与验收来源"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "视觉密度与响应式验收"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "测试、lint和构建验收"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "资产账本错误矩阵与数据流验收"}

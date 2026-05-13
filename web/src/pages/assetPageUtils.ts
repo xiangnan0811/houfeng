@@ -123,10 +123,12 @@ export function hasMissingVPSFacts(vps: VPSAssetRecord): boolean {
 export function buildVPSQualityIssues(
   vps: VPSAssetRecord,
   subscription: SubscriptionRecord | null,
+  options: { includeMissingSubscription?: boolean } = {},
 ): AssetQualityIssue[] {
   const issues: AssetQualityIssue[] = []
+  const includeMissingSubscription = options.includeMissingSubscription ?? true
 
-  if (!subscription) {
+  if (includeMissingSubscription && !subscription) {
     issues.push({ key: 'missing-subscription', label: '缺订阅', tone: 'critical' })
   }
   if (vps.active_node_link_count <= 0) {
