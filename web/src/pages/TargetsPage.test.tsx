@@ -100,12 +100,12 @@ describe('TargetsPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
     )
 
     expect(screen.getAllByText('目标').length).toBeGreaterThanOrEqual(1)
 
-    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     expect(screen.getByText('目标创建')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(screen.getByLabelText('目标类型'), { target: { value: 'service' } })
@@ -153,10 +153,10 @@ describe('TargetsPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
@@ -178,10 +178,10 @@ describe('TargetsPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.change(screen.getByLabelText('基础端口'), { target: { value: 'abc' } })
@@ -273,10 +273,10 @@ describe('TargetsPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
@@ -334,10 +334,10 @@ describe('TargetsPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
@@ -375,9 +375,9 @@ describe('TargetsPage', () => {
     })
 
     expect(screen.queryByText('target detail route')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '创建第一个目标' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '创建第一个目标' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
 
     expect(screen.queryByText('Late Blog')).not.toBeInTheDocument()
     expect(screen.queryByText('target detail route')).not.toBeInTheDocument()

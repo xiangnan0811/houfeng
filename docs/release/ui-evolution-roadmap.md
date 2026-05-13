@@ -200,7 +200,8 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 ### 状态
 
 - UX-7A `Evidence components + route loading hardening` 已完成：Nodes / Targets / Events 的 shared evidence lead/focus 已抽取到跨页业务组件，路由页已改为 `React.lazy` + `RouteModuleFallback`，build 不再回退到单个 500 kB+ 入口 chunk。
-- UX-7B `Visual evidence governance` 是当前切片：把 v2 截图 manifest 校验与本地 browser sanity 输出固化为可复用工具和文档规则，但不引入 e2e / 视觉回归依赖。
+- UX-7B `Visual evidence governance` 已完成：v2 截图 manifest 校验与本地 browser sanity 输出已固化为可复用工具和文档规则，未引入 e2e / 视觉回归依赖。
+- UX-7C `Page state consistency` 是当前切片：把高影响 route/detail/list loading、error、empty 状态收敛到共享 page-state primitive，并补齐对应测试。
 
 ### 范围
 
@@ -229,6 +230,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前推荐继续执行 UX-7B Trellis task：`Visual evidence governance`。
+当前推荐继续执行 UX-7C Trellis task：`Page state consistency`。
 
-UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。UX-6C 已经把 Events 收敛为审计与诊断时间线：事件证据 lead、优先事件 focus、空筛选清除、Dashboard 深链承接和 v2 视觉证据已经落地。UX-7A 已经沉淀观测 evidence 组件并完成路由加载性能 hardening。下一步应先完成 UX-7B，把截图 manifest 校验和 browser sanity 输出稳定下来，再继续更深的 design-system primitive 或页面状态测试补强。
+UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。UX-6C 已经把 Events 收敛为审计与诊断时间线：事件证据 lead、优先事件 focus、空筛选清除、Dashboard 深链承接和 v2 视觉证据已经落地。UX-7A 已经沉淀观测 evidence 组件并完成路由加载性能 hardening。UX-7B 已经把截图 manifest 校验和 browser sanity 输出稳定下来。下一步应完成 UX-7C，把可见 loading / error / empty 状态收敛为共享 primitive，再继续更深的 table/filter/workbench primitive 或页面状态覆盖补强。

@@ -1,4 +1,5 @@
 import { DataTable, type DataTableColumn, type DataTableSortState } from '../../components/atoms'
+import { PageState } from '../../components/PageState'
 import type { NodeRecord } from '../../lib/types'
 import { NodesBatchPanel } from './NodesBatchPanel'
 import { NodesFilterPanel } from './NodesFilterPanel'
@@ -52,6 +53,7 @@ type NodesListSectionProps = {
   onRowClick: (node: NodeRecord) => void
   onConfirmPause: (node: NodeRecord) => void
   onCancelPause: (node: NodeRecord) => void
+  onCreateNode: () => void
 }
 
 export function NodesListSection({
@@ -93,17 +95,27 @@ export function NodesListSection({
   onRowClick,
   onConfirmPause,
   onCancelPause,
+  onCreateNode,
 }: NodesListSectionProps) {
   if (baseNodes.length === 0) {
     return (
-      <div className="empty-state">
-        <h3>{nodeListView === 'binding-conflict' ? '没有绑定异常节点' : '暂无节点'}</h3>
-        <p>
-          {nodeListView === 'binding-conflict'
+      <PageState
+        kind="empty"
+        surface="empty"
+        title={nodeListView === 'binding-conflict' ? '没有绑定异常节点' : '候风尚未接入任何节点'}
+        description={
+          nodeListView === 'binding-conflict'
             ? '当前没有等待绑定确认的节点。'
-            : '请先创建第一个节点。'}
-        </p>
-      </div>
+            : '请先创建第一个节点，完成接入后再用它支撑 VPS 运行事实。'
+        }
+        action={
+          nodeListView === 'binding-conflict' ? null : (
+            <button type="button" className="btn btn--primary btn--md" onClick={onCreateNode}>
+              新建第一个节点
+            </button>
+          )
+        }
+      />
     )
   }
 
@@ -147,15 +159,17 @@ export function NodesListSection({
       />
 
       {nodes.length === 0 ? (
-        <div className="empty-state">
-          <h3>没有匹配当前筛选的节点</h3>
-          <p>请尝试调整筛选条件，或清空筛选恢复完整列表。</p>
-          <p>
+        <PageState
+          kind="empty"
+          surface="empty"
+          title="没有匹配当前筛选的节点"
+          description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
+          action={
             <button type="button" className="btn btn--ghost btn--md" onClick={onClearAllFilters}>
               清空筛选
             </button>
-          </p>
-        </div>
+          }
+        />
       ) : (
         <div className="page-panel page-panel--scroll-x nodes-table-panel">
           <DataTable<NodeRecord>

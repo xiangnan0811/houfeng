@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 
 import { ActionConfirmationCard } from '../ActionConfirmationCard'
+import { PageState } from '../PageState'
 import { StatusBadge } from '../StatusBadge'
 import {
   DataTable,
@@ -122,17 +123,19 @@ export function TargetProbeList({
 }: TargetProbeListProps) {
   if (probeItems.length === 0) {
     return (
-      <div className="empty-state">
-        <h3>当前还没有 ProbeItem</h3>
-        <p>当前还没有 ProbeItem，请为该入口添加至少一种观测方式。</p>
-        {onAddProbe ? (
-          <div>
+      <PageState
+        kind="empty"
+        surface="empty"
+        title="目标尚未配置 ProbeItem"
+        description="请为该入口添加至少一种观测方式。"
+        action={
+          onAddProbe ? (
             <button type="button" className="btn btn--primary btn--md" onClick={() => onAddProbe()}>
-              添加第一个 Probe
+              添加 Probe
             </button>
-          </div>
-        ) : null}
-      </div>
+          ) : null
+        }
+      />
     )
   }
 

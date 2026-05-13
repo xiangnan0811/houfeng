@@ -1,4 +1,5 @@
 import { Button } from '../../components/atoms'
+import { PageState } from '../../components/PageState'
 
 type VPSDetailErrorPanelProps = {
   error: string | null
@@ -8,16 +9,14 @@ type VPSDetailErrorPanelProps = {
 export function VPSDetailErrorPanel({ error, onBack }: VPSDetailErrorPanelProps) {
   return (
     <div className="page-stack asset-page vps-detail-page">
-      <section className="page-panel page-panel--inline">
-        <div>
-          <div className="page-panel__eyebrow">VPS DETAIL</div>
-          <h1 className="page-panel__title">VPS 详情不可用</h1>
-          <p className="page-panel__description">{error ?? 'VPS 不存在'}</p>
-        </div>
-        <div className="page-panel__actions">
-          <Button variant="secondary" onClick={onBack}>返回</Button>
-        </div>
-      </section>
+      <PageState
+        kind="error"
+        eyebrow="VPS DETAIL"
+        title="VPS 详情不可用"
+        description={error ?? 'VPS 不存在'}
+        technicalSummary={error}
+        action={<Button variant="secondary" onClick={onBack}>返回</Button>}
+      />
     </div>
   )
 }

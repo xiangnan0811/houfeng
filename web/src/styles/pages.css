@@ -111,6 +111,125 @@
   min-height: 160px;
 }
 
+.page-state {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.page-state--compact {
+  padding: var(--space-4);
+}
+
+.page-state__mark {
+  width: 44px;
+  height: 44px;
+  color: var(--text-muted);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.72;
+}
+
+.page-state--loading .page-state__mark {
+  color: var(--accent);
+}
+
+.page-state--error {
+  border-color: color-mix(in srgb, var(--color-state-alert) 42%, var(--panel-border));
+}
+
+.page-state--error .page-state__mark {
+  color: var(--color-state-alert);
+}
+
+.page-state--empty .page-state__mark {
+  color: var(--text-muted);
+}
+
+.page-state__content {
+  min-width: 0;
+}
+
+.page-state__eyebrow {
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: var(--space-1);
+}
+
+.page-state__title {
+  font-family: var(--font-sans);
+  font-size: var(--type-h2-size);
+  font-weight: var(--type-h2-weight);
+  line-height: var(--type-h2-leading);
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.page-state__description {
+  color: var(--text-secondary);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
+  max-width: 720px;
+}
+
+.page-state__meta,
+.page-state__summary {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+}
+
+.page-state__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.page-state__summary span {
+  color: var(--color-state-alert);
+  font-family: var(--font-sans);
+}
+
+.page-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.empty-state.page-state {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  text-align: center;
+}
+
+.empty-state.page-state .page-state__actions {
+  justify-content: center;
+}
+
+@media (max-width: 640px) {
+  .page-state {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: flex-start;
+  }
+
+  .empty-state.page-state {
+    justify-items: center;
+  }
+}
+
 .page-panel--inline {
   display: flex;
   align-items: flex-start;

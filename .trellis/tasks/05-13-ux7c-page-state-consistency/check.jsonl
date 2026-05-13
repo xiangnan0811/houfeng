@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/index.md", "reason": "front-end spec authority order for review"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "component review expectations"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS token and BEM review expectations"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "quality gate review expectations"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "duplication review expectations"}
+{"file": ".trellis/tasks/05-13-ux7c-page-state-consistency/research/page-state-audit.md", "reason": "accepted scope for page state replacement"}

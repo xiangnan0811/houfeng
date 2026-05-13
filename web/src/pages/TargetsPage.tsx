@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Button, DataTable } from '../components/atoms'
+import { PageState } from '../components/PageState'
 import {
   ApiError,
   archiveTarget,
@@ -518,15 +519,18 @@ export function TargetsPage() {
   }
 
   if (loading) {
-    return <section className="page-panel">正在加载目标列表…</section>
+    return <PageState kind="loading" title="正在加载目标列表…" />
   }
 
   if (error) {
     return (
-      <section className="page-panel">
-        <h2 className="page-panel__title">目标</h2>
-        <p className="page-panel__description">{error}</p>
-      </section>
+      <PageState
+        kind="error"
+        eyebrow="目标"
+        title="目标列表不可用"
+        description={error}
+        technicalSummary={error}
+      />
     )
   }
 
@@ -615,15 +619,17 @@ export function TargetsPage() {
       />
 
       {targets.length === 0 ? (
-        <div className="empty-state">
-          <h3>当前还没有目标</h3>
-          <p>创建第一个目标后，可以继续为它配置 ProbeItem。</p>
-          <p>
+        <PageState
+          kind="empty"
+          surface="empty"
+          title="候风尚未配置任何观测目标"
+          description="创建第一个目标后，可以继续为它配置 ProbeItem。"
+          action={
             <button type="button" className="btn btn--primary btn--md" onClick={() => setCreateOpen(true)}>
-              创建第一个目标
+              新建第一个目标
             </button>
-          </p>
-        </div>
+          }
+        />
       ) : (
         <>
           <TargetsFilterPanel
@@ -650,15 +656,17 @@ export function TargetsPage() {
             onCancelBatchPause={() => setPendingBatchAction(null)}
           />
           {filteredTargets.length === 0 ? (
-            <div className="empty-state">
-              <h3>没有匹配当前筛选的目标</h3>
-              <p>请尝试调整筛选条件，或清空筛选恢复完整列表。</p>
-              <p>
+            <PageState
+              kind="empty"
+              surface="empty"
+              title="没有匹配当前筛选的目标"
+              description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
+              action={
                 <button type="button" className="btn btn--ghost btn--md" onClick={clearAllFilters}>
                   清空筛选
                 </button>
-              </p>
-            </div>
+              }
+            />
           ) : (
             <div className="page-panel page-panel--scroll-x targets-table-panel">
               <DataTable<TargetRecord>

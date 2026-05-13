@@ -1,6 +1,9 @@
+import type { ReactNode } from 'react'
+
 import { Hostname, StatusGlyph, Timestamp, type HealthState } from './atoms'
 import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../lib/types'
 
+import { PageState } from './PageState'
 import { StatusBadge } from './StatusBadge'
 
 const INCIDENT_CLASS_LABELS: Record<string, string> = {
@@ -21,6 +24,7 @@ type EventListProps = {
   events: StateChangeEventRecord[]
   emptyTitle?: string
   emptyDescription?: string
+  emptyAction?: ReactNode
 }
 
 function incidentClassLabel(value: string) {
@@ -59,13 +63,17 @@ export function EventList({
   events,
   emptyTitle = '最近没有状态变更事件',
   emptyDescription = '系统暂时没有新的状态变更事件。',
+  emptyAction,
 }: EventListProps) {
   if (events.length === 0) {
     return (
-      <div className="empty-state">
-        <h3>{emptyTitle}</h3>
-        <p>{emptyDescription}</p>
-      </div>
+      <PageState
+        kind="empty"
+        surface="empty"
+        title={emptyTitle}
+        description={emptyDescription}
+        action={emptyAction}
+      />
     )
   }
 

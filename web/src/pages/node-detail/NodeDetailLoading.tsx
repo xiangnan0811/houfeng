@@ -1,3 +1,5 @@
+import { PageState } from '../../components/PageState'
+
 export function NodeDetailLoading() {
-  return <section className="page-panel">正在加载节点详情…</section>
+  return <PageState kind="loading" title="正在加载节点详情…" />
 }
