@@ -82,7 +82,7 @@ export function VPSServicesSection({
   ]
 
   return (
-    <section className="page-panel">
+    <section className="page-panel page-panel--scroll-x">
       <div className="section-heading">
         <div>
           <p className="section-heading__eyebrow">SERVICES</p>

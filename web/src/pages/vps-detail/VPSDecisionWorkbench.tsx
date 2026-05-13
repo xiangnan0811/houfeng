@@ -1,25 +1,32 @@
 import { Link } from 'react-router-dom'
 
-import { Badge, Button, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
+import { Badge, Button, Hostname, MonoDigits, StatusGlyph, Timestamp } from '../../components/atoms'
 import { formatDate, formatMoney, formatOptional } from '../../lib/format'
 import type { SubscriptionRecord, VPSAssetDetail, VPSTimeline } from '../../lib/types'
 import {
-  buildVPSQualityIssues,
-  daysUntilDate,
   renewalLabel,
   renewalTimingLabel,
   subscriptionStatusLabel,
 } from '../assetPageUtils'
 import { HealthBadge, RenewalBadge } from '../assetPageBadges'
+import {
+  buildVPSDecisionModel,
+  countDecisionRecords,
+  latestDecisionReason,
+  toneToGlyphState,
+  type WorkbenchTone,
+} from './vpsDecisionModel'
 
 type VPSDecisionWorkbenchProps = {
   detail: VPSAssetDetail
   timeline: VPSTimeline
   primarySubscription: SubscriptionRecord | null
   subscriptionLoadFailed: boolean
+  subscriptionError: string | null
   servicesCount: number
   domainsCount: number
   onDecisionEdit: () => void
+  onFactEdit: () => void
   onExperienceLog: () => void
   onNodeLink: () => void
 }
@@ -28,27 +35,7 @@ type WorkbenchMetricProps = {
   label: string
   value: string
   meta: string
-  tone?: 'normal' | 'notice' | 'alert' | 'critical' | 'neutral'
-}
-
-function latestDecisionReason(timeline: VPSTimeline): string {
-  return timeline.renewal_decisions[0]?.reason || '尚未记录决策理由'
-}
-
-function renewalTone(
-  subscription: SubscriptionRecord | null,
-  subscriptionLoadFailed: boolean,
-): 'normal' | 'notice' | 'critical' {
-  if (subscriptionLoadFailed) return 'notice'
-  if (!subscription) return 'critical'
-  const days = daysUntilDate(subscription.renew_at)
-  if (days != null && days <= 7) return 'critical'
-  if (days != null && days <= 30) return 'notice'
-  return 'normal'
-}
-
-function primaryNode(detail: VPSAssetDetail) {
-  return detail.node_links[0] ?? null
+  tone?: WorkbenchTone
 }
 
 function WorkbenchMetric({ label, value, meta, tone = 'neutral' }: WorkbenchMetricProps) {
@@ -66,18 +53,34 @@ export function VPSDecisionWorkbench({
   timeline,
   primarySubscription,
   subscriptionLoadFailed,
+  subscriptionError,
   servicesCount,
   domainsCount,
   onDecisionEdit,
+  onFactEdit,
   onExperienceLog,
   onNodeLink,
 }: VPSDecisionWorkbenchProps) {
-  const qualityIssues = subscriptionLoadFailed
-    ? buildVPSQualityIssues(detail, primarySubscription).filter((issue) => issue.key !== 'missing-subscription')
-    : buildVPSQualityIssues(detail, primarySubscription)
-  const node = primaryNode(detail)
-  const renewalDays = daysUntilDate(primarySubscription?.renew_at)
-  const subscriptionTone = renewalTone(primarySubscription, subscriptionLoadFailed)
+  const {
+    qualityIssues,
+    node,
+    renewalDays,
+    subscriptionTone,
+    nextAction,
+    evidenceItems,
+  } = buildVPSDecisionModel({
+    detail,
+    timeline,
+    primarySubscription,
+    subscriptionLoadFailed,
+    subscriptionError,
+    servicesCount,
+    domainsCount,
+    onDecisionEdit,
+    onFactEdit,
+    onExperienceLog,
+    onNodeLink,
+  })
 
   return (
     <section className="page-panel vps-workbench" aria-labelledby="vps-workbench-title">
@@ -89,6 +92,40 @@ export function VPSDecisionWorkbench({
         <div className="section-heading__actions">
           <Button variant="primary" size="sm" onClick={onDecisionEdit}>调整决策</Button>
           <Button variant="secondary" size="sm" onClick={onExperienceLog}>记录经验</Button>
+        </div>
+      </div>
+
+      <div className={`vps-workbench__lead vps-workbench__lead--${nextAction.tone}`}>
+        <article className="vps-workbench-next">
+          <p>下一步动作</p>
+          <h3>{nextAction.title}</h3>
+          <span>{nextAction.summary}</span>
+          <div className="vps-workbench-next__actions">
+            {'onAction' in nextAction ? (
+              <Button variant="primary" size="sm" onClick={nextAction.onAction}>
+                {nextAction.buttonLabel}
+              </Button>
+            ) : (
+              <Link className="btn btn--primary btn--sm" to={nextAction.to}>
+                {nextAction.linkLabel}
+              </Link>
+            )}
+          </div>
+        </article>
+
+        <div className="vps-workbench-evidence" aria-label="资产判断证据状态">
+          {evidenceItems.map((item) => (
+            <article key={item.label} className={`vps-workbench-evidence__item vps-workbench-evidence__item--${item.tone}`}>
+              <div className="vps-workbench-evidence__label">
+                <span aria-hidden="true">
+                  <StatusGlyph state={toneToGlyphState(item.tone)} size="sm" />
+                </span>
+                <span>{item.label}</span>
+              </div>
+              <strong>{item.value}</strong>
+              <small>{item.meta}</small>
+            </article>
+          ))}
         </div>
       </div>
 
@@ -132,7 +169,7 @@ export function VPSDecisionWorkbench({
                 primarySubscription.auto_renew ? '自动续费' : '手工续费'
               }`
               : subscriptionLoadFailed
-                ? '当前无法读取订阅列表，页面不把它误判为缺订阅。'
+                ? `当前无法读取订阅列表，页面不把它误判为缺订阅。${subscriptionError ? `错误：${subscriptionError}` : ''}`
                 : '没有 VPS 绑定订阅，无法判断真实续费压力。'}
           </p>
           <div className="vps-workbench-card__footer">
@@ -223,7 +260,7 @@ export function VPSDecisionWorkbench({
         />
         <WorkbenchMetric
           label="Timeline"
-          value={`${timeline.renewal_decisions.length + timeline.experience_logs.length} 条判断记录`}
+          value={`${countDecisionRecords(timeline)} 条判断记录`}
           meta={`${timeline.price_histories.length} 条价格变化 · ${timeline.spec_snapshots.length} 条规格快照`}
         />
       </div>

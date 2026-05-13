@@ -718,9 +718,11 @@ export function VPSDetailPage() {
         timeline={timeline}
         primarySubscription={primarySubscription}
         subscriptionLoadFailed={subscriptionLoadFailed}
+        subscriptionError={state.subscriptionsError}
         servicesCount={state.services.length}
         domainsCount={state.domains.length}
         onDecisionEdit={() => openDrawer('decision')}
+        onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
         onNodeLink={() => openDrawer('node-link')}
       />
@@ -736,8 +738,6 @@ export function VPSDetailPage() {
       {experienceNotice ? (
         <p className="asset-operation-feedback" role="status">{experienceNotice}</p>
       ) : null}
-
-      <VPSTimelinePanel timeline={timeline} />
 
       <div className="page-stack">
         <VPSLifecycleCard
@@ -781,6 +781,8 @@ export function VPSDetailPage() {
           notice={domainNotice}
           onCreate={() => openDrawer('domain')}
         />
+
+        <VPSTimelinePanel timeline={timeline} />
 
         <VPSAccessSummarySection detail={detail} />
       </div>
