@@ -40,6 +40,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **page 不直接 import `app/layout/*`**：layout 仅服务 AppShell。
 - **components/ 不依赖路由**：要跳转，由 page 传 callback 或 children 进来。
 - **atoms/ 不依赖 `lib/types.ts`**：原子要复用，必须保持业务无关；需要业务感知就升一层到 `components/`。
+- **跨页业务组合组件可接收 action/meta/glyph 这类 `ReactNode` 插槽**：当组件需要保持 route-agnostic，但页面仍要传入 `<Link>`、`<Button>`、`<StatusGlyph>`、`<Hostname>` 等具体组合时，使用受控插槽，不在组件内 import `react-router-dom` 或领域 helper。参考 `web/src/components/ObservabilityEvidenceLead.tsx` 与 `web/src/components/ObservabilityEvidenceFocus.tsx`：Nodes / Targets / Events 共享 lead/focus 骨架，但页面自己决定 action、glyph、meta 和路由。
 - 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。
 - **modal / drawer focus 行为复用 `web/src/lib/useModalFocus.ts`**：可访问性弹层必须 portal 到 `document.body`，声明 `role="dialog"` / `aria-modal="true"`（确认类用 `alertdialog`），打开后移动初始焦点，Tab / Shift+Tab containment，Escape 关闭，关闭后恢复触发器焦点；不要在各组件里复制 ad-hoc `document.addEventListener('keydown')` + 手写 focus trap。
 
@@ -128,6 +129,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - ❌ **组件文件 > 300 行不拆**（已知偿还点：`NodeDetailPage.tsx`、`TargetDetailPage.tsx`、`SettingsPage.tsx`、`TargetsPage.tsx` 都超）。新页面应主动按 section 拆 `components/`。
 - ❌ **CSS in JS / inline style 写业务样式**：颜色 / 间距用 `tokens.css` 变量；inline `style={}` 仅限尺寸 / 计算量（参考 `web/src/components/atoms/Sparkline.tsx:71`）。
 - ❌ **从 `pages/` import 别的 page**：要复用就升到 `components/`。
+- ❌ **共享业务组件内写死 `<Link to=...>` 或 import page-private helper**：这会让组件反向感知路由或领域排名逻辑。正确做法是由 page 传入 `action` / `secondaryAction` / `glyph` / `meta` 节点。
 - ❌ **绕过 `app/router.tsx` 私加路由 / 用 `<BrowserRouter>` 包裹**：路由唯一入口在 `web/src/app/router.tsx`。
 
 ---
@@ -148,5 +150,6 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **设计系统原子（atoms）**：`web/src/components/atoms/Sparkline.tsx`（`export interface SparklineProps` + 默认值解构 + tokens 变量映射）。
 - **设计系统原子带 ref 转发**：`web/src/components/atoms/Input.tsx`（`forwardRef` + 命名 const 导出）。
 - **跨页业务组合组件**：`web/src/components/IncidentList.tsx`（`type IncidentListProps`、纯展示、引用 `lib/types.ts`、按 severity 排序后渲染）。
+- **跨页业务组合组件使用插槽保持路由无关**：`web/src/components/ObservabilityEvidenceLead.tsx` / `ObservabilityEvidenceFocus.tsx`（纯展示、`ReactNode` action/meta/glyph 插槽、页面传入 Link/Button/StatusGlyph/Hostname）。
 - **路由页装配**：`web/src/pages/EventsPage.tsx`（页面拉数据 → loading / error / data 三态 → 组合 `EventList` 与 `DetailSection`）。
 - **Provider + hook 配对**：`web/src/lib/theme-context.tsx`（`createContext` + `<Name>Provider` + `use<Name>` + `use<Name>Optional` 测试便利变体）。

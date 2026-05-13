@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
 
 import { Badge, Button, Hostname, MonoDigits, StatusGlyph } from '../../components/atoms'
+import { ObservabilityEvidenceFocus } from '../../components/ObservabilityEvidenceFocus'
+import { ObservabilityEvidenceLead } from '../../components/ObservabilityEvidenceLead'
 import { targetEvidenceGlyphState } from './targetHelpers'
 import type { TargetEvidenceItem, TargetEvidenceLead } from './types'
 
@@ -83,25 +85,16 @@ export function TargetsSupportSurface({
         </div>
       </div>
 
-      <div className={`targets-evidence-lead targets-evidence-lead--${evidenceLead.tone}`}>
-        <div className="targets-evidence-lead__main">
-          <p className="targets-evidence-lead__eyebrow">{evidenceLead.eyebrow}</p>
-          <h3>{evidenceLead.title}</h3>
-          <p>{evidenceLead.description}</p>
-          {filterContext.length > 0 ? (
-            <div className="targets-evidence-lead__filters" aria-label="当前入口证据筛选">
-              {filterContext.map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-          ) : (
-            <div className="targets-evidence-lead__filters" aria-label="当前入口证据筛选">
-              <span>完整 Target 库存</span>
-            </div>
-          )}
-        </div>
-        <div className="targets-evidence-lead__action">
-          {evidenceLead.actionKind === 'asset' ? (
+      <ObservabilityEvidenceLead
+        tone={evidenceLead.tone}
+        eyebrow={evidenceLead.eyebrow}
+        title={evidenceLead.title}
+        description={evidenceLead.description}
+        filterItems={filterContext}
+        emptyFilterLabel="完整 Target 库存"
+        filterAriaLabel="当前入口证据筛选"
+        action={
+          evidenceLead.actionKind === 'asset' ? (
             <Link className="btn btn--secondary btn--md" to="/asset-decisions">
               {evidenceLead.actionLabel}
             </Link>
@@ -109,12 +102,14 @@ export function TargetsSupportSurface({
             <Button variant="secondary" size="md" onClick={handleLeadAction}>
               {evidenceLead.actionLabel}
             </Button>
-          )}
+          )
+        }
+        secondaryAction={
           <Link className="observability-support-link" to="/vps">
             VPS 台账
           </Link>
-        </div>
-      </div>
+        }
+      />
 
       <div className="observability-support__grid" aria-label="目标观测证据摘要">
         <article className="observability-support-lane observability-support-lane--alert">
@@ -209,42 +204,43 @@ export function TargetsSupportSurface({
 
       <div className="targets-evidence-context" aria-label="目标证据下一步">
         {topEvidence ? (
-          <article className="targets-evidence-focus">
-            <div className="targets-evidence-focus__glyph">
+          <ObservabilityEvidenceFocus
+            glyph={
               <StatusGlyph
                 state={targetEvidenceGlyphState(topEvidence.target)}
                 ariaLabel={`${topEvidence.title} 入口证据状态`}
               />
-            </div>
-            <div className="targets-evidence-focus__body">
-              <p className="targets-evidence-focus__eyebrow">优先核对入口</p>
-              <h3>优先核对：{topEvidence.title}</h3>
-              <p>{topEvidence.reason}</p>
-              <span>
+            }
+            eyebrow="优先核对入口"
+            title={`优先核对：${topEvidence.title}`}
+            description={topEvidence.reason}
+            meta={
+              <>
                 <Hostname truncate maxChars={18}>{topEvidence.target.target_id}</Hostname>
                 {' · '}
                 {topEvidence.meta}
-              </span>
-            </div>
-            <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
-              {topEvidence.actionLabel}
-            </Link>
-          </article>
+              </>
+            }
+            action={
+              <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
+                {topEvidence.actionLabel}
+              </Link>
+            }
+          />
         ) : (
-          <article className="targets-evidence-focus targets-evidence-focus--stable">
-            <div className="targets-evidence-focus__glyph">
-              <StatusGlyph state="normal" ariaLabel="Target 入口证据稳定" />
-            </div>
-            <div className="targets-evidence-focus__body">
-              <p className="targets-evidence-focus__eyebrow">入口证据</p>
-              <h3>没有需要优先核对的 Target</h3>
-              <p>当前列表没有异常入口、暂停归档对象或执行覆盖缺口。</p>
-              <span>继续从 VPS 台账和资产决策队列核对资产侧事实。</span>
-            </div>
-            <Link className="btn btn--ghost btn--sm" to="/asset-decisions">
-              查看资产决策
-            </Link>
-          </article>
+          <ObservabilityEvidenceFocus
+            stable
+            glyph={<StatusGlyph state="normal" ariaLabel="Target 入口证据稳定" />}
+            eyebrow="入口证据"
+            title="没有需要优先核对的 Target"
+            description="当前列表没有异常入口、暂停归档对象或执行覆盖缺口。"
+            meta="继续从 VPS 台账和资产决策队列核对资产侧事实。"
+            action={
+              <Link className="btn btn--ghost btn--sm" to="/asset-decisions">
+                查看资产决策
+              </Link>
+            }
+          />
         )}
       </div>
     </section>

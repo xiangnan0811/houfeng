@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
 
 import { Badge, Button, Hostname, MonoDigits, StatusGlyph } from '../../components/atoms'
+import { ObservabilityEvidenceFocus } from '../../components/ObservabilityEvidenceFocus'
+import { ObservabilityEvidenceLead } from '../../components/ObservabilityEvidenceLead'
 import { nodeEvidenceGlyphState } from './nodeHelpers'
 import type { NodeEvidenceItem, NodeEvidenceLead } from './types'
 
@@ -71,25 +73,16 @@ export function NodesSupportSurface({
         </div>
       </div>
 
-      <div className={`nodes-evidence-lead nodes-evidence-lead--${evidenceLead.tone}`}>
-        <div className="nodes-evidence-lead__main">
-          <p className="nodes-evidence-lead__eyebrow">{evidenceLead.eyebrow}</p>
-          <h3>{evidenceLead.title}</h3>
-          <p>{evidenceLead.description}</p>
-          {filterContext.length > 0 ? (
-            <div className="nodes-evidence-lead__filters" aria-label="当前证据筛选">
-              {filterContext.map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-          ) : (
-            <div className="nodes-evidence-lead__filters" aria-label="当前证据筛选">
-              <span>完整 Node 库存</span>
-            </div>
-          )}
-        </div>
-        <div className="nodes-evidence-lead__action">
-          {evidenceLead.actionKind === 'asset' ? (
+      <ObservabilityEvidenceLead
+        tone={evidenceLead.tone}
+        eyebrow={evidenceLead.eyebrow}
+        title={evidenceLead.title}
+        description={evidenceLead.description}
+        filterItems={filterContext}
+        emptyFilterLabel="完整 Node 库存"
+        filterAriaLabel="当前证据筛选"
+        action={
+          evidenceLead.actionKind === 'asset' ? (
             <Link className="btn btn--secondary btn--md" to="/vps">
               {evidenceLead.actionLabel}
             </Link>
@@ -97,12 +90,14 @@ export function NodesSupportSurface({
             <Button variant="secondary" size="md" onClick={handleLeadAction}>
               {evidenceLead.actionLabel}
             </Button>
-          )}
+          )
+        }
+        secondaryAction={
           <Link className="observability-support-link" to="/asset-decisions">
             资产决策队列
           </Link>
-        </div>
-      </div>
+        }
+      />
 
       <div className="observability-support__grid" aria-label="节点观测证据摘要">
         <article className="observability-support-lane observability-support-lane--alert">
@@ -196,42 +191,43 @@ export function NodesSupportSurface({
 
       <div className="nodes-evidence-context" aria-label="节点证据下一步">
         {topEvidence ? (
-          <article className="nodes-evidence-focus">
-            <div className="nodes-evidence-focus__glyph">
+          <ObservabilityEvidenceFocus
+            glyph={
               <StatusGlyph
                 state={nodeEvidenceGlyphState(topEvidence.node)}
                 ariaLabel={`${topEvidence.title} 证据状态`}
               />
-            </div>
-            <div className="nodes-evidence-focus__body">
-              <p className="nodes-evidence-focus__eyebrow">优先核对节点</p>
-              <h3>优先核对：{topEvidence.title}</h3>
-              <p>{topEvidence.reason}</p>
-              <span>
+            }
+            eyebrow="优先核对节点"
+            title={`优先核对：${topEvidence.title}`}
+            description={topEvidence.reason}
+            meta={
+              <>
                 <Hostname truncate maxChars={18}>{topEvidence.node.node_id}</Hostname>
                 {' · '}
                 {topEvidence.meta}
-              </span>
-            </div>
-            <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
-              {topEvidence.actionLabel}
-            </Link>
-          </article>
+              </>
+            }
+            action={
+              <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
+                {topEvidence.actionLabel}
+              </Link>
+            }
+          />
         ) : (
-          <article className="nodes-evidence-focus nodes-evidence-focus--stable">
-            <div className="nodes-evidence-focus__glyph">
-              <StatusGlyph state="normal" ariaLabel="Node 证据稳定" />
-            </div>
-            <div className="nodes-evidence-focus__body">
-              <p className="nodes-evidence-focus__eyebrow">运行证据</p>
-              <h3>没有需要优先核对的 Node</h3>
-              <p>当前列表没有异常、接入缺口、维护或暂停对象。</p>
-              <span>继续从 VPS 库存、订阅和资产决策队列核对资产侧事实。</span>
-            </div>
-            <Link className="btn btn--ghost btn--sm" to="/vps">
-              查看 VPS
-            </Link>
-          </article>
+          <ObservabilityEvidenceFocus
+            stable
+            glyph={<StatusGlyph state="normal" ariaLabel="Node 证据稳定" />}
+            eyebrow="运行证据"
+            title="没有需要优先核对的 Node"
+            description="当前列表没有异常、接入缺口、维护或暂停对象。"
+            meta="继续从 VPS 库存、订阅和资产决策队列核对资产侧事实。"
+            action={
+              <Link className="btn btn--ghost btn--sm" to="/vps">
+                查看 VPS
+              </Link>
+            }
+          />
         )}
       </div>
     </section>

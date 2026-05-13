@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend spec index for applicable guidance."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Component extraction, export, props, and layering rules."}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Shared component placement, route module, and test colocation rules."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "BEM, token, and CSS placement rules for shared evidence styles."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required lint, Vitest, build, and visual evidence checks."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse guide for extracting repeated evidence UI only after stable duplication."}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Active v2 visual language and loading/state guidance."}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Active component/page visual contract for observability support pages."}
+{"file": "docs/operations/v2-visual-evidence.md", "reason": "Required preview/browser sanity workflow for user-visible UI changes."}
+{"file": ".trellis/tasks/05-13-ux7a-evidence-route-hardening/research/local-ux7a-audit.md", "reason": "Task-local audit of duplicate evidence UI and route bundle hardening."}
