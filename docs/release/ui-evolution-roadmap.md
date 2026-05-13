@@ -150,7 +150,7 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 
 ## UX-5：VPS Detail Decision Workbench
 
-> 状态：进行中，当前任务 `05-13-ux5-vps-detail-decision-workbench`。
+> 状态：已完成，落地于 PR #56。
 
 ### 目标
 
@@ -220,6 +220,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前执行 UX-5 Trellis task：`VPS detail decision workbench`。
+当前推荐执行 UX-6 Trellis task：`Observability support pages`。
 
 UX-5 完成后，推荐进入 UX-6：`Observability support pages`。原因是 UX-5 会把单台 VPS 的判断路径收敛到续费、成本、Node 证据、服务/域名和时间线；UX-6 应继续把 Nodes、Targets、Events 收敛成资产判断的运行证据系统，避免观测对象与资产主线割裂。
