@@ -393,6 +393,11 @@ export function AssetDecisionsPage() {
   const renewalDueQueueCount = decisionQueue.filter((item) => item.renewalDue).length
   const missingSubscriptionCount = decisionQueue.filter((item) => !item.subscription).length
   const unlinkedCount = decisionQueue.filter((item) => item.vps.active_node_link_count <= 0).length
+  const priorityDecisionCount = decisionQueue.filter(
+    (item) => item.renewalDue && item.vps.renewal_decision === 'unreviewed',
+  ).length
+  const qualityGapCount = decisionQueue.filter((item) => item.qualityIssues.length > 0).length
+  const lifecycleActionCount = state.migrate.length + state.cancel.length
   const totalDecisionQueue = decisionQueue.length
   const queueTabs = [
     { value: 'all', label: '全部', count: totalDecisionQueue },
@@ -403,6 +408,40 @@ export function AssetDecisionsPage() {
     { value: 'unlinked', label: '未关联', count: unlinkedCount },
     { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
   ] satisfies Array<{ value: DecisionQueueView; label: string; count: number }>
+  const focusItems = [
+    {
+      label: '优先处理',
+      value: `${priorityDecisionCount}`,
+      meta: `${renewalWindow} 天内续费且未评估`,
+      tone: priorityDecisionCount > 0 ? 'critical' : 'normal',
+    },
+    {
+      label: '统一队列',
+      value: `${totalDecisionQueue}`,
+      meta: visibleDecisionQueue.length === totalDecisionQueue
+        ? '当前显示全部'
+        : `当前视图 ${visibleDecisionQueue.length} 台`,
+      tone: totalDecisionQueue > 0 ? 'notice' : 'normal',
+    },
+    {
+      label: '资料缺口',
+      value: `${qualityGapCount}`,
+      meta: `缺订阅 ${missingSubscriptionCount} / 未关联 ${unlinkedCount}`,
+      tone: qualityGapCount > 0 ? 'alert' : 'normal',
+    },
+    {
+      label: '生命周期动作',
+      value: `${lifecycleActionCount}`,
+      meta: `迁移 ${state.migrate.length} / 取消 ${state.cancel.length}`,
+      tone: lifecycleActionCount > 0 ? 'alert' : 'normal',
+    },
+    {
+      label: '续费证据',
+      value: `${state.renewals.length}`,
+      meta: state.renewalsError ? '续费窗口读取失败' : `${renewalWindow} 天窗口订阅`,
+      tone: state.renewalsError ? 'notice' : state.renewals.length > 0 ? 'normal' : 'neutral',
+    },
+  ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'notice' | 'alert' | 'critical' | 'neutral' }>
 
   function selectVPS(vps: VPSAssetRecord) {
     setSelectedVPS(vps)
@@ -509,6 +548,18 @@ export function AssetDecisionsPage() {
           </label>
         </div>
         <Tabs items={queueTabs} value={queueView} onChange={setQueueView} variant="pill" />
+        <div className="asset-decision-focus" aria-label="资产决策处理焦点">
+          {focusItems.map((item) => (
+            <article
+              key={item.label}
+              className={['asset-decision-focus__item', `asset-decision-focus__item--${item.tone}`].join(' ')}
+            >
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <small>{item.meta}</small>
+            </article>
+          ))}
+        </div>
         {decisionNotice && <p className="asset-operation-feedback">{decisionNotice}</p>}
         {state.vpsLoading ? (
           <div className="empty-state">正在加载 VPS 决策队列…</div>

@@ -204,4 +204,25 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: /迁移/ }))
     expect(within(screen.getByLabelText('资产决策工作队列')).getByText('Tokyo Review')).toBeInTheDocument()
   })
+
+  it('shows a queue error instead of misreporting missing subscriptions when all subscription evidence fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'subscription evidence unavailable' }, 500))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+      .mockResolvedValueOnce(mockJSONResponse([migrateVPS]))
+      .mockResolvedValueOnce(mockJSONResponse([cancelVPS]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('subscription evidence unavailable')).toBeInTheDocument())
+    expect(screen.queryByText('Tokyo Review')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('资产决策队列列表')).not.toBeInTheDocument()
+  })
 })

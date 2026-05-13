@@ -4,7 +4,7 @@
 >
 > 状态：Active route for the next UI implementation batch
 >
-> 前置状态：PR #52 `Improve page body responsive hierarchy` 已合并，当前 `main` 已同步。
+> 前置状态：PR #53 `Improve dashboard command surface polish` 已合并，当前进入 UX-4 `Asset decision + VPS inventory real-data path`。
 
 ## 结论
 
@@ -103,7 +103,7 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 
 ## UX-3：Dashboard Command Surface Polish
 
-> 状态：进行中，当前任务 `05-13-ux3-dashboard-command-surface-polish`。
+> 状态：已完成，落地于 PR #53。
 
 ### 目标
 
@@ -127,6 +127,8 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 
 ## UX-4：Asset Decision + VPS Inventory Real-Data Path
 
+> 状态：进行中，当前任务 `05-13-ux4-asset-vps-real-data-path`。
+
 ### 目标
 
 让用户愿意把 40+ VPS 带进界面核对。资产决策页是处理队列，VPS 页是高密度资产库存表，两者共同承担真实数据验证前的产品吸引力。
@@ -135,6 +137,7 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 
 - 资产决策页强化续费窗口、未评估、迁移/取消、缺订阅、未关联 Node 和缺信息优先级。
 - VPS 列表强化 quick views、filter chips、drawer filters、订阅 join、Node 关联数量、数据质量 badge。
+- VPS 列表必须区分订阅证据 `loading / ready / error`：只有 `ready` 且无订阅时才显示真实“缺订阅”，订阅读取失败时显示“订阅未知 / 证据不可用”。
 - 保持首屏数据行密度，避免筛选器和说明文案成为视觉主体。
 - URL-state 与 Dashboard 深链保持可见承接。
 
@@ -215,6 +218,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前执行 UX-3 Trellis task：`Dashboard command surface polish`。
+当前执行 UX-4 Trellis task：`Asset decision + VPS inventory real-data path`。
 
-UX-3 完成后，推荐进入 UX-4：`Asset decision + VPS inventory real-data path`。原因是 Dashboard 是用户每天打开的判断入口，UX-4 则直接承接真实 40+ VPS 数据验证；先把首页 command desk 做稳，再把资产决策和 VPS 库存打磨成真实数据核对路径，能避免真实数据验证时被首屏判断和资产列表体验同时拖累。
+UX-4 完成后，推荐进入 UX-5：`VPS detail decision workbench`。原因是 UX-4 解决 40+ VPS 的列表扫描和队列优先级，UX-5 则承接单台 VPS 的深入判断：续费、成本、Node 证据、服务/域名和时间线需要被组织成“是否保留/迁移/取消”的决策工作台。
