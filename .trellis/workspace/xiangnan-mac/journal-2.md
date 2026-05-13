@@ -1626,3 +1626,36 @@ Implemented the UX-1 shell baseline: compact v2 app shell styling, asset breadcr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 108: UX-2 page body responsive hierarchy
+
+**Date**: 2026-05-13
+**Task**: UX-2 page body responsive hierarchy
+**Branch**: `ux2-page-body-responsive-hierarchy`
+
+### Summary
+
+Improved shared page-body responsive rules, wrapped Nodes/Targets tables in local scroll surfaces, updated UI roadmap, and captured v2 visual evidence for the core route matrix.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a843c4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

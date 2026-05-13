@@ -602,17 +602,19 @@ export function TargetsPage() {
               </p>
             </div>
           ) : (
-            <DataTable<TargetRecord>
-              columns={columns}
-              rows={filteredTargets}
-              rowKey={(target) => target.target_id}
-              density="compact"
-              className="targets-table"
-              onRowClick={(target) => {
-                if (!shouldNavigateOnRowClick(target)) return
-                navigate(`/targets/${target.target_id}`)
-              }}
-            />
+            <div className="page-panel page-panel--scroll-x targets-table-panel">
+              <DataTable<TargetRecord>
+                columns={columns}
+                rows={filteredTargets}
+                rowKey={(target) => target.target_id}
+                density="compact"
+                className="targets-table"
+                onRowClick={(target) => {
+                  if (!shouldNavigateOnRowClick(target)) return
+                  navigate(`/targets/${target.target_id}`)
+                }}
+              />
+            </div>
           )}
 
           <TargetsRuntimeOverlays

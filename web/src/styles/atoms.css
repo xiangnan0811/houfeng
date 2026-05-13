@@ -290,6 +290,7 @@
 
 .tabs--pill {
   display: inline-flex;
+  max-width: 100%;
   padding: 4px;
   background: rgba(0, 0, 0, 0.2);
   border-radius: var(--radius-pill);
@@ -297,6 +298,11 @@
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 .tabs--pill .tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 0;
   padding: 6px 16px;
   color: var(--text-muted);
   font-size: 13px;
@@ -311,6 +317,20 @@
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 620px) {
+  .tabs--pill {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .tabs--pill .tab {
+    flex: 1 1 calc(50% - 4px);
+    justify-content: center;
+    padding-inline: var(--space-2);
+  }
 }
 
 /* ============== DataTable ============== */

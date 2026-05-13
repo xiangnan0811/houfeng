@@ -157,16 +157,18 @@ export function NodesListSection({
           </p>
         </div>
       ) : (
-        <DataTable<NodeRecord>
-          columns={visibleColumns}
-          rows={nodes}
-          rowKey={(node) => node.node_id}
-          density="compact"
-          className="nodes-table"
-          sortState={sortState}
-          onSortChange={onSortChange}
-          onRowClick={onRowClick}
-        />
+        <div className="page-panel page-panel--scroll-x nodes-table-panel">
+          <DataTable<NodeRecord>
+            columns={visibleColumns}
+            rows={nodes}
+            rowKey={(node) => node.node_id}
+            density="compact"
+            className="nodes-table"
+            sortState={sortState}
+            onSortChange={onSortChange}
+            onRowClick={onRowClick}
+          />
+        </div>
       )}
 
       <NodesRuntimeOverlays
