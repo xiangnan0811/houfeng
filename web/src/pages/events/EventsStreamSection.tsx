@@ -9,7 +9,9 @@ type EventsStreamSectionProps = {
   events: StateChangeEventRecord[]
   exhausted: boolean
   loadingMore: boolean
+  hasActiveFilters: boolean
   onLoadMore: () => void
+  onClearFilters: () => void
 }
 
 const EVENT_GROUP_LABELS: Record<EventGroupKey, string> = {
@@ -69,14 +71,31 @@ export function EventsStreamSection({
   events,
   exhausted,
   loadingMore,
+  hasActiveFilters,
   onLoadMore,
+  onClearFilters,
 }: EventsStreamSectionProps) {
   const groupedEvents = groupEventsByTime(events)
 
   return (
     <DetailSection eyebrow="事件流" title="事件流">
       {events.length === 0 ? (
-        <EventList events={events} />
+        <EventList
+          events={events}
+          emptyTitle={hasActiveFilters ? '没有匹配的事件' : '最近没有状态变更事件'}
+          emptyDescription={
+            hasActiveFilters
+              ? '当前 URL 筛选没有返回事件。重置筛选后再继续核对诊断时间线。'
+              : '系统暂时没有新的状态变更事件。'
+          }
+          emptyAction={
+            hasActiveFilters ? (
+              <Button variant="ghost" size="md" onClick={onClearFilters}>
+                重置筛选
+              </Button>
+            ) : null
+          }
+        />
       ) : (
         <div className="probe-list">
           {groupedEvents.map((group) => (

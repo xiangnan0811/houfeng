@@ -107,6 +107,7 @@
 - 跨页复用样式 → `styles/pages.css`（业务级版式）或 `styles/atoms.css`（原子）。
 - 仅 AppShell 子树用 → `app/layout/layout.css`。
 - **不要**为某个 page 单独建 `.css` 文件（LoginPage 是历史例外）。要做局部 → 用 BEM 命名 + 写进 `pages.css`，靠 page 根容器的 block class 隔离。
+- loading / error / empty 的共享页面状态样式统一用 `.page-state` 系列，落在 `styles/pages.css`。页面不要复制 `.page-panel` + 裸文本；空态如果需要 v2 装饰和 CTA，使用 `PageState surface="empty"` 复用 `.empty-state.page-state`。
 
 ---
 

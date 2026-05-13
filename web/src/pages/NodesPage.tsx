@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { type DataTableSortState } from '../components/atoms'
+import { PageState } from '../components/PageState'
 import {
   ApiError,
   createNode,
@@ -536,15 +537,18 @@ export function NodesPage() {
   }
 
   if (loading) {
-    return <section className="page-panel">正在加载节点列表…</section>
+    return <PageState kind="loading" title="正在加载节点列表…" />
   }
 
   if (error) {
     return (
-      <section className="page-panel">
-        <h2 className="page-panel__title">节点</h2>
-        <p className="page-panel__description">{error}</p>
-      </section>
+      <PageState
+        kind="error"
+        eyebrow="节点"
+        title="节点列表不可用"
+        description={error}
+        technicalSummary={error}
+      />
     )
   }
 
@@ -779,6 +783,7 @@ export function NodesPage() {
             current?.nodeId === node.node_id ? null : current,
           )
         }}
+        onCreateNode={toggleCreateDrawer}
       />
     </section>
   )

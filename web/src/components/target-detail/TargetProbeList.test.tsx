@@ -64,7 +64,7 @@ describe('TargetProbeList', () => {
       />,
     )
 
-    expect(screen.getByRole('heading', { name: '当前还没有 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '目标尚未配置 ProbeItem' })).toBeInTheDocument()
   })
 
   it('renders probe item rows with the latest observations', () => {
@@ -199,7 +199,7 @@ describe('TargetProbeList', () => {
     expect(screen.getByText('尚无观测结果')).toBeInTheDocument()
   })
 
-  it('renders an "添加第一个 Probe" CTA button in the empty state when onAddProbe is provided', () => {
+  it('renders an "添加 Probe" CTA button in the empty state when onAddProbe is provided', () => {
     const onAddProbe = vi.fn()
     render(
       <TargetProbeList
@@ -214,7 +214,7 @@ describe('TargetProbeList', () => {
       />,
     )
 
-    const button = screen.getByRole('button', { name: '添加第一个 Probe' })
+    const button = screen.getByRole('button', { name: '添加 Probe' })
     expect(button).toBeInTheDocument()
     fireEvent.click(button)
     expect(onAddProbe).toHaveBeenCalledTimes(1)

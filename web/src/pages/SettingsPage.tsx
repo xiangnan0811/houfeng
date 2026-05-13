@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useState } from 'react'
 import { Tabs } from '../components/atoms/Tabs'
 import { Modal } from '../components/atoms/Modal'
 import { DetailSection } from '../components/DetailSection'
+import { PageState } from '../components/PageState'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
 import type {
   FeishuSettingsInput,
@@ -374,16 +375,18 @@ export function SettingsPage() {
   }, [])
 
   if (state.loading) {
-    return <section className="page-panel">正在加载设置…</section>
+    return <PageState kind="loading" title="正在加载设置…" />
   }
 
   if (state.error || !state.settings || !state.form) {
     return (
-      <section className="page-panel">
-        <p className="page-panel__eyebrow">设置</p>
-        <h2 className="page-panel__title">设置不可用</h2>
-        <p className="page-panel__description">{state.error ?? '未获取到设置数据'}</p>
-      </section>
+      <PageState
+        kind="error"
+        eyebrow="设置"
+        title="设置不可用"
+        description={state.error ?? '未获取到设置数据'}
+        technicalSummary={state.error}
+      />
     )
   }
 

@@ -159,7 +159,7 @@ describe('TargetDetailPage', () => {
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
     expect(screen.getByText('nd_001')).toBeInTheDocument()
-    expect(screen.queryByText('当前还没有 ProbeItem')).not.toBeInTheDocument()
+    expect(screen.queryByText('目标尚未配置 ProbeItem')).not.toBeInTheDocument()
     expect(screen.queryByText('事件与 incident 仍由后续切片接入，这里先保留版位。')).not.toBeInTheDocument()
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/targets/tg_001', {
@@ -425,11 +425,9 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
     )
-    expect(
-      screen.getByText('当前还没有 ProbeItem，请为该入口添加至少一种观测方式。'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('请为该入口添加至少一种观测方式。')).toBeInTheDocument()
   })
 
   it('creates an HTTP ProbeItem from the empty state and appends it to the list', async () => {
@@ -491,7 +489,7 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
     )
 
     fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
@@ -602,7 +600,7 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
     )
 
     fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
@@ -683,7 +681,7 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
     )
 
     fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
@@ -752,7 +750,7 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
 
     expect(screen.getByText('端口必须为正整数。')).toBeInTheDocument()
-    expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument()
+    expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
@@ -1398,7 +1396,7 @@ describe('TargetDetailPage', () => {
 
     expect(confirmSpy).not.toHaveBeenCalled()
     await waitFor(() =>
-      expect(screen.getByText('当前还没有 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
     )
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toHaveFocus(),

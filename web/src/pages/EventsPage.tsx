@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
+import { PageState } from '../components/PageState'
 import { ApiError, listEvents } from '../lib/api'
 import type { EventListFilter, StateChangeEventType } from '../lib/types'
 import { EventsFilterDrawer } from './events/EventsFilterDrawer'
@@ -354,16 +355,18 @@ export function EventsPage() {
   }
 
   if (state.loading) {
-    return <section className="page-panel">正在加载事件…</section>
+    return <PageState kind="loading" title="正在加载事件…" />
   }
 
   if (state.error) {
     return (
-      <section className="page-panel">
-        <p className="page-panel__eyebrow">事件</p>
-        <h2 className="page-panel__title">事件不可用</h2>
-        <p className="page-panel__description">{state.error}</p>
-      </section>
+      <PageState
+        kind="error"
+        eyebrow="事件"
+        title="事件不可用"
+        description={state.error}
+        technicalSummary={state.error}
+      />
     )
   }
 
@@ -410,7 +413,9 @@ export function EventsPage() {
         events={state.events}
         exhausted={state.exhausted}
         loadingMore={loadingMore}
+        hasActiveFilters={activeFilters}
         onLoadMore={handleLoadMore}
+        onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
       />
     </div>
   )

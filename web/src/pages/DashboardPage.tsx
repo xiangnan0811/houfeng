@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { PageState } from '../components/PageState'
 import { ApiError, getDashboard } from '../lib/api'
 import { type AutoRefreshOption, useAutoRefresh } from '../lib/useAutoRefresh'
 import type { DashboardOverview } from '../lib/types'
@@ -56,16 +57,18 @@ export function DashboardPage() {
   }
 
   if (state.loading) {
-    return <section className="page-panel">正在加载工作台…</section>
+    return <PageState kind="loading" title="正在加载工作台…" />
   }
 
   if (state.error || !state.overview) {
     return (
-      <section className="page-panel">
-        <p className="page-panel__eyebrow">工作台</p>
-        <h2 className="page-panel__title">工作台不可用</h2>
-        <p className="page-panel__description">{state.error ?? '未获取到概览数据'}</p>
-      </section>
+      <PageState
+        kind="error"
+        eyebrow="工作台"
+        title="工作台不可用"
+        description={state.error ?? '未获取到概览数据'}
+        technicalSummary={state.error}
+      />
     )
   }
 
