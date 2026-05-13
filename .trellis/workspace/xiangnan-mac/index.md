@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 106
+- **Total Sessions**: 107
 - **Last Active**: 2026-05-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1595 | Active |
+| `journal-2.md` | ~1628 | Active |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 107 | 2026-05-13 | UX-1 app shell visual baseline | `bbc88d5` | `ux1-app-shell-visual-baseline` |
 | 106 | 2026-05-13 | Plan UI evolution roadmap | `a3c98f9`, `988c595`, `7acb473` | `plan/ui-evolution-roadmap` |
 | 105 | 2026-05-13 | Harden glassmorphism web redesign | `1c7385b` | `fix/glassmorphism-web-hardening` |
 | 104 | 2026-05-12 | UX-6 visual evidence workflow | `374c0af` | `ux/visual-evidence-acceptance-flow` |

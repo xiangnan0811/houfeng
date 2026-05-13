@@ -1593,3 +1593,36 @@ Created the next-stage UI evolution roadmap, archived the Trellis planning task,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 107: UX-1 app shell visual baseline
+
+**Date**: 2026-05-13
+**Task**: UX-1 app shell visual baseline
+**Branch**: `ux1-app-shell-visual-baseline`
+
+### Summary
+
+Implemented the UX-1 shell baseline: compact v2 app shell styling, asset breadcrumb coverage, mobile shell/nav corrections, Nodes mobile hero fix, full lint/test/build and local visual sanity across core routes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bbc88d5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
