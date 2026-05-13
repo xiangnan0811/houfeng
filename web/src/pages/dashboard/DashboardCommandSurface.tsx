@@ -56,6 +56,15 @@ type NextAction = {
   primary?: boolean
 }
 
+type FocusItem = {
+  label: string
+  value: number | string
+  detail: string
+  to: string
+  tone: BadgeTone
+  emphasis?: boolean
+}
+
 function assetPressureCount(summary: DashboardAssetSummary) {
   return (
     summary.renewal_due_30d_vps_count +
@@ -111,6 +120,92 @@ function commandDescription(
       ? `30 天续费 ${summary.renewal_due_30d_vps_count} 台 VPS`
       : '30 天内暂无续费压力'
   return `${assetCopy}；${observationCopy}；${renewalCopy}。`
+}
+
+function assetFocusDetail(summary: DashboardAssetSummary, pressureTotal: number) {
+  if (pressureTotal === 0) return '续费、决策与关联均稳定'
+  const lifecycleReviewCount = summary.to_cancel_vps_count + summary.to_migrate_vps_count
+  return `续费 ${summary.renewal_due_30d_vps_count} · 决策 ${
+    summary.unreviewed_vps_count + lifecycleReviewCount
+  } · 缺关联 ${summary.unlinked_vps_count}`
+}
+
+function observabilityFocus(
+  overview: DashboardOverview,
+  abnormalTotal: number,
+  severeTotal: number,
+  maintenanceTotal: number,
+): FocusItem {
+  if (severeTotal > 0) {
+    return {
+      label: '严重异常',
+      value: severeTotal,
+      detail: `异常对象 ${abnormalTotal} · 先看事件证据`,
+      to: DASHBOARD_LINKS.eventsSevere,
+      tone: 'critical',
+      emphasis: true,
+    }
+  }
+
+  if (abnormalTotal > 0) {
+    return {
+      label: '观测异常',
+      value: abnormalTotal,
+      detail: `节点 ${overview.abnormal_node_count} · 目标 ${overview.abnormal_target_count}`,
+      to: overview.abnormal_node_count > 0 ? DASHBOARD_LINKS.nodesAbnormal : DASHBOARD_LINKS.targetsAbnormal,
+      tone: 'alert',
+      emphasis: true,
+    }
+  }
+
+  if (maintenanceTotal > 0) {
+    return {
+      label: '维护观察',
+      value: maintenanceTotal,
+      detail: `节点 ${overview.maintenance_node_count} · 目标 ${overview.maintenance_target_count}`,
+      to: DASHBOARD_LINKS.eventsMaintenance,
+      tone: 'maintenance',
+      emphasis: true,
+    }
+  }
+
+  return {
+    label: '观测稳定',
+    value: 0,
+    detail: '当前没有活跃异常对象',
+    to: DASHBOARD_LINKS.events24h,
+    tone: 'normal',
+  }
+}
+
+function commandFocusItems(
+  overview: DashboardOverview,
+  pressureTotal: number,
+  abnormalTotal: number,
+  severeTotal: number,
+  maintenanceTotal: number,
+  primaryAction?: NextAction,
+): FocusItem[] {
+  const summary = overview.asset_summary
+  return [
+    {
+      label: pressureTotal > 0 ? '资产压力' : '资产主线',
+      value: pressureTotal,
+      detail: assetFocusDetail(summary, pressureTotal),
+      to: pressureTotal > 0 ? DASHBOARD_LINKS.assetDecisions : DASHBOARD_LINKS.vps,
+      tone: pressureTotal > 0 ? 'notice' : 'normal',
+      emphasis: pressureTotal > 0,
+    },
+    observabilityFocus(overview, abnormalTotal, severeTotal, maintenanceTotal),
+    {
+      label: '下一步',
+      value: '01',
+      detail: primaryAction?.label ?? '等待工作台生成动作',
+      to: primaryAction?.to ?? DASHBOARD_LINKS.events24h,
+      tone: primaryAction?.tone ?? 'neutral',
+      emphasis: true,
+    },
+  ]
 }
 
 function assetRows(summary: DashboardAssetSummary): CommandRow[] {
@@ -330,6 +425,25 @@ export function DashboardCommandSurface({
   const primaryAction = actions.find((action) => action.primary) ?? actions[0]
   const tone = commandTone(fleetState)
   const visibleAttention = attentionItems.slice(0, 3)
+  const focusItems = commandFocusItems(
+    overview,
+    pressureTotal,
+    abnormalTotal,
+    severeTotal,
+    maintenanceTotal,
+    primaryAction,
+  )
+  const assetLaneClass = [
+    'dashboard-command-lane',
+    'dashboard-command-lane--asset',
+    pressureTotal > 0 && 'dashboard-command-lane--priority',
+  ].filter(Boolean).join(' ')
+  const observationLaneClass = [
+    'dashboard-command-lane',
+    'dashboard-command-lane--observability',
+    severeTotal > 0 && 'dashboard-command-lane--critical-priority',
+    abnormalTotal > 0 && severeTotal === 0 && 'dashboard-command-lane--priority',
+  ].filter(Boolean).join(' ')
 
   const filteredAssetRows = assetRows(summary).filter(
     (item) => item.value !== 0 && item.value !== '0/0' && item.value !== '0'
@@ -370,6 +484,24 @@ export function DashboardCommandSurface({
           <p className="dashboard-command-surface__eyebrow">工作台</p>
           <h1>{commandTitle(summary, abnormalTotal, severeTotal, maintenanceTotal, isFreshInstall)}</h1>
           <p>{commandDescription(overview, abnormalTotal, severeTotal, maintenanceTotal, isFreshInstall)}</p>
+          <div className="dashboard-command-focus" aria-label="今日判断摘要">
+            {focusItems.map((item) => (
+              <Link
+                className={`dashboard-command-focus__item dashboard-command-focus__item--${item.tone}${
+                  item.emphasis ? ' dashboard-command-focus__item--emphasis' : ''
+                }`}
+                to={item.to}
+                key={item.label}
+                aria-label={`${item.label}：${item.detail}`}
+              >
+                <span className="dashboard-command-focus__label">{item.label}</span>
+                <strong className="dashboard-command-focus__value">
+                  <MonoDigits>{item.value}</MonoDigits>
+                </strong>
+                <span className="dashboard-command-focus__detail">{item.detail}</span>
+              </Link>
+            ))}
+          </div>
         </div>
         <div className="dashboard-command-surface__controls" aria-label="工作台主要动作">
           {primaryAction ? (
@@ -411,15 +543,18 @@ export function DashboardCommandSurface({
       </header>
 
       <div className="dashboard-command-grid">
-        <section className="dashboard-command-lane" aria-label="资产决策队列">
+        <section className={assetLaneClass} aria-label="资产决策队列">
           <div className="dashboard-command-lane__header">
             <div>
               <p className="dashboard-command-lane__eyebrow">资产决策队列</p>
               <h2>续费、决策与缺信息</h2>
             </div>
-            <Badge variant="count" tone={pressureTotal > 0 ? 'notice' : 'normal'}>
-              <MonoDigits>{pressureTotal}</MonoDigits>
-            </Badge>
+            <div className="dashboard-command-lane__tools">
+              {pressureTotal > 0 ? <span className="dashboard-command-lane__signal">优先处理</span> : null}
+              <Badge variant="count" tone={pressureTotal > 0 ? 'notice' : 'normal'}>
+                <MonoDigits>{pressureTotal}</MonoDigits>
+              </Badge>
+            </div>
           </div>
           <div className="dashboard-command-list">
             {filteredAssetRows.length > 0
@@ -444,15 +579,22 @@ export function DashboardCommandSurface({
           </div>
         </section>
 
-        <section className="dashboard-command-lane" aria-label="观测异常队列">
+        <section className={observationLaneClass} aria-label="观测异常队列">
           <div className="dashboard-command-lane__header">
             <div>
               <p className="dashboard-command-lane__eyebrow">观测异常队列</p>
               <h2>事件、节点与目标证据</h2>
             </div>
-            <Badge variant="count" tone={abnormalTotal > 0 ? 'alert' : 'normal'}>
-              <MonoDigits>{abnormalTotal}</MonoDigits>
-            </Badge>
+            <div className="dashboard-command-lane__tools">
+              {severeTotal > 0 ? (
+                <span className="dashboard-command-lane__signal dashboard-command-lane__signal--critical">
+                  严重优先
+                </span>
+              ) : null}
+              <Badge variant="count" tone={abnormalTotal > 0 ? 'alert' : 'normal'}>
+                <MonoDigits>{abnormalTotal}</MonoDigits>
+              </Badge>
+            </div>
           </div>
           <div className="dashboard-command-list">
             {filteredObservabilityRows.length > 0
@@ -508,6 +650,9 @@ export function DashboardCommandSurface({
               <p className="dashboard-command-lane__eyebrow">下一步动作</p>
               <h2>今天先做什么</h2>
             </div>
+            <span className="dashboard-command-lane__signal dashboard-command-lane__signal--muted">
+              按序执行
+            </span>
           </div>
           <div className="dashboard-action-list">
             {actions.map((action, index) => (

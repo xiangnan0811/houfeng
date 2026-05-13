@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "web spec index for review"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "component convention review"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS and token review"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard contract review"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "verification gate review"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "branch governance review"}
