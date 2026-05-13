@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web spec entry point for checking the UX-1 frontend implementation."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check shell CSS, token usage, theme, and visual evidence constraints."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check App layout component conventions and test placement."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check AppShell dashboard summary truth and URL/deep-link semantics."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check required lint, test, build, and UI evidence gates."}
+{"file": ".trellis/tasks/archive/2026-05/05-13-ux1-app-shell-visual-baseline/research/local-shell-context.md", "reason": "Check implementation against local shell findings and scope."}

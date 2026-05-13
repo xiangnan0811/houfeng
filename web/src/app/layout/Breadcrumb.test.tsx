@@ -32,6 +32,18 @@ describe('Breadcrumb', () => {
     expect(screen.getByText('nd_001')).toBeInTheDocument()
   })
 
+  it('renders parent link + current id on /vps/:id', () => {
+    renderAt('/vps/vps_tokyo_001', '/vps/:vpsId')
+    const link = screen.getByRole('link', { name: 'VPS' })
+    expect(link).toHaveAttribute('href', '/vps')
+    expect(screen.getByText('vps_tokyo_001')).toBeInTheDocument()
+  })
+
+  it('hides on level-1 asset routes', () => {
+    const { container } = renderAt('/asset-decisions', '/asset-decisions')
+    expect(container.querySelector('.breadcrumb')).toBeNull()
+  })
+
   it('renders three segments on /nodes/:id/onboarding', () => {
     renderAt('/nodes/nd_001/onboarding', '/nodes/:nodeId/onboarding')
     expect(screen.getByRole('link', { name: '节点' })).toHaveAttribute('href', '/nodes')
