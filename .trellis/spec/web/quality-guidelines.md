@@ -226,6 +226,7 @@ export default defineConfig([
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/atoms.css` 加样式（用令牌） |
 | 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步改 4 个主题块（`:root` / `theme-houfeng-light` / `theme-classic-dark` / `theme-classic-light`），见 `.trellis/spec/web/styling-guidelines.md` |
 | 改首屏防闪烁脚本 | `web/index.html:8-19` 与 `web/src/lib/theme.ts` 的逻辑必须保持一致——它们之间没有共享代码，靠人工对齐 |
+| 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；运行 `npm run build` 并确认没有 Vite large chunk warning，入口 chunk 不应回退到单个 500 kB+ app bundle |
 
 ---
 

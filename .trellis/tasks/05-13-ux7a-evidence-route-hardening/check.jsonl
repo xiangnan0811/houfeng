@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend spec index for quality review."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check shared component layering, route-agnostic behavior, and props shape."}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Check component/test placement and router ownership."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check BEM/shared CSS/token compliance."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check lint, tests, build, and visual evidence requirements."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check whether extraction reduces real duplication without over-abstracting."}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Check v2 visual/state/loading contract."}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Check observability page contract remains intact."}
+{"file": "docs/operations/v2-visual-evidence.md", "reason": "Check preview/browser sanity evidence is recorded."}
+{"file": ".trellis/tasks/05-13-ux7a-evidence-route-hardening/research/local-ux7a-audit.md", "reason": "Check implementation against the task-local hardening plan."}

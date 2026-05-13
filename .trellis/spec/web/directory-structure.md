@@ -43,10 +43,11 @@ web/
 └── src/
     ├── main.tsx                # createRoot + Provider 嵌套
     ├── app/                    # 路由 / 布局壳 / 路由级 metadata
-    │   ├── router.tsx          # createBrowserRouter；所有路由集中注册
+    │   ├── router.tsx          # createBrowserRouter；所有路由集中注册；页面模块用 React.lazy 按路由拆包
     │   ├── RequireAuth.tsx     # 受保护路由壳；未登录跳 /login
     │   ├── RequireAuth.test.tsx
     │   ├── metadata.ts         # PRODUCT_FULL_NAME_ZH 等路由级常量
+    │   ├── RouteModuleFallback.tsx # 路由模块加载中的 v2 surface
     │   └── layout/             # 应用骨架（Sidebar、TopBar、Breadcrumb 等）
     │       ├── AppShell.tsx    # 业务路由统一外壳；含 <Outlet />
     │       ├── Sidebar.tsx
@@ -105,7 +106,9 @@ web/
 
 应用骨架。**不放具体业务**，只放路由表、受保护壳、应用级 metadata 与布局组件。
 
-- `router.tsx` 是路由唯一入口：所有 `path / element` 在这里集中声明，绝大多数业务路由都嵌在 `<RequireAuth />` → `<AppShell />` 之下（参见 `web/src/app/router.tsx:15-37`）。`/login` 是唯一的免登录路由。
+- `router.tsx` 是路由唯一入口：所有 `path / element` 在这里集中声明，绝大多数业务路由都嵌在 `<RequireAuth />` → `<AppShell />` 之下。`/login` 是唯一的免登录路由。
+- 业务页面模块在 `router.tsx` 里用 `React.lazy` 按路由拆包，并通过 `RouteModuleFallback` 包进 `Suspense`。这样 `npm run build` 不会把所有页面塞进首个 app chunk；`RouteModuleFallback` 负责加载中文文案与 `page-panel` surface。
+- `router.tsx` 仍需要导出 `appRoutes` 供 `matchRoutes(appRoutes, ...)` 测试。为满足 `react-refresh/only-export-components`，`router.tsx` 中的 lazy 变量使用 lower camelCase（如 `nodesPage`），不要定义 PascalCase 组件常量；需要渲染时用小 helper 接收 `ComponentType` 并 `createElement(Component)`。
 - `RequireAuth.tsx` 承担 401 / 未登录跳转；新增需要登录的页面**只需挂到 RequireAuth 子节点**，不要重写认证逻辑。
 - `layout/` 下是 AppShell 的可视组成（侧边栏、顶部栏、面包屑、全局搜索、同步状态等）；它们仅被 `AppShell.tsx` 组合，**不应被 `pages/` 直接导入**。
 - `metadata.ts` 放路由 / 应用级常量（如 `PRODUCT_FULL_NAME_ZH`），供 AppShell 与 LoginPage 共享。
@@ -166,7 +169,7 @@ web/
 
 | 变更类型 | 落点 |
 |----------|------|
-| 新增业务路由 / 整页 | 1) 新建 `web/src/pages/<Name>Page.tsx` + 同名 `*.test.tsx`；2) 在 `web/src/app/router.tsx` 的 `appRoutes` 内挂到 `<RequireAuth />` 下；3) 如需新数据，先在 `lib/api.ts` 加函数 + `lib/types.ts` 加类型 |
+| 新增业务路由 / 整页 | 1) 新建 `web/src/pages/<Name>Page.tsx` + 同名 `*.test.tsx`；2) 在 `web/src/app/router.tsx` 用 `React.lazy` 建 lower camelCase 页面模块变量；3) 在 `appRoutes` 内用 `routeElement(<module>, '<中文加载文案>')` 挂到 `<RequireAuth />` 下；4) 如需新数据，先在 `lib/api.ts` 加函数 + `lib/types.ts` 加类型 |
 | 新跨页展示原子 | `web/src/components/atoms/<Name>.tsx` + 同名 `*.test.tsx`；在 `atoms/index.ts` 导出；如需新样式加到 `styles/atoms.css` |
 | 新跨页业务组合组件 | `web/src/components/<Name>.tsx`（与 IncidentList / EventList 同级），保持纯展示 / 受控 |
 | 新 API 调用 | `web/src/lib/api.ts` 加函数；如响应/请求体新颖，同步在 `lib/types.ts` 加类型；不要在 page / component 里直接 `fetch()` |
@@ -185,6 +188,7 @@ web/
 - ❌ `components/` 反向 import `pages/`：组件层不该感知具体路由页。
 - ❌ 在 `lib/` 里写 React 组件 / JSX（context Provider 例外）：`lib/` 是无 UI 数据/工具层。
 - ❌ 绕过 `app/router.tsx` 私自加路由（如手写 `<BrowserRouter>`）：路由唯一入口是 `createBrowserRouter(appRoutes)`。
+- ❌ 在 `router.tsx` 里 eagerly import 业务页面或定义 PascalCase lazy 常量：前者会恢复大入口 chunk，后者会触发 React Refresh 规则，因为 `router.tsx` 同时导出 `appRoutes` / `router`。
 - ❌ 在组件文件里 `import './foo.css'`：全局样式由 `main.tsx` 顶部 + `app/layout/layout.css` + `pages/LoginPage.css` 三处统一管理。
 - ❌ 新建 `__tests__/` 集中目录：测试一律 colocate（与被测同目录、同名 `.test.*`）。
 - ❌ 在 `pages/` 之间相互 import：要复用就提到 `components/`。
@@ -207,7 +211,7 @@ web/
 
 仓库内"组织到位"的真实参考点：
 
-- **完整一条路由线**：`web/src/app/router.tsx` 注册 `/nodes` → `web/src/pages/NodesPage.tsx`（页面装配） + `web/src/pages/NodesPage.test.tsx`（colocated 测试） + `web/src/lib/api.ts:133-201`（业务 API client） + `web/src/lib/types.ts:1-19`（`NodeRecord` 类型）。
+- **完整一条路由线**：`web/src/app/router.tsx` lazy 注册 `/nodes` → `web/src/pages/NodesPage.tsx`（页面装配） + `web/src/pages/NodesPage.test.tsx`（colocated 测试） + `web/src/lib/api.ts`（业务 API client） + `web/src/lib/types.ts`（`NodeRecord` 类型）。
 - **设计系统原子使用**：`web/src/components/IncidentList.tsx:1` `import { Hostname, StatusGlyph, Timestamp } from './atoms'`，体现"组合组件按需引用 atoms barrel"的范式。
 - **应用壳分层**：`web/src/app/layout/AppShell.tsx` 引用 `Sidebar`、`TopBar`、`ChangePasswordModal`，并通过 `<Outlet />` 渲染当前路由页（`web/src/app/router.tsx:23` 处的子路由）。
 - **数据获取分层**：`web/src/pages/EventsPage.tsx:63-94` 完整体现 "page 调 `lib/api.ts` → `loading/error/data` 三态 → 渲染 `components/EventList`" 的标准结构。

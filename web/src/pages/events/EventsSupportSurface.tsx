@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
 
 import { Badge, Button, Hostname, MonoDigits, StatusGlyph } from '../../components/atoms'
+import { ObservabilityEvidenceFocus } from '../../components/ObservabilityEvidenceFocus'
+import { ObservabilityEvidenceLead } from '../../components/ObservabilityEvidenceLead'
 import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../../lib/types'
 import { eventEvidenceGlyphState } from './eventEvidenceHelpers'
 import { DEFAULT_LIMIT, TIME_RANGE_LABELS } from './eventsPageConstants'
@@ -110,30 +112,21 @@ export function EventsSupportSurface({
         </div>
       </div>
 
-      <div className={`events-evidence-lead events-evidence-lead--${evidenceLead.tone}`}>
-        <div className="events-evidence-lead__main">
-          <p className="events-evidence-lead__eyebrow">{evidenceLead.eyebrow}</p>
-          <h3>{evidenceLead.title}</h3>
-          <p>{evidenceLead.description}</p>
-          {filterContext.length > 0 ? (
-            <div className="events-evidence-lead__filters" aria-label="当前事件证据筛选">
-              {filterContext.map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-          ) : (
-            <div className="events-evidence-lead__filters" aria-label="当前事件证据筛选">
-              <span>默认事件流</span>
-            </div>
-          )}
-        </div>
-        <div className="events-evidence-lead__action">
-          {renderLeadAction()}
+      <ObservabilityEvidenceLead
+        tone={evidenceLead.tone}
+        eyebrow={evidenceLead.eyebrow}
+        title={evidenceLead.title}
+        description={evidenceLead.description}
+        filterItems={filterContext}
+        emptyFilterLabel="默认事件流"
+        filterAriaLabel="当前事件证据筛选"
+        action={renderLeadAction()}
+        secondaryAction={
           <Link className="observability-support-link" to="/asset-decisions">
             资产决策队列
           </Link>
-        </div>
-      </div>
+        }
+      />
 
       <div className="observability-support__grid" aria-label="事件诊断上下文">
         <article className="observability-support-lane observability-support-lane--normal">
@@ -216,42 +209,43 @@ export function EventsSupportSurface({
 
       <div className="events-evidence-context" aria-label="事件证据下一步">
         {topEvidence ? (
-          <article className="events-evidence-focus">
-            <div className="events-evidence-focus__glyph">
+          <ObservabilityEvidenceFocus
+            glyph={
               <StatusGlyph
                 state={eventEvidenceGlyphState(topEvidence.event)}
                 ariaLabel={`${topEvidence.title} 事件证据状态`}
               />
-            </div>
-            <div className="events-evidence-focus__body">
-              <p className="events-evidence-focus__eyebrow">优先核对事件</p>
-              <h3>优先核对：{topEvidence.title}</h3>
-              <p>{topEvidence.reason}</p>
-              <span>
+            }
+            eyebrow="优先核对事件"
+            title={`优先核对：${topEvidence.title}`}
+            description={topEvidence.reason}
+            meta={
+              <>
                 <Hostname truncate maxChars={18}>{topEvidence.event.object_id}</Hostname>
                 {' · '}
                 {topEvidence.meta}
-              </span>
-            </div>
-            <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
-              {topEvidence.actionLabel}
-            </Link>
-          </article>
+              </>
+            }
+            action={
+              <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
+                {topEvidence.actionLabel}
+              </Link>
+            }
+          />
         ) : (
-          <article className="events-evidence-focus events-evidence-focus--stable">
-            <div className="events-evidence-focus__glyph">
-              <StatusGlyph state="normal" ariaLabel="事件时间线稳定" />
-            </div>
-            <div className="events-evidence-focus__body">
-              <p className="events-evidence-focus__eyebrow">诊断时间线</p>
-              <h3>没有需要优先核对的事件</h3>
-              <p>当前事件切片没有严重、告警或关注级别线索。</p>
-              <span>继续从工作台、Node、Target 或 VPS 台账核对上游证据。</span>
-            </div>
-            <Link className="btn btn--ghost btn--sm" to="/events?time_range=24h">
-              查看 24h 事件
-            </Link>
-          </article>
+          <ObservabilityEvidenceFocus
+            stable
+            glyph={<StatusGlyph state="normal" ariaLabel="事件时间线稳定" />}
+            eyebrow="诊断时间线"
+            title="没有需要优先核对的事件"
+            description="当前事件切片没有严重、告警或关注级别线索。"
+            meta="继续从工作台、Node、Target 或 VPS 台账核对上游证据。"
+            action={
+              <Link className="btn btn--ghost btn--sm" to="/events?time_range=24h">
+                查看 24h 事件
+              </Link>
+            }
+          />
         )}
       </div>
     </section>
