@@ -1824,3 +1824,36 @@ Completed UX-6B Targets evidence convergence: added service-entry evidence lead,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 114: UX-6C Events timeline evidence convergence
+
+**Date**: 2026-05-13
+**Task**: UX-6C Events timeline evidence convergence
+**Branch**: `main`
+
+### Summary
+
+Completed UX-6C Events diagnostic evidence lead, priority event focus, Dashboard deep-link clearing, v2 screenshot evidence, PR #63 green and merged.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2271edb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
