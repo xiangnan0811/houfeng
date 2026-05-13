@@ -197,10 +197,15 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 在页面结构稳定后，把已经证明会长期保留的 UI 模式沉淀为组件、测试和证据，而不是提前抽象临时页面形态。
 
+### 状态
+
+- UX-7A `Evidence components + route loading hardening` 已完成：Nodes / Targets / Events 的 shared evidence lead/focus 已抽取到跨页业务组件，路由页已改为 `React.lazy` + `RouteModuleFallback`，build 不再回退到单个 500 kB+ 入口 chunk。
+- UX-7B `Visual evidence governance` 是当前切片：把 v2 截图 manifest 校验与本地 browser sanity 输出固化为可复用工具和文档规则，但不引入 e2e / 视觉回归依赖。
+
 ### 范围
 
-- 抽取稳定的 shell/page/table/filter/workbench 组件。
-- 维护 `docs/operations/v2-visual-evidence/manifest.md` 和关键截图。
+- 继续抽取稳定的 shell/page/table/filter/workbench 组件。
+- 维护并校验 `docs/operations/v2-visual-evidence/manifest.md` 和关键截图。
 - 处理明显 bundle/chunk 警告和过重页面加载路径。
 - 对跨页面深链、URL-state、Drawer 状态和空/错/加载态补测试。
 
@@ -208,6 +213,7 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 - 组件抽取降低后续修改成本，而不是只降低单文件行数。
 - UI 任务 PR 都能说明预览、路由、视口和视觉判断限制。
+- 新增或修改截图 manifest 时，`make validate-visual-evidence` 能通过。
 - `npm run lint`、Vitest、build 和 PR CI 全绿。
 
 ## 后续执行规则
@@ -223,6 +229,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前推荐继续执行 UX-7 Trellis task：`Design system / evidence / performance hardening`。
+当前推荐继续执行 UX-7B Trellis task：`Visual evidence governance`。
 
-UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。UX-6C 已经把 Events 收敛为审计与诊断时间线：事件证据 lead、优先事件 focus、空筛选清除、Dashboard 深链承接和 v2 视觉证据已经落地。下一步应进入 UX-7，把已经稳定的 shell/page/filter/workbench/evidence 模式沉淀为更小的组件、测试和证据维护机制，并开始处理明显性能与 bundle hardening。
+UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。UX-6C 已经把 Events 收敛为审计与诊断时间线：事件证据 lead、优先事件 focus、空筛选清除、Dashboard 深链承接和 v2 视觉证据已经落地。UX-7A 已经沉淀观测 evidence 组件并完成路由加载性能 hardening。下一步应先完成 UX-7B，把截图 manifest 校验和 browser sanity 输出稳定下来，再继续更深的 design-system primitive 或页面状态测试补强。

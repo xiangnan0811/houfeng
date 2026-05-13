@@ -6,7 +6,7 @@ AGENT_BIN := ./bin/houfeng-agent
 GO_PACKAGES := $(shell $(GO) list ./... 2>/dev/null)
 GO_VERIFY_PATTERNS := ./agent/... ./cmd/... ./db/... ./internal/...
 
-.PHONY: fmt-go test-go vet-go build-center build-agent verify-go verify-web verify
+.PHONY: fmt-go test-go vet-go build-center build-agent verify-go verify-web validate-visual-evidence verify
 
 fmt-go:
 	@if ! command -v $(GO) >/dev/null 2>&1; then \
@@ -68,6 +68,9 @@ verify-web:
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi
+
+validate-visual-evidence:
+	python3 scripts/visual_evidence.py validate-manifest
 
 verify:
 	./scripts/verify.sh

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Verify changes stay aligned with active frontend authority"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Verify local checks, visual evidence process, and dependency constraints"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Verify v2 visual evidence path and archived-v1 boundaries"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify branch/PR workflow compliance"}
+{"file": ".trellis/tasks/05-13-ux7b-visual-evidence-governance/research/local-evidence-workflow-audit.md", "reason": "Verify implementation resolves the documented workflow gaps"}
+

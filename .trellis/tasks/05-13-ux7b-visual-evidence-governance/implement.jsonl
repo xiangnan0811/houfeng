@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend visual workflow authority and relevant web spec entrypoint"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "UI evidence, verification gates, and dependency constraints"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Repo structure and script/tooling placement context"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Active v2 visual authority and screenshot evidence path"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Non-main branch and PR workflow requirements"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Search/reuse guidance before adding new helpers"}
+{"file": ".trellis/tasks/05-13-ux7b-visual-evidence-governance/research/local-evidence-workflow-audit.md", "reason": "Local audit of manifest and browser sanity workflow gaps"}
+

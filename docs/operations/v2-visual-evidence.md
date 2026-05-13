@@ -54,6 +54,47 @@ Every UI task final report must include:
 - whether the server is still running or has been stopped;
 - any blocked evidence, with reason.
 
+## Repo-local evidence helpers
+
+These helpers make evidence easier to repeat, but they still do not replace reviewer judgment.
+
+Validate committed screenshot evidence before submitting a UI PR that adds or edits manifest rows:
+
+```bash
+make validate-visual-evidence
+```
+
+Equivalent direct command:
+
+```bash
+python3 scripts/visual_evidence.py validate-manifest
+```
+
+The validator checks the manifest table shape, route/date/viewport formatting, supported verdict values, duplicate `File` entries, and whether every referenced screenshot file exists under `docs/operations/v2-visual-evidence/`.
+
+For browser sanity against a running preview, use the local-only helper:
+
+```bash
+python3 scripts/visual_evidence.py browser-sanity \
+  --base-url http://127.0.0.1:5178/ \
+  --route /nodes \
+  --route /targets \
+  --viewport 1440x1000 \
+  --viewport 390x900
+```
+
+If no `--viewport` is provided, the helper uses the standard `1440x1000` and `390x900` viewports. It fails on nonblank-body and page-level horizontal overflow problems, and reports obvious text overflow risks as warnings for human review. It intentionally does not take screenshots or compare pixels.
+
+The browser sanity helper uses locally installed Python Playwright when available. The repository intentionally does not depend on Playwright/Cypress/WebDriverIO, so a missing browser driver is a local tooling limitation to report, not a CI failure.
+
+If your machine has multiple Python versions, run the helper with the interpreter that owns the local Playwright package, for example:
+
+```bash
+/opt/homebrew/opt/python@3.11/bin/python3.11 scripts/visual_evidence.py browser-sanity \
+  --base-url http://127.0.0.1:5178/ \
+  --route /login
+```
+
 ## Core route matrix
 
 This is the current v2 core-page acceptance set. A task only needs to check routes it changes, but broad UX tasks should cover the full relevant subset.
@@ -111,6 +152,8 @@ Manifest row format:
 
 Do not mark screenshots as accepted unless a human reviewer has accepted the visual result or the user explicitly says it is acceptable.
 
+When screenshot rows are added or changed, run `make validate-visual-evidence` and include the result in the PR or final report. Local browser sanity without committed screenshots does not require manifest rows.
+
 ## Browser sanity checklist
 
 For each checked route:
@@ -126,6 +169,8 @@ For each checked route:
 ## Temporary automation helpers
 
 External browser tools such as a locally installed Playwright CLI may be used for one-off sanity checks or screenshots, but they are not part of the repository contract unless a separate task intentionally introduces browser automation.
+
+The repo-local `scripts/visual_evidence.py browser-sanity` command is also a temporary/local evidence helper. It standardizes the geometry checks and output shape, but it remains outside `make verify-web` and CI.
 
 Current repository constraints:
 
