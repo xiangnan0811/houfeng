@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { Button, DataTable, Input, MonoDigits, type DataTableColumn } from '../components/atoms'
 import { FilterBar, FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
+import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createSubscription, listSubscriptions, listVPSAssets, updateSubscription } from '../lib/api'
 import { formatDate, formatMoney, formatOptional } from '../lib/format'
 import {
@@ -530,9 +531,21 @@ export function SubscriptionsPage() {
         </div>
 
         {state.loading ? (
-          <div className="empty-state">正在加载订阅…</div>
+          <PageStateView
+            kind="loading"
+            title="正在加载订阅…"
+            surface="empty"
+            compact
+          />
         ) : state.error ? (
-          <div className="empty-state">{state.error}</div>
+          <PageStateView
+            kind="error"
+            title="订阅列表不可用"
+            description={state.error}
+            technicalSummary={state.error}
+            surface="empty"
+            compact
+          />
         ) : (
           <DataTable
             className="asset-table subscriptions-table"

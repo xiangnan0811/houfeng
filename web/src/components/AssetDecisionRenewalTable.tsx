@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { PageState } from './PageState'
 import { DataTable, type DataTableColumn } from './atoms'
 import { formatDate, formatMoney } from '../lib/format'
 import type { SubscriptionRecord } from '../lib/types'
@@ -62,8 +63,28 @@ export function AssetDecisionRenewalTable({
     },
   ]
 
-  if (loading) return <div className="empty-state">正在加载续费候选…</div>
-  if (error) return <div className="empty-state">{error}</div>
+  if (loading) {
+    return (
+      <PageState
+        kind="loading"
+        title="正在加载续费候选…"
+        surface="empty"
+        compact
+      />
+    )
+  }
+  if (error) {
+    return (
+      <PageState
+        kind="error"
+        title="续费候选不可用"
+        description={error}
+        technicalSummary={error}
+        surface="empty"
+        compact
+      />
+    )
+  }
 
   return (
     <DataTable

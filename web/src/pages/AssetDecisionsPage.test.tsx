@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AssetDecisionsPage } from './AssetDecisionsPage'
@@ -203,6 +203,85 @@ describe('AssetDecisionsPage', () => {
     expect(within(screen.getByLabelText('资产决策工作队列')).queryByText('Tokyo Review')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /迁移/ }))
     expect(within(screen.getByLabelText('资产决策工作队列')).getByText('Tokyo Review')).toBeInTheDocument()
+  })
+
+  it('navigates from a queue row while keeping row actions isolated', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/asset-decisions']}>
+        <Routes>
+          <Route path="/asset-decisions" element={<AssetDecisionsPage />} />
+          <Route path="/vps/:vpsId" element={<div>vps detail route</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '处理 vps_review' }))
+    expect(await screen.findByRole('dialog', { name: '续费决策处理' })).toBeInTheDocument()
+    expect(screen.queryByText('vps detail route')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '续费决策处理' })).not.toBeInTheDocument())
+
+    const queueRow = screen.getByText('Tokyo Review').closest('li')
+    expect(queueRow).not.toBeNull()
+    fireEvent.click(queueRow!)
+    await waitFor(() => expect(screen.getByText('vps detail route')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+  })
+
+  it('does not submit draft decisions when the drawer is cancelled, escaped, or overlay-closed', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '处理 vps_review' }))
+    let drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
+    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
+    fireEvent.change(within(drawer).getByLabelText('决策理由'), { target: { value: 'draft only' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '续费决策处理' })).not.toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+
+    fireEvent.click(screen.getByRole('button', { name: '处理 vps_review' }))
+    drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
+    expect(within(drawer).getByLabelText('续费决策')).toHaveValue('unreviewed')
+    expect(within(drawer).getByLabelText('决策理由')).toHaveValue('')
+    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'cancel' } })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '续费决策处理' })).not.toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+
+    fireEvent.click(screen.getByRole('button', { name: '处理 vps_review' }))
+    drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
+    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
+    const overlay = document.body.querySelector('.drawer-overlay')
+    expect(overlay).not.toBeNull()
+    fireEvent.mouseDown(overlay!)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '续费决策处理' })).not.toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('shows a queue error instead of misreporting missing subscriptions when all subscription evidence fails', async () => {
