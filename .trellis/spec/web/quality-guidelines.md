@@ -162,6 +162,8 @@ it('applies variant class', () => {
 ### 不在 verify 链路里的东西
 
 - **可视化回归 / 截图对比**不在 `make verify-web`。当前 active visual authority 是 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`；v2 预览、浏览器 sanity 与截图证据流程见 `docs/operations/v2-visual-evidence.md`。已有一次性历史截图仍保留在 `docs/operations/*.jpg`，新截图如需提交应使用 `docs/operations/v2-visual-evidence/` 并记录 manifest。不要再使用 archived 的 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 作为 active workflow。
+- **截图 manifest 校验**用 `make validate-visual-evidence`，它只校验 `docs/operations/v2-visual-evidence/manifest.md` 的表格形状、字段格式、重复项和引用文件是否存在。该 target 不属于 `make verify-web`，也不代表截图已被人工接受。
+- **本地 browser sanity**可用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Playwright 是证据阻塞项，不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
 - **真实 center 烟囱**由 `docs/operations/v1-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
 ---
@@ -210,6 +212,8 @@ export default defineConfig([
 3. [ ] **`cd web && npm run build`** —— 跑 `tsc -b && vite build`，确保 TS strict + Vite 产物都干净。
 4. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完（前后端都过）。
 5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity 或截图证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。
+   - 若新增或修改 `docs/operations/v2-visual-evidence/manifest.md`，同时跑 `make validate-visual-evidence`。
+   - 若只做本地 browser sanity、不提交截图，记录 `scripts/visual_evidence.py browser-sanity` 的 routes / viewports / 结果和 local-only 限制即可。
 6. [ ] **改了 API 形状（增减字段 / 改命名 / 改可选性）** → 同 PR 把 `web/src/lib/types.ts` + `web/src/lib/api.ts` 改完，并补 page / 测试断言。
 
 ---
