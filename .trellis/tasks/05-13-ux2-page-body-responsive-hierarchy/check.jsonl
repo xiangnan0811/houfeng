@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Web spec entry point for checking the UX-2 frontend implementation."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check page-body CSS, token usage, dark-first responsive styling, and visual evidence constraints."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check page/component boundaries and allowed style placement for shared page primitives."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check Asset Ledger, Dashboard deep-link, and URL-state/data truth contracts are preserved."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check required lint, test, build, and UI evidence gates."}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "Check v2 visual language for hierarchy, density, typography, and state semantics."}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Check v2 component/page contracts for page templates, tables, tabs, filters, and shell-adjacent layout."}
+{"file": "docs/operations/v2-visual-evidence.md", "reason": "Check preview, route, viewport, screenshot, and visual sanity workflow evidence."}
+{"file": ".trellis/tasks/05-13-ux2-page-body-responsive-hierarchy/research/local-page-body-context.md", "reason": "Check implementation against local route/style findings and scope."}

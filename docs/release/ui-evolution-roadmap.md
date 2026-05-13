@@ -4,7 +4,7 @@
 >
 > 状态：Active route for the next UI implementation batch
 >
-> 前置状态：PR #49 `Harden glassmorphism web redesign` 已合并，当前 `main` 已同步。
+> 前置状态：PR #51 `Redesign app shell visual baseline` 已合并，当前 `main` 已同步。
 
 ## 结论
 
@@ -12,11 +12,12 @@
 
 ```text
 UX-1 App shell / navigation / visual baseline
-UX-2 Dashboard command surface polish
-UX-3 Asset decision + VPS inventory real-data path
-UX-4 VPS detail decision workbench
-UX-5 Observability support pages
-UX-6 Design system / evidence / performance hardening
+UX-2 Page body responsive hierarchy baseline
+UX-3 Dashboard command surface polish
+UX-4 Asset decision + VPS inventory real-data path
+UX-5 VPS detail decision workbench
+UX-6 Observability support pages
+UX-7 Design system / evidence / performance hardening
 ```
 
 这条路线继承 `docs/release/core-pages-product-ux-replan.md`，但把它压缩为后续 Trellis 任务可以直接执行的批次。它不替代 `docs/design/v2-houfeng/design-language.md` 与 `docs/design/v2-houfeng/component-spec.md`。
@@ -70,7 +71,35 @@ UX-6 Design system / evidence / performance hardening
 - 不新增 UI 框架或图表库。
 - 不创建 repo 级视觉回归依赖。
 
-## UX-2：Dashboard Command Surface Polish
+## UX-2：Page Body Responsive Hierarchy Baseline
+
+### 目标
+
+UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的响应式层级。它不是重新设计单个页面，而是让 VPS、资产决策、Nodes、Targets、Events、Settings 在桌面保持工程工作台密度，在 390px 移动视口下不出现页面级横向溢出、控件遮挡或按钮/筛选 chips 挤压。
+
+### 范围
+
+- `page-panel`、`section-heading`、form action、settings grid、table scroll panel 等共享页面 primitive。
+- `FilterBar` / `FilterChip` / pill tabs 的移动端收敛，避免筛选区把页面撑宽。
+- VPS / Asset Decisions 的资产工作台和库存表在移动端保留可读主线，大表只在本地 surface 内横向滚动。
+- Nodes / Targets / Events 的观测支持 surface、工具栏、hover actions 和筛选入口在触屏与窄屏下可用。
+- 只做布局、层级和可用性基线，不改变 URL-state、drawer 行为、API contract 或数据语义。
+
+### 验收
+
+- `/vps`、`/asset-decisions`、`/nodes`、`/targets`、`/events`、`/settings` 在 1440x1000 下保持高密度扫描，不退化为卡片堆叠。
+- 上述路由在 390x900 下没有 page-level horizontal overflow；需要横向比较的大表只在对应 table surface 内滚动。
+- 移动端筛选 chips、pill tabs、page actions、settings actions、observability lane actions 不发生文本重叠或按钮挤压。
+- Nodes / Targets 的触屏行操作不依赖 hover 才可发现。
+- PR 报告包含 preview URL、检查路由、检查视口、证据级别和限制。
+
+### 非目标
+
+- 不改 Dashboard command surface 的信息架构；它顺延到 UX-3。
+- 不引入可视化回归依赖或新 CSS 框架。
+- 不重写资产决策、VPS inventory、观测页的数据流。
+
+## UX-3：Dashboard Command Surface Polish
 
 ### 目标
 
@@ -90,7 +119,7 @@ UX-6 Design system / evidence / performance hardening
 - 正常态不显示大型空队列表格。
 - Dashboard 深链继续被 Nodes/Targets/Events/VPS 页面承接。
 
-## UX-3：Asset Decision + VPS Inventory Real-Data Path
+## UX-4：Asset Decision + VPS Inventory Real-Data Path
 
 ### 目标
 
@@ -110,7 +139,7 @@ UX-6 Design system / evidence / performance hardening
 - 订阅读取失败不被渲染成真实“缺订阅”事实。
 - linked node health 只在 contract 明确支持的页面展示，不在 VPS 列表中推导。
 
-## UX-4：VPS Detail Decision Workbench
+## UX-5：VPS Detail Decision Workbench
 
 ### 目标
 
@@ -129,7 +158,7 @@ UX-6 Design system / evidence / performance hardening
 - 用户不需要滚完整页才能知道下一步该做什么。
 - Node/Target/Event 作为证据出现，不抢占 VPS 资产主体。
 
-## UX-5：Observability Support Pages
+## UX-6：Observability Support Pages
 
 ### 目标
 
@@ -148,7 +177,7 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 - Dashboard 深链进入后，筛选状态首屏可见且可清除。
 - 行点击、hover actions、drawer 和 keyboard 行为不回退。
 
-## UX-6：Design System / Evidence / Performance Hardening
+## UX-7：Design System / Evidence / Performance Hardening
 
 ### 目标
 
@@ -180,6 +209,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-下一步创建并启动 UX-1 Trellis task：`App shell / navigation / visual baseline reset`。
+下一步执行 UX-2 Trellis task：`Page body responsive hierarchy baseline`。
 
-它应该先做壳层和视觉基线，不应直接进入 Dashboard/VPS 细节。原因是后续所有页面都会继承壳层密度、导航心智、页面 chrome 和视觉证据流程；如果先改单页，容易让各页继续各自变漂亮但整体产品感仍然割裂。
+UX-2 应该先修核心页面主体的响应式层级，不应直接进入 Dashboard/VPS 细节。原因是 UX-1 已经解决壳层和导航基线，后续单页美化都需要继承同一套 page panel、filter、table、actions 和移动端折叠规则；如果先改单页，容易让各页继续各自变漂亮但整体产品感仍然割裂。

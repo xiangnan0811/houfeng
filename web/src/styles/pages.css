@@ -6,6 +6,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+  min-width: 0;
 }
 
 /* Unified property list for configurations and secondary actions */
@@ -36,6 +37,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
 }
 .watchtower-property-item__title {
   font-weight: 500;
@@ -51,6 +53,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 @keyframes page-fade-in {
@@ -62,6 +66,7 @@
 .page-panel {
   position: relative;
   overflow: hidden;
+  min-width: 0;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-3);
@@ -74,8 +79,10 @@
 }
 
 .page-panel--scroll-x {
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 .page-panel__eyebrow {
   font-size: var(--type-eyebrow-size);
@@ -115,10 +122,12 @@
   gap: var(--space-3);
   flex-wrap: wrap;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 /* Hero panel: like page-panel but with the brand-accent backdrop on top of dashboard / overview pages */
 .hero-panel {
+  min-width: 0;
   background: var(--panel-bg-elevated);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-3);
@@ -1279,6 +1288,7 @@ html.theme-classic-light .dashboard-command-surface {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
   padding-bottom: var(--space-3);
   border-bottom: var(--border-w) solid var(--panel-border);
   margin-bottom: var(--space-4);
@@ -1301,16 +1311,24 @@ html.theme-classic-light .dashboard-command-surface {
   font-size: var(--type-small-size);
   color: var(--text-secondary);
 }
+.section-heading__meta {
+  color: var(--text-muted);
+  font-size: var(--type-small-size);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 .section-heading__actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 /* Detail section: collapsible sub-block with eyebrow + title + body */
 .detail-section {
+  min-width: 0;
   background:
     linear-gradient(180deg, var(--panel-bg-elevated) 0%, var(--panel-bg) 100%);
   border: var(--border-w) solid var(--panel-border);
@@ -2099,7 +2117,7 @@ html.theme-classic-light .dashboard-command-surface {
 
 .page-panel form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: var(--space-3);
   margin-top: var(--space-5);
 }
@@ -2138,6 +2156,7 @@ html.theme-classic-light .dashboard-command-surface {
   justify-content: flex-end;
   gap: var(--space-3);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .event-filter-actions {
@@ -2155,6 +2174,7 @@ html.theme-classic-light .dashboard-command-surface {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-width: 0;
   padding: var(--space-4);
   border-radius: var(--radius-2);
   border-top: var(--border-w-strong) solid var(--observability-support-color);
@@ -2180,6 +2200,7 @@ html.theme-classic-light .dashboard-command-surface {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-4);
   align-items: start;
+  min-width: 0;
 }
 
 .observability-support__eyebrow {
@@ -2210,6 +2231,7 @@ html.theme-classic-light .dashboard-command-surface {
 
 .observability-support__scope {
   min-width: 128px;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -2458,13 +2480,13 @@ html.theme-classic-light .dashboard-command-surface {
 
 .settings-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: var(--space-4);
   max-width: 960px;
 }
 
 .settings-form-grid--tight {
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
 }
 
 .settings-fieldset {
@@ -3544,8 +3566,85 @@ html.theme-classic-light .dashboard-command-surface {
 }
 
 @media (max-width: 620px) {
+  .page-stack,
+  .asset-page,
+  .targets-page,
+  .events-page,
+  .settings-page,
+  .nodes-page {
+    gap: var(--space-4);
+  }
+
+  .page-panel,
+  .hero-panel {
+    padding: var(--space-4);
+    border-radius: var(--radius-2);
+  }
+
+  .page-panel__title,
+  .hero-panel__title {
+    font-size: var(--type-h2-size);
+  }
+
+  .page-panel__description,
+  .hero-panel__description {
+    max-width: none;
+    font-size: var(--type-small-size);
+  }
+
+  .page-panel--inline,
+  .section-heading--inline,
+  .watchtower-property-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .page-panel__actions,
+  .section-heading__actions,
+  .page-form-actions,
+  .settings-actions,
+  .event-filter-actions,
+  .watchtower-property-item__actions,
+  .events-filter-drawer__actions {
+    align-items: stretch;
+    justify-content: flex-start;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .page-panel__actions .btn,
+  .section-heading__actions .btn,
+  .page-form-actions .btn,
+  .settings-actions .btn,
+  .event-filter-actions .btn,
+  .watchtower-property-item__actions .btn,
+  .events-filter-drawer__actions .btn {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .page-panel form,
+  .settings-form-grid,
+  .settings-form-grid--tight {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: none;
+  }
+
+  .section-heading {
+    margin-bottom: var(--space-3);
+  }
+
+  .section-heading__meta {
+    width: 100%;
+  }
+
   .observability-support {
     padding: var(--space-3);
+  }
+
+  .observability-support__scope {
+    align-items: flex-start;
+    width: 100%;
   }
 
   .observability-support__grid {
@@ -3592,6 +3691,24 @@ html.theme-classic-light .dashboard-command-surface {
   .vps-inventory-table,
   .asset-renewal-evidence .data-table {
     min-width: 760px;
+  }
+
+  .vps-filter-bar__summary {
+    width: 100%;
+  }
+
+  .asset-decision-row {
+    padding: var(--space-3);
+  }
+
+  .asset-decision-board__header,
+  .asset-decision-actions {
+    align-items: stretch;
+  }
+
+  .asset-decision-actions .btn {
+    justify-content: center;
+    width: 100%;
   }
 
   .asset-filter-drawer__actions {
@@ -3711,6 +3828,7 @@ html.theme-classic-light .dashboard-command-surface {
   justify-content: space-between;
   gap: var(--space-3);
   flex-wrap: wrap;
+  min-width: 0;
   padding: var(--space-3);
   border: var(--border-w) solid var(--border);
   border-radius: var(--radius-2);
@@ -3723,6 +3841,7 @@ html.theme-classic-light .dashboard-command-surface {
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .nodes-toolbar__result,
@@ -3735,8 +3854,31 @@ html.theme-classic-light .dashboard-command-surface {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   color: var(--text-muted);
   font-size: var(--type-small-size);
+}
+
+@media (max-width: 620px) {
+  .nodes-toolbar,
+  .nodes-toolbar__primary,
+  .nodes-toolbar__actions,
+  .nodes-toolbar__refresh {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .nodes-toolbar__actions .btn,
+  .nodes-toolbar__actions a,
+  .nodes-toolbar__refresh select {
+    width: 100%;
+  }
+
+  .nodes-toolbar__actions .btn,
+  .nodes-toolbar__actions a {
+    justify-content: center;
+  }
 }
 
 /* Collapsible creation panel (existing page-panel + tighter top spacing) */
@@ -3750,6 +3892,11 @@ html.theme-classic-light .dashboard-command-surface {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.nodes-table-panel,
+.targets-table-panel {
+  padding: 0;
 }
 .nodes-table .data-table__row {
   background:
@@ -3880,6 +4027,13 @@ html.theme-classic-light .dashboard-command-surface {
 .nodes-table .data-table__row:focus-within .nodes-table__actions {
   opacity: 1;
 }
+
+@media (hover: none), (max-width: 620px) {
+  .nodes-table .nodes-table__actions {
+    opacity: 1;
+  }
+}
+
 /* Always reveal when an inline editor is active so the user can confirm/cancel */
 .nodes-table .nodes-table__label-editor {
   display: flex;
@@ -4192,6 +4346,12 @@ html.theme-classic-light .dashboard-command-surface {
 .targets-table .data-table__row:hover .targets-table__actions,
 .targets-table .data-table__row:focus-within .targets-table__actions {
   opacity: 1;
+}
+
+@media (hover: none), (max-width: 620px) {
+  .targets-table .targets-table__actions {
+    opacity: 1;
+  }
 }
 
 .targets-table .targets-table__label-editor {
