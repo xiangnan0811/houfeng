@@ -1,0 +1,9 @@
+{"file":".trellis/spec/web/index.md","reason":"Check implemented page behavior against web package guidelines."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Verify support surface/component changes preserve accessibility and contracts."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Verify URL-state filters and derived evidence counts stay correct."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Verify responsive CSS uses project tokens and avoids overflow."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Run required lint, test, build, and browser sanity gates."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Review visual hierarchy and product tone."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Review Targets page against v2 component expectations."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Validate screenshot evidence and manifest updates."}
+{"file":"docs/release/ui-evolution-roadmap.md","reason":"Confirm UX-6B status and next UX-6C sequencing are documented."}

@@ -1,0 +1,11 @@
+{"file":".trellis/spec/guides/index.md","reason":"Project Trellis workflow and spec discovery guidance."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse UX-6A Nodes evidence patterns instead of creating a parallel interaction language."}
+{"file":".trellis/spec/web/index.md","reason":"Web package implementation guidelines for React, CSS, and tests."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Component extraction, prop contracts, and accessibility expectations for page surfaces."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"URL-state, API data ownership, and derived state rules for frontend pages."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Token-based styling and responsive layout constraints."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Required frontend verification gates and browser sanity expectations."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Visual hierarchy, density, and engineering workbench design language."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Targets page component and table expectations."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Screenshot evidence workflow for user-visible UI changes."}
+{"file":"docs/release/ui-evolution-roadmap.md","reason":"UX-6B Targets evidence convergence scope and sequencing."}
