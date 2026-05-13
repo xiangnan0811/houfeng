@@ -7,6 +7,10 @@ interface Crumb {
 }
 
 const SECTION_LABELS: Record<string, string> = {
+  'asset-decisions': '资产决策',
+  providers: '服务商',
+  subscriptions: '订阅',
+  vps: 'VPS',
   nodes: '节点',
   targets: '目标',
   events: '事件',
@@ -20,14 +24,15 @@ const TAIL_LABELS: Record<string, string> = {
 /**
  * Build a breadcrumb trail from the current location.
  *
- * Returns null on the root and any level-1 route ("/", "/nodes", "/targets",
- * "/events", "/settings"). At those depths the sidebar nav already conveys
+ * Returns null on the root and any level-1 route ("/", "/vps", "/nodes",
+ * "/targets", "/events", "/settings"). At those depths the sidebar nav already conveys
  * "where you are" — adding a breadcrumb that re-renders the same anchor text
  * would create duplicate links and break test contracts that assume a single
  * `getByRole('link', { name: '节点' })` etc.
  *
  * On detail / nested routes (`/nodes/:id`, `/nodes/:id/onboarding`,
- * `/targets/:id`) the trail looks like: `节点 / nd_abcd... / 接入工作台`.
+ * `/targets/:id`, `/vps/:id`) the trail looks like:
+ * `节点 / nd_abcd... / 接入工作台` or `VPS / vps_abcd...`.
  * The IDs are not display names — the breadcrumb stays page-rendering-free
  * (no extra fetch). Page hero panels remain the canonical place for the
  * full display_name.

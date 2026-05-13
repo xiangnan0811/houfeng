@@ -3682,6 +3682,29 @@ html.theme-classic-light .dashboard-command-surface {
 .nodes-hero-stat--alert { border-top-color: var(--color-state-alert); }
 .nodes-hero-stat--maintenance { border-top-color: var(--color-state-maintenance); }
 
+@media (max-width: 620px) {
+  .nodes-hero {
+    flex-direction: column;
+    padding: var(--space-3);
+  }
+
+  .nodes-hero__aside {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .nodes-hero__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    width: 100%;
+  }
+
+  .nodes-hero__aside .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .nodes-toolbar {
   display: flex;
   align-items: center;
