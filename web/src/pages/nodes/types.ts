@@ -1,3 +1,5 @@
+import type { NodeRecord } from '../../lib/types'
+
 export type NodeFilterState = {
   group: string | null
   region: string | null
@@ -28,4 +30,24 @@ export type FocusRestoreRequest = {
 export type NodeFilterOption = {
   value: string
   label: string
+}
+
+export type NodeEvidenceActionKind = 'abnormal' | 'onboarding' | 'runtime' | 'clear' | 'create' | 'asset'
+
+export type NodeEvidenceLead = {
+  eyebrow: string
+  title: string
+  description: string
+  actionKind: NodeEvidenceActionKind
+  actionLabel: string
+  tone: 'normal' | 'notice' | 'alert' | 'maintenance' | 'offline'
+}
+
+export type NodeEvidenceItem = {
+  node: NodeRecord
+  title: string
+  reason: string
+  meta: string
+  route: string
+  actionLabel: string
 }

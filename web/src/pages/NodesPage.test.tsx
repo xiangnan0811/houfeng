@@ -1105,6 +1105,13 @@ describe('NodesPage', () => {
     expect(screen.getByText('Unbound Edge')).toBeInTheDocument()
     expect(screen.getByText('Conflict Edge')).toBeInTheDocument()
     expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '补齐 3 个接入 / 绑定状态' })).toBeInTheDocument()
+    expect(screen.getByLabelText('当前证据筛选')).toHaveTextContent('待接入/绑定')
+    expect(screen.getByRole('heading', { name: '优先核对：Conflict Edge' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '处理接入' })).toHaveAttribute(
+      'href',
+      '/nodes/nd_binding_conflict/onboarding',
+    )
     expect(screen.getByRole('switch', { name: '待接入/绑定待处理' })).toHaveAttribute(
       'aria-checked',
       'true',
@@ -1156,6 +1163,8 @@ describe('NodesPage', () => {
       expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument(),
     )
     expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '先处理 1 个异常节点' })).toBeInTheDocument()
+    expect(screen.getByLabelText('当前证据筛选')).toHaveTextContent('仅看异常')
     expect(
       screen.getByRole('button', { name: '移除筛选 仅看异常' }),
     ).toBeInTheDocument()
@@ -1209,7 +1218,15 @@ describe('NodesPage', () => {
     await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '先处理 1 个异常节点' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '优先核对：Alerting Edge' })).toBeInTheDocument()
+    expect(screen.getByText('健康状态：告警')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看证据' })).toHaveAttribute(
+      'href',
+      '/nodes/nd_alert',
+    )
     expect(screen.getByText('VPS 关联')).toBeInTheDocument()
+    expect(screen.getByText('列表不推导 linked VPS health；资产关联回到 VPS 台账和 Node 详情核对。')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '未关联 VPS' })).toHaveAttribute(
       'href',
       '/vps?view=unlinked',
@@ -1236,6 +1253,80 @@ describe('NodesPage', () => {
     )
     expect(screen.getByText('Pending Edge')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '移除筛选 待接入/绑定待处理' })).toBeInTheDocument()
+  })
+
+  it('shows a clear empty-filter lead and clears filters from the support surface', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_healthy',
+            display_name: 'Healthy Edge',
+            current_health_status: '正常',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes?abnormal=1']}>
+        <Routes>
+          <Route
+            path="/nodes"
+            element={
+              <>
+                <NodesPage />
+                <LocationProbe />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '没有匹配当前证据条件' })).toBeInTheDocument(),
+    )
+    expect(screen.getByText('当前筛选没有返回节点。先清空或收窄条件，再继续判断观测证据。')).toBeInTheDocument()
+    expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '清空证据筛选' }))
+
+    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
+    expect(screen.getByLabelText('location')).toHaveTextContent('/nodes')
+  })
+
+  it('renders a stable evidence lead without inventing linked VPS health', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          nodeRecord({
+            node_id: 'nd_healthy',
+            display_name: 'Healthy Edge',
+            current_health_status: '正常',
+            monitoring_status: '启用',
+            binding_status: '已绑定',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes']}>
+        <Routes>
+          <Route path="/nodes" element={<NodesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Node 运行证据当前稳定' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('heading', { name: '没有需要优先核对的 Node' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看 VPS 库存' })).toHaveAttribute('href', '/vps')
+    expect(screen.queryByText(/linked node health/i)).not.toBeInTheDocument()
   })
 
   it('navigates to the node detail page when a row is clicked', async () => {
