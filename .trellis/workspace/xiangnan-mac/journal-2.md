@@ -1890,3 +1890,36 @@ Completed UX-7A by extracting shared observability evidence lead/focus component
 ### Next Steps
 
 - None - task complete
+
+
+## Session 116: UX-7B visual evidence governance
+
+**Date**: 2026-05-13
+**Task**: UX-7B visual evidence governance
+**Branch**: `main`
+
+### Summary
+
+Completed UX-7B by adding a repo-local visual evidence manifest validator, a local-only browser sanity helper, Makefile target, updated v2 evidence workflow guidance, roadmap status, and Trellis quality rules; verified manifest, browser helper smoke, lint, Vitest, build, make verify-web, and merged PR #67 green.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ecdb4d5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
