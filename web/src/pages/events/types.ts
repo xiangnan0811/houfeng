@@ -28,3 +28,30 @@ export type EventsPageState = {
   // backend has no more events to give for the current filter.
   exhausted: boolean
 }
+
+export type EventEvidenceLeadTone =
+  | 'normal'
+  | 'notice'
+  | 'alert'
+  | 'critical'
+  | 'maintenance'
+  | 'offline'
+
+export type EventEvidenceLead = {
+  eyebrow: string
+  title: string
+  description: string
+  actionKind: 'filters' | 'clear' | 'event' | 'timeRange'
+  actionLabel: string
+  actionHref?: string
+  tone: EventEvidenceLeadTone
+}
+
+export type EventEvidenceItem = {
+  event: StateChangeEventRecord
+  title: string
+  reason: string
+  meta: string
+  route: string
+  actionLabel: string
+}

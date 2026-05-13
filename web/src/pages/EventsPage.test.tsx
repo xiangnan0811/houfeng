@@ -102,9 +102,17 @@ describe('EventsPage', () => {
     )
 
     expect(screen.getAllByText('事件').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('较新的事件')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '先核对严重事件时间线' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '优先核对：Target · 异常升级' })).toBeInTheDocument()
+    expect(screen.getAllByText('较新的事件').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('较早的事件')).toBeInTheDocument()
-    expect(screen.getByText('较新的事件').compareDocumentPosition(screen.getByText('较早的事件')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const eventStream = screen.getByRole('heading', { name: '更早' }).closest('.event-group')
+    expect(eventStream).not.toBeNull()
+    expect(
+      within(eventStream as HTMLElement).getByText('较新的事件').compareDocumentPosition(
+        within(eventStream as HTMLElement).getByText('较早的事件'),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
 
     const drawer = await openFilterDrawer()
     fireEvent.change(within(drawer).getByLabelText('对象类型'), { target: { value: 'target' } })
@@ -150,7 +158,83 @@ describe('EventsPage', () => {
     expect(screen.getByRole('button', { name: '移除筛选 包含补传事件' })).toBeInTheDocument()
     expect(screen.getByText('11 项筛选')).toBeInTheDocument()
     expect(screen.getByText('对象类型决定后续处理入口：Node 关联 VPS 证据，Target 关联服务入口证据。')).toBeInTheDocument()
-    expect(screen.getByText('自定义时间')).toBeInTheDocument()
+    expect(screen.getByText(/当前只看维护上下文事件 · 自定义时间/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '没有匹配当前诊断条件' })).toBeInTheDocument()
+  })
+
+  it('clears an empty Dashboard events filter from the evidence lead', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockEventsResponse([]))
+      .mockResolvedValueOnce(mockEventsResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const page = renderEventsPage('/events?severity=%E4%B8%A5%E9%87%8D')
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '没有匹配当前诊断条件' })).toBeInTheDocument(),
+    )
+    expect(screen.getByText('严重度 严重')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '清空事件筛选' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith('/api/events?limit=50', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      }),
+    )
+    await waitFor(() => expect(page.getCurrentLocation()).toBe('/events'))
+  })
+
+  it('shows a stable timeline focus when the loaded slice has no priority event', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockEventsResponse([
+          {
+            event_id: 'evt_normal',
+            incident_id: '',
+            incident_class: '',
+            object_type: 'node',
+            object_id: 'nd_001',
+            event_type: 'node_monitoring_resumed',
+            severity: '正常',
+            summary: '节点恢复监控',
+            created_at: new Date().toISOString(),
+          },
+        ]),
+      ),
+    )
+
+    renderEventsPage()
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件时间线当前稳定' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('heading', { name: '没有需要优先核对的事件' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看 24h 事件' })).toHaveAttribute(
+      'href',
+      '/events?time_range=24h',
+    )
+  })
+
+  it('keeps Dashboard time-range and maintenance deep links visible in the evidence lead', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockEventsResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderEventsPage('/events?time_range=24h&maintenance_only=1')
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost')
+    expect(url.searchParams.get('created_from')).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(url.searchParams.get('created_to')).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(url.searchParams.get('maintenance_only')).toBe('true')
+
+    expect(screen.getByText('时间 近 24 小时')).toBeInTheDocument()
+    expect(screen.getByText('仅维护')).toBeInTheDocument()
+    expect(screen.getByText(/当前只看维护上下文事件 · 近 24 小时/)).toBeInTheDocument()
   })
 
   it('offers binding audit event filters for node onboarding actions', async () => {
@@ -474,8 +558,9 @@ describe('EventsPage', () => {
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '事件时间线当前稳定' })).toBeInTheDocument(),
     )
+    expect(screen.getByRole('heading', { name: '最近没有状态变更事件' })).toBeInTheDocument()
   })
 
   it('renders an explicit error state when the events request fails', async () => {
