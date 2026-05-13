@@ -1,0 +1,11 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/index.md", "reason": "project workflow and Trellis context routing"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "reuse-first implementation guardrails"}
+{"file": ".trellis/spec/web/index.md", "reason": "web package spec index"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "frontend component conventions"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "frontend state, URL, and API contract conventions"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "v2 styling and layout conventions"}
+{"file": "docs/design/v2-houfeng/design-language.md", "reason": "active v2 visual language authority"}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "active v2 EventsPage component contract"}
+{"file": "docs/release/ui-evolution-roadmap.md", "reason": "UX-6C roadmap and sequencing"}
+{"file": ".trellis/tasks/05-13-ux6c-events-timeline-evidence/prd.md", "reason": "task requirements and acceptance criteria"}

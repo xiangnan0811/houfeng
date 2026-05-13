@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "frontend verification and visual evidence requirements"}
+{"file": "docs/operations/v2-visual-evidence.md", "reason": "visual evidence workflow for UI tasks"}
+{"file": ".trellis/tasks/05-13-ux6c-events-timeline-evidence/prd.md", "reason": "task acceptance criteria"}

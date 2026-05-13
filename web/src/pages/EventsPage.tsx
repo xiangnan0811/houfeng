@@ -8,6 +8,11 @@ import { EventsFilterOverview } from './events/EventsFilterOverview'
 import { EventsStreamSection } from './events/EventsStreamSection'
 import { EventsSupportSurface } from './events/EventsSupportSurface'
 import {
+  buildEventEvidenceLead,
+  describeEventFilterContext,
+  pickTopEventEvidence,
+} from './events/eventEvidenceHelpers'
+import {
   ALLOWED_EVENT_TYPES,
   ALLOWED_LIMITS,
   ALLOWED_TIME_RANGES,
@@ -273,6 +278,21 @@ export function EventsPage() {
   }, [appliedFilters, appliedFilterKey, effectiveLimit])
 
   const activeFilters = hasActiveFilters(appliedFilters)
+  const filterContext = useMemo(
+    () => describeEventFilterContext(appliedFilters),
+    [appliedFilters],
+  )
+  const topEvidence = useMemo(() => pickTopEventEvidence(state.events), [state.events])
+  const evidenceLead = useMemo(
+    () =>
+      buildEventEvidenceLead({
+        events: state.events,
+        filters: appliedFilters,
+        hasActiveFilters: activeFilters,
+        topEvidence,
+      }),
+    [activeFilters, appliedFilters, state.events, topEvidence],
+  )
 
   function handleLoadMore() {
     if (state.exhausted || loadingMore) return
@@ -361,7 +381,11 @@ export function EventsPage() {
         events={state.events}
         filters={appliedFilters}
         hasActiveFilters={activeFilters}
+        evidenceLead={evidenceLead}
+        topEvidence={topEvidence}
+        filterContext={filterContext}
         onOpenFilters={openFiltersDrawer}
+        onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
       />
 
       <EventsFilterOverview

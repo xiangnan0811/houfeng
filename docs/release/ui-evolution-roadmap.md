@@ -4,7 +4,7 @@
 >
 > 状态：Active route for the next UI implementation batch
 >
-> 前置状态：UX-5 `VPS detail decision workbench` 已完成；当前进入 UX-6 `Observability support pages`，Nodes 与 Targets evidence convergence 已完成，下一步进入 Events timeline evidence convergence。
+> 前置状态：UX-6 `Observability support pages` 已完成；下一步进入 UX-7 `Design system / evidence / performance hardening`。
 
 ## 结论
 
@@ -171,7 +171,7 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 
 ## UX-6：Observability Support Pages
 
-> 状态：进行中。UX-6A Nodes evidence convergence 与 UX-6B Targets evidence convergence 已完成，后续继续 UX-6C Events timeline evidence convergence。
+> 状态：已完成。UX-6A Nodes evidence convergence、UX-6B Targets evidence convergence 与 UX-6C Events timeline evidence convergence 均已落地。
 
 ### 目标
 
@@ -223,6 +223,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前推荐继续执行 UX-6C Trellis task：`Events timeline evidence convergence`。
+当前推荐继续执行 UX-7 Trellis task：`Design system / evidence / performance hardening`。
 
-UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。下一步应进入 UX-6C Events，把审计与诊断时间线按同一证据语言收敛。
+UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。UX-6C 已经把 Events 收敛为审计与诊断时间线：事件证据 lead、优先事件 focus、空筛选清除、Dashboard 深链承接和 v2 视觉证据已经落地。下一步应进入 UX-7，把已经稳定的 shell/page/filter/workbench/evidence 模式沉淀为更小的组件、测试和证据维护机制，并开始处理明显性能与 bundle hardening。

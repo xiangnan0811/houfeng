@@ -1,15 +1,20 @@
 import { Link } from 'react-router-dom'
 
-import { Badge, Button, MonoDigits } from '../../components/atoms'
+import { Badge, Button, Hostname, MonoDigits, StatusGlyph } from '../../components/atoms'
 import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../../lib/types'
+import { eventEvidenceGlyphState } from './eventEvidenceHelpers'
 import { DEFAULT_LIMIT, TIME_RANGE_LABELS } from './eventsPageConstants'
-import type { FilterState } from './types'
+import type { EventEvidenceItem, EventEvidenceLead, FilterState } from './types'
 
 type EventsSupportSurfaceProps = {
   events: StateChangeEventRecord[]
   filters: FilterState
   hasActiveFilters: boolean
+  evidenceLead: EventEvidenceLead
+  topEvidence: EventEvidenceItem | null
+  filterContext: string[]
   onOpenFilters: () => void
+  onClearFilters: () => void
 }
 
 function objectTypeLabel(value: FilterState['object_type']) {
@@ -53,9 +58,39 @@ export function EventsSupportSurface({
   events,
   filters,
   hasActiveFilters,
+  evidenceLead,
+  topEvidence,
+  filterContext,
   onOpenFilters,
+  onClearFilters,
 }: EventsSupportSurfaceProps) {
   const filterCount = activeFilterCount(filters)
+  const severeCount = events.filter((event) => event.severity === '严重').length
+  const recoveryCount = events.filter((event) => event.event_type === 'incident_recovered').length
+
+  function renderLeadAction() {
+    if (evidenceLead.actionHref) {
+      return (
+        <Link className="btn btn--secondary btn--md" to={evidenceLead.actionHref}>
+          {evidenceLead.actionLabel}
+        </Link>
+      )
+    }
+
+    if (evidenceLead.actionKind === 'clear') {
+      return (
+        <Button variant="secondary" size="md" onClick={onClearFilters}>
+          {evidenceLead.actionLabel}
+        </Button>
+      )
+    }
+
+    return (
+      <Button variant="secondary" size="md" onClick={onOpenFilters}>
+        {evidenceLead.actionLabel}
+      </Button>
+    )
+  }
 
   return (
     <section className="page-panel observability-support observability-support--events">
@@ -72,6 +107,31 @@ export function EventsSupportSurface({
           <strong>
             <MonoDigits>{events.length}</MonoDigits>
           </strong>
+        </div>
+      </div>
+
+      <div className={`events-evidence-lead events-evidence-lead--${evidenceLead.tone}`}>
+        <div className="events-evidence-lead__main">
+          <p className="events-evidence-lead__eyebrow">{evidenceLead.eyebrow}</p>
+          <h3>{evidenceLead.title}</h3>
+          <p>{evidenceLead.description}</p>
+          {filterContext.length > 0 ? (
+            <div className="events-evidence-lead__filters" aria-label="当前事件证据筛选">
+              {filterContext.map((item) => (
+                <span key={item}>{item}</span>
+              ))}
+            </div>
+          ) : (
+            <div className="events-evidence-lead__filters" aria-label="当前事件证据筛选">
+              <span>默认事件流</span>
+            </div>
+          )}
+        </div>
+        <div className="events-evidence-lead__action">
+          {renderLeadAction()}
+          <Link className="observability-support-link" to="/asset-decisions">
+            资产决策队列
+          </Link>
         </div>
       </div>
 
@@ -113,8 +173,8 @@ export function EventsSupportSurface({
         <article className="observability-support-lane observability-support-lane--alert">
           <div className="observability-support-lane__head">
             <span>严重度 / 类型</span>
-            <Badge variant="info" tone={filters.severity === '严重' ? 'critical' : 'neutral'}>
-              {filters.severity || '全部'}
+            <Badge variant="count" tone={severeCount > 0 || filters.severity === '严重' ? 'critical' : 'neutral'}>
+              <MonoDigits>{severeCount}</MonoDigits>
             </Badge>
           </div>
           <p>{severityContext(filters)}</p>
@@ -131,20 +191,68 @@ export function EventsSupportSurface({
         <article className="observability-support-lane observability-support-lane--maintenance">
           <div className="observability-support-lane__head">
             <span>时间 / 来源</span>
-            <Badge variant="info" tone={filters.maintenance_only ? 'maintenance' : 'neutral'}>
-              {timeContext(filters)}
+            <Badge variant="count" tone={recoveryCount > 0 || filters.maintenance_only ? 'maintenance' : 'neutral'}>
+              <MonoDigits>{recoveryCount}</MonoDigits>
             </Badge>
           </div>
-          <p>{filters.maintenance_only ? '当前只看维护上下文事件。' : '时间窗口保留在 URL 中，API 请求时再转换为实际时间。'}</p>
+          <p>
+            {filters.maintenance_only
+              ? `当前只看维护上下文事件 · ${timeContext(filters)}`
+              : `${timeContext(filters)} · 恢复事件用于确认影响是否已收敛。`}
+          </p>
           <div className="observability-support-lane__actions">
             <Link className="observability-support-link" to="/">
               工作台
+            </Link>
+            <Link className="observability-support-link" to="/vps">
+              VPS 台账
             </Link>
             <Link className="observability-support-link" to="/events?maintenance_only=1">
               维护事件
             </Link>
           </div>
         </article>
+      </div>
+
+      <div className="events-evidence-context" aria-label="事件证据下一步">
+        {topEvidence ? (
+          <article className="events-evidence-focus">
+            <div className="events-evidence-focus__glyph">
+              <StatusGlyph
+                state={eventEvidenceGlyphState(topEvidence.event)}
+                ariaLabel={`${topEvidence.title} 事件证据状态`}
+              />
+            </div>
+            <div className="events-evidence-focus__body">
+              <p className="events-evidence-focus__eyebrow">优先核对事件</p>
+              <h3>优先核对：{topEvidence.title}</h3>
+              <p>{topEvidence.reason}</p>
+              <span>
+                <Hostname truncate maxChars={18}>{topEvidence.event.object_id}</Hostname>
+                {' · '}
+                {topEvidence.meta}
+              </span>
+            </div>
+            <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
+              {topEvidence.actionLabel}
+            </Link>
+          </article>
+        ) : (
+          <article className="events-evidence-focus events-evidence-focus--stable">
+            <div className="events-evidence-focus__glyph">
+              <StatusGlyph state="normal" ariaLabel="事件时间线稳定" />
+            </div>
+            <div className="events-evidence-focus__body">
+              <p className="events-evidence-focus__eyebrow">诊断时间线</p>
+              <h3>没有需要优先核对的事件</h3>
+              <p>当前事件切片没有严重、告警或关注级别线索。</p>
+              <span>继续从工作台、Node、Target 或 VPS 台账核对上游证据。</span>
+            </div>
+            <Link className="btn btn--ghost btn--sm" to="/events?time_range=24h">
+              查看 24h 事件
+            </Link>
+          </article>
+        )}
       </div>
     </section>
   )
