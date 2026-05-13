@@ -4,7 +4,7 @@
 >
 > 状态：Active route for the next UI implementation batch
 >
-> 前置状态：PR #51 `Redesign app shell visual baseline` 已合并，当前 `main` 已同步。
+> 前置状态：PR #52 `Improve page body responsive hierarchy` 已合并，当前 `main` 已同步。
 
 ## 结论
 
@@ -73,6 +73,8 @@ UX-7 Design system / evidence / performance hardening
 
 ## UX-2：Page Body Responsive Hierarchy Baseline
 
+> 状态：已完成，落地于 PR #52。
+
 ### 目标
 
 UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的响应式层级。它不是重新设计单个页面，而是让 VPS、资产决策、Nodes、Targets、Events、Settings 在桌面保持工程工作台密度，在 390px 移动视口下不出现页面级横向溢出、控件遮挡或按钮/筛选 chips 挤压。
@@ -101,6 +103,8 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 
 ## UX-3：Dashboard Command Surface Polish
 
+> 状态：进行中，当前任务 `05-13-ux3-dashboard-command-surface-polish`。
+
 ### 目标
 
 在现有工作台 command surface 基础上，把首屏视觉判断做得更有吸引力、更清晰。Dashboard 要像日常 command desk，而不是 KPI 墙、API 字段展板或模块目录。
@@ -108,6 +112,7 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 ### 范围
 
 - 强化 h1、三条 lane、主按钮、次级动作和状态摘要之间的主次。
+- 增加紧凑的今日判断摘要，让资产压力、严重异常、维护观察和下一步动作在首屏形成可扫轨道。
 - 资产决策队列、观测异常队列、下一步动作保留固定结构，但视觉上更容易 5 秒内判断优先级。
 - 当前处理队列、运行上下文、管理入口保持渐进披露，不恢复同权 section 堆叠。
 - 空态、正常态、维护态、严重异常态都要有明确视觉节奏。
@@ -118,6 +123,7 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 - 有严重异常时，严重异常和资产压力不会互相淹没。
 - 正常态不显示大型空队列表格。
 - Dashboard 深链继续被 Nodes/Targets/Events/VPS 页面承接。
+- 390x900 下 command surface 不出现页面级横向溢出，判断摘要与 lane 工具标签折叠后仍可读。
 
 ## UX-4：Asset Decision + VPS Inventory Real-Data Path
 
@@ -209,6 +215,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-下一步执行 UX-2 Trellis task：`Page body responsive hierarchy baseline`。
+当前执行 UX-3 Trellis task：`Dashboard command surface polish`。
 
-UX-2 应该先修核心页面主体的响应式层级，不应直接进入 Dashboard/VPS 细节。原因是 UX-1 已经解决壳层和导航基线，后续单页美化都需要继承同一套 page panel、filter、table、actions 和移动端折叠规则；如果先改单页，容易让各页继续各自变漂亮但整体产品感仍然割裂。
+UX-3 完成后，推荐进入 UX-4：`Asset decision + VPS inventory real-data path`。原因是 Dashboard 是用户每天打开的判断入口，UX-4 则直接承接真实 40+ VPS 数据验证；先把首页 command desk 做稳，再把资产决策和 VPS 库存打磨成真实数据核对路径，能避免真实数据验证时被首屏判断和资产列表体验同时拖累。

@@ -17,17 +17,29 @@ export function RunningOverview({ overview, maintenanceTotal, contextItems }: Ru
   const isMaintenance = maintenanceTotal > 0
 
   return (
-    <div className="dashboard-overview-panel">
-      <div className="dashboard-overview-panel__summary">
-        <StatusGlyph state={isMaintenance ? 'maintenance' : 'normal'} size="md" />
-        <div>
-          <h3>{isMaintenance ? '维护观察中' : '当前没有活跃异常'}</h3>
-          <p>
-            {isMaintenance
-              ? '维护对象进入观察状态，首页保留事件和库存上下文，不把维护态提升为紧急异常。'
-              : '处理队列保持为空，首页转为运行概览与管理入口。'}
-          </p>
+    <div className={`dashboard-overview-panel dashboard-overview-panel--${isMaintenance ? 'maintenance' : 'normal'}`}>
+      <div className="dashboard-overview-panel__lead">
+        <div className="dashboard-overview-panel__summary">
+          <StatusGlyph state={isMaintenance ? 'maintenance' : 'normal'} size="md" />
+          <div>
+            <span className="dashboard-overview-panel__eyebrow">
+              {isMaintenance ? '观察窗口' : '稳定窗口'}
+            </span>
+            <h3>{isMaintenance ? '维护观察中' : '当前没有活跃异常'}</h3>
+            <p>
+              {isMaintenance
+                ? '维护对象进入观察状态，首页保留事件和库存上下文，不把维护态提升为紧急异常。'
+                : '处理队列保持为空，首页转为运行概览与管理入口。'}
+            </p>
+          </div>
         </div>
+        <Link
+          className="dashboard-overview-panel__lead-link"
+          to={isMaintenance ? DASHBOARD_LINKS.eventsMaintenance : DASHBOARD_LINKS.events24h}
+          aria-label={isMaintenance ? '在工作台查看维护事件' : '在工作台查看 24h 事件流'}
+        >
+          {isMaintenance ? '查看维护事件' : '查看 24h 事件流'}
+        </Link>
       </div>
       <div className="dashboard-overview-metrics" aria-label={isMaintenance ? '维护观察指标' : '运行概览指标'}>
         <Link className="dashboard-overview-metric" to={DASHBOARD_LINKS.nodes}>
@@ -66,8 +78,10 @@ export function RunningOverview({ overview, maintenanceTotal, contextItems }: Ru
           </small>
         </Link>
       </div>
-      <ManagementEntries overview={overview} />
-      <DashboardContextStrip items={contextItems} />
+      <div className="dashboard-overview-panel__support">
+        <ManagementEntries overview={overview} />
+        <DashboardContextStrip items={contextItems} />
+      </div>
     </div>
   )
 }

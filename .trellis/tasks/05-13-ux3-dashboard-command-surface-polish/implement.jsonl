@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "web spec index for Dashboard UI work"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "component splitting and React conventions"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "v2 token and CSS conventions"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Dashboard contract and data truth constraints"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "web test and verification gates"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "branch and PR workflow guardrails"}

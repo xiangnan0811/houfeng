@@ -193,6 +193,20 @@ describe('DashboardPage', () => {
     expect(commandSurface).toHaveTextContent('观测侧 2 个异常对象，其中严重 1')
     expect(commandSurface).toHaveTextContent('30 天续费 2 台 VPS')
 
+    const focusSummary = within(commandSurface).getByLabelText('今日判断摘要')
+    expect(within(focusSummary).getByRole('link', { name: '资产压力：续费 2 · 决策 7 · 缺关联 5' })).toHaveAttribute(
+      'href',
+      '/asset-decisions',
+    )
+    expect(within(focusSummary).getByRole('link', { name: '严重异常：异常对象 2 · 先看事件证据' })).toHaveAttribute(
+      'href',
+      '/events?severity=严重',
+    )
+    expect(within(focusSummary).getByRole('link', { name: '下一步：进入资产决策队列' })).toHaveAttribute(
+      'href',
+      '/asset-decisions',
+    )
+
     const controls = within(commandSurface).getByLabelText('工作台主要动作')
     expect(within(controls).getByRole('link', { name: '进入资产决策队列' })).toHaveAttribute(
       'href',
@@ -201,6 +215,7 @@ describe('DashboardPage', () => {
 
     const assetLane = within(commandSurface).getByLabelText('资产决策队列')
     expect(within(assetLane).getByRole('heading', { name: '续费、决策与缺信息' })).toBeInTheDocument()
+    expect(within(assetLane).getByText('优先处理')).toBeInTheDocument()
     expect(within(assetLane).getByRole('link', { name: '30 天续费：订阅 3' })).toHaveAttribute(
       'href',
       '/asset-decisions',
@@ -228,6 +243,7 @@ describe('DashboardPage', () => {
 
     const observationLane = within(commandSurface).getByLabelText('观测异常队列')
     expect(within(observationLane).getByRole('heading', { name: '事件、节点与目标证据' })).toBeInTheDocument()
+    expect(within(observationLane).getByText('严重优先')).toBeInTheDocument()
     expect(within(observationLane).getByRole('link', { name: '异常对象：节点 1 · 目标 1' })).toHaveAttribute(
       'href',
       '/nodes?abnormal=1',
@@ -332,6 +348,15 @@ describe('DashboardPage', () => {
 
     const commandSurface = screen.getByLabelText('工作台 command surface')
     expect(commandSurface).toHaveTextContent('资产侧暂无待处理信号')
+    const focusSummary = within(commandSurface).getByLabelText('今日判断摘要')
+    expect(within(focusSummary).getByRole('link', { name: '资产主线：续费、决策与关联均稳定' })).toHaveAttribute(
+      'href',
+      '/vps',
+    )
+    expect(within(focusSummary).getByRole('link', { name: '观测异常：节点 1 · 目标 0' })).toHaveAttribute(
+      'href',
+      '/nodes?abnormal=1',
+    )
     const controls = within(commandSurface).getByLabelText('工作台主要动作')
     expect(within(controls).getByRole('link', { name: '处理观测异常' })).toHaveAttribute(
       'href',
@@ -359,6 +384,11 @@ describe('DashboardPage', () => {
     )
 
     const commandSurface = screen.getByLabelText('工作台 command surface')
+    const focusSummary = within(commandSurface).getByLabelText('今日判断摘要')
+    expect(within(focusSummary).getByRole('link', { name: '维护观察：节点 1 · 目标 1' })).toHaveAttribute(
+      'href',
+      '/events?maintenance_only=1',
+    )
     const controls = within(commandSurface).getByLabelText('工作台主要动作')
     expect(within(controls).getByRole('link', { name: '查看维护事件' })).toHaveAttribute(
       'href',
@@ -371,6 +401,11 @@ describe('DashboardPage', () => {
     )
     expect(screen.getByRole('heading', { name: '维护观察' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '维护观察中' })).toBeInTheDocument()
+    expect(screen.getByText('观察窗口')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '在工作台查看维护事件' })).toHaveAttribute(
+      'href',
+      '/events?maintenance_only=1',
+    )
     expect(screen.queryByRole('heading', { name: '当前需要处理' })).not.toBeInTheDocument()
     const maintenanceMetrics = screen.getByLabelText('维护观察指标')
     expect(within(maintenanceMetrics).getByRole('link', { name: /维护事件/ })).toHaveAttribute(
@@ -407,6 +442,15 @@ describe('DashboardPage', () => {
     const commandSurface = screen.getByLabelText('工作台 command surface')
     expect(commandSurface).toHaveTextContent('资产侧暂无待处理信号')
     expect(commandSurface).toHaveTextContent('观测侧暂无活跃异常')
+    const focusSummary = within(commandSurface).getByLabelText('今日判断摘要')
+    expect(within(focusSummary).getByRole('link', { name: '资产主线：续费、决策与关联均稳定' })).toHaveAttribute(
+      'href',
+      '/vps',
+    )
+    expect(within(focusSummary).getByRole('link', { name: '观测稳定：当前没有活跃异常对象' })).toHaveAttribute(
+      'href',
+      '/events?time_range=24h',
+    )
     const controls = within(commandSurface).getByLabelText('工作台主要动作')
     expect(within(controls).getByRole('link', { name: '核对 VPS 库存' })).toHaveAttribute('href', '/vps')
     const nextActions = within(commandSurface).getByLabelText('下一步动作')
@@ -418,6 +462,11 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('heading', { name: '运行概览' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前没有活跃异常' })).toBeInTheDocument()
+    expect(screen.getByText('稳定窗口')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '在工作台查看 24h 事件流' })).toHaveAttribute(
+      'href',
+      '/events?time_range=24h',
+    )
     expect(screen.queryByRole('heading', { name: '当前需要处理' })).not.toBeInTheDocument()
     const management = screen.getByLabelText('管理入口')
     expect(within(management).getByRole('link', { name: '节点：待接入 0 · 暂停 0 · 退役 0' })).toHaveAttribute(
@@ -462,6 +511,15 @@ describe('DashboardPage', () => {
     )
 
     const commandSurface = screen.getByLabelText('工作台 command surface')
+    const focusSummary = within(commandSurface).getByLabelText('今日判断摘要')
+    expect(within(focusSummary).getByRole('link', { name: '资产主线：续费、决策与关联均稳定' })).toHaveAttribute(
+      'href',
+      '/vps',
+    )
+    expect(within(focusSummary).getByRole('link', { name: '下一步：创建第一个节点' })).toHaveAttribute(
+      'href',
+      '/nodes',
+    )
     const controls = within(commandSurface).getByLabelText('工作台主要动作')
     expect(within(controls).getByRole('link', { name: '创建第一个节点' })).toHaveAttribute('href', '/nodes')
     const nextActions = within(commandSurface).getByLabelText('下一步动作')
