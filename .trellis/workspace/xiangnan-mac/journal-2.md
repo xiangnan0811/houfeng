@@ -1725,3 +1725,36 @@ Completed UX-4 by merging PR #54: Asset Decisions gained a processing-focus stri
 ### Next Steps
 
 - None - task complete
+
+
+## Session 111: UX-5 VPS detail decision workbench
+
+**Date**: 2026-05-13
+**Task**: UX-5 VPS detail decision workbench
+**Branch**: `chore/archive-ux5-task`
+
+### Summary
+
+Delivered UX-5 through PR #56: redesigned VPS detail around a next-action decision workbench with explicit decision, subscription, Node, quality, and context evidence; preserved drawer-based edits and dangerous lifecycle confirmation; added subscription failure vs true missing-subscription regression coverage; captured desktop/mobile v2 visual evidence; merged PR after GitGuardian, Go, and Web CI passed.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bfab59e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
