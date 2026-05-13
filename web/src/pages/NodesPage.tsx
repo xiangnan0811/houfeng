@@ -27,9 +27,11 @@ import { buildNodesTableColumns } from './nodes/NodesTableColumns'
 import { NodesToolbar } from './nodes/NodesToolbar'
 import {
   actionButtonKey,
+  buildNodeEvidenceLead,
   countAbnormalNodes,
   countMaintenanceOrPausedNodes,
   countPendingOnboardingNodes,
+  describeNodeFilterContext,
   distinctSorted,
   initialCreateForm,
   isBindingConflictNode,
@@ -37,6 +39,7 @@ import {
   mergeNonMetadataNodeRecord,
   parseLabels,
   parseMultiValue,
+  pickTopNodeEvidence,
   runtimeAttentionFilter,
 } from './nodes/nodeHelpers'
 import type {
@@ -432,6 +435,43 @@ export function NodesPage() {
     filterState.abnormal ||
     filterState.onboardingPending
 
+  const filterContext = useMemo(() => describeNodeFilterContext(filterState), [filterState])
+  const topEvidence = useMemo(
+    () => pickTopNodeEvidence(sortedFilteredNodes),
+    [sortedFilteredNodes],
+  )
+  const displayedAbnormalNodeCount = useMemo(
+    () => countAbnormalNodes(sortedFilteredNodes),
+    [sortedFilteredNodes],
+  )
+  const displayedPendingOnboardingNodeCount = useMemo(
+    () => countPendingOnboardingNodes(sortedFilteredNodes),
+    [sortedFilteredNodes],
+  )
+  const displayedMaintenanceOrPausedNodeCount = useMemo(
+    () => countMaintenanceOrPausedNodes(sortedFilteredNodes),
+    [sortedFilteredNodes],
+  )
+  const evidenceLead = useMemo(
+    () =>
+      buildNodeEvidenceLead({
+        totalNodeCount: nodes.length,
+        displayedNodeCount: sortedFilteredNodes.length,
+        abnormalNodeCount: displayedAbnormalNodeCount,
+        pendingOnboardingNodeCount: displayedPendingOnboardingNodeCount,
+        maintenanceOrPausedNodeCount: displayedMaintenanceOrPausedNodeCount,
+        hasActiveFilters,
+      }),
+    [
+      nodes.length,
+      sortedFilteredNodes.length,
+      displayedAbnormalNodeCount,
+      displayedPendingOnboardingNodeCount,
+      displayedMaintenanceOrPausedNodeCount,
+      hasActiveFilters,
+    ],
+  )
+
   async function executeBatchAction(action: string) {
     if (action === 'pause') {
       setPendingBatchAction('pause')
@@ -623,6 +663,15 @@ export function NodesPage() {
     return true
   }
 
+  function toggleCreateDrawer() {
+    setCreateOpen((current) => {
+      if (current) {
+        resetCreateFlow()
+      }
+      return !current
+    })
+  }
+
   return (
     <section className="page-stack nodes-page">
       <NodesHero
@@ -633,14 +682,7 @@ export function NodesPage() {
         onAbnormalClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
         onOnboardingClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
         onRuntimeAttentionClick={() => setSingleFilter('run_status', runtimeAttentionFilter(nodes))}
-        onCreateClick={() =>
-          setCreateOpen((current) => {
-            if (current) {
-              resetCreateFlow()
-            }
-            return !current
-          })
-        }
+        onCreateClick={toggleCreateDrawer}
       />
 
       <NodesSupportSurface
@@ -649,12 +691,17 @@ export function NodesPage() {
         abnormalNodeCount={abnormalNodeCount}
         pendingOnboardingNodeCount={pendingOnboardingNodeCount}
         maintenanceOrPausedNodeCount={maintenanceOrPausedNodeCount}
+        evidenceLead={evidenceLead}
+        topEvidence={topEvidence}
+        filterContext={filterContext}
         hasActiveFilters={hasActiveFilters}
         onAbnormalClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
         onOnboardingClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
         onRuntimeAttentionClick={() =>
           setSingleFilter('run_status', runtimeAttentionFilter(nodes))
         }
+        onClearFilters={clearAllFilters}
+        onCreateClick={toggleCreateDrawer}
       />
 
       <CreateNodeDrawer

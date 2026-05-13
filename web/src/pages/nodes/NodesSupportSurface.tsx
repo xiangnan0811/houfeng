@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
 
-import { Badge, Button, MonoDigits } from '../../components/atoms'
+import { Badge, Button, Hostname, MonoDigits, StatusGlyph } from '../../components/atoms'
+import { nodeEvidenceGlyphState } from './nodeHelpers'
+import type { NodeEvidenceItem, NodeEvidenceLead } from './types'
 
 type NodesSupportSurfaceProps = {
   totalNodeCount: number
@@ -8,10 +10,15 @@ type NodesSupportSurfaceProps = {
   abnormalNodeCount: number
   pendingOnboardingNodeCount: number
   maintenanceOrPausedNodeCount: number
+  evidenceLead: NodeEvidenceLead
+  topEvidence: NodeEvidenceItem | null
+  filterContext: string[]
   hasActiveFilters: boolean
   onAbnormalClick: () => void
   onOnboardingClick: () => void
   onRuntimeAttentionClick: () => void
+  onClearFilters: () => void
+  onCreateClick: () => void
 }
 
 export function NodesSupportSurface({
@@ -20,11 +27,30 @@ export function NodesSupportSurface({
   abnormalNodeCount,
   pendingOnboardingNodeCount,
   maintenanceOrPausedNodeCount,
+  evidenceLead,
+  topEvidence,
+  filterContext,
   hasActiveFilters,
   onAbnormalClick,
   onOnboardingClick,
   onRuntimeAttentionClick,
+  onClearFilters,
+  onCreateClick,
 }: NodesSupportSurfaceProps) {
+  function handleLeadAction() {
+    if (evidenceLead.actionKind === 'abnormal') {
+      onAbnormalClick()
+    } else if (evidenceLead.actionKind === 'onboarding') {
+      onOnboardingClick()
+    } else if (evidenceLead.actionKind === 'runtime') {
+      onRuntimeAttentionClick()
+    } else if (evidenceLead.actionKind === 'clear') {
+      onClearFilters()
+    } else if (evidenceLead.actionKind === 'create') {
+      onCreateClick()
+    }
+  }
+
   return (
     <section className="page-panel observability-support observability-support--nodes">
       <div className="observability-support__header">
@@ -42,6 +68,39 @@ export function NodesSupportSurface({
             <small>/</small>
             <MonoDigits>{totalNodeCount}</MonoDigits>
           </strong>
+        </div>
+      </div>
+
+      <div className={`nodes-evidence-lead nodes-evidence-lead--${evidenceLead.tone}`}>
+        <div className="nodes-evidence-lead__main">
+          <p className="nodes-evidence-lead__eyebrow">{evidenceLead.eyebrow}</p>
+          <h3>{evidenceLead.title}</h3>
+          <p>{evidenceLead.description}</p>
+          {filterContext.length > 0 ? (
+            <div className="nodes-evidence-lead__filters" aria-label="当前证据筛选">
+              {filterContext.map((item) => (
+                <span key={item}>{item}</span>
+              ))}
+            </div>
+          ) : (
+            <div className="nodes-evidence-lead__filters" aria-label="当前证据筛选">
+              <span>完整 Node 库存</span>
+            </div>
+          )}
+        </div>
+        <div className="nodes-evidence-lead__action">
+          {evidenceLead.actionKind === 'asset' ? (
+            <Link className="btn btn--secondary btn--md" to="/vps">
+              {evidenceLead.actionLabel}
+            </Link>
+          ) : (
+            <Button variant="secondary" size="md" onClick={handleLeadAction}>
+              {evidenceLead.actionLabel}
+            </Button>
+          )}
+          <Link className="observability-support-link" to="/asset-decisions">
+            资产决策队列
+          </Link>
         </div>
       </div>
 
@@ -123,7 +182,7 @@ export function NodesSupportSurface({
             <span>VPS 关联</span>
             <Badge variant="info" tone="neutral">资产上下文</Badge>
           </div>
-          <p>资产关联回到 VPS 台账和 Node 详情核对，避免把孤立运行事实当成资产结论。</p>
+          <p>列表不推导 linked VPS health；资产关联回到 VPS 台账和 Node 详情核对。</p>
           <div className="observability-support-lane__actions">
             <Link className="observability-support-link" to="/vps?view=unlinked">
               未关联 VPS
@@ -133,6 +192,47 @@ export function NodesSupportSurface({
             </Link>
           </div>
         </article>
+      </div>
+
+      <div className="nodes-evidence-context" aria-label="节点证据下一步">
+        {topEvidence ? (
+          <article className="nodes-evidence-focus">
+            <div className="nodes-evidence-focus__glyph">
+              <StatusGlyph
+                state={nodeEvidenceGlyphState(topEvidence.node)}
+                ariaLabel={`${topEvidence.title} 证据状态`}
+              />
+            </div>
+            <div className="nodes-evidence-focus__body">
+              <p className="nodes-evidence-focus__eyebrow">优先核对节点</p>
+              <h3>优先核对：{topEvidence.title}</h3>
+              <p>{topEvidence.reason}</p>
+              <span>
+                <Hostname truncate maxChars={18}>{topEvidence.node.node_id}</Hostname>
+                {' · '}
+                {topEvidence.meta}
+              </span>
+            </div>
+            <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
+              {topEvidence.actionLabel}
+            </Link>
+          </article>
+        ) : (
+          <article className="nodes-evidence-focus nodes-evidence-focus--stable">
+            <div className="nodes-evidence-focus__glyph">
+              <StatusGlyph state="normal" ariaLabel="Node 证据稳定" />
+            </div>
+            <div className="nodes-evidence-focus__body">
+              <p className="nodes-evidence-focus__eyebrow">运行证据</p>
+              <h3>没有需要优先核对的 Node</h3>
+              <p>当前列表没有异常、接入缺口、维护或暂停对象。</p>
+              <span>继续从 VPS 库存、订阅和资产决策队列核对资产侧事实。</span>
+            </div>
+            <Link className="btn btn--ghost btn--sm" to="/vps">
+              查看 VPS
+            </Link>
+          </article>
+        )}
       </div>
     </section>
   )

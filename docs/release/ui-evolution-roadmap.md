@@ -4,7 +4,7 @@
 >
 > 状态：Active route for the next UI implementation batch
 >
-> 前置状态：PR #54 `Improve asset inventory real-data path` 已合并，当前进入 UX-5 `VPS detail decision workbench`。
+> 前置状态：UX-5 `VPS detail decision workbench` 已完成；当前进入 UX-6 `Observability support pages`，先落地 Nodes evidence convergence。
 
 ## 结论
 
@@ -171,20 +171,22 @@ UX-1 已经建立 AppShell 与导航基线，UX-2 先补齐核心页面主体的
 
 ## UX-6：Observability Support Pages
 
+> 状态：进行中。UX-6A Nodes evidence convergence 已完成，后续继续 UX-6B Targets evidence convergence 与 UX-6C Events timeline evidence convergence。
+
 ### 目标
 
 Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资产判断的证据系统。
 
 ### 范围
 
-- Nodes 强调 linked VPS、异常证据、维护/暂停、接入/绑定状态。
+- Nodes 强调异常证据、维护/暂停、接入/绑定状态，并明确列表不推导 linked VPS health。
 - Targets 强调服务入口、探测覆盖、资产服务上下文。
 - Events 强调审计与诊断时间线，承接 Dashboard、VPS、Node、Target 深链。
 - 列表页保持高密度，筛选器以 chips/drawer/segmented controls 降低视觉占用。
 
 ### 验收
 
-- 观测页能解释资产风险，而不是孤立展示运行对象。
+- Nodes 首屏能解释资产风险，而不是孤立展示运行对象。
 - Dashboard 深链进入后，筛选状态首屏可见且可清除。
 - 行点击、hover actions、drawer 和 keyboard 行为不回退。
 
@@ -220,6 +222,6 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前推荐执行 UX-6 Trellis task：`Observability support pages`。
+当前推荐继续执行 UX-6B Trellis task：`Targets evidence convergence`。
 
-UX-5 完成后，推荐进入 UX-6：`Observability support pages`。原因是 UX-5 会把单台 VPS 的判断路径收敛到续费、成本、Node 证据、服务/域名和时间线；UX-6 应继续把 Nodes、Targets、Events 收敛成资产判断的运行证据系统，避免观测对象与资产主线割裂。
+UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。下一步应进入 UX-6B Targets，把服务入口、探测覆盖、资产服务上下文和 Dashboard 深链按同一证据语言收敛，之后再做 UX-6C Events 时间线。

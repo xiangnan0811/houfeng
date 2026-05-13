@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "Review branch workflow, reuse, and cross-layer risk before final verification."}
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend spec index and authority order for review."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Check component boundaries and React style consistency."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Check existing Node list contracts, URL-state behavior, and no invented linked VPS health."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check CSS token/BEM compliance and responsive behavior."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check required lint/test/build and visual evidence gates."}
+{"file": "docs/design/v2-houfeng/component-spec.md", "reason": "Check NodesPage against the active v2 visual contract."}
+{"file": "docs/operations/v2-visual-evidence.md", "reason": "Check preview/screenshot/manifest evidence requirements."}
