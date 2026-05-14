@@ -1,0 +1,32 @@
+{
+  "id": "asset-ledger-real-data-validation-readiness",
+  "name": "asset-ledger-real-data-validation-readiness",
+  "title": "Asset Ledger real-data validation readiness",
+  "description": "Bridge UX-7E mocked Asset Ledger browser evidence to local-center sample and user-authorized real-inventory validation by adding authenticated browser sanity support, a safe sample import file, and an operations readiness workflow.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "web",
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-mac",
+  "assignee": "xiangnan-mac",
+  "createdAt": "2026-05-14",
+  "completedAt": null,
+  "branch": "asset-ledger-real-data-readiness",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "scripts/visual_evidence.py",
+    "docs/operations/v2-visual-evidence.md",
+    "docs/operations/asset-ledger-real-data-validation-readiness.md",
+    "docs/operations/asset-ledger-local-sample.json",
+    "docs/release/ui-evolution-roadmap.md"
+  ],
+  "notes": "Main-session only; user explicitly requested no subagents.",
+  "meta": {}
+}

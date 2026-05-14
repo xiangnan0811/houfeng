@@ -132,6 +132,28 @@ Report this as `Data source: mock-api asset-workflows`. It proves the protected 
 
 If local Playwright cannot create browser temp files, prefer a repo-local temp directory (`TMPDIR="$PWD/.tmp/playwright"`) and record that in the evidence notes. Do not add browser automation dependencies to `web/package.json` to work around local tooling.
 
+### Local center sample routes
+
+After `houfeng-center` is running and a disposable local database contains the sample or manually entered Asset Ledger records, run browser sanity with the real login flow instead of `--mock-api`:
+
+```bash
+mkdir -p .tmp/playwright
+TMPDIR="$PWD/.tmp/playwright" python3 scripts/visual_evidence.py browser-sanity \
+  --base-url http://127.0.0.1:5178/ \
+  --login-username-env HOUFENG_INITIAL_USERNAME \
+  --login-password-env HOUFENG_INITIAL_PASSWORD \
+  --route /asset-decisions \
+  --route /vps \
+  --route /providers \
+  --route /subscriptions \
+  --viewport 1440x1000 \
+  --viewport 390x900
+```
+
+`--login-username-env` and `--login-password-env` read credentials from environment variables and authenticate through `/api/auth/login` before navigating protected routes. The helper prints `auth=session-login` and fails if a protected route is redirected away from the requested path. Real login cannot be combined with `--mock-api`; data source labels must be either `mock-api asset-workflows`, `local center sample`, or `real data`.
+
+The local sample and real-data readiness workflow is documented in `docs/operations/asset-ledger-real-data-validation-readiness.md`.
+
 ## Core route matrix
 
 This is the current v2 core-page acceptance set. A task only needs to check routes it changes, but broad UX tasks should cover the full relevant subset.
