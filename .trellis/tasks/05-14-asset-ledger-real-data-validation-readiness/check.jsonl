@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify Asset Ledger evidence does not overclaim data semantics."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Validate browser sanity and frontend verification expectations."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify import dry-run sample and CLI-related quality gate."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify import readiness preserves Asset Ledger boundaries and no DB schema changes."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify feature branch, PR, and protected-main workflow."}
+{"file": ".trellis/tasks/05-14-asset-ledger-real-data-validation-readiness/research/asset-ledger-real-data-readiness.md", "reason": "Validate implementation against task-specific findings."}

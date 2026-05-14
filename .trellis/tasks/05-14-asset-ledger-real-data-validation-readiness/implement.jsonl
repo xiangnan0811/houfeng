@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Browser sanity evidence remains local-only and outside CI/browser deps."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Asset Ledger route data truth and non-inference contracts."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Import CLI verification expectations and dry-run sample command requirement."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Asset Ledger import boundaries, transaction behavior, and model invariants."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature branch and PR workflow governance."}
+{"file": ".trellis/tasks/05-14-asset-ledger-real-data-validation-readiness/research/asset-ledger-real-data-readiness.md", "reason": "Task-specific current import, auth, evidence, and readiness findings."}

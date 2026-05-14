@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -49,6 +50,12 @@ class Viewport:
     label: str
     width: int
     height: int
+
+
+@dataclass(frozen=True)
+class BrowserLogin:
+    username: str
+    password: str
 
 
 def strip_code(value: str) -> str:
@@ -199,9 +206,60 @@ def normalize_route(route: str) -> str:
     return route
 
 
+def route_path(route: str) -> str:
+    parsed = urlparse(normalize_route(route))
+    return parsed.path or "/"
+
+
 def target_url(base_url: str, route: str) -> str:
     base = base_url.rstrip("/") + "/"
     return urljoin(base, normalize_route(route).lstrip("/"))
+
+
+def resolve_login_value(
+    value: str | None,
+    env_name: str | None,
+    label: str,
+) -> tuple[str | None, list[str]]:
+    errors: list[str] = []
+    if value and env_name:
+        errors.append(f"{label}: use either a direct value or an env var, not both")
+        return None, errors
+    if env_name:
+        env_value = os.environ.get(env_name)
+        if not env_value:
+            errors.append(f"{label}: environment variable {env_name!r} is not set or empty")
+            return None, errors
+        return env_value, errors
+    if value:
+        return value, errors
+    return None, errors
+
+
+def resolve_browser_login(args: argparse.Namespace) -> tuple[BrowserLogin | None, list[str]]:
+    username, username_errors = resolve_login_value(
+        args.login_username,
+        args.login_username_env,
+        "login username",
+    )
+    password, password_errors = resolve_login_value(
+        args.login_password,
+        args.login_password_env,
+        "login password",
+    )
+    errors = username_errors + password_errors
+    if errors:
+        return None, errors
+
+    if bool(username) != bool(password):
+        return None, [
+            "browser-sanity login requires both username and password; use "
+            "--login-username or --login-username-env together with "
+            "--login-password or --login-password-env"
+        ]
+    if username is None or password is None:
+        return None, []
+    return BrowserLogin(username=username, password=password), []
 
 
 def iso_date(days_from_today: int) -> str:
@@ -663,12 +721,32 @@ def install_mock_api_routes(page: object, profile: MockAPIProfile) -> None:
     raise ValueError(f"unsupported mock API profile: {profile}")
 
 
+def login_browser_context(
+    page: object,
+    base_url: str,
+    login: BrowserLogin,
+    timeout_ms: int,
+) -> None:
+    response = page.request.post(
+        target_url(base_url, "/api/auth/login"),
+        data={"username": login.username, "password": login.password},
+        timeout=timeout_ms,
+    )
+    if response.status < 200 or response.status >= 300:
+        body = response.text().strip()
+        if len(body) > 240:
+            body = body[:240] + "..."
+        detail = f": {body}" if body else ""
+        raise RuntimeError(f"POST /api/auth/login returned {response.status}{detail}")
+
+
 def run_browser_sanity(
     base_url: str,
     routes: Iterable[str],
     viewports: Iterable[Viewport],
     timeout_ms: int,
     mock_api: MockAPIProfile,
+    login: BrowserLogin | None,
 ) -> int:
     try:
         from playwright.sync_api import Error as PlaywrightError
@@ -700,10 +778,18 @@ def run_browser_sanity(
             for route in routes:
                 for viewport in viewports:
                     url = target_url(base_url, route)
-                    page = browser.new_page(
+                    context = browser.new_context(
                         viewport={"width": viewport.width, "height": viewport.height}
                     )
+                    page = context.new_page()
                     install_mock_api_routes(page, mock_api)
+                    pre_navigation_failures: list[str] = []
+                    if login is not None:
+                        try:
+                            login_browser_context(page, base_url, login, timeout_ms)
+                        except (PlaywrightError, RuntimeError) as exc:
+                            pre_navigation_failures.append(f"login failed: {exc}")
+
                     try:
                         page.goto(url, wait_until="networkidle", timeout=timeout_ms)
                     except PlaywrightTimeoutError:
@@ -782,8 +868,9 @@ def run_browser_sanity(
                         """
                     )
                     page.close()
+                    context.close()
 
-                    route_failures: list[str] = []
+                    route_failures = list(pre_navigation_failures)
                     if result["bodyTextLength"] < 20:
                         route_failures.append("blank-or-nearly-blank body text")
                     if result["docScrollWidth"] > viewport.width + 2:
@@ -794,6 +881,13 @@ def run_browser_sanity(
                         route_failures.append(
                             f"body horizontal overflow {result['bodyScrollWidth']} > {viewport.width}"
                         )
+                    if mock_api != "none" or login is not None:
+                        current_path = urlparse(result["currentUrl"]).path or "/"
+                        expected_path = route_path(route)
+                        if current_path != expected_path:
+                            route_failures.append(
+                                f"unexpected final path {current_path!r}; expected {expected_path!r}"
+                            )
                     status = "PASS" if not route_failures else "FAIL"
                     warning_text = (
                         f" warnings={len(result['overflowingText'])}"
@@ -801,11 +895,12 @@ def run_browser_sanity(
                         else ""
                     )
                     mock_text = f" mock={mock_api}" if mock_api != "none" else ""
+                    auth_text = " auth=session-login" if login is not None else ""
                     print(
                         f"{status} {normalize_route(route)} {viewport.label} "
                         f"text={result['bodyTextLength']} "
                         f"doc={result['docScrollWidth']} body={result['bodyScrollWidth']} "
-                        f"panels={result['pagePanels']}{warning_text}{mock_text} "
+                        f"panels={result['pagePanels']}{warning_text}{mock_text}{auth_text} "
                         f"url={result['currentUrl']}"
                     )
                     if result["overflowingText"]:
@@ -848,12 +943,22 @@ def command_validate_manifest(args: argparse.Namespace) -> int:
 
 
 def command_browser_sanity(args: argparse.Namespace) -> int:
+    login, login_errors = resolve_browser_login(args)
+    if login is not None and args.mock_api != "none":
+        login_errors.append("browser-sanity real login cannot be combined with --mock-api")
+    if login_errors:
+        print("Browser sanity configuration error:", file=sys.stderr)
+        for error in login_errors:
+            print(f"- {error}", file=sys.stderr)
+        return 2
+
     return run_browser_sanity(
         base_url=args.base_url,
         routes=args.route,
         viewports=args.viewport,
         timeout_ms=args.timeout_ms,
         mock_api=args.mock_api,
+        login=login,
     )
 
 
@@ -911,6 +1016,27 @@ def build_parser() -> argparse.ArgumentParser:
             "Optional local-only API fixture profile. Use asset-workflows to "
             "render protected Asset Ledger routes without a running center."
         ),
+    )
+    sanity.add_argument(
+        "--login-username",
+        help="Username for an optional real center /api/auth/login session.",
+    )
+    sanity.add_argument(
+        "--login-username-env",
+        metavar="ENV_VAR",
+        help="Environment variable containing the login username.",
+    )
+    sanity.add_argument(
+        "--login-password",
+        help=(
+            "Password for an optional real center /api/auth/login session. "
+            "Prefer --login-password-env to avoid exposing the value in process args."
+        ),
+    )
+    sanity.add_argument(
+        "--login-password-env",
+        metavar="ENV_VAR",
+        help="Environment variable containing the login password.",
     )
     sanity.set_defaults(func=command_browser_sanity)
     return parser
