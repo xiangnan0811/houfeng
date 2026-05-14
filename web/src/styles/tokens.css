@@ -61,6 +61,14 @@
   --text-secondary:   #9EA3AE;
   --text-muted:       #7B7F88;
   --text-disabled:    #48494E;
+  --text-tertiary:    var(--text-muted);
+
+  --surface-0:       var(--bg);
+  --surface-1:       var(--surface);
+  --surface-2:       var(--surface-elevated);
+  --surface-3:       var(--surface-pressed);
+  --border-muted:    color-mix(in srgb, var(--border) 58%, transparent);
+  --border-default:  var(--border);
 
   --accent:        #C9A56F;
   --accent-strong: #E0BE85;
@@ -116,6 +124,14 @@ html.theme-houfeng-light {
   --text-secondary:   #4A4638;
   --text-muted:       #6E6856;
   --text-disabled:    #B5AC95;
+  --text-tertiary:    var(--text-muted);
+
+  --surface-0:       var(--bg);
+  --surface-1:       var(--surface);
+  --surface-2:       var(--surface-elevated);
+  --surface-3:       var(--surface-pressed);
+  --border-muted:    color-mix(in srgb, var(--border) 58%, transparent);
+  --border-default:  var(--border);
 
   --accent:        #9A7A3D;
   --accent-strong: #7E6128;
@@ -200,6 +216,14 @@ html.theme-classic-light {
   --text-secondary:   #4A4638;
   --text-muted:       #6E6856;
   --text-disabled:    #B5AC95;
+  --text-tertiary:    var(--text-muted);
+
+  --surface-0:       var(--bg);
+  --surface-1:       var(--surface);
+  --surface-2:       var(--surface-elevated);
+  --surface-3:       var(--surface-pressed);
+  --border-muted:    color-mix(in srgb, var(--border) 58%, transparent);
+  --border-default:  var(--border);
 
   --accent:        #9A7A3D;
   --accent-strong: #7E6128;

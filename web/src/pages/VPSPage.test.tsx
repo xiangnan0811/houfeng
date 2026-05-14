@@ -272,7 +272,7 @@ describe('VPSPage', () => {
     expect(screen.getByText('无法核算续费')).toBeInTheDocument()
   })
 
-  it('creates a VPS and navigates to the created detail route', async () => {
+  it('opens VPS creation in a drawer, creates a VPS, and navigates to the detail route', async () => {
     const created = { ...vps, vps_id: 'vps_new', display_name: 'Osaka Standby' }
     const fetchMock = vi
       .fn()
@@ -292,14 +292,19 @@ describe('VPSPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('button', { name: '创建第一台 VPS' })).toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: 'VPS 创建表单' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '库存核对' })).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
-    fireEvent.change(screen.getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })
-    fireEvent.change(screen.getByLabelText('资产服务商'), { target: { value: 'pv_001' } })
-    fireEvent.change(screen.getByLabelText('国家'), { target: { value: 'JP' } })
-    fireEvent.change(screen.getByLabelText('区域'), { target: { value: 'Kansai' } })
-    fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Osaka' } })
-    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'standby, standby' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建 VPS' }))
+    const drawer = await screen.findByRole('dialog', { name: 'VPS 创建表单' })
+    expect(within(drawer).getByText(/创建只记录资产库存基础事实/)).toBeInTheDocument()
+    fireEvent.change(within(drawer).getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })
+    fireEvent.change(within(drawer).getByLabelText('资产服务商'), { target: { value: 'pv_001' } })
+    fireEvent.change(within(drawer).getByLabelText('国家'), { target: { value: 'JP' } })
+    fireEvent.change(within(drawer).getByLabelText('区域'), { target: { value: 'Kansai' } })
+    fireEvent.change(within(drawer).getByLabelText('城市'), { target: { value: 'Osaka' } })
+    fireEvent.change(within(drawer).getByLabelText('标签'), { target: { value: 'standby, standby' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建 VPS' }))
 
     await waitFor(() => expect(screen.getByText('created vps detail')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps', {

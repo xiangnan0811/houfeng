@@ -39,6 +39,12 @@ describe('Breadcrumb', () => {
     expect(screen.getByText('vps_tokyo_001')).toBeInTheDocument()
   })
 
+  it('uses current navigation wording on nested observation routes', () => {
+    renderAt('/targets/tg_001', '/targets/:targetId')
+    expect(screen.getByRole('link', { name: '入口探测' })).toHaveAttribute('href', '/targets')
+    expect(screen.queryByRole('link', { name: '目标' })).not.toBeInTheDocument()
+  })
+
   it('hides on level-1 asset routes', () => {
     const { container } = renderAt('/asset-decisions', '/asset-decisions')
     expect(container.querySelector('.breadcrumb')).toBeNull()

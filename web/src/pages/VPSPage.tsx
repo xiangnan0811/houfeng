@@ -556,15 +556,14 @@ export function VPSPage() {
     setFilterDrawerOpen(false)
   }
 
-  function toggleCreatePanel() {
-    setCreateOpen((open) => {
-      const next = !open
-      if (!next) {
-        setCreateForm(INITIAL_CREATE_FORM)
-        setCreateError(null)
-      }
-      return next
-    })
+  function openCreateDrawer() {
+    setCreateOpen(true)
+  }
+
+  function closeCreateDrawer() {
+    setCreateOpen(false)
+    setCreateForm(INITIAL_CREATE_FORM)
+    setCreateError(null)
   }
 
   function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
@@ -666,73 +665,11 @@ export function VPSPage() {
           </p>
         </div>
         <div className="page-panel__actions">
-          <Button variant={createOpen ? 'secondary' : 'primary'} onClick={toggleCreatePanel}>
-            {createOpen ? '收起创建' : state.vps.length === 0 ? '创建第一台 VPS' : '新建 VPS'}
+          <Button onClick={openCreateDrawer}>
+            {state.vps.length === 0 ? '创建第一台 VPS' : '新建 VPS'}
           </Button>
         </div>
       </section>
-
-      {createOpen && (
-        <section className="page-panel">
-          <div className="page-panel__eyebrow">CREATE</div>
-          <h2 className="page-panel__title">VPS 创建</h2>
-          <form onSubmit={handleCreateSubmit}>
-            <Input label="VPS 名称" value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} />
-            <label className="input-field">
-              <span className="input-field__label">资产服务商</span>
-              <select className="input" value={createForm.providerID} onChange={(event) => setCreateForm({ ...createForm, providerID: event.target.value })}>
-                <option value="">未关联服务商</option>
-                {providerSelectOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Input label="服务商名称快照" value={createForm.providerName} onChange={(event) => setCreateForm({ ...createForm, providerName: event.target.value })} />
-            <Input label="产品名" value={createForm.productName} onChange={(event) => setCreateForm({ ...createForm, productName: event.target.value })} />
-            <Input label="订单号" value={createForm.orderRef} onChange={(event) => setCreateForm({ ...createForm, orderRef: event.target.value })} />
-            <Input label="国家" value={createForm.country} onChange={(event) => setCreateForm({ ...createForm, country: event.target.value })} />
-            <Input label="区域" value={createForm.region} onChange={(event) => setCreateForm({ ...createForm, region: event.target.value })} />
-            <Input label="城市" value={createForm.city} onChange={(event) => setCreateForm({ ...createForm, city: event.target.value })} />
-            <Input label="数据中心" value={createForm.datacenter} onChange={(event) => setCreateForm({ ...createForm, datacenter: event.target.value })} />
-            <Input label="IPv4" value={createForm.ipv4} onChange={(event) => setCreateForm({ ...createForm, ipv4: event.target.value })} />
-            <Input label="IPv6" value={createForm.ipv6} onChange={(event) => setCreateForm({ ...createForm, ipv6: event.target.value })} />
-            <Input label="SSH Host" value={createForm.sshHost} onChange={(event) => setCreateForm({ ...createForm, sshHost: event.target.value })} />
-            <Input label="SSH 端口" type="number" value={createForm.sshPort} onChange={(event) => setCreateForm({ ...createForm, sshPort: event.target.value })} />
-            <Input label="SSH 用户" value={createForm.sshUser} onChange={(event) => setCreateForm({ ...createForm, sshUser: event.target.value })} />
-            <Input label="操作系统" value={createForm.osName} onChange={(event) => setCreateForm({ ...createForm, osName: event.target.value })} />
-            <Input label="虚拟化" value={createForm.virtualization} onChange={(event) => setCreateForm({ ...createForm, virtualization: event.target.value })} />
-            <label className="input-field">
-              <span className="input-field__label">生命周期</span>
-              <select className="input" value={createForm.lifecycleStatus} onChange={(event) => setCreateForm({ ...createForm, lifecycleStatus: event.target.value as VPSLifecycleStatus })}>
-                {LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <label className="input-field">
-              <span className="input-field__label">用途状态</span>
-              <select className="input" value={createForm.usageStatus} onChange={(event) => setCreateForm({ ...createForm, usageStatus: event.target.value as VPSUsageStatus })}>
-                {USAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <label className="input-field">
-              <span className="input-field__label">续费决策</span>
-              <select className="input" value={createForm.renewalDecision} onChange={(event) => setCreateForm({ ...createForm, renewalDecision: event.target.value as VPSRenewalDecision })}>
-                {RENEWAL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <Input label="重要性" value={createForm.importance} onChange={(event) => setCreateForm({ ...createForm, importance: event.target.value })} />
-            <Input label="标签" hint="用逗号分隔" value={createForm.labels} onChange={(event) => setCreateForm({ ...createForm, labels: event.target.value })} />
-            <Input label="备注" value={createForm.note} onChange={(event) => setCreateForm({ ...createForm, note: event.target.value })} />
-            {createError && <p className="create-form__error" role="alert">{createError}</p>}
-            <div className="page-form-actions">
-              <Button type="submit" disabled={createSubmitting}>
-                {createSubmitting ? '创建中…' : '创建 VPS'}
-              </Button>
-            </div>
-          </form>
-        </section>
-      )}
 
       <section className="page-panel vps-inventory-command">
         <div className="section-heading">
@@ -826,6 +763,77 @@ export function VPSPage() {
           />
         )}
       </section>
+
+      <Drawer
+        open={createOpen}
+        onClose={closeCreateDrawer}
+        title="VPS 创建"
+        ariaLabel="VPS 创建表单"
+      >
+        <div className="asset-create-drawer">
+          <p className="page-panel__description">
+            创建只记录资产库存基础事实；订阅、Node 关联和详细编辑继续在对应页面补齐。
+          </p>
+          <form className="asset-create-form" onSubmit={handleCreateSubmit}>
+            <Input label="VPS 名称" value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} />
+            <label className="input-field">
+              <span className="input-field__label">资产服务商</span>
+              <select className="input" value={createForm.providerID} onChange={(event) => setCreateForm({ ...createForm, providerID: event.target.value })}>
+                <option value="">未关联服务商</option>
+                {providerSelectOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Input label="服务商名称快照" value={createForm.providerName} onChange={(event) => setCreateForm({ ...createForm, providerName: event.target.value })} />
+            <Input label="产品名" value={createForm.productName} onChange={(event) => setCreateForm({ ...createForm, productName: event.target.value })} />
+            <Input label="订单号" value={createForm.orderRef} onChange={(event) => setCreateForm({ ...createForm, orderRef: event.target.value })} />
+            <Input label="国家" value={createForm.country} onChange={(event) => setCreateForm({ ...createForm, country: event.target.value })} />
+            <Input label="区域" value={createForm.region} onChange={(event) => setCreateForm({ ...createForm, region: event.target.value })} />
+            <Input label="城市" value={createForm.city} onChange={(event) => setCreateForm({ ...createForm, city: event.target.value })} />
+            <Input label="数据中心" value={createForm.datacenter} onChange={(event) => setCreateForm({ ...createForm, datacenter: event.target.value })} />
+            <Input label="IPv4" value={createForm.ipv4} onChange={(event) => setCreateForm({ ...createForm, ipv4: event.target.value })} />
+            <Input label="IPv6" value={createForm.ipv6} onChange={(event) => setCreateForm({ ...createForm, ipv6: event.target.value })} />
+            <Input label="SSH Host" value={createForm.sshHost} onChange={(event) => setCreateForm({ ...createForm, sshHost: event.target.value })} />
+            <Input label="SSH 端口" type="number" value={createForm.sshPort} onChange={(event) => setCreateForm({ ...createForm, sshPort: event.target.value })} />
+            <Input label="SSH 用户" value={createForm.sshUser} onChange={(event) => setCreateForm({ ...createForm, sshUser: event.target.value })} />
+            <Input label="操作系统" value={createForm.osName} onChange={(event) => setCreateForm({ ...createForm, osName: event.target.value })} />
+            <Input label="虚拟化" value={createForm.virtualization} onChange={(event) => setCreateForm({ ...createForm, virtualization: event.target.value })} />
+            <label className="input-field">
+              <span className="input-field__label">生命周期</span>
+              <select className="input" value={createForm.lifecycleStatus} onChange={(event) => setCreateForm({ ...createForm, lifecycleStatus: event.target.value as VPSLifecycleStatus })}>
+                {LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="input-field">
+              <span className="input-field__label">用途状态</span>
+              <select className="input" value={createForm.usageStatus} onChange={(event) => setCreateForm({ ...createForm, usageStatus: event.target.value as VPSUsageStatus })}>
+                {USAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="input-field">
+              <span className="input-field__label">续费决策</span>
+              <select className="input" value={createForm.renewalDecision} onChange={(event) => setCreateForm({ ...createForm, renewalDecision: event.target.value as VPSRenewalDecision })}>
+                {RENEWAL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <Input label="重要性" value={createForm.importance} onChange={(event) => setCreateForm({ ...createForm, importance: event.target.value })} />
+            <Input label="标签" hint="用逗号分隔" value={createForm.labels} onChange={(event) => setCreateForm({ ...createForm, labels: event.target.value })} />
+            <Input name="note" label="备注" value={createForm.note} onChange={(event) => setCreateForm({ ...createForm, note: event.target.value })} />
+            {createError && <p className="create-form__error" role="alert">{createError}</p>}
+            <div className="page-form-actions">
+              <Button variant="secondary" type="button" onClick={closeCreateDrawer}>
+                取消
+              </Button>
+              <Button type="submit" disabled={createSubmitting}>
+                {createSubmitting ? '创建中…' : '创建 VPS'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </Drawer>
 
       <Drawer
         open={filterDrawerOpen}

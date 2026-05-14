@@ -3885,6 +3885,7 @@ html.theme-classic-light .dashboard-command-surface {
 .asset-decision-signal,
 .asset-subscription-cell,
 .asset-quality-list,
+.asset-create-drawer,
 .asset-filter-drawer {
   min-width: 0;
 }
@@ -4063,10 +4064,23 @@ html.theme-classic-light .dashboard-command-surface {
   flex-wrap: wrap;
 }
 
+.asset-create-drawer,
 .asset-filter-drawer {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.asset-create-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: var(--space-3);
+}
+
+.asset-create-form .create-form__error,
+.asset-create-form .page-form-actions,
+.asset-create-form .input-field:has(input[name='note']) {
+  grid-column: 1 / -1;
 }
 
 .asset-filter-drawer .filter-select {

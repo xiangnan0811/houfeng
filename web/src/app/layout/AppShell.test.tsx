@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -92,6 +92,8 @@ describe('AppShell', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
     const { container } = renderAuthenticatedAppShell()
 
+    expect(screen.getByRole('link', { name: '跳到主内容' })).toHaveAttribute('href', '#main-content')
+    expect(container.querySelector('#main-content')).toHaveAttribute('tabindex', '-1')
     expect(screen.getByText(PRODUCT_NAME_ZH)).toBeInTheDocument()
     PRIMARY_NAV_GROUPS.forEach((group) => {
       expect(
@@ -132,6 +134,52 @@ describe('AppShell', () => {
     expect(screen.getByText('正在读取系统摘要')).toBeInTheDocument()
     expect(screen.getByText('v1.0 · dashboard loading')).toBeInTheDocument()
     expect(screen.queryByText('中心运行正常')).not.toBeInTheDocument()
+  })
+
+  it('shows a global critical alert when severe objects exist', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(
+          baseOverview({
+            abnormal_node_count: 3,
+            abnormal_target_count: 2,
+            severe_node_count: 1,
+            severe_target_count: 1,
+          }),
+        ),
+      ),
+    )
+
+    renderAuthenticatedAppShell()
+
+    const alert = await screen.findByRole('alert', { name: '全局严重异常' })
+    expect(alert).toHaveTextContent('严重异常 2 个')
+    expect(alert).toHaveTextContent('节点 1 · 入口 1')
+    expect(within(alert).getByRole('link', { name: '查看严重事件' })).toHaveAttribute('href', '/events?severity=严重')
+    expect(within(alert).getByRole('link', { name: '异常节点' })).toHaveAttribute('href', '/nodes?abnormal=1')
+    expect(within(alert).getByRole('link', { name: '异常入口' })).toHaveAttribute('href', '/targets?abnormal=1')
+  })
+
+  it('shows a weaker global anomaly alert when only non-severe objects exist', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(
+          baseOverview({
+            abnormal_node_count: 1,
+            abnormal_target_count: 2,
+          }),
+        ),
+      ),
+    )
+
+    renderAuthenticatedAppShell()
+
+    const status = await screen.findByRole('status', { name: '全局活跃异常' })
+    expect(status).toHaveTextContent('活跃异常 3 个')
+    expect(status).toHaveTextContent('节点 1 · 入口 2')
+    expect(within(status).queryByRole('link', { name: '查看严重事件' })).not.toBeInTheDocument()
   })
 
   it('shows dashboard anomaly counts in sidebar after summary loads', async () => {
