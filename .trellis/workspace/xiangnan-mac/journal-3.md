@@ -204,3 +204,36 @@ Reframed Nodes, Targets, and Events as observability evidence/support pages whil
 ### Next Steps
 
 - None - task complete
+
+
+## Session 125: Visual evidence observability mock
+
+**Date**: 2026-05-15
+**Task**: Visual evidence observability mock
+**Branch**: `feature/visual-evidence-observability-mock`
+
+### Summary
+
+Added an observability-support mock API profile for local browser sanity of Nodes, Targets, and Events, plus stdlib tests and workflow documentation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b738d12` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
