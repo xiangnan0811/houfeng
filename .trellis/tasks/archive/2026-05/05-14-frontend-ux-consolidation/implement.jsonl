@@ -1,0 +1,12 @@
+{"file":".trellis/spec/web/index.md","reason":"Frontend spec index and applicable pre-development checklist."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Frontend file placement and route/layout boundaries."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Component layering, exports, props, accessibility and Drawer/layout conventions."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Dashboard, AppShell, Asset Ledger, URL-state and API client data-flow contracts."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"CSS token, BEM, dark-first and visual authority constraints."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Testing and verification requirements for web changes."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Feature branch workflow required before implementation."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing atoms/components and avoid duplicating similar patterns."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check frontend/backend contract boundaries for dashboard/search/VPS data flow."}
+{"file":"docs/release/core-pages-product-ux-replan.md","reason":"Active product/UX plan for core pages and first UX batches."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Active visual design language and constraints."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Component and page visual contracts for AppShell, Dashboard, VPS, and shared atoms."}

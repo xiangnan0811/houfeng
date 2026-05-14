@@ -1,0 +1,7 @@
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Required lint/test/build and UI verification standards."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Check CSS token/theme consistency and dark-first design compliance."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Check dashboard, AppShell summary, Asset Ledger and API client contract compliance."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Check component layering, accessibility and route/layout boundaries."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Validate visual changes against active v2 design authority."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Validate AppShell/Dashboard/VPS changes against active component/page contracts."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Reference current browser sanity and visual evidence workflow for UI changes."}
