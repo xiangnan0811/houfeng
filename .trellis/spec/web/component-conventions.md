@@ -47,6 +47,13 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。
 - **modal / drawer focus 行为复用 `web/src/lib/useModalFocus.ts`**：可访问性弹层必须 portal 到 `document.body`，声明 `role="dialog"` / `aria-modal="true"`（确认类用 `alertdialog`），打开后移动初始焦点，Tab / Shift+Tab containment，Escape 关闭，关闭后恢复触发器焦点；不要在各组件里复制 ad-hoc `document.addEventListener('keydown')` + 手写 focus trap。
 
+### AppShell / Command Search 交互合同
+
+- **Skip link 必须有可聚焦目标**：AppShell 顶部使用 `<a className="skip-link" href="#main-content">跳到主内容</a>`，主区域必须是 `<main id="main-content" tabIndex={-1}>`。测试断言 skip link 的 `href` 与 main 的 `tabindex="-1"`，避免只滚动不转移焦点。
+- **GlobalSearch 结果必须是可访问链接语义**：可点击结果用 `<Link role="option" to={result.to}>`，不要用 `<button>` + pointer-only `navigate()` 伪装跳转；键盘 Enter 可以继续调用 `navigate(result.to)` 来激活当前 focusIndex。
+- **Search result 只能指向已注册 / 可落地的前端路由**：有详情页的对象链接详情，如 VPS `/vps/:id`、节点 `/nodes/:id`、入口 `/targets/:id`；没有详情页的对象链接列表页或列表筛选，如服务商 `/providers`、订阅 `/subscriptions?vps_id=<vps_id>`。不要生成不存在的 `/providers/:id` 或 `/subscriptions/:id`。
+- **列表主扫描路径上的创建/编辑表单优先放 Drawer**：如果创建表单会挤占库存表 / 队列主视图，应使用 `Drawer` 承载，并保留页面主列表可见。关闭 Drawer 时重置草稿/错误；提交成功后的跳转和 payload 合同仍由 page 测试断言。
+
 ---
 
 ## 命名约定
