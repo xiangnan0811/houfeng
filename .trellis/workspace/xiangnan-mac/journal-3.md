@@ -71,3 +71,36 @@ Added authenticated browser sanity support, a non-sensitive Asset Ledger local s
 ### Next Steps
 
 - None - task complete
+
+
+## Session 121: Asset Ledger local center sample evidence
+
+**Date**: 2026-05-14
+**Task**: Asset Ledger local center sample evidence
+**Branch**: `chore/archive-local-center-sample-evidence`
+
+### Summary
+
+Ran the Asset Ledger local-center sample path with disposable PostgreSQL, center migrations, database-aware sample dry-run/import, authenticated protected-route browser sanity, and recorded the evidence and real-data boundary.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `636a5c5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
