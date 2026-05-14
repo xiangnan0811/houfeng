@@ -1,4 +1,4 @@
 {"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Visual evidence and local-only browser sanity constraints."}
 {"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Import CLI sample verification and local center quality expectations."}
 {"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Feature branch and PR workflow governance."}
-{"file": ".trellis/tasks/05-14-asset-ledger-local-center-sample-evidence/research/local-runtime-check.md", "reason": "Task-specific local runtime findings and Docker/Postgres blocker state."}
+{"file": ".trellis/tasks/archive/2026-05/05-14-asset-ledger-local-center-sample-evidence/research/local-runtime-check.md", "reason": "Task-specific local runtime findings and Docker/Postgres blocker state."}
