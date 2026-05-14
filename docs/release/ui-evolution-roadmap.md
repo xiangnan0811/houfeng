@@ -232,7 +232,7 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前正在推进真实数据验证准备任务：`Asset Ledger real-data validation readiness`。该任务不导入用户真实 40+ VPS 文件，而是补齐 local center sample 与真实登录 browser sanity 的可重复路径，确保后续真实数据进入前先完成隐私检查、字段映射、dry-run 报告和证据边界标注。
+`Asset Ledger real-data validation readiness` 已完成，local center sample 也已经通过真实登录 browser sanity。仓库现在有非敏感样本、database-aware dry-run/import 证据、`auth=session-login` protected-route browser sanity，以及真实 40+ VPS 数据进入前的隐私检查、字段映射、dry-run 报告和证据边界说明。下一步如果继续真实数据方向，需要用户提供或授权访问真实 40+ VPS 数据源。
 
 UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。UX-6C 已经把 Events 收敛为审计与诊断时间线：事件证据 lead、优先事件 focus、空筛选清除、Dashboard 深链承接和 v2 视觉证据已经落地。UX-7A 已经沉淀观测 evidence 组件并完成路由加载性能 hardening。UX-7B 已经把截图 manifest 校验和 browser sanity 输出稳定下来。UX-7C 已经把可见 loading / error / empty 状态收敛为共享 primitive。UX-7D 已经优先验证真实操作手感：drawer draft/cancel、URL chip、row action 与主路径局部状态都已补强。UX-7E 已经让资产主路径在无本地 center 的情况下也能生成可复查 browser sanity evidence。下一步不应继续空转做视觉微调，而应把 `docs/operations/ux7e-asset-workflow-visual-evidence.md` 的 checklist 推进到 local center sample，再进入真实 40+ VPS 数据验证。
 

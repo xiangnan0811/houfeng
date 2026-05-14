@@ -186,3 +186,140 @@ When real or local-sample data is visible:
 - `/subscriptions`: price/monthly conversion, renewal sorting, status filters, and auto-renew labels.
 
 If the real-data shape materially changes visual judgment, capture screenshots under `docs/operations/v2-visual-evidence/` and add manifest rows. Otherwise, browser sanity plus explicit row counts and limitations is enough for the readiness pass.
+
+## Local Center Sample Evidence
+
+> Date: 2026-05-14
+>
+> Evidence level: authenticated browser sanity, no committed screenshots
+>
+> Data source: `local center sample`
+
+### Runtime
+
+- PostgreSQL: disposable `postgres:16-alpine` container named `houfeng-local-sample-postgres`, published on `127.0.0.1:15432`.
+- Center: `./bin/houfeng-center`, `HOUFENG_HTTP_ADDR=:18080`, `HOUFENG_WEB_DIST_DIR=web/dist`.
+- Browser base URL: `http://127.0.0.1:18080/`.
+- Browser runtime: local Python Playwright through `/opt/homebrew/opt/python@3.11/bin/python3.11`.
+- Temp directory: `TMPDIR=/Users/weibo/Code/houfeng/.tmp/playwright`.
+- Credentials: local throwaway initial user credentials via `HOUFENG_INITIAL_USERNAME` and `HOUFENG_INITIAL_PASSWORD`; no real account credentials.
+
+### Build And Startup
+
+```bash
+npm --prefix web run build
+TMPDIR=/Users/weibo/Code/houfeng/.tmp/tmp GOTMPDIR=/Users/weibo/Code/houfeng/.tmp/go-build go build -o ./bin/houfeng-center ./cmd/houfeng-center
+```
+
+Center health passed:
+
+```text
+{"name":"houfeng-center","version":"dev","status":"ok"}
+```
+
+The center applied 25 schema migrations in the disposable database.
+
+### Sample Dry-Run
+
+After center startup and migrations, the sample dry-run was database-aware:
+
+```bash
+HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@127.0.0.1:15432/houfeng?sslmode=disable' \
+TMPDIR=/Users/weibo/Code/houfeng/.tmp/tmp \
+GOTMPDIR=/Users/weibo/Code/houfeng/.tmp/go-build \
+go run ./cmd/houfeng-import-vps-json \
+  -file docs/operations/asset-ledger-local-sample.json \
+  -dry-run \
+  -format json
+```
+
+Result summary:
+
+- `database_checked: true`
+- `can_import: true`
+- `warnings: []`
+- `input_rows: 5`
+- `provider_create_candidates: 4`
+- `vps_create_candidates: 5`
+- `subscription_candidates: 4`
+- `validation_errors: 0`
+- `duplicate_candidates: 0`
+- `node_association_candidates: 3`
+- `renewal_candidates: 2`
+- `idle_paid_candidates: 1`
+
+### Sample Import
+
+```bash
+HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@127.0.0.1:15432/houfeng?sslmode=disable' \
+TMPDIR=/Users/weibo/Code/houfeng/.tmp/tmp \
+GOTMPDIR=/Users/weibo/Code/houfeng/.tmp/go-build \
+go run ./cmd/houfeng-import-vps-json \
+  -file docs/operations/asset-ledger-local-sample.json \
+  -import \
+  -format json
+```
+
+Result summary:
+
+- `imported_providers: 4`
+- `imported_vps_assets: 5`
+- `imported_subscriptions: 4`
+
+Post-import database row counts:
+
+```text
+providers: 4
+vps_assets: 5
+subscriptions: 4
+```
+
+### Authenticated Browser Sanity
+
+Command:
+
+```bash
+HOUFENG_INITIAL_USERNAME=admin \
+HOUFENG_INITIAL_PASSWORD='<redacted local throwaway password>' \
+TMPDIR=/Users/weibo/Code/houfeng/.tmp/playwright \
+/opt/homebrew/opt/python@3.11/bin/python3.11 scripts/visual_evidence.py browser-sanity \
+  --base-url http://127.0.0.1:18080/ \
+  --login-username-env HOUFENG_INITIAL_USERNAME \
+  --login-password-env HOUFENG_INITIAL_PASSWORD \
+  --route /asset-decisions \
+  --route /vps \
+  --route /providers \
+  --route /subscriptions \
+  --viewport 1440x1000 \
+  --viewport 390x900
+```
+
+Result:
+
+```text
+PASS /asset-decisions 1440x1000 text=1436 doc=1440 body=1440 panels=4 auth=session-login url=http://127.0.0.1:18080/asset-decisions
+PASS /asset-decisions 390x900 text=1424 doc=390 body=390 panels=4 auth=session-login url=http://127.0.0.1:18080/asset-decisions
+PASS /vps 1440x1000 text=1568 doc=1440 body=1440 panels=4 auth=session-login url=http://127.0.0.1:18080/vps
+PASS /vps 390x900 text=1556 doc=390 body=390 panels=4 auth=session-login url=http://127.0.0.1:18080/vps
+PASS /providers 1440x1000 text=528 doc=1440 body=1440 panels=3 auth=session-login url=http://127.0.0.1:18080/providers
+PASS /providers 390x900 text=516 doc=390 body=390 panels=3 auth=session-login url=http://127.0.0.1:18080/providers
+PASS /subscriptions 1440x1000 text=938 doc=1440 body=1440 panels=5 auth=session-login url=http://127.0.0.1:18080/subscriptions
+PASS /subscriptions 390x900 text=926 doc=390 body=390 panels=5 auth=session-login url=http://127.0.0.1:18080/subscriptions
+```
+
+The run found no blank page, no unexpected login redirect, no page/body horizontal overflow, and no reported leaf-text overflow warnings on the standard desktop and mobile viewports.
+
+### Cleanup
+
+The local center process was stopped, and the disposable PostgreSQL container was removed:
+
+```text
+docker rm -f houfeng-local-sample-postgres
+```
+
+### Limitations
+
+- No screenshots were committed, so no manifest rows were added.
+- This proves the local center sample path, not the user's real 40+ VPS inventory.
+- Node association hints correctly remained manual evidence; the import did not create `vps_node_links`.
+- Provider account truth, external billing truth, linked Node health, exchange rates, and production deployment behavior were not validated.
