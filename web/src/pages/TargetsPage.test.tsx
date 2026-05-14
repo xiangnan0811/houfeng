@@ -103,7 +103,10 @@ describe('TargetsPage', () => {
       expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
     )
 
-    expect(screen.getAllByText('目标').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('观测 · 目标')).toBeInTheDocument()
+    expect(
+      screen.getByText('以 Target / ProbeItem 组织服务入口可达性证据，优先扫描异常、暂停、归档和执行覆盖，不抢占 VPS 与服务资产主体。'),
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     expect(screen.getByText('目标创建')).toBeInTheDocument()
@@ -250,6 +253,9 @@ describe('TargetsPage', () => {
     expect(screen.getByText('Existing API')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '入口观测' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
+    expect(
+      screen.getByText('Target 页面保留服务入口可达性、探测覆盖和运行状态证据，帮助资产侧判断暴露面与可用性风险。'),
+    ).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 

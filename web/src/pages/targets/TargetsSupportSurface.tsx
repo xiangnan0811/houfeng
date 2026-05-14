@@ -72,7 +72,7 @@ export function TargetsSupportSurface({
           <p className="observability-support__eyebrow">ENTRY OBSERVABILITY</p>
           <h2 className="observability-support__title">服务入口支撑</h2>
           <p className="observability-support__description">
-            Target 页面用于核对服务入口和探测覆盖，帮助判断资产暴露面与可用性风险。
+            Target 页面保留服务入口可达性、探测覆盖和运行状态证据，帮助资产侧判断暴露面与可用性风险。
           </p>
         </div>
         <div className="observability-support__scope" aria-label="当前目标筛选范围">

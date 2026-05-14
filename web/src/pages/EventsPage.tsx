@@ -373,10 +373,10 @@ export function EventsPage() {
   return (
     <div className="page-stack events-page">
       <section className="page-panel">
-        <p className="page-panel__eyebrow">事件</p>
-        <h2 className="page-panel__title">事件</h2>
+        <p className="page-panel__eyebrow">观测 · 事件</p>
+        <h2 className="page-panel__title">审计与诊断时间线</h2>
         <p className="page-panel__description">
-          查看最新状态变更事件，并按对象类型、严重程度、事件类型与数量快速筛选。
+          承接工作台、VPS、Node 和 Target 深链，把严重度、对象、时间窗口与维护上下文呈现为可追溯的处理证据。
         </p>
       </section>
 

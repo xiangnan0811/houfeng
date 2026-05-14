@@ -171,3 +171,36 @@ Refactored VPS Detail into an evidence-first asset decision workbench, split ren
 ### Next Steps
 
 - None - task complete
+
+
+## Session 124: Observability support UX consolidation
+
+**Date**: 2026-05-14
+**Task**: Observability support UX consolidation
+**Branch**: `feature/observability-support-ux-consolidation`
+
+### Summary
+
+Reframed Nodes, Targets, and Events as observability evidence/support pages while preserving existing URL-state and API contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `603c6a8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

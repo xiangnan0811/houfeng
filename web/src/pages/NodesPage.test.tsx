@@ -115,6 +115,10 @@ describe('NodesPage', () => {
     )
 
     expect(screen.getByRole('heading', { name: '节点观测' })).toBeInTheDocument()
+    expect(screen.getByText('观测 · 节点')).toBeInTheDocument()
+    expect(
+      screen.getByText('以运行事实支撑 VPS 资产判断，优先扫描 VPS 关联、接入状态、维护 / 暂停与异常证据。'),
+    ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /全部节点/ })).toBeInTheDocument()
 
@@ -1218,6 +1222,9 @@ describe('NodesPage', () => {
     await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
+    expect(
+      screen.getByText('Node 页面不是资产主体；它保留运行事实、接入状态、维护窗口和 freshness，用来判断 VPS 是否有可信观测证据。'),
+    ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '先处理 1 个异常节点' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '优先核对：Alerting Edge' })).toBeInTheDocument()
     expect(screen.getByText('健康状态：告警')).toBeInTheDocument()

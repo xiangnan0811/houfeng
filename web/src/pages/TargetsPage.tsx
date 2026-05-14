@@ -561,10 +561,10 @@ export function TargetsPage() {
     <section className="page-stack targets-page">
       <header className="page-panel page-panel--inline">
         <div>
-          <p className="page-panel__eyebrow">目标</p>
+          <p className="page-panel__eyebrow">观测 · 目标</p>
           <h2 className="page-panel__title">入口观测</h2>
           <p className="page-panel__description">
-            以 ProbeItem 视角组织服务入口状态，并保留执行节点标签与最近成功/失败摘要。
+            以 Target / ProbeItem 组织服务入口可达性证据，优先扫描异常、暂停、归档和执行覆盖，不抢占 VPS 与服务资产主体。
           </p>
         </div>
         <div className="page-panel__actions">

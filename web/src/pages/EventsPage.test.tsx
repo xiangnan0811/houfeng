@@ -85,7 +85,7 @@ describe('EventsPage', () => {
     expect(screen.getByText('正在加载事件…')).toBeInTheDocument()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     expect(screen.getAllByText('筛选条件').length).toBeGreaterThanOrEqual(2)
@@ -101,7 +101,10 @@ describe('EventsPage', () => {
       '/targets?abnormal=1',
     )
 
-    expect(screen.getAllByText('事件').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('观测 · 事件')).toBeInTheDocument()
+    expect(
+      screen.getByText('承接工作台、VPS、Node 和 Target 深链，把严重度、对象、时间窗口与维护上下文呈现为可追溯的处理证据。'),
+    ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '先核对严重事件时间线' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '优先核对：Target · 异常升级' })).toBeInTheDocument()
     expect(screen.getAllByText('较新的事件').length).toBeGreaterThanOrEqual(2)
@@ -247,7 +250,7 @@ describe('EventsPage', () => {
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     const drawer = await openFilterDrawer()
@@ -275,7 +278,7 @@ describe('EventsPage', () => {
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     const drawer = await openFilterDrawer()
@@ -339,7 +342,7 @@ describe('EventsPage', () => {
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     const drawer = await openFilterDrawer()
@@ -380,7 +383,7 @@ describe('EventsPage', () => {
     const page = renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     const drawer = await openFilterDrawer()
@@ -439,7 +442,7 @@ describe('EventsPage', () => {
     const page = renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     const drawer = await openFilterDrawer()
@@ -479,7 +482,7 @@ describe('EventsPage', () => {
     const page = renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     const drawer = await openFilterDrawer()
@@ -587,7 +590,7 @@ describe('EventsPage', () => {
     const page = renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     const drawer = await openFilterDrawer()
@@ -657,7 +660,7 @@ describe('EventsPage', () => {
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: '审计与诊断时间线' })).toBeInTheDocument(),
     )
 
     // Time-group header for "今天" should appear (50 events created now).
