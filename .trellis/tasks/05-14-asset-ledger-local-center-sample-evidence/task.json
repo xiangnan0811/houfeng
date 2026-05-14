@@ -1,0 +1,29 @@
+{
+  "id": "asset-ledger-local-center-sample-evidence",
+  "name": "asset-ledger-local-center-sample-evidence",
+  "title": "Asset Ledger local center sample evidence",
+  "description": "Run or explicitly block the local center sample evidence path for Asset Ledger real-data validation readiness, recording real login/sample import/browser sanity evidence or precise local runtime blockers.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "docs",
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-mac",
+  "assignee": "xiangnan-mac",
+  "createdAt": "2026-05-14",
+  "completedAt": null,
+  "branch": "asset-ledger-local-center-sample-evidence",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "docs/operations/asset-ledger-real-data-validation-readiness.md",
+    "docs/operations/asset-ledger-local-sample.json"
+  ],
+  "notes": "Main-session only; user explicitly requested no subagents.",
+  "meta": {}
+}
