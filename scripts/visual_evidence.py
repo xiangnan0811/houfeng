@@ -29,7 +29,8 @@ EXPECTED_COLUMNS = [
 ]
 VALID_VERDICTS = {"Needs review", "Accepted", "Rejected"}
 VIEWPORT_RE = re.compile(r"^(?P<width>[1-9][0-9]*)x(?P<height>[1-9][0-9]*)$")
-MockAPIProfile = Literal["none", "asset-workflows"]
+MOCK_API_PROFILE_CHOICES = ("none", "asset-workflows", "observability-support")
+MockAPIProfile = Literal["none", "asset-workflows", "observability-support"]
 
 
 @dataclass(frozen=True)
@@ -603,6 +604,633 @@ def asset_workflow_dashboard() -> dict[str, object]:
     }
 
 
+def observability_support_nodes() -> list[dict[str, object]]:
+    return [
+        {
+            "node_id": "node_hkg_edge_01",
+            "display_name": "hkg-edge-01",
+            "group": "asset-prod",
+            "region": "APAC",
+            "city": "Hong Kong",
+            "provider": "Hetzner",
+            "lifecycle_status": "在用",
+            "monitoring_status": "启用",
+            "binding_status": "已绑定",
+            "labels": ["prod", "edge", "vps-linked"],
+            "note": "Severe node fixture for UX-5 abnormal evidence.",
+            "current_health_status": "严重",
+            "last_heartbeat_at": iso_timestamp_hours_ago(1),
+            "last_sync_at": iso_timestamp_hours_ago(1),
+            "current_active_incident_count": 3,
+            "current_primary_issue_summary": "CPU 持续高位且心跳延迟，需要先核对 VPS 负载。",
+            "created_at": iso_timestamp(-80),
+            "updated_at": iso_timestamp_hours_ago(1),
+        },
+        {
+            "node_id": "node_pending_sfo_02",
+            "display_name": "sfo-pending-onboarding",
+            "group": "asset-intake",
+            "region": "US-West",
+            "city": "San Francisco",
+            "provider": "Vultr",
+            "lifecycle_status": "待接入",
+            "monitoring_status": "启用",
+            "binding_status": "未绑定",
+            "labels": ["onboarding", "needs-agent"],
+            "note": "Pending onboarding fixture.",
+            "current_health_status": "正常",
+            "last_heartbeat_at": None,
+            "last_sync_at": None,
+            "current_active_incident_count": 0,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-6),
+            "updated_at": iso_timestamp_hours_ago(6),
+        },
+        {
+            "node_id": "node_ams_conflict_03",
+            "display_name": "ams-conflict-03",
+            "group": "asset-prod",
+            "region": "EU-West",
+            "city": "Amsterdam",
+            "provider": "Hetzner",
+            "lifecycle_status": "在用",
+            "monitoring_status": "启用",
+            "binding_status": "指纹变更待确认",
+            "labels": ["prod", "binding-review"],
+            "note": "Fingerprint conflict fixture.",
+            "current_health_status": "关注",
+            "last_heartbeat_at": iso_timestamp_hours_ago(5),
+            "last_sync_at": iso_timestamp_hours_ago(5),
+            "current_active_incident_count": 1,
+            "current_primary_issue_summary": "等待确认新的主机指纹。",
+            "created_at": iso_timestamp(-60),
+            "updated_at": iso_timestamp_hours_ago(5),
+        },
+        {
+            "node_id": "node_fra_maint_04",
+            "display_name": "fra-maintenance-04",
+            "group": "asset-ops",
+            "region": "EU-Central",
+            "city": "Frankfurt",
+            "provider": "Netcup",
+            "lifecycle_status": "在用",
+            "monitoring_status": "维护中",
+            "binding_status": "已绑定",
+            "labels": ["maintenance", "db"],
+            "note": "Maintenance window fixture.",
+            "current_health_status": "正常",
+            "last_heartbeat_at": iso_timestamp_hours_ago(2),
+            "last_sync_at": iso_timestamp_hours_ago(2),
+            "current_active_incident_count": 0,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-140),
+            "updated_at": iso_timestamp_hours_ago(2),
+        },
+        {
+            "node_id": "node_sin_paused_05",
+            "display_name": "sin-paused-05",
+            "group": "asset-observe",
+            "region": "APAC",
+            "city": "Singapore",
+            "provider": "Manual",
+            "lifecycle_status": "观察中",
+            "monitoring_status": "暂停",
+            "binding_status": "已绑定",
+            "labels": ["paused", "cost-review"],
+            "note": "Paused monitoring fixture.",
+            "current_health_status": "正常",
+            "last_heartbeat_at": iso_timestamp_hours_ago(30),
+            "last_sync_at": iso_timestamp_hours_ago(30),
+            "current_active_incident_count": 0,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-220),
+            "updated_at": iso_timestamp_hours_ago(30),
+        },
+        {
+            "node_id": "node_old_retired_06",
+            "display_name": "old-retired-06",
+            "group": "archive",
+            "region": "EU-Central",
+            "city": "Nuremberg",
+            "provider": "Netcup",
+            "lifecycle_status": "已退役",
+            "monitoring_status": "暂停",
+            "binding_status": "已绑定",
+            "labels": ["archived", "legacy"],
+            "note": "Retired node fixture for inventory completeness.",
+            "current_health_status": "正常",
+            "last_heartbeat_at": iso_timestamp(-45),
+            "last_sync_at": iso_timestamp(-45),
+            "current_active_incident_count": 0,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-600),
+            "updated_at": iso_timestamp(-45),
+        },
+    ]
+
+
+def observability_support_targets() -> list[dict[str, object]]:
+    return [
+        {
+            "target_id": "target_api_core",
+            "name": "api-core.example.test",
+            "target_type": "service",
+            "host": "api-core.example.test",
+            "base_port": 443,
+            "execution_node_labels": ["prod", "edge"],
+            "run_status": "启用",
+            "group": "asset-prod",
+            "labels": ["prod", "api", "vps-linked"],
+            "note": "Abnormal API target fixture.",
+            "current_health_status": "告警",
+            "current_active_incident_count": 2,
+            "last_success_at": iso_timestamp_hours_ago(7),
+            "last_failure_at": iso_timestamp_hours_ago(1),
+            "current_primary_issue_summary": "HTTP 5xx 持续出现，需结合 Node 与资产决策核对。",
+            "created_at": iso_timestamp(-90),
+            "updated_at": iso_timestamp_hours_ago(1),
+        },
+        {
+            "target_id": "target_china_ref",
+            "name": "china-reference-latency",
+            "target_type": "china_reference",
+            "host": "www.baidu.com",
+            "base_port": 443,
+            "execution_node_labels": ["cn-probe"],
+            "run_status": "启用",
+            "group": "network-reference",
+            "labels": ["reference", "china", "notification"],
+            "note": "Reference target with notification event coverage.",
+            "current_health_status": "关注",
+            "current_active_incident_count": 1,
+            "last_success_at": iso_timestamp_hours_ago(4),
+            "last_failure_at": iso_timestamp_hours_ago(2),
+            "current_primary_issue_summary": "跨境参考延迟超过关注阈值。",
+            "created_at": iso_timestamp(-70),
+            "updated_at": iso_timestamp_hours_ago(2),
+        },
+        {
+            "target_id": "target_www_maint",
+            "name": "www-maintenance.example.test",
+            "target_type": "service",
+            "host": "www-maintenance.example.test",
+            "base_port": 443,
+            "execution_node_labels": ["prod"],
+            "run_status": "维护中",
+            "group": "asset-ops",
+            "labels": ["maintenance", "web"],
+            "note": "Maintenance target fixture.",
+            "current_health_status": "正常",
+            "current_active_incident_count": 0,
+            "last_success_at": iso_timestamp_hours_ago(3),
+            "last_failure_at": None,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-120),
+            "updated_at": iso_timestamp_hours_ago(3),
+        },
+        {
+            "target_id": "target_docs_paused",
+            "name": "docs-paused.example.test",
+            "target_type": "service",
+            "host": "docs-paused.example.test",
+            "base_port": 443,
+            "execution_node_labels": ["docs"],
+            "run_status": "暂停",
+            "group": "docs",
+            "labels": ["paused", "docs"],
+            "note": "Paused target fixture.",
+            "current_health_status": "正常",
+            "current_active_incident_count": 0,
+            "last_success_at": iso_timestamp_hours_ago(48),
+            "last_failure_at": None,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-160),
+            "updated_at": iso_timestamp_hours_ago(48),
+        },
+        {
+            "target_id": "target_legacy_archived",
+            "name": "legacy-archived.example.test",
+            "target_type": "service",
+            "host": "legacy-archived.example.test",
+            "base_port": 80,
+            "execution_node_labels": ["legacy"],
+            "run_status": "已归档",
+            "group": "archive",
+            "labels": ["archived", "legacy"],
+            "note": "Archived target fixture.",
+            "current_health_status": "正常",
+            "current_active_incident_count": 0,
+            "last_success_at": iso_timestamp(-30),
+            "last_failure_at": None,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-500),
+            "updated_at": iso_timestamp(-30),
+        },
+        {
+            "target_id": "target_no_exec_labels",
+            "name": "no-execution-label.example.test",
+            "target_type": "service",
+            "host": "no-execution-label.example.test",
+            "base_port": 8443,
+            "execution_node_labels": [],
+            "run_status": "启用",
+            "group": "asset-intake",
+            "labels": ["needs-coverage"],
+            "note": "Coverage-gap target fixture.",
+            "current_health_status": "正常",
+            "current_active_incident_count": 0,
+            "last_success_at": None,
+            "last_failure_at": None,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-12),
+            "updated_at": iso_timestamp_hours_ago(12),
+        },
+    ]
+
+
+def observability_support_events() -> list[dict[str, object]]:
+    return [
+        {
+            "event_id": "event_node_severe_started",
+            "incident_id": "inc_node_hkg_cpu",
+            "incident_class": "node_resource_pressure",
+            "object_type": "node",
+            "object_id": "node_hkg_edge_01",
+            "event_type": "incident_started",
+            "severity": "严重",
+            "summary": "hkg-edge-01 CPU 与 load5 同时进入严重区间。",
+            "created_at": iso_timestamp_hours_ago(1),
+            "_labels": ["prod", "edge", "vps-linked"],
+            "_notification_sent": True,
+            "_is_backfilled": False,
+        },
+        {
+            "event_id": "event_target_api_escalated",
+            "incident_id": "inc_target_api_5xx",
+            "incident_class": "target_probe_failure",
+            "object_type": "target",
+            "object_id": "target_api_core",
+            "event_type": "incident_escalated",
+            "severity": "告警",
+            "summary": "api-core.example.test HTTP 探测失败率升高。",
+            "created_at": iso_timestamp_hours_ago(2),
+            "_labels": ["prod", "api", "vps-linked"],
+            "_notification_sent": True,
+            "_is_backfilled": False,
+        },
+        {
+            "event_id": "event_target_china_notice",
+            "incident_id": "inc_target_china_latency",
+            "incident_class": "target_probe_failure",
+            "object_type": "target",
+            "object_id": "target_china_ref",
+            "event_type": "incident_started",
+            "severity": "关注",
+            "summary": "中国参考入口延迟超过关注阈值，已发送通知样例。",
+            "created_at": iso_timestamp_hours_ago(4),
+            "_labels": ["reference", "china", "notification"],
+            "_notification_sent": True,
+            "_is_backfilled": False,
+        },
+        {
+            "event_id": "event_target_recovered",
+            "incident_id": "inc_target_api_5xx",
+            "incident_class": "target_probe_failure",
+            "object_type": "target",
+            "object_id": "target_api_core",
+            "event_type": "incident_recovered",
+            "severity": "正常",
+            "summary": "api-core.example.test 探测恢复，保留用于 recovery filter。",
+            "created_at": iso_timestamp_hours_ago(5),
+            "_labels": ["prod", "api", "vps-linked"],
+            "_notification_sent": False,
+            "_is_backfilled": False,
+        },
+        {
+            "event_id": "event_node_maintenance_entered",
+            "incident_id": "runtime_node_fra_maint",
+            "incident_class": "",
+            "object_type": "node",
+            "object_id": "node_fra_maint_04",
+            "event_type": "node_monitoring_maintenance_entered",
+            "severity": "",
+            "summary": "fra-maintenance-04 进入维护窗口。",
+            "created_at": iso_timestamp_hours_ago(6),
+            "_labels": ["maintenance", "db"],
+            "_notification_sent": False,
+            "_is_backfilled": False,
+        },
+        {
+            "event_id": "event_target_maintenance_exited",
+            "incident_id": "runtime_target_www_maint",
+            "incident_class": "",
+            "object_type": "target",
+            "object_id": "target_www_maint",
+            "event_type": "target_maintenance_exited",
+            "severity": "",
+            "summary": "www-maintenance.example.test 退出维护窗口。",
+            "created_at": iso_timestamp_hours_ago(7),
+            "_labels": ["maintenance", "web"],
+            "_notification_sent": False,
+            "_is_backfilled": False,
+        },
+        {
+            "event_id": "event_backfilled_node",
+            "incident_id": "inc_backfilled_node_disk",
+            "incident_class": "node_disk_pressure",
+            "object_type": "node",
+            "object_id": "node_hkg_edge_01",
+            "event_type": "incident_started",
+            "severity": "告警",
+            "summary": "补传观测触发的磁盘压力事件，默认应被事件流排除。",
+            "created_at": iso_timestamp_hours_ago(8),
+            "_labels": ["prod", "edge", "backfilled"],
+            "_notification_sent": False,
+            "_is_backfilled": True,
+        },
+        {
+            "event_id": "event_node_binding_confirmed",
+            "incident_id": "binding_node_ams_conflict",
+            "incident_class": "",
+            "object_type": "node",
+            "object_id": "node_ams_conflict_03",
+            "event_type": "node_binding_rebind_confirmed",
+            "severity": "关注",
+            "summary": "ams-conflict-03 新指纹确认重新绑定。",
+            "created_at": iso_timestamp_hours_ago(10),
+            "_labels": ["prod", "binding-review"],
+            "_notification_sent": False,
+            "_is_backfilled": False,
+        },
+        {
+            "event_id": "event_target_paused",
+            "incident_id": "runtime_target_docs_paused",
+            "incident_class": "",
+            "object_type": "target",
+            "object_id": "target_docs_paused",
+            "event_type": "target_paused",
+            "severity": "",
+            "summary": "docs-paused.example.test 已暂停探测。",
+            "created_at": iso_timestamp_hours_ago(12),
+            "_labels": ["paused", "docs"],
+            "_notification_sent": False,
+            "_is_backfilled": False,
+        },
+        {
+            "event_id": "event_target_archived",
+            "incident_id": "runtime_target_legacy_archived",
+            "incident_class": "",
+            "object_type": "target",
+            "object_id": "target_legacy_archived",
+            "event_type": "target_archived",
+            "severity": "",
+            "summary": "legacy-archived.example.test 已归档。",
+            "created_at": iso_timestamp_hours_ago(36),
+            "_labels": ["archived", "legacy"],
+            "_notification_sent": False,
+            "_is_backfilled": False,
+        },
+    ]
+
+
+def observability_support_dashboard() -> dict[str, object]:
+    nodes = observability_support_nodes()
+    targets = observability_support_targets()
+    events = filter_observability_support_events({"limit": ["6"]})
+    abnormal_nodes = [node for node in nodes if node["current_health_status"] != "正常"]
+    abnormal_targets = [target for target in targets if target["current_health_status"] != "正常"]
+
+    group_names = sorted(
+        {
+            str(item.get("group") or "未分组")
+            for item in [*nodes, *targets]
+        },
+        key=lambda value: value or "未分组",
+    )
+    group_summaries: list[dict[str, object]] = []
+    for group in group_names:
+        group_nodes = [node for node in nodes if str(node.get("group") or "未分组") == group]
+        group_targets = [target for target in targets if str(target.get("group") or "未分组") == group]
+        group_summaries.append(
+            {
+                "group": group,
+                "node_count": len(group_nodes),
+                "target_count": len(group_targets),
+                "abnormal_node_count": sum(1 for node in group_nodes if node["current_health_status"] != "正常"),
+                "abnormal_target_count": sum(1 for target in group_targets if target["current_health_status"] != "正常"),
+                "severe_node_count": sum(1 for node in group_nodes if node["current_health_status"] == "严重"),
+                "severe_target_count": sum(1 for target in group_targets if target["current_health_status"] == "严重"),
+                "maintenance_node_count": sum(1 for node in group_nodes if node["monitoring_status"] == "维护中"),
+                "maintenance_target_count": sum(1 for target in group_targets if target["run_status"] == "维护中"),
+            }
+        )
+
+    return {
+        "snapshot_generated_at": iso_timestamp_hours_ago(0),
+        "total_node_count": len(nodes),
+        "total_target_count": len(targets),
+        "abnormal_node_count": len(abnormal_nodes),
+        "abnormal_target_count": len(abnormal_targets),
+        "severe_node_count": sum(1 for node in nodes if node["current_health_status"] == "严重"),
+        "severe_target_count": sum(1 for target in targets if target["current_health_status"] == "严重"),
+        "maintenance_node_count": sum(1 for node in nodes if node["monitoring_status"] == "维护中"),
+        "maintenance_target_count": sum(1 for target in targets if target["run_status"] == "维护中"),
+        "pending_onboarding_node_count": sum(
+            1
+            for node in nodes
+            if node["lifecycle_status"] == "待接入"
+            or node["binding_status"] in ("未绑定", "指纹变更待确认")
+        ),
+        "paused_node_count": sum(1 for node in nodes if node["monitoring_status"] == "暂停"),
+        "retired_node_count": sum(1 for node in nodes if node["lifecycle_status"] == "已退役"),
+        "paused_target_count": sum(1 for target in targets if target["run_status"] == "暂停"),
+        "archived_target_count": sum(1 for target in targets if target["run_status"] == "已归档"),
+        "recent_new_incident_count": sum(1 for event in events if event["event_type"] == "incident_started"),
+        "recent_recovery_count": sum(1 for event in events if event["event_type"] == "incident_recovered"),
+        "group_summaries": group_summaries,
+        "notification_status": {
+            "telegram_configured": True,
+            "telegram_runtime_managed": False,
+            "telegram_runtime_apply_active": False,
+            "feishu_configured": False,
+        },
+        "asset_summary": {
+            "renewal_due_30d_subscription_count": 0,
+            "renewal_due_30d_vps_count": 0,
+            "unreviewed_vps_count": 0,
+            "to_cancel_vps_count": 0,
+            "to_migrate_vps_count": 0,
+            "unlinked_vps_count": 0,
+            "abnormal_linked_vps_count": 0,
+            "cost_by_currency": [],
+        },
+        "abnormal_nodes": [
+            {
+                "node_id": node["node_id"],
+                "display_name": node["display_name"],
+                "group": node["group"],
+                "region": node["region"],
+                "city": node["city"],
+                "provider": node["provider"],
+                "lifecycle_status": node["lifecycle_status"],
+                "monitoring_status": node["monitoring_status"],
+                "current_health_status": node["current_health_status"],
+                "last_heartbeat_at": node["last_heartbeat_at"],
+                "current_active_incident_count": node["current_active_incident_count"],
+                "current_primary_issue_summary": node["current_primary_issue_summary"],
+            }
+            for node in abnormal_nodes[:4]
+        ],
+        "abnormal_targets": [
+            {
+                "target_id": target["target_id"],
+                "name": target["name"],
+                "target_type": target["target_type"],
+                "host": target["host"],
+                "base_port": target["base_port"],
+                "run_status": target["run_status"],
+                "group": target["group"],
+                "current_health_status": target["current_health_status"],
+                "last_success_at": target["last_success_at"],
+                "last_failure_at": target["last_failure_at"],
+                "current_active_incident_count": target["current_active_incident_count"],
+                "current_primary_issue_summary": target["current_primary_issue_summary"],
+            }
+            for target in abnormal_targets[:4]
+        ],
+        "recent_events": events,
+        "new_incident_trend_24h": [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1],
+        "recovery_trend_24h": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+    }
+
+
+def observability_node_sparklines(query: dict[str, list[str]]) -> dict[str, object]:
+    metrics = [
+        metric.strip()
+        for value in query.get("metrics", ["cpu_usage_pct,mem_used_pct,disk_used_pct"])
+        for metric in value.split(",")
+        if metric.strip()
+    ]
+    defaults: dict[str, list[float | None]] = {
+        "cpu_usage_pct": [42, 45, 48, 52, 57, 63, 72, 81, 88, 93, 96, 94],
+        "mem_used_pct": [55, 56, 58, 61, 63, 67, 71, 76, 81, 85, 88, 91],
+        "disk_used_pct": [61, 62, 63, 64, 66, 68, 70, 72, 73, 74, 76, 78],
+    }
+    stable: dict[str, list[float | None]] = {
+        "cpu_usage_pct": [18, 19, 20, 21, 21, 22, 20, 19, 18, 20, 21, 19],
+        "mem_used_pct": [34, 35, 35, 36, 35, 36, 37, 36, 36, 35, 35, 36],
+        "disk_used_pct": [40, 40, 41, 41, 42, 42, 42, 43, 43, 43, 44, 44],
+    }
+    nodes: dict[str, dict[str, list[float | None]]] = {}
+    for node in observability_support_nodes():
+        node_id = str(node["node_id"])
+        source = defaults if node_id == "node_hkg_edge_01" else stable
+        if node["monitoring_status"] == "暂停":
+            source = {key: [None, None, None, None] for key in defaults}
+        nodes[node_id] = {metric: source.get(metric, []) for metric in metrics}
+    return {"nodes": nodes}
+
+
+def observability_target_sparklines() -> dict[str, object]:
+    return {
+        "targets": {
+            "target_api_core": {"latency": [120, 130, 180, 240, 300, 520, 860, 1100, 980, 760, 640, 720]},
+            "target_china_ref": {"latency": [180, 210, 260, 310, 360, 390, 420, 450, 410, 380, 430, 470]},
+            "target_www_maint": {"latency": [42, 41, 40, None, None, 39, 38, 37]},
+            "target_docs_paused": {"latency": [None, None, None, None]},
+            "target_legacy_archived": {"latency": []},
+            "target_no_exec_labels": {"latency": [22, 24, 25, 23, 21, 24]},
+        }
+    }
+
+
+def query_bool(query: dict[str, list[str]], key: str) -> bool:
+    value = first_query_value(query, key)
+    if value is None:
+        return False
+    return value.lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def parse_query_datetime(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def event_datetime(event: dict[str, object]) -> dt.datetime | None:
+    value = event.get("created_at")
+    return parse_query_datetime(str(value)) if value else None
+
+
+def public_event(event: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in event.items() if not key.startswith("_")}
+
+
+def filter_observability_support_events(
+    query: dict[str, list[str]],
+) -> list[dict[str, object]]:
+    rows = observability_support_events()
+    include_backfilled = query_bool(query, "include_backfilled")
+    if not include_backfilled:
+        rows = [row for row in rows if not row.get("_is_backfilled")]
+
+    for key in ("object_type", "object_id", "severity", "event_type"):
+        value = first_query_value(query, key)
+        if value:
+            rows = [row for row in rows if str(row.get(key) or "") == value]
+
+    created_from = parse_query_datetime(first_query_value(query, "created_from"))
+    if created_from is not None:
+        rows = [
+            row for row in rows
+            if (event_time := event_datetime(row)) is not None and event_time >= created_from
+        ]
+    created_to = parse_query_datetime(first_query_value(query, "created_to"))
+    if created_to is not None:
+        rows = [
+            row for row in rows
+            if (event_time := event_datetime(row)) is not None and event_time <= created_to
+        ]
+
+    label = first_query_value(query, "label")
+    if label:
+        rows = [row for row in rows if label in row.get("_labels", [])]
+    if query_bool(query, "notification_only"):
+        rows = [row for row in rows if row.get("_notification_sent")]
+    if query_bool(query, "recovery_only"):
+        rows = [row for row in rows if row.get("event_type") == "incident_recovered"]
+    if query_bool(query, "maintenance_only"):
+        maintenance_types = {
+            "node_monitoring_maintenance_entered",
+            "node_monitoring_maintenance_exited",
+            "target_maintenance_entered",
+            "target_maintenance_exited",
+        }
+        rows = [row for row in rows if row.get("event_type") in maintenance_types]
+
+    rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+    limit_value = first_query_value(query, "limit")
+    try:
+        limit = int(limit_value) if limit_value else 50
+    except ValueError:
+        limit = 50
+    if limit <= 0:
+        limit = 50
+    return [public_event(row) for row in rows[:limit]]
+
+
+def iso_timestamp_hours_ago(hours: int) -> str:
+    target = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)
+    return target.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def first_query_value(query: dict[str, list[str]], key: str) -> str | None:
     values = query.get(key)
     if not values:
@@ -712,11 +1340,69 @@ def fulfill_asset_workflow_api(route: object) -> None:
     )
 
 
+def fulfill_observability_support_api(route: object) -> None:
+    request = route.request
+    parsed = urlparse(request.url)
+    path = parsed.path
+    query = parse_qs(parsed.query)
+    method = request.method.upper()
+
+    if method == "GET" and path == "/api/auth/me":
+        fulfill_json(
+            route,
+            200,
+            {
+                "user_id": "user_observability_visual_evidence",
+                "username": "observability-evidence",
+                "role": "admin",
+                "display_name": "Observability Evidence",
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/dashboard":
+        fulfill_json(route, 200, observability_support_dashboard())
+        return
+
+    if method == "GET" and path == "/api/nodes":
+        fulfill_json(route, 200, observability_support_nodes())
+        return
+
+    if method == "GET" and path == "/api/nodes/sparklines":
+        fulfill_json(route, 200, observability_node_sparklines(query))
+        return
+
+    if method == "GET" and path == "/api/targets":
+        fulfill_json(route, 200, observability_support_targets())
+        return
+
+    if method == "GET" and path == "/api/targets/sparklines":
+        fulfill_json(route, 200, observability_target_sparklines())
+        return
+
+    if method == "GET" and path == "/api/events":
+        fulfill_json(route, 200, {"items": filter_observability_support_events(query)})
+        return
+
+    fulfill_json(
+        route,
+        404,
+        {
+            "error": "mock observability support API has no fixture for this request",
+            "method": method,
+            "path": path,
+        },
+    )
+
+
 def install_mock_api_routes(page: object, profile: MockAPIProfile) -> None:
     if profile == "none":
         return
     if profile == "asset-workflows":
         page.route("**/api/**", fulfill_asset_workflow_api)
+        return
+    if profile == "observability-support":
+        page.route("**/api/**", fulfill_observability_support_api)
         return
     raise ValueError(f"unsupported mock API profile: {profile}")
 
@@ -1010,11 +1696,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sanity.add_argument(
         "--mock-api",
-        choices=["none", "asset-workflows"],
+        choices=MOCK_API_PROFILE_CHOICES,
         default="none",
         help=(
-            "Optional local-only API fixture profile. Use asset-workflows to "
-            "render protected Asset Ledger routes without a running center."
+            "Optional local-only API fixture profile. Use asset-workflows for "
+            "protected Asset Ledger routes or observability-support for Nodes, "
+            "Targets, and Events without a running center."
         ),
     )
     sanity.add_argument(

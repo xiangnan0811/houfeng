@@ -132,6 +132,43 @@ Report this as `Data source: mock-api asset-workflows`. It proves the protected 
 
 If local Playwright cannot create browser temp files, prefer a repo-local temp directory (`TMPDIR="$PWD/.tmp/playwright"`) and record that in the evidence notes. Do not add browser automation dependencies to `web/package.json` to work around local tooling.
 
+### Observability support routes
+
+Nodes, Targets, and Events are also protected by the app auth gate. To exercise the UX-5 observability support pages without a running center, use the explicit local mock API profile:
+
+```bash
+mkdir -p .tmp/playwright
+TMPDIR="$PWD/.tmp/playwright" python3 scripts/visual_evidence.py browser-sanity \
+  --base-url http://127.0.0.1:5178/ \
+  --mock-api observability-support \
+  --route /nodes \
+  --route /targets \
+  --route /events \
+  --viewport 1440x1000 \
+  --viewport 390x900
+```
+
+Use the interpreter that has local Python Playwright installed when needed:
+
+```bash
+TMPDIR="$PWD/.tmp/playwright" /opt/homebrew/opt/python@3.11/bin/python3.11 scripts/visual_evidence.py browser-sanity \
+  --base-url http://127.0.0.1:5178/ \
+  --mock-api observability-support \
+  --route /nodes \
+  --route /targets \
+  --route /events \
+  --viewport 1440x1000 \
+  --viewport 390x900
+```
+
+`--mock-api observability-support` intercepts `/api/auth/me`, `/api/dashboard`, `/api/nodes`, `/api/nodes/sparklines`, `/api/targets`, `/api/targets/sparklines`, and `/api/events` in the browser session. The fixture rows intentionally cover abnormal nodes, pending onboarding and binding conflict, maintenance / paused / retired nodes, abnormal targets, paused / archived / maintenance targets, missing execution coverage, event severity, recovery / maintenance / notification filters, and explicit backfilled event opt-in.
+
+Report this as `Data source: mock-api observability-support`. It proves the protected observability support route layout can render with representative UX-5 states, but it does **not** prove backend correctness, real incident evaluation, real notification delivery, real backfill classification, or real asset-to-observability linkage.
+
+`asset-workflows` and `observability-support` are separate mock profiles. A route outside the selected profile intentionally returns a profile-specific mock 404 so browser sanity failures make the selected data source clear. Real login cannot be combined with `--mock-api`; for authenticated local center checks, use the local center sample flow below instead.
+
+If local Playwright cannot create browser temp files, prefer a repo-local temp directory (`TMPDIR="$PWD/.tmp/playwright"`) and record that in the evidence notes. Missing local Playwright or browser runtime is a local tooling limitation, not a reason to add Playwright/Cypress/WebDriverIO to `web/package.json`.
+
 ### Local center sample routes
 
 After `houfeng-center` is running and a disposable local database contains the sample or manually entered Asset Ledger records, run browser sanity with the real login flow instead of `--mock-api`:
@@ -150,7 +187,7 @@ TMPDIR="$PWD/.tmp/playwright" python3 scripts/visual_evidence.py browser-sanity 
   --viewport 390x900
 ```
 
-`--login-username-env` and `--login-password-env` read credentials from environment variables and authenticate through `/api/auth/login` before navigating protected routes. The helper prints `auth=session-login` and fails if a protected route is redirected away from the requested path. Real login cannot be combined with `--mock-api`; data source labels must be either `mock-api asset-workflows`, `local center sample`, or `real data`.
+`--login-username-env` and `--login-password-env` read credentials from environment variables and authenticate through `/api/auth/login` before navigating protected routes. The helper prints `auth=session-login` and fails if a protected route is redirected away from the requested path. Real login cannot be combined with `--mock-api`; data source labels must be one of `mock-api asset-workflows`, `mock-api observability-support`, `local center sample`, or `real data`.
 
 The local sample and real-data readiness workflow is documented in `docs/operations/asset-ledger-real-data-validation-readiness.md`.
 
@@ -255,7 +292,7 @@ Use this section in PR bodies and final reports for UI tasks:
   - Browser sanity
   - Screenshot evidence: none / `docs/operations/v2-visual-evidence/...`
 - Data source:
-  - mocked API / mock-api asset-workflows / local center / real data
+  - mocked API / mock-api asset-workflows / mock-api observability-support / local center / real data
 - Result:
   - no blank viewport, no text overlap, no support-surface overflow
 - Limitations:
