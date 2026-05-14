@@ -104,3 +104,37 @@ Ran the Asset Ledger local-center sample path with disposable PostgreSQL, center
 ### Next Steps
 
 - None - task complete
+
+
+## Session 122: Frontend UX consolidation
+
+**Date**: 2026-05-14
+**Task**: Frontend UX consolidation
+**Branch**: `chore/frontend-ux-consolidation-finish`
+
+### Summary
+
+Completed the restrained frontend UX consolidation batch: shell/global alert/search expansion/VPS create drawer, recorded web UX contracts, opened and merged PR #80 after green CI.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7a6d38f` | (see git log) |
+| `b5f0271` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
