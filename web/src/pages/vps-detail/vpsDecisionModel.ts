@@ -5,6 +5,7 @@ import {
   daysUntilDate,
   renewalLabel,
   renewalTimingLabel,
+  type AssetQualityIssue,
 } from '../assetPageUtils'
 
 export type WorkbenchTone = 'normal' | 'notice' | 'alert' | 'critical' | 'neutral'
@@ -78,9 +79,15 @@ export function toneToGlyphState(tone: Exclude<WorkbenchTone, 'neutral'>) {
 }
 
 export function buildVPSDecisionModel(input: BuildDecisionModelInput) {
-  const qualityIssues = input.subscriptionLoadFailed
+  const knownQualityIssues = input.subscriptionLoadFailed
     ? buildVPSQualityIssues(input.detail, input.primarySubscription, { includeMissingSubscription: false })
     : buildVPSQualityIssues(input.detail, input.primarySubscription)
+  const qualityIssues: AssetQualityIssue[] = input.subscriptionLoadFailed
+    ? [
+        { key: 'subscription-unknown', label: '订阅未知', tone: 'notice' },
+        ...knownQualityIssues,
+      ]
+    : knownQualityIssues
   const node = primaryNode(input.detail)
   const renewalDays = daysUntilDate(input.primarySubscription?.renew_at)
   const subscriptionTone = renewalTone(input.primarySubscription, input.subscriptionLoadFailed)

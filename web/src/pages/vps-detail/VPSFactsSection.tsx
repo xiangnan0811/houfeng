@@ -21,8 +21,9 @@ export function VPSFactsSection({
     <section className="page-panel">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">FACTS</p>
+          <p className="section-heading__eyebrow">BASELINE FACTS</p>
           <h2>基础信息</h2>
+          <p className="section-heading__description">服务商、位置、规格与访问字段用于支撑上方资产判断，不承载复杂编辑表单。</p>
         </div>
         <div className="section-heading__actions">
           <AssetLabels labels={detail.labels} />

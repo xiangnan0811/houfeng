@@ -30,11 +30,12 @@ export function VPSLifecycleCard({
     <div className="asset-operation-form asset-lifecycle-card">
       <div className="asset-operation-form__header">
         <div>
-          <h3>生命周期</h3>
+          <p className="asset-lifecycle-card__eyebrow">DANGER ZONE</p>
+          <h3>生命周期危险区</h3>
           <p>
             {isArchived
               ? '这台 VPS 已退出当前工作集，可恢复为闲置后重新纳入台账处理。'
-              : '归档会让 VPS 退出当前工作集，但保留基础信息、历史与 Node 关联。'}
+              : '归档是独立危险操作，不进入常规编辑 Drawer；它会让 VPS 退出当前工作集，但保留基础信息、历史与 Node 关联。'}
           </p>
         </div>
         <LifecycleBadge value={detail.lifecycle_status} />

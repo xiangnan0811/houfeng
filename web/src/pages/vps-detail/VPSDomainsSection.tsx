@@ -77,7 +77,7 @@ export function VPSDomainsSection({
               Target {domain.target_id}
             </Link>
           ) : (
-            <span className="text-muted">未关联 Target</span>
+            <span className="asset-table__muted">未关联 Target</span>
           )}
         </div>
       ),
@@ -98,8 +98,9 @@ export function VPSDomainsSection({
     <section className="page-panel page-panel--scroll-x">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">DOMAINS</p>
+          <p className="section-heading__eyebrow">DOMAIN CONTEXT</p>
           <h2>域名资产</h2>
+          <p className="section-heading__description">当前 VPS 的手工域名记录，不扩展为完整 DNS 或 Registrar 管理。</p>
         </div>
         <span className="section-heading__meta">
           <MonoDigits>{domains.length}</MonoDigits> 个手工记录域名

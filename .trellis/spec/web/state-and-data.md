@@ -235,6 +235,7 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 - VPS scoped subscription 只作为续费/成本 evidence。订阅请求失败时显示请求错误和未知状态，不得把 failure 当成真实 `缺订阅`。
 - `VPSAssetDetail.node_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_node_link_count` 在列表页只能代表数量的限制。
 - 决策、facts、Node link、experience log、service create、domain create 的复杂输入使用 Drawer。关闭 Drawer 后，保存成功 notice 必须留在主页面可见 surface 内。
+- Facts Drawer 只编辑基础事实和用途状态；不得包含 lifecycle status，也不得在 facts PATCH payload 中发送 `lifecycle_status`。
 - Archive/restore 仍是 lifecycle 危险操作，使用独立 confirmation，不放入 routine edit Drawer。
 
 #### Validation & Error Matrix

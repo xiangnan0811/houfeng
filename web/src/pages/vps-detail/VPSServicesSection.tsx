@@ -66,7 +66,7 @@ export function VPSServicesSection({
             {service.target_id}
           </Link>
         ) : (
-          <span className="text-muted">未关联</span>
+          <span className="asset-table__muted">未关联</span>
         ),
     },
     {
@@ -85,8 +85,9 @@ export function VPSServicesSection({
     <section className="page-panel page-panel--scroll-x">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">SERVICES</p>
+          <p className="section-heading__eyebrow">SERVICE CONTEXT</p>
           <h2>服务资产</h2>
+          <p className="section-heading__description">当前 VPS 的手工服务记录，只提供上下文和 Target 跳转。</p>
         </div>
         <span className="section-heading__meta">
           <MonoDigits>{services.length}</MonoDigits> 个手工记录服务
