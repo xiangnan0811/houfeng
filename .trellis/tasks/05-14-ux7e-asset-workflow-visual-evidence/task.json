@@ -1,0 +1,30 @@
+{
+  "id": "ux7e-asset-workflow-visual-evidence",
+  "name": "ux7e-asset-workflow-visual-evidence",
+  "title": "UX-7E asset workflow visual evidence refresh",
+  "description": "Refresh the asset workflow visual evidence path by making local browser sanity checks reproducible for protected Asset Ledger routes, documenting mocked/local/real-data evidence limits, and preparing the route/data checklist for future 40+ VPS validation.",
+  "status": "in_progress",
+  "dev_type": "implementation",
+  "scope": "web",
+  "package": "web",
+  "priority": "P2",
+  "creator": "xiangnan-mac",
+  "assignee": "xiangnan-mac",
+  "createdAt": "2026-05-14",
+  "completedAt": null,
+  "branch": "ux7e-asset-visual-evidence",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "scripts/visual_evidence.py",
+    "docs/operations/v2-visual-evidence.md",
+    "docs/release/ui-evolution-roadmap.md"
+  ],
+  "notes": "Main-session only per user instruction; do not use subagents for this task.",
+  "meta": {}
+}

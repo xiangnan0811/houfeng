@@ -203,6 +203,7 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 - UX-7B `Visual evidence governance` 已完成：v2 截图 manifest 校验与本地 browser sanity 输出已固化为可复用工具和文档规则，未引入 e2e / 视觉回归依赖。
 - UX-7C `Page state consistency` 已完成：高影响 route/detail/list loading、error、empty 状态已收敛到共享 `PageState` primitive，并补齐对应测试。
 - UX-7D `Interaction state contract hardening` 已完成：VPS / Asset Decisions / Providers / Subscriptions 的主路径局部状态已继续收敛到 `PageState`，VPS 与 Asset Decisions drawer draft/apply/cancel 合同已补测试，DataTable 行点击与行内 action 冒泡边界已固化，Asset Decisions 自绘队列补齐鼠标行导航和可见 action 隔离。
+- UX-7E `Visual evidence refresh for asset workflows` 已完成：`browser-sanity` 增加显式 `mock-api asset-workflows` 模式，受保护的 `/asset-decisions`、`/vps`、`/providers`、`/subscriptions` 可在无本地 center 时用代表性资产 fixture 渲染真实页面 surface；本轮记录了 1440x1000 与 390x900 的 PASS evidence，并补齐 mock/local center/real data 三层 route/data checklist。
 
 ### 范围
 
@@ -231,21 +232,21 @@ Nodes、Targets、Events 保持专业观测能力，但产品定位收敛为资�
 
 ## 推荐下一步
 
-当前推荐进入 UX-7E Trellis task：`Visual evidence refresh for asset workflows`。
+当前推荐进入真实数据验证准备任务：`Asset Ledger real-data validation readiness`。
 
-UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。UX-6C 已经把 Events 收敛为审计与诊断时间线：事件证据 lead、优先事件 focus、空筛选清除、Dashboard 深链承接和 v2 视觉证据已经落地。UX-7A 已经沉淀观测 evidence 组件并完成路由加载性能 hardening。UX-7B 已经把截图 manifest 校验和 browser sanity 输出稳定下来。UX-7C 已经把可见 loading / error / empty 状态收敛为共享 primitive。UX-7D 已经优先验证真实操作手感：drawer draft/cancel、URL chip、row action 与主路径局部状态都已补强。下一步应刷新资产主路径视觉证据，让 `/asset-decisions`、`/vps`、`/providers`、`/subscriptions` 在标准桌面与移动视口下有可复查的 browser sanity 或截图记录。
+UX-6A 已经把 Nodes 页面收敛为资产判断的第一层运行证据：证据 lead、优先核对节点、深链筛选承接和不推导 linked VPS health 的边界已经落地。UX-6B 已经把 Targets 页面收敛为服务入口证据：入口 lead、优先核对 Target、执行覆盖缺口、暂停/归档上下文、资产服务边界和 Dashboard 深链承接已落地。UX-6C 已经把 Events 收敛为审计与诊断时间线：事件证据 lead、优先事件 focus、空筛选清除、Dashboard 深链承接和 v2 视觉证据已经落地。UX-7A 已经沉淀观测 evidence 组件并完成路由加载性能 hardening。UX-7B 已经把截图 manifest 校验和 browser sanity 输出稳定下来。UX-7C 已经把可见 loading / error / empty 状态收敛为共享 primitive。UX-7D 已经优先验证真实操作手感：drawer draft/cancel、URL chip、row action 与主路径局部状态都已补强。UX-7E 已经让资产主路径在无本地 center 的情况下也能生成可复查 browser sanity evidence。下一步不应继续空转做视觉微调，而应把 `docs/operations/ux7e-asset-workflow-visual-evidence.md` 的 checklist 推进到 local center sample，再进入真实 40+ VPS 数据验证。
 
-UX-7E 推荐范围：
+下一步推荐范围：
 
-- 启动本地 preview，按 `docs/operations/v2-visual-evidence.md` 对 `/asset-decisions`、`/vps`、`/providers`、`/subscriptions` 做 1440x1000 与 390x900 browser sanity。
-- 优先记录资产主路径首屏、drawer 入口、筛选 chips、table scroll surface、PageState 局部状态的人工视觉判断。
-- 如视觉变化足以影响评审，应补 `docs/operations/v2-visual-evidence/manifest.md` 与截图；否则在 PR 中明确记录 preview URL、routes、viewports、evidence level 和限制。
-- 对发现的实际布局/溢出问题做小修，不把 UX-7E 扩成新信息架构或大页面拆分。
-- 为后续真实 40+ VPS 数据验证准备一份 route/data checklist，区分 mocked/local center/real data 证据。
+- 启动真实 `houfeng-center` 本地实例，完成真实登录流和最小样本录入。
+- 用 local center sample 复跑 `/asset-decisions`、`/vps`、`/providers`、`/subscriptions` 的 1440x1000 与 390x900 browser sanity，数据源标注为 `local center sample`，不再使用 `--mock-api`。
+- 准备真实 40+ VPS 数据的隐私检查、字段映射、dry-run/import 或人工录入方案，确保不包含 token、SSH 私钥、账号密钥和无关个人信息。
+- 用真实数据检查资产决策队列优先级、VPS quick views、服务商去重、订阅续费排序、缺订阅/未关联/缺事实提示，以及表格滚动/移动端可读性。
+- 如果真实数据形态影响视觉评审，补截图与 manifest；否则至少记录 preview URL、routes、viewports、data source、row counts 和限制。
 
-UX-7E 非目标：
+下一步非目标：
 
-- 不引入 e2e / Playwright / Cypress 依赖。
-- 不重写 VPS、Asset Decisions、Providers、Subscriptions 的信息架构。
-- 不把截图 manifest 当作自动视觉验收；人工判断仍需明确记录。
-- 不新增后端 contract，不展示列表 API 没有提供的 linked health / subscription certainty。
+- 不新增外部 provider 同步、DNS 同步、Web SSH、插件系统或复杂评分算法。
+- 不把 mock evidence 当作真实数据验收。
+- 不从列表 API 推导 linked node health 或 subscription certainty 之外的事实。
+- 不引入 e2e / Playwright / Cypress 依赖；本地 browser sanity 仍然是 repo 外运行时工具。

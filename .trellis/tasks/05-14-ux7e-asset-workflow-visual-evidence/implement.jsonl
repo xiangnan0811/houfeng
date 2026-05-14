@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Frontend spec index and active visual authority for UX-7E."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Visual evidence and CSS/token constraints for frontend-visible work."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Verification gates and visual evidence workflow requirements."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Asset Ledger route data contracts and dashboard shell data semantics."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Protected route/page interaction and PageState conventions relevant to visual evidence surfaces."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Branch, PR, and protected-main workflow for this implementation task."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Search-before-new-code guidance for extending the existing visual evidence helper."}
+{"file": ".trellis/tasks/05-14-ux7e-asset-workflow-visual-evidence/research/asset-visual-evidence-tooling.md", "reason": "Task-specific auth/API/tooling facts and recommended mock API approach."}
