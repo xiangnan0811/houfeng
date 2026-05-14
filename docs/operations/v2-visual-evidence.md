@@ -95,6 +95,43 @@ If your machine has multiple Python versions, run the helper with the interprete
   --route /login
 ```
 
+### Protected asset workflow routes
+
+Asset Ledger routes are protected by the app auth gate and need center API data before their page surfaces render. Browser sanity against a plain Vite preview may only prove that `/login` works. To exercise the protected asset routes without a running center, use the explicit local mock API profile:
+
+```bash
+mkdir -p .tmp/playwright
+TMPDIR="$PWD/.tmp/playwright" python3 scripts/visual_evidence.py browser-sanity \
+  --base-url http://127.0.0.1:5178/ \
+  --mock-api asset-workflows \
+  --route /asset-decisions \
+  --route /vps \
+  --route /providers \
+  --route /subscriptions \
+  --viewport 1440x1000 \
+  --viewport 390x900
+```
+
+Use the interpreter that has local Python Playwright installed. For example, on this machine:
+
+```bash
+TMPDIR="$PWD/.tmp/playwright" /opt/homebrew/opt/python@3.11/bin/python3.11 scripts/visual_evidence.py browser-sanity \
+  --base-url http://127.0.0.1:5178/ \
+  --mock-api asset-workflows \
+  --route /asset-decisions \
+  --route /vps \
+  --route /providers \
+  --route /subscriptions \
+  --viewport 1440x1000 \
+  --viewport 390x900
+```
+
+`--mock-api asset-workflows` intercepts `/api/auth/me`, `/api/dashboard`, `/api/providers`, `/api/vps`, and `/api/subscriptions` in the browser session. The fixture rows intentionally cover renewal due, unreviewed/migrate/cancel decisions, missing subscription, unlinked VPS, missing facts, provider labels/ratings, subscription filters, and shell summary state.
+
+Report this as `Data source: mock-api asset-workflows`. It proves the protected route layout can render with representative asset workflow states, but it does **not** prove backend correctness, real account completeness, import fidelity, or the real 40+ VPS inventory result.
+
+If local Playwright cannot create browser temp files, prefer a repo-local temp directory (`TMPDIR="$PWD/.tmp/playwright"`) and record that in the evidence notes. Do not add browser automation dependencies to `web/package.json` to work around local tooling.
+
 ## Core route matrix
 
 This is the current v2 core-page acceptance set. A task only needs to check routes it changes, but broad UX tasks should cover the full relevant subset.
@@ -196,7 +233,7 @@ Use this section in PR bodies and final reports for UI tasks:
   - Browser sanity
   - Screenshot evidence: none / `docs/operations/v2-visual-evidence/...`
 - Data source:
-  - mocked API / local center / real data
+  - mocked API / mock-api asset-workflows / local center / real data
 - Result:
   - no blank viewport, no text overlap, no support-surface overflow
 - Limitations:

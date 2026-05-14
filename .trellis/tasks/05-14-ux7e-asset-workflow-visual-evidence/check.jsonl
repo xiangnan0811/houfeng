@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Defines local lint/test/build and browser sanity evidence expectations."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Defines active visual evidence workflow and no new e2e dependency constraint."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Validates that mocked visual evidence does not overclaim dashboard or asset data semantics."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verifies branch and PR flow compliance before merge."}
+{"file": ".trellis/tasks/05-14-ux7e-asset-workflow-visual-evidence/research/asset-visual-evidence-tooling.md", "reason": "Task-specific verification checklist for protected asset routes and mock API evidence."}
