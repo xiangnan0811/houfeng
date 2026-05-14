@@ -1,0 +1,6 @@
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Active local preview, browser sanity, mock API, and screenshot evidence workflow"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Frontend quality rules and browser sanity local-only evidence constraints"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Dashboard, Events URL-state, and API client/query contract context for fixtures"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Route/page semantics and no new browser automation dependency conventions"}
+{"file":"docs/release/core-pages-product-ux-replan.md","reason":"UX-6 scope and relationship to core page UX acceptance"}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Core route matrix and Nodes/Targets/Events visual contract context"}

@@ -1,0 +1,5 @@
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Verify docs reflect new observability mock API workflow and limitations"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Verify no Playwright/Cypress/WebDriverIO dependency is introduced and evidence remains local-only"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Verify Events/dashboard query and fixture semantics remain compatible"}
+{"file":"docs/release/core-pages-product-ux-replan.md","reason":"Check implementation satisfies UX-6 visual evidence scope"}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Check covered routes align with Nodes/Targets/Events contracts"}
