@@ -1,0 +1,9 @@
+{"file":".trellis/spec/web/index.md","reason":"Web frontend spec index for this VPS Detail UX task"}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Route page/component placement and no page-local CSS rules"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Page/component layering, Drawer behavior, DataTable/link interaction conventions"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"API client usage, VPS detail data contracts, subscription evidence failure handling"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Dark-first tokens, BEM, pages.css-only styling constraints"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Vitest, lint, build, and visual sanity expectations"}
+{"file":"docs/release/core-pages-product-ux-replan.md","reason":"UX-4 product goal and information architecture for VPS Detail"}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Authoritative VPSDetailPage visual/component contract"}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Dark-first high-density visual language and anti-patterns"}

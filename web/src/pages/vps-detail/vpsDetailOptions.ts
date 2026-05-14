@@ -4,7 +4,6 @@ import {
   ASSET_SERVICE_TYPE_LABELS,
   VPS_EXPERIENCE_CATEGORY_LABELS,
   VPS_EXPERIENCE_SEVERITY_LABELS,
-  VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
   VPS_USAGE_STATUS_LABELS,
   type AssetDomainStatus,
@@ -12,18 +11,12 @@ import {
   type AssetServiceType,
   type VPSExperienceCategory,
   type VPSExperienceSeverity,
-  type VPSLifecycleStatus,
   type VPSRenewalDecision,
   type VPSUsageStatus,
 } from '../../lib/types'
 
 export const RENEWAL_DECISION_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABELS) as Array<[
   VPSRenewalDecision,
-  string,
-]>
-
-export const LIFECYCLE_OPTIONS = Object.entries(VPS_LIFECYCLE_STATUS_LABELS) as Array<[
-  VPSLifecycleStatus,
   string,
 ]>
 

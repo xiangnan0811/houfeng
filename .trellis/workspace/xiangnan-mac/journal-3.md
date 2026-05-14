@@ -138,3 +138,36 @@ Completed the restrained frontend UX consolidation batch: shell/global alert/sea
 ### Next Steps
 
 - None - task complete
+
+
+## Session 123: VPS Detail UX refactor
+
+**Date**: 2026-05-14
+**Task**: VPS Detail UX refactor
+**Branch**: `feature/vps-detail-ux-refactor`
+
+### Summary
+
+Refactored VPS Detail into an evidence-first asset decision workbench, split renewal and decision evidence sections, preserved Drawer-based edits and lifecycle danger-zone handling, and updated frontend contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `887e2be` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

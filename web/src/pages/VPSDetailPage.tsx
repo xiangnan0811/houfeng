@@ -34,6 +34,7 @@ import { VPSDetailErrorPanel } from './vps-detail/VPSDetailErrorPanel'
 import { VPSDetailHero } from './vps-detail/VPSDetailHero'
 import { VPSDetailLoading } from './vps-detail/VPSDetailLoading'
 import { VPSDetailMissingID } from './vps-detail/VPSDetailMissingID'
+import { VPSDecisionEvidenceSection } from './vps-detail/VPSDecisionEvidenceSection'
 import { VPSDomainsForm } from './vps-detail/VPSDomainsForm'
 import { VPSDomainsSection } from './vps-detail/VPSDomainsSection'
 import { VPSExperienceLogForm } from './vps-detail/VPSExperienceLogForm'
@@ -43,6 +44,7 @@ import { VPSLifecycleCard } from './vps-detail/VPSLifecycleCard'
 import { VPSNodeLinkForm } from './vps-detail/VPSNodeLinkForm'
 import { VPSNodeLinksSection } from './vps-detail/VPSNodeLinksSection'
 import { VPSRenewalDecisionForm } from './vps-detail/VPSRenewalDecisionForm'
+import { VPSRenewalEvidenceSection } from './vps-detail/VPSRenewalEvidenceSection'
 import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import type {
@@ -735,28 +737,19 @@ export function VPSDetailPage() {
       {decisionNotice ? (
         <p className="asset-operation-feedback" role="status">{decisionNotice}</p>
       ) : null}
-      {experienceNotice ? (
-        <p className="asset-operation-feedback" role="status">{experienceNotice}</p>
-      ) : null}
 
-      <div className="page-stack">
-        <VPSLifecycleCard
-          detail={detail}
-          isArchived={isArchived}
-          confirmingArchive={lifecycleConfirmingArchive}
-          submitting={lifecycleSubmitting}
-          error={lifecycleError}
-          notice={lifecycleNotice}
-          onArchiveConfirmOpenChange={handleLifecycleConfirmingArchiveChange}
-          onArchive={() => void handleArchiveVPS()}
-          onRestore={() => void handleRestoreVPS()}
+      <div className="page-stack vps-detail-evidence-stack">
+        <VPSRenewalEvidenceSection
+          primarySubscription={primarySubscription}
+          subscriptionLoadFailed={subscriptionLoadFailed}
+          subscriptionError={state.subscriptionsError}
+          timeline={timeline}
         />
 
-        <VPSFactsSection
-          detail={detail}
-          error={activeDrawer === 'facts' ? null : factError}
-          notice={factNotice}
-          onEdit={() => openFactEdit(detail)}
+        <VPSDecisionEvidenceSection
+          timeline={timeline}
+          notice={experienceNotice}
+          onExperienceLog={() => openDrawer('experience')}
         />
 
         <VPSNodeLinksSection
@@ -768,23 +761,44 @@ export function VPSDetailPage() {
           onUnlinkNode={(node) => void handleUnlinkNode(node)}
         />
 
-        <VPSServicesSection
-          services={state.services}
-          error={activeDrawer === 'service' ? null : serviceError}
-          notice={serviceNotice}
-          onCreate={() => openDrawer('service')}
+        <VPSFactsSection
+          detail={detail}
+          error={activeDrawer === 'facts' ? null : factError}
+          notice={factNotice}
+          onEdit={() => openFactEdit(detail)}
         />
 
-        <VPSDomainsSection
-          domains={state.domains}
-          error={activeDrawer === 'domain' ? null : domainError}
-          notice={domainNotice}
-          onCreate={() => openDrawer('domain')}
-        />
+        <section className="vps-detail-context-grid" aria-label="服务与域名上下文">
+          <VPSServicesSection
+            services={state.services}
+            error={activeDrawer === 'service' ? null : serviceError}
+            notice={serviceNotice}
+            onCreate={() => openDrawer('service')}
+          />
+
+          <VPSDomainsSection
+            domains={state.domains}
+            error={activeDrawer === 'domain' ? null : domainError}
+            notice={domainNotice}
+            onCreate={() => openDrawer('domain')}
+          />
+        </section>
 
         <VPSTimelinePanel timeline={timeline} />
 
         <VPSAccessSummarySection detail={detail} />
+
+        <VPSLifecycleCard
+          detail={detail}
+          isArchived={isArchived}
+          confirmingArchive={lifecycleConfirmingArchive}
+          submitting={lifecycleSubmitting}
+          error={lifecycleError}
+          notice={lifecycleNotice}
+          onArchiveConfirmOpenChange={handleLifecycleConfirmingArchiveChange}
+          onArchive={() => void handleArchiveVPS()}
+          onRestore={() => void handleRestoreVPS()}
+        />
       </div>
 
       <Drawer

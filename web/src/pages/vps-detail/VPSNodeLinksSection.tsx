@@ -1,4 +1,4 @@
-import { Badge, Button, DataTable, MonoDigits, Timestamp, type DataTableColumn } from '../../components/atoms'
+import { Badge, Button, DataTable, Hostname, MonoDigits, Timestamp, type DataTableColumn } from '../../components/atoms'
 import { formatOptional } from '../../lib/format'
 import type { VPSNodeSummary } from '../../lib/types'
 import { HealthBadge } from '../assetPageBadges'
@@ -87,14 +87,32 @@ export function VPSNodeLinksSection({
     <section className="page-panel page-panel--scroll-x">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">OBSERVABILITY LINK</p>
-          <h2>关联 Node 监控</h2>
+          <p className="section-heading__eyebrow">NODE EVIDENCE</p>
+          <h2>Node 观测证据</h2>
+          <p className="section-heading__description">
+            关联 Node 监控用于解释续费决策，只使用 VPS detail contract 返回的 linked Node health、心跳、异常数量和主问题摘要。
+          </p>
         </div>
         <span className="section-heading__meta">
           <MonoDigits>{nodes.length}</MonoDigits> 个 active link
         </span>
         <Button variant="secondary" size="sm" onClick={onOpenLink}>关联 Node</Button>
       </div>
+      {nodes.length > 0 ? (
+        <div className="vps-node-evidence-strip" aria-label="Node evidence summary">
+          {nodes.slice(0, 3).map((node) => (
+            <article key={node.node_id} className="vps-node-evidence-strip__item">
+              <div>
+                <strong>{node.display_name}</strong>
+                <Hostname truncate>{node.node_id}</Hostname>
+              </div>
+              <HealthBadge value={node.current_health_status} />
+              <span><MonoDigits>{node.current_active_incident_count}</MonoDigits> 个活跃异常</span>
+              <small>{formatOptional(node.current_primary_issue_summary)}</small>
+            </article>
+          ))}
+        </div>
+      ) : null}
       {linkFeedback ? (
         <p
           className={[

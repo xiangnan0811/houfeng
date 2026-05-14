@@ -8,7 +8,6 @@ import type {
   VPSAssetDetail,
   VPSExperienceCategory,
   VPSExperienceSeverity,
-  VPSLifecycleStatus,
   VPSRenewalDecision,
   VPSTimeline,
   VPSUsageStatus,
@@ -51,7 +50,6 @@ export type FactEditFormState = {
   sshUser: string
   osName: string
   virtualization: string
-  lifecycleStatus: VPSLifecycleStatus
   usageStatus: VPSUsageStatus
   importance: string
   labels: string

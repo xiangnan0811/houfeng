@@ -259,22 +259,27 @@ describe('VPSDetailPage', () => {
     expect(screen.getByRole('link', { name: '查看 Node' })).toHaveAttribute('href', '/nodes/nd_001')
     expect(screen.getByLabelText('资产判断证据状态')).toBeInTheDocument()
     expect(screen.getByText('续费与成本')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '续费与成本证据' })).toBeInTheDocument()
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
-    expect(screen.getByText(/续费日 2026-06-01/)).toBeInTheDocument()
+    expect(screen.getAllByText(/续费日 2026-06-01/).length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: '决策依据与经验记录' })).toBeInTheDocument()
     expect(screen.getAllByText('Node 证据').length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: 'Node 观测证据' })).toBeInTheDocument()
+    expect(screen.getByText(/关联 Node 监控用于解释续费决策/)).toBeInTheDocument()
     expect(screen.getByText('基础信息')).toBeInTheDocument()
     expect(screen.getAllByText('192.0.2.1').length).toBeGreaterThan(0)
-    expect(screen.getByText('关联 Node 监控')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Node 观测证据' })).toBeInTheDocument()
     expect(screen.getAllByText('Tokyo Node').length).toBeGreaterThan(0)
-    expect(screen.getByText('latency high')).toBeInTheDocument()
+    expect(screen.getAllByText('latency high').length).toBeGreaterThan(0)
     expect(screen.getByText('资产历史')).toBeInTheDocument()
     expect(screen.getByText('未评估 -> 保留')).toBeInTheDocument()
     expect(screen.getAllByText('稳定承载边缘流量').length).toBeGreaterThan(0)
     expect(screen.getAllByText('USD 10.00 -> USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getByText('192.0.2.10 -> 192.0.2.1')).toBeInTheDocument()
     expect(screen.getByText('root@192.0.2.1:22')).toBeInTheDocument()
-    expect(screen.getByText('晚高峰丢包')).toBeInTheDocument()
+    expect(screen.getAllByText('晚高峰丢包').length).toBeGreaterThan(0)
     expect(screen.getByText('已向服务商提交工单')).toBeInTheDocument()
+    expect(screen.getByLabelText('服务与域名上下文')).toBeInTheDocument()
     expect(screen.getByText('服务资产')).toBeInTheDocument()
     expect(screen.getByText('Blog')).toBeInTheDocument()
     expect(screen.getByText('https://blog.example.com')).toBeInTheDocument()
@@ -283,6 +288,7 @@ describe('VPSDetailPage', () => {
     expect(screen.getByText('www.example.com')).toBeInTheDocument()
     expect(screen.getByText('NameSilo')).toBeInTheDocument()
     expect(screen.getByText('2026-07-01')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '访问摘要' })).toBeInTheDocument()
   })
 
   it('does not treat subscription load failures as missing subscription facts', async () => {
@@ -353,12 +359,12 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    expect(screen.getByText('订阅读取失败')).toBeInTheDocument()
+    expect(screen.getAllByText('订阅读取失败').length).toBeGreaterThan(0)
     expect(screen.getByText('先恢复订阅证据')).toBeInTheDocument()
     expect(screen.getByText('读取失败')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions')
     expect(screen.getAllByText('subscription backend down').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('资料可用').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('订阅未知').length).toBeGreaterThan(0)
     expect(screen.queryByText('缺订阅')).not.toBeInTheDocument()
   })
 
@@ -714,7 +720,6 @@ describe('VPSDetailPage', () => {
         ssh_user: 'deploy',
         os_name: 'Ubuntu 24.04',
         virtualization: 'kvm',
-        lifecycle_status: 'active',
         usage_status: 'standby',
         importance: 'normal',
         labels: ['edge', 'backup'],
@@ -951,7 +956,7 @@ describe('VPSDetailPage', () => {
     fireEvent.change(within(experienceDrawer).getByLabelText('详情'), { target: { value: '连续三天 tcp probe 抖动' } })
     fireEvent.click(within(experienceDrawer).getByRole('button', { name: '写入经验记录' }))
 
-    await waitFor(() => expect(screen.getByText('经验记录已写入资产历史')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('经验记录已写入资产历史').length).toBeGreaterThan(0))
     expect(screen.getAllByText('晚高峰丢包').length).toBeGreaterThan(0)
     expect(screen.getByText('连续三天 tcp probe 抖动')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/experience-logs', {

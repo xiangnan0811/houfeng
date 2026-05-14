@@ -1,9 +1,9 @@
 import type { FormEvent } from 'react'
 
 import { Button, Input } from '../../components/atoms'
-import type { VPSLifecycleStatus, VPSUsageStatus } from '../../lib/types'
+import type { VPSUsageStatus } from '../../lib/types'
 import type { FactEditFormState } from './types'
-import { LIFECYCLE_OPTIONS, USAGE_OPTIONS } from './vpsDetailOptions'
+import { USAGE_OPTIONS } from './vpsDetailOptions'
 
 type VPSFactsEditFormProps = {
   draft: FactEditFormState
@@ -42,21 +42,6 @@ export function VPSFactsEditForm({
       <Input label="SSH 用户" value={draft.sshUser} onChange={(event) => onDraftChange({ ...draft, sshUser: event.target.value })} />
       <Input label="操作系统" value={draft.osName} onChange={(event) => onDraftChange({ ...draft, osName: event.target.value })} />
       <Input label="虚拟化" value={draft.virtualization} onChange={(event) => onDraftChange({ ...draft, virtualization: event.target.value })} />
-      <label className="input-field">
-        <span className="input-field__label">生命周期</span>
-        <select
-          className="input"
-          value={draft.lifecycleStatus}
-          onChange={(event) => onDraftChange({
-            ...draft,
-            lifecycleStatus: event.target.value as VPSLifecycleStatus,
-          })}
-        >
-          {LIFECYCLE_OPTIONS.map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-      </label>
       <label className="input-field">
         <span className="input-field__label">用途状态</span>
         <select
