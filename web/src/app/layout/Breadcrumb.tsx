@@ -7,12 +7,12 @@ interface Crumb {
 }
 
 const SECTION_LABELS: Record<string, string> = {
-  'asset-decisions': '资产决策',
+  'asset-decisions': '续费决策',
   providers: '服务商',
   subscriptions: '订阅',
   vps: 'VPS',
   nodes: '节点',
-  targets: '目标',
+  targets: '入口探测',
   events: '事件',
   settings: '设置',
 }

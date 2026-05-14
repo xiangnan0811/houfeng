@@ -5,6 +5,38 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { GlobalSearch } from './GlobalSearch'
 import * as api from '../../lib/api'
 
+const mockVPS = [
+  {
+    vps_id: 'vps_001',
+    display_name: 'Tokyo VPS',
+    provider_id: 'pv_001',
+    provider_name: 'Hetzner',
+    product_name: 'cx22',
+    order_ref: 'ord-1',
+    country: 'JP',
+    region: 'Kanto',
+    city: 'Tokyo',
+    datacenter: 'nrt',
+    ipv4: '192.0.2.1',
+    ipv6: '',
+    ssh_host: 'tokyo.example.com',
+    ssh_port: 22,
+    ssh_user: 'root',
+    os_name: 'Debian',
+    virtualization: 'kvm',
+    lifecycle_status: 'active',
+    usage_status: 'in_use',
+    renewal_decision: 'keep',
+    importance: 'normal',
+    labels: ['edge'],
+    note: '',
+    active_node_link_count: 1,
+    created_at: '2026-05-09T08:00:00Z',
+    updated_at: '2026-05-09T08:00:00Z',
+    archived_at: null,
+  },
+] as Awaited<ReturnType<typeof api.listVPSAssets>>
+
 const mockNodes = [
   {
     node_id: 'nd_001',
@@ -50,10 +82,50 @@ const mockTargets = [
   },
 ] as Awaited<ReturnType<typeof api.listTargets>>
 
+const mockProviders = [
+  {
+    provider_id: 'pv_001',
+    name: 'Hetzner',
+    website: '',
+    panel_url: '',
+    account_hint: 'main account',
+    country: 'DE',
+    note: '',
+    rating: null,
+    labels: [],
+    created_at: '2026-05-09T08:00:00Z',
+    updated_at: '2026-05-09T08:00:00Z',
+  },
+] as Awaited<ReturnType<typeof api.listProviders>>
+
+const mockSubscriptions = [
+  {
+    subscription_id: 'sub_001',
+    vps_id: 'vps_001',
+    price: 12,
+    currency: 'USD',
+    billing_cycle: 'monthly',
+    billing_months: 1,
+    monthly_price: 12,
+    started_at: '2026-05-01',
+    renew_at: '2026-05-20',
+    auto_renew: true,
+    auto_renew_cancelled: false,
+    status: 'active',
+    payment_method: 'card',
+    note: 'tokyo renewal',
+    created_at: '2026-05-09T08:00:00Z',
+    updated_at: '2026-05-09T08:00:00Z',
+  },
+] as Awaited<ReturnType<typeof api.listSubscriptions>>
+
 describe('GlobalSearch', () => {
   beforeEach(() => {
+    vi.spyOn(api, 'listVPSAssets').mockResolvedValue(mockVPS)
     vi.spyOn(api, 'listNodes').mockResolvedValue(mockNodes)
     vi.spyOn(api, 'listTargets').mockResolvedValue(mockTargets)
+    vi.spyOn(api, 'listProviders').mockResolvedValue(mockProviders)
+    vi.spyOn(api, 'listSubscriptions').mockResolvedValue(mockSubscriptions)
   })
 
   it('renders the search input', () => {
@@ -65,7 +137,7 @@ describe('GlobalSearch', () => {
     expect(screen.getByLabelText('全局搜索')).toBeInTheDocument()
   })
 
-  it('matches a node by display_name and shows it in the dropdown', async () => {
+  it('matches records across assets and observation objects with grouped links', async () => {
     render(
       <MemoryRouter>
         <GlobalSearch />
@@ -76,10 +148,17 @@ describe('GlobalSearch', () => {
     fireEvent.submit(input.closest('form')!)
 
     await waitFor(() => {
-      expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
+      expect(screen.getByText('Tokyo VPS')).toBeInTheDocument()
     })
-    const option = screen.getByRole('option', { name: /Tokyo Edge/ })
-    expect(option).toBeInTheDocument()
+
+    expect(api.listSubscriptions).toHaveBeenCalledWith({ sort: 'renew_at', order: 'asc' })
+    expect(screen.getAllByText('VPS').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('节点').length).toBeGreaterThan(0)
+    const vpsLink = screen.getByRole('option', { name: /Tokyo VPS/ })
+    expect(vpsLink).toHaveAttribute('href', '/vps/vps_001')
+    expect(vpsLink.tagName).toBe('A')
+    expect(screen.getByRole('option', { name: /Tokyo Edge/ })).toHaveAttribute('href', '/nodes/nd_001')
+    expect(screen.getByRole('option', { name: /sub_001/ })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
   })
 
   it('matches a target by host', async () => {
@@ -95,6 +174,23 @@ describe('GlobalSearch', () => {
     await waitFor(() => {
       expect(screen.getByText('Blog')).toBeInTheDocument()
     })
+    expect(screen.getByRole('option', { name: /Blog/ })).toHaveAttribute('href', '/targets/tg_001')
+  })
+
+  it('matches a provider by name', async () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByLabelText('全局搜索')
+    fireEvent.change(input, { target: { value: 'hetzner' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
+    expect(
+      screen.getAllByRole('option').find((option) => option.getAttribute('href') === '/providers'),
+    ).toBeInTheDocument()
   })
 
   it('shows "没有匹配项" when nothing matches', async () => {

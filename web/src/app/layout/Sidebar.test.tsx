@@ -27,7 +27,7 @@ describe('Sidebar', () => {
         ),
       ).toBe(true)
     }
-    for (const label of ['VPS', '服务商', '订阅', '资产决策', '节点', '目标', '事件', '设置']) {
+    for (const label of ['VPS', '服务商', '订阅', '续费决策', '节点', '入口探测', '事件', '设置']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
@@ -47,7 +47,7 @@ describe('Sidebar', () => {
     )
     const links = screen.getAllByRole('link')
     const linkText = links.map((link) => link.textContent)
-    expect(linkText).toEqual(['工作台', '资产决策', 'VPS', '服务商', '订阅', '节点3', '目标1', '事件', '设置'])
+    expect(linkText).toEqual(['工作台', '续费决策', 'VPS', '服务商', '订阅', '节点3', '入口探测1', '事件', '设置'])
     expect(screen.getByText('3')).toHaveClass('badge--count')
     expect(screen.getByText('3')).not.toHaveClass('tone--alert', 'tone--critical')
     expect(screen.getByText('1')).toHaveClass('badge--count')

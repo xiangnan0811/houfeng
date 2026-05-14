@@ -53,6 +53,7 @@
 - 颜色 / 间距 / 字号 / 圆角 / 边框 / 阴影 / 动效**一律走 `var(--xxx)`**，**严禁组件 / 全局样式里写硬编码 hex 或像素**（除非是 SVG 内部计算尺寸，参考 `Sparkline.tsx:71` 的 `style={{ width, height }}`）。
 - 状态色派生写法用 `color-mix(in srgb, var(--color-state-xxx) NN%, transparent)`，参见 `atoms.css:155-196` 的 `tone--*` 系列。**不要**自己另算 RGBA / 引入额外色板。
 - 新增令牌：先在 `tokens.css` `:root` 段加默认值，再到每个 `html.theme-*` 块补对应主题值——**漏一个主题会让该主题视觉破洞**。
+- 兼容别名令牌必须跨主题一致：如果引入 `--surface-0..3`、`--border-muted`、`--border-default`、`--text-tertiary` 这类 alias，必须在 `:root` 与每个 `html.theme-*` 块都定义，并让 alias 指向当前主题的基础令牌（如 `--surface-2: var(--surface-elevated)`），不要只在默认主题补别名。
 
 ---
 
