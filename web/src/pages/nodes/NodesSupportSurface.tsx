@@ -60,7 +60,7 @@ export function NodesSupportSurface({
           <p className="observability-support__eyebrow">OBSERVABILITY SUPPORT</p>
           <h2 className="observability-support__title">资产判断支撑</h2>
           <p className="observability-support__description">
-            Node 页面保留运行事实、接入状态和 freshness，用来判断 VPS 是否有可信观测证据。
+            Node 页面不是资产主体；它保留运行事实、接入状态、维护窗口和 freshness，用来判断 VPS 是否有可信观测证据。
           </p>
         </div>
         <div className="observability-support__scope" aria-label="当前节点筛选范围">

@@ -26,10 +26,10 @@ export function NodesHero({
   return (
     <header className="section-heading section-heading--inline nodes-hero">
       <div>
-        <p className="section-heading__eyebrow">节点</p>
+        <p className="section-heading__eyebrow">观测 · 节点</p>
         <h2 className="section-heading__title">节点观测</h2>
         <p className="section-heading__description">
-          按健康风险、接入状态和最近运行事实管理服务器节点，为 VPS 资产判断提供证据。
+          以运行事实支撑 VPS 资产判断，优先扫描 VPS 关联、接入状态、维护 / 暂停与异常证据。
         </p>
       </div>
       <div className="nodes-hero__aside" aria-label="节点库存摘要">
