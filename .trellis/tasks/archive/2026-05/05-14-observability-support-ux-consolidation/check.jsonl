@@ -1,0 +1,8 @@
+{"file":".trellis/spec/web/index.md","reason":"Web frontend spec index for checking UX-5"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Verify component layering, route/link semantics, and shared component responsibilities"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Verify API client usage, URL-state deep-link contracts, and error handling"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Verify tokens, BEM, dark-first styling and no page-local CSS"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Verify tests, lint/build requirements, and UI sanity expectations"}
+{"file":"docs/release/core-pages-product-ux-replan.md","reason":"Check implemented UX aligns with approved UX-5 scope"}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Check Nodes/Targets/Events component contract compliance"}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Check visual language compliance and anti-patterns"}

@@ -1,0 +1,9 @@
+{"file":".trellis/spec/web/index.md","reason":"Web frontend spec index for the UX-5 observability support task"}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Page/component placement and style file constraints"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Component layering, DataTable/link interaction, shared observability component conventions"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"API client usage, URL-state, dashboard deep-link and Events filter contracts"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Dark-first tokens, BEM, pages.css-only styling constraints"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Vitest, lint, build and UI sanity expectations"}
+{"file":"docs/release/core-pages-product-ux-replan.md","reason":"UX-5 product goal and information architecture for observability support pages"}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Authoritative page/component visual contracts for Nodes, Targets, Events"}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Dark-first high-density visual language and anti-patterns"}
