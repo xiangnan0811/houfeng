@@ -1,0 +1,9 @@
+{"file":".trellis/spec/web/index.md","reason":"Web frontend spec index and authority hierarchy for review."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Review component boundaries, drawer/search/page contracts, and interaction semantics."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Review dark-first token/BEM/pure CSS compliance and no visual authority regressions."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Review lint/test/build expectations and browser evidence reporting."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Review that UI changes do not alter API/data contracts or real-data validation boundaries."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Confirm work stayed off main and PR workflow remains clean."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Review against active v2 visual language and anti-patterns."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Review page/component visual contract consistency and whether spec updates are needed."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Review frontend visual evidence workflow and reported limitations."}

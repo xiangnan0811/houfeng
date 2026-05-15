@@ -148,6 +148,7 @@
 - ❌ **类名简写 / 工具类滥用**（`mt-2`、`flex`、`text-red`）：`reset.css` 仅留 `.tnum` `.mono` 两个工具类，其余走 BEM 表达语义。
 - ❌ **令牌只改一份主题**：`tokens.css` 改了 `:root` 的 `--surface`，必须同步 `theme-houfeng-light` / `theme-classic-dark` / `theme-classic-light` 三个块。
 - ❌ **在组件文件 `import './x.css'`**（除 `LoginPage.tsx` 这个历史例外）：全局样式由 `main.tsx` 顶部 + `app/layout/layout.css` 集中管理。
+- ❌ **DataTable 可排序表头双 padding**：`.data-table__th--sortable` 自身必须清零 padding，实际间距由 `.data-table__sort-btn` 承担；若密度规则用 `.data-table--compact .data-table__head th` 这类更高特异性选择器，清零规则也必须带上同等上下文（如 `th.data-table__th--sortable`），否则 sortable 表头会比普通表头更宽。
 
 ---
 
