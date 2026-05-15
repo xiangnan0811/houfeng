@@ -237,3 +237,36 @@ Added an observability-support mock API profile for local browser sanity of Node
 ### Next Steps
 
 - None - task complete
+
+
+## Session 126: UX-8 human UI acceptance hardening
+
+**Date**: 2026-05-15
+**Task**: UX-8 human UI acceptance hardening
+**Branch**: `feature/ux8-human-ui-acceptance`
+
+### Summary
+
+Hardened the core frontend visual rhythm for human UI acceptance, reduced shared page/table/dashboard chrome noise, preserved data contracts, and recorded the DataTable sortable header padding styling pitfall.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `998ee6d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
