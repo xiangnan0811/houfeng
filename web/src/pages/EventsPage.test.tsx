@@ -160,8 +160,10 @@ describe('EventsPage', () => {
     expect(screen.getByText('标签: edge')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '移除筛选 包含补传事件' })).toBeInTheDocument()
     expect(screen.getByText('11 项筛选')).toBeInTheDocument()
-    expect(screen.getByText('对象类型决定后续处理入口：Node 关联 VPS 证据，Target 关联服务入口证据。')).toBeInTheDocument()
+    expect(screen.getByText('Node 事件优先核对服务器观测证据；Target 事件优先确认服务入口影响，再回到资产侧决策。')).toBeInTheDocument()
     expect(screen.getByText(/当前只看维护上下文事件 · 自定义时间/)).toBeInTheDocument()
+    expect(screen.getByText('已应用筛选 · 自定义时间 · 最近 25 条')).toBeInTheDocument()
+    expect(screen.getByText('当前事件流只展示 URL 固定的筛选结果；加载更早事件会沿用同一组条件扩大数量上限。')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '没有匹配当前诊断条件' })).toBeInTheDocument()
   })
 
@@ -216,6 +218,8 @@ describe('EventsPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '事件时间线当前稳定' })).toBeInTheDocument(),
     )
+    expect(screen.getByText('默认：未限定时间 · 最近 50 条')).toBeInTheDocument()
+    expect(screen.getByText('默认事件流未限定时间范围，按最近事件数量截取；需要精确窗口可使用高级筛选。')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '没有需要优先核对的事件' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看 24h 事件' })).toHaveAttribute(
       'href',

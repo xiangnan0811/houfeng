@@ -101,7 +101,7 @@ export function EventsSupportSurface({
           <p className="observability-support__eyebrow">DIAGNOSTIC TIMELINE</p>
           <h2 className="observability-support__title">诊断时间线</h2>
           <p className="observability-support__description">
-            事件页承接 Dashboard、VPS、Node 和 Target 的深链，用于审计状态变化和定位处理路径。
+            用事件时间线复盘状态何时变化、影响是否收敛，并把下一步核对带回节点、入口或资产决策。
           </p>
         </div>
         <div className="observability-support__scope" aria-label="当前事件筛选范围">
@@ -152,7 +152,7 @@ export function EventsSupportSurface({
             <span>对象上下文</span>
             <Badge variant="info" tone="neutral">{objectTypeLabel(filters.object_type)}</Badge>
           </div>
-          <p>对象类型决定后续处理入口：Node 关联 VPS 证据，Target 关联服务入口证据。</p>
+          <p>Node 事件优先核对服务器观测证据；Target 事件优先确认服务入口影响，再回到资产侧决策。</p>
           <div className="observability-support-lane__actions">
             <Link className="observability-support-link" to="/nodes?abnormal=1">
               异常节点

@@ -260,7 +260,7 @@ describe('TargetsPage', () => {
     expect(screen.getByRole('heading', { name: '入口观测' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
     expect(
-      screen.getByText('Target 页面保留服务入口可达性、探测覆盖和运行状态证据，帮助资产侧判断暴露面与可用性风险。'),
+      screen.getByText('用服务入口可达性和探测覆盖确认暴露面是否可信，异常入口再回到 VPS 与服务资产补证据。'),
     ).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })

@@ -6,7 +6,7 @@ import {
   AssetDecisionWorkPanel,
   type AssetDecisionDraft,
 } from '../components/AssetDecisionWorkPanel'
-import { Badge, Button, Drawer, MonoDigits, Tabs } from '../components/atoms'
+import { Badge, Button, Drawer, Hostname, MonoDigits, Tabs } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, listSubscriptions, listVPSAssets, updateVPSAsset } from '../lib/api'
 import { formatDate, formatMoney, formatOptional } from '../lib/format'
@@ -244,6 +244,7 @@ function renderDecisionQueueItem(
       className={['asset-decision-row', 'asset-decision-row--clickable', queueRowClass(item)].join(' ')}
       key={vps.vps_id}
       onClick={() => onNavigate(vps)}
+      aria-label={`查看 ${vps.display_name} 详情`}
     >
       <div className="asset-decision-row__rank">
         <strong>P{index + 1}</strong>
@@ -252,7 +253,7 @@ function renderDecisionQueueItem(
       <div className="asset-decision-row__main">
         <div className="asset-decision-row__title">
           <strong>{vps.display_name}</strong>
-          <MonoDigits>{vps.vps_id}</MonoDigits>
+          <Hostname truncate maxChars={28}>{vps.vps_id}</Hostname>
         </div>
         <div className="asset-decision-row__meta">
           <span>{formatOptional(vps.provider_name)}</span>
@@ -499,6 +500,22 @@ export function AssetDecisionsPage() {
       .finally(() => setDecisionSubmitting(false))
   }
 
+  const queueEmptyAction = (
+    <div className="asset-empty-actions">
+      {queueView !== 'all' ? (
+        <Button variant="secondary" size="sm" onClick={() => setQueueView('all')}>
+          查看全部队列
+        </Button>
+      ) : null}
+      <Link className="btn btn--ghost btn--sm" to="/vps">
+        核对 VPS 库存
+      </Link>
+      <Link className="btn btn--ghost btn--sm" to="/subscriptions">
+        补充订阅证据
+      </Link>
+    </div>
+  )
+
   return (
     <div className="page-stack asset-page asset-decisions-page">
       <section className="page-panel page-panel--inline">
@@ -562,7 +579,7 @@ export function AssetDecisionsPage() {
             </article>
           ))}
         </div>
-        {decisionNotice && <p className="asset-operation-feedback">{decisionNotice}</p>}
+        {decisionNotice && <p className="asset-operation-feedback" role="status">{decisionNotice}</p>}
         {state.vpsLoading ? (
           <PageStateView
             kind="loading"
@@ -583,7 +600,8 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="empty"
             title="当前视图暂无待处理 VPS"
-            description="切换队列视图或进入 VPS 库存继续核对资产资料。"
+            description="这组队列暂时没有需要人工决策的资产；可回到全部队列、库存或订阅证据继续核对。"
+            action={queueEmptyAction}
             surface="empty"
             compact
           />

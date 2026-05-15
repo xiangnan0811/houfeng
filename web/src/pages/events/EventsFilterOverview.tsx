@@ -26,6 +26,13 @@ export function EventsFilterOverview({
       : filters.object_type === 'target'
         ? '目标'
         : ''
+  const timeRangeContext =
+    filters.time_range !== 'custom'
+      ? TIME_RANGE_LABELS[filters.time_range]
+      : filters.created_from || filters.created_to
+        ? '自定义时间'
+        : '未限定时间'
+  const limitContext = `最近 ${filters.limit || DEFAULT_LIMIT} 条`
 
   const activeFilterChips = (
     <>
@@ -100,7 +107,7 @@ export function EventsFilterOverview({
         <div className="events-filter-overview__status">
           <span className="events-filter-overview__label">当前筛选</span>
           <span className="events-filter-overview__value">
-            {hasActiveFilters ? '已应用筛选条件' : '默认事件流'}
+            {hasActiveFilters ? `已应用筛选 · ${timeRangeContext} · ${limitContext}` : `默认：${timeRangeContext} · ${limitContext}`}
           </span>
         </div>
         <Button variant="secondary" size="sm" onClick={onOpenFilters}>

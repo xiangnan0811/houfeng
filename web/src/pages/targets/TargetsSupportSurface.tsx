@@ -72,7 +72,7 @@ export function TargetsSupportSurface({
           <p className="observability-support__eyebrow">ENTRY OBSERVABILITY</p>
           <h2 className="observability-support__title">服务入口支撑</h2>
           <p className="observability-support__description">
-            Target 页面保留服务入口可达性、探测覆盖和运行状态证据，帮助资产侧判断暴露面与可用性风险。
+            用服务入口可达性和探测覆盖确认暴露面是否可信，异常入口再回到 VPS 与服务资产补证据。
           </p>
         </div>
         <div className="observability-support__scope" aria-label="当前目标筛选范围">
@@ -190,7 +190,7 @@ export function TargetsSupportSurface({
               <MonoDigits>{serviceTargetCount}</MonoDigits>
             </Badge>
           </div>
-          <p>服务记录回到 VPS 详情核对，Target 只保留入口观测证据和探测覆盖。</p>
+          <p>需要补齐服务归属时，从 VPS 台账回查资产；Target 侧只负责说明入口是否可达、由谁探测。</p>
           <div className="observability-support-lane__actions">
             <Link className="observability-support-link" to="/vps">
               VPS 台账

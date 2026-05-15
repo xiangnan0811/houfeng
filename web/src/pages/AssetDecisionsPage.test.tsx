@@ -205,6 +205,32 @@ describe('AssetDecisionsPage', () => {
     expect(within(screen.getByLabelText('资产决策工作队列')).getByText('Tokyo Review')).toBeInTheDocument()
   })
 
+  it('shows next actions when a queue view is empty', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: /未关联/ }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '当前视图暂无待处理 VPS' })).toBeInTheDocument())
+    expect(screen.getByText('这组队列暂时没有需要人工决策的资产；可回到全部队列、库存或订阅证据继续核对。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '核对 VPS 库存' })).toHaveAttribute('href', '/vps')
+    expect(screen.getByRole('link', { name: '补充订阅证据' })).toHaveAttribute('href', '/subscriptions')
+    fireEvent.click(screen.getByRole('button', { name: '查看全部队列' }))
+    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+  })
+
   it('navigates from a queue row while keeping row actions isolated', async () => {
     const fetchMock = vi
       .fn()
