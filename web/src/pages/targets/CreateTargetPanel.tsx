@@ -10,6 +10,7 @@ type CreateTargetPanelProps = {
   form: CreateTargetFormState
   submitting: boolean
   error: string | null
+  onCancel: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onFieldChange: <K extends keyof CreateTargetFormState>(
     field: K,
@@ -21,17 +22,18 @@ export function CreateTargetPanel({
   form,
   submitting,
   error,
+  onCancel,
   onSubmit,
   onFieldChange,
 }: CreateTargetPanelProps) {
   return (
-    <section className="page-panel">
-      <p className="page-panel__eyebrow">目标创建</p>
-      <h3 className="page-panel__title">创建目标</h3>
-      <p className="page-panel__description">
+    <section className="target-create-drawer">
+      <p className="target-create-drawer__eyebrow">目标创建</p>
+      <h3 className="target-create-drawer__title">创建目标</h3>
+      <p className="target-create-drawer__description">
         填写入口、执行节点标签与运行状态，创建后进入目标详情页继续配置 ProbeItem。
       </p>
-      <form onSubmit={onSubmit}>
+      <form className="target-create-drawer__form" onSubmit={onSubmit}>
         <p>
           <label>
             目标名称
@@ -154,6 +156,14 @@ export function CreateTargetPanel({
           </p>
         ) : null}
         <div className="page-form-actions">
+          <button
+            type="button"
+            className="btn btn--secondary btn--md"
+            disabled={submitting}
+            onClick={onCancel}
+          >
+            取消
+          </button>
           <button type="submit" className="btn btn--primary btn--md" disabled={submitting}>
             {submitting ? '正在创建…' : '创建目标'}
           </button>

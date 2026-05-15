@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, DataTable } from '../components/atoms'
+import { Button, DataTable, Drawer } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
@@ -122,6 +122,15 @@ export function TargetsPage() {
     setCreateSubmitting(false)
     setCreateError(null)
     setCreateForm(initialCreateForm)
+  }
+
+  function openCreateDrawer() {
+    setCreateOpen(true)
+  }
+
+  function closeCreateDrawer() {
+    resetCreateFlow()
+    setCreateOpen(false)
   }
 
   function updateCreateField<K extends keyof CreateTargetFormState>(
@@ -571,29 +580,28 @@ export function TargetsPage() {
           <Button
             variant="primary"
             size="md"
-            onClick={() =>
-              setCreateOpen((current) => {
-                if (current) {
-                  resetCreateFlow()
-                }
-                return !current
-              })
-            }
+            onClick={createOpen ? closeCreateDrawer : openCreateDrawer}
           >
             新建目标
           </Button>
         </div>
       </header>
 
-      {createOpen ? (
+      <Drawer
+        open={createOpen}
+        onClose={closeCreateDrawer}
+        title="创建目标"
+        ariaLabel="创建目标"
+      >
         <CreateTargetPanel
           form={createForm}
           submitting={createSubmitting}
           error={createError}
+          onCancel={closeCreateDrawer}
           onSubmit={handleCreate}
           onFieldChange={updateCreateField}
         />
-      ) : null}
+      </Drawer>
 
       <TargetsSupportSurface
         totalTargetCount={targets.length}
@@ -615,7 +623,7 @@ export function TargetsPage() {
         }
         onCoverageClick={() => navigate('/nodes')}
         onClearFilters={clearAllFilters}
-        onCreateClick={() => setCreateOpen(true)}
+        onCreateClick={() => openCreateDrawer()}
       />
 
       {targets.length === 0 ? (
@@ -625,7 +633,7 @@ export function TargetsPage() {
           title="候风尚未配置任何观测目标"
           description="创建第一个目标后，可以继续为它配置 ProbeItem。"
           action={
-            <button type="button" className="btn btn--primary btn--md" onClick={() => setCreateOpen(true)}>
+            <button type="button" className="btn btn--primary btn--md" onClick={() => openCreateDrawer()}>
               新建第一个目标
             </button>
           }

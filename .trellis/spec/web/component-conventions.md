@@ -46,6 +46,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **自绘可点击队列不要制造嵌套交互语义**：如果一个 `<li>` / `<article>` 内部已经有可见 `<Link>` 和 `<Button>`，可以让鼠标点击行背景进入主详情，但不要给外层容器加 `role="link"` / `tabIndex=0` 再包住内部交互控件；键盘入口应落在可见 action 上，外层只用 `:focus-within` 做焦点视觉辅助。
 - 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。
 - **modal / drawer focus 行为复用 `web/src/lib/useModalFocus.ts`**：可访问性弹层必须 portal 到 `document.body`，声明 `role="dialog"` / `aria-modal="true"`（确认类用 `alertdialog`），打开后移动初始焦点，Tab / Shift+Tab containment，Escape 关闭，关闭后恢复触发器焦点；不要在各组件里复制 ad-hoc `document.addEventListener('keydown')` + 手写 focus trap。
+- **Drawer 取消/关闭必须清理未提交本地状态**：page 用 Drawer 承载 create/edit 表单时，`onClose` / 取消按钮 / Escape / overlay 关闭都必须丢弃 draft、表单错误和保存反馈；重新打开应从当前已保存数据或初始空表单重建。测试至少覆盖“编辑草稿 → 取消关闭 → 重新打开草稿已重置”以及取消不触发提交。
 
 ### AppShell / Command Search 交互合同
 

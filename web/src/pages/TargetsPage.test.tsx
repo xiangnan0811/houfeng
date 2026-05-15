@@ -109,16 +109,17 @@ describe('TargetsPage', () => {
     ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
-    expect(screen.getByText('目标创建')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('目标类型'), { target: { value: 'service' } })
-    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(screen.getByLabelText('基础端口'), { target: { value: '443' } })
-    fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge, core' } })
-    fireEvent.change(screen.getByLabelText('运行状态'), { target: { value: '启用' } })
-    fireEvent.change(screen.getByLabelText('目标标签'), { target: { value: 'public' } })
-    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'primary blog' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    expect(within(createDrawer).getByText('目标创建')).toBeInTheDocument()
+    fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(within(createDrawer).getByLabelText('目标类型'), { target: { value: 'service' } })
+    fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(within(createDrawer).getByLabelText('基础端口'), { target: { value: '443' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge, core' } })
+    fireEvent.change(within(createDrawer).getByLabelText('运行状态'), { target: { value: '启用' } })
+    fireEvent.change(within(createDrawer).getByLabelText('目标标签'), { target: { value: 'public' } })
+    fireEvent.change(within(createDrawer).getByLabelText('备注'), { target: { value: 'primary blog' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     await waitFor(() => expect(screen.getByText('target detail route')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets', {
@@ -143,7 +144,7 @@ describe('TargetsPage', () => {
     })
   })
 
-  it('keeps target creation errors inside the create panel', async () => {
+  it('keeps target creation errors inside the create drawer', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -160,11 +161,12 @@ describe('TargetsPage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
-    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
-    expect(screen.getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
+    expect(within(createDrawer).getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -185,17 +187,18 @@ describe('TargetsPage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
-    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(screen.getByLabelText('基础端口'), { target: { value: 'abc' } })
-    fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(within(createDrawer).getByLabelText('基础端口'), { target: { value: 'abc' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
-    expect(screen.getByText('基础端口必须为正整数。')).toBeInTheDocument()
+    expect(within(createDrawer).getByText('基础端口必须为正整数。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('resets stale create panel state when closed from the header', async () => {
+  it('resets stale create drawer state when cancelled from the drawer', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([targetRecord()]))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -210,20 +213,22 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(screen.getByText('Existing API')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
-    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Stale target' } })
-    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'stale.example.com' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+    let createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Stale target' } })
+    fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'stale.example.com' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
-    expect(screen.getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
+    expect(within(createDrawer).getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
+
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
-    expect(screen.queryByLabelText('目标名称')).not.toBeInTheDocument()
+    createDrawer = screen.getByRole('dialog', { name: '创建目标' })
 
-    fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
-
-    expect(screen.queryByText('执行节点标签至少需要填写一个。')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('目标名称')).toHaveValue('')
-    expect(screen.getByLabelText('主机地址')).toHaveValue('')
+    expect(within(createDrawer).queryByText('执行节点标签至少需要填写一个。')).not.toBeInTheDocument()
+    expect(within(createDrawer).getByLabelText('目标名称')).toHaveValue('')
+    expect(within(createDrawer).getByLabelText('主机地址')).toHaveValue('')
   })
 
   it('keeps failed target creation API errors local while preserving the loaded list', async () => {
@@ -244,12 +249,13 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(screen.getByText('Existing API')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
-    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
-    await waitFor(() => expect(screen.getByText('target already exists')).toBeInTheDocument())
+    await waitFor(() => expect(within(createDrawer).getByText('target already exists')).toBeInTheDocument())
     expect(screen.getByText('Existing API')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '入口观测' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
@@ -283,10 +289,11 @@ describe('TargetsPage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
-    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 
@@ -322,7 +329,7 @@ describe('TargetsPage', () => {
     expect(screen.queryByText('target detail route')).not.toBeInTheDocument()
   })
 
-  it('ignores a late target creation response after the create panel is closed', async () => {
+  it('ignores a late target creation response after the create drawer is closed', async () => {
     const createResponse = deferred<Response>()
     const fetchMock = vi
       .fn()
@@ -344,16 +351,17 @@ describe('TargetsPage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
-    fireEvent.change(screen.getByLabelText('目标名称'), { target: { value: 'Blog' } })
-    fireEvent.change(screen.getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(screen.getByLabelText('执行节点标签'), { target: { value: 'edge' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建目标' }))
+    let createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
+    fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-    expect(screen.getByRole('button', { name: '正在创建…' })).toBeDisabled()
+    expect(within(createDrawer).getByRole('button', { name: '正在创建…' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
-    expect(screen.queryByLabelText('目标名称')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument()
 
     await act(async () => {
       createResponse.resolve(
@@ -384,12 +392,13 @@ describe('TargetsPage', () => {
     expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
+    createDrawer = screen.getByRole('dialog', { name: '创建目标' })
 
-    expect(screen.queryByText('Late Blog')).not.toBeInTheDocument()
+    expect(within(createDrawer).queryByText('Late Blog')).not.toBeInTheDocument()
     expect(screen.queryByText('target detail route')).not.toBeInTheDocument()
-    expect(screen.queryByText('执行节点标签至少需要填写一个。')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('目标名称')).toHaveValue('')
-    expect(screen.getByRole('button', { name: '创建目标' })).toBeEnabled()
+    expect(within(createDrawer).queryByText('执行节点标签至少需要填写一个。')).not.toBeInTheDocument()
+    expect(within(createDrawer).getByLabelText('目标名称')).toHaveValue('')
+    expect(within(createDrawer).getByRole('button', { name: '创建目标' })).toBeEnabled()
   })
 
   it('renders runtime quick actions by target run status and restores archived targets to paused', async () => {
@@ -1528,7 +1537,7 @@ describe('TargetsPage', () => {
     expect(screen.queryByText('target detail')).not.toBeInTheDocument()
   })
 
-  it('toggles the create target form panel via the section heading button', async () => {
+  it('toggles the create target drawer via the section heading button and restores focus', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(mockJSONResponse([targetRecord()])),
@@ -1546,13 +1555,22 @@ describe('TargetsPage', () => {
       expect(screen.getByRole('button', { name: '新建目标' })).toBeInTheDocument(),
     )
 
-    expect(screen.queryByText('目标创建')).not.toBeInTheDocument()
+    const trigger = screen.getByRole('button', { name: '新建目标' })
+    trigger.focus()
+    expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    expect(screen.getByRole('dialog', { name: '创建目标' })).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
-    expect(screen.getByText('目标创建')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '创建目标' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
-    expect(screen.queryByText('目标创建')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument()
   })
 
   // ─── PR2: sparkline strip ──────────────────────────────────────────────

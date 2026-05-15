@@ -331,6 +331,35 @@ export function VPSDetailPage() {
   }
 
   function closeDrawer() {
+    if (activeDrawer === 'decision') {
+      if (state.detail) {
+        setDecisionDraft({ renewalDecision: state.detail.renewal_decision, reason: '' })
+      }
+      clearDecisionFeedback()
+    }
+    if (activeDrawer === 'facts') {
+      if (state.detail) {
+        setFactDraft(detailToFactEditForm(state.detail))
+      }
+      setFactError(null)
+      setFactNotice(null)
+    }
+    if (activeDrawer === 'node-link') {
+      setLinkDraft({ nodeId: '', note: '' })
+      clearLinkFormFeedback()
+    }
+    if (activeDrawer === 'experience') {
+      setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
+      clearExperienceFeedback()
+    }
+    if (activeDrawer === 'service') {
+      setServiceDraft(INITIAL_SERVICE_DRAFT)
+      clearServiceFeedback()
+    }
+    if (activeDrawer === 'domain') {
+      setDomainDraft(INITIAL_DOMAIN_DRAFT)
+      clearDomainFeedback()
+    }
     setActiveDrawer(null)
   }
 
@@ -629,6 +658,7 @@ export function VPSDetailPage() {
           error={decisionError}
           notice={decisionNotice}
           decisionChanged={decisionChanged}
+          onCancel={closeDrawer}
           onDraftChange={handleDecisionDraftChange}
           onFeedbackClear={clearDecisionFeedback}
           onSubmit={(event) => void handleDecisionSubmit(event)}
@@ -657,6 +687,7 @@ export function VPSDetailPage() {
           submitting={linkSubmitting}
           error={linkError}
           notice={linkNotice}
+          onCancel={closeDrawer}
           onDraftChange={handleLinkDraftChange}
           onFeedbackClear={clearLinkFormFeedback}
           onSubmit={(event) => void handleLinkSubmit(event)}
@@ -671,6 +702,7 @@ export function VPSDetailPage() {
           submitting={experienceSubmitting}
           error={experienceError}
           notice={experienceNotice}
+          onCancel={closeDrawer}
           onDraftChange={handleExperienceDraftChange}
           onFeedbackClear={clearExperienceFeedback}
           onSubmit={(event) => void handleExperienceSubmit(event)}
@@ -684,6 +716,7 @@ export function VPSDetailPage() {
           submitting={serviceSubmitting}
           error={serviceError}
           notice={serviceNotice}
+          onCancel={closeDrawer}
           onDraftChange={handleServiceDraftChange}
           onFeedbackClear={clearServiceFeedback}
           onSubmit={(event) => void handleServiceSubmit(event)}
@@ -697,6 +730,7 @@ export function VPSDetailPage() {
           submitting={domainSubmitting}
           error={domainError}
           notice={domainNotice}
+          onCancel={closeDrawer}
           onDraftChange={handleDomainDraftChange}
           onFeedbackClear={clearDomainFeedback}
           onSubmit={(event) => void handleDomainSubmit(event)}

@@ -303,3 +303,36 @@ Completed page-specific visual acceptance pass across Dashboard, asset decisions
 ### Next Steps
 
 - None - task complete
+
+
+## Session 128: UX-10 Interaction acceptance polish
+
+**Date**: 2026-05-15
+**Task**: UX-10 Interaction acceptance polish
+**Branch**: `feature/ux10-interaction-acceptance-polish`
+
+### Summary
+
+Completed interaction acceptance polish for routine VPS detail drawers and target creation drawer, with Drawer cancel state cleanup captured in frontend specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `995204d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
