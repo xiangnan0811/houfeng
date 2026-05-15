@@ -7,6 +7,7 @@ import {
   DataTable,
   Drawer,
   Input,
+  Hostname,
   MonoDigits,
   Tabs,
   type DataTableColumn,
@@ -530,6 +531,26 @@ export function VPSPage() {
           : 'normal',
     },
   ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'notice' | 'alert' }>
+  const inventoryEmptyContent = (
+    <div className="asset-table-empty-state">
+      <strong>{active ? '当前筛选没有匹配 VPS' : '还没有录入 VPS 资产'}</strong>
+      <span>
+        {active
+          ? '先清空筛选回到完整库存；如果这是新资产，直接创建 VPS 后再补订阅和 Node 关联。'
+          : '先建立第一条 VPS 库存记录，再补齐订阅、Node 关联和续费判断。'}
+      </span>
+      <div className="asset-empty-actions">
+        {active ? (
+          <Button variant="secondary" size="sm" onClick={clearFilters}>
+            清空筛选
+          </Button>
+        ) : null}
+        <Button variant={active ? 'ghost' : 'secondary'} size="sm" onClick={openCreateDrawer}>
+          {state.vps.length === 0 ? '录入第一台 VPS' : '录入新 VPS'}
+        </Button>
+      </div>
+    </div>
+  )
 
   function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     const next = { ...filters, [key]: value }
@@ -591,7 +612,7 @@ export function VPSPage() {
       render: ({ vps }) => (
         <div className="asset-table__identity">
           <strong>{vps.display_name}</strong>
-          <span>{vps.vps_id}</span>
+          <Hostname truncate maxChars={28}>{vps.vps_id}</Hostname>
           <small>{vpsAccessLabel(vps)}</small>
         </div>
       ),
@@ -755,7 +776,7 @@ export function VPSPage() {
             rows={filteredRows}
             rowKey={(row) => row.vps.vps_id}
             onRowClick={(row) => navigate(`/vps/${row.vps.vps_id}`)}
-            emptyContent={<span className="empty-inline">当前筛选下暂无 VPS 资产</span>}
+            emptyContent={inventoryEmptyContent}
           />
         )}
       </section>
@@ -771,55 +792,72 @@ export function VPSPage() {
             创建只记录资产库存基础事实；订阅、Node 关联和详细编辑继续在对应页面补齐。
           </p>
           <form className="asset-create-form" onSubmit={handleCreateSubmit}>
-            <Input label="VPS 名称" value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} />
-            <label className="input-field">
-              <span className="input-field__label">资产服务商</span>
-              <select className="input" value={createForm.providerID} onChange={(event) => setCreateForm({ ...createForm, providerID: event.target.value })}>
-                <option value="">未关联服务商</option>
-                {providerSelectOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Input label="服务商名称快照" value={createForm.providerName} onChange={(event) => setCreateForm({ ...createForm, providerName: event.target.value })} />
-            <Input label="产品名" value={createForm.productName} onChange={(event) => setCreateForm({ ...createForm, productName: event.target.value })} />
-            <Input label="订单号" value={createForm.orderRef} onChange={(event) => setCreateForm({ ...createForm, orderRef: event.target.value })} />
-            <Input label="国家" value={createForm.country} onChange={(event) => setCreateForm({ ...createForm, country: event.target.value })} />
-            <Input label="区域" value={createForm.region} onChange={(event) => setCreateForm({ ...createForm, region: event.target.value })} />
-            <Input label="城市" value={createForm.city} onChange={(event) => setCreateForm({ ...createForm, city: event.target.value })} />
-            <Input label="数据中心" value={createForm.datacenter} onChange={(event) => setCreateForm({ ...createForm, datacenter: event.target.value })} />
-            <Input label="IPv4" value={createForm.ipv4} onChange={(event) => setCreateForm({ ...createForm, ipv4: event.target.value })} />
-            <Input label="IPv6" value={createForm.ipv6} onChange={(event) => setCreateForm({ ...createForm, ipv6: event.target.value })} />
-            <Input label="SSH Host" value={createForm.sshHost} onChange={(event) => setCreateForm({ ...createForm, sshHost: event.target.value })} />
-            <Input label="SSH 端口" type="number" value={createForm.sshPort} onChange={(event) => setCreateForm({ ...createForm, sshPort: event.target.value })} />
-            <Input label="SSH 用户" value={createForm.sshUser} onChange={(event) => setCreateForm({ ...createForm, sshUser: event.target.value })} />
-            <Input label="操作系统" value={createForm.osName} onChange={(event) => setCreateForm({ ...createForm, osName: event.target.value })} />
-            <Input label="虚拟化" value={createForm.virtualization} onChange={(event) => setCreateForm({ ...createForm, virtualization: event.target.value })} />
-            <label className="input-field">
-              <span className="input-field__label">生命周期</span>
-              <select className="input" value={createForm.lifecycleStatus} onChange={(event) => setCreateForm({ ...createForm, lifecycleStatus: event.target.value as VPSLifecycleStatus })}>
-                {LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <label className="input-field">
-              <span className="input-field__label">用途状态</span>
-              <select className="input" value={createForm.usageStatus} onChange={(event) => setCreateForm({ ...createForm, usageStatus: event.target.value as VPSUsageStatus })}>
-                {USAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <label className="input-field">
-              <span className="input-field__label">续费决策</span>
-              <select className="input" value={createForm.renewalDecision} onChange={(event) => setCreateForm({ ...createForm, renewalDecision: event.target.value as VPSRenewalDecision })}>
-                {RENEWAL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <Input label="重要性" value={createForm.importance} onChange={(event) => setCreateForm({ ...createForm, importance: event.target.value })} />
-            <Input label="标签" hint="用逗号分隔" value={createForm.labels} onChange={(event) => setCreateForm({ ...createForm, labels: event.target.value })} />
-            <Input name="note" label="备注" value={createForm.note} onChange={(event) => setCreateForm({ ...createForm, note: event.target.value })} />
+            <fieldset className="asset-create-form__group">
+              <legend>基础识别</legend>
+              <Input label="VPS 名称" value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} />
+              <label className="input-field">
+                <span className="input-field__label">资产服务商</span>
+                <select className="input" value={createForm.providerID} onChange={(event) => setCreateForm({ ...createForm, providerID: event.target.value })}>
+                  <option value="">未关联服务商</option>
+                  {providerSelectOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Input label="服务商名称快照" value={createForm.providerName} onChange={(event) => setCreateForm({ ...createForm, providerName: event.target.value })} />
+              <Input label="产品名" value={createForm.productName} onChange={(event) => setCreateForm({ ...createForm, productName: event.target.value })} />
+              <Input label="订单号" value={createForm.orderRef} onChange={(event) => setCreateForm({ ...createForm, orderRef: event.target.value })} />
+            </fieldset>
+
+            <fieldset className="asset-create-form__group">
+              <legend>访问入口</legend>
+              <Input label="国家" value={createForm.country} onChange={(event) => setCreateForm({ ...createForm, country: event.target.value })} />
+              <Input label="区域" value={createForm.region} onChange={(event) => setCreateForm({ ...createForm, region: event.target.value })} />
+              <Input label="城市" value={createForm.city} onChange={(event) => setCreateForm({ ...createForm, city: event.target.value })} />
+              <Input label="数据中心" value={createForm.datacenter} onChange={(event) => setCreateForm({ ...createForm, datacenter: event.target.value })} />
+              <Input label="IPv4" value={createForm.ipv4} onChange={(event) => setCreateForm({ ...createForm, ipv4: event.target.value })} />
+              <Input label="IPv6" value={createForm.ipv6} onChange={(event) => setCreateForm({ ...createForm, ipv6: event.target.value })} />
+              <Input label="SSH Host" value={createForm.sshHost} onChange={(event) => setCreateForm({ ...createForm, sshHost: event.target.value })} />
+              <Input label="SSH 端口" type="number" value={createForm.sshPort} onChange={(event) => setCreateForm({ ...createForm, sshPort: event.target.value })} />
+              <Input label="SSH 用户" value={createForm.sshUser} onChange={(event) => setCreateForm({ ...createForm, sshUser: event.target.value })} />
+            </fieldset>
+
+            <fieldset className="asset-create-form__group">
+              <legend>运行与决策</legend>
+              <Input label="操作系统" value={createForm.osName} onChange={(event) => setCreateForm({ ...createForm, osName: event.target.value })} />
+              <Input label="虚拟化" value={createForm.virtualization} onChange={(event) => setCreateForm({ ...createForm, virtualization: event.target.value })} />
+              <label className="input-field">
+                <span className="input-field__label">生命周期</span>
+                <select className="input" value={createForm.lifecycleStatus} onChange={(event) => setCreateForm({ ...createForm, lifecycleStatus: event.target.value as VPSLifecycleStatus })}>
+                  {LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="input-field">
+                <span className="input-field__label">用途状态</span>
+                <select className="input" value={createForm.usageStatus} onChange={(event) => setCreateForm({ ...createForm, usageStatus: event.target.value as VPSUsageStatus })}>
+                  {USAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="input-field">
+                <span className="input-field__label">续费决策</span>
+                <select className="input" value={createForm.renewalDecision} onChange={(event) => setCreateForm({ ...createForm, renewalDecision: event.target.value as VPSRenewalDecision })}>
+                  {RENEWAL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <Input label="重要性" value={createForm.importance} onChange={(event) => setCreateForm({ ...createForm, importance: event.target.value })} />
+            </fieldset>
+
+            <fieldset className="asset-create-form__group asset-create-form__group--wide">
+              <legend>备注标签</legend>
+              <Input label="标签" hint="用逗号分隔" value={createForm.labels} onChange={(event) => setCreateForm({ ...createForm, labels: event.target.value })} />
+              <Input name="note" label="备注" value={createForm.note} onChange={(event) => setCreateForm({ ...createForm, note: event.target.value })} />
+            </fieldset>
+
             {createError && <p className="create-form__error" role="alert">{createError}</p>}
-            <div className="page-form-actions">
+            <div className="page-form-actions asset-create-form__actions">
+              <span className="asset-create-form__hint">创建后进入详情页补订阅、Node 关联和更多证据。</span>
               <Button variant="secondary" type="button" onClick={closeCreateDrawer}>
                 取消
               </Button>

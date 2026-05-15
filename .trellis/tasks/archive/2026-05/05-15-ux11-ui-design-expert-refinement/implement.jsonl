@@ -1,0 +1,12 @@
+{"file":".trellis/spec/web/index.md","reason":"Web frontend authority hierarchy and task-relevant spec index."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Preserve PageState, Drawer focus/ESC/restore and cancel cleanup, DataTable row action guard, self-drawn queue semantics, and Drawer-first create/edit patterns."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Dark-first token/BEM/pure CSS rules, responsive layout constraints, no page-local CSS, and no hardcoded colors."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Preserve API client, URL-state, Dashboard facts boundaries, Asset Ledger data flow, and no real-data/API contract drift."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Frontend lint/test/build and browser evidence expectations for user-visible UI changes."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Keep implementation off main and use PR workflow."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Prefer existing page/components and avoid premature abstractions while refining repeated UI state patterns."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Active v2 visual language: refined observatory, dark-first, high-density, restrained engineering workbench."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Active component/page visual contracts for Dashboard, Asset Ledger, VPS, Drawer, DataTable, PageState, and observability pages."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Required browser preview/sanity evidence workflow and limitations."}
+{"file":".trellis/tasks/archive/2026-05/05-15-ux10-interaction-acceptance-polish/prd.md","reason":"Prior UX-10 interaction polish scope so UX-11 advances expert micro-refinement rather than repeating Drawer/interaction work."}
+{"file":".trellis/tasks/05-15-ux11-ui-design-expert-refinement/research/expert-ui-audit.md","reason":"Read-only expert UI audit candidates that should guide the restrained implementation subset."}

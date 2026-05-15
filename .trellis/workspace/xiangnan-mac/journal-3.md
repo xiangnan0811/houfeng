@@ -336,3 +336,36 @@ Completed interaction acceptance polish for routine VPS detail drawers and targe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 129: UX-11 Expert UI refinement
+
+**Date**: 2026-05-15
+**Task**: UX-11 Expert UI refinement
+**Branch**: `feature/ux11-ui-design-expert-refinement`
+
+### Summary
+
+Completed expert UI micro-refinement for state surfaces, events context, observability support copy, empty next actions, and VPS create drawer grouping.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6c25181` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

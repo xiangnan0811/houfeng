@@ -119,6 +119,9 @@ describe('NodesPage', () => {
     expect(
       screen.getByText('以运行事实支撑 VPS 资产判断，优先扫描 VPS 关联、接入状态、维护 / 暂停与异常证据。'),
     ).toBeInTheDocument()
+    expect(
+      screen.getByText('用运行事实确认服务器是否在线、证据是否新鲜，以及哪些 VPS 需要补接入、维护解释或异常排查。'),
+    ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /全部节点/ })).toBeInTheDocument()
 
@@ -1223,7 +1226,7 @@ describe('NodesPage', () => {
 
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
     expect(
-      screen.getByText('Node 页面不是资产主体；它保留运行事实、接入状态、维护窗口和 freshness，用来判断 VPS 是否有可信观测证据。'),
+      screen.getByText('用运行事实确认服务器是否在线、证据是否新鲜，以及哪些 VPS 需要补接入、维护解释或异常排查。'),
     ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '先处理 1 个异常节点' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '优先核对：Alerting Edge' })).toBeInTheDocument()
@@ -1233,7 +1236,7 @@ describe('NodesPage', () => {
       '/nodes/nd_alert',
     )
     expect(screen.getByText('VPS 关联')).toBeInTheDocument()
-    expect(screen.getByText('列表不推导 linked VPS health；资产关联回到 VPS 台账和 Node 详情核对。')).toBeInTheDocument()
+    expect(screen.getByText('需要判断资产健康时，先从未关联 VPS 和节点详情确认这台服务器是否有可用观测证据。')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '未关联 VPS' })).toHaveAttribute(
       'href',
       '/vps?view=unlinked',

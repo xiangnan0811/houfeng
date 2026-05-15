@@ -84,6 +84,11 @@ export function EventsStreamSection({
       ribbon={hasActiveFilters ? 'notice' : 'accent-2'}
       aside={<span><MonoDigits>{events.length}</MonoDigits> 条当前事件</span>}
     >
+      <p className="events-stream-context">
+        {hasActiveFilters
+          ? '当前事件流只展示 URL 固定的筛选结果；加载更早事件会沿用同一组条件扩大数量上限。'
+          : '默认事件流未限定时间范围，按最近事件数量截取；需要精确窗口可使用高级筛选。'}
+      </p>
       {events.length === 0 ? (
         <EventList
           events={events}
