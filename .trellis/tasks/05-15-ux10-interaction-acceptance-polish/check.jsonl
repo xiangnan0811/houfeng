@@ -1,0 +1,10 @@
+{"file":".trellis/spec/web/index.md","reason":"Web frontend authority hierarchy and task-relevant spec index for review."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Review Drawer focus/ESC/restore, DataTable row action guard, self-drawn queue semantics, AppShell/search contracts, and Drawer-first create/edit patterns."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Review token/BEM/pure CSS compliance, responsive constraints, and DataTable sortable header styling pitfall."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Review no API/data/URL-state/real-data contract drift and applied/draft filter behavior."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Review lint/test/build and browser evidence expectations."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Confirm work stayed off main and follows PR workflow."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Review against active v2 visual language and anti-patterns."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Review interaction and page/component visual contract consistency and spec update need."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Review browser evidence workflow and limitations."}
+{"file":".trellis/tasks/archive/2026-05/05-15-ux9-page-visual-acceptance/prd.md","reason":"Review UX-10 does not simply repeat UX-9 page composition and remains interaction-specific."}

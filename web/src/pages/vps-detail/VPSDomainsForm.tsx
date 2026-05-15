@@ -10,6 +10,7 @@ type VPSDomainsFormProps = {
   submitting: boolean
   error: string | null
   notice: string | null
+  onCancel: () => void
   onDraftChange: (draft: DomainDraftState) => void
   onFeedbackClear: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -20,6 +21,7 @@ export function VPSDomainsForm({
   submitting,
   error,
   notice,
+  onCancel,
   onDraftChange,
   onFeedbackClear,
   onSubmit,
@@ -155,6 +157,9 @@ export function VPSDomainsForm({
         <p className="asset-operation-feedback" role="status">{notice}</p>
       ) : null}
       <div className="asset-operation-actions">
+        <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
+          取消
+        </Button>
         <Button type="submit" disabled={submitting}>
           {submitting ? '创建中…' : '创建域名记录'}
         </Button>

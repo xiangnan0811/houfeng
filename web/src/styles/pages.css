@@ -3265,6 +3265,7 @@ html.theme-classic-light .dashboard-command-surface {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .asset-lifecycle-card {
@@ -4350,13 +4351,82 @@ html.theme-classic-light .dashboard-command-surface {
 }
 
 .asset-create-drawer,
-.asset-filter-drawer {
+.asset-filter-drawer,
+.target-create-drawer {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  min-width: 0;
 }
 
-.asset-create-form {
+.target-create-drawer__eyebrow {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+}
+
+.target-create-drawer__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--type-h2-size);
+  line-height: var(--type-h2-leading);
+}
+
+.target-create-drawer__description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+}
+
+.target-create-drawer__form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+}
+
+.target-create-drawer__form input,
+.target-create-drawer__form select,
+.target-create-drawer__form textarea {
+  width: 100%;
+  background: var(--control-bg);
+  border: var(--border-w) solid var(--control-border);
+  border-radius: var(--radius-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-primary);
+  font: inherit;
+  transition: border-color var(--dur-micro) var(--ease-calm),
+              background-color var(--dur-micro) var(--ease-calm),
+              box-shadow var(--dur-micro) var(--ease-calm);
+}
+
+.target-create-drawer__form input:hover,
+.target-create-drawer__form select:hover,
+.target-create-drawer__form textarea:hover {
+  background: var(--control-bg-hover);
+  border-color: var(--panel-border-strong);
+}
+
+.target-create-drawer__form input:focus,
+.target-create-drawer__form select:focus,
+.target-create-drawer__form textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.target-create-drawer__form textarea {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+.asset-create-form,
+.target-create-drawer__form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: var(--space-3);
@@ -4364,8 +4434,20 @@ html.theme-classic-light .dashboard-command-surface {
 
 .asset-create-form .create-form__error,
 .asset-create-form .page-form-actions,
-.asset-create-form .input-field:has(input[name='note']) {
+.asset-create-form .input-field:has(input[name='note']),
+.target-create-drawer__form .create-form__error,
+.target-create-drawer__form .page-form-actions,
+.target-create-drawer__form > p:has(textarea) {
   grid-column: 1 / -1;
+}
+
+.target-create-drawer__form > p {
+  margin: 0;
+}
+
+.target-create-drawer__form textarea {
+  min-height: 96px;
+  resize: vertical;
 }
 
 .asset-filter-drawer .filter-select {
@@ -4679,6 +4761,7 @@ html.theme-classic-light .dashboard-command-surface {
   .page-panel__actions,
   .section-heading--inline,
   .section-heading__actions,
+  .asset-operation-actions,
   .watchtower-property-item,
   .watchtower-property-item__actions,
   .events-filter-drawer__actions {
@@ -4690,6 +4773,7 @@ html.theme-classic-light .dashboard-command-surface {
 
   .page-panel__actions .btn,
   .section-heading__actions .btn,
+  .asset-operation-actions .btn,
   .events-filter-drawer__actions .btn,
   .page-form-actions .btn,
   .settings-actions .btn,
@@ -4719,6 +4803,7 @@ html.theme-classic-light .dashboard-command-surface {
   .page-panel__actions,
   .section-heading__actions,
   .page-form-actions,
+  .asset-operation-actions,
   .settings-actions,
   .event-filter-actions,
   .watchtower-property-item__actions,
@@ -4732,6 +4817,7 @@ html.theme-classic-light .dashboard-command-surface {
   .page-panel__actions .btn,
   .section-heading__actions .btn,
   .page-form-actions .btn,
+  .asset-operation-actions .btn,
   .settings-actions .btn,
   .event-filter-actions .btn,
   .watchtower-property-item__actions .btn,

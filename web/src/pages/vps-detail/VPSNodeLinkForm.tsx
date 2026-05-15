@@ -11,6 +11,7 @@ type VPSNodeLinkFormProps = {
   submitting: boolean
   error: string | null
   notice: string | null
+  onCancel: () => void
   onDraftChange: (draft: LinkDraftState) => void
   onFeedbackClear: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -23,6 +24,7 @@ export function VPSNodeLinkForm({
   submitting,
   error,
   notice,
+  onCancel,
   onDraftChange,
   onFeedbackClear,
   onSubmit,
@@ -66,6 +68,9 @@ export function VPSNodeLinkForm({
         <p className="asset-operation-feedback" role="status">{notice}</p>
       ) : null}
       <div className="asset-operation-actions">
+        <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
+          取消
+        </Button>
         <Button type="submit" disabled={controlsDisabled}>
           {submitting ? '关联中…' : '关联 Node'}
         </Button>

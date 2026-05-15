@@ -570,6 +570,129 @@ describe('VPSDetailPage', () => {
     })
   })
 
+  it('lets users cancel routine VPS detail drawers without submitting', async () => {
+    const detailBody = {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      product_name: 'cx22',
+      order_ref: 'ord-1',
+      country: 'JP',
+      region: 'Kanto',
+      city: 'Tokyo',
+      datacenter: 'nrt',
+      ipv4: '192.0.2.1',
+      ipv6: '',
+      ssh_host: '192.0.2.1',
+      ssh_port: 22,
+      ssh_user: 'root',
+      os_name: 'Debian',
+      virtualization: 'kvm',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'normal',
+      labels: ['edge'],
+      note: 'primary',
+      active_node_link_count: 0,
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+      archived_at: null,
+      node_links: [],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '调整决策' }))
+    let decisionDialog = screen.getByRole('dialog', { name: '续费决策' })
+    fireEvent.change(within(decisionDialog).getByLabelText('续费决策'), { target: { value: 'cancel' } })
+    fireEvent.change(within(decisionDialog).getByLabelText('决策理由'), { target: { value: 'stale decision' } })
+    fireEvent.click(within(decisionDialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '续费决策' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '调整决策' }))
+    decisionDialog = screen.getByRole('dialog', { name: '续费决策' })
+    expect(within(decisionDialog).getByLabelText('续费决策')).toHaveValue('keep')
+    expect(within(decisionDialog).getByLabelText('决策理由')).toHaveValue('')
+    fireEvent.click(within(decisionDialog).getByRole('button', { name: '取消' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑基础信息' }))
+    let factsDialog = screen.getByRole('dialog', { name: '编辑基础信息' })
+    fireEvent.change(within(factsDialog).getByLabelText('VPS 名称'), { target: { value: 'Stale VPS' } })
+    fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
+    expect(screen.queryByRole('dialog', { name: '编辑基础信息' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑基础信息' }))
+    factsDialog = screen.getByRole('dialog', { name: '编辑基础信息' })
+    expect(within(factsDialog).getByLabelText('VPS 名称')).toHaveValue('Tokyo Edge')
+    fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
+    let nodeDialog = screen.getByRole('dialog', { name: '关联 Node' })
+    fireEvent.change(within(nodeDialog).getByLabelText('Node ID'), { target: { value: 'nd_stale' } })
+    fireEvent.change(within(nodeDialog).getByLabelText('关联备注'), { target: { value: 'stale note' } })
+    fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '关联 Node' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
+    nodeDialog = screen.getByRole('dialog', { name: '关联 Node' })
+    expect(within(nodeDialog).getByLabelText('Node ID')).toHaveValue('')
+    expect(within(nodeDialog).getByLabelText('关联备注')).toHaveValue('')
+    fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '记录经验' }))
+    let experienceDialog = screen.getByRole('dialog', { name: '经验记录' })
+    fireEvent.change(within(experienceDialog).getByLabelText('摘要'), { target: { value: 'stale experience' } })
+    fireEvent.click(within(experienceDialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '经验记录' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '记录经验' }))
+    experienceDialog = screen.getByRole('dialog', { name: '经验记录' })
+    expect(within(experienceDialog).getByLabelText('摘要')).toHaveValue('')
+    fireEvent.click(within(experienceDialog).getByRole('button', { name: '取消' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '新增服务' }))
+    let serviceDialog = screen.getByRole('dialog', { name: '新增服务' })
+    fireEvent.change(within(serviceDialog).getByLabelText('服务名称'), { target: { value: 'stale service' } })
+    fireEvent.click(within(serviceDialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '新增服务' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新增服务' }))
+    serviceDialog = screen.getByRole('dialog', { name: '新增服务' })
+    expect(within(serviceDialog).getByLabelText('服务名称')).toHaveValue('')
+    fireEvent.click(within(serviceDialog).getByRole('button', { name: '取消' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '新增域名' }))
+    let domainDialog = screen.getByRole('dialog', { name: '新增域名' })
+    fireEvent.change(within(domainDialog).getByLabelText('域名'), { target: { value: 'stale.example.com' } })
+    fireEvent.click(within(domainDialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '新增域名' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新增域名' }))
+    domainDialog = screen.getByRole('dialog', { name: '新增域名' })
+    expect(within(domainDialog).getByLabelText('域名')).toHaveValue('')
+    fireEvent.click(within(domainDialog).getByRole('button', { name: '取消' }))
+
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+  })
+
   it('updates VPS facts and refreshes detail plus timeline', async () => {
     const detailBody = {
       vps_id: 'vps_001',

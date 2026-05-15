@@ -13,6 +13,7 @@ type VPSRenewalDecisionFormProps = {
   error: string | null
   notice: string | null
   decisionChanged: boolean
+  onCancel: () => void
   onDraftChange: (draft: DecisionDraftState) => void
   onFeedbackClear: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -25,6 +26,7 @@ export function VPSRenewalDecisionForm({
   error,
   notice,
   decisionChanged,
+  onCancel,
   onDraftChange,
   onFeedbackClear,
   onSubmit,
@@ -74,6 +76,9 @@ export function VPSRenewalDecisionForm({
         <p className="asset-operation-feedback" role="status">{notice}</p>
       ) : null}
       <div className="asset-operation-actions">
+        <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
+          取消
+        </Button>
         <Button type="submit" disabled={submitting || !decisionChanged}>
           {submitting ? '保存中…' : '保存续费决策'}
         </Button>
