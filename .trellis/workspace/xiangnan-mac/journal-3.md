@@ -270,3 +270,36 @@ Hardened the core frontend visual rhythm for human UI acceptance, reduced shared
 ### Next Steps
 
 - None - task complete
+
+
+## Session 127: UX-9 Page visual acceptance
+
+**Date**: 2026-05-15
+**Task**: UX-9 Page visual acceptance
+**Branch**: `feature/ux9-page-visual-acceptance`
+
+### Summary
+
+Completed page-specific visual acceptance pass across Dashboard, asset decisions, VPS inventory/detail, and observability support routes with mock browser sanity evidence.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d07de92` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
