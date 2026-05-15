@@ -1,0 +1,10 @@
+{"file":".trellis/spec/web/index.md","reason":"Web frontend authority hierarchy and task-relevant spec index for review."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Review component boundaries, route/page contracts, DataTable row behavior, Drawer/PageState conventions."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Review token/BEM/pure CSS compliance and DataTable sortable header styling pitfall."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Review no API/data/URL-state/real-data contract drift."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Review lint/test/build and browser evidence expectations."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Confirm work stayed off main and follows PR workflow."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Review against active v2 visual language and anti-patterns."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Review page/component visual contract consistency and spec update need."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Review browser evidence workflow and limitations."}
+{"file":".trellis/tasks/archive/2026-05/05-15-ux8-human-ui-acceptance/prd.md","reason":"Review UX-9 does not simply repeat UX-8 global CSS hardening and remains page-specific."}

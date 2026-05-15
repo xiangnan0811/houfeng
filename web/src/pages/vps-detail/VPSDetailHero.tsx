@@ -36,8 +36,8 @@ export function VPSDetailHero({
       <div className="page-panel__actions">
         <Button variant="primary" onClick={onDecisionEdit}>处理决策</Button>
         <Button variant="secondary" onClick={onFactEdit}>编辑资料</Button>
-        <Button variant="secondary" onClick={onBack}>返回</Button>
-        <Link className="btn btn--secondary btn--md" to="/vps">VPS 列表</Link>
+        <Button variant="ghost" onClick={onBack}>返回</Button>
+        <Link className="btn btn--ghost btn--md" to="/vps">VPS 列表</Link>
       </div>
     </section>
   )

@@ -504,38 +504,32 @@ export function VPSPage() {
     { value: 'missing_facts', label: '缺信息', count: missingFactsCount },
     { value: 'archived', label: '已归档', count: inventoryRows.filter((row) => row.vps.lifecycle_status === 'archived').length },
   ] satisfies Array<{ value: VPSQuickView; label: string; count: number }>
-  const focusItems = [
+  const inventorySignals = [
     {
-      label: '当前可见',
+      label: '当前表格',
       value: `${filteredRows.length} / ${inventoryRows.length}`,
       meta: active ? '已应用筛选' : '全量库存',
       tone: 'normal',
     },
     {
-      label: '续费窗口',
-      value: `${renewalDueCount}`,
-      meta: subscriptionEvidence === 'ready' ? '30 天内需核对' : '等待订阅证据',
-      tone: renewalDueCount > 0 ? 'alert' : 'neutral',
+      label: '续费 / 未评估',
+      value: `${renewalDueCount} / ${unreviewedCount}`,
+      meta: subscriptionEvidence === 'ready' ? '30 天续费与待判断' : '等待订阅证据',
+      tone: renewalDueCount + unreviewedCount > 0 ? 'alert' : 'normal',
     },
     {
-      label: '未评估 / 未关联',
-      value: `${unreviewedCount} / ${unlinkedCount}`,
-      meta: '优先补判断与 Node 证据',
-      tone: unreviewedCount + unlinkedCount > 0 ? 'alert' : 'normal',
+      label: '质量 / Node',
+      value: `${missingFactsCount} / ${unlinkedCount}`,
+      meta: subscriptionEvidence === 'error'
+        ? subscriptionEvidenceLabel(subscriptionEvidence, state.subscriptionsError)
+        : `缺订阅 ${missingSubscriptionCount}`,
+      tone: subscriptionEvidence === 'error'
+        ? 'notice'
+        : missingFactsCount + unlinkedCount + missingSubscriptionCount > 0
+          ? 'alert'
+          : 'normal',
     },
-    {
-      label: '订阅证据',
-      value: subscriptionEvidence === 'ready' ? `${missingSubscriptionCount} 缺订阅` : '未知',
-      meta: subscriptionEvidenceLabel(subscriptionEvidence, state.subscriptionsError),
-      tone: subscriptionEvidence === 'error' ? 'notice' : missingSubscriptionCount > 0 ? 'critical' : 'normal',
-    },
-    {
-      label: '资料缺口',
-      value: `${missingFactsCount}`,
-      meta: '服务商、位置或访问入口',
-      tone: missingFactsCount > 0 ? 'notice' : 'normal',
-    },
-  ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'notice' | 'alert' | 'critical' | 'neutral' }>
+  ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'notice' | 'alert' }>
 
   function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     const next = { ...filters, [key]: value }
@@ -681,51 +675,53 @@ export function VPSPage() {
             <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台 VPS
           </span>
         </div>
-        <div className="vps-inventory-focus" aria-label="VPS 盘点焦点">
-          {focusItems.map((item) => (
-            <article
-              key={item.label}
-              className={['vps-inventory-focus__item', `vps-inventory-focus__item--${item.tone}`].join(' ')}
-            >
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-              <small>{item.meta}</small>
-            </article>
-          ))}
-        </div>
         <Tabs
           items={quickViews}
           value={filters.view}
           onChange={(view) => setFilter('view', view)}
           variant="pill"
         />
+        <div className="vps-inventory-command__body">
+          <div className="vps-inventory-focus" aria-label="VPS 盘点焦点">
+            {inventorySignals.map((item) => (
+              <article
+                key={item.label}
+                className={['vps-inventory-focus__item', `vps-inventory-focus__item--${item.tone}`].join(' ')}
+              >
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+                <small>{item.meta}</small>
+              </article>
+            ))}
+          </div>
+          <FilterBar
+            className="vps-filter-bar"
+            hasActiveFilters={active}
+            onClearAll={clearFilters}
+            activeChips={
+              <>
+                {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
+                {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
+                {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
+                {filters.usage_status && <FilterChip label={`用途: ${usageLabel(filters.usage_status)}`} onRemove={() => setFilter('usage_status', null)} />}
+                {filters.renewal_decision && <FilterChip label={`续费: ${renewalLabel(filters.renewal_decision)}`} onRemove={() => setFilter('renewal_decision', null)} />}
+              </>
+            }
+          >
+            <div className="vps-filter-bar__summary">
+              <span>字段筛选在 drawer 中调整；表格是资产核对主视图。</span>
+            </div>
+            <Button variant="secondary" onClick={openFilterDrawer}>高级筛选</Button>
+          </FilterBar>
+        </div>
         {subscriptionEvidence === 'error' && (
           <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
             订阅证据不可用，缺订阅视图暂不作为事实。{state.subscriptionsError}
           </p>
         )}
-        <FilterBar
-          className="vps-filter-bar"
-          hasActiveFilters={active}
-          onClearAll={clearFilters}
-          activeChips={
-            <>
-              {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
-              {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
-              {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
-              {filters.usage_status && <FilterChip label={`用途: ${usageLabel(filters.usage_status)}`} onRemove={() => setFilter('usage_status', null)} />}
-              {filters.renewal_decision && <FilterChip label={`续费: ${renewalLabel(filters.renewal_decision)}`} onRemove={() => setFilter('renewal_decision', null)} />}
-            </>
-          }
-        >
-          <div className="vps-filter-bar__summary">
-            <span>主屏只保留 quick views，字段筛选在 drawer 中调整。</span>
-          </div>
-          <Button variant="secondary" onClick={openFilterDrawer}>高级筛选</Button>
-        </FilterBar>
       </section>
 
-      <section className="page-panel page-panel--scroll-x">
+      <section className="page-panel page-panel--scroll-x vps-inventory-table-panel">
         <div className="section-heading">
           <div>
             <p className="section-heading__eyebrow">VPS ASSETS</p>

@@ -78,7 +78,12 @@ export function EventsStreamSection({
   const groupedEvents = groupEventsByTime(events)
 
   return (
-    <DetailSection eyebrow="事件流" title="事件流">
+    <DetailSection
+      eyebrow="事件流"
+      title="事件流"
+      ribbon={hasActiveFilters ? 'notice' : 'accent-2'}
+      aside={<span><MonoDigits>{events.length}</MonoDigits> 条当前事件</span>}
+    >
       {events.length === 0 ? (
         <EventList
           events={events}

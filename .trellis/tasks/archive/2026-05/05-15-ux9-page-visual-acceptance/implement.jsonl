@@ -1,0 +1,11 @@
+{"file":".trellis/spec/web/index.md","reason":"Web frontend authority hierarchy and task-relevant spec index."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Preserve component boundaries, route/page contracts, DataTable row behavior, Drawer/PageState conventions."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Dark-first token/BEM/pure CSS rules and current DataTable sortable header styling pitfall."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Preserve API client, URL-state, frontend types, and no real-data contract changes."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Frontend lint/test/build and browser evidence expectations for user-visible UI changes."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Keep implementation off main and use PR workflow."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Prefer existing page/components and avoid premature abstractions while improving repeated page patterns."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Active v2 visual language for human UI acceptance."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Active component/page visual contracts for Dashboard, shell, atoms, and shared components."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Required browser preview/sanity evidence workflow and limitations."}
+{"file":".trellis/tasks/archive/2026-05/05-15-ux8-human-ui-acceptance/prd.md","reason":"Previous UX-8 scope and constraints so UX-9 advances page-specific acceptance rather than repeating global CSS hardening."}

@@ -505,40 +505,46 @@ export function DashboardCommandSurface({
         </div>
         <div className="dashboard-command-surface__controls" aria-label="工作台主要动作">
           {primaryAction ? (
-            <Link className="btn btn--primary btn--md" to={primaryAction.to}>
-              {primaryAction.label}
-            </Link>
+            <article className={`dashboard-command-primary dashboard-command-primary--${primaryAction.tone}`}>
+              <span className="dashboard-command-primary__eyebrow">今日第一步</span>
+              <p className="dashboard-command-primary__detail">{primaryAction.detail}</p>
+              <Link className="btn btn--primary btn--md dashboard-command-primary__action" to={primaryAction.to}>
+                {primaryAction.label}
+              </Link>
+            </article>
           ) : null}
-          {onRefresh ? (
-            <button
-              type="button"
-              className="btn btn--ghost btn--md"
-              disabled={refreshing}
-              onClick={onRefresh}
-            >
-              {refreshing ? '刷新中…' : '刷新'}
-            </button>
-          ) : null}
-          {onAutoRefreshChange ? (
-            <label className="dashboard-command-surface__refresh">
-              <span>自动刷新</span>
-              <select
-                className="auto-refresh-select"
-                value={autoRefresh == null ? '' : String(autoRefresh)}
-                onChange={(event) => {
-                  const value = event.target.value
-                  onAutoRefreshChange(value === '' ? null : Number(value))
-                }}
-                aria-label="自动刷新间隔"
+          <div className="dashboard-command-surface__secondary-controls">
+            {onRefresh ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--md"
+                disabled={refreshing}
+                onClick={onRefresh}
               >
-                {AUTO_REFRESH_OPTIONS.map((option) => (
-                  <option key={option.label} value={option.value == null ? '' : String(option.value)}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+                {refreshing ? '刷新中…' : '刷新'}
+              </button>
+            ) : null}
+            {onAutoRefreshChange ? (
+              <label className="dashboard-command-surface__refresh">
+                <span>自动刷新</span>
+                <select
+                  className="auto-refresh-select"
+                  value={autoRefresh == null ? '' : String(autoRefresh)}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    onAutoRefreshChange(value === '' ? null : Number(value))
+                  }}
+                  aria-label="自动刷新间隔"
+                >
+                  {AUTO_REFRESH_OPTIONS.map((option) => (
+                    <option key={option.label} value={option.value == null ? '' : String(option.value)}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
         </div>
       </header>
 
