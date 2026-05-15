@@ -631,7 +631,7 @@ export function TargetsPage() {
           }
         />
       ) : (
-        <>
+        <div className="observability-list-frame observability-list-frame--targets">
           <TargetsFilterPanel
             hasActiveFilters={hasActiveFilters}
             filterState={filterState}
@@ -700,7 +700,7 @@ export function TargetsPage() {
               )
             }}
           />
-        </>
+        </div>
       )}
     </section>
   )

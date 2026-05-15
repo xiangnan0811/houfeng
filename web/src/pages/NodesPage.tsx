@@ -723,68 +723,70 @@ export function NodesPage() {
         onLabelInputChange={setLabelInput}
       />
 
-      <NodesToolbar
-        viewTabs={viewTabs}
-        nodeListView={nodeListView}
-        displayedCount={sortedFilteredNodes.length}
-        baseCount={baseNodes.length}
-        showTrends={showTrends}
-        compareSet={compareSet}
-        autoRefresh={autoRefresh}
-        onNodeListViewChange={setNodeListView}
-        onShowTrendsChange={setShowTrends}
-        onAutoRefreshChange={setAutoRefresh}
-      />
+      <div className="observability-list-frame observability-list-frame--nodes">
+        <NodesToolbar
+          viewTabs={viewTabs}
+          nodeListView={nodeListView}
+          displayedCount={sortedFilteredNodes.length}
+          baseCount={baseNodes.length}
+          showTrends={showTrends}
+          compareSet={compareSet}
+          autoRefresh={autoRefresh}
+          onNodeListViewChange={setNodeListView}
+          onShowTrendsChange={setShowTrends}
+          onAutoRefreshChange={setAutoRefresh}
+        />
 
-      <NodesListSection
-        nodeListView={nodeListView}
-        baseNodes={baseNodes}
-        nodes={sortedFilteredNodes}
-        columns={columns}
-        showTrends={showTrends}
-        sortState={sortState}
-        hasActiveFilters={hasActiveFilters}
-        filterState={filterState}
-        groupOptions={groupOptions}
-        regionOptions={regionOptions}
-        cityOptions={cityOptions}
-        providerOptions={providerOptions}
-        labelOptions={labelOptions}
-        selectAll={selectAll}
-        batchSubmitting={batchSubmitting}
-        batchError={batchError}
-        commandOpen={commandOpen}
-        commandID={commandID}
-        pendingBatchAction={pendingBatchAction}
-        runtimeErrors={runtimeErrors}
-        pendingConfirmation={pendingConfirmation}
-        runtimeBusyNodeId={runtimeBusyNodeId}
-        onClearAllFilters={clearAllFilters}
-        onSingleFilterChange={setSingleFilter}
-        onMultiFilterChange={setMultiFilter}
-        onAbnormalFilterChange={setAbnormalFilter}
-        onOnboardingFilterChange={setOnboardingFilter}
-        onSelectAllChange={setSelectAll}
-        onBatchAction={(action) => void executeBatchAction(action)}
-        onCommandOpenChange={setCommandOpen}
-        onCommandIDChange={setCommandID}
-        onExecuteBatchCommand={() => void executeBatchCommand()}
-        onConfirmBatchPause={() => void executeBatchPauseConfirmed()}
-        onCancelBatchPause={() => setPendingBatchAction(null)}
-        onSortChange={handleSortChange}
-        onRowClick={(node) => {
-          if (!shouldNavigateOnRowClick(node)) return
-          navigate(`/nodes/${node.node_id}`)
-        }}
-        onConfirmPause={(node) => void handleRuntimeAction(node, 'pause', true)}
-        onCancelPause={(node) => {
-          queueFocusRestore(node.node_id, 'pause')
-          setPendingConfirmation((current) =>
-            current?.nodeId === node.node_id ? null : current,
-          )
-        }}
-        onCreateNode={toggleCreateDrawer}
-      />
+        <NodesListSection
+          nodeListView={nodeListView}
+          baseNodes={baseNodes}
+          nodes={sortedFilteredNodes}
+          columns={columns}
+          showTrends={showTrends}
+          sortState={sortState}
+          hasActiveFilters={hasActiveFilters}
+          filterState={filterState}
+          groupOptions={groupOptions}
+          regionOptions={regionOptions}
+          cityOptions={cityOptions}
+          providerOptions={providerOptions}
+          labelOptions={labelOptions}
+          selectAll={selectAll}
+          batchSubmitting={batchSubmitting}
+          batchError={batchError}
+          commandOpen={commandOpen}
+          commandID={commandID}
+          pendingBatchAction={pendingBatchAction}
+          runtimeErrors={runtimeErrors}
+          pendingConfirmation={pendingConfirmation}
+          runtimeBusyNodeId={runtimeBusyNodeId}
+          onClearAllFilters={clearAllFilters}
+          onSingleFilterChange={setSingleFilter}
+          onMultiFilterChange={setMultiFilter}
+          onAbnormalFilterChange={setAbnormalFilter}
+          onOnboardingFilterChange={setOnboardingFilter}
+          onSelectAllChange={setSelectAll}
+          onBatchAction={(action) => void executeBatchAction(action)}
+          onCommandOpenChange={setCommandOpen}
+          onCommandIDChange={setCommandID}
+          onExecuteBatchCommand={() => void executeBatchCommand()}
+          onConfirmBatchPause={() => void executeBatchPauseConfirmed()}
+          onCancelBatchPause={() => setPendingBatchAction(null)}
+          onSortChange={handleSortChange}
+          onRowClick={(node) => {
+            if (!shouldNavigateOnRowClick(node)) return
+            navigate(`/nodes/${node.node_id}`)
+          }}
+          onConfirmPause={(node) => void handleRuntimeAction(node, 'pause', true)}
+          onCancelPause={(node) => {
+            queueFocusRestore(node.node_id, 'pause')
+            setPendingConfirmation((current) =>
+              current?.nodeId === node.node_id ? null : current,
+            )
+          }}
+          onCreateNode={toggleCreateDrawer}
+        />
+      </div>
     </section>
   )
 }

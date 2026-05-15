@@ -88,6 +88,7 @@ export function VPSDecisionWorkbench({
         <div>
           <p className="section-heading__eyebrow">ASSET DECISION</p>
           <h2 id="vps-workbench-title">资产判断</h2>
+          <p className="section-heading__description">先看下一步动作，再核对订阅、Node、服务域名和资料质量证据。</p>
         </div>
         <div className="section-heading__actions">
           <Button variant="primary" size="sm" onClick={onDecisionEdit}>调整决策</Button>

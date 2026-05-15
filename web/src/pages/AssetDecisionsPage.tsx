@@ -433,14 +433,6 @@ export function AssetDecisionsPage() {
       tone: priorityDecisionCount > 0 ? 'critical' : 'normal',
     },
     {
-      label: '统一队列',
-      value: `${totalDecisionQueue}`,
-      meta: visibleDecisionQueue.length === totalDecisionQueue
-        ? '当前显示全部'
-        : `当前视图 ${visibleDecisionQueue.length} 台`,
-      tone: totalDecisionQueue > 0 ? 'notice' : 'normal',
-    },
-    {
       label: '资料缺口',
       value: `${qualityGapCount}`,
       meta: `缺订阅 ${missingSubscriptionCount} / 未关联 ${unlinkedCount}`,
@@ -452,13 +444,7 @@ export function AssetDecisionsPage() {
       meta: `迁移 ${state.migrate.length} / 取消 ${state.cancel.length}`,
       tone: lifecycleActionCount > 0 ? 'alert' : 'normal',
     },
-    {
-      label: '续费证据',
-      value: `${state.renewals.length}`,
-      meta: state.renewalsError ? '续费窗口读取失败' : `${renewalWindow} 天窗口订阅`,
-      tone: state.renewalsError ? 'notice' : state.renewals.length > 0 ? 'normal' : 'neutral',
-    },
-  ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'notice' | 'alert' | 'critical' | 'neutral' }>
+  ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'alert' | 'critical' }>
 
   function selectVPS(vps: VPSAssetRecord) {
     setSelectedVPS(vps)
@@ -529,31 +515,26 @@ export function AssetDecisionsPage() {
         </div>
       </section>
 
-      <dl className="asset-workbench-summary" aria-label="资产决策指标">
-        <div className="asset-workbench-summary__item">
-          <dt>{renewalWindow} 天续费</dt>
-          <dd><MonoDigits>{state.renewals.length}</MonoDigits> 条订阅</dd>
-        </div>
-        <div className="asset-workbench-summary__item">
-          <dt>统一队列</dt>
-          <dd><MonoDigits>{totalDecisionQueue}</MonoDigits> 台 VPS</dd>
-        </div>
-        <div className="asset-workbench-summary__item">
-          <dt>缺订阅 / 未关联</dt>
-          <dd><MonoDigits>{missingSubscriptionCount}</MonoDigits> / <MonoDigits>{unlinkedCount}</MonoDigits></dd>
-        </div>
-        <div className="asset-workbench-summary__item">
-          <dt>迁移 / 取消</dt>
-          <dd><MonoDigits>{state.migrate.length + state.cancel.length}</MonoDigits> 台 VPS</dd>
-        </div>
-      </dl>
-
       <section className="page-panel asset-decision-board" aria-label="资产决策工作队列">
         <div className="asset-decision-board__header">
           <div>
             <p className="section-heading__eyebrow">DECISION QUEUE</p>
             <h2>资产决策工作队列</h2>
             <p>按未评估、续费窗口、迁移/取消、Node 关联和订阅缺口排序。</p>
+            <dl className="asset-decision-board__summary" aria-label="资产决策指标">
+              <div>
+                <dt>统一队列</dt>
+                <dd><MonoDigits>{visibleDecisionQueue.length}</MonoDigits> / <MonoDigits>{totalDecisionQueue}</MonoDigits> 台</dd>
+              </div>
+              <div>
+                <dt>{renewalWindow} 天续费</dt>
+                <dd><MonoDigits>{state.renewals.length}</MonoDigits> 条订阅</dd>
+              </div>
+              <div>
+                <dt>缺订阅 / 未关联</dt>
+                <dd><MonoDigits>{missingSubscriptionCount}</MonoDigits> / <MonoDigits>{unlinkedCount}</MonoDigits></dd>
+              </div>
+            </dl>
           </div>
           <label className="asset-decision-window">
             <span>续费窗口</span>

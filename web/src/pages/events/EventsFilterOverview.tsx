@@ -90,7 +90,7 @@ export function EventsFilterOverview({
   )
 
   return (
-    <DetailSection eyebrow="筛选条件" title="筛选条件">
+    <DetailSection eyebrow="筛选条件" title="筛选条件" ribbon="offline">
       <FilterBar
         className="events-filter-overview"
         hasActiveFilters={hasActiveFilters}
