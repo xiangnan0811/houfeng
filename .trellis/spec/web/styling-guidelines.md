@@ -25,13 +25,13 @@
 1. `docs/design/v2-houfeng/design-language.md` —— v2 候风设计语言、主题、密度、状态色、排版与反模式。
 2. `docs/design/v2-houfeng/component-spec.md` —— 原语、atoms、共享组件、页面壳和关键页面的视觉契约。
 
-早期 `docs/design/v1-baseline/{ui-ux-spec,baseline-screens,visual-review-round2,handoff}.md`、`docs/design/v1-baseline/stitch/` 和 `docs/design/v1.x-frontend-redesign/` 已迁到 `docs/_archive/design/`，仅作历史记录。业务结构仍以 v1-baseline frozen 子集为准，但视觉实现不再回归 v1/stitch。
+早期 v1 视觉规格、Stitch 素材和 v1.x frontend redesign 过程材料不再保留在 tracked docs 中；如需追溯使用 git history。业务结构仍以 v1-baseline frozen 子集为准，但视觉实现不再回归 v1/stitch。
 
 **禁止**：
 
-- 不要回归早期 concept 屏 / `stitch/` 子目录视觉——这些是历史素材。
-- 不要修改 `docs/design/v1-baseline/` frozen 业务结构文档来承载视觉变更；视觉确实需要变更时，先在 `docs/release/v1-gap-checklist.md` 或当前任务 PRD 记录差异，再更新 v2 文档 / 代码。
-- 当前 v2 预览、浏览器 sanity 与截图证据流程见 `docs/operations/v2-visual-evidence.md`。一次性历史截图仍直接存放在 `docs/operations/*.jpg`（Dashboard / 节点列表 / 节点详情 / 目标列表 / 目标详情，2026-05-06）；新截图如需提交应使用 `docs/operations/v2-visual-evidence/`。不要再引用 archived 的 `docs/operations/v1-visual-verification.md` 或 `docs/operations/visual-evidence/` 作为 active workflow。
+- 不要回归早期 concept 屏 / `stitch/` 子目录视觉——这些是历史素材，不是 active guidance。
+- 不要修改 `docs/design/v1-baseline/` frozen 业务结构文档来承载视觉变更；视觉确实需要变更时，在当前任务 PRD、active docs 或 `.trellis/spec/` 中记录可复用结论，再更新 v2 文档 / 代码。
+- 当前 v2 预览、浏览器 sanity 与本地截图政策见 `docs/operations/v2-visual-evidence.md`；不要提交 screenshot manifest 或 bulk raster screenshots。只有用户明确批准的 public README/docs 图片资产才可放入 allowlisted docs asset path。不要恢复旧视觉验证流程或一次性历史截图作为 active workflow。
 
 ---
 
@@ -154,7 +154,7 @@
 
 ## 与 CLAUDE.md / 设计基线的差异 / 已知 gap
 
-> 用于喂 `docs/release/v1-gap-checklist.md`。
+> 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
 1. **SettingsPage 仍有少量 inline spacing/layout style**，绕过了令牌 + BEM 的规则。属已知小额偿还，新代码不要复制。
 2. **`web/src/pages/LoginPage.css` 是 page 局部 CSS 唯一例外**，与"组件文件不 import css"的规则冲突。当前合理（首屏前 AppShell 未挂），不打算回头消除。

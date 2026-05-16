@@ -222,8 +222,8 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 1. [ ] **`make verify-go`** —— 永远必须通过。fmt 修了直接重跑。
 2. [ ] **改了 `web/` 里任何文件 → `cd web && npm run lint && npm run test`**（CLAUDE.md 第 31 行）。
 3. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完。
-4. [ ] **改了迁移 / 表结构** → 跑一次 `docs/operations/v1-smoke-run.md` 的 fresh-install，补 `docs/release/v1-gap-checklist.md`。
-5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity 或截图证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。早期 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 已 archive，不是 active workflow。
+4. [ ] **改了迁移 / 表结构** → 跑一次 `docs/operations/v1-smoke-run.md` 的 fresh-install；若发现可复用的 gap 或规则，补到 `.trellis/spec/` 或当前 active docs。
+5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity、local screenshot notes（如有，默认不提交）；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。早期 V1/Stitch 视觉验证流程与 bulk screenshot evidence 已从 tracked docs 移除，不是 active workflow。
 6. [ ] 如果 worker / 调度类改动，本地用注入的小间隔跑 `go test -count=10` 看下抖动。
 
 ---
@@ -263,6 +263,6 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 
 ## 已知 gap
 
-- 仓库**没有** `golangci-lint`、没有 race-by-default、没有 coverage 阈值。如果未来引入，应同步更新 `.github/workflows/ci.yml`、`Makefile`、本文件，并在 `docs/release/v1-gap-checklist.md` 记录变更。
+- 仓库**没有** `golangci-lint`、没有 race-by-default、没有 coverage 阈值。如果未来引入，应同步更新 `.github/workflows/ci.yml`、`Makefile`、本文件，并在当前 active docs 或 `.trellis/spec/` 记录变更。
 - `make verify-web` 跑 `npm ci`，每次清空 `node_modules` 后重装，本地反复跑会比较慢；若需要本地速度，单独 `cd web && npm test` / `npm run lint` 即可，CI 仍然走完整 `verify-web`。
 - `cmd/houfeng-center/main.go` 启动期失败仍走 stdlib `log.Fatalf`，与全仓 `log/slog` 不一致——见 `logging-guidelines.md` 的同款 gap，质量 reviewer 不要把这个当 lint 错误反复提。

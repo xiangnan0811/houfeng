@@ -135,5 +135,5 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 
 ## 已知 gap
 
-- 当前 slog handler 是 stdlib 默认 text 输出，**未配置最小 level、未输出 source 行号、不带 trace id**。如果 fleet 规模扩大需要更结构化日志（例如切到 `slog.NewJSONHandler` + LokiQuery），应统一在 `cmd/houfeng-center/main.go` 与 `cmd/houfeng-agent/main.go` 同步切换，并把切换写进 `docs/release/v1-gap-checklist.md`。
+- 当前 slog handler 是 stdlib 默认 text 输出，**未配置最小 level、未输出 source 行号、不带 trace id**。如果 fleet 规模扩大需要更结构化日志（例如切到 `slog.NewJSONHandler` + LokiQuery），应统一在 `cmd/houfeng-center/main.go` 与 `cmd/houfeng-agent/main.go` 同步切换，并把可复用结论写进本 spec 或当前 active docs。
 - `cmd/houfeng-center/main.go` 仍混用 stdlib `"log"`，与全仓 `log/slog` 风格不一致。短期内为启动失败兜底保留；新代码任何业务路径**禁止**再引 `"log"` 包。

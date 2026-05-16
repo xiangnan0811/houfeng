@@ -2,8 +2,8 @@
 date: 2026-04-30
 status: active
 supersedes:
-  - docs/design/v1-baseline/ui-ux-spec.md
-  - docs/design/v1.x-frontend-redesign/
+  - removed v1-baseline visual specification
+  - removed v1.x frontend redesign process materials
 tags:
   - 候风
   - 设计语言
@@ -322,7 +322,7 @@ light 主题不是次要主题。它必须独立打磨到同等可用：
 | 类名 | 不重命名 atom 类名（`.btn--primary` `.tone--critical` `.summary-card` `.probe-card`） |
 | 移动端 | 不适配响应式 — 这是单用户桌面工程工具 |
 | i18n | 不引入英文界面 — 中文为主 |
-| 视觉回归测试 | 不引入 Playwright 截图（用人工归档代替） |
+| 视觉回归测试 | 不引入 Playwright 截图对比；如需视觉语境，使用本地/外部截图说明，默认不提交截图目录或 manifest |
 
 ### 12.x 监控视图与图表自研路径（2026-05-05 更新）
 
@@ -369,8 +369,9 @@ light 主题不是次要主题。它必须独立打磨到同等可用：
 ## 14. 文档导航
 
 - [`component-spec.md`](./component-spec.md) — 每个原语 / atom / 共享组件 / 页面壳的视觉契约
-- [v1-baseline 已被 v2 取代](../v1-baseline/README.md) — active 路径仅保留架构 / 数据模型 / 交互规则等结构层；视觉历史在 `docs/_archive/design/v1-baseline/`
-- [v1.x-frontend-redesign 已被 v2 取代](../../_archive/design/v1.x-frontend-redesign/README.md) — 历史
+- [v1-baseline](../v1-baseline/README.md) — active 路径仅保留架构 / 数据模型 / 交互规则等结构层；视觉权威已转到 v2-houfeng
+
+历史 v1 视觉与 v1.x frontend redesign 过程材料已从 tracked docs 移除；如需追溯，请使用 git history，不要把它们当作当前实现指导。
 
 ## 15. 一句话
 

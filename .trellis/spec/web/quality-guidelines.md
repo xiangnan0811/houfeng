@@ -73,7 +73,7 @@ verify-web:
 
 - 测试与被测**同目录、同名 + `.test.tsx` / `.test.ts`**（如 `Button.tsx` ↔ `Button.test.tsx`）。详见 `.trellis/spec/web/directory-structure.md`。
 - **不要**建集中 `__tests__/` 目录。
-- 跨 page 的工具测试（`api.test.ts` / `theme.test.ts` / `auth-client.test.ts` / `fetcher.test.ts` / `onboardingTokenCache.test.ts`）放 `web/src/lib/`。
+- 跨 page 的工具测试（`api.test.ts` / `theme.test.ts` / `auth-client.test.ts`）放 `web/src/lib/`。
 
 ### 测试覆盖目标
 
@@ -82,7 +82,7 @@ verify-web:
 - **每个路由页有至少 1 份 `<Page>.test.tsx`**：实读 `web/src/pages/` 下 9 个 page 全部配套（`DashboardPage` / `EventsPage` / `LoginPage` / `NodeDetailPage` / `NodeOnboardingPage` / `NodesPage` / `SettingsPage` / `TargetDetailPage` / `TargetsPage`）。**新增 page 必须保持这条线**——至少 1 个 happy-path test 覆盖渲染 + 拉数据 + 默认交互。
 - **每个 atom 有同名测试**（`atoms/Button.test.tsx` / `Card.test.tsx` / `Sparkline.test.tsx` / `Input.test.tsx` / `Badge.test.tsx` / `DataTable.test.tsx` / `Mono.test.tsx` / `StatusGlyph.test.tsx` / `Tabs.test.tsx` / `Toggle.test.tsx`）。新增 atom 同样补一份。
 - **跨页业务组合组件按需测**（`IncidentList.test.tsx` / `EventList.test.tsx` / `ActionConfirmationCard.test.tsx` 已有；`DetailSection` / `StatusBadge` 当前未测——**不强制**，但如果改动到行为分支，请补）。
-- **`lib/` 工具函数**——纯逻辑（`format.ts` / `theme.ts` / `onboardingTokenCache.ts`）应有单测，I/O 边界（`api.ts` / `auth-client.ts` / `fetcher.ts`）按现状 mock `fetch` 跑表驱动用例。
+- **`lib/` 工具函数**——纯逻辑（`format.ts` / `theme.ts`）应有单测，I/O 边界（`api.ts` / `auth-client.ts`）按现状 mock `fetch` 跑表驱动用例。
 
 ### 测试模式（实读）
 
@@ -161,8 +161,7 @@ it('applies variant class', () => {
 
 ### 不在 verify 链路里的东西
 
-- **可视化回归 / 截图对比**不在 `make verify-web`。当前 active visual authority 是 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`；v2 预览、浏览器 sanity 与截图证据流程见 `docs/operations/v2-visual-evidence.md`。已有一次性历史截图仍保留在 `docs/operations/*.jpg`，新截图如需提交应使用 `docs/operations/v2-visual-evidence/` 并记录 manifest。不要再使用 archived 的 `docs/operations/v1-visual-verification.md` / `docs/operations/visual-evidence/` 作为 active workflow。
-- **截图 manifest 校验**用 `make validate-visual-evidence`，它只校验 `docs/operations/v2-visual-evidence/manifest.md` 的表格形状、字段格式、重复项和引用文件是否存在。该 target 不属于 `make verify-web`，也不代表截图已被人工接受。
+- **可视化回归 / 截图对比**不在 `make verify-web`。当前 active visual authority 是 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`；v2 预览、浏览器 sanity 与本地截图政策见 `docs/operations/v2-visual-evidence.md`。bulk screenshot evidence 与 manifest 不再 tracked；新 raster 图片只有在用户明确批准为 public README/docs asset 时才可提交到 allowlisted docs asset path。旧 V1/Stitch 验证流程与一次性历史截图已从 tracked docs 移除，不要恢复为 active workflow。
 - **本地 browser sanity**可用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Playwright 是证据阻塞项，不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
 - **真实 center 烟囱**由 `docs/operations/v1-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
@@ -211,9 +210,9 @@ export default defineConfig([
 2. [ ] **`cd web && npm run test -- --run`** —— 跑 vitest 一遍。
 3. [ ] **`cd web && npm run build`** —— 跑 `tsc -b && vite build`，确保 TS strict + Vite 产物都干净。
 4. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完（前后端都过）。
-5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity 或截图证据；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。
-   - 若新增或修改 `docs/operations/v2-visual-evidence/manifest.md`，同时跑 `make validate-visual-evidence`。
-   - 若只做本地 browser sanity、不提交截图，记录 `scripts/visual_evidence.py browser-sanity` 的 routes / viewports / 结果和 local-only 限制即可。
+5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity、local screenshot notes（如有，默认不提交）；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。
+   - 若只做本地 browser sanity，记录 `scripts/visual_evidence.py browser-sanity` 的 routes / viewports / 结果和 local-only 限制即可。
+   - 不要提交 screenshot manifest 或 bulk raster screenshots；只有用户明确批准的 public README/docs asset 可放入 allowlisted docs asset path。
 6. [ ] **改了 API 形状（增减字段 / 改命名 / 改可选性）** → 同 PR 把 `web/src/lib/types.ts` + `web/src/lib/api.ts` 改完，并补 page / 测试断言。
 
 ---
@@ -251,8 +250,8 @@ export default defineConfig([
 
 ## 已知 gap
 
-> 用于喂 `docs/release/v1-gap-checklist.md`。
+> 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
 1. **没有 coverage 阈值 / coverage 上传**：当前不强制；如未来引入 `vitest --coverage` 与阈值，需同步更新 `.github/workflows/ci.yml` + 本文件。
-2. **没有 e2e 框架**（Playwright / Cypress）：当前 CI 不跑浏览器自动化；`docs/operations/v2-visual-evidence.md` 只定义本地预览、browser sanity 和按需截图证据。如未来引入正式浏览器自动化，需独立技术决策。
+2. **没有 e2e 框架**（Playwright / Cypress）：当前 CI 不跑浏览器自动化；`docs/operations/v2-visual-evidence.md` 只定义本地预览、browser sanity 和本地/外部截图说明，不定义 tracked screenshot evidence。如未来引入正式浏览器自动化，需独立技术决策。
 3. **`web/src/lib/types.ts` 与 Go contract 全靠人工同步**：没有 codegen。reviewer 在 contract 改动 PR 里必须同时检查 `lib/types.ts`。

@@ -402,3 +402,39 @@ Implemented center-generated one-command agent install with public base URL, one
 ### Next Steps
 
 - None - task complete
+
+
+## Session 131: Refresh documentation for open-source project state
+
+**Date**: 2026-05-16
+**Task**: Refresh documentation for open-source project state
+**Branch**: `feature/docs-refresh-after-agent-install`
+
+### Summary
+
+Refreshed Houfeng public docs after the agent install flow, removed tracked process/archive/screenshot documentation, added image ignore policy, and updated Trellis specs away from stale documentation references.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bfce02f` | (see git log) |
+| `0bf9c16` | (see git log) |
+| `d8b8319` | (see git log) |
+| `39d40b7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

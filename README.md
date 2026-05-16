@@ -1,82 +1,111 @@
 # 候风 / Houfeng Fleet Control Plane
 
-This is the V1 implementation repository for 候风 / Houfeng Fleet Control Plane. It exists to implement the frozen V1 baseline package, not to redefine it during delivery.
+Houfeng is an early-stage, self-hosted fleet control plane for a single operator. It focuses on monitoring servers and service entrypoints first, then adds a lightweight VPS Asset Ledger so infrastructure inventory and observability evidence can be reviewed in one place.
 
-## Implementation rule
+The repository contains the Go center, Go agent, PostgreSQL schema, React/Vite web UI, deployment notes, and validation workflows. It is not documented as production-ready packaging: there are no package-manager repositories, Docker/Kubernetes deployment manifests, automatic upgrades, or completed real-inventory validation claims in this repo.
 
-不要在实现阶段重新设计 V1 一级能力。If implementation work discovers a mismatch, record the gap against the frozen baseline before changing behavior.
+## Current shape
 
-## Branch workflow governance
+The supported deployment topology is small and explicit:
 
-Houfeng uses a protected-branch workflow:
+```text
+operator browser
+      |
+      v
+houfeng-center (Go API + React SPA)
+      |
+      v
+PostgreSQL
 
-- Local `main` / `master` must stay read-only for development work. Do not commit, merge, amend, squash, reset, or otherwise directly modify those branches.
-- Create a new branch for every feature, bug fix, documentation update, or agent implementation task.
-- Do not use `git worktree` in this repository workflow.
-- Enable the versioned local hooks once per clone:
-
-  ```bash
-  sh scripts/setup-git-hooks.sh
-  ```
-
-  This sets `core.hooksPath=.githooks` and activates hooks that reject commits on local `main` / `master` and pushes to remote `main` / `master`.
-- Remote `main` / `master` must be protected in the Git host to reject direct pushes and force pushes by everyone. Changes should land through pull requests from feature branches.
-
-## V1 baseline 文档（部分 frozen / 部分 superseded）
-
-V1 业务结构 frozen 在 v1-baseline 的 4 份子集（加 README，共 5 份保留在原路径）：
-
-1. `docs/design/v1-baseline/README.md`
-2. `docs/design/v1-baseline/architecture-data-model.md`
-3. `docs/design/v1-baseline/rules-and-interaction.md`
-4. `docs/design/v1-baseline/interactive-prototype-and-operation-flow.md`
-5. `docs/design/v1-baseline/tech-selection.md`
-
-视觉部分已 unfrozen，权威指向 v2-houfeng：
-
-- `docs/design/v2-houfeng/design-language.md`
-- `docs/design/v2-houfeng/component-spec.md`
-
-早期视觉文档（`ui-ux-spec.md` / `baseline-screens.md` / `visual-review-round2.md` / `handoff.md` / `stitch/*`）以及整个 `v1.x-frontend-redesign/` 已 archive 至 `docs/_archive/design/`，仅作历史记录。
-
-## Guardrails
-
-- Product name 不变：`候风 / Houfeng Fleet Control Plane`
-- Visual authority：`docs/design/v2-houfeng/`（`design-language.md` + `component-spec.md`）。已 supersede 早期 v1-baseline 视觉部分（stitch / ui-ux-spec / baseline-screens / visual-review-round2 / handoff）和整个 `v1.x-frontend-redesign/`，这两批历史材料已迁至 `docs/_archive/design/`。
-- Tech direction 不变：Go center + Go agent + React/Vite web + PostgreSQL
-- Scope：V1.x 已加 username/password login + sessions；产品仍是 tightly bounded 单用户 operator tool
-- 实施与设计 mismatch：先在 `docs/release/v1-gap-checklist.md` 登记 gap，再参考 `docs/release/next-phase-plan.md` 决定优先级
-- **当前阶段**：V1 收口期（详见 `docs/release/next-phase-plan.md`）；**V1 ≠ MVP**——用户心目中的 MVP 范围比 v1-baseline 大
-
-当前实施入口 / 初始实现落位可先围绕以下路径展开，其中 `docs/design/v1-baseline/` 是 V1 业务结构权威（4 份 frozen 子集），`docs/design/v2-houfeng/` 是视觉权威：
-
-- `cmd/houfeng-center`
-- `cmd/houfeng-agent`
-- `internal/center`
-- `agent`
-- `db/migrations`
-- `web`
-- `docs/design/v1-baseline`
-
-这不是冻结最终目录名，最终结构以后续代码落地为准。
-
-## Delivery and V1 verification artifacts
-
-- 部署 recipe：`docs/deploy/local-and-systemd.md` + `docs/deploy/systemd/houfeng-center.service` + `docs/deploy/systemd/houfeng-agent.service`
-- 真实环境冒烟脚本：`docs/operations/v1-smoke-run.md`
-- v2 视觉预览与证据流程：`docs/operations/v2-visual-evidence.md`
-- gap 清单（含 V1 release gate 与 12 条 2026-05-02 新增 gap）：`docs/release/v1-gap-checklist.md`
-- docs 审计与 archive 决策：`docs/release/docs-audit.md`
-- 下一阶段开发计划（Stage 1/2/3）：`docs/release/next-phase-plan.md`
-
-注：早期 `docs/operations/v1-visual-verification.md` 与 `docs/operations/visual-evidence/` 与 v1-baseline/stitch 视觉强绑定，已迁至 `docs/_archive/operations/`。当前 v2 预览、浏览器 sanity 与截图证据流程见 `docs/operations/v2-visual-evidence.md`；一次性历史截图仍保留在 `docs/operations/*.jpg`。
-
-Automated verification:
-
-```bash
-go test ./...
-./scripts/verify.sh
-cd web && npm run build
+houfeng-agent(s) --outbound enroll/sync--> houfeng-center
 ```
 
-Live PostgreSQL smoke 与 Telegram delivery 证据 require environment-specific runtime setup，分别记录在 `docs/operations/v1-smoke-run.md` 与 `docs/release/v1-gap-checklist.md`。
+- **Center**: serves the API and built web UI, applies embedded PostgreSQL migrations, manages auth sessions, settings, incidents/events, retention, node onboarding, and Asset Ledger APIs.
+- **Agent**: runs on monitored hosts, reads a token file, fingerprints the host, samples host/probe/container facts, buffers sync data locally, and initiates all communication to the center.
+- **Web UI**: React 19 + Vite SPA for dashboard, nodes, targets, events, settings, onboarding, and asset workflows.
+- **Asset Ledger**: manual/API/JSON-import records for providers, VPS assets, subscriptions, VPS-to-Node links, renewal decisions/history, and lightweight service/domain records.
+
+The center does not SSH into agents. Agents do not accept arbitrary scripts or user-supplied shell commands; the current command surface is bounded to compiled-in diagnostic action IDs.
+
+## Quick start for local development
+
+Prerequisites:
+
+- Go toolchain
+- Node.js 22 + npm
+- PostgreSQL
+
+Build the web UI and center, then run the center with local environment values:
+
+```bash
+cd web && npm ci && npm run build
+cd ..
+
+export HOUFENG_HTTP_ADDR=:8080
+export HOUFENG_WEB_DIST_DIR=web/dist
+export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
+export HOUFENG_PUBLIC_BASE_URL='http://localhost:8080'
+export HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+export HOUFENG_INITIAL_USERNAME=admin
+export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
+
+make build-center
+./bin/houfeng-center
+```
+
+Open `http://127.0.0.1:8080/`, log in with the initial credentials, and create a Node from the UI. The default center version is `dev`, so one-command install generation is intentionally blocked until the center is built with a real release tag and matching agent release assets exist.
+
+For a real Linux agent onboarding run, follow `docs/deploy/local-and-systemd.md`. One-command installation depends on a center-generated command, `HOUFENG_PUBLIC_BASE_URL`, and Linux agent release assets built with a real version tag:
+
+```bash
+make build-center VERSION=v1.2.3
+make build-agent-release VERSION=v1.2.3
+```
+
+Upload `dist/houfeng-agent_v1.2.3_linux_amd64`, `dist/houfeng-agent_v1.2.3_linux_arm64`, and `dist/sha256sums.txt` to the matching GitHub Release. The installer script itself is served by the deployed center at `/api/agent/install.sh`; GitHub Release hosts only the binary and checksum assets.
+
+## Verification commands
+
+Repository quality gates are exposed through the Makefile:
+
+```bash
+make fmt-go
+make vet-go
+make test-go
+make verify-go
+make verify-web
+./scripts/verify.sh
+```
+
+Useful focused commands:
+
+```bash
+go test ./internal/center/http/handlers -run TestNodeOnboarding -v
+cd web && npx vitest run src/pages/NodesPage.test.tsx
+```
+
+## Documentation map
+
+Start with `docs/README.md` for the maintained documentation index.
+
+Primary operator docs:
+
+- `docs/deploy/local-and-systemd.md` — canonical local/systemd deployment and one-command agent install guide.
+- `docs/operations/v1-smoke-run.md` — fresh-install smoke run with one-command onboarding as the primary path.
+- `docs/operations/v2-visual-evidence.md` — active UI preview and browser-sanity workflow; screenshots are local/untracked unless explicitly approved as public assets.
+- `docs/operations/asset-ledger-real-data-validation-readiness.md` — local sample and real-data validation boundaries for Asset Ledger.
+
+Design/reference docs:
+
+- `docs/design/v1-baseline/` — retained V1 business/data/rule/tech baselines for traceability.
+- `docs/design/v2-houfeng/` — current visual design language and component reference.
+
+Completed roadmap, release-gate, archived visual-history, and one-off evidence logs have been removed from the tracked public docs tree. Durable operator cautions and current constraints are folded into README, `docs/README.md`, deployment guidance, smoke guidance, and the active design references.
+
+## Current limitations and cautions
+
+- Houfeng is still early-stage and single-operator oriented.
+- The documented agent installer supports Linux + systemd + `amd64`/`arm64` only.
+- The project does not provide package repositories, Docker/Kubernetes deployment, or automatic upgrade UX.
+- Asset Ledger facts are only as true as the manually entered or imported data. Do not claim provider account truth, billing accuracy, exchange-rate truth, or completed real-inventory validation unless the specific evidence exists.
+- Enrollment/install commands contain one-time tokens. Treat them as secrets and do not paste them into public issues, screenshots, logs, or shared transcripts.

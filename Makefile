@@ -10,7 +10,7 @@ AGENT_RELEASE_DIR ?= ./dist
 AGENT_RELEASE_AMD64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_amd64
 AGENT_RELEASE_ARM64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_arm64
 
-.PHONY: fmt-go test-go vet-go build-center build-agent build-agent-release verify-go verify-web validate-visual-evidence verify
+.PHONY: fmt-go test-go vet-go build-center build-agent build-agent-release verify-go verify-web verify
 
 fmt-go:
 	@if ! command -v $(GO) >/dev/null 2>&1; then \
@@ -91,9 +91,6 @@ verify-web:
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi
-
-validate-visual-evidence:
-	python3 scripts/visual_evidence.py validate-manifest
 
 verify:
 	./scripts/verify.sh

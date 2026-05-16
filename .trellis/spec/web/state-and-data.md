@@ -25,7 +25,7 @@
   - 一个 `request(path, init)` 内部函数（`web/src/lib/api.ts:39-68`）封装通用 fetch 行为：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store`，对 401 调用 `onUnauthorized()` 钩子并抛 `ApiError(401)`，对非 2xx 解析 `error` / `message` 字段后包成 `ApiError(status, message)`。
   - 业务函数使用动词 + 资源命名（`listNodes` / `getNode` / `createTarget` / `updateNodeMetadata` / `enterNodeMaintenance` / `getDashboard` 等），返回 `Promise<T>`，T 来自 `lib/types.ts`。
   - `If-Match` 乐观锁通过 `patchJSONBody(path, body, { ifMatch })` 表达（`web/src/lib/api.ts:98-112`），传入的是上一次拿到的 `updated_at`。
-- **`/api/auth/*` 走 `web/src/lib/auth-client.ts` + `web/src/lib/fetcher.ts`**。这是历史遗留的第二条 fetch 包装，仅服务认证；**不要把新业务请求加到 `fetcher`**。
+- **`/api/auth/*` 走 `web/src/lib/auth-client.ts`**，并复用 `web/src/lib/api.ts` 的 request helpers 与 401 hook。不要新增第二套 fetch 包装。
 - **不要在 page / component 里直接 `fetch()`**。业务请求必须加到 `web/src/lib/api.ts` 再由 page / component 调用；`NodesPage` 的历史直连 `fetch('/api/nodes')` 已偿还为 `createNode` API helper，新代码不要恢复这条路径。
 
 ### 类型对齐
@@ -45,7 +45,7 @@
 
 - Frontend type: `NodeInstallCommandIssue` fields mirror center JSON snake_case: `command`, `issued_at`, `expires_at`, `installer_url`, `public_base_url`, `agent_version`, `release_repo`。
 - Frontend API: `issueNodeInstallCommand(nodeId)` -> `POST /api/nodes/{node_id}/install-command`。
-- Page flow: `NodesPage` 创建 Node 后跳转 onboarding；`NodeOnboardingPage` 按用户操作生成/重新生成 center command，不再依赖 create flow 预发 token cache。
+- Page flow: `NodesPage` 创建 Node 后跳转 onboarding；`NodeOnboardingPage` 按用户操作生成/重新生成 center command，不再依赖 create flow 预发 plaintext token。
 
 #### 3. Contracts
 
@@ -70,7 +70,7 @@
 - Good: user clicks generate, reviews masked/revealed command, copies the exact backend command, and runs it on a VPS.
 - Base: command expired; user clicks regenerate and copies the replacement.
 - Bad: page builds `curl ${window.location.origin}/api/agent/install.sh ...` and silently ignores missing `HOUFENG_PUBLIC_BASE_URL`.
-- Bad: create flow stores plaintext enrollment token in `onboardingTokenCache` for cross-page state.
+- Bad: create flow stores plaintext enrollment token in module/global state for cross-page transfer.
 
 #### 6. Tests Required
 
@@ -528,7 +528,7 @@ include_backfilled: filters.include_backfilled
 4. 渲染分支：先 `state.loading` → loading 文案；再 `state.error` → 错误面板（用 `page-panel` 样式）；最后正常渲染。
 5. **空数据渲染由展示组件兜底**（如 `IncidentList` / `EventList` 内部 `if (items.length === 0) return <div className="empty-state">…`），不要在 page 内重复写空态。
 
-> 该模式**当前由各 page 手抄**，未抽公共 hook。等到 ≥ 5 个 page 重复且能稳定下来时，再考虑提取 `useResource(fetcher, deps)`——目前不抽。
+> 该模式**当前由各 page 手抄**，未抽公共 hook。等到 ≥ 5 个 page 重复且能稳定下来时，再考虑提取 `useResource(loader, deps)`——目前不抽。
 
 ---
 
@@ -560,8 +560,6 @@ include_backfilled: filters.include_backfilled
 
 满足后落到 `web/src/lib/<name>-context.tsx`，导出 `<Name>Provider` + `use<Name>`，并在 `main.tsx` Provider 链显式挂载（不要在某个 page 内偷偷挂）。
 
-**还有一处准全局可变状态例外**：`web/src/lib/onboardingTokenCache.ts` 是模块级 Map，专门给"创建节点 → 跳转接入页"场景做一次性传值。**不要扩展它做通用 store**——其语义是"短生命、单消费、即用即清"。
-
 ---
 
 ## 数据拉取时机（实读约束）
@@ -579,7 +577,7 @@ include_backfilled: filters.include_backfilled
 - ❌ **page / component 里直接 `fetch()`**：业务请求必须走 `web/src/lib/api.ts`，认证请求走 `web/src/lib/auth-client.ts`。
 - ❌ **手抄后端字段名 / 自己拼 URL 格式化**：从 `lib/types.ts` import 类型 + 用 `lib/api.ts` 里的 `withQuery` 模式构造查询参数。
 - ❌ **驼峰化后端字段**：保持 snake_case（`node_id`、`current_health_status`），便于和 center 端 grep 对齐。
-- ❌ **跨 page 共享 mutable 全局变量**：除 `onboardingTokenCache` 这种受控、单用途、即用即清的例外，不要建模块级 `let`。
+- ❌ **跨 page 共享 mutable 全局变量**：不要用模块级 `let` / Map 缓存业务数据或 plaintext token；节点安装命令只从 center 生成并在当前 onboarding page 状态中展示。
 - ❌ **绕过 ApiError 直接 throw 字符串**：`lib/api.ts` 已统一错 `ApiError(status, message)`，page 用 `instanceof ApiError` 判别后挑 `.message` 展示。
 - ❌ **在 `useEffect` 里写 state 不带 `cancelled` 旗标**：StrictMode 下 effect 会触发两次，不防护会出现 setState on unmounted。
 - ❌ **把派生数据存 `useState`**：能现算就不要二次同步。
@@ -590,9 +588,9 @@ include_backfilled: filters.include_backfilled
 
 ## 与 CLAUDE.md 的差异 / 已知 gap
 
-> 用于喂 `docs/release/v1-gap-checklist.md`。
+> 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
-1. **`fetcher.ts` 与 `api.ts` 双 fetch 包装并存**（`web/src/lib/fetcher.ts` + `web/src/lib/api.ts`），分别注册 `setUnauthorizedHandler` 与 `setApiUnauthorizedHandler`，由 `auth-context.tsx` 同时挂钩。这是历史遗留，新代码不要再加第三套。
+1. **认证请求与业务请求现在共享 `api.ts` 的 request helpers 和 401 hook**；新代码不要再加第二套 fetch 包装。
 2. **类型与 Go contract 全靠手维护**——没有 codegen。前后端字段如有漂移，依赖测试 + 运行期 `unknown` 解析报错暴露。
 3. **当前没有任何状态库 / 数据缓存层**：CLAUDE.md 也没要求引入。本 spec 把"暂不引入"作为现行约束写明。
 

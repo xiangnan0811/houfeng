@@ -4,7 +4,9 @@
 >
 > Scope: `/asset-decisions`, `/vps`, `/providers`, `/subscriptions`
 >
-> Status: readiness workflow; real 40+ VPS execution still requires a user-provided or explicitly authorized data source.
+> Status: current readiness workflow; local sample evidence exists, while real 40+ VPS execution still requires a user-provided or explicitly authorized data source.
+>
+> Public navigation: this is the current place for Asset Ledger sample/real-data validation boundaries. Do not convert it into a claim that real provider billing, provider account truth, exchange rates, linked Node health, or the user's real inventory have been verified.
 
 ## Purpose
 
@@ -185,7 +187,7 @@ When real or local-sample data is visible:
 - `/providers`: duplicate provider naming, account hints, ratings, labels, and update timestamps.
 - `/subscriptions`: price/monthly conversion, renewal sorting, status filters, and auto-renew labels.
 
-If the real-data shape materially changes visual judgment, capture screenshots under `docs/operations/v2-visual-evidence/` and add manifest rows. Otherwise, browser sanity plus explicit row counts and limitations is enough for the readiness pass.
+If the real-data shape materially changes visual judgment, capture local screenshots for private review or external attachment, but do not commit screenshot directories or manifests by default. Browser sanity plus explicit row counts and limitations is enough for the readiness pass unless the user explicitly approves public README/docs image assets.
 
 ## Local Center Sample Evidence
 
@@ -319,7 +321,7 @@ docker rm -f houfeng-local-sample-postgres
 
 ### Limitations
 
-- No screenshots were committed, so no manifest rows were added.
+- No screenshots were committed; screenshot directories and manifests are intentionally not tracked by default.
 - This proves the local center sample path, not the user's real 40+ VPS inventory.
 - Node association hints correctly remained manual evidence; the import did not create `vps_node_links`.
 - Provider account truth, external billing truth, linked Node health, exchange rates, and production deployment behavior were not validated.
