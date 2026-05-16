@@ -42,7 +42,10 @@ ENV HOUFENG_WEB_DIST_DIR=/app/web/dist
 
 COPY --from=go-build --chown=houfeng:houfeng /out/houfeng-center /usr/local/bin/houfeng-center
 COPY --from=web-build --chown=houfeng:houfeng /src/web/dist/ /app/web/dist/
+COPY --chown=houfeng:houfeng scripts/docker-entrypoint.sh /usr/local/bin/houfeng-docker-entrypoint
+RUN chmod 0755 /usr/local/bin/houfeng-docker-entrypoint
 
 USER houfeng
 EXPOSE 16001
-ENTRYPOINT ["/usr/local/bin/houfeng-center"]
+ENTRYPOINT ["/usr/local/bin/houfeng-docker-entrypoint"]
+CMD ["/usr/local/bin/houfeng-center"]

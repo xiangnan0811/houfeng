@@ -92,7 +92,9 @@ cp docs/deploy/compose.env.example docs/deploy/compose.env
 docker compose --env-file docs/deploy/compose.env up -d
 ```
 
-The default Compose file pulls and runs `linnea7171/houfeng:latest`. That placeholder project image contains `houfeng-center` and baked `web/dist`; the runtime container runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001` and `HOUFENG_WEB_DIST_DIR=/app/web/dist`, so no host-mounted `web/dist` directory is required. The root `Dockerfile` remains the image definition for future automated publishing, but automated release image publishing is not part of this MVP and the default quick-start does not build locally.
+The default Compose file pulls and runs `linnea7171/houfeng:latest`. That placeholder project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the container ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001` and `HOUFENG_WEB_DIST_DIR=/app/web/dist`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env` before executing the center. The root `Dockerfile` remains the image definition for future automated publishing, but automated release image publishing is not part of this MVP and the default quick-start does not build locally.
+
+Sensitive Compose values such as the PostgreSQL password and initial admin password live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` intentionally avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignment lines and loads those values through `env_file` so repository secret scanners do not flag placeholder deployment configuration.
 
 `compose.yaml` starts exactly two required services:
 

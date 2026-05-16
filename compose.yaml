@@ -2,25 +2,26 @@ services:
   houfeng:
     image: linnea7171/houfeng:latest
     restart: unless-stopped
+    env_file:
+      - path: docs/deploy/compose.env
+        required: false
     depends_on:
       db:
         condition: service_healthy
     environment:
       HOUFENG_HTTP_ADDR: ":16001"
       HOUFENG_WEB_DIST_DIR: /app/web/dist
-      HOUFENG_DATABASE_URL: "postgres://houfeng:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docs/deploy/compose.env}@db:5432/houfeng?sslmode=disable"
-      HOUFENG_INITIAL_USERNAME: ${HOUFENG_INITIAL_USERNAME:-admin}
-      HOUFENG_INITIAL_PASSWORD: ${HOUFENG_INITIAL_PASSWORD:?set HOUFENG_INITIAL_PASSWORD in docs/deploy/compose.env}
-      HOUFENG_PUBLIC_BASE_URL: ${HOUFENG_PUBLIC_BASE_URL:-}
     ports:
       - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
 
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    env_file:
+      - path: docs/deploy/compose.env
+        required: false
     environment:
       POSTGRES_USER: houfeng
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docs/deploy/compose.env}
       POSTGRES_DB: houfeng
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
