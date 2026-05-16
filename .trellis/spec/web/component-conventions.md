@@ -6,7 +6,7 @@
 
 ## Overview
 
-候风前端组件统一采用 **函数式组件 + React 19 hooks**，TypeScript 严格 props（`tsconfig.app.json` 启用 strict）。视觉权威是 `docs/design/v2-houfeng/design-language.md` 与 `docs/design/v2-houfeng/component-spec.md`；新组件只参考这两份 v2 文档与现有 `components/atoms/` / `components/filters/` 实现。早期 v1-baseline 视觉稿、stitch 截图和 `v1.x-frontend-redesign/` 已 archive，仅作历史记录，不再作为 active implementation authority。
+候风前端组件统一采用 **函数式组件 + React 19 hooks**，TypeScript 严格 props（`tsconfig.app.json` 启用 strict）。视觉权威是 `docs/design/v2-houfeng/design-language.md` 与 `docs/design/v2-houfeng/component-spec.md`；新组件只参考这两份 v2 文档与现有 `components/atoms/` / `components/filters/` 实现。早期 v1-baseline 视觉稿、Stitch 截图和 v1.x frontend redesign 过程材料已从 tracked docs 移除；如需追溯使用 git history，不再作为 active implementation authority。
 
 实读约束（来自 `web/src/components/`、`web/src/pages/`）：
 
@@ -148,7 +148,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 
 ## 与 CLAUDE.md 的差异 / 已知 gap
 
-> 用于喂 `docs/release/v1-gap-checklist.md`。
+> 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
 - **多个页面单文件超过 1000 行**（`NodeDetailPage.tsx` 1138、`TargetDetailPage.tsx` 1731、`TargetsPage.tsx` 740、`SettingsPage.tsx` 873）。是**已知技术债**，需在后续按 detail section / form section 拆 `components/`。新页面不要再走这条路。
 - **`atoms/` 与上层 `components/` 在 props 类型写法上不一致**（`interface XxxProps` vs `type XxxProps = {}`）。本 spec 把它确认为分层写法，不打算回头统一——以"原子用 interface（要 extends DOM 属性）、业务组件用 type（不需要扩展）"为准则继续走。

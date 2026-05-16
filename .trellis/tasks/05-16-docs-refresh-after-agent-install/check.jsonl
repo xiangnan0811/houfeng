@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/05-16-docs-refresh-after-agent-install/prd.md","reason":"Acceptance criteria and definition of done for documentation verification."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Verify docs match current backend/agent deployment structure and install contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify documented API/config errors match current handler contract."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify docs do not encourage logging or sharing sensitive tokens."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Verify onboarding documentation matches current frontend data flow."}

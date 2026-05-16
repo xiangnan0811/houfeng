@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/05-16-docs-refresh-after-agent-install/prd.md","reason":"Task requirements, scope decision, acceptance criteria, and docs refresh boundaries."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Backend structure, agent install contract path, and public base URL/checksum constraints from the recent agent install flow."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Install-command endpoint error behavior and general API error-message constraints that docs should not contradict."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Sensitive token/logging constraints that documentation must preserve for install commands and onboarding tokens."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Frontend node onboarding command-generation flow and browser-side constraints."}

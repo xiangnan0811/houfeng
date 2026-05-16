@@ -79,13 +79,11 @@ web/
     │   ├── IncidentList.tsx
     │   └── StatusBadge.tsx
     ├── lib/                    # 数据层与无 UI 工具
-    │   ├── api.ts              # 业务 API client（封装 /api/* 调用）
-    │   ├── auth-client.ts      # /api/auth/* 调用
-    │   ├── fetcher.ts          # 通用 fetch 包装（专给 auth-client 使用）
+    │   ├── api.ts              # 统一 API client（封装 /api/* 调用）
+    │   ├── auth-client.ts      # /api/auth/* 薄封装，复用 api.ts request helpers
     │   ├── auth-context.tsx    # AuthProvider + useAuth
     │   ├── theme.ts + theme-context.tsx
     │   ├── format.ts           # 时间 / 字节 / 百分比等展示格式化
-    │   ├── onboardingTokenCache.ts
     │   └── types.ts            # 与 center JSON 响应对齐的 TS 类型
     ├── styles/                 # 全局 CSS，main.tsx 一次性导入
     │   ├── reset.css
@@ -132,12 +130,11 @@ web/
 
 无 UI 的数据 / 工具层：
 
-- `api.ts`：业务 API client。**所有 `/api/*`（除 auth）请求必须经此**。导出函数式 API（`listNodes()`、`getDashboard()` 等），返回 `Promise<T>`，T 直接来自 `types.ts`。
-- `auth-client.ts` + `fetcher.ts`：`/api/auth/*` 的薄封装（`login`、`logout`、`me`、`changePassword`）。`fetcher.ts` 是这条路径专用的通用 fetch（`web/src/lib/fetcher.ts:14-33`），**新业务请求不要走 `fetcher`，请走 `api.ts`**。
+- `api.ts`：统一 API client。**所有 `/api/*` 请求必须经此处的 request helpers 或导出业务函数**。导出函数式 API（`listNodes()`、`getDashboard()` 等），返回 `Promise<T>`，T 直接来自 `types.ts`。
+- `auth-client.ts`：`/api/auth/*` 的薄封装（`login`、`logout`、`me`、`changePassword`），复用 `api.ts` 的 `requestJSON` / `postJSONBody` / `requestEmpty` 与同一套 401 hook。
 - `auth-context.tsx` / `theme-context.tsx`：唯二的 React Context Provider，分别在 `main.tsx` 顶层一次性挂载。
 - `format.ts`：所有面向用户的格式化（时间、字节、百分比、标签拼接）；**新格式化函数都加到这里**，不要散落到组件文件。
 - `types.ts`：与 center HTTP 响应对齐的 TypeScript 类型；**不要在 page / component 里手抄一遍**。
-- `onboardingTokenCache.ts`：跨页一次性缓存（节点接入 token），是 `lib/` 下少见的内存可变状态例外。
 
 ### `web/src/styles/`
 
@@ -198,11 +195,11 @@ web/
 
 ## 与 CLAUDE.md 的差异 / 已知 gap
 
-> 用于喂 `docs/release/v1-gap-checklist.md`。
+> 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
 1. **`components/atoms/` 子目录未被 `CLAUDE.md` "Frontend (`web/`)" 段提及**，但实际已是设计系统原子的稳定落点（`Button` / `Card` / `Sparkline` / `Mono` / `Hostname` / `Timestamp` 等都在此）。本 spec 把它写进官方目录布局。
 2. **`app/layout/`、`app/RequireAuth.tsx`、`app/metadata.ts` 也在 `CLAUDE.md` 简述之外**，是当前实际的应用壳组织方式。
-3. **`lib/` 下当前并存两套 fetch 包装**：`fetcher.ts`（仅 auth-client 使用）+ `api.ts`（业务用）。它们的 401 钩子分别注册：`setUnauthorizedHandler` 给 `fetcher`、`setApiUnauthorizedHandler` 给 `api`，由 `auth-context.tsx` 同时绑定（`web/src/lib/auth-context.tsx:24-33`）。这是历史遗留，新代码不应再增第三套。
+3. **`auth-client.ts` 当前复用 `api.ts` 的 request helpers**，所以 401 hook 只有 `setUnauthorizedHandler` 一套，由 `auth-context.tsx` 绑定。新代码不要再新增第二套 fetch 包装。
 4. **当前未使用 React Query / SWR / Redux / Zustand 等状态库**（`web/package.json` 无依赖）；详见 `state-and-data.md`。
 
 ---
