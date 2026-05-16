@@ -1,0 +1,33 @@
+services:
+  houfeng:
+    image: linnea7171/houfeng:latest
+    restart: unless-stopped
+    env_file:
+      - path: docs/deploy/compose.env
+        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      HOUFENG_HTTP_ADDR: ":16001"
+      HOUFENG_WEB_DIST_DIR: /app/web/dist
+    ports:
+      - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - path: docs/deploy/compose.env
+        required: false
+    environment:
+      POSTGRES_USER: houfeng
+      POSTGRES_DB: houfeng
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U houfeng -d houfeng"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s

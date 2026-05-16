@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Preserve current 1 Go center + PostgreSQL + N systemd agents topology and agent deployment boundary while adding Docker artifacts."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"PostgreSQL remains the only persistent store; center applies embedded migrations at startup and Compose must persist database volume."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Use project quality gates and avoid adding unsupported tooling while changing build/deploy artifacts."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Web SPA production build is served by center via HOUFENG_WEB_DIST_DIR and must be baked into the project image."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Web build/lint/test expectations for any changes touching frontend build artifacts."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Implementation must stay on a non-main branch and preserve PR-based workflow."}
+{"file":".trellis/tasks/05-16-docker-compose-deployment/research/docker-compose-conventions.md","reason":"Research-backed Docker/Compose shape for center+web image, sibling PostgreSQL service, healthchecks, volume, minimal env, and external proxy boundary."}

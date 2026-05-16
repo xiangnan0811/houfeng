@@ -2,7 +2,7 @@
 
 Houfeng is an early-stage, self-hosted fleet control plane for a single operator. It focuses on monitoring servers and service entrypoints first, then adds a lightweight VPS Asset Ledger so infrastructure inventory and observability evidence can be reviewed in one place.
 
-The repository contains the Go center, Go agent, PostgreSQL schema, React/Vite web UI, deployment notes, and validation workflows. It is not documented as production-ready packaging: there are no package-manager repositories, Docker/Kubernetes deployment manifests, automatic upgrades, or completed real-inventory validation claims in this repo.
+The repository contains the Go center, Go agent, PostgreSQL schema, React/Vite web UI, Docker Compose center deployment artifacts, local/systemd deployment notes, and validation workflows. It is not documented as production-ready packaging: there are no package-manager repositories, Kubernetes deployment manifests, automatic upgrades, or completed real-inventory validation claims in this repo.
 
 ## Current shape
 
@@ -55,7 +55,17 @@ make build-center
 
 Open `http://127.0.0.1:8080/`, log in with the initial credentials, and create a Node from the UI. The default center version is `dev`, so one-command install generation is intentionally blocked until the center is built with a real release tag and matching agent release assets exist.
 
-For a real Linux agent onboarding run, follow `docs/deploy/local-and-systemd.md`. One-command installation depends on a center-generated command, `HOUFENG_PUBLIC_BASE_URL`, and Linux agent release assets built with a real version tag:
+A Docker Compose center quick start is also available:
+
+```bash
+cp docs/deploy/compose.env.example docs/deploy/compose.env
+# edit docs/deploy/compose.env and replace the database/admin passwords
+docker compose --env-file docs/deploy/compose.env up -d
+```
+
+The Compose stack contains only the placeholder project image (`linnea7171/houfeng:latest`, with `houfeng-center`, a small runtime entrypoint, and baked `web/dist`) as service `houfeng` and PostgreSQL. It binds Houfeng to `127.0.0.1:16001` by default for an operator-managed HTTPS reverse proxy, persists PostgreSQL data under `./data/postgres/` for easier migration, and does not containerize agents. Sensitive values live in the untracked `docs/deploy/compose.env`; the tracked Compose file avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignments so repository secret scanners do not flag placeholder configuration. Automated publishing of release-stamped Docker images and application file logging are required follow-ups; one-command agent onboarding still requires a center image built with a real release version and matching Linux agent release assets.
+
+For a real Linux agent onboarding run, follow `docs/deploy/local-and-systemd.md`. One-command installation depends on a center-generated command, an externally reachable `HOUFENG_PUBLIC_BASE_URL`, and Linux agent release assets built with a real version tag:
 
 ```bash
 make build-center VERSION=v1.2.3
@@ -90,7 +100,7 @@ Start with `docs/README.md` for the maintained documentation index.
 
 Primary operator docs:
 
-- `docs/deploy/local-and-systemd.md` — canonical local/systemd deployment and one-command agent install guide.
+- `docs/deploy/local-and-systemd.md` — canonical local, Docker Compose center, systemd deployment, and one-command agent install guide.
 - `docs/operations/v1-smoke-run.md` — fresh-install smoke run with one-command onboarding as the primary path.
 - `docs/operations/v2-visual-evidence.md` — active UI preview and browser-sanity workflow; screenshots are local/untracked unless explicitly approved as public assets.
 - `docs/operations/asset-ledger-real-data-validation-readiness.md` — local sample and real-data validation boundaries for Asset Ledger.
@@ -106,6 +116,6 @@ Completed roadmap, release-gate, archived visual-history, and one-off evidence l
 
 - Houfeng is still early-stage and single-operator oriented.
 - The documented agent installer supports Linux + systemd + `amd64`/`arm64` only.
-- The project does not provide package repositories, Docker/Kubernetes deployment, or automatic upgrade UX.
+- The project provides a minimal Docker Compose path for center + web + PostgreSQL, but does not provide containerized agents, Kubernetes deployment, package repositories, or automatic upgrade UX.
 - Asset Ledger facts are only as true as the manually entered or imported data. Do not claim provider account truth, billing accuracy, exchange-rate truth, or completed real-inventory validation unless the specific evidence exists.
 - Enrollment/install commands contain one-time tokens. Treat them as secrets and do not paste them into public issues, screenshots, logs, or shared transcripts.

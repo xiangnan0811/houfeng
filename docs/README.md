@@ -5,12 +5,12 @@ This index keeps the current public/operator path separate from design reference
 ## Start here
 
 - `../README.md` — public project overview, quick start, components, verification commands, and documentation map.
-- `deploy/local-and-systemd.md` — canonical deployment guide for local/systemd center installs and one-command Linux agent onboarding.
+- `deploy/local-and-systemd.md` — canonical deployment guide for local, Docker Compose center, systemd center installs, and one-command Linux agent onboarding.
 - `operations/v1-smoke-run.md` — fresh-install smoke run. The primary onboarding path is the center-generated one-command installer.
 
 ## Current operator guides
 
-- `deploy/local-and-systemd.md` — build artifacts, center environment, authentication, reverse proxy/TLS notes, systemd examples, generated install commands, checksum verification, and manual troubleshooting fallback.
+- `deploy/local-and-systemd.md` — build artifacts, center environment, Docker Compose center deployment (`houfeng` service on `127.0.0.1:16001`, `./data/postgres/`, file-logging follow-up), authentication, reverse proxy/TLS notes, systemd examples, generated install commands, checksum verification, and manual troubleshooting fallback.
 - `deploy/systemd/houfeng-center.service` — example center systemd unit.
 - `deploy/systemd/houfeng-agent.service` — example agent systemd unit for manual installs and reference.
 - `operations/v1-smoke-run.md` — live PostgreSQL smoke path for center/auth/node/agent/target/probe/incident/event checks.
@@ -40,5 +40,5 @@ The v1 baseline is useful for understanding why the current model exists, but it
 - Keep README and this index concise and public-reader friendly.
 - Keep current operator commands verifiable against `.env.example`, `Makefile`, code routes, and checked-in scripts.
 - Label evidence level and data source honestly: mock API, local center sample, or real data.
-- Do not claim production readiness, package manager support, Docker/Kubernetes deployment, automatic upgrades, completed real-data validation, provider account truth, or billing accuracy unless current code/evidence proves it.
+- Do not claim production readiness, package manager support, Kubernetes deployment, containerized agents, automatic upgrades, completed real-data validation, provider account truth, or billing accuracy unless current code/evidence proves it.
 - Preserve token and real-data secrecy: enrollment tokens, sync tokens, passwords, SSH keys, provider credentials, session cookies, webhook URLs, and unrelated private notes must not be committed or pasted into public docs.

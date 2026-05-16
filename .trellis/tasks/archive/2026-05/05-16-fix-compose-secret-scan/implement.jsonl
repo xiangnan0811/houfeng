@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Preserve Docker Compose deployment contract while fixing secret scanner failure."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Use existing verification gates and avoid unsupported tooling."}

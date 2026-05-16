@@ -438,3 +438,69 @@ Refreshed Houfeng public docs after the agent install flow, removed tracked proc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 132: Docker Compose deployment
+
+**Date**: 2026-05-16
+**Task**: Docker Compose deployment
+**Branch**: `feature/docker-compose-deployment`
+
+### Summary
+
+Added Docker/Compose deployment artifacts for the center+web image and PostgreSQL, documented the non-containerized agent boundary, default 16001 port, migratable database directory, and required logging/publishing follow-ups.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ccfa3f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 133: Fix Compose secret scan
+
+**Date**: 2026-05-16
+**Task**: Fix Compose secret scan
+**Branch**: `feature/docker-compose-deployment`
+
+### Summary
+
+Removed password-like assignments from tracked Compose source, added a runtime entrypoint to assemble the database URL from the env file, and confirmed PR #91 checks pass.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `47857aa` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1,4 +1,4 @@
-# Houfeng local and systemd deployment guide
+# Houfeng local, Docker Compose, and systemd deployment guide
 
 > Authentication note: the center requires a username + password login for
 > every API call except `/api/healthz` and `/api/agent/*`.
@@ -10,9 +10,9 @@
 
 ## Scope
 
-This guide describes the current local/systemd deployment path for `候风 / Houfeng Fleet Control Plane`: one Go center process, one PostgreSQL database, and one or more Go agents managed by systemd.
+This guide describes the current deployment paths for `候风 / Houfeng Fleet Control Plane`: one Go center process serving API + web UI, one PostgreSQL database, and one or more Go agents managed by systemd on the monitored hosts. The center can run either directly on the host or in the provided Docker Compose stack; agents are not containerized.
 
-This repository does not currently document package-manager repositories, Docker/Kubernetes deployment, automatic upgrades, or non-systemd agent installation.
+This repository does not currently document package-manager repositories, Kubernetes deployment, automatic upgrades, or non-systemd agent installation.
 
 ## Build artifacts
 
@@ -78,6 +78,45 @@ make build-center
 ```
 
 The center applies embedded migrations on startup and serves API plus the built web UI. The default center version is `dev`, so one-command install generation returns a configuration error instead of pointing at nonexistent release assets. For production one-command installs, build `houfeng-center` with a real release version and publish matching agent assets so generated install commands point at a real release.
+
+## Docker Compose center deployment
+
+The Compose path packages only the center and built web UI plus PostgreSQL. It does not run agents in containers; monitored hosts still use the center-generated Linux/systemd onboarding command from the Node onboarding page.
+
+Prerequisites: Docker with Compose support, and an operator-managed HTTPS reverse proxy for production/public access.
+
+```bash
+cp docs/deploy/compose.env.example docs/deploy/compose.env
+# edit docs/deploy/compose.env and replace the database/admin passwords
+# optionally set HOUFENG_PUBLIC_BASE_URL before agent onboarding
+docker compose --env-file docs/deploy/compose.env up -d
+```
+
+The default Compose file pulls and runs `linnea7171/houfeng:latest`. That placeholder project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the container ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001` and `HOUFENG_WEB_DIST_DIR=/app/web/dist`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env` before executing the center. The root `Dockerfile` remains the image definition for future automated publishing, but automated release image publishing is not part of this MVP and the default quick-start does not build locally.
+
+Sensitive Compose values such as the PostgreSQL password and initial admin password live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` intentionally avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignment lines and loads those values through `env_file` so repository secret scanners do not flag placeholder deployment configuration.
+
+`compose.yaml` starts exactly two required services:
+
+- `houfeng` — the Houfeng project image, bound by default to `127.0.0.1:16001` on the host for a local reverse proxy upstream. Override only the host port with `HOUFENG_HOST_PORT=<port>` in `docs/deploy/compose.env` if needed.
+- `db` — PostgreSQL with the user-migratable host directory `./data/postgres/` mounted at `/var/lib/postgresql/data`.
+
+PostgreSQL has a `pg_isready` healthcheck and the Houfeng service waits for a healthy database before startup. The center still applies embedded migrations on startup.
+
+`HOUFENG_PUBLIC_BASE_URL` in `docs/deploy/compose.env` may be empty for first login. Before generating one-command agent install commands, set it to the externally reachable absolute `http(s)` URL that browsers and target agents can access, then recreate the Houfeng container:
+
+```bash
+docker compose --env-file docs/deploy/compose.env up -d houfeng
+```
+
+For production/public deployments, terminate HTTPS outside this Compose stack with Caddy, Nginx Proxy Manager, Nginx, a cloud load balancer, or similar, and forward to the loopback-bound Houfeng port. Do not expose the center directly on public plain HTTP. If one-command agent onboarding is needed, the project image must be published with a real release version and matching Linux agent release assets as described above; automated Docker image publishing is a follow-up requirement.
+
+Application logs currently go to container stdout/stderr. File-based Houfeng application logging is a required follow-up for troubleshooting and user feedback; this Compose file intentionally does not include a misleading log bind mount until the app writes log files itself.
+
+Rollback/removal expectations:
+
+- `docker compose down` stops and removes the `houfeng`/`db` containers but keeps PostgreSQL files under `./data/postgres/`.
+- Delete `./data/postgres/` only when intentionally discarding the deployment. Back up or move that directory when migrating the Compose deployment to another host.
 
 ## Agent environment
 
@@ -225,7 +264,7 @@ Houfeng can run behind a local reverse proxy that terminates TLS and forwards to
 
 ## Operational verification
 
-After startup:
+After local/systemd startup:
 
 ```bash
 curl -fsS http://127.0.0.1:8080/api/healthz
@@ -233,6 +272,14 @@ systemctl status houfeng-center
 systemctl status houfeng-agent
 journalctl -u houfeng-center -n 100 --no-pager
 journalctl -u houfeng-agent -n 100 --no-pager
+```
+
+After Docker Compose startup:
+
+```bash
+curl -fsS http://127.0.0.1:16001/api/healthz
+docker compose --env-file docs/deploy/compose.env ps
+docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng
 ```
 
 Continue with `docs/operations/v1-smoke-run.md` for the full fresh-install path.
