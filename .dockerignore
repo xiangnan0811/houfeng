@@ -1,0 +1,62 @@
+# Git and local VCS metadata
+.git
+.gitignore
+.githooks
+.worktrees
+
+# Local environment and secrets
+.env
+.env.*
+docs/deploy/compose.env
+!.env.example
+!docs/deploy/compose.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Local editor and OS files
+.DS_Store
+.idea
+.vscode
+
+# AI/Trellis/local runtime noise
+.agents
+.agent
+.claude
+.codex
+.gemini
+.omc
+.omx
+.superpowers
+.trellis
+.tmp
+tmp
+web/.tmp
+
+# Docker Compose local data
+/data
+
+# Build outputs and caches
+bin
+dist
+web/dist
+web/node_modules
+node_modules
+coverage
+
+# Test/cache artifacts
+__pycache__
+*.pyc
+*.pyo
+*.test
+*.out
+*.log
+
+# Documentation screenshot/image artifacts are not needed for image builds
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.webp

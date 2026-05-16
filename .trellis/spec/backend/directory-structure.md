@@ -253,6 +253,112 @@ if ok {
    - Wrong: 在 `agent/runtime` 里按 OS 分支，或让 runtime 感知 `sysctl` / `/proc` 文件名。
    - Correct: 在 `hostsample.New()` / `Provider.Collect` 内选择平台 collector，runtime 只消费 `HostSamplePayload`。
 
+#### Scenario: Docker Compose center deployment contract
+
+1. **Scope / Trigger**
+   - 触发：修改 `Dockerfile`、`compose.yaml`、`docs/deploy/compose.env.example`、Docker 部署文档、Docker 镜像命名 / 发布流程、或 center/web/PostgreSQL 部署边界。
+   - 目标：Compose 只提供 center + built web + PostgreSQL 的快速部署路径，不改变 1 center + 1 PostgreSQL + N systemd agents 的产品拓扑，也不把 agent 变成容器工作负载。
+
+2. **Signatures**
+   - Image definition: repository root `Dockerfile` builds a single project image containing `houfeng-center` and baked `web/dist`.
+   - Published Compose file: `compose.yaml` service set is exactly `houfeng` + `db` for MVP.
+   - Project image reference: `houfeng.image = linnea7171/houfeng:latest` until automated release image publishing replaces the placeholder.
+   - Runtime web path: `HOUFENG_WEB_DIST_DIR=/app/web/dist` inside the project image.
+   - Runtime HTTP default: project image and Compose set `HOUFENG_HTTP_ADDR=:16001`; default port mapping is `127.0.0.1:16001:16001`, with host port override allowed.
+   - Database URL shape: `postgres://houfeng:<password>@db:5432/houfeng?sslmode=disable`.
+   - PostgreSQL data path: default Compose bind mount is `./data/postgres:/var/lib/postgresql/data` so operators can migrate the directory directly.
+   - Minimal env template: `docs/deploy/compose.env.example` copied to untracked `docs/deploy/compose.env`.
+
+3. **Contracts**
+   - Published `compose.yaml` must not contain a local project `build:` block and quick-start docs must not instruct `docker compose up --build`; operators should be able to run the published image directly.
+   - The root `Dockerfile` is the image build definition for future automation, not the default Compose quick-start execution path.
+   - `houfeng` runs only `houfeng-center`; it does not start Vite, Nginx, Caddy, Postgres, or an agent inside the project container.
+   - `db` uses the official PostgreSQL image with a user-migratable host directory mounted at `/var/lib/postgresql/data`; center applies embedded migrations at startup.
+   - Compose may bind Houfeng to host loopback for an operator-managed reverse proxy upstream; TLS termination stays outside the app container/Compose MVP.
+   - `HOUFENG_PUBLIC_BASE_URL` may be empty for first login, but must be set to an externally reachable absolute `http(s)` URL before one-command agent onboarding.
+   - Quick-start env stays minimal: database password, initial admin username/password, and visible `HOUFENG_PUBLIC_BASE_URL`; do not add Telegram, agent env, retention/session/incident tuning, or release automation secrets to this template.
+   - Application file logging is a required follow-up for troubleshooting and user feedback if not implemented. Do not add a log bind mount unless the app actually writes files there; stdout/stderr-only logging must not be documented as sufficient long-term behavior.
+   - Agents remain Linux/systemd host installs through center-generated onboarding commands. Do not add an `agent` Compose service, Docker agent deployment docs, Docker socket mounts, host PID/network namespace requirements, or Kubernetes manifests under this contract.
+
+4. **Validation & Error Matrix**
+
+   | Condition | Expected behavior |
+   | --- | --- |
+   | `compose.yaml` contains `houfeng.build` or quick-start says `up --build` | Reject in review; published Compose must pull/use `linnea7171/houfeng:latest` until release automation is implemented |
+   | `compose.yaml` uses project service name `center` | Reject in review; service name must be `houfeng` |
+   | `compose.yaml` keeps project container port `8080` as the Docker default | Reject in review; Docker/Compose default must be `16001` inside and outside |
+   | `compose.yaml` adds an `agent` service | Reject in review; agents are host systemd services |
+   | `docs/deploy/compose.env` is committed | Reject in review; only `docs/deploy/compose.env.example` is tracked |
+   | Missing `POSTGRES_PASSWORD` / `HOUFENG_INITIAL_PASSWORD` in env file | Compose interpolation should fail before starting services |
+   | Empty `HOUFENG_PUBLIC_BASE_URL` | Center can start and login works; install-command generation remains unavailable until configured |
+   | Internal Compose URL used as public base URL | Reject in docs/review unless target agents can actually reach it; production commands need the external browser/agent URL |
+   | Public deployment exposes plain HTTP directly | Reject in docs/review; require operator-managed HTTPS reverse proxy |
+
+5. **Good / Base / Bad Cases**
+   - Good: operator copies `docs/deploy/compose.env.example` to `docs/deploy/compose.env`, replaces passwords, runs `docker compose --env-file docs/deploy/compose.env up -d`, and accesses Houfeng on `127.0.0.1:16001` through a local reverse proxy upstream.
+   - Good: operator backs up or migrates `./data/postgres/` as an ordinary host directory before moving the deployment.
+   - Good: release automation later builds the root `Dockerfile`, tags/pushes `linnea7171/houfeng:<version>` / `latest`, and updates docs or Compose image pinning without adding local `build:` to the published quick-start.
+   - Base: local login works with empty `HOUFENG_PUBLIC_BASE_URL`; before onboarding real agents, operator sets the external HTTPS URL and recreates the `houfeng` container.
+   - Bad: using `build: .` in `compose.yaml` makes deployment depend on local Go/Node source builds and breaks the intended project-image distribution path.
+   - Bad: adding a `/var/log/houfeng` bind mount while the app does not write files there creates misleading troubleshooting expectations.
+   - Bad: adding an agent container with `/var/run/docker.sock` or broad host mounts changes the thin-agent security boundary and is not this deployment model.
+
+6. **Tests Required**
+   - `docker compose --env-file docs/deploy/compose.env.example -f compose.yaml config --quiet` must pass.
+   - Static check must confirm `compose.yaml` has no `build:` for `houfeng`, has no `agent` service, references `linnea7171/houfeng:latest`, maps `127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001`, bind-mounts `./data/postgres`, and wires `depends_on.condition: service_healthy` for PostgreSQL.
+   - `git diff --check` must pass after Docker/docs edits.
+   - Search touched docs/configs for stale `center` service naming, `127.0.0.1:8080`, Docker `:8080` defaults, `postgres-data` named-volume wording, misleading log mount wording, and stale `--build` / local-build quick-start wording before review.
+   - For Dockerfile changes, run a lightweight Dockerfile validation or image build when Docker is available; if unavailable, state that explicitly and rely on review plus existing `make verify-go` / `make verify-web` gates.
+
+7. **Wrong vs Correct**
+
+```yaml
+# 错误：发布给 operator 的 Compose 默认从本地源码 build，且服务名不是 houfeng。
+services:
+  center:
+    build: .
+```
+
+```yaml
+# 正确：发布 Compose 默认使用项目镜像，服务名为 houfeng。
+services:
+  houfeng:
+    image: linnea7171/houfeng:latest
+```
+
+```yaml
+# 错误：Docker 默认仍监听 / 暴露 8080。
+services:
+  houfeng:
+    environment:
+      HOUFENG_HTTP_ADDR: ":8080"
+    ports:
+      - "127.0.0.1:8080:8080"
+```
+
+```yaml
+# 正确：Docker/Compose 默认内外都是 16001，host 端口可覆盖。
+services:
+  houfeng:
+    environment:
+      HOUFENG_HTTP_ADDR: ":16001"
+    ports:
+      - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
+```
+
+```yaml
+# 错误：把 agent 做成容器服务并要求宿主机高权限挂载。
+services:
+  agent:
+    image: linnea7171/houfeng-agent:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+```text
+正确：agent 继续通过 Node onboarding 生成的一键安装命令安装到真实 Linux/systemd 主机。
+```
+
 ### `internal/contracts/agentapi/`
 
 center 与 agent 同时引用的唯一契约包。内容：

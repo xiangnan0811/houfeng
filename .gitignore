@@ -1,5 +1,9 @@
 # env
 .env
+docs/deploy/compose.env
+
+# Docker Compose local data
+/data/
 
 # IDE
 .DS_Store
