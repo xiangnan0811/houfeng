@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 133
-- **Last Active**: 2026-05-16
+- **Total Sessions**: 134
+- **Last Active**: 2026-05-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~506 | Active |
+| `journal-3.md` | ~539 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 134 | 2026-05-17 | Add Docker image publishing | `3b4ba8f` | `feature/docker-image-auto-publishing` |
 | 133 | 2026-05-16 | Fix Compose secret scan | `47857aa` | `feature/docker-compose-deployment` |
 | 132 | 2026-05-16 | Docker Compose deployment | `2ccfa3f` | `feature/docker-compose-deployment` |
 | 131 | 2026-05-16 | Refresh documentation for open-source project state | `bfce02f`, `0bf9c16`, `d8b8319`, `39d40b7` | `feature/docs-refresh-after-agent-install` |
