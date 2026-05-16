@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Check Docker docs/artifacts do not drift from center + PostgreSQL + systemd agent architecture."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Check PostgreSQL persistence and startup migration assumptions are correct for Compose."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check verification commands and tooling changes align with project quality gates."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Check built SPA is served from the image path through center, not a separate frontend container."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Check web build expectations remain compatible with Docker image build and local verification."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Check changes remain on feature branch and do not alter protected branch workflow incorrectly."}
+{"file":".trellis/tasks/05-16-docker-compose-deployment/research/docker-compose-conventions.md","reason":"Check implementation matches researched Compose conventions: health dependency, named volume, minimal env, external proxy, no agent service."}
