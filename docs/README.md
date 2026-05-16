@@ -10,7 +10,7 @@ This index keeps the current public/operator path separate from design reference
 
 ## Current operator guides
 
-- `deploy/local-and-systemd.md` — build artifacts, center environment, Docker Compose center deployment (`houfeng` service on `127.0.0.1:16001`, `./data/postgres/`, file-logging follow-up), authentication, reverse proxy/TLS notes, systemd examples, generated install commands, checksum verification, and manual troubleshooting fallback.
+- `deploy/local-and-systemd.md` — build artifacts, center environment, Docker Compose center deployment (`houfeng` service on `127.0.0.1:16001`, `./data/postgres/`, release-published Docker image, file-logging follow-up), authentication, reverse proxy/TLS notes, systemd examples, generated install commands, checksum verification, and manual troubleshooting fallback.
 - `deploy/systemd/houfeng-center.service` — example center systemd unit.
 - `deploy/systemd/houfeng-agent.service` — example agent systemd unit for manual installs and reference.
 - `operations/v1-smoke-run.md` — live PostgreSQL smoke path for center/auth/node/agent/target/probe/incident/event checks.

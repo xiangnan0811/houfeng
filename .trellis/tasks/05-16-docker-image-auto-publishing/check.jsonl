@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Verify implementation preserves Docker/Compose boundaries and updates durable release publishing contract if needed."}
+{"file":".trellis/tasks/05-16-docker-image-auto-publishing/research/xirang-docker-publishing.md","reason":"Check workflow behavior matches chosen release-only strategy and does not accidentally publish on main/PR."}

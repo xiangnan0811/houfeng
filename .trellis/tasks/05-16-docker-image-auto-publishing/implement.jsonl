@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Docker/Compose and release workflow contract: root Dockerfile, image name, no local compose build, no agent container, required tests."}
+{"file":".trellis/tasks/05-16-docker-image-auto-publishing/research/xirang-docker-publishing.md","reason":"Reference release-only Docker publishing workflow from xirang: triggers, Docker Hub auth, tag policy, multi-arch/digest patterns, and what to adapt/avoid."}
