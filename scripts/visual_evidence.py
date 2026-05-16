@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate v2 visual evidence and run local browser sanity checks."""
+"""Run local browser sanity checks for Houfeng v2 UI work."""
 
 from __future__ import annotations
 
@@ -10,40 +10,13 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Iterable, Literal
 from urllib.parse import parse_qs, urljoin, urlparse
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST = REPO_ROOT / "docs/operations/v2-visual-evidence/manifest.md"
-EXPECTED_COLUMNS = [
-    "Date",
-    "Route",
-    "Viewport",
-    "Theme",
-    "Data source",
-    "File",
-    "Verdict",
-    "Notes",
-]
-VALID_VERDICTS = {"Needs review", "Accepted", "Rejected"}
 VIEWPORT_RE = re.compile(r"^(?P<width>[1-9][0-9]*)x(?P<height>[1-9][0-9]*)$")
 MOCK_API_PROFILE_CHOICES = ("none", "asset-workflows", "observability-support")
 MockAPIProfile = Literal["none", "asset-workflows", "observability-support"]
-
-
-@dataclass(frozen=True)
-class ManifestRow:
-    line_no: int
-    date: str
-    route: str
-    viewport: str
-    theme: str
-    data_source: str
-    file: str
-    verdict: str
-    notes: str
 
 
 @dataclass(frozen=True)
@@ -57,135 +30,6 @@ class Viewport:
 class BrowserLogin:
     username: str
     password: str
-
-
-def strip_code(value: str) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == "`" and value[-1] == "`":
-        return value[1:-1].strip()
-    return value
-
-
-def split_markdown_row(line: str) -> list[str]:
-    text = line.strip()
-    if not text.startswith("|") or not text.endswith("|"):
-        return []
-    return [cell.strip() for cell in text.strip("|").split("|")]
-
-
-def is_separator_row(cells: list[str]) -> bool:
-    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)
-
-
-def parse_manifest(path: Path) -> tuple[list[str], list[ManifestRow], list[str]]:
-    errors: list[str] = []
-    rows: list[ManifestRow] = []
-    lines = path.read_text(encoding="utf-8").splitlines()
-
-    table_lines = [
-        (line_no, line)
-        for line_no, line in enumerate(lines, start=1)
-        if line.strip().startswith("|")
-    ]
-    if len(table_lines) < 2:
-        return [], [], [f"{path}: expected a markdown table with header and rows"]
-
-    header_line_no, header_line = table_lines[0]
-    header = split_markdown_row(header_line)
-    if header != EXPECTED_COLUMNS:
-        errors.append(
-            f"{path}:{header_line_no}: expected columns {EXPECTED_COLUMNS}, got {header}"
-        )
-
-    separator_line_no, separator_line = table_lines[1]
-    separator = split_markdown_row(separator_line)
-    if not is_separator_row(separator):
-        errors.append(f"{path}:{separator_line_no}: expected markdown separator row")
-
-    for line_no, line in table_lines[2:]:
-        cells = split_markdown_row(line)
-        if len(cells) != len(EXPECTED_COLUMNS):
-            errors.append(
-                f"{path}:{line_no}: expected {len(EXPECTED_COLUMNS)} cells, got {len(cells)}"
-            )
-            continue
-        rows.append(ManifestRow(line_no, *cells))
-
-    return header, rows, errors
-
-
-def validate_manifest(path: Path) -> list[str]:
-    errors: list[str] = []
-    if not path.exists():
-        return [f"{path}: manifest does not exist"]
-
-    _, rows, parse_errors = parse_manifest(path)
-    errors.extend(parse_errors)
-    evidence_root = path.parent.resolve()
-    seen_files: dict[str, int] = {}
-
-    if not rows:
-        errors.append(f"{path}: no evidence rows found")
-
-    for row in rows:
-        location = f"{path}:{row.line_no}"
-
-        try:
-            dt.date.fromisoformat(row.date)
-        except ValueError:
-            errors.append(f"{location}: invalid Date {row.date!r}; use YYYY-MM-DD")
-
-        route = strip_code(row.route)
-        if not route.startswith("/"):
-            errors.append(f"{location}: Route must start with '/', got {row.route!r}")
-
-        if not VIEWPORT_RE.fullmatch(row.viewport):
-            errors.append(
-                f"{location}: Viewport must look like 1440x1000, got {row.viewport!r}"
-            )
-
-        if not row.theme:
-            errors.append(f"{location}: Theme must not be empty")
-
-        if not row.data_source:
-            errors.append(f"{location}: Data source must not be empty")
-
-        evidence_file = strip_code(row.file)
-        if not evidence_file:
-            errors.append(f"{location}: File must not be empty")
-        elif evidence_file.startswith("/") or ".." in Path(evidence_file).parts:
-            errors.append(f"{location}: File must be relative inside {evidence_root}")
-        else:
-            resolved = (evidence_root / evidence_file).resolve()
-            try:
-                resolved.relative_to(evidence_root)
-            except ValueError:
-                errors.append(f"{location}: File escapes {evidence_root}: {evidence_file}")
-            if not resolved.exists():
-                errors.append(f"{location}: referenced file does not exist: {evidence_file}")
-            elif not resolved.is_file():
-                errors.append(f"{location}: referenced path is not a file: {evidence_file}")
-            elif resolved.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
-                errors.append(
-                    f"{location}: screenshot file should be .png/.jpg/.jpeg: {evidence_file}"
-                )
-            if evidence_file in seen_files:
-                errors.append(
-                    f"{location}: duplicate File also referenced at line {seen_files[evidence_file]}: {evidence_file}"
-                )
-            else:
-                seen_files[evidence_file] = row.line_no
-
-        verdict = row.verdict.strip()
-        if verdict not in VALID_VERDICTS:
-            errors.append(
-                f"{location}: Verdict must be one of {sorted(VALID_VERDICTS)}, got {row.verdict!r}"
-            )
-
-        if not row.notes:
-            errors.append(f"{location}: Notes must not be empty")
-
-    return errors
 
 
 def parse_viewport(value: str) -> Viewport:
@@ -1613,21 +1457,6 @@ def run_browser_sanity(
         return 1
     return 0
 
-
-def command_validate_manifest(args: argparse.Namespace) -> int:
-    manifest = args.manifest.resolve()
-    errors = validate_manifest(manifest)
-    if errors:
-        print("Visual evidence manifest validation failed:", file=sys.stderr)
-        for error in errors:
-            print(f"- {error}", file=sys.stderr)
-        return 1
-
-    _, rows, _ = parse_manifest(manifest)
-    print(f"Visual evidence manifest OK: {manifest} ({len(rows)} row(s))")
-    return 0
-
-
 def command_browser_sanity(args: argparse.Namespace) -> int:
     login, login_errors = resolve_browser_login(args)
     if login is not None and args.mock_api != "none":
@@ -1650,21 +1479,9 @@ def command_browser_sanity(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Validate Houfeng v2 visual evidence and run local browser sanity."
+        description="Run Houfeng v2 local browser sanity checks."
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
-
-    validate = subcommands.add_parser(
-        "validate-manifest",
-        help="Validate docs/operations/v2-visual-evidence/manifest.md.",
-    )
-    validate.add_argument(
-        "--manifest",
-        type=Path,
-        default=DEFAULT_MANIFEST,
-        help=f"Manifest path (default: {DEFAULT_MANIFEST.relative_to(REPO_ROOT)}).",
-    )
-    validate.set_defaults(func=command_validate_manifest)
 
     sanity = subcommands.add_parser(
         "browser-sanity",
