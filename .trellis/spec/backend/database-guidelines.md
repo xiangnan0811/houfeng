@@ -105,6 +105,66 @@
 
 > 例外：`db/migrations/0010_add_users_and_sessions.sql` 中的 `sessions_user_idx` / `sessions_expires_idx` 没有 `idx_` 前缀，是仓库现存差异；新增索引请遵循 `idx_<table>_<purpose>` 主流写法。
 
+### Node enrollment token one-time consumption
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 Node enrollment token issuance/validation、`nodes.enrollment_token_*` 字段、`/api/agent/enroll`、或 Node onboarding install-command 生成路径。
+- 目标：enrollment token 是一次性 bootstrap secret，不是长期 agent credential；成功绑定或进入待确认 fingerprint 路径后不得继续复用同一 token。
+
+#### 2. Signatures
+
+- DB columns: `nodes.enrollment_token_hash`, `nodes.enrollment_token_issued_at`, `nodes.enrollment_token_consumed_at`。
+- Domain constant: `nodes.EnrollmentTokenTTL = 30 * time.Minute`。
+- Issue method: `IssueNodeEnrollmentToken(ctx, nodeID) -> nodes.EnrollmentTokenIssue{Token, IssuedAt, ExpiresAt}`。
+- Validation path: `/api/agent/enroll` consumes a matching active token before or during binding evaluation.
+
+#### 3. Contracts
+
+- Token lookup must require non-empty hash, `enrollment_token_consumed_at is null`, and `enrollment_token_issued_at >= now() - nodes.EnrollmentTokenTTL`.
+- Issuing a new token overwrites the previous hash/issued time and clears consumed state, so only the latest generated command is active.
+- Successful token validation must mark `enrollment_token_consumed_at` in the same transaction as the enrollment/binding state change.
+- A pending fingerprint conflict can consume the one-time token even before the operator confirms/rejects the conflict; UI copy must tell operators to regenerate when needed.
+- Store only token hashes in Postgres; plaintext enrollment tokens appear only in the generated command and target host token file.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Token older than 30 minutes | enrollment returns invalid enrollment token semantics |
+| Token already consumed | enrollment returns invalid enrollment token semantics |
+| Token regenerated | old token becomes invalid; new token can be used until consumed or expired |
+| Node missing during issue | `nodes.ErrNodeNotFound` |
+| DB failure during consume/bind | transaction rolls back; caller returns wrapped repository error |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: user generates command, runs it once within 30 minutes, agent binds and receives sync token; the bootstrap token is consumed.
+- Base: user waits beyond 30 minutes; command fails at enroll and user regenerates from onboarding page.
+- Bad: leaving multiple generated tokens valid lets shell history or chat leaks enroll the same Node later.
+- Bad: consuming token after fingerprint confirmation instead of at enroll attempt makes conflict retries reuse a leaked bootstrap secret.
+
+#### 6. Tests Required
+
+- Migration test: `enrollment_token_consumed_at` column exists and active-token index excludes consumed tokens.
+- Store tests: issue sets `expires_at = issued_at + 30m`, regeneration invalidates prior token, expired token fails, consumed token fails, successful enroll consumes token.
+- Enrollment service/handler tests: invalid/expired/consumed token maps to the existing invalid enrollment response and does not leak token details.
+- Frontend onboarding tests: conflict-resolution copy does not claim the one-time token remains unchanged.
+
+#### 7. Wrong vs Correct
+
+```sql
+-- 错误：只按 hash 找 token，过期或已用 token 仍可登录。
+where enrollment_token_hash = $1
+```
+
+```sql
+-- 正确：只接受最新、未消费、TTL 内的 bootstrap token。
+where enrollment_token_hash = $1
+  and enrollment_token_consumed_at is null
+  and enrollment_token_issued_at >= now() - interval '30 minutes'
+```
+
 ### Node command action durability
 
 #### 1. Scope / Trigger

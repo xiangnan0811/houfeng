@@ -25,7 +25,7 @@ import {
   getSubscription,
   getVPSAsset,
   getVPSTimeline,
-  issueNodeEnrollmentToken,
+  issueNodeInstallCommand,
   linkVPSNode,
   listAssetDomains,
   listAssetServices,
@@ -1469,16 +1469,21 @@ describe('api helpers', () => {
     })
   })
 
-  it('issues enrollment tokens with POST /api/nodes/:nodeId/enrollment-token', async () => {
+  it('issues one-command install commands with POST /api/nodes/:nodeId/install-command', async () => {
     const responseBody = {
-      token: 'enroll_001',
+      command: 'curl -fsSL "https://center.example.com/api/agent/install.sh" | sudo sh -s -- --server-url "https://center.example.com" --enrollment-token "enroll_001" --version "v1.2.3" --release-repo "owner/repo"',
       issued_at: '2026-04-26T09:10:00Z',
+      expires_at: '2026-04-26T09:40:00Z',
+      installer_url: 'https://center.example.com/api/agent/install.sh',
+      public_base_url: 'https://center.example.com',
+      agent_version: 'v1.2.3',
+      release_repo: 'owner/repo',
     }
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(issueNodeEnrollmentToken('nd_001')).resolves.toEqual(responseBody)
-    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001/enrollment-token', {
+    await expect(issueNodeInstallCommand('nd_001')).resolves.toEqual(responseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001/install-command', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',

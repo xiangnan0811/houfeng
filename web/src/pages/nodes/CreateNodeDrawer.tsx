@@ -28,7 +28,7 @@ export function CreateNodeDrawer({
 }: CreateNodeDrawerProps) {
   return (
     <Drawer open={open} onClose={onClose} title="节点创建" ariaLabel="创建节点表单">
-      <p className="page-panel__description">创建完成后将立即生成接入 Token，并跳转到节点接入准备页。</p>
+      <p className="page-panel__description">创建完成后将跳转到节点接入工作台，在那里生成一键安装命令。</p>
       <form onSubmit={onSubmit}>
         <p>
           <label>
@@ -111,7 +111,7 @@ export function CreateNodeDrawer({
         {error ? <p>{error}</p> : null}
         <div className="page-form-actions">
           <button type="submit" className="btn btn--primary btn--md" disabled={submitting}>
-            {submitting ? '正在创建…' : '创建并生成 Token'}
+            {submitting ? '正在创建…' : '创建并进入接入工作台'}
           </button>
         </div>
       </form>

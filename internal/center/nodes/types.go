@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	EnrollmentTokenTTL = 30 * time.Minute
+
 	LifecyclePendingEnrollment = "待接入"
 	LifecycleInUse             = "在用"
 	LifecycleObserving         = "观察中"
@@ -113,8 +115,19 @@ type Repository interface {
 }
 
 type EnrollmentTokenIssue struct {
-	Token    string    `json:"token"`
-	IssuedAt time.Time `json:"issued_at"`
+	Token     string    `json:"token"`
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type InstallCommandIssue struct {
+	Command       string    `json:"command"`
+	IssuedAt      time.Time `json:"issued_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	InstallerURL  string    `json:"installer_url"`
+	PublicBaseURL string    `json:"public_base_url"`
+	AgentVersion  string    `json:"agent_version"`
+	ReleaseRepo   string    `json:"release_repo"`
 }
 
 type PendingBindingMetadata struct {

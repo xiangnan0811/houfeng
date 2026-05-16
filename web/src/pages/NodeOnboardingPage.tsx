@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 
 import {
   Card,
@@ -16,18 +16,13 @@ import {
   ApiError,
   confirmNodeRebind,
   getNodeOnboarding,
-  issueNodeEnrollmentToken,
+  issueNodeInstallCommand,
   rejectPendingNodeBinding,
   resetNodeBinding,
 } from '../lib/api'
 import { formatLabelList } from '../lib/format'
-import {
-  clearOnboardingTokenCache,
-  getOnboardingTokenCache,
-  setOnboardingTokenCache,
-} from '../lib/onboardingTokenCache'
 import { useCopyToClipboard } from '../lib/useCopyToClipboard'
-import type { NodeOnboardingState } from '../lib/types'
+import type { NodeInstallCommandIssue, NodeOnboardingState } from '../lib/types'
 
 type State = {
   requestedNodeId: string | null
@@ -42,12 +37,30 @@ type ConflictState = {
   error: string | null
 }
 
-type TokenState = {
+type InstallCommandState = {
+  issue: NodeInstallCommandIssue | null
   action: 'issue' | null
   error: string | null
+  hidden: boolean
 }
 
-const TOKEN_PLACEHOLDER = '###TOKEN###'
+const MANUAL_TOKEN_PLACEHOLDER = '<30-minute enrollment token>'
+const MANUAL_SERVER_PLACEHOLDER = '<center public base URL>'
+
+const manualEnvSnippet = `HOUFENG_AGENT_SERVER_URL=${MANUAL_SERVER_PLACEHOLDER}
+HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
+HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
+HOUFENG_AGENT_BUFFER_MAX_ENTRIES=2048
+HOUFENG_AGENT_BUFFER_MAX_AGE=72h`
+const manualTokenSnippet = `printf '%s' '${MANUAL_TOKEN_PLACEHOLDER}' | sudo tee /etc/houfeng-agent/token >/dev/null`
+
+const installChecklist = [
+  '复制一键安装命令。',
+  '在目标 VPS 的 root shell 或具备 sudo 的账号中粘贴执行。',
+  '安装器会校验 linux/amd64 或 linux/arm64、systemd、下载工具和 checksum 工具。',
+  '安装器下载 GitHub Release 中的 houfeng-agent，并用 sha256sums.txt 校验后再写入本机。',
+  '安装完成后 systemd 会启动 agent，回到本页等待首次同步和绑定。',
+]
 
 type ConflictActionCopy = {
   title: string
@@ -64,16 +77,17 @@ const CONFLICT_ACTION_COPY: Record<ConflictAction, ConflictActionCopy> = {
     current: '已绑定指纹与新指纹不一致，存在待确认的指纹尝试。',
     result: '操作后：以新指纹建立绑定，原指纹立即失效。',
     impact:
-      '后续 sync 将以新指纹为准；之前以旧指纹接入的 agent 将被拒绝（如系误判，请检查 agent 部署）。',
-    unchanged: '不会改变节点 ID、历史观测数据或 enrollment token。',
+      '后续 sync 将以新指纹为准；之前以旧指纹接入的 agent 将被拒绝。触发待确认的安装命令已消耗一次性 token，确认后请重新生成安装命令并在目标机器执行。',
+    unchanged: '不会改变节点 ID 与历史观测数据。',
     confirmLabel: '确认重新绑定',
   },
   reject: {
     title: '拒绝该指纹接入',
     current: '有未确认的新指纹正在尝试以该节点接入。',
     result: '操作后：保留当前已绑定指纹，新指纹的接入请求将继续被拒绝。',
-    impact: '使用新指纹的 agent 将持续无法 sync；如系误操作，请前往该机器检查 agent 部署。',
-    unchanged: '不会改变当前已绑定指纹、节点状态或 enrollment token。',
+    impact:
+      '使用新指纹的 agent 将持续无法 sync；该次接入已消耗一次性 token，如后续确认为误操作，需要重新生成安装命令。',
+    unchanged: '不会改变当前已绑定指纹、节点状态或历史观测数据。',
     confirmLabel: '确认拒绝该指纹',
   },
   reset: {
@@ -102,6 +116,13 @@ function describeError(error: unknown, fallback: string) {
   return fallback
 }
 
+function describeInstallCommandError(error: unknown) {
+  if (error instanceof ApiError && error.status === 409) {
+    return `中心一键安装配置不完整：${error.message}。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。`
+  }
+  return describeError(error, '生成一键安装命令失败')
+}
+
 function maskFingerprint(value?: string | null) {
   if (!value) return '尚无'
   const normalized = value.trim()
@@ -124,7 +145,6 @@ function derivePhaseSteps(onboarding: NodeOnboardingState): StepperStep[] {
   const binding = onboarding.binding_status
   const accepted = onboarding.has_accepted_observation
 
-  // 异常分支：绑定冲突 → 第 2 步标 error
   if (binding === '指纹变更待确认') {
     return [
       { label: labels[0], state: 'done' },
@@ -134,7 +154,6 @@ function derivePhaseSteps(onboarding: NodeOnboardingState): StepperStep[] {
     ]
   }
 
-  // 主路径：未绑定 → 第 1 步 current
   if (binding === '未绑定') {
     return [
       { label: labels[0], state: 'current' },
@@ -144,7 +163,6 @@ function derivePhaseSteps(onboarding: NodeOnboardingState): StepperStep[] {
     ]
   }
 
-  // binding === '已绑定'：根据 has_accepted_observation 判断停在第 3 步还是全部完成
   if (!accepted) {
     return [
       { label: labels[0], state: 'done' },
@@ -154,7 +172,6 @@ function derivePhaseSteps(onboarding: NodeOnboardingState): StepperStep[] {
     ]
   }
 
-  // 已绑定 + 已接收观测 = 接入完成
   return [
     { label: labels[0], state: 'done' },
     { label: labels[1], state: 'done' },
@@ -163,10 +180,6 @@ function derivePhaseSteps(onboarding: NodeOnboardingState): StepperStep[] {
   ]
 }
 
-/**
- * Inline copy button used inside the token block and install snippets.
- * Not promoted to an atom: only this page composes it (see PRD §Technical Approach).
- */
 function CopyButton({
   value,
   label = '复制',
@@ -189,15 +202,144 @@ function CopyButton({
       disabled={!value}
       aria-label={ariaLabel ?? label}
     >
-      {copied ? '已复制 ✓' : label}
+      {copied ? '已复制' : label}
     </button>
+  )
+}
+
+function InstallCommandPanel({
+  nodeId,
+  issue,
+  hidden,
+  busy,
+  error,
+  onGenerate,
+  onHide,
+  onReveal,
+}: {
+  nodeId: string
+  issue: NodeInstallCommandIssue | null
+  hidden: boolean
+  busy: boolean
+  error: string | null
+  onGenerate: () => void
+  onHide: () => void
+  onReveal: () => void
+}) {
+  const canShowCommand = issue !== null && !hidden
+  const primaryLabel = issue ? '重新生成安装命令' : '生成一键安装命令'
+
+  return (
+    <div className="page-stack">
+      <Card cardRole="warning">
+        <p className="onboarding-token__hint onboarding-token__hint--critical">
+          安装命令包含 30 分钟有效的一次性 enrollment token。请把它当作敏感信息处理，不要粘贴到工单、聊天、日志或截图里。
+        </p>
+        <div className="onboarding-token__actions">
+          <button
+            type="button"
+            className="btn btn--primary btn--md"
+            disabled={busy}
+            onClick={onGenerate}
+          >
+            {busy ? '正在生成…' : primaryLabel}
+          </button>
+          {issue && hidden ? (
+            <button type="button" className="btn btn--ghost btn--md" onClick={onReveal}>
+              重新展开命令
+            </button>
+          ) : null}
+        </div>
+        {issue ? (
+          <p className="onboarding-steps__hint">
+            重新生成会立即使上一条安装命令里的 enrollment token 失效；如果命令过期、丢失或已经被隐藏，请重新生成。
+          </p>
+        ) : (
+          <p className="onboarding-steps__hint">
+            命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。
+          </p>
+        )}
+        {error ? (
+          <p role="alert" className="onboarding-token__error-summary">
+            <MonoDigits>{error}</MonoDigits>
+          </p>
+        ) : null}
+      </Card>
+
+      {canShowCommand && issue ? (
+        <Card cardRole="accent" aria-label="一键安装命令">
+          <div className="onboarding-snippet">
+            <pre>
+              <code>{issue.command}</code>
+            </pre>
+            <CopyButton value={issue.command} label="复制安装命令" size="md" />
+          </div>
+          <dl className="metadata-list">
+            <div>
+              <dt>签发时间</dt>
+              <dd>
+                <Timestamp value={issue.issued_at} mode="both" />
+              </dd>
+            </div>
+            <div>
+              <dt>过期时间</dt>
+              <dd>
+                <Timestamp value={issue.expires_at} mode="both" />
+              </dd>
+            </div>
+            <div>
+              <dt>Center URL</dt>
+              <dd>
+                <Hostname>{issue.public_base_url}</Hostname>
+              </dd>
+            </div>
+            <div>
+              <dt>Installer</dt>
+              <dd>
+                <Hostname>{issue.installer_url}</Hostname>
+              </dd>
+            </div>
+            <div>
+              <dt>Agent Release</dt>
+              <dd>
+                <MonoDigits>{issue.agent_version}</MonoDigits>
+                {' · '}
+                <MonoDigits>{issue.release_repo}</MonoDigits>
+              </dd>
+            </div>
+          </dl>
+          <div className="onboarding-token__actions">
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={onHide}
+              aria-label="隐藏安装命令"
+            >
+              已保存，隐藏命令
+            </button>
+            <Link className="text-link" to={`/nodes/${nodeId}`}>
+              安装后查看节点详情 →
+            </Link>
+          </div>
+        </Card>
+      ) : issue && hidden ? (
+        <Card cardRole="dim">
+          <p className="onboarding-token__hint onboarding-token__hint--critical">
+            安装命令已隐藏。本页会话内可重新展开；如果已离开页面或命令过期，请重新生成。
+          </p>
+        </Card>
+      ) : (
+        <div className="empty-state">
+          <h3>尚未生成一键安装命令。</h3>
+          <p>点击上方按钮后，center 会签发新的 30 分钟一次性 token 并返回可复制命令。</p>
+        </div>
+      )}
+    </div>
   )
 }
 
 export function NodeOnboardingPage() {
   const { nodeId } = useParams()
-  const location = useLocation()
-  const navigate = useNavigate()
   const [state, setState] = useState<State>({
     requestedNodeId: null,
     onboarding: null,
@@ -208,11 +350,12 @@ export function NodeOnboardingPage() {
     error: null,
   })
   const [pendingConflictChoice, setPendingConflictChoice] = useState<ConflictAction | null>(null)
-  const [tokenState, setTokenState] = useState<TokenState>({
+  const [installCommandState, setInstallCommandState] = useState<InstallCommandState>({
+    issue: null,
     action: null,
     error: null,
+    hidden: false,
   })
-  const [tokenCollapsed, setTokenCollapsed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -226,9 +369,11 @@ export function NodeOnboardingPage() {
           error: null,
         })
         setPendingConflictChoice(null)
-        setTokenState({
+        setInstallCommandState({
+          issue: null,
           action: null,
           error: null,
+          hidden: false,
         })
         setState({
           requestedNodeId: nodeId,
@@ -243,9 +388,11 @@ export function NodeOnboardingPage() {
           error: null,
         })
         setPendingConflictChoice(null)
-        setTokenState({
+        setInstallCommandState({
+          issue: null,
           action: null,
           error: null,
+          hidden: false,
         })
         setState({
           requestedNodeId: nodeId,
@@ -264,27 +411,6 @@ export function NodeOnboardingPage() {
 
   const onboarding = state.requestedNodeId === nodeId ? state.onboarding : null
   const error = state.requestedNodeId === nodeId ? state.error : null
-  const locationTokenIssueError =
-    typeof (location.state as { tokenIssueError?: string } | null)?.tokenIssueError === 'string'
-      ? (location.state as { tokenIssueError?: string }).tokenIssueError
-      : null
-  const cachedTokenIssue = nodeId ? getOnboardingTokenCache(nodeId) : null
-  const tokenIssue =
-    cachedTokenIssue &&
-    (!onboarding?.enrollment_token_issued_at ||
-      onboarding.enrollment_token_issued_at === cachedTokenIssue.issued_at)
-      ? cachedTokenIssue
-      : null
-
-  useEffect(() => {
-    if (!nodeId || !cachedTokenIssue || !onboarding?.enrollment_token_issued_at) {
-      return
-    }
-
-    if (onboarding.enrollment_token_issued_at !== cachedTokenIssue.issued_at) {
-      clearOnboardingTokenCache(nodeId)
-    }
-  }, [cachedTokenIssue, nodeId, onboarding?.enrollment_token_issued_at])
 
   if (nodeId && state.requestedNodeId !== nodeId) {
     return <section className="page-panel">正在加载节点接入状态…</section>
@@ -305,17 +431,18 @@ export function NodeOnboardingPage() {
 
   const pendingBinding = onboarding.pending_binding
   const showBindingConflict = onboarding.binding_status === '指纹变更待确认'
-  const tokenErrorMessage = tokenState.error ?? locationTokenIssueError ?? null
-
-  // Install snippet template values (frontend-derived; backend currently does
-  // not provide a public server URL — see PRD ADR-lite).
-  const serverUrl = typeof window !== 'undefined' ? window.location.origin : ''
-  const tokenForTemplate =
-    tokenIssue && !tokenCollapsed ? tokenIssue.token : TOKEN_PLACEHOLDER
-  const tokenAvailableForTemplate = Boolean(tokenIssue && !tokenCollapsed)
-  const envSnippet = `HOUFENG_AGENT_SERVER_URL=${serverUrl}\nHOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token`
-  const tokenWriteSnippet = `echo '${tokenForTemplate}' > /etc/houfeng-agent/token`
-  const startSnippet = 'systemctl enable --now houfeng-agent'
+  const installIssue = installCommandState.issue
+  const installAside = installIssue ? (
+    <span>
+      有效至：<Timestamp value={installIssue.expires_at} mode="both" />
+    </span>
+  ) : onboarding.enrollment_token_issued_at ? (
+    <span>
+      上次签发：<Timestamp value={onboarding.enrollment_token_issued_at} mode="both" />
+    </span>
+  ) : (
+    <span>尚未签发</span>
+  )
 
   function applyOnboardingState(targetNodeId: string, nextOnboarding: NodeOnboardingState) {
     setState({
@@ -351,65 +478,43 @@ export function NodeOnboardingPage() {
     }
   }
 
-  async function handleIssueEnrollmentToken() {
+  async function handleIssueInstallCommand() {
     if (!nodeId) return
 
-    setTokenState({
+    setInstallCommandState((current) => ({
+      ...current,
       action: 'issue',
       error: null,
-    })
+    }))
 
     try {
-      const issue = await issueNodeEnrollmentToken(nodeId)
-      setOnboardingTokenCache(nodeId, issue)
-      // A freshly minted token should always be visible (un-collapse on success).
-      setTokenCollapsed(false)
-
-      try {
-        const refreshed = await getNodeOnboarding(nodeId)
-        applyOnboardingState(nodeId, refreshed)
-        navigate(`/nodes/${nodeId}/onboarding`, { replace: true })
-        setTokenState({
-          action: null,
-          error: null,
-        })
-      } catch (error: unknown) {
-        setState((current) => {
-          if (current.requestedNodeId !== nodeId || !current.onboarding) {
-            return current
-          }
-
-          return {
-            ...current,
-            onboarding: {
-              ...current.onboarding,
-              enrollment_token_issued_at: issue.issued_at,
-            },
-          }
-        })
-        navigate(`/nodes/${nodeId}/onboarding`, { replace: true })
-        setTokenState({
-          action: null,
-          error: describeError(error, '已重新生成 Token，但刷新接入状态失败'),
-        })
-      }
-    } catch (error: unknown) {
-      setTokenState({
+      const issue = await issueNodeInstallCommand(nodeId)
+      setInstallCommandState({
+        issue,
         action: null,
-        error: describeError(error, '重新生成接入 Token 失败'),
+        error: null,
+        hidden: false,
       })
+      setState((current) => {
+        if (current.requestedNodeId !== nodeId || !current.onboarding) {
+          return current
+        }
+        return {
+          ...current,
+          onboarding: {
+            ...current.onboarding,
+            enrollment_token_issued_at: issue.issued_at,
+          },
+        }
+      })
+    } catch (error: unknown) {
+      setInstallCommandState((current) => ({
+        ...current,
+        action: null,
+        error: describeInstallCommandError(error),
+      }))
     }
   }
-
-  const tokenAside = tokenIssue ? (
-    <Timestamp value={tokenIssue.issued_at} mode="both" />
-  ) : onboarding.enrollment_token_issued_at ? (
-    <span>
-      上次签发：<Timestamp value={onboarding.enrollment_token_issued_at} mode="both" />
-    </span>
-  ) : (
-    <span>尚未签发</span>
-  )
 
   return (
     <div className="page-stack">
@@ -586,144 +691,60 @@ export function NodeOnboardingPage() {
         </DetailSection>
       ) : null}
 
-      <DetailSection eyebrow="接入 Token" title="接入凭证" ribbon="accent" aside={tokenAside}>
-        {tokenIssue && !tokenCollapsed ? (
-          <Card cardRole="warning">
-            <p className="onboarding-token__hint">
-              请在本次会话内完成安装。关闭后本会话仍可重新展开；离开页面后需要重新生成。
-            </p>
-            <div className="onboarding-token__row">
-              <MonoDigits className="onboarding-token__value">{tokenIssue.token}</MonoDigits>
-              <CopyButton value={tokenIssue.token} label="复制 token" />
-            </div>
-            <div className="onboarding-token__actions">
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={() => setTokenCollapsed(true)}
-              >
-                已保存，关闭
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                disabled={tokenState.action !== null}
-                onClick={handleIssueEnrollmentToken}
-              >
-                重新生成接入 Token
-              </button>
-            </div>
-            {tokenErrorMessage ? (
-              <p role="alert" className="onboarding-token__error-summary">
-                <MonoDigits>{tokenErrorMessage}</MonoDigits>
-              </p>
-            ) : null}
-          </Card>
-        ) : tokenIssue && tokenCollapsed ? (
-          <Card cardRole="dim">
-            <p className="onboarding-token__hint onboarding-token__hint--critical">
-              Token 明文已隐藏。本会话内可重新展开；离开页面后需要重新生成。
-            </p>
-            <div className="onboarding-token__actions">
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                onClick={() => setTokenCollapsed(false)}
-              >
-                重新展开 token 明文
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                disabled={tokenState.action !== null}
-                onClick={handleIssueEnrollmentToken}
-              >
-                重新生成接入 Token
-              </button>
-            </div>
-          </Card>
-        ) : tokenErrorMessage ? (
-          <Card cardRole="warning">
-            <p>{tokenErrorMessage}</p>
-            <div className="onboarding-token__actions">
-              <button
-                type="button"
-                className="btn btn--primary btn--md"
-                disabled={tokenState.action !== null}
-                onClick={handleIssueEnrollmentToken}
-              >
-                {tokenState.action === 'issue' ? '正在生成…' : '重新生成接入 Token'}
-              </button>
-            </div>
-          </Card>
-        ) : (
-          <div className="empty-state">
-            <h3>当前会话里没有可显示的 Token 明文。</h3>
-            <p>请重新生成接入 Token，再继续安装或核对配置。</p>
-            <div className="onboarding-token__actions onboarding-token__actions--center">
-              <button
-                type="button"
-                className="btn btn--primary btn--md"
-                disabled={tokenState.action !== null}
-                onClick={handleIssueEnrollmentToken}
-              >
-                {tokenState.action === 'issue' ? '正在生成…' : '重新生成接入 Token'}
-              </button>
-            </div>
-          </div>
-        )}
+      <DetailSection eyebrow="一键安装" title="复制一条命令完成安装" ribbon="accent" aside={installAside}>
+        <InstallCommandPanel
+          nodeId={onboarding.node_id}
+          issue={installCommandState.issue}
+          hidden={installCommandState.hidden}
+          busy={installCommandState.action === 'issue'}
+          error={installCommandState.error}
+          onGenerate={handleIssueInstallCommand}
+          onHide={() =>
+            setInstallCommandState((current) => ({
+              ...current,
+              hidden: true,
+            }))
+          }
+          onReveal={() =>
+            setInstallCommandState((current) => ({
+              ...current,
+              hidden: false,
+            }))
+          }
+        />
       </DetailSection>
 
-      <DetailSection eyebrow="安装步骤" title="接入步骤">
+      <DetailSection eyebrow="安装器行为" title="命令执行后会做什么">
         <ol className="onboarding-steps">
-          <li>
-            <p>
-              在服务器上安装 <code>houfeng-agent</code>（参考部署文档）。
-            </p>
-          </li>
-          <li>
-            <p>
-              创建 systemd 环境文件 <code>/etc/houfeng-agent/agent.env</code>：
-            </p>
-            <div className="onboarding-snippet">
-              <pre>
-                <code>{envSnippet}</code>
-              </pre>
-              <CopyButton value={envSnippet} label="复制配置" />
-            </div>
-            <p className="onboarding-steps__hint">
-              <code>{serverUrl}</code> 取自当前页面地址。如经反向代理或公网访问与该地址不一致，请按实际外部 URL 调整。
-            </p>
-          </li>
-          <li>
-            <p>
-              把 token 写入 <code>/etc/houfeng-agent/token</code>：
-            </p>
-            <div className="onboarding-snippet">
-              <pre>
-                <code>{tokenWriteSnippet}</code>
-              </pre>
-              <CopyButton value={tokenWriteSnippet} label="复制命令" />
-            </div>
-            {!tokenAvailableForTemplate ? (
-              <p className="onboarding-steps__hint">
-                先生成或展开上方 token 明文，此处会自动填入真值；当前显示占位 <code>{TOKEN_PLACEHOLDER}</code>。
-              </p>
-            ) : null}
-          </li>
-          <li>
-            <p>启动服务：</p>
-            <div className="onboarding-snippet">
-              <pre>
-                <code>{startSnippet}</code>
-              </pre>
-              <CopyButton value={startSnippet} label="复制命令" />
-            </div>
-          </li>
-          <li>
-            <p>返回本页面，等待首次同步与绑定完成（约 1-5 分钟）。</p>
-          </li>
+          {installChecklist.map((item) => (
+            <li key={item}>
+              <p>{item}</p>
+            </li>
+          ))}
         </ol>
+      </DetailSection>
+
+      <DetailSection eyebrow="手工回退" title="手工安装仍可作为排障路径" ribbon="notice">
+        <Card cardRole="dim">
+          <p className="onboarding-token__hint">
+            优先使用上方一键命令。若需要排查安装器问题，可按部署文档手工安装二进制、写入 systemd 与以下配置；不要使用浏览器地址推导生产 Center URL。
+          </p>
+          <div className="onboarding-snippet">
+            <pre>
+              <code>{manualEnvSnippet}</code>
+            </pre>
+            <CopyButton value={manualEnvSnippet} label="复制环境模板" />
+          </div>
+          <div className="onboarding-snippet">
+            <pre>
+              <code>{manualTokenSnippet}</code>
+            </pre>
+            <CopyButton value={manualTokenSnippet} label="复制 token 写入模板" />
+          </div>
+          <p className="onboarding-steps__hint">
+            手工 token 仍应从 center 生成，30 分钟内使用且只使用一次；不要把 token 明文写入日志。
+          </p>
+        </Card>
       </DetailSection>
 
       <p className="onboarding-snapshot-meta">

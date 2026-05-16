@@ -584,6 +584,10 @@ func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"token":"enroll_001"}`))
 		}),
+		NodeInstallCommandHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"command":"curl -fsSL https://center.example.com/api/agent/install.sh"}`))
+		}),
 		NodeBindingConfirmRebindHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"phase":"已绑定，等待稳定观测"}`))
@@ -606,6 +610,7 @@ func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
 	}{
 		{name: "onboarding", method: http.MethodGet, path: "/api/nodes/nd_001/onboarding", wantBodySnippet: `"phase":"未开始接入"`},
 		{name: "issue token", method: http.MethodPost, path: "/api/nodes/nd_001/enrollment-token", wantBodySnippet: `"token":"enroll_001"`},
+		{name: "install command", method: http.MethodPost, path: "/api/nodes/nd_001/install-command", wantBodySnippet: `"command":"curl -fsSL https://center.example.com/api/agent/install.sh"`},
 		{name: "confirm rebind", method: http.MethodPost, path: "/api/nodes/nd_001/binding/confirm-rebind", wantBodySnippet: `"phase":"已绑定，等待稳定观测"`},
 		{name: "reject pending", method: http.MethodPost, path: "/api/nodes/nd_001/binding/reject-pending", wantBodySnippet: `"phase":"已绑定，等待稳定观测"`},
 		{name: "reset binding", method: http.MethodPost, path: "/api/nodes/nd_001/binding/reset", wantBodySnippet: `"phase":"未开始接入"`},
@@ -634,6 +639,42 @@ func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
 				t.Fatalf("expected body to contain %q, got %q", tt.wantBodySnippet, string(body))
 			}
 		})
+	}
+}
+
+func TestRouterServesInstallerScriptOutsideAuthMiddleware(t *testing.T) {
+	calledAuth := false
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		InstallerScriptHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+			_, _ = w.Write([]byte("#!/bin/sh\necho installer\n"))
+		}),
+		AuthMiddleware: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calledAuth = true
+				next.ServeHTTP(w, r)
+			})
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agent/install.sh", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if calledAuth {
+		t.Fatal("installer script route was wrapped by auth middleware")
+	}
+	if strings.TrimSpace(recorder.Body.String()) == spaShell {
+		t.Fatalf("expected installer script response, got SPA fallback body %q", recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "echo installer") {
+		t.Fatalf("installer body = %q, want script payload", recorder.Body.String())
 	}
 }
 

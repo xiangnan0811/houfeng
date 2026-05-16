@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 129
-- **Last Active**: 2026-05-15
+- **Total Sessions**: 130
+- **Last Active**: 2026-05-16
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~371 | Active |
+| `journal-3.md` | ~404 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 130 | 2026-05-16 | Agent one-command install | `d3eb4e6` | `feature/agent-one-command-install` |
 | 129 | 2026-05-15 | UX-11 Expert UI refinement | `6c25181` | `feature/ux11-ui-design-expert-refinement` |
 | 128 | 2026-05-15 | UX-10 Interaction acceptance polish | `995204d` | `feature/ux10-interaction-acceptance-polish` |
 | 127 | 2026-05-15 | UX-9 Page visual acceptance | `d07de92` | `feature/ux9-page-visual-acceptance` |

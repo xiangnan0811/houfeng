@@ -79,6 +79,19 @@ writeError(w, http.StatusInternalServerError, "internal server error")
 - 405 走 `writeError(w, http.StatusMethodNotAllowed, "method not allowed")`（参考 `targets.go:41`）。
 - 同一 handler 内出现 2 个以上 sentinel 分支时使用 `switch { case errors.Is(...) }`（参考 `internal/center/http/handlers/auth.go:128-131`、`runtime_controls.go:63-66`）。
 
+### Node onboarding install-command endpoint
+
+`POST /api/nodes/{node_id}/install-command` 是登录用户触发的普通 center API，不是 agent contract endpoint。它仍走 `writeError`，但有两个配置类 409 是产品契约，不能降级成 500：
+
+| Condition | HTTP status | Message |
+| --- | --- | --- |
+| `HOUFENG_PUBLIC_BASE_URL` 未配置 | 409 | `public base URL is not configured` |
+| agent release version 为空或 `dev` | 409 | `agent release version is not configured` |
+| Node 不存在 | 404 | `node not found` |
+| 其他 repository error | 500 | `internal server error` |
+
+前端必须展示这些短文案，引导 operator 回到部署配置或发布流程；不要在浏览器侧用 `window.location.origin` 兜底绕过 409。
+
 ### agent 端点（contract 层）
 
 `internal/center/http/handlers/agent.go:106-108` 的 `writeAgentAPIError` 是 agent 专用错误响应，**额外带 `agentapi.ErrorCode*`**：

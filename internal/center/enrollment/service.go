@@ -18,8 +18,7 @@ var (
 
 type Repository interface {
 	IssueEnrollmentToken(context.Context, string) (string, error)
-	IssueSyncToken(context.Context, string) (string, error)
-	ApplyEnrollment(context.Context, EnrollInput) (nodes.Record, error)
+	ApplyEnrollment(context.Context, EnrollInput) (nodes.Record, string, error)
 	GetNode(context.Context, string) (nodes.Record, error)
 	RecordAcceptedHeartbeats(context.Context, string, []HeartbeatWrite) error
 }
@@ -42,7 +41,7 @@ func (s *Service) IssueNodeEnrollmentToken(ctx context.Context, nodeID string) (
 }
 
 func (s *Service) EnrollNode(ctx context.Context, input EnrollInput) (EnrollResult, error) {
-	record, err := s.repo.ApplyEnrollment(ctx, input)
+	record, syncToken, err := s.repo.ApplyEnrollment(ctx, input)
 	if err != nil {
 		if errors.Is(err, nodes.ErrNodeNotFound) {
 			return EnrollResult{}, ErrInvalidEnrollmentToken
@@ -50,20 +49,11 @@ func (s *Service) EnrollNode(ctx context.Context, input EnrollInput) (EnrollResu
 		return EnrollResult{}, err
 	}
 
-	result := EnrollResult{
+	return EnrollResult{
 		NodeID:        record.NodeID,
 		BindingStatus: record.BindingStatus,
-	}
-	if record.BindingStatus != nodes.BindingBound {
-		return result, nil
-	}
-
-	syncToken, err := s.repo.IssueSyncToken(ctx, record.NodeID)
-	if err != nil {
-		return EnrollResult{}, err
-	}
-	result.SyncToken = syncToken
-	return result, nil
+		SyncToken:     syncToken,
+	}, nil
 }
 
 func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) error {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -60,6 +61,78 @@ func NodeEnrollmentToken(repo nodes.OnboardingRepository) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, issue)
+	})
+}
+
+type InstallCommandOptions struct {
+	PublicBaseURL string
+	AgentVersion  string
+	ReleaseRepo   string
+}
+
+const defaultAgentReleaseRepo = "xiangnan0811/houfeng"
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func NodeInstallCommand(repo nodes.OnboardingRepository, opts InstallCommandOptions) http.Handler {
+	publicBaseURL := strings.TrimRight(strings.TrimSpace(opts.PublicBaseURL), "/")
+	agentVersion := strings.TrimSpace(opts.AgentVersion)
+	releaseRepo := strings.TrimSpace(opts.ReleaseRepo)
+	if releaseRepo == "" {
+		releaseRepo = defaultAgentReleaseRepo
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if publicBaseURL == "" {
+			writeError(w, http.StatusConflict, "public base URL is not configured")
+			return
+		}
+		if agentVersion == "" || agentVersion == "dev" {
+			writeError(w, http.StatusConflict, "agent release version is not configured")
+			return
+		}
+
+		nodeID, ok := nodeActionNodeID(r.URL.Path, "/install-command")
+		if !ok {
+			writeError(w, http.StatusNotFound, "node not found")
+			return
+		}
+
+		issue, err := repo.IssueNodeEnrollmentToken(r.Context(), nodeID)
+		if errors.Is(err, nodes.ErrNodeNotFound) {
+			writeError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		installerURL := publicBaseURL + "/api/agent/install.sh"
+		command := fmt.Sprintf(
+			"curl -fsSL %s | sudo sh -s -- --server-url %s --enrollment-token %s --version %s --release-repo %s",
+			shellQuote(installerURL),
+			shellQuote(publicBaseURL),
+			shellQuote(issue.Token),
+			shellQuote(agentVersion),
+			shellQuote(releaseRepo),
+		)
+
+		writeJSON(w, http.StatusOK, nodes.InstallCommandIssue{
+			Command:       command,
+			IssuedAt:      issue.IssuedAt,
+			ExpiresAt:     issue.ExpiresAt,
+			InstallerURL:  installerURL,
+			PublicBaseURL: publicBaseURL,
+			AgentVersion:  agentVersion,
+			ReleaseRepo:   releaseRepo,
+		})
 	})
 }
 

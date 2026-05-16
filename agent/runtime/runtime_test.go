@@ -69,10 +69,50 @@ func (f *fakeClient) Sync(_ context.Context, request agentapi.SyncRequest) (*age
 	return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "ok"}, nil
 }
 
+func withoutDockerCLI(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH", t.TempDir())
+}
+
 type staticTokenSource struct{}
 
 func (staticTokenSource) Token(context.Context) (string, error) {
 	return "plain-token", nil
+}
+
+type syncCredentialTokenSource struct {
+	enrollmentToken string
+	nodeID          string
+	syncToken       string
+	hasCredentials  bool
+	loadErr         error
+	saveErr         error
+	saveCalls       int
+}
+
+func (s *syncCredentialTokenSource) Token(context.Context) (string, error) {
+	if s.enrollmentToken == "" {
+		return "plain-token", nil
+	}
+	return s.enrollmentToken, nil
+}
+
+func (s *syncCredentialTokenSource) SyncCredentials(context.Context) (string, string, bool, error) {
+	if s.loadErr != nil {
+		return "", "", false, s.loadErr
+	}
+	return s.nodeID, s.syncToken, s.hasCredentials, nil
+}
+
+func (s *syncCredentialTokenSource) SaveSyncCredentials(_ context.Context, nodeID, syncToken string) error {
+	s.saveCalls++
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.nodeID = nodeID
+	s.syncToken = syncToken
+	s.hasCredentials = true
+	return nil
 }
 
 type staticFingerprint struct{}
@@ -243,6 +283,87 @@ func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
 	}
 	if client.lastSync.Heartbeats[0].AgentVersion != "dev" {
 		t.Fatalf("Sync agent_version = %q, want %q", client.lastSync.Heartbeats[0].AgentVersion, "dev")
+	}
+}
+
+func TestRuntimeUsesPersistedSyncCredentialsWithoutReusingEnrollmentToken(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{}
+	tokenSource := &syncCredentialTokenSource{
+		nodeID:         "node-456",
+		syncToken:      "sync-token-persisted",
+		hasCredentials: true,
+	}
+	rt := agentruntime.NewWithDeps(cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if client.enrollCalls != 0 {
+		t.Fatalf("Enroll() calls = %d, want 0 with persisted sync credentials", client.enrollCalls)
+	}
+	if client.syncCalls == 0 {
+		t.Fatal("Sync() was not called")
+	}
+	if client.lastSync.NodeID != "node-456" {
+		t.Fatalf("Sync node_id = %q, want %q", client.lastSync.NodeID, "node-456")
+	}
+	if client.lastSync.SyncToken != "sync-token-persisted" {
+		t.Fatalf("Sync sync_token = %q, want %q", client.lastSync.SyncToken, "sync-token-persisted")
+	}
+	if tokenSource.saveCalls != 0 {
+		t.Fatalf("SaveSyncCredentials() calls = %d, want 0", tokenSource.saveCalls)
+	}
+}
+
+func TestRuntimePersistsSyncCredentialsAfterEnrollment(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{}
+	tokenSource := &syncCredentialTokenSource{enrollmentToken: "enroll-token-001"}
+	rt := agentruntime.NewWithDeps(cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if client.enrollCalls != 1 {
+		t.Fatalf("Enroll() calls = %d, want 1", client.enrollCalls)
+	}
+	if client.lastEnroll.Token != "enroll-token-001" {
+		t.Fatalf("Enroll token = %q, want %q", client.lastEnroll.Token, "enroll-token-001")
+	}
+	if tokenSource.saveCalls != 1 {
+		t.Fatalf("SaveSyncCredentials() calls = %d, want 1", tokenSource.saveCalls)
+	}
+	if tokenSource.nodeID != "node-123" {
+		t.Fatalf("persisted nodeID = %q, want %q", tokenSource.nodeID, "node-123")
+	}
+	if tokenSource.syncToken != "sync-token-001" {
+		t.Fatalf("persisted syncToken = %q, want %q", tokenSource.syncToken, "sync-token-001")
+	}
+}
+
+func TestRuntimeReturnsPersistSyncCredentialsErrorBeforeSyncLoop(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	client := &fakeClient{}
+	saveErr := errors.New("token file read-only")
+	tokenSource := &syncCredentialTokenSource{saveErr: saveErr}
+	rt := agentruntime.NewWithDeps(cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
+
+	err := rt.Run(context.Background())
+	if !errors.Is(err, saveErr) {
+		t.Fatalf("Run() error = %v, want save error", err)
+	}
+	if client.enrollCalls != 1 {
+		t.Fatalf("Enroll() calls = %d, want 1", client.enrollCalls)
+	}
+	if client.syncCalls != 0 {
+		t.Fatalf("Sync() calls = %d, want 0", client.syncCalls)
 	}
 }
 
@@ -427,6 +548,8 @@ func TestRuntimeLogsHostSampleFailureAndContinuesHeartbeatSync(t *testing.T) {
 }
 
 func TestRuntimeReplacesCurrentPlanWithExplicitEmptyPlan(t *testing.T) {
+	withoutDockerCLI(t)
+
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -495,6 +618,8 @@ func TestRuntimeReplacesCurrentPlanWithExplicitEmptyPlan(t *testing.T) {
 }
 
 func TestRuntimeQueuesFailedSyncAndRetriesAsBackfilled(t *testing.T) {
+	withoutDockerCLI(t)
+
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
 		syncErrs: []error{nil, errors.New("center unavailable"), nil},

@@ -255,6 +255,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.NodeEnrollmentTokenHandler == nil {
 		t.Fatal("router node enrollment token handler = nil, want non-nil")
 	}
+	if gotOpts.NodeInstallCommandHandler == nil {
+		t.Fatal("router node install command handler = nil, want non-nil")
+	}
 	if gotOpts.NodeBindingConfirmRebindHandler == nil {
 		t.Fatal("router node binding confirm rebind handler = nil, want non-nil")
 	}
@@ -293,6 +296,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	}
 	if gotOpts.AgentSyncHandler == nil {
 		t.Fatal("router agent sync handler = nil, want non-nil")
+	}
+	if gotOpts.InstallerScriptHandler == nil {
+		t.Fatal("router installer script handler = nil, want non-nil")
 	}
 	if gotAddr != cfg.HTTPAddr {
 		t.Fatalf("app addr = %q, want %q", gotAddr, cfg.HTTPAddr)

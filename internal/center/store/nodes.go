@@ -469,6 +469,7 @@ func (r *PostgresNodeRepository) IssueNodeEnrollmentToken(ctx context.Context, n
 		update nodes
 		set enrollment_token_hash = $2,
 			enrollment_token_issued_at = now(),
+			enrollment_token_consumed_at = null,
 			updated_at = now()
 		where node_id = $1
 		returning enrollment_token_issued_at`,
@@ -481,8 +482,9 @@ func (r *PostgresNodeRepository) IssueNodeEnrollmentToken(ctx context.Context, n
 	}
 
 	return nodes.EnrollmentTokenIssue{
-		Token:    token,
-		IssuedAt: issuedAt,
+		Token:     token,
+		IssuedAt:  issuedAt,
+		ExpiresAt: issuedAt.Add(nodes.EnrollmentTokenTTL),
 	}, nil
 }
 
@@ -1065,7 +1067,9 @@ func (r *PostgresNodeRepository) FindNodeByEnrollmentToken(ctx context.Context, 
 	record, err := scanNode(r.db.QueryRow(ctx, `
 		select `+nodeSelectColumns+`
 		from nodes
-		where enrollment_token_hash = $1`,
+		where enrollment_token_hash = $1
+			and enrollment_token_consumed_at is null
+			and enrollment_token_issued_at >= now() - interval '30 minutes'`,
 		hashEnrollmentToken(token),
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1132,10 +1136,10 @@ func resolveEnrollmentBindingTransition(record nodes.Record, newFingerprint stri
 	}
 }
 
-func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enrollment.EnrollInput) (nodes.Record, error) {
+func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enrollment.EnrollInput) (nodes.Record, string, error) {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return nodes.Record{}, fmt.Errorf("begin enrollment transaction: %w", err)
+		return nodes.Record{}, "", fmt.Errorf("begin enrollment transaction: %w", err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
@@ -1162,6 +1166,8 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 			pending_binding_attempt_count
 		from nodes
 		where enrollment_token_hash = $1
+			and enrollment_token_consumed_at is null
+			and enrollment_token_issued_at >= now() - interval '30 minutes'
 		for update`,
 		hashEnrollmentToken(input.Token),
 	).Scan(
@@ -1174,9 +1180,9 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		&pendingBindingLastSeenAt,
 		&pendingBindingAttemptCount,
 	); errors.Is(err, pgx.ErrNoRows) {
-		return nodes.Record{}, nodes.ErrNodeNotFound
+		return nodes.Record{}, "", nodes.ErrNodeNotFound
 	} else if err != nil {
-		return nodes.Record{}, fmt.Errorf("query node by enrollment token for update: %w", err)
+		return nodes.Record{}, "", fmt.Errorf("query node by enrollment token for update: %w", err)
 	}
 
 	next := resolveEnrollmentBindingTransition(nodes.Record{
@@ -1188,6 +1194,17 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		PendingBindingLastSeenAt:   pendingBindingLastSeenAt,
 		PendingBindingAttemptCount: pendingBindingAttemptCount,
 	}, input.Fingerprint, time.Now().UTC())
+
+	syncToken := ""
+	syncTokenHash := ""
+	if next.BindingStatus == nodes.BindingBound {
+		syncToken, err = ids.New("sync")
+		if err != nil {
+			return nodes.Record{}, "", fmt.Errorf("generate sync token: %w", err)
+		}
+		syncTokenHash = hashSyncToken(syncToken)
+	}
+
 	record, err := scanNode(tx.QueryRow(ctx, `
 		update nodes
 		set binding_status = $2,
@@ -1197,6 +1214,8 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 			pending_binding_first_seen_at = $6,
 			pending_binding_last_seen_at = $7,
 			pending_binding_attempt_count = $8,
+			sync_token_hash = case when $9 <> '' then $9 else sync_token_hash end,
+			enrollment_token_consumed_at = now(),
 			updated_at = now()
 		where node_id = $1
 		returning `+nodeSelectColumns,
@@ -1208,17 +1227,18 @@ func (r *PostgresNodeRepository) ApplyEnrollment(ctx context.Context, input enro
 		next.PendingBindingFirstSeenAt,
 		next.PendingBindingLastSeenAt,
 		next.PendingBindingAttemptCount,
+		syncTokenHash,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nodes.Record{}, nodes.ErrNodeNotFound
+		return nodes.Record{}, "", nodes.ErrNodeNotFound
 	}
 	if err != nil {
-		return nodes.Record{}, fmt.Errorf("update enrollment binding state for node %q: %w", nodeID, err)
+		return nodes.Record{}, "", fmt.Errorf("update enrollment binding state for node %q: %w", nodeID, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nodes.Record{}, fmt.Errorf("commit enrollment transaction for node %q: %w", nodeID, err)
+		return nodes.Record{}, "", fmt.Errorf("commit enrollment transaction for node %q: %w", nodeID, err)
 	}
-	return record, nil
+	return record, syncToken, nil
 }
 
 func nullableText(value string) *string {

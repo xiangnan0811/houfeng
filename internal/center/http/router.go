@@ -38,6 +38,7 @@ type RouterOptions struct {
 	NodeLifecycleControlHandler     stdhttp.Handler
 	NodeOnboardingHandler           stdhttp.Handler
 	NodeEnrollmentTokenHandler      stdhttp.Handler
+	NodeInstallCommandHandler       stdhttp.Handler
 	NodeBindingConfirmRebindHandler stdhttp.Handler
 	NodeBindingRejectPendingHandler stdhttp.Handler
 	NodeBindingResetHandler         stdhttp.Handler
@@ -52,6 +53,7 @@ type RouterOptions struct {
 	TargetSparklinesHandler         stdhttp.Handler
 	AgentEnrollHandler              stdhttp.Handler
 	AgentSyncHandler                stdhttp.Handler
+	InstallerScriptHandler          stdhttp.Handler
 	AuthLoginHandler                stdhttp.Handler
 	AuthLogoutHandler               stdhttp.Handler
 	AuthMeHandler                   stdhttp.Handler
@@ -189,7 +191,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.NodeBatchHandler != nil {
 		mux.Handle("/api/nodes/batch", protect(opts.NodeBatchHandler))
 	}
-	if opts.NodeItemHandler != nil || opts.NodeVPSHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil || opts.NodeSparklinesHandler != nil || opts.NodeActionsHandler != nil {
+	if opts.NodeItemHandler != nil || opts.NodeVPSHandler != nil || opts.NodeRuntimeFactsHandler != nil || opts.NodeRuntimeControlHandler != nil || opts.NodeLifecycleControlHandler != nil || opts.NodeOnboardingHandler != nil || opts.NodeEnrollmentTokenHandler != nil || opts.NodeInstallCommandHandler != nil || opts.NodeBindingConfirmRebindHandler != nil || opts.NodeBindingRejectPendingHandler != nil || opts.NodeBindingResetHandler != nil || opts.NodeSparklinesHandler != nil || opts.NodeActionsHandler != nil {
 		mux.Handle("/api/nodes/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			nodeID, subtree := nodeSubtreePath(r.URL.Path)
 			if nodeID == "" && subtree != nodeSubtreeSparklines {
@@ -240,6 +242,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.NodeEnrollmentTokenHandler.ServeHTTP(w, r)
+			case nodeSubtreeInstallCommand:
+				if opts.NodeInstallCommandHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.NodeInstallCommandHandler.ServeHTTP(w, r)
 			case nodeSubtreeBindingConfirmRebind:
 				if opts.NodeBindingConfirmRebindHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -283,6 +291,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.AgentSyncHandler != nil {
 		mux.Handle(agentapi.SyncPath, opts.AgentSyncHandler)
+	}
+	if opts.InstallerScriptHandler != nil {
+		mux.Handle(agentapi.InstallScriptPath, opts.InstallerScriptHandler)
 	}
 	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil || opts.TargetRuntimeFactsHandler != nil || opts.TargetRuntimeControlHandler != nil || opts.TargetSparklinesHandler != nil {
 		mux.Handle("/api/targets/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -395,6 +406,7 @@ const (
 	nodeSubtreeLifecycleControl     nodeSubtree = "lifecycle-control"
 	nodeSubtreeOnboarding           nodeSubtree = "onboarding"
 	nodeSubtreeEnrollmentToken      nodeSubtree = "enrollment-token"
+	nodeSubtreeInstallCommand       nodeSubtree = "install-command"
 	nodeSubtreeBindingConfirmRebind nodeSubtree = "binding-confirm-rebind"
 	nodeSubtreeBindingRejectPending nodeSubtree = "binding-reject-pending"
 	nodeSubtreeBindingReset         nodeSubtree = "binding-reset"
@@ -438,6 +450,9 @@ func nodeSubtreePath(path string) (nodeID string, subtree nodeSubtree) {
 	}
 	if segments[1] == "enrollment-token" && len(segments) == 2 {
 		return segments[0], nodeSubtreeEnrollmentToken
+	}
+	if segments[1] == "install-command" && len(segments) == 2 {
+		return segments[0], nodeSubtreeInstallCommand
 	}
 	if segments[1] == "binding" && len(segments) == 3 {
 		switch segments[2] {

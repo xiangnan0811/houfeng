@@ -19,16 +19,30 @@ It intentionally does not introduce Docker, extra queues, TSDBs, or microservice
 From the repository root:
 
 ```bash
-make build-center
+make build-center VERSION=v1.2.3
 make build-agent
 cd web && npm ci && npm run build
 ```
 
-Expected outputs:
+Expected local outputs:
 
-- `bin/houfeng-center`
+- `bin/houfeng-center` stamped with the release version used by generated install commands
 - `bin/houfeng-agent`
 - `web/dist/`
+
+For one-command agent installation, publish Linux release artifacts for the agent and checksum manifest:
+
+```bash
+make build-agent-release VERSION=v1.2.3
+```
+
+Expected release outputs under `dist/`:
+
+- `houfeng-agent_v1.2.3_linux_amd64`
+- `houfeng-agent_v1.2.3_linux_arm64`
+- `sha256sums.txt`
+
+`build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. Upload those files to the matching GitHub Release tag. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary/checksum assets.
 
 ## Center environment
 
@@ -38,6 +52,7 @@ Minimum `/etc/houfeng/center.env`:
 HOUFENG_HTTP_ADDR=:8080
 HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
+HOUFENG_PUBLIC_BASE_URL=https://center.example.com
 HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
@@ -45,9 +60,9 @@ HOUFENG_TELEGRAM_BOT_TOKEN=
 HOUFENG_TELEGRAM_CHAT_ID=
 ```
 
-`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, and `HOUFENG_INITIAL_PASSWORD` are required. Telegram is disabled unless both Telegram values are set. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
+`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, and `HOUFENG_INITIAL_PASSWORD` are required. `HOUFENG_PUBLIC_BASE_URL` is optional for center startup, but required to generate one-command install commands. Set it to the externally reachable absolute `http(s)` URL that target agents can access, for example `https://center.example.com` or `http://203.0.113.10:8080`; the center normalizes trailing slashes when generating commands. Telegram is disabled unless both Telegram values are set. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
 
-> ⚠️ `HOUFENG_WEB_DIST_DIR` 必须设置——否则 center `/` 返回 404，SPA 不可访问。生产部署应指向 `web/dist`。
+> Note: `HOUFENG_WEB_DIST_DIR` must be set; otherwise center `/` returns 404 and the SPA is unavailable. Production deployments should point it at `web/dist`.
 
 ## Local center run
 
@@ -55,13 +70,14 @@ HOUFENG_TELEGRAM_CHAT_ID=
 export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
+export HOUFENG_PUBLIC_BASE_URL='http://localhost:8080'
 export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
-make build-center
+make build-center VERSION=dev-local
 ./bin/houfeng-center
 ```
 
-The center applies embedded migrations on startup and serves API plus the built web UI.
+The center applies embedded migrations on startup and serves API plus the built web UI. For production one-command installs, build `houfeng-center` with a real release version (not the default `dev`) so generated install commands point at published agent assets.
 
 ## Agent environment
 
@@ -75,7 +91,7 @@ HOUFENG_AGENT_BUFFER_MAX_ENTRIES=2048
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h
 ```
 
-The token file must contain an enrollment token issued from the Node onboarding workflow.
+The token file initially contains an enrollment token issued from the Node onboarding workflow. After the first successful enrollment, `houfeng-agent` replaces it with post-enrollment sync credentials for that Node so service restarts do not reuse the consumed enrollment token. In normal deployments, use the one-command installer from the Node onboarding page instead of manually writing this file.
 
 ## Local agent run
 
@@ -107,6 +123,7 @@ sudo tee /etc/houfeng/center.env >/dev/null <<'EOF'
 HOUFENG_HTTP_ADDR=:8080
 HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
+HOUFENG_PUBLIC_BASE_URL=https://center.example.com
 HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
@@ -120,7 +137,17 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now houfeng-center
 ```
 
-Then issue an enrollment token from the Node onboarding flow or smoke run, install the agent runtime files, and start the agent:
+Then create a Node in the web UI and open its Node onboarding workspace. The primary path is the generated one-command installer:
+
+1. Click **生成一键安装命令**.
+2. Copy the command shown by the center.
+3. Run it once on the target Linux systemd host with root privileges or a sudo-capable account.
+
+The generated command downloads `/api/agent/install.sh` from this center's `HOUFENG_PUBLIC_BASE_URL`, passes a 30-minute one-time enrollment token, and instructs the installer which GitHub Release version/repository to use for the `houfeng-agent` binary. Regenerating a command invalidates the previous token for that Node. If the center was built with the placeholder `dev` version or without `HOUFENG_PUBLIC_BASE_URL`, command generation returns a configuration error instead of guessing. Treat the command as a secret: do not paste it into tickets, chat, screenshots, process logs, or shell transcripts you plan to share.
+
+The installer supports Linux systemd hosts on `amd64` and `arm64`. It fails before writing runtime files when the OS, architecture, service manager, downloader, or checksum tools are unsupported. On success it downloads the release asset, verifies it against `sha256sums.txt`, installs `/usr/local/bin/houfeng-agent`, writes `/etc/houfeng-agent/agent.env`, writes `/etc/houfeng-agent/token` with mode `0600` when the file does not already contain post-enrollment sync credentials, creates `/var/lib/houfeng-agent`, installs the systemd unit, and runs `systemctl daemon-reload` plus `systemctl enable --now houfeng-agent`.
+
+Manual installation remains a troubleshooting fallback when investigating installer failures:
 
 ```bash
 getent passwd houfeng-agent >/dev/null || sudo useradd --system --home-dir /var/lib/houfeng-agent --shell /usr/sbin/nologin houfeng-agent
@@ -128,7 +155,7 @@ sudo install -d -o houfeng-agent -g houfeng-agent -m 0750 /etc/houfeng-agent
 sudo install -d -o houfeng-agent -g houfeng-agent -m 0750 /var/lib/houfeng-agent
 sudo install -o root -g root -m 0755 bin/houfeng-agent /usr/local/bin/houfeng-agent
 sudo tee /etc/houfeng-agent/agent.env >/dev/null <<'EOF'
-HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
+HOUFENG_AGENT_SERVER_URL=https://center.example.com
 HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
 HOUFENG_AGENT_BUFFER_MAX_ENTRIES=2048
@@ -136,7 +163,7 @@ HOUFENG_AGENT_BUFFER_MAX_AGE=72h
 EOF
 sudo chown root:houfeng-agent /etc/houfeng-agent/agent.env
 sudo chmod 0640 /etc/houfeng-agent/agent.env
-printf '%s' '<enrollment_token>' | sudo tee /etc/houfeng-agent/token >/dev/null
+printf '%s' '<30-minute-one-time-enrollment-token>' | sudo tee /etc/houfeng-agent/token >/dev/null
 sudo chown houfeng-agent:houfeng-agent /etc/houfeng-agent/token
 sudo chmod 0600 /etc/houfeng-agent/token
 sudo install -o root -g root -m 0644 docs/deploy/systemd/houfeng-agent.service /etc/systemd/system/houfeng-agent.service
@@ -144,12 +171,12 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now houfeng-agent
 ```
 
-Adjust users, paths, PostgreSQL URL, TLS/reverse-proxy setup, and token file ownership for the target host. Do not enable the agent until `/etc/houfeng-agent/token` contains a valid enrollment token.
+Adjust users, paths, PostgreSQL URL, TLS/reverse-proxy setup, public center URL, and token file ownership for the target host. Do not enable the agent until `/etc/houfeng-agent/token` contains a valid unexpired enrollment token.
 
 ## Authentication
 
 The center protects every `/api/*` route except `/api/healthz` and the agent
-endpoints (`/api/agent/enroll`, `/api/agent/sync`) with a session-cookie auth
+endpoints (`/api/agent/enroll`, `/api/agent/sync`, `/api/agent/install.sh`) with a session-cookie auth
 layer added in V1.x. Required environment variables:
 
 | Variable | Required | Default | Purpose |
@@ -169,8 +196,7 @@ Behavior:
 - Sessions are stored in the new `sessions` table (migration `0010`) and
   delivered as `HttpOnly` + `SameSite=Lax` cookies named `houfeng_session`.
   A background worker sweeps expired rows hourly.
-- Agent endpoints continue to authenticate via enrollment tokens (independent
-  of the user session layer).
+- Agent enrollment/sync endpoints continue to authenticate via enrollment or sync tokens (independent of the user session layer); `/api/agent/install.sh` is a public read-only installer script and does not carry a token by itself.
 
 ### HTTPS requirement
 
