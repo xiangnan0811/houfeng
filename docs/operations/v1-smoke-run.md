@@ -1,22 +1,27 @@
-# Houfeng V1 Fresh-Install Smoke Run
+# Houfeng fresh-install smoke run
 
 ## Purpose
 
-This smoke run verifies the first V1 operating path for `候风 / Houfeng Fleet Control Plane`:
+This smoke run verifies the current first operating path for `候风 / Houfeng Fleet Control Plane`:
 
-1. create a Node;
-2. enroll an agent;
-3. create a Target;
-4. add a ProbeItem;
-5. receive observations;
-6. trigger and recover an incident;
-7. verify events and notification records.
+1. build and start the center against PostgreSQL;
+2. log in with the initial admin user;
+3. create a Node;
+4. generate a center-owned one-command agent install command;
+5. enroll/sync an agent;
+6. create a Target and ProbeItem;
+7. receive observations;
+8. trigger and recover an incident;
+9. verify events and notification records.
+
+The primary onboarding path is the generated install command from the Node onboarding page or `POST /api/nodes/{node_id}/install-command`. Manual enrollment-token issuance is kept only as an API/troubleshooting fallback.
 
 ## Evidence levels
 
-- **Automated:** can be verified by repository commands in any complete development environment.
-- **Local PostgreSQL required:** requires a running PostgreSQL instance and live center process.
-- **Manual / Telegram required:** requires optional Telegram credentials or an operator-captured UI screenshot.
+- **Automated:** repository commands that can run in a complete development environment.
+- **Local PostgreSQL required:** live center process and reachable PostgreSQL.
+- **Linux systemd agent required:** full one-command installer path on a Linux `amd64` or `arm64` host running systemd.
+- **Manual / notification-provider required:** optional Telegram/Feishu delivery evidence or operator-captured UI screenshots.
 
 ## Prerequisites
 
@@ -27,27 +32,40 @@ npm --version
 psql --version
 ```
 
-Required environment:
+Required center environment:
 
 ```bash
 export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
+export HOUFENG_PUBLIC_BASE_URL='http://127.0.0.1:8080'
+export HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
 export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
 ```
 
-Run the center and agent in separate terminals, or use the background commands below from one shell. If using the background form, stop both processes at the end with `kill "$CENTER_PID" "$AGENT_PID"` after `AGENT_PID` has been set.
+`HOUFENG_PUBLIC_BASE_URL` is required for generated install commands. It must be an externally reachable absolute `http(s)` URL without query or fragment. For production-like one-command testing, build `houfeng-center` with a real release version and publish matching Linux agent release assets before generating the command; `VERSION=dev` intentionally makes install-command generation return a configuration error.
 
 Build:
 
 ```bash
-make build-center
-make build-agent
 cd web && npm ci && npm run build
+cd ..
+make build-center VERSION=v1.2.3
+make build-agent-release VERSION=v1.2.3
 ```
 
-Start center in the background:
+Release assets expected under `dist/`:
+
+- `houfeng-agent_v1.2.3_linux_amd64`
+- `houfeng-agent_v1.2.3_linux_arm64`
+- `sha256sums.txt`
+
+Upload those files to the matching GitHub Release tag for the configured release repository before testing the installer. GitHub Release hosts only the binary/checksum assets; the installer script is served by the running center at `/api/agent/install.sh`.
+
+For API-only local smoke on the same machine, `make build-agent` plus the manual fallback appendix can still verify enroll/sync behavior, but it does not verify the release-asset installer path.
+
+## Start center
 
 ```bash
 ./bin/houfeng-center > /tmp/houfeng-center.log 2>&1 &
@@ -60,13 +78,13 @@ Health check:
 curl -fsS http://127.0.0.1:8080/api/healthz
 ```
 
-Expected: HTTP 200 JSON response containing service/version health metadata.
+Expected: HTTP 200 JSON response containing center health metadata.
 
-## Step 0: Login and keep a session cookie
+Stop the center at the end with `kill "$CENTER_PID"`. If you also start a local foreground/background agent through the troubleshooting appendix, stop it too.
 
-All `/api/*` routes except `/api/healthz` and `/api/agent/*` require the
-session cookie. Log in once and reuse the cookie jar for every protected center
-API call below.
+## Step 0: Log in and keep a session cookie
+
+All `/api/*` routes except `/api/healthz` and `/api/agent/*` require the session cookie. Log in once and reuse the cookie jar for every protected center API call below.
 
 ```bash
 COOKIE_JAR=/tmp/houfeng-smoke-cookie.txt
@@ -79,8 +97,7 @@ curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   }'
 ```
 
-Expected: HTTP 200 JSON response with the current user and a `houfeng_session`
-cookie in `$COOKIE_JAR`.
+Expected: HTTP 200 JSON response with the current user and a `houfeng_session` cookie in `$COOKIE_JAR`.
 
 ## Step 1: Create a Node
 
@@ -94,47 +111,74 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/nodes \
     "region": "local",
     "city": "local",
     "labels": ["smoke", "v1"],
-    "note": "V1 smoke node"
+    "note": "fresh-install smoke node"
   }'
 ```
 
 Record the returned `node_id`.
 
-## Step 2: Issue an enrollment token
+## Step 2: Generate the one-command install command
+
+Preferred UI path:
+
+1. Open `http://127.0.0.1:8080/`.
+2. Log in.
+3. Open the Node onboarding workspace for the smoke Node.
+4. Click **生成一键安装命令** and copy the command shown by the center.
+
+API equivalent:
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/nodes/<node_id>/enrollment-token
+curl -fsS -b "$COOKIE_JAR" \
+  -X POST http://127.0.0.1:8080/api/nodes/<node_id>/install-command
 ```
 
-Record the returned plaintext token once (响应键名实际为 `token`，不是 `plaintext_token`). Store it for the local agent:
+Expected response fields:
 
-```bash
-printf '%s' '<enrollment_token>' > /tmp/houfeng-agent-token
-chmod 0600 /tmp/houfeng-agent-token
-```
+- `command`
+- `issued_at`
+- `expires_at`
+- `installer_url`
+- `public_base_url`
+- `agent_version`
+- `release_repo`
 
-## Step 3: Enroll and run an agent
+The generated command downloads the center-served `/api/agent/install.sh`, passes a 30-minute one-time enrollment token, and tells the installer which GitHub Release repository/version to use for the Linux agent binary. Regenerating the command invalidates the previous active token for that Node.
 
-```bash
-export HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
-export HOUFENG_AGENT_TOKEN_FILE=/tmp/houfeng-agent-token
-install -d -m 0700 /tmp/houfeng-agent
-export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent/sync-buffer.json
-./bin/houfeng-agent > /tmp/houfeng-agent.log 2>&1 &
-AGENT_PID=$!
-```
+Treat the full command as secret material. Do not paste it into public issues, screenshots, shared shell transcripts, or long-lived logs.
 
-Expected:
+If this step returns `public base URL is not configured`, set `HOUFENG_PUBLIC_BASE_URL` and restart the center. If it returns `agent release version is not configured`, rebuild the center with a real version such as `make build-center VERSION=v1.2.3` and ensure matching release assets exist.
+
+## Step 3: Run the generated installer on a target host
+
+Run the exact generated command once on a Linux systemd `amd64` or `arm64` host with root privileges or a sudo-capable account.
+
+Expected installer behavior:
+
+- detects Linux/systemd and supported architecture before writing runtime files;
+- downloads `houfeng-agent_<version>_linux_<amd64|arm64>` and `sha256sums.txt` from the configured GitHub Release;
+- verifies the exact checksum entry before replacing `/usr/local/bin/houfeng-agent` or starting the service;
+- writes `/etc/houfeng-agent/agent.env` and `/etc/houfeng-agent/token` with restrictive permissions;
+- enables and starts `houfeng-agent` with systemd.
+
+Expected runtime behavior:
 
 - agent enrolls through `/api/agent/enroll`;
 - subsequent syncs call `/api/agent/sync`;
-- node onboarding state changes from unbound toward bound/running.
+- node onboarding state changes from `未绑定` toward `已绑定` / `接入完成` after accepted observations.
 
-Check:
+Check from the center machine:
 
 ```bash
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/nodes/<node_id>/onboarding
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/nodes/<node_id>/runtime-facts
+```
+
+On the agent host:
+
+```bash
+systemctl status houfeng-agent
+journalctl -u houfeng-agent -n 100 --no-pager
 ```
 
 ## Step 4: Create a Target
@@ -151,7 +195,7 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets \
     "group": "smoke",
     "labels": ["smoke", "v1"],
     "execution_node_labels": ["smoke"],
-    "note": "V1 smoke target"
+    "note": "fresh-install smoke target"
   }'
 ```
 
@@ -176,7 +220,7 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets/<target_id>
   }'
 ```
 
-Expected: the target detail page and runtime facts eventually show probe observations. The supported frequency tiers are `1m`, `5m`, `15m`, and `6h`.
+Expected: the target detail page and runtime facts eventually show probe observations. Supported frequency tiers are `1m`, `5m`, `15m`, and `6h`.
 
 Check:
 
@@ -188,7 +232,7 @@ curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/targets/<target_id>/runtime
 
 One safe local method is to change the ProbeItem to a failing path or stop the service it checks, then wait for the incident sweep interval.
 
-Check active incidents:
+Check active incidents and events:
 
 ```bash
 curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/incidents?object_type=target&object_id=<target_id>&limit=10'
@@ -199,7 +243,7 @@ Expected:
 
 - an active target incident appears after repeated failing observations;
 - the event response is an object with an `items` array, and `items[]` contains an `incident_started` event;
-- Telegram notification is sent only if Telegram settings are configured and notification policy allows it.
+- notification delivery is attempted only if notification settings are configured and policy allows it.
 
 ## Step 7: Recover the incident
 
@@ -216,9 +260,9 @@ Expected:
 - the event response is an object with an `items` array, and `items[]` contains an `incident_recovered` event;
 - recovery notification follows current settings.
 
-## Step 8: Verify notification record surface
+## Step 8: Verify notification-backed events
 
-Notification-backed event records are visible through the event surface whenever an incident transition created a `notification_records` row. This includes sent, failed, and policy-suppressed notification records; `notification_only=true` does not mean “Telegram send succeeded”.
+Notification-backed event records are visible through the event surface whenever an incident transition created a `notification_records` row. This includes sent, failed, and policy-suppressed notification records; `notification_only=true` does not mean “Telegram/Feishu send succeeded”.
 
 ```bash
 curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/events?object_type=target&object_id=<target_id>&notification_only=true&limit=10'
@@ -231,119 +275,56 @@ Expected:
 
 ## Step 9: UI verification checkpoints
 
-Open `http://127.0.0.1:8080/` and check:
+Open `http://127.0.0.1:8080/` and check the current UI surfaces that are relevant to the smoke:
 
-- Dashboard shows fleet health, abnormal summaries, and event stream.
-- Nodes page shows the smoke node.
-- Node onboarding page shows bound state or any binding conflict truthfully.
-- Node detail shows latest host sample and recent trend summary.
+- Dashboard shows the current workbench and abnormal/asset decision summaries without pretending the smoke proves production health.
+- Nodes page shows the smoke node and visible onboarding/binding status.
+- Node onboarding page shows generated-command metadata, token expiry, and bound/conflict state truthfully.
+- Node detail shows latest host sample and runtime evidence once the agent has synced.
 - Targets page shows the smoke target.
-- Target detail shows ProbeItem, latest probe observation, active/recovered incident context, and recent latency trend.
-- Events page filters by object, time, label, notification-only, recovery-only, and maintenance-only controls.
-- Settings page shows effective defaults and Telegram/retention behavior truthfully.
+- Target detail shows ProbeItem, latest probe observation, incident context, and recent trend evidence.
+- Events page filters by object, time, severity/type, notification-only, recovery-only, maintenance-only, and explicit backfilled-event opt-in.
+- Settings page shows effective defaults and notification/retention behavior truthfully.
 
-## Evidence table
+For broader frontend checks, use the local preview and browser-sanity workflow in `docs/operations/v2-visual-evidence.md` rather than the old V1/Stitch visual flow.
 
-| Check | Evidence level | Result field |
-| --- | --- | --- |
-| `go test ./...` | Automated | Passed on 2026-04-29 after evidence update |
-| `./scripts/verify.sh` | Automated | Passed on 2026-04-29: Go tests, `npm ci`, 14 Vitest files / 165 tests, and frontend build |
-| center starts and `/api/healthz` returns 200 | Local PostgreSQL required | 2026-04-29 live run `smoke-20260429024908`: `{"name":"houfeng-center","version":"dev","status":"ok"}` |
-| Node created | Local PostgreSQL required | 2026-04-29 live run `smoke-20260429024908`: `node_id=nd_1450995f5b3bdf38` |
-| enrollment token issued | Local PostgreSQL required | Issued at `2026-04-29T10:49:09.129938+08:00`; plaintext token intentionally not recorded |
-| agent enrolls and syncs | Local PostgreSQL required | `houfeng-agent` enrolled with `binding_status=已绑定`; latest host sample at `2026-04-29T10:50:09.151525+08:00` |
-| Target created | Local PostgreSQL required | `target_id=tg_02d55cc117129e57`, host `127.0.0.1`, smoke center port `34923` |
-| ProbeItem created | Local PostgreSQL required | `probe_item_id=pb_98a9b2826106bcb1`, `probe_kind=http`, `frequency_tier=1m` |
-| observations received | Local PostgreSQL required | Runtime facts showed HTTP success observation, `http_status=200`, observed at `2026-04-29T10:50:09.151525+08:00` |
-| incident started | Local PostgreSQL required | `incident_id=inc_target_tg_02d55cc117129e57_target_probe_failure`, `event_id=evt_813ad08f1029a282`, severity `关注` after two 404 probe failures |
-| incident recovered | Local PostgreSQL required | Active incident count returned to `0`; recovered event `evt_b7416f1f3da1f506` |
-| notification-backed event query checked | Local PostgreSQL / Telegram policy dependent | `notification_only=true` returned 2 event rows for the incident start/recovery transitions |
-| Telegram notification sent or intentionally disabled | Manual / Telegram required | Telegram env vars were intentionally empty for this smoke; outbound Telegram delivery was not attempted |
-| primary UI pages checked | Manual | Not checked in browser during this live PostgreSQL run; historical v2 screenshot evidence is kept directly under `docs/operations/*.jpg`; active v2 preview / browser sanity / screenshot evidence workflow is `docs/operations/v2-visual-evidence.md` |
+## Troubleshooting fallback: manual enrollment token
 
-### 2026-05-02 Run Evidence
+Use this only when debugging the installer or doing API-level local verification. It does not verify release artifact download or checksum behavior.
 
-| Check | Evidence level | Result field |
-| --- | --- | --- |
-| `go test ./...` / `./scripts/verify.sh` | Automated | Not re-run in this smoke (black-box validation only); see 2026-04-29 row above |
-| center starts and `/api/healthz` returns 200 | Local PostgreSQL required | Pre-existing center process at `localhost:8080`: `{"name":"houfeng-center","version":"dev","status":"ok"}` |
-| Login (acquire session cookie) | Local PostgreSQL required | `POST /api/auth/login` admin/Houfeng@123*: HTTP 200, cookie `houfeng_session`, `user_id=usr_8ca5360bcc10195ccff02f58` |
-| Node created | Local PostgreSQL required | `node_id=nd_cc1c47a6803a648c`, `display_name=smoke-node-20260502T152318Z`, created `2026-05-02T23:23:26+08:00` |
-| enrollment token issued | Local PostgreSQL required | `POST /api/nodes/<id>/enrollment-token` returned `{"token":"enroll_c7a01127341509ae", ...}` (response key is `token`, not `plaintext_token`) |
-| agent enrolls and syncs | Local PostgreSQL required (PARTIAL) | Agent PID `42347` enrolled at `2026-05-02T23:23:46+08:00`, `binding_status=已绑定`, sync heartbeat OK; host sample collection FAILED on macOS (`/proc/loadavg` not found) — Linux deploy target unaffected |
-| Target created | Local PostgreSQL required | `target_id=tg_5742021c60d2cff1`, host `127.0.0.1:8080`, created `2026-05-02T23:25:25+08:00` |
-| ProbeItem created | Local PostgreSQL required | `probe_item_id=pb_3bcefcd290adb5f8`, `probe_kind=http`, `frequency_tier=1m`, path `/api/healthz` |
-| observations received | Local PostgreSQL required | First observation `2026-05-02T23:26:16+08:00`, `result_kind=success`, `http_status=200`, `latency_ms=1` |
-| incident started | Local PostgreSQL required | `incident_id=inc_target_tg_5742021c60d2cff1_target_probe_failure`, started event `evt_18584acd91cc1236` (severity 关注), escalation event `evt_5f3dbc952fb7a055` (severity 告警); ~3m25s wait from probe-path mutation to detection |
-| incident recovered | Local PostgreSQL required | Recovered event `evt_4a26540ab9b8afd0` at `2026-05-02T23:35:16+08:00`; ~2m05s wait from probe-path restore; active incident count back to 0 |
-| notification-backed event query checked | Local PostgreSQL / Telegram policy dependent | `notification_only=true` returned 3 rows (started/escalated/recovered); Telegram intentionally not configured |
-| Telegram notification sent or intentionally disabled | Manual / Telegram required | `telegram.token_present = false`; outbound delivery suppressed; notification records still persisted |
-| primary UI pages checked | Manual | INCONCLUSIVE: pre-running center process serves `/` as HTTP 404 (no `HOUFENG_WEB_DIST_DIR` set); SPA dev shell at `http://localhost:5173/` returns 200; backing JSON endpoints (`/api/dashboard`, `/api/nodes`, `/api/targets`, `/api/events`, `/api/incidents`) verified directly |
+Issue a raw enrollment token:
 
-## Current session status
+```bash
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/nodes/<node_id>/enrollment-token
+```
 
-Most recent live PostgreSQL smoke: **2026-05-02** against
-`192.168.100.192:5432/houfeng` with the V1.x auth middleware in place
-(admin login successful → cookie reused for protected endpoints).
-End-to-end Step 1-2, 4-8 PASSED on first run; Step 3 (agent host sample)
-was PARTIAL because the local box was macOS and `agent/hostsample` required
-Linux `/proc/loadavg` at the time (does not affect the systemd deploy target).
-Follow-up 2026-05-03: `agent/hostsample` now has a Darwin collector backed by
-`sysctl` / `vm_stat`; a short macOS rerun against the same node produced
-`latest_host_sample.observed_at=2026-05-03T14:50:01.228739+08:00`;
-Step 9 INCONCLUSIVE because the running center process has no
-`HOUFENG_WEB_DIST_DIR` set and serves SPA via the parallel vite dev
-server instead.
+The response key is `token`. Store it in a private token file:
 
-Earlier 2026-04-29 run against `192.168.100.192:5432/user_82Xkx5`
-remains tracked in the legacy evidence table (above) for historical
-comparison.
+```bash
+printf '%s' '<enrollment_token>' > /tmp/houfeng-agent-token
+chmod 0600 /tmp/houfeng-agent-token
+```
 
-## 2026-05-02 Live PostgreSQL Smoke Run
+Run a locally built agent:
 
-### Environment
-- DB: `192.168.100.192:5432/houfeng`
-- Center: pre-running `localhost:8080` (no `HOUFENG_WEB_DIST_DIR` set; SPA via vite :5173 instead)
-- Auth: admin / Houfeng@123*
-- Agent: built locally and run as background process (PID killed cleanly post-run)
-- Effective center settings: `incident_defaults.sweep_interval_seconds = 60`, `heartbeat_interval_seconds = 30`, `stale_threshold_intervals = 3`, `probe_frequency_defaults.http = 5m` (smoke ProbeItem overrides to `1m`), `notify_on_started/escalated/recovered = true`, `telegram.token_present = false`
+```bash
+export HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
+export HOUFENG_AGENT_TOKEN_FILE=/tmp/houfeng-agent-token
+install -d -m 0700 /tmp/houfeng-agent
+export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent/sync-buffer.json
+make build-agent
+./bin/houfeng-agent > /tmp/houfeng-agent.log 2>&1 &
+AGENT_PID=$!
+```
 
-### Resource IDs
-- node_id: `nd_cc1c47a6803a648c` (`smoke-node-20260502T152318Z`)
-- target_id: `tg_5742021c60d2cff1` (`smoke-target-20260502T152318Z`, host `127.0.0.1:8080`)
-- probe_item_id: `pb_3bcefcd290adb5f8` (http GET `/api/healthz`, freq `1m`, timeout `3s`)
-- incident_id: `inc_target_tg_5742021c60d2cff1_target_probe_failure`
-- events: started `evt_18584acd91cc1236` / escalated `evt_5f3dbc952fb7a055` / recovered `evt_4a26540ab9b8afd0`
+After the first successful enrollment, the agent replaces the enrollment token file with post-enrollment sync credentials for that Node. Do not reuse a consumed token for another host.
 
-### Timing
-- incident started detection: 3 min 25 s after probe-path mutation (`23:27:21` → `23:30:46`), consistent with 1m probe cadence + 60s sweep + 2-failure threshold
-- incident recovered detection: 2 min 5 s after probe-path restore (`23:33:11` → `23:35:16`)
+## Historical evidence snapshot
 
-### Per-step result summary
+Earlier live PostgreSQL smoke evidence remains useful as history, but it should not be read as a current installer run:
 
-| Step | Status | Note |
-| --- | --- | --- |
-| 0. Login | PASS | session cookie reused for all protected calls |
-| 1. Create Node | PASS | initial `binding_status=未绑定`, `lifecycle_status=待接入` |
-| 2. Issue token | PASS | response key is `token`, not `plaintext_token` (see caveat below) |
-| 3. Enroll + run agent | PARTIAL | enroll/sync/plan delivery OK; macOS host-sample failed in this run because Darwin lacks `/proc/loadavg`; fixed after the run on 2026-05-03 and pending next-smoke verification |
-| 4. Create Target | PASS | self-probe target against running center |
-| 5. Add ProbeItem | PASS | first observation ~50s after creation |
-| 6. Trigger incident | PASS | `PUT` updates ProbeItem `config.path` to `/api/__nonexistent__`; full body required |
-| 7. Recover incident | PASS | restore `config.path=/api/healthz`; recovered event observed within 2m05s |
-| 8. Notification surface | PASS | 3 notification-backed events returned; delivery suppressed by missing Telegram config |
-| 9. UI checkpoints | INCONCLUSIVE | no headless browser; backing JSON endpoints verified directly |
+- 2026-04-29: first full live path evidence with manual token enrollment; Telegram was intentionally disabled.
+- 2026-05-02: auth-protected smoke path passed for node/target/probe/incident/event surfaces; local macOS host-sample collection was partial at the time.
+- 2026-05-03 follow-up: Darwin hostsample collector was added and a short rerun produced a host sample.
 
-### Caveats / new findings (consider for v1-gap-checklist follow-ups)
-
-1. **`POST /api/nodes/{id}/enrollment-token` response key is `token`** (not `plaintext_token` as the Step-2 doc text suggests). Anyone scripting strictly against the doc will break on the first parse — Step-2 should clarify the actual key.
-2. **agent `agent/hostsample` required Linux `/proc/loadavg` during this run** — it failed on macOS every 30s, so `latest_host_sample` stayed `null` and `has_host_sample=false`. Follow-up 2026-05-03 added a Darwin collector backed by `sysctl` / `vm_stat`; a short rerun against `nd_cc1c47a6803a648c` produced `latest_host_sample.observed_at=2026-05-03T14:50:01.228739+08:00`.
-3. **Center `/` returns HTTP 404 when `HOUFENG_WEB_DIST_DIR` is unset** — production deploys must set it; the smoke prerequisite section already exports it, but operators reusing a long-lived dev center must verify the env var or the Step-9 visual checks cannot be performed against the center process itself.
-4. **Historical note:** this 2026-05-02 smoke observed `GET /api/events` returning a bare JSON array. The active contract was migrated on 2026-05-11 to `{"items":[...]}`; update any local scripts that still parse the old bare-array shape.
-
-### Cleanup state
-
-- Agent PID `42347` killed at `2026-05-02T23:35:51+08:00` (`agent runtime stopped` logged); `ps` confirms gone.
-- Smoke resources retained in PostgreSQL (tagged `20260502T152318Z` for cleanup): node, target, probe item, incident, three events.
-- Local files retained for forensics: `/tmp/houfeng-smoke-cookies.txt`, `/tmp/houfeng-smoke-vars.sh`, `/tmp/houfeng-agent-token-smoke`, `/tmp/houfeng-agent-smoke.log`, `/tmp/houfeng-agent-smoke/sync-buffer.json`.
-- No DB rows from prior runs were modified or deleted.
+For new evidence, record date, center version, database scope, onboarding path (`install-command` or manual fallback), data source, notification configuration, and any limitations. Do not record full enrollment tokens, sync tokens, passwords, cookies, webhook URLs, or real provider/customer secrets.
