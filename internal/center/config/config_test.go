@@ -51,6 +51,48 @@ func TestLoadCenterConfigParsesOptionalIncidentAndTelegramSettings(t *testing.T)
 	}
 }
 
+func TestLoadCenterConfigParsesPublicBaseURL(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+	t.Setenv("HOUFENG_PUBLIC_BASE_URL", " https://center.example.com/ ")
+
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() error = %v", err)
+	}
+	if cfg.PublicBaseURL != "https://center.example.com" {
+		t.Fatalf("PublicBaseURL = %q, want trimmed absolute URL without trailing slash", cfg.PublicBaseURL)
+	}
+}
+
+func TestLoadCenterConfigAcceptsPublicIPPortBaseURL(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+	t.Setenv("HOUFENG_PUBLIC_BASE_URL", "http://192.0.2.10:8080/")
+
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() error = %v", err)
+	}
+	if cfg.PublicBaseURL != "http://192.0.2.10:8080" {
+		t.Fatalf("PublicBaseURL = %q, want IP:port URL", cfg.PublicBaseURL)
+	}
+}
+
+func TestLoadCenterConfigRejectsInvalidPublicBaseURL(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+
+	for _, value := range []string{"center.example.com", "ftp://center.example.com", "https://", "https://center.example.com?token=bad"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("HOUFENG_PUBLIC_BASE_URL", value)
+			if _, err := centerconfig.LoadCenterConfig(); err == nil {
+				t.Fatal("LoadCenterConfig() error = nil, want non-nil for invalid public base URL")
+			}
+		})
+	}
+}
+
 func TestLoadCenterConfigRejectsHalfConfiguredTelegramOrInvalidSweepInterval(t *testing.T) {
 	setRequiredAuth(t)
 	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")

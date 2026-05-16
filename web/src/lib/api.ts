@@ -19,7 +19,7 @@ import type {
   EventListFilter,
   EventListResponse,
   IncidentListFilter,
-  NodeEnrollmentTokenIssue,
+  NodeInstallCommandIssue,
   NodeOnboardingState,
   NodeRecord,
   NodeRuntimeFacts,
@@ -230,8 +230,8 @@ export function getNodeOnboarding(nodeId: string) {
   return requestJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/onboarding`)
 }
 
-export function issueNodeEnrollmentToken(nodeId: string) {
-  return postJSON<NodeEnrollmentTokenIssue>(`/api/nodes/${nodeId}/enrollment-token`)
+export function issueNodeInstallCommand(nodeId: string) {
+  return postJSON<NodeInstallCommandIssue>(`/api/nodes/${nodeId}/install-command`)
 }
 
 export function confirmNodeRebind(nodeId: string) {

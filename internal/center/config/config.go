@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ type CenterConfig struct {
 	HTTPAddr              string
 	WebDistDir            string
 	DatabaseURL           string
+	PublicBaseURL         string
 	TelegramBotToken      string
 	TelegramChatID        string
 	IncidentSweepInterval time.Duration
@@ -47,6 +49,11 @@ func LoadCenterConfig() (CenterConfig, error) {
 		return CenterConfig{}, err
 	}
 
+	publicBaseURL, err := optionalHTTPBaseURL("HOUFENG_PUBLIC_BASE_URL")
+	if err != nil {
+		return CenterConfig{}, err
+	}
+
 	telegramBotToken := strings.TrimSpace(os.Getenv("HOUFENG_TELEGRAM_BOT_TOKEN"))
 	telegramChatID := strings.TrimSpace(os.Getenv("HOUFENG_TELEGRAM_CHAT_ID"))
 	if (telegramBotToken == "") != (telegramChatID == "") {
@@ -71,6 +78,7 @@ func LoadCenterConfig() (CenterConfig, error) {
 		HTTPAddr:              httpAddr,
 		WebDistDir:            webDistDir,
 		DatabaseURL:           databaseURL,
+		PublicBaseURL:         publicBaseURL,
 		TelegramBotToken:      telegramBotToken,
 		TelegramChatID:        telegramChatID,
 		IncidentSweepInterval: sweepInterval,
@@ -107,6 +115,30 @@ func durationEnvOrDefault(key string, fallback time.Duration) (time.Duration, er
 		return 0, fmt.Errorf("parse %s: %w", key, err)
 	}
 	return duration, nil
+}
+
+func optionalHTTPBaseURL(key string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return "", nil
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("parse %s: %w", key, err)
+	}
+	if !parsed.IsAbs() || parsed.Host == "" {
+		return "", fmt.Errorf("%s must be an absolute HTTP(S) URL", key)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("%s must use http or https", key)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("%s must not include query or fragment", key)
+	}
+
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return parsed.String(), nil
 }
 
 func nonEmptyEnvValue(key, value string) (string, error) {

@@ -41,7 +41,7 @@ func TestEnrollNodeBindsUnboundNodeAndIssuesSyncToken(t *testing.T) {
 				BindingFingerprint: "fp-new",
 			},
 		},
-		issuedSyncToken: "sync-token-001",
+		atomicSyncTokenByToken: map[string]string{"plain-token": "sync-token-001"},
 	}
 	service := NewService(repo)
 
@@ -59,11 +59,8 @@ func TestEnrollNodeBindsUnboundNodeAndIssuesSyncToken(t *testing.T) {
 	if repo.enrollmentCalls[0] != (EnrollInput{Token: "plain-token", Fingerprint: "fp-new"}) {
 		t.Fatalf("enrollmentCalls[0] = %#v", repo.enrollmentCalls[0])
 	}
-	if repo.issuedSyncNodeIDs != nil && len(repo.issuedSyncNodeIDs) != 1 {
-		t.Fatalf("issuedSyncNodeIDs len = %d, want 1", len(repo.issuedSyncNodeIDs))
-	}
-	if repo.issuedSyncNodeIDs[0] != "nd_123" {
-		t.Fatalf("issuedSyncNodeIDs[0] = %q, want %q", repo.issuedSyncNodeIDs[0], "nd_123")
+	if len(repo.issuedSyncNodeIDs) != 0 {
+		t.Fatalf("issuedSyncNodeIDs len = %d, want 0 because sync token is issued atomically by ApplyEnrollment", len(repo.issuedSyncNodeIDs))
 	}
 
 	if result != (EnrollResult{
@@ -139,7 +136,7 @@ func TestEnrollNodeUsesSingleAtomicRepositoryCall(t *testing.T) {
 				BindingStatus: nodes.BindingBound,
 			},
 		},
-		issuedSyncToken: "sync-token-atomic",
+		atomicSyncTokenByToken: map[string]string{"token-1": "sync-token-atomic"},
 	}
 	service := NewService(repo)
 
@@ -393,9 +390,10 @@ type fakeRepository struct {
 	issuedNodeID string
 	issueErr     error
 
-	issuedSyncToken   string
-	issuedSyncNodeIDs []string
-	issueSyncErr      error
+	issuedSyncToken        string
+	issuedSyncNodeIDs      []string
+	issueSyncErr           error
+	atomicSyncTokenByToken map[string]string
 
 	enrollmentResultByToken map[string]nodes.Record
 	enrollmentCalls         []EnrollInput
@@ -426,16 +424,16 @@ func (f *fakeRepository) IssueSyncToken(_ context.Context, nodeID string) (strin
 	return f.issuedSyncToken, nil
 }
 
-func (f *fakeRepository) ApplyEnrollment(_ context.Context, input EnrollInput) (nodes.Record, error) {
+func (f *fakeRepository) ApplyEnrollment(_ context.Context, input EnrollInput) (nodes.Record, string, error) {
 	f.enrollmentCalls = append(f.enrollmentCalls, input)
 	if f.enrollErr != nil {
-		return nodes.Record{}, f.enrollErr
+		return nodes.Record{}, "", f.enrollErr
 	}
 	record, ok := f.enrollmentResultByToken[input.Token]
 	if !ok {
-		return nodes.Record{}, nodes.ErrNodeNotFound
+		return nodes.Record{}, "", nodes.ErrNodeNotFound
 	}
-	return record, nil
+	return record, f.atomicSyncTokenByToken[input.Token], nil
 }
 
 func (f *fakeRepository) GetNode(_ context.Context, nodeID string) (nodes.Record, error) {

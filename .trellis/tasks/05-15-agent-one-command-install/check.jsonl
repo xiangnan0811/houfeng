@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify backend/agent/contract/router/bootstrap placement"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify migration/repository token semantics and SQL style"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify expired/reused token and API error behavior"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify no token leakage in logs/output"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify Go tests and backend quality gates"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Verify onboarding UI composition stays consistent"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify API/types/data flow for install command"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Verify web tests/lint/build expectations"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify cross-layer consistency from config to UI to installer"}
+{"file": ".trellis/tasks/05-15-agent-one-command-install/research/installer-conventions.md", "reason": "Check installer against researched conventions"}
+{"file": ".trellis/tasks/05-15-agent-one-command-install/research/secure-enrollment.md", "reason": "Check enrollment/token security against researched conventions"}

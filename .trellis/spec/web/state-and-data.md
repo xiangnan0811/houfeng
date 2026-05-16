@@ -35,6 +35,62 @@
 - 中文枚举（如 `IncidentSeverity = '正常' | '关注' | '告警' | '严重'`、`OnboardingPhase` 等）来自 center，前端原样保留中文字面量；展示标签通过 `STATE_CHANGE_EVENT_TYPE_LABELS` (`web/src/lib/types.ts:202-221`) 这种 const map 二次映射，**不要散落到组件文件**。
 - **当前类型是手写**，与 Go contract 没有自动生成机制。新增字段时按以下顺序：1) center handler / contract 改完；2) 在 `lib/types.ts` 加字段（保持 snake_case、保持可选性与后端一致）；3) 在 `lib/api.ts` 引用；4) page / component 消费。
 
+### Node onboarding 一键安装数据流
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `NodeOnboardingPage`、`NodeInstallCommandIssue`、`issueNodeInstallCommand`、Node 创建后跳转 onboarding 的流程，或任何安装命令展示/复制行为。
+
+#### 2. Signatures
+
+- Frontend type: `NodeInstallCommandIssue` fields mirror center JSON snake_case: `command`, `issued_at`, `expires_at`, `installer_url`, `public_base_url`, `agent_version`, `release_repo`。
+- Frontend API: `issueNodeInstallCommand(nodeId)` -> `POST /api/nodes/{node_id}/install-command`。
+- Page flow: `NodesPage` 创建 Node 后跳转 onboarding；`NodeOnboardingPage` 按用户操作生成/重新生成 center command，不再依赖 create flow 预发 token cache。
+
+#### 3. Contracts
+
+- Browser must never construct the production install command from `window.location.origin`, route params, or request metadata. The center-generated `issue.command` is the only command shown for copy.
+- The command contains a one-time enrollment token; UI should hide/reveal/copy deliberately, show expiry metadata, and avoid rendering full token in incidental notices or conflict-resolution copy.
+- Config errors from backend 409 (`public base URL is not configured`, `agent release version is not configured`) are actionable deployment errors and should be displayed as-is.
+- Binding conflict UI must not say the enrollment token is unchanged; a pending fingerprint attempt may have consumed it, so operators may need to regenerate after confirm/reject.
+- Manual fallback can remain for troubleshooting, but it must be secondary to center-generated one-command install.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Generate command succeeds | page shows command, expiry, installer URL, version/repo metadata, and copy controls |
+| User regenerates command | old visible command is replaced by new center response |
+| 409 public URL/version config error | page shows backend message and does not synthesize fallback command |
+| Binding conflict displayed | copy explains one-time token may be consumed and regeneration may be required |
+| Create Node succeeds | navigate to onboarding page instead of caching a plaintext token in module global state |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: user clicks generate, reviews masked/revealed command, copies the exact backend command, and runs it on a VPS.
+- Base: command expired; user clicks regenerate and copies the replacement.
+- Bad: page builds `curl ${window.location.origin}/api/agent/install.sh ...` and silently ignores missing `HOUFENG_PUBLIC_BASE_URL`.
+- Bad: create flow stores plaintext enrollment token in `onboardingTokenCache` for cross-page state.
+
+#### 6. Tests Required
+
+- `web/src/lib/api.test.ts`: `issueNodeInstallCommand` posts to `/api/nodes/{id}/install-command`.
+- `NodeOnboardingPage.test.tsx`: generate success, regenerate, reveal/hide/copy, config errors, metadata display, and conflict copy warning about consumed one-time tokens.
+- `NodesPage.test.tsx`: create flow navigates to onboarding without pre-issuing or caching an enrollment token.
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：浏览器自己拼安装命令，绕过 center 的 URL/version/token contract。
+const command = `curl -fsSL ${window.location.origin}/api/agent/install.sh | sudo sh -s -- --server-url ${window.location.origin}`
+```
+
+```tsx
+// 正确：只展示后端返回的命令。
+const issue = await issueNodeInstallCommand(nodeId)
+setInstallIssue(issue)
+```
+
 ### 数据格式化
 
 - **所有面向用户的展示格式化都集中在 `web/src/lib/format.ts`**：时间 (`formatDateTime`)、百分比 (`formatPercent`)、数值 (`formatNumber`)、字节 (`formatBytes` / `formatBytesPerSecond`)、延迟 (`formatLatency`)、运行时长 (`formatUptime`)、标签拼接 (`formatLabelList`)。

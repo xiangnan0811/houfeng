@@ -3,7 +3,6 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { formatDateTime } from '../lib/format'
-import { getOnboardingTokenCache, setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import { NodeOnboardingPage } from './NodeOnboardingPage'
 
 function mockJSONResponse(body: unknown, status = 200) {
@@ -60,11 +59,7 @@ describe('NodeOnboardingPage', () => {
     window.sessionStorage.clear()
   })
 
-  it('shows the cached token and templated install steps while onboarding has not started', async () => {
-    setOnboardingTokenCache('nd_001', {
-      token: 'enroll_tokyo_001',
-      issued_at: '2026-04-26T09:05:00Z',
-    })
+  it('makes one-command install primary before any token is generated', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(mockJSONResponse(createOnboardingState())),
@@ -77,25 +72,24 @@ describe('NodeOnboardingPage', () => {
     )
 
     expect(screen.getByText('节点接入')).toBeInTheDocument()
-    // Token plaintext is rendered inside the warning Card.
-    expect(screen.getByText('enroll_tokyo_001')).toBeInTheDocument()
-    // Install steps mention the systemd path and template substitution.
+    expect(screen.getByRole('button', { name: '生成一键安装命令' })).toBeInTheDocument()
     expect(
-      screen.getByText('/etc/houfeng-agent/agent.env', { exact: false }),
+      screen.getByText('命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。'),
     ).toBeInTheDocument()
-    // Token is available, so the install snippet should embed the real token,
-    // not the placeholder.
     expect(
-      screen.getByText("echo 'enroll_tokyo_001' > /etc/houfeng-agent/token"),
+      screen.getByText('安装命令包含 30 分钟有效的一次性 enrollment token。', { exact: false }),
     ).toBeInTheDocument()
-    expect(screen.queryByText("echo '###TOKEN###' > /etc/houfeng-agent/token")).toBeNull()
+    expect(screen.getByText('尚未生成一键安装命令。')).toBeInTheDocument()
+    expect(screen.getByText('手工安装仍可作为排障路径')).toBeInTheDocument()
+    expect(screen.getByText('HOUFENG_AGENT_SERVER_URL=<center public base URL>', { exact: false })).toBeInTheDocument()
+    expect(
+      screen.getByText("printf '%s' '<30-minute enrollment token>' | sudo tee /etc/houfeng-agent/token >/dev/null"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(window.location.origin)).not.toBeInTheDocument()
+    expect(screen.queryByText('enroll_tokyo_001')).not.toBeInTheDocument()
   })
 
   it('shows the bound-but-waiting state before stable observation arrives', async () => {
-    setOnboardingTokenCache('nd_001', {
-      token: 'enroll_tokyo_001',
-      issued_at: '2026-04-26T09:05:00Z',
-    })
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -124,10 +118,6 @@ describe('NodeOnboardingPage', () => {
   })
 
   it('shows completion state with a CTA back to node detail', async () => {
-    setOnboardingTokenCache('nd_001', {
-      token: 'enroll_tokyo_001',
-      issued_at: '2026-04-26T09:05:00Z',
-    })
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -158,150 +148,169 @@ describe('NodeOnboardingPage', () => {
     )
   })
 
-  it('clears a stale cached token when the server reports a different issuance time', async () => {
-    setOnboardingTokenCache('nd_001', {
-      token: 'stale_token_001',
-      issued_at: '2026-04-26T09:05:00Z',
-    })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        mockJSONResponse(
-          createOnboardingState({
-            enrollment_token_issued_at: '2026-04-26T09:10:00Z',
-          }),
-        ),
-      ),
-    )
-
-    renderOnboardingPage()
-
-    await waitFor(() =>
-      expect(screen.getByText('当前会话里没有可显示的 Token 明文。')).toBeInTheDocument(),
-    )
-
-    expect(screen.queryByText('stale_token_001')).not.toBeInTheDocument()
-    await waitFor(() => expect(getOnboardingTokenCache('nd_001')).toBeNull())
-  })
-
-  it('asks for regeneration when the plaintext token is no longer cached', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(mockJSONResponse(createOnboardingState())),
-    )
-
-    renderOnboardingPage()
-
-    await waitFor(() =>
-      expect(screen.getByText('当前会话里没有可显示的 Token 明文。')).toBeInTheDocument(),
-    )
-
-    expect(screen.getByText('请重新生成接入 Token，再继续安装或核对配置。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '重新生成接入 Token' })).toBeInTheDocument()
-    expect(screen.queryByText('enroll_tokyo_001')).not.toBeInTheDocument()
-    // The install snippet shows the placeholder since no token is available.
-    expect(
-      screen.getByText("echo '###TOKEN###' > /etc/houfeng-agent/token"),
-    ).toBeInTheDocument()
-  })
-
-  it('reissues the enrollment token and refreshes onboarding state', async () => {
+  it('generates and displays the backend-issued one-command installer', async () => {
+    const command = 'curl -fsSL "https://center.example.com/api/agent/install.sh" | sudo sh -s -- --server-url "https://center.example.com" --enrollment-token "enroll_tokyo_001" --version "v1.2.3" --release-repo "owner/repo"'
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          createOnboardingState({
-            enrollment_token_issued_at: '2026-04-26T09:05:00Z',
-          }),
-        ),
-      )
+      .mockResolvedValueOnce(mockJSONResponse(createOnboardingState()))
       .mockResolvedValueOnce(
         mockJSONResponse({
-          token: 'enroll_tokyo_002',
+          command,
           issued_at: '2026-04-26T09:25:00Z',
+          expires_at: '2026-04-26T09:55:00Z',
+          installer_url: 'https://center.example.com/api/agent/install.sh',
+          public_base_url: 'https://center.example.com',
+          agent_version: 'v1.2.3',
+          release_repo: 'owner/repo',
         }),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          createOnboardingState({
-            enrollment_token_issued_at: '2026-04-26T09:25:00Z',
-            updated_at: '2026-04-26T09:25:00Z',
-          }),
-        ),
       )
     vi.stubGlobal('fetch', fetchMock)
 
     renderOnboardingPage()
 
     await waitFor(() =>
-      expect(screen.getByText('当前会话里没有可显示的 Token 明文。')).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '生成一键安装命令' })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '重新生成接入 Token' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成一键安装命令' }))
 
-    await waitFor(() => expect(screen.getByText('enroll_tokyo_002')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(command)).toBeInTheDocument())
 
-    expect(getOnboardingTokenCache('nd_001')).toEqual({
-      token: 'enroll_tokyo_002',
-      issued_at: '2026-04-26T09:25:00Z',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/enrollment-token', {
+    expect(screen.getByText('有效至：', { exact: false })).toBeInTheDocument()
+    expect(screen.getAllByText(formatDateTime('2026-04-26T09:25:00Z')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(formatDateTime('2026-04-26T09:55:00Z')).length).toBeGreaterThan(0)
+    expect(screen.getByText('https://center.example.com')).toBeInTheDocument()
+    expect(screen.getByText('https://center.example.com/api/agent/install.sh')).toBeInTheDocument()
+    expect(screen.getByText('v1.2.3')).toBeInTheDocument()
+    expect(screen.getByText('owner/repo')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/install-command', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/onboarding', {
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/nodes/nd_001/enrollment-token', expect.anything())
+  })
+
+  it('surfaces missing center install configuration without guessing a browser URL', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(createOnboardingState()))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'public base URL is not configured' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderOnboardingPage()
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '生成一键安装命令' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '生成一键安装命令' }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('中心一键安装配置不完整：public base URL is not configured。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。'),
+      ).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByText(window.location.origin)).not.toBeInTheDocument()
+    expect(screen.queryByText('/api/agent/install.sh')).not.toBeInTheDocument()
+  })
+
+  it('regenerates install commands and replaces the previously visible secret', async () => {
+    const firstCommand = 'curl -fsSL "https://center.example.com/api/agent/install.sh" | sudo sh -s -- --server-url "https://center.example.com" --enrollment-token "enroll_tokyo_001" --version "v1.2.3" --release-repo "owner/repo"'
+    const secondCommand = 'curl -fsSL "https://center.example.com/api/agent/install.sh" | sudo sh -s -- --server-url "https://center.example.com" --enrollment-token "enroll_tokyo_002" --version "v1.2.3" --release-repo "owner/repo"'
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(createOnboardingState()))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          command: firstCommand,
+          issued_at: '2026-04-26T09:25:00Z',
+          expires_at: '2026-04-26T09:55:00Z',
+          installer_url: 'https://center.example.com/api/agent/install.sh',
+          public_base_url: 'https://center.example.com',
+          agent_version: 'v1.2.3',
+          release_repo: 'owner/repo',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          command: secondCommand,
+          issued_at: '2026-04-26T09:30:00Z',
+          expires_at: '2026-04-26T10:00:00Z',
+          installer_url: 'https://center.example.com/api/agent/install.sh',
+          public_base_url: 'https://center.example.com',
+          agent_version: 'v1.2.3',
+          release_repo: 'owner/repo',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderOnboardingPage()
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '生成一键安装命令' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '生成一键安装命令' }))
+    await waitFor(() => expect(screen.getByText(firstCommand)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '重新生成安装命令' }))
+
+    await waitFor(() => expect(screen.getByText(secondCommand)).toBeInTheDocument())
+    expect(screen.queryByText(firstCommand)).not.toBeInTheDocument()
+    expect(screen.getAllByText(formatDateTime('2026-04-26T10:00:00Z')).length).toBeGreaterThan(0)
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/install-command', {
+      method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
   })
 
-  it('collapses the token block when "已保存，关闭" is clicked and lets it be re-expanded', async () => {
-    setOnboardingTokenCache('nd_001', {
-      token: 'enroll_tokyo_001',
-      issued_at: '2026-04-26T09:05:00Z',
-    })
+  it('hides and re-expands the generated install command within the current page session', async () => {
+    const command = 'curl -fsSL "https://center.example.com/api/agent/install.sh" | sudo sh -s -- --server-url "https://center.example.com" --enrollment-token "enroll_tokyo_001" --version "v1.2.3" --release-repo "owner/repo"'
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(mockJSONResponse(createOnboardingState())),
+      vi
+        .fn()
+        .mockResolvedValueOnce(mockJSONResponse(createOnboardingState()))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            command,
+            issued_at: '2026-04-26T09:25:00Z',
+            expires_at: '2026-04-26T09:55:00Z',
+            installer_url: 'https://center.example.com/api/agent/install.sh',
+            public_base_url: 'https://center.example.com',
+            agent_version: 'v1.2.3',
+            release_repo: 'owner/repo',
+          }),
+        ),
     )
 
     renderOnboardingPage()
 
-    await waitFor(() => expect(screen.getByText('enroll_tokyo_001')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: '已保存，关闭' }))
-
     await waitFor(() =>
-      expect(
-        screen.getByText('Token 明文已隐藏。本会话内可重新展开；离开页面后需要重新生成。'),
-      ).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '生成一键安装命令' })).toBeInTheDocument(),
     )
 
-    expect(screen.queryByText('enroll_tokyo_001')).not.toBeInTheDocument()
-    // Cache is intentionally NOT cleared when the user only collapses the UI
-    // (PRD Q-CLOSE decision: cache 不清).
-    expect(getOnboardingTokenCache('nd_001')).toEqual({
-      token: 'enroll_tokyo_001',
-      issued_at: '2026-04-26T09:05:00Z',
-    })
-    // Install snippet should fall back to the placeholder while collapsed.
-    expect(
-      screen.getByText("echo '###TOKEN###' > /etc/houfeng-agent/token"),
-    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '生成一键安装命令' }))
+    await waitFor(() => expect(screen.getByText(command)).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '重新展开 token 明文' }))
+    fireEvent.click(screen.getByRole('button', { name: '隐藏安装命令' }))
 
-    await waitFor(() => expect(screen.getByText('enroll_tokyo_001')).toBeInTheDocument())
-    // Install snippet now embeds the real token again.
-    expect(
-      screen.getByText("echo 'enroll_tokyo_001' > /etc/houfeng-agent/token"),
-    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByText('安装命令已隐藏。本页会话内可重新展开；如果已离开页面或命令过期，请重新生成。')).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(command)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '重新展开命令' }))
+
+    await waitFor(() => expect(screen.getByText(command)).toBeInTheDocument())
   })
 
-  it('copies the token via navigator.clipboard.writeText when the copy button is pressed', async () => {
+  it('copies the generated install command via navigator.clipboard.writeText', async () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(globalThis.navigator, 'clipboard', {
       configurable: true,
@@ -312,22 +321,37 @@ describe('NodeOnboardingPage', () => {
       get: () => true,
     })
 
-    setOnboardingTokenCache('nd_001', {
-      token: 'enroll_tokyo_001',
-      issued_at: '2026-04-26T09:05:00Z',
-    })
+    const command = 'curl -fsSL "https://center.example.com/api/agent/install.sh" | sudo sh -s -- --server-url "https://center.example.com" --enrollment-token "enroll_tokyo_001" --version "v1.2.3" --release-repo "owner/repo"'
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(mockJSONResponse(createOnboardingState())),
+      vi
+        .fn()
+        .mockResolvedValueOnce(mockJSONResponse(createOnboardingState()))
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            command,
+            issued_at: '2026-04-26T09:25:00Z',
+            expires_at: '2026-04-26T09:55:00Z',
+            installer_url: 'https://center.example.com/api/agent/install.sh',
+            public_base_url: 'https://center.example.com',
+            agent_version: 'v1.2.3',
+            release_repo: 'owner/repo',
+          }),
+        ),
     )
 
     renderOnboardingPage()
 
-    await waitFor(() => expect(screen.getByText('enroll_tokyo_001')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '生成一键安装命令' })).toBeInTheDocument(),
+    )
 
-    fireEvent.click(screen.getByRole('button', { name: '复制 token' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成一键安装命令' }))
+    await waitFor(() => expect(screen.getByText(command)).toBeInTheDocument())
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('enroll_tokyo_001'))
+    fireEvent.click(screen.getByRole('button', { name: '复制安装命令' }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(command))
   })
 
   it('shows a high-priority conflict card with masked fingerprint summaries and conflict metadata', async () => {
@@ -370,6 +394,41 @@ describe('NodeOnboardingPage', () => {
     expect(within(conflictCard).getByRole('button', { name: '重置绑定…' })).toBeInTheDocument()
     // No ActionConfirmationCard yet.
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('warns that conflict resolution requires a regenerated command after token consumption', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(
+          createOnboardingState(
+            {
+              binding_status: '指纹变更待确认',
+              phase: '绑定冲突待处理',
+              current_binding_fingerprint_summary: 'sha256:c…abcdef',
+            },
+            {
+              fingerprint: 'sha256:pendabcdef1234567890',
+              first_seen_at: '2026-04-26T09:15:00Z',
+              last_seen_at: '2026-04-26T09:18:00Z',
+              attempt_count: 4,
+            },
+          ),
+        ),
+      ),
+    )
+
+    renderOnboardingPage()
+
+    const conflictCard = await screen.findByRole('article', {
+      name: '高优先级：绑定冲突待处理',
+    })
+    fireEvent.click(within(conflictCard).getByRole('button', { name: '确认重新绑定…' }))
+
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('触发待确认的安装命令已消耗一次性 token', { exact: false })).toBeInTheDocument()
+    expect(within(dialog).getByText('不会改变节点 ID 与历史观测数据。')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/enrollment token/)).not.toBeInTheDocument()
   })
 
   it('keeps action failures local to the conflict section', async () => {

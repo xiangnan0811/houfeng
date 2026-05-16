@@ -5593,6 +5593,29 @@ html.theme-classic-light .dashboard-command-surface {
   font-family: var(--font-mono);
   color: var(--text-primary);
 }
+.metadata-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0 0;
+}
+.metadata-list div {
+  min-width: 0;
+}
+.metadata-list dt {
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: var(--space-1);
+}
+.metadata-list dd {
+  margin: 0;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .onboarding-snapshot-meta {
   font-family: var(--font-mono);
   font-size: 11px;

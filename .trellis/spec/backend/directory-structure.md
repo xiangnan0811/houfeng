@@ -257,10 +257,84 @@ if ok {
 
 center 与 agent 同时引用的唯一契约包。内容：
 
-- `routes.go`：`EnrollPath = "/api/agent/enroll"`、`SyncPath = "/api/agent/sync"`
+- `routes.go`：`EnrollPath = "/api/agent/enroll"`、`SyncPath = "/api/agent/sync"`、`InstallScriptPath = "/api/agent/install.sh"`
 - `types.go`：请求 / 响应 DTO、`BindingStatus*` / `ErrorCode*` / `ProbeKind*` / `ProbeError*` 常量
 
 > 这是**唯一**允许同时被 `cmd/houfeng-center` / `internal/center/http/handlers` 与 `cmd/houfeng-agent` / `agent/runtime` 引用的包。新增 agent ↔ center 字段时，先改这里，两侧再各自适配。**不要把 DTO 定义在 handler 包或 runtime 包内自己重复一份**。
+
+#### Scenario: Agent one-command install contract
+
+1. **Scope / Trigger**
+   - 触发：修改 Node onboarding、一键安装命令、center-served installer、`HOUFENG_PUBLIC_BASE_URL`、agent release artifact 命名、或 `/api/agent/install.sh` 路由。
+   - 目标：让每个自部署 center 负责生成自己的安装命令和 enrollment token；GitHub Release 只提供二进制与 `sha256sums.txt`，不得成为 token/script authority。
+
+2. **Signatures**
+   - Config: `config.CenterConfig.PublicBaseURL` 来自 `HOUFENG_PUBLIC_BASE_URL`，必须是无 query/fragment 的 absolute `http(s)` URL，可为 domain 或 `IP:port`。
+   - Public route: `GET agentapi.InstallScriptPath` -> embedded shell script，未登录可读，只允许读取脚本。
+   - Authenticated route: `POST /api/nodes/{node_id}/install-command` -> `nodes.InstallCommandIssue`。
+   - Response JSON: `{command, issued_at, expires_at, installer_url, public_base_url, agent_version, release_repo}`。
+   - Generated command:
+
+     ```sh
+     curl -fsSL '<public_base_url>/api/agent/install.sh' | sudo sh -s -- --server-url '<public_base_url>' --enrollment-token '<token>' --version '<agent_version>' --release-repo '<owner/repo>'
+     ```
+
+3. **Contracts**
+   - Production install commands must use `HOUFENG_PUBLIC_BASE_URL` as the authoritative externally reachable center URL; do not derive production commands from browser origin, request host, `Referer`, or SPA location.
+   - `POST /api/nodes/{node_id}/install-command` issues a fresh short-lived one-time enrollment token for that Node; regeneration invalidates the previous active token.
+   - `agent_version` must be a real release version, not empty and not `dev`; the installer downloads `houfeng-agent_<version>_linux_<amd64|arm64>` from the configured release repo.
+   - The installer must verify the downloaded binary against `sha256sums.txt` before replacing `/usr/local/bin/houfeng-agent` or starting systemd.
+   - MVP support is Linux + systemd + `amd64`/`arm64` only. Auto-upgrade, uninstall UX, non-systemd hosts, package repos, Docker/Kubernetes installs, and center-hosted binary mirrors are out of scope.
+   - Installer output, center logs, and UI conflict copy must not print the full enrollment token or imply a one-time token remains reusable after a failed/pending fingerprint attempt.
+
+4. **Validation & Error Matrix**
+
+   | Condition | Expected behavior |
+   | --- | --- |
+   | Missing `HOUFENG_PUBLIC_BASE_URL` | install-command returns 409 `public base URL is not configured` |
+   | Invalid public URL scheme/query/fragment | center config load fails before serving traffic |
+   | Missing or `dev` agent version | install-command returns 409 `agent release version is not configured` |
+   | Unknown node | install-command returns 404 `node not found` |
+   | Unsupported install method | installer returns non-zero with a short error; no partial service start |
+   | Unsupported OS / architecture / no running systemd | installer exits before writing binary/config/token |
+   | Missing checksum entry or checksum mismatch | installer exits before replacing binary or starting service |
+
+5. **Good / Base / Bad Cases**
+   - Good: logged-in operator opens Node onboarding, generates a command from center, copies it to a Linux systemd amd64/arm64 host, checksum verification passes, installer writes config/token with restrictive permissions, enables and starts `houfeng-agent`.
+   - Base: the public script route is unauthenticated but contains no deployment-specific secret until command generation passes `--enrollment-token` at execution time.
+   - Bad: SPA constructs `curl ${window.location.origin}/api/agent/install.sh ...` and ships a command that works only behind the browser's current origin.
+   - Bad: putting the installer script only in GitHub Release/raw means all self-hosted deployments share script authority and cannot couple script behavior to their center token contract.
+   - Bad: installing or restarting the service before checksum verification makes a corrupted or substituted binary executable.
+
+6. **Tests Required**
+   - Config tests for valid domain/IP public URLs, trim/trailing slash behavior, rejected scheme, relative URL, query, and fragment.
+   - Handler tests for install-command success, 404 node, 409 missing public URL, 409 dev/missing version, method not allowed, and shell quoting of all command arguments.
+   - Router/bootstrap tests proving `/api/agent/install.sh` is public while `/api/nodes/{id}/install-command` remains session-protected and wired non-nil.
+   - Installer tests or embedded-script checks for Linux arch mapping, systemd requirement, exact checksum-manifest matching, token file permissions, and no full-token logging.
+   - Release target test/sanity that `make build-agent-release VERSION=<tag>` emits both Linux binaries and `sha256sums.txt` with names matching installer expectations.
+
+7. **Wrong vs Correct**
+
+```tsx
+// 错误：前端从浏览器 origin 拼生产安装命令。
+const command = `curl -fsSL ${window.location.origin}/api/agent/install.sh | sudo sh -s -- ...`
+```
+
+```tsx
+// 正确：前端只展示 center 生成的命令。
+const issue = await issueNodeInstallCommand(node.node_id)
+setInstallCommand(issue.command)
+```
+
+```go
+// 错误：request host / browser origin 成为部署 URL authority。
+installerURL := "https://" + r.Host + agentapi.InstallScriptPath
+```
+
+```go
+// 正确：显式配置是唯一 production URL authority。
+installerURL := publicBaseURL + agentapi.InstallScriptPath
+```
 
 ---
 

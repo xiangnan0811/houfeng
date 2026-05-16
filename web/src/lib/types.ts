@@ -42,9 +42,14 @@ export type PendingBindingMetadata = {
   attempt_count: number
 }
 
-export type NodeEnrollmentTokenIssue = {
-  token: string
+export type NodeInstallCommandIssue = {
+  command: string
   issued_at: string
+  expires_at: string
+  installer_url: string
+  public_base_url: string
+  agent_version: string
+  release_repo: string
 }
 
 export type UpdateNodeMetadataInput = {

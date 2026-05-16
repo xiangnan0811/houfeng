@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/nodes"
 )
@@ -174,6 +175,27 @@ func TestNodeOnboardingMigrationAddsPersistenceColumns(t *testing.T) {
 	}
 }
 
+func TestEnrollmentTokenConsumptionMigrationAddsActiveTokenState(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0025_add_enrollment_token_consumption.sql"))
+	if err != nil {
+		t.Fatalf("ReadFile(consumption migration) error = %v", err)
+	}
+
+	text := string(source)
+	for _, snippet := range []string{
+		"add column if not exists enrollment_token_consumed_at timestamptz",
+		"create index if not exists idx_nodes_enrollment_token_active",
+		"where enrollment_token_hash is not null",
+		"and enrollment_token_consumed_at is null",
+	} {
+		if !strings.Contains(text, snippet) {
+			t.Fatalf("migration missing %q", snippet)
+		}
+	}
+}
+
 func TestSetPendingActionStoresDurablePendingLastAction(t *testing.T) {
 	t.Parallel()
 
@@ -263,6 +285,10 @@ func TestNodeOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testing.T) {
 	if !result.IssuedAt.Equal(issuedAt) {
 		t.Fatalf("IssueNodeEnrollmentToken().IssuedAt = %s, want %s", result.IssuedAt.Format(time.RFC3339), issuedAt.Format(time.RFC3339))
 	}
+	wantExpiresAt := issuedAt.Add(nodes.EnrollmentTokenTTL)
+	if !result.ExpiresAt.Equal(wantExpiresAt) {
+		t.Fatalf("IssueNodeEnrollmentToken().ExpiresAt = %s, want %s", result.ExpiresAt.Format(time.RFC3339), wantExpiresAt.Format(time.RFC3339))
+	}
 	if len(gotArgs) != 2 {
 		t.Fatalf("len(gotArgs) = %d, want 2", len(gotArgs))
 	}
@@ -274,6 +300,130 @@ func TestNodeOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testing.T) {
 	}
 	if !strings.Contains(gotSQL, "enrollment_token_issued_at = now()") {
 		t.Fatalf("IssueNodeEnrollmentToken() SQL = %q, want enrollment_token_issued_at update", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "enrollment_token_consumed_at = null") {
+		t.Fatalf("IssueNodeEnrollmentToken() SQL = %q, want consumed marker reset", gotSQL)
+	}
+}
+
+func TestFindNodeByEnrollmentTokenRequiresActiveUnexpiredToken(t *testing.T) {
+	t.Parallel()
+
+	var gotSQL string
+	var gotArgs []any
+	repo := &PostgresNodeRepository{db: fakeNodeDB{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			gotSQL = sql
+			gotArgs = append([]any(nil), args...)
+			return fakeNodeRow{scan: func(dest ...any) error {
+				scanNodeRecordDestinations(dest, nodes.Record{NodeID: "nd_001"})
+				return nil
+			}}
+		},
+	}}
+
+	_, err := repo.FindNodeByEnrollmentToken(context.Background(), "enroll_001")
+	if err != nil {
+		t.Fatalf("FindNodeByEnrollmentToken() error = %v", err)
+	}
+	if len(gotArgs) != 1 || gotArgs[0] != hashEnrollmentToken("enroll_001") {
+		t.Fatalf("QueryRow args = %#v, want enrollment token hash only", gotArgs)
+	}
+	for _, snippet := range []string{
+		"enrollment_token_consumed_at is null",
+		"enrollment_token_issued_at >= now() - interval '30 minutes'",
+	} {
+		if !strings.Contains(gotSQL, snippet) {
+			t.Fatalf("FindNodeByEnrollmentToken() SQL = %q, missing %q", gotSQL, snippet)
+		}
+	}
+}
+
+func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
+	t.Parallel()
+
+	var (
+		selectSQL  string
+		selectArgs []any
+		updateSQL  string
+		updateArgs []any
+		committed  bool
+		call       int
+	)
+	tx := &fakeNodeTx{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			call++
+			if call == 1 {
+				selectSQL = sql
+				selectArgs = append([]any(nil), args...)
+				return fakeNodeRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "nd_001"
+					*(dest[1].(*string)) = nodes.BindingUnbound
+					*(dest[2].(*string)) = ""
+					*(dest[3].(**time.Time)) = nil
+					*(dest[4].(*string)) = ""
+					*(dest[5].(**time.Time)) = nil
+					*(dest[6].(**time.Time)) = nil
+					*(dest[7].(*int)) = 0
+					return nil
+				}}
+			}
+			updateSQL = sql
+			updateArgs = append([]any(nil), args...)
+			return fakeNodeRow{scan: func(dest ...any) error {
+				now := time.Date(2026, time.May, 15, 8, 0, 0, 0, time.UTC)
+				scanNodeRecordDestinations(dest, nodes.Record{
+					NodeID:                "nd_001",
+					BindingStatus:         nodes.BindingBound,
+					BindingFingerprint:    "fp_001",
+					BindingEpochStartedAt: &now,
+				})
+				return nil
+			}}
+		},
+		commit: func(context.Context) error {
+			committed = true
+			return nil
+		},
+	}
+	repo := &PostgresNodeRepository{db: fakeNodeDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+
+	record, syncToken, err := repo.ApplyEnrollment(context.Background(), enrollment.EnrollInput{Token: "enroll_001", Fingerprint: "fp_001"})
+	if err != nil {
+		t.Fatalf("ApplyEnrollment() error = %v", err)
+	}
+	if record.NodeID != "nd_001" || record.BindingStatus != nodes.BindingBound {
+		t.Fatalf("record = %#v, want bound nd_001", record)
+	}
+	if syncToken == "" {
+		t.Fatal("syncToken = empty, want generated sync token for bound enrollment")
+	}
+	if len(selectArgs) != 1 || selectArgs[0] != hashEnrollmentToken("enroll_001") {
+		t.Fatalf("select args = %#v, want enrollment hash", selectArgs)
+	}
+	for _, snippet := range []string{
+		"enrollment_token_consumed_at is null",
+		"enrollment_token_issued_at >= now() - interval '30 minutes'",
+		"for update",
+	} {
+		if !strings.Contains(selectSQL, snippet) {
+			t.Fatalf("ApplyEnrollment select SQL = %q, missing %q", selectSQL, snippet)
+		}
+	}
+	if !strings.Contains(updateSQL, "enrollment_token_consumed_at = now()") {
+		t.Fatalf("ApplyEnrollment update SQL = %q, want consumed marker write", updateSQL)
+	}
+	if !strings.Contains(updateSQL, "sync_token_hash = case when $9 <> '' then $9 else sync_token_hash end") {
+		t.Fatalf("ApplyEnrollment update SQL = %q, want atomic sync token write", updateSQL)
+	}
+	if len(updateArgs) != 9 {
+		t.Fatalf("ApplyEnrollment update args = %#v, want 9 args", updateArgs)
+	}
+	if updateArgs[8] != hashSyncToken(syncToken) {
+		t.Fatalf("ApplyEnrollment sync hash arg = %#v, want hash of returned token", updateArgs[8])
+	}
+	if !committed {
+		t.Fatal("transaction was not committed")
 	}
 }
 

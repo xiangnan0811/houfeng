@@ -8,7 +8,6 @@ import {
   createNode,
   enterNodeMaintenance,
   exitNodeMaintenance,
-  issueNodeEnrollmentToken,
   listNodes,
   listNodeSparklines,
   pauseNodeMonitoring,
@@ -17,7 +16,6 @@ import {
   resumeNodeMonitoring,
   updateNodeMetadata,
 } from '../lib/api'
-import { setOnboardingTokenCache } from '../lib/onboardingTokenCache'
 import type { CreateNodeInput, NodeRecord, NodeSparklinesResponse } from '../lib/types'
 import { type AutoRefreshOption, useAutoRefresh } from '../lib/useAutoRefresh'
 import { CreateNodeDrawer } from './nodes/CreateNodeDrawer'
@@ -211,24 +209,6 @@ export function NodesPage() {
     }
   }
 
-  async function issueTokenAndEnterOnboarding(node: NodeRecord) {
-    try {
-      const issue = await issueNodeEnrollmentToken(node.node_id)
-      setOnboardingTokenCache(node.node_id, issue)
-      setCreateOpen(false)
-      resetCreateFlow()
-      navigate(`/nodes/${node.node_id}/onboarding`)
-    } catch (issueError) {
-      setCreateOpen(false)
-      resetCreateFlow()
-      navigate(`/nodes/${node.node_id}/onboarding`, {
-        state: {
-          tokenIssueError: `接入 Token 生成失败：${describeError(issueError, '请稍后重试')}`,
-        },
-      })
-    }
-  }
-
   async function handleSaveLabels(node: NodeRecord) {
     setMetadataBusyNodeId(node.node_id)
     setMetadataErrors((current) => {
@@ -298,7 +278,9 @@ export function NodesPage() {
         const withoutCreated = current.filter((item) => item.node_id !== node.node_id)
         return [node, ...withoutCreated]
       })
-      await issueTokenAndEnterOnboarding(node)
+      setCreateOpen(false)
+      resetCreateFlow()
+      navigate(`/nodes/${node.node_id}/onboarding`)
     } catch (submitError) {
       setCreateError(describeError(submitError, '创建节点失败'))
     } finally {

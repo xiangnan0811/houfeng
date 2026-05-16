@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,10 +149,12 @@ func TestNodeEnrollmentTokenHandlerReturnsPlaintextToken(t *testing.T) {
 	t.Parallel()
 
 	issuedAt := time.Date(2026, time.April, 26, 9, 10, 0, 0, time.UTC)
+	expiresAt := issuedAt.Add(nodes.EnrollmentTokenTTL)
 	repo := &fakeNodeOnboardingRepository{
 		issueEnrollmentTokenResult: nodes.EnrollmentTokenIssue{
-			Token:    "enroll_001",
-			IssuedAt: issuedAt,
+			Token:     "enroll_001",
+			IssuedAt:  issuedAt,
+			ExpiresAt: expiresAt,
 		},
 	}
 
@@ -177,6 +180,187 @@ func TestNodeEnrollmentTokenHandlerReturnsPlaintextToken(t *testing.T) {
 	}
 	if !body.IssuedAt.Equal(issuedAt) {
 		t.Fatalf("IssuedAt = %s, want %s", body.IssuedAt.Format(time.RFC3339), issuedAt.Format(time.RFC3339))
+	}
+	if !body.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("ExpiresAt = %s, want %s", body.ExpiresAt.Format(time.RFC3339), expiresAt.Format(time.RFC3339))
+	}
+}
+
+func TestNodeInstallCommandHandlerReturnsCommand(t *testing.T) {
+	t.Parallel()
+
+	issuedAt := time.Date(2026, time.May, 15, 8, 30, 0, 0, time.UTC)
+	expiresAt := issuedAt.Add(nodes.EnrollmentTokenTTL)
+	repo := &fakeNodeOnboardingRepository{
+		issueEnrollmentTokenResult: nodes.EnrollmentTokenIssue{
+			Token:     "enroll_secret_001",
+			IssuedAt:  issuedAt,
+			ExpiresAt: expiresAt,
+		},
+	}
+
+	handler := handlers.NodeInstallCommand(repo, handlers.InstallCommandOptions{
+		PublicBaseURL: "https://center.example.com/",
+		AgentVersion:  "v1.2.3",
+		ReleaseRepo:   "owner/repo",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/install-command", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if repo.issueEnrollmentTokenNodeID != "nd_001" {
+		t.Fatalf("IssueNodeEnrollmentToken nodeID = %q, want %q", repo.issueEnrollmentTokenNodeID, "nd_001")
+	}
+
+	var body nodes.InstallCommandIssue
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.InstallerURL != "https://center.example.com/api/agent/install.sh" {
+		t.Fatalf("InstallerURL = %q, want center-served installer URL", body.InstallerURL)
+	}
+	if body.PublicBaseURL != "https://center.example.com" {
+		t.Fatalf("PublicBaseURL = %q, want trimmed base URL", body.PublicBaseURL)
+	}
+	if body.AgentVersion != "v1.2.3" || body.ReleaseRepo != "owner/repo" {
+		t.Fatalf("release metadata = version %q repo %q, want v1.2.3 owner/repo", body.AgentVersion, body.ReleaseRepo)
+	}
+	if !body.IssuedAt.Equal(issuedAt) || !body.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("issue timestamps = %s/%s, want %s/%s", body.IssuedAt.Format(time.RFC3339), body.ExpiresAt.Format(time.RFC3339), issuedAt.Format(time.RFC3339), expiresAt.Format(time.RFC3339))
+	}
+	for _, want := range []string{
+		`curl -fsSL 'https://center.example.com/api/agent/install.sh'`,
+		`--server-url 'https://center.example.com'`,
+		`--enrollment-token 'enroll_secret_001'`,
+		`--version 'v1.2.3'`,
+		`--release-repo 'owner/repo'`,
+	} {
+		if !strings.Contains(body.Command, want) {
+			t.Fatalf("Command = %q, missing %q", body.Command, want)
+		}
+	}
+}
+
+func TestNodeInstallCommandHandlerShellQuotesArguments(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeNodeOnboardingRepository{
+		issueEnrollmentTokenResult: nodes.EnrollmentTokenIssue{
+			Token:     "enroll_secret_001",
+			IssuedAt:  time.Date(2026, time.May, 15, 8, 30, 0, 0, time.UTC),
+			ExpiresAt: time.Date(2026, time.May, 15, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	handler := handlers.NodeInstallCommand(repo, handlers.InstallCommandOptions{
+		PublicBaseURL: "https://center.example.com",
+		AgentVersion:  "v1.2.3",
+		ReleaseRepo:   "owner/o'repo",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/install-command", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var body nodes.InstallCommandIssue
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if !strings.Contains(body.Command, `--release-repo 'owner/o'\''repo'`) {
+		t.Fatalf("Command = %q, want shell-quoted release repo", body.Command)
+	}
+}
+
+func TestNodeInstallCommandHandlerRequiresConfiguredPublicBaseURL(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeNodeOnboardingRepository{}
+	handler := handlers.NodeInstallCommand(repo, handlers.InstallCommandOptions{AgentVersion: "v1.2.3"})
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/install-command", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	assertAdminError(t, recorder, "public base URL is not configured")
+	if repo.issueEnrollmentTokenNodeID != "" {
+		t.Fatalf("IssueNodeEnrollmentToken called for %q, want not called", repo.issueEnrollmentTokenNodeID)
+	}
+}
+
+func TestNodeInstallCommandHandlerRequiresReleaseVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		version string
+	}{
+		{name: "missing", version: ""},
+		{name: "dev placeholder", version: "dev"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := &fakeNodeOnboardingRepository{}
+			handler := handlers.NodeInstallCommand(repo, handlers.InstallCommandOptions{PublicBaseURL: "https://center.example.com", AgentVersion: tt.version})
+			req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/install-command", nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+			}
+			assertAdminError(t, recorder, "agent release version is not configured")
+			if repo.issueEnrollmentTokenNodeID != "" {
+				t.Fatalf("IssueNodeEnrollmentToken called for %q, want not called", repo.issueEnrollmentTokenNodeID)
+			}
+		})
+	}
+}
+
+func TestNodeInstallCommandHandlerMapsRepositoryErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		repoErr    error
+		wantStatus int
+		wantError  string
+	}{
+		{name: "missing node", repoErr: nodes.ErrNodeNotFound, wantStatus: http.StatusNotFound, wantError: "node not found"},
+		{name: "repository failure", repoErr: errors.New("db boom"), wantStatus: http.StatusInternalServerError, wantError: "internal server error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := &fakeNodeOnboardingRepository{issueEnrollmentTokenErr: tt.repoErr}
+			handler := handlers.NodeInstallCommand(repo, handlers.InstallCommandOptions{
+				PublicBaseURL: "https://center.example.com",
+				AgentVersion:  "v1.2.3",
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/install-command", nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+			assertAdminError(t, recorder, tt.wantError)
+		})
 	}
 }
 
@@ -347,6 +531,7 @@ func TestNodeOnboardingAdminHandlersRejectWrongMethod(t *testing.T) {
 	}{
 		{name: "onboarding read", handler: handlers.NodeOnboarding(&fakeNodeOnboardingRepository{}), path: "/api/nodes/nd_001/onboarding", method: http.MethodPost},
 		{name: "issue token", handler: handlers.NodeEnrollmentToken(&fakeNodeOnboardingRepository{}), path: "/api/nodes/nd_001/enrollment-token", method: http.MethodGet},
+		{name: "install command", handler: handlers.NodeInstallCommand(&fakeNodeOnboardingRepository{}, handlers.InstallCommandOptions{PublicBaseURL: "https://center.example.com", AgentVersion: "v1.2.3"}), path: "/api/nodes/nd_001/install-command", method: http.MethodGet},
 		{name: "confirm rebind", handler: handlers.NodeBindingConfirmRebind(&fakeNodeOnboardingRepository{}), path: "/api/nodes/nd_001/binding/confirm-rebind", method: http.MethodGet},
 		{name: "reject pending", handler: handlers.NodeBindingRejectPending(&fakeNodeOnboardingRepository{}), path: "/api/nodes/nd_001/binding/reject-pending", method: http.MethodGet},
 		{name: "reset binding", handler: handlers.NodeBindingReset(&fakeNodeOnboardingRepository{}), path: "/api/nodes/nd_001/binding/reset", method: http.MethodGet},

@@ -17,10 +17,9 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-const (
-	defaultInterval = 30 * time.Second
-	agentVersion    = "dev"
-)
+const defaultInterval = 30 * time.Second
+
+var agentVersion = "dev"
 
 var ErrMissingSyncToken = errors.New("enrollment bound response missing sync token")
 
@@ -46,6 +45,11 @@ type TokenSource interface {
 	Token(context.Context) (string, error)
 }
 
+type SyncCredentialStore interface {
+	SyncCredentials(context.Context) (nodeID string, syncToken string, ok bool, err error)
+	SaveSyncCredentials(context.Context, string, string) error
+}
+
 type FingerprintSource interface {
 	Fingerprint(context.Context) (string, error)
 }
@@ -67,18 +71,19 @@ type SyncQueue interface {
 }
 
 type Runtime struct {
-	cfg                agentconfig.AgentConfig
-	client             Client
-	logger             *slog.Logger
-	tokenSource        TokenSource
-	fingerprintSource  FingerprintSource
-	hostSampleProvider HostSampleProvider
-	probeProvider      ProbeProvider
-	interval           time.Duration
-	syncQueue          SyncQueue
-	currentPlan        *agentapi.SyncPlan
-	lastHostSampleAt   time.Time
-	pendingResults     []agentexec.Result
+	cfg                 agentconfig.AgentConfig
+	client              Client
+	logger              *slog.Logger
+	tokenSource         TokenSource
+	syncCredentialStore SyncCredentialStore
+	fingerprintSource   FingerprintSource
+	hostSampleProvider  HostSampleProvider
+	probeProvider       ProbeProvider
+	interval            time.Duration
+	syncQueue           SyncQueue
+	currentPlan         *agentapi.SyncPlan
+	lastHostSampleAt    time.Time
+	pendingResults      []agentexec.Result
 }
 
 func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSource, fingerprintSource FingerprintSource) *Runtime {
@@ -114,17 +119,22 @@ func NewWithRuntimeDeps(
 	if len(queues) > 0 {
 		queue = queues[0]
 	}
+	var syncCredentialStore SyncCredentialStore
+	if store, ok := tokenSource.(SyncCredentialStore); ok {
+		syncCredentialStore = store
+	}
 
 	return &Runtime{
-		cfg:                cfg,
-		client:             client,
-		logger:             logger,
-		tokenSource:        tokenSource,
-		fingerprintSource:  fingerprintSource,
-		hostSampleProvider: hostSampleProvider,
-		probeProvider:      probeProvider,
-		interval:           interval,
-		syncQueue:          queue,
+		cfg:                 cfg,
+		client:              client,
+		logger:              logger,
+		tokenSource:         tokenSource,
+		syncCredentialStore: syncCredentialStore,
+		fingerprintSource:   fingerprintSource,
+		hostSampleProvider:  hostSampleProvider,
+		probeProvider:       probeProvider,
+		interval:            interval,
+		syncQueue:           queue,
 	}
 }
 
@@ -142,30 +152,22 @@ func (r *Runtime) Run(ctx context.Context) error {
 	r.logger.Info("agent runtime started", "server_url", r.cfg.ServerURL)
 	defer r.logger.Info("agent runtime stopped", "server_url", r.cfg.ServerURL)
 
-	token, err := r.tokenSource.Token(ctx)
-	if err != nil {
-		return fmt.Errorf("load token: %w", err)
-	}
-
 	fingerprint, err := r.fingerprintSource.Fingerprint(ctx)
 	if err != nil {
 		return fmt.Errorf("load fingerprint: %w", err)
 	}
 
-	enrollment, err := r.client.Enroll(ctx, agentapi.EnrollmentRequest{
-		Token:       token,
-		Fingerprint: fingerprint,
-	})
+	nodeID, syncToken, ok, err := r.loadSyncCredentials(ctx)
 	if err != nil {
-		return fmt.Errorf("enroll agent: %w", err)
+		return err
 	}
-
-	r.logger.Info("agent enrolled", "node_id", enrollment.NodeID, "status", enrollment.Status, "binding_status", enrollment.BindingStatus)
-	if enrollment.BindingStatus != agentapi.BindingStatusBound {
-		return fmt.Errorf("enroll agent: %w", &EnrollmentNotBoundError{BindingStatus: enrollment.BindingStatus})
-	}
-	if enrollment.SyncToken == "" {
-		return fmt.Errorf("enroll agent: %w", ErrMissingSyncToken)
+	if !ok {
+		enrollment, err := r.enroll(ctx, fingerprint)
+		if err != nil {
+			return err
+		}
+		nodeID = enrollment.NodeID
+		syncToken = enrollment.SyncToken
 	}
 
 	ticker := time.NewTicker(r.interval)
@@ -178,7 +180,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 		case tick := <-ticker.C:
 			observedAt := tick.UTC()
 			syncBatchID := observedAt.Format(time.RFC3339Nano)
-			request := r.buildSyncRequest(ctx, enrollment.NodeID, enrollment.SyncToken, observedAt, fingerprint, syncBatchID)
+			request := r.buildSyncRequest(ctx, nodeID, syncToken, observedAt, fingerprint, syncBatchID)
 
 			if r.syncQueue == nil {
 				response, err := r.client.Sync(ctx, request)
@@ -201,6 +203,46 @@ func (r *Runtime) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (r *Runtime) loadSyncCredentials(ctx context.Context) (string, string, bool, error) {
+	if r.syncCredentialStore == nil {
+		return "", "", false, nil
+	}
+	nodeID, syncToken, ok, err := r.syncCredentialStore.SyncCredentials(ctx)
+	if err != nil {
+		return "", "", false, fmt.Errorf("load sync credentials: %w", err)
+	}
+	return nodeID, syncToken, ok, nil
+}
+
+func (r *Runtime) enroll(ctx context.Context, fingerprint string) (*agentapi.EnrollmentResponse, error) {
+	token, err := r.tokenSource.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load token: %w", err)
+	}
+
+	enrollment, err := r.client.Enroll(ctx, agentapi.EnrollmentRequest{
+		Token:       token,
+		Fingerprint: fingerprint,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enroll agent: %w", err)
+	}
+
+	r.logger.Info("agent enrolled", "node_id", enrollment.NodeID, "status", enrollment.Status, "binding_status", enrollment.BindingStatus)
+	if enrollment.BindingStatus != agentapi.BindingStatusBound {
+		return nil, fmt.Errorf("enroll agent: %w", &EnrollmentNotBoundError{BindingStatus: enrollment.BindingStatus})
+	}
+	if enrollment.SyncToken == "" {
+		return nil, fmt.Errorf("enroll agent: %w", ErrMissingSyncToken)
+	}
+	if r.syncCredentialStore != nil {
+		if err := r.syncCredentialStore.SaveSyncCredentials(ctx, enrollment.NodeID, enrollment.SyncToken); err != nil {
+			return nil, fmt.Errorf("persist sync credentials: %w", err)
+		}
+	}
+	return enrollment, nil
 }
 
 func (r *Runtime) buildSyncRequest(ctx context.Context, nodeID, syncToken string, observedAt time.Time, fingerprint, syncBatchID string) agentapi.SyncRequest {

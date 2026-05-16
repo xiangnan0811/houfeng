@@ -100,7 +100,7 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 - ❌ **敏感字段**：以下字段**禁止出现在 log value 里**：
   - `sync_token` / 任何来自 `enrollment.SyncToken`（`agent/runtime/runtime.go:160` 故意只 log `binding_status` 不 log `sync_token`）
   - `password` / `password_hash` / bcrypt 字符串
-  - 完整的 enrollment token 内容（仅在请求路径校验，不 log）
+  - 完整的 enrollment token 内容（仅在请求路径校验，不 log；一键安装命令也只能在认证 UI 中按用户操作 reveal/copy，不写入 center/agent 日志）
   - cookie / Authorization 头
   - Telegram bot token / chat id（`internal/center/notify/telegram.go` 全程不 log payload 内容，仅 `fmt.Errorf` 包装失败）
   - Feishu webhook URL（`internal/center/notify/feishu.go` 全程不 log webhook URL，仅 `fmt.Errorf` 包装失败）
