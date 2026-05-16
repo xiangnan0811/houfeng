@@ -369,3 +369,36 @@ Completed expert UI micro-refinement for state surfaces, events context, observa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 130: Agent one-command install
+
+**Date**: 2026-05-16
+**Task**: Agent one-command install
+**Branch**: `feature/agent-one-command-install`
+
+### Summary
+
+Implemented center-generated one-command agent install with public base URL, one-time enrollment tokens, checksum-verified GitHub Release installer, onboarding UI, specs, and verification notes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d3eb4e6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
