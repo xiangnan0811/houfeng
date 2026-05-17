@@ -262,7 +262,7 @@ if ok {
 2. **Signatures**
    - Image definition: repository root `Dockerfile` builds a single project image containing `houfeng-center`, a small runtime entrypoint, and baked `web/dist`.
    - Published Compose file: `compose.yaml` service set is exactly `houfeng` + `db` for MVP.
-   - Project image reference: `houfeng.image = linnea7171/houfeng:latest` until automated release image publishing replaces the placeholder.
+   - Project image reference: `houfeng.image = linnea7171/houfeng:latest`; release publishing produces `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `linnea7171/houfeng:latest`.
    - Runtime web path: `HOUFENG_WEB_DIST_DIR=/app/web/dist` inside the project image.
    - Runtime HTTP default: project image and Compose set `HOUFENG_HTTP_ADDR=:16001`; default port mapping is `127.0.0.1:16001:16001`, with host port override allowed.
    - Database URL shape: `postgres://houfeng:<password>@db:5432/houfeng?sslmode=disable`, assembled by the project image entrypoint at runtime from env-file values unless an explicit `HOUFENG_DATABASE_URL` is already set.
@@ -272,7 +272,9 @@ if ok {
 
 3. **Contracts**
    - Published `compose.yaml` must not contain a local project `build:` block or password-like environment assignment lines for secret scanner avoidance, and quick-start docs must not instruct `docker compose up --build`; operators should be able to run the published image directly.
-   - The root `Dockerfile` is the image build definition for future automation, not the default Compose quick-start execution path.
+   - The root `Dockerfile` is the image build definition for release-only GitHub Actions publishing, not the default Compose quick-start execution path.
+   - Docker image publishing must be deliberate release output: `release.published` and maintainer `workflow_dispatch` may publish; `main` push and pull request events must not publish images or access Docker Hub credentials.
+   - Release publishing uses Docker Hub secrets (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`) and must not commit credentials or include them in compose/env examples.
    - `houfeng` runs only `houfeng-center`; it does not start Vite, Nginx, Caddy, Postgres, or an agent inside the project container.
    - `db` uses the official PostgreSQL image with a user-migratable host directory mounted at `/var/lib/postgresql/data`; center applies embedded migrations at startup.
    - Compose may bind Houfeng to host loopback for an operator-managed reverse proxy upstream; TLS termination stays outside the app container/Compose MVP.
@@ -285,7 +287,9 @@ if ok {
 
    | Condition | Expected behavior |
    | --- | --- |
-   | `compose.yaml` contains `houfeng.build` or quick-start says `up --build` | Reject in review; published Compose must pull/use `linnea7171/houfeng:latest` until release automation is implemented |
+   | `compose.yaml` contains `houfeng.build` or quick-start says `up --build` | Reject in review; published Compose must pull/use `linnea7171/houfeng:latest` from release publishing |
+   | Docker image workflow publishes on `push` to `main` or `pull_request` | Reject in review; image publication must be release/manual only |
+   | Docker image workflow updates `latest` during manual rebuilds | Reject in review unless deliberately changed; `latest` is controlled by normal release publication |
    | `compose.yaml` uses project service name `center` | Reject in review; service name must be `houfeng` |
    | `compose.yaml` keeps project container port `8080` as the Docker default | Reject in review; Docker/Compose default must be `16001` inside and outside |
    | `compose.yaml` adds an `agent` service | Reject in review; agents are host systemd services |
@@ -299,7 +303,7 @@ if ok {
 5. **Good / Base / Bad Cases**
    - Good: operator copies `docs/deploy/compose.env.example` to `docs/deploy/compose.env`, replaces passwords, runs `docker compose --env-file docs/deploy/compose.env up -d`, and accesses Houfeng on `127.0.0.1:16001` through a local reverse proxy upstream.
    - Good: operator backs up or migrates `./data/postgres/` as an ordinary host directory before moving the deployment.
-   - Good: release automation later builds the root `Dockerfile`, tags/pushes `linnea7171/houfeng:<version>` / `latest`, and updates docs or Compose image pinning without adding local `build:` to the published quick-start.
+   - Good: release-only automation builds the root `Dockerfile` on published GitHub releases, tags/pushes `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `latest`, and leaves Compose without local `build:`.
    - Base: local login works with empty `HOUFENG_PUBLIC_BASE_URL`; before onboarding real agents, operator sets the external HTTPS URL and recreates the `houfeng` container.
    - Bad: using `build: .` in `compose.yaml` makes deployment depend on local Go/Node source builds and breaks the intended project-image distribution path.
    - Bad: adding a `/var/log/houfeng` bind mount while the app does not write files there creates misleading troubleshooting expectations.
@@ -311,6 +315,7 @@ if ok {
    - `git diff --check` must pass after Docker/docs edits.
    - Search touched docs/configs for stale `center` service naming, `127.0.0.1:8080`, Docker `:8080` defaults, `postgres-data` named-volume wording, misleading log mount wording, and stale `--build` / local-build quick-start wording before review.
    - For Dockerfile changes, run a lightweight Dockerfile validation or image build when Docker is available; if unavailable, state that explicitly and rely on review plus existing `make verify-go` / `make verify-web` gates.
+   - For Docker publishing workflow changes, statically verify `.github/workflows/publish-images.yml` has no `push`/`pull_request` trigger, has `release.published` and `workflow_dispatch`, targets `docker.io/linnea7171/houfeng`, uses the root `Dockerfile`, and references only GitHub Secrets for Docker Hub credentials.
 
 7. **Wrong vs Correct**
 

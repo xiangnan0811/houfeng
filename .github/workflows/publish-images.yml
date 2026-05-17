@@ -1,0 +1,234 @@
+name: publish-images
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to publish, for example v1.2.3 or 1.2.3
+        required: true
+      source_ref:
+        description: Git ref to build, for example v1.2.3, main, or a commit SHA
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY_IMAGE: docker.io/linnea7171/houfeng
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      source_ref: ${{ steps.version.outputs.source_ref }}
+      update_latest: ${{ steps.version.outputs.update_latest }}
+    steps:
+      - id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+          RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+              echo "Prerelease Docker image publishing is not supported." >&2
+              exit 1
+            fi
+            raw_version="$RELEASE_TAG_NAME"
+            source_ref="$RELEASE_TAG_NAME"
+            update_latest="true"
+          else
+            raw_version="$INPUT_VERSION"
+            source_ref="$INPUT_SOURCE_REF"
+            update_latest="false"
+          fi
+
+          version="${raw_version#refs/tags/}"
+          version="${version#v}"
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Docker image version must be strict semver: X.Y.Z or vX.Y.Z" >&2
+            exit 1
+          fi
+
+          if [[ -z "$source_ref" || "$source_ref" == *$'\n'* || "$source_ref" == *$'\r'* ]]; then
+            echo "Docker image source_ref must be non-empty and single-line." >&2
+            exit 1
+          fi
+
+          {
+            printf 'version=%s\n' "$version"
+            printf 'source_ref=%s\n' "$source_ref"
+            printf 'update_latest=%s\n' "$update_latest"
+          } >> "$GITHUB_OUTPUT"
+
+  credentials:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Docker Hub credentials
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_TOKEN" ]]; then
+            echo "Docker Hub secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must be configured." >&2
+            exit 1
+          fi
+
+  build:
+    needs:
+      - resolve
+      - credentials
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            artifact: linux-amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            artifact: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - name: Resolve source revision
+        id: source
+        shell: bash
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            VERSION=v${{ needs.resolve.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+            org.opencontainers.image.version=v${{ needs.resolve.outputs.version }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      - name: Export digest
+        shell: bash
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.artifact }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs:
+      - resolve
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - name: Resolve source revision
+        id: source
+        shell: bash
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=raw,value=v${{ needs.resolve.outputs.version }}
+            type=raw,value=${{ needs.resolve.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.resolve.outputs.update_latest == 'true' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+            org.opencontainers.image.version=v${{ needs.resolve.outputs.version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Create and push manifest
+        working-directory: /tmp/digests
+        shell: bash
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        shell: bash
+        env:
+          IMAGE_REF: ${{ env.REGISTRY_IMAGE }}:v${{ needs.resolve.outputs.version }}
+        run: |
+          docker buildx imagetools inspect "$IMAGE_REF"
+
+      - name: Publish summary
+        shell: bash
+        env:
+          REGISTRY_IMAGE: ${{ env.REGISTRY_IMAGE }}
+          VERSION: v${{ needs.resolve.outputs.version }}
+          SOURCE_REF: ${{ needs.resolve.outputs.source_ref }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          UPDATE_LATEST: ${{ needs.resolve.outputs.update_latest }}
+        run: |
+          {
+            echo "## Docker image published"
+            echo
+            echo "- Image: \`$REGISTRY_IMAGE\`"
+            echo "- Version: \`$VERSION\`"
+            echo "- Source ref: \`$SOURCE_REF\`"
+            echo "- Source commit: \`$SOURCE_SHA\`"
+            echo "- Updated latest: \`$UPDATE_LATEST\`"
+            echo
+            echo "### Tags"
+            jq -r '.tags[] | "- `" + . + "`"' <<< "$DOCKER_METADATA_OUTPUT_JSON"
+          } >> "$GITHUB_STEP_SUMMARY"

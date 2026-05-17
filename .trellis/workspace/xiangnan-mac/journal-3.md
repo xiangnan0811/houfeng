@@ -504,3 +504,36 @@ Removed password-like assignments from tracked Compose source, added a runtime e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 134: Add Docker image publishing
+
+**Date**: 2026-05-17
+**Task**: Add Docker image publishing
+**Branch**: `feature/docker-image-auto-publishing`
+
+### Summary
+
+Added release-only Docker Hub publishing for Houfeng images, CI Docker build validation, and updated Docker deployment docs/spec.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3b4ba8f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

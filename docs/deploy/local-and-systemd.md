@@ -92,9 +92,11 @@ cp docs/deploy/compose.env.example docs/deploy/compose.env
 docker compose --env-file docs/deploy/compose.env up -d
 ```
 
-The default Compose file pulls and runs `linnea7171/houfeng:latest`. That placeholder project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the container ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001` and `HOUFENG_WEB_DIST_DIR=/app/web/dist`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env` before executing the center. The root `Dockerfile` remains the image definition for future automated publishing, but automated release image publishing is not part of this MVP and the default quick-start does not build locally.
+The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the container ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001` and `HOUFENG_WEB_DIST_DIR=/app/web/dist`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env` before executing the center. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.
 
 Sensitive Compose values such as the PostgreSQL password and initial admin password live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` intentionally avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignment lines and loads those values through `env_file` so repository secret scanners do not flag placeholder deployment configuration.
+
+Maintainers publish Docker images through `.github/workflows/publish-images.yml`. Configure GitHub repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, then publish a normal GitHub Release such as `v1.2.3` to push `linnea7171/houfeng:v1.2.3`, `linnea7171/houfeng:1.2.3`, and `linnea7171/houfeng:latest`. Manual workflow dispatch requires explicit `version` and `source_ref` inputs and does not update `latest`.
 
 `compose.yaml` starts exactly two required services:
 
@@ -109,7 +111,7 @@ PostgreSQL has a `pg_isready` healthcheck and the Houfeng service waits for a he
 docker compose --env-file docs/deploy/compose.env up -d houfeng
 ```
 
-For production/public deployments, terminate HTTPS outside this Compose stack with Caddy, Nginx Proxy Manager, Nginx, a cloud load balancer, or similar, and forward to the loopback-bound Houfeng port. Do not expose the center directly on public plain HTTP. If one-command agent onboarding is needed, the project image must be published with a real release version and matching Linux agent release assets as described above; automated Docker image publishing is a follow-up requirement.
+For production/public deployments, terminate HTTPS outside this Compose stack with Caddy, Nginx Proxy Manager, Nginx, a cloud load balancer, or similar, and forward to the loopback-bound Houfeng port. Do not expose the center directly on public plain HTTP. If one-command agent onboarding is needed, publish a GitHub Release so the Docker image workflow builds `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `linnea7171/houfeng:latest`, and upload matching Linux agent release assets as described above.
 
 Application logs currently go to container stdout/stderr. File-based Houfeng application logging is a required follow-up for troubleshooting and user feedback; this Compose file intentionally does not include a misleading log bind mount until the app writes log files itself.
 
