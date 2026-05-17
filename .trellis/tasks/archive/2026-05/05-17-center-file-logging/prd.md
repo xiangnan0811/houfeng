@@ -69,3 +69,4 @@ Add file-based Houfeng application logging so Docker/Compose and systemd center 
 
 * Task directory: `.trellis/tasks/05-17-center-file-logging`.
 * Existing Compose docs mention file logging as a required follow-up; this task should close that gap only when code actually writes files.
+* Release follow-through note: PR #95 merged the implementation, but the work commit used a non-conventional subject, so Release Please correctly skipped a release PR; follow-up PR #96 carries the conventional `feat:` marker for this already-merged user-facing logging feature.
