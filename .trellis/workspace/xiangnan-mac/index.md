@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 137
+- **Total Sessions**: 138
 - **Last Active**: 2026-05-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~638 | Active |
+| `journal-3.md` | ~671 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 138 | 2026-05-17 | Agent release asset publishing | `3e04b4b` | `feature/agent-release-assets` |
 | 137 | 2026-05-17 | UI theme layout audit | `38a1d2a` | `feature/ui-theme-layout-audit` |
 | 136 | 2026-05-17 | Add center file logging | `571bfb4` | `feature/center-file-logging` |
 | 135 | 2026-05-17 | Auto release Docker publishing | `53d335a` | `feature/auto-release-docker-publish` |

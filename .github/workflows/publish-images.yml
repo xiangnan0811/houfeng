@@ -42,7 +42,7 @@ jobs:
         run: |
           if [[ "$EVENT_NAME" == "release" ]]; then
             if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
-              echo "Prerelease Docker image publishing is not supported." >&2
+              echo "Prerelease publishing is not supported." >&2
               exit 1
             fi
             raw_version="$RELEASE_TAG_NAME"
@@ -58,12 +58,12 @@ jobs:
           version="${version#v}"
 
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Docker image version must be strict semver: X.Y.Z or vX.Y.Z" >&2
+            echo "Release version must be strict semver: X.Y.Z or vX.Y.Z" >&2
             exit 1
           fi
 
           if [[ -z "$source_ref" || "$source_ref" == *$'\n'* || "$source_ref" == *$'\r'* ]]; then
-            echo "Docker image source_ref must be non-empty and single-line." >&2
+            echo "Release source_ref must be non-empty and single-line." >&2
             exit 1
           fi
 
@@ -72,6 +72,76 @@ jobs:
             printf 'source_ref=%s\n' "$source_ref"
             printf 'update_latest=%s\n' "$update_latest"
           } >> "$GITHUB_OUTPUT"
+
+  agent-assets:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build agent release assets
+        shell: bash
+        run: |
+          make build-agent-release VERSION=v${{ needs.resolve.outputs.version }}
+
+      - name: Verify agent release assets
+        shell: bash
+        env:
+          VERSION: v${{ needs.resolve.outputs.version }}
+        run: |
+          amd64="dist/houfeng-agent_${VERSION}_linux_amd64"
+          arm64="dist/houfeng-agent_${VERSION}_linux_arm64"
+          manifest="dist/sha256sums.txt"
+
+          test -s "$amd64"
+          test -s "$arm64"
+          test -s "$manifest"
+
+          expected_manifest="$(mktemp)"
+          trap 'rm -f "$expected_manifest"' EXIT
+          (
+            cd dist
+            sha256sum "houfeng-agent_${VERSION}_linux_amd64" "houfeng-agent_${VERSION}_linux_arm64"
+          ) > "$expected_manifest"
+          diff -u "$expected_manifest" "$manifest"
+
+      - name: Upload agent release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: v${{ needs.resolve.outputs.version }}
+        run: |
+          gh release upload "$VERSION" \
+            "dist/houfeng-agent_${VERSION}_linux_amd64" \
+            "dist/houfeng-agent_${VERSION}_linux_arm64" \
+            "dist/sha256sums.txt" \
+            --clobber
+
+      - name: Publish summary
+        shell: bash
+        env:
+          VERSION: v${{ needs.resolve.outputs.version }}
+          SOURCE_REF: ${{ needs.resolve.outputs.source_ref }}
+        run: |
+          {
+            echo "## Agent release assets published"
+            echo
+            echo "- Release tag: \`$VERSION\`"
+            echo "- Source ref: \`$SOURCE_REF\`"
+            echo
+            echo "### Assets"
+            echo "- \`houfeng-agent_${VERSION}_linux_amd64\`"
+            echo "- \`houfeng-agent_${VERSION}_linux_arm64\`"
+            echo "- \`sha256sums.txt\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   credentials:
     needs: resolve

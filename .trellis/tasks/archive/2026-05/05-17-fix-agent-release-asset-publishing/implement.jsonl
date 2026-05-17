@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Agent one-command install contract and Docker/Release Please workflow constraints for publishing installer-required assets."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Feature branch and PR governance for workflow changes."}
+{"file":"docs/deploy/local-and-systemd.md","reason":"Operator deployment docs currently describe manual agent asset upload and release flow."}
+{"file":"docs/operations/v1-smoke-run.md","reason":"Smoke run docs for one-command onboarding and release asset prerequisites."}

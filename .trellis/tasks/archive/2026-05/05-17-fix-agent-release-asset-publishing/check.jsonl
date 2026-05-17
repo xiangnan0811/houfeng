@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Validation matrix for release workflows, one-command installer, and required tests/static checks."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Ensure branch/PR/release workflow changes follow protected-main process."}
+{"file":"docs/deploy/local-and-systemd.md","reason":"Check deployment docs match automated asset publishing behavior."}
+{"file":"docs/operations/v1-smoke-run.md","reason":"Check smoke docs include current installer asset requirements and validation."}

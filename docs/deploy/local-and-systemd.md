@@ -30,7 +30,7 @@ Expected local outputs:
 - `bin/houfeng-agent`
 - `web/dist/`
 
-For one-command agent installation, publish Linux release artifacts for the agent and checksum manifest:
+For one-command agent installation, each published GitHub Release must contain Linux agent artifacts and the checksum manifest. The release workflow builds and uploads them automatically on `release.published`; keep the local target for sanity checks and emergency backfills:
 
 ```bash
 make build-agent-release VERSION=v1.2.3
@@ -42,7 +42,7 @@ Expected release outputs under `dist/`:
 - `houfeng-agent_v1.2.3_linux_arm64`
 - `sha256sums.txt`
 
-`build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. Upload those files to the matching GitHub Release tag. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary/checksum assets.
+`build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary/checksum assets.
 
 ## Center environment
 
@@ -97,7 +97,7 @@ The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project
 
 Sensitive Compose values such as the PostgreSQL password and initial admin password live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` intentionally avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignment lines and loads those values through `env_file` so repository secret scanners do not flag placeholder deployment configuration.
 
-Maintainers publish Docker images through the release pipeline. Configure GitHub repository secrets `RELEASE_PLEASE_TOKEN`, `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`. After an eligible conventional feature/fix/docs PR merges to `main`, `.github/workflows/release-please.yml` opens or updates a release PR. When that release PR passes CI and is merged, Release Please publishes a GitHub Release such as `v1.2.3`; the `release.published` event then runs `.github/workflows/publish-images.yml` and pushes `linnea7171/houfeng:v1.2.3`, `linnea7171/houfeng:1.2.3`, and `linnea7171/houfeng:latest`. Manual image workflow dispatch requires explicit `version` and `source_ref` inputs and does not update `latest`.
+Maintainers publish Docker images and installer-required agent assets through the release pipeline. Configure GitHub repository secrets `RELEASE_PLEASE_TOKEN`, `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`. After an eligible conventional feature/fix/docs PR merges to `main`, `.github/workflows/release-please.yml` opens or updates a release PR. When that release PR passes CI and is merged, Release Please publishes a GitHub Release such as `v1.2.3`; the `release.published` event then runs `.github/workflows/publish-images.yml`, uploads `houfeng-agent_v1.2.3_linux_amd64`, `houfeng-agent_v1.2.3_linux_arm64`, and `sha256sums.txt` to the release, and pushes `linnea7171/houfeng:v1.2.3`, `linnea7171/houfeng:1.2.3`, and `linnea7171/houfeng:latest`. Manual workflow dispatch requires explicit `version` and `source_ref` inputs, can rebuild/upload those agent assets for emergency backfills, and does not update the Docker `latest` tag.
 
 `compose.yaml` starts exactly two required services:
 
@@ -114,7 +114,7 @@ PostgreSQL has a `pg_isready` healthcheck and the Houfeng service waits for a he
 docker compose --env-file docs/deploy/compose.env up -d houfeng
 ```
 
-For production/public deployments, terminate HTTPS outside this Compose stack with Caddy, Nginx Proxy Manager, Nginx, a cloud load balancer, or similar, and forward to the loopback-bound Houfeng port. Do not expose the center directly on public plain HTTP. If one-command agent onboarding is needed, publish a GitHub Release so the Docker image workflow builds `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `linnea7171/houfeng:latest`, and upload matching Linux agent release assets as described above.
+For production/public deployments, terminate HTTPS outside this Compose stack with Caddy, Nginx Proxy Manager, Nginx, a cloud load balancer, or similar, and forward to the loopback-bound Houfeng port. Do not expose the center directly on public plain HTTP. If one-command agent onboarding is needed, publish a GitHub Release so the release workflow builds `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, release-controlled `linnea7171/houfeng:latest`, and the matching Linux agent release assets described above.
 
 For troubleshooting, collect `./data/logs/center.log` plus recent `docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng` output. Do not paste enrollment commands, tokens, cookies, passwords, or provider credentials into shared logs or issues.
 

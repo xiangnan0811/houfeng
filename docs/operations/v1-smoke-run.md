@@ -44,7 +44,7 @@ export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
 ```
 
-`HOUFENG_PUBLIC_BASE_URL` is required for generated install commands. It must be an externally reachable absolute `http(s)` URL without query or fragment. For production-like one-command testing, build `houfeng-center` with a real release version and publish matching Linux agent release assets before generating the command; `VERSION=dev` intentionally makes install-command generation return a configuration error.
+`HOUFENG_PUBLIC_BASE_URL` is required for generated install commands. It must be an externally reachable absolute `http(s)` URL without query or fragment. For production-like one-command testing, build `houfeng-center` with a real release version and ensure the matching GitHub Release contains the Linux agent assets published by the release workflow before generating the command; `VERSION=dev` intentionally makes install-command generation return a configuration error.
 
 Build:
 
@@ -61,7 +61,7 @@ Release assets expected under `dist/`:
 - `houfeng-agent_v1.2.3_linux_arm64`
 - `sha256sums.txt`
 
-Upload those files to the matching GitHub Release tag for the configured release repository before testing the installer. GitHub Release hosts only the binary/checksum assets; the installer script is served by the running center at `/api/agent/install.sh`.
+Published releases should already contain those files because `.github/workflows/publish-images.yml` uploads them on `release.published`. Use `make build-agent-release VERSION=<tag>` locally as a sanity check or emergency backfill source if a historical release is missing assets. GitHub Release hosts only the binary/checksum assets; the installer script is served by the running center at `/api/agent/install.sh`.
 
 For API-only local smoke on the same machine, `make build-agent` plus the manual fallback appendix can still verify enroll/sync behavior, but it does not verify the release-asset installer path.
 
