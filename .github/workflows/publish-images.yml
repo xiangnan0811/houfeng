@@ -113,6 +113,14 @@ jobs:
           ) > "$expected_manifest"
           diff -u "$expected_manifest" "$manifest"
 
+          for asset in "$amd64" "$arm64"; do
+            if ! go version -m "$asset" | grep -q 'vcs.modified=false'; then
+              echo "$asset does not contain clean Git tree metadata." >&2
+              go version -m "$asset" >&2
+              exit 1
+            fi
+          done
+
       - name: Upload agent release assets
         shell: bash
         env:

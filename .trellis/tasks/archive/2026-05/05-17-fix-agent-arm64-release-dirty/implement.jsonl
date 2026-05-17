@@ -1,0 +1,4 @@
+{"type":"context","path":"CLAUDE.md","note":"Agent release assets are part of the one-command installer contract and must match installer naming/checksum expectations."}
+{"type":"context","path":".trellis/spec/backend/directory-structure.md","note":"Agent one-command install contract and release workflow contract require installer assets on GitHub Releases."}
+{"type":"context","path":".trellis/spec/backend/quality-guidelines.md","note":"Makefile is the local/CI command portal; workflow changes require git diff checks and GitHub Actions verification."}
+{"type":"context","path":".trellis/spec/guides/branch-workflow-governance.md","note":"Implementation work must stay on feature branches and land through PRs."}

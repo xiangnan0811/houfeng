@@ -669,3 +669,36 @@ Backfilled v0.3.1 agent release assets and updated the release workflow/docs/spe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 139: Fix agent release asset metadata
+
+**Date**: 2026-05-17
+**Task**: Fix agent release asset metadata
+**Branch**: `feature/fix-agent-arm64-release-dirty`
+
+### Summary
+
+Fixed agent release asset builds so both linux/amd64 and linux/arm64 binaries are built before repository output is written, and added release workflow validation for clean Go VCS metadata.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ca51d0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
