@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/xiangnan0811/houfeng/compare/v0.3.2...v0.3.3) (2026-05-17)
+
+
+### Bug Fixes
+
+* keep agent release assets clean ([ee65bf9](https://github.com/xiangnan0811/houfeng/commit/ee65bf993de6a0f263d0d053c4ee45cd7e187684))
+
 ## [0.3.2](https://github.com/xiangnan0811/houfeng/compare/v0.3.1...v0.3.2) (2026-05-17)
 
 
