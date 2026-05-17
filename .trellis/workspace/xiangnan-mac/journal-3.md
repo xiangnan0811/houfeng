@@ -570,3 +570,36 @@ Added Release Please automation for release PRs, upgraded Docker actions to Node
 ### Next Steps
 
 - None - task complete
+
+
+## Session 136: Add center file logging
+
+**Date**: 2026-05-17
+**Task**: Add center file logging
+**Branch**: `feature/center-file-logging`
+
+### Summary
+
+Implemented center-only HOUFENG_LOG_FILE logging with stdout/file tee, Docker Compose and systemd log paths, non-root container log directory handoff, and updated deployment/spec docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `571bfb4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

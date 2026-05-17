@@ -54,13 +54,14 @@ HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
 HOUFENG_PUBLIC_BASE_URL=https://center.example.com
 HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
 HOUFENG_TELEGRAM_BOT_TOKEN=
 HOUFENG_TELEGRAM_CHAT_ID=
 ```
 
-`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, and `HOUFENG_INITIAL_PASSWORD` are required for center startup. `HOUFENG_PUBLIC_BASE_URL` is optional for center startup, but required to generate one-command install commands. Set it to the externally reachable absolute `http(s)` URL that target agents can access, for example `https://center.example.com` or `http://203.0.113.10:8080`; it must not include query or fragment, and the center normalizes trailing slashes when generating commands. Telegram is disabled unless both Telegram values are set. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
+`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, and `HOUFENG_INITIAL_PASSWORD` are required for center startup. `HOUFENG_PUBLIC_BASE_URL` is optional for center startup, but required to generate one-command install commands. Set it to the externally reachable absolute `http(s)` URL that target agents can access, for example `https://center.example.com` or `http://203.0.113.10:8080`; it must not include query or fragment, and the center normalizes trailing slashes when generating commands. `HOUFENG_LOG_FILE` is optional; when set, center writes application logs to both stdout and the configured file, and startup fails if the file cannot be opened. Telegram is disabled unless both Telegram values are set. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
 
 > Note: `HOUFENG_WEB_DIST_DIR` defaults to `web/dist`, but the configured directory must exist and contain the built SPA; otherwise center `/` returns 404 and the UI is unavailable. Production deployments should point it at the installed `web/dist` path.
 
@@ -92,7 +93,7 @@ cp docs/deploy/compose.env.example docs/deploy/compose.env
 docker compose --env-file docs/deploy/compose.env up -d
 ```
 
-The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the container ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001` and `HOUFENG_WEB_DIST_DIR=/app/web/dist`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env` before executing the center. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.
+The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the container ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001`, `HOUFENG_WEB_DIST_DIR=/app/web/dist`, and `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env`, prepares the configured log directory for the non-root `houfeng` user, then executes the center as that user. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.
 
 Sensitive Compose values such as the PostgreSQL password and initial admin password live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` intentionally avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignment lines and loads those values through `env_file` so repository secret scanners do not flag placeholder deployment configuration.
 
@@ -102,6 +103,8 @@ Maintainers publish Docker images through the release pipeline. Configure GitHub
 
 - `houfeng` — the Houfeng project image, bound by default to `127.0.0.1:16001` on the host for a local reverse proxy upstream. Override only the host port with `HOUFENG_HOST_PORT=<port>` in `docs/deploy/compose.env` if needed.
 - `db` — PostgreSQL with the user-migratable host directory `./data/postgres/` mounted at `/var/lib/postgresql/data`.
+
+The Houfeng service writes center application logs to `/var/log/houfeng/center.log` inside the container, mapped to `./data/logs/center.log` on the host. It still emits logs to stdout so `docker compose logs houfeng` remains useful.
 
 PostgreSQL has a `pg_isready` healthcheck and the Houfeng service waits for a healthy database before startup. The center still applies embedded migrations on startup.
 
@@ -113,7 +116,7 @@ docker compose --env-file docs/deploy/compose.env up -d houfeng
 
 For production/public deployments, terminate HTTPS outside this Compose stack with Caddy, Nginx Proxy Manager, Nginx, a cloud load balancer, or similar, and forward to the loopback-bound Houfeng port. Do not expose the center directly on public plain HTTP. If one-command agent onboarding is needed, publish a GitHub Release so the Docker image workflow builds `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `linnea7171/houfeng:latest`, and upload matching Linux agent release assets as described above.
 
-Application logs currently go to container stdout/stderr. File-based Houfeng application logging is a required follow-up for troubleshooting and user feedback; this Compose file intentionally does not include a misleading log bind mount until the app writes log files itself.
+For troubleshooting, collect `./data/logs/center.log` plus recent `docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng` output. Do not paste enrollment commands, tokens, cookies, passwords, or provider credentials into shared logs or issues.
 
 Rollback/removal expectations:
 
@@ -156,6 +159,7 @@ getent passwd houfeng >/dev/null || sudo useradd --system --home-dir /opt/houfen
 sudo install -d -o houfeng -g houfeng -m 0755 /opt/houfeng
 sudo install -d -o houfeng -g houfeng -m 0755 /opt/houfeng/web
 sudo install -d -o houfeng -g houfeng -m 0755 /opt/houfeng/docs
+sudo install -d -o houfeng -g houfeng -m 0750 /var/log/houfeng
 sudo cp -a web/dist /opt/houfeng/web/
 sudo cp -a docs/deploy /opt/houfeng/docs/
 sudo install -o root -g root -m 0755 bin/houfeng-center /usr/local/bin/houfeng-center
@@ -166,6 +170,7 @@ HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
 HOUFENG_PUBLIC_BASE_URL=https://center.example.com
 HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
 HOUFENG_TELEGRAM_BOT_TOKEN=
@@ -272,6 +277,8 @@ After local/systemd startup:
 curl -fsS http://127.0.0.1:8080/api/healthz
 systemctl status houfeng-center
 systemctl status houfeng-agent
+sudo test -s /var/log/houfeng/center.log
+sudo tail -n 100 /var/log/houfeng/center.log
 journalctl -u houfeng-center -n 100 --no-pager
 journalctl -u houfeng-agent -n 100 --no-pager
 ```
@@ -281,6 +288,8 @@ After Docker Compose startup:
 ```bash
 curl -fsS http://127.0.0.1:16001/api/healthz
 docker compose --env-file docs/deploy/compose.env ps
+test -s ./data/logs/center.log
+tail -n 100 ./data/logs/center.log
 docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng
 ```
 

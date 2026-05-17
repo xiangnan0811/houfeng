@@ -153,7 +153,7 @@ type RemoteError struct {
 
 **生产代码（`internal/`、`agent/`、`cmd/` 下非 `_test.go`）零 panic**。任何错误必须返回 `error`。
 
-- 启动期不可恢复的失败：直接 `log.Fatalf` 退出（参考 `cmd/houfeng-center/main.go:17`、`cmd/houfeng-agent/main.go:19-21` 的 `slog.Error + os.Exit(1)`）。
+- 启动期不可恢复的失败：入口函数记录 `slog.Error(..., "error", err)` 后 `os.Exit(1)`（参考 `cmd/houfeng-center/main.go`、`cmd/houfeng-agent/main.go`）。center 配置加载或 logging 初始化失败发生在 `setupLogging` 完成前，因此只写 stderr；初始化成功后的启动失败会进入配置后的 stdout 或 stdout+file handler。
 - 不要用 `panic` 做"不可能发生"的断言；用类型 / 接口契约让编译器保证。
 - 测试代码内 `t.Fatalf` 是替代 `panic` 的标准做法，**不要在测试里用 `panic`**。
 

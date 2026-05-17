@@ -17,7 +17,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=/opt/houfeng
+ReadWritePaths=/opt/houfeng /var/log/houfeng
 
 [Install]
 WantedBy=multi-user.target

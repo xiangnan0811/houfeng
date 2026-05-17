@@ -20,4 +20,13 @@ if [ -z "${HOUFENG_INITIAL_PASSWORD:-}" ]; then
 	exit 1
 fi
 
+if [ "$(id -u)" = "0" ]; then
+	if [ -n "${HOUFENG_LOG_FILE:-}" ]; then
+		log_dir=$(dirname -- "$HOUFENG_LOG_FILE")
+		install -d -o houfeng -g houfeng -m 0755 -- "$log_dir"
+	fi
+
+	exec gosu houfeng "$@"
+fi
+
 exec "$@"

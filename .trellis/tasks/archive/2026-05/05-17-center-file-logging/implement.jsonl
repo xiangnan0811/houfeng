@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Center config/bootstrap/deployment contract, Docker/Compose boundary, systemd deployment constraints, and where infra changes belong."}
+{"file":".trellis/tasks/05-17-center-file-logging/prd.md","reason":"Confirmed requirements: center-only file logging, HOUFENG_LOG_FILE, stdout+file output, Docker/systemd paths, and out-of-scope agent logging."}

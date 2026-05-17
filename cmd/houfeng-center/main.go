@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"houfeng/internal/center/config"
@@ -17,6 +18,14 @@ func main() {
 	if err != nil {
 		fatal("load center config", err)
 	}
+
+	cleanupLogging, err := setupLogging(cfg)
+	if err != nil {
+		fatal("setup logging", err)
+	}
+	defer cleanupLogging()
+	slog.Info("center starting", "version", safeLogVersion(version), "http_addr", cfg.HTTPAddr)
+	defer slog.Info("center stopped")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -35,4 +44,11 @@ func main() {
 func fatal(msg string, err error) {
 	slog.Error(msg, "error", err)
 	os.Exit(1)
+}
+
+func safeLogVersion(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
 }

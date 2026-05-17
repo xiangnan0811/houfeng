@@ -19,6 +19,7 @@ type CenterConfig struct {
 	WebDistDir            string
 	DatabaseURL           string
 	PublicBaseURL         string
+	LogFile               string
 	TelegramBotToken      string
 	TelegramChatID        string
 	IncidentSweepInterval time.Duration
@@ -54,6 +55,8 @@ func LoadCenterConfig() (CenterConfig, error) {
 		return CenterConfig{}, err
 	}
 
+	logFile := strings.TrimSpace(os.Getenv("HOUFENG_LOG_FILE"))
+
 	telegramBotToken := strings.TrimSpace(os.Getenv("HOUFENG_TELEGRAM_BOT_TOKEN"))
 	telegramChatID := strings.TrimSpace(os.Getenv("HOUFENG_TELEGRAM_CHAT_ID"))
 	if (telegramBotToken == "") != (telegramChatID == "") {
@@ -79,6 +82,7 @@ func LoadCenterConfig() (CenterConfig, error) {
 		WebDistDir:            webDistDir,
 		DatabaseURL:           databaseURL,
 		PublicBaseURL:         publicBaseURL,
+		LogFile:               logFile,
 		TelegramBotToken:      telegramBotToken,
 		TelegramChatID:        telegramChatID,
 		IncidentSweepInterval: sweepInterval,

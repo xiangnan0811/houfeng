@@ -265,4 +265,4 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 
 - 仓库**没有** `golangci-lint`、没有 race-by-default、没有 coverage 阈值。如果未来引入，应同步更新 `.github/workflows/ci.yml`、`Makefile`、本文件，并在当前 active docs 或 `.trellis/spec/` 记录变更。
 - `make verify-web` 跑 `npm ci`，每次清空 `node_modules` 后重装，本地反复跑会比较慢；若需要本地速度，单独 `cd web && npm test` / `npm run lint` 即可，CI 仍然走完整 `verify-web`。
-- `cmd/houfeng-center/main.go` 启动期失败仍走 stdlib `log.Fatalf`，与全仓 `log/slog` 不一致——见 `logging-guidelines.md` 的同款 gap，质量 reviewer 不要把这个当 lint 错误反复提。
+- center / agent 的 slog handler 仍是 stdlib text 输出，未配置最小 level、source 行号或 trace id。center 支持 `HOUFENG_LOG_FILE` tee 到文件，但不做内建轮转；见 `logging-guidelines.md`。
