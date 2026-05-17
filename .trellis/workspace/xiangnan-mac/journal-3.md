@@ -537,3 +537,36 @@ Added release-only Docker Hub publishing for Houfeng images, CI Docker build val
 ### Next Steps
 
 - None - task complete
+
+
+## Session 135: Auto release Docker publishing
+
+**Date**: 2026-05-17
+**Task**: Auto release Docker publishing
+**Branch**: `feature/auto-release-docker-publish`
+
+### Summary
+
+Added Release Please automation for release PRs, upgraded Docker actions to Node 24-compatible majors, documented the release-to-Docker publishing chain, and captured the contract in Trellis spec.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `53d335a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
