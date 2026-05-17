@@ -603,3 +603,36 @@ Implemented center-only HOUFENG_LOG_FILE logging with stdout/file tee, Docker Co
 ### Next Steps
 
 - None - task complete
+
+
+## Session 137: UI theme layout audit
+
+**Date**: 2026-05-17
+**Task**: UI theme layout audit
+**Branch**: `feature/ui-theme-layout-audit`
+
+### Summary
+
+Hardened Houfeng light/dark UI surfaces by tokenizing drawer, modal, login, status, and form styling; reworked node creation drawer and verified frontend quality gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `38a1d2a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
