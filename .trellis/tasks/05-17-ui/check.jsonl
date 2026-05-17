@@ -1,0 +1,6 @@
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Required lint/test/build commands and browser sanity evidence expectations."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Checklist for token-driven CSS, theme parity, and hardcoded color review."}
+{"file":".trellis/tasks/05-17-ui/research/route-verification-matrix.md","reason":"Route-by-route browser verification matrix for full UI quality gate."}
+{"file":".trellis/tasks/05-17-ui/research/drawer-form-surfaces.md","reason":"Drawer/form surface list to verify after implementation."}
+{"file":".trellis/tasks/05-17-ui/research/theme-hardcode-risks.md","reason":"Hardcoded color and theme-token risk list for final review."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Current browser sanity and screenshot evidence policy for UI changes."}

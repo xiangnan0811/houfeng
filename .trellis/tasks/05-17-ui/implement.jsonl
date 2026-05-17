@@ -1,0 +1,6 @@
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"CSS token, theme, BEM, style placement, inline style and hardcoded color rules for implementing UI fixes."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Drawer/modal focus, form reset, component layering, and page/component conventions for implementation."}
+{"file":".trellis/tasks/05-17-ui/research/drawer-form-surfaces.md","reason":"Inventory of all Drawer/form surfaces and identified layout/theme risks to fix."}
+{"file":".trellis/tasks/05-17-ui/research/theme-hardcode-risks.md","reason":"Token compliance and hardcoded color risk inventory for selecting high-impact shared CSS fixes."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Visual authority for dark-first plus equally usable light theme and tokenized colors."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Drawer/page surface design contracts and expected component behavior."}
