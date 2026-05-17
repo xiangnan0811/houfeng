@@ -55,3 +55,4 @@ docs/superpowers/
 
 # build outputs
 /bin/
+/dist/

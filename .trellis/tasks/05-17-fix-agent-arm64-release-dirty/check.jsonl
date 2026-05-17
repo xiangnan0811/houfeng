@@ -1,0 +1,5 @@
+{"type":"check","command":"git diff --check","note":"Check whitespace in Makefile/workflow changes."}
+{"type":"check","command":"<temp clean snapshot> make build-agent-release VERSION=v9.9.9 && sha256sum -c sha256sums.txt && go version -m <both assets>","note":"Verify both release binaries checksum and clean Go VCS metadata from a clean temporary checkout."}
+{"type":"check","command":"make verify-go","note":"Verify Go quality gate after Makefile/release build changes."}
+{"type":"check","command":"gh pr checks <pr> --repo xiangnan0811/houfeng","note":"Verify CI checks before merge."}
+{"type":"check","command":"gh release view <version> --repo xiangnan0811/houfeng --json assets && gh release download <version> ...","note":"Verify follow-up release assets after workflow rerun."}
