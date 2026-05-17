@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/xiangnan0811/houfeng/compare/v0.3.0...v0.3.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* mark UI theme hardening release ([#99](https://github.com/xiangnan0811/houfeng/issues/99)) ([3ab2dfb](https://github.com/xiangnan0811/houfeng/commit/3ab2dfbdfcdb6758e8561ab5330ba48d0d3dedc9))
+
 ## [0.3.0](https://github.com/xiangnan0811/houfeng/compare/v0.2.0...v0.3.0) (2026-05-17)
 
 
