@@ -33,6 +33,7 @@ func TestLoadCenterConfigParsesOptionalIncidentAndTelegramSettings(t *testing.T)
 	t.Setenv("HOUFENG_WEB_DIST_DIR", "web/custom-dist")
 	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
 	t.Setenv("HOUFENG_INCIDENT_SWEEP_INTERVAL", "90s")
+	t.Setenv("HOUFENG_LOG_FILE", " /var/log/houfeng/center.log ")
 	t.Setenv("HOUFENG_TELEGRAM_BOT_TOKEN", "bot-token")
 	t.Setenv("HOUFENG_TELEGRAM_CHAT_ID", "chat-001")
 
@@ -45,6 +46,9 @@ func TestLoadCenterConfigParsesOptionalIncidentAndTelegramSettings(t *testing.T)
 	}
 	if cfg.IncidentSweepInterval.Seconds() != 90 {
 		t.Fatalf("IncidentSweepInterval = %s, want 90s", cfg.IncidentSweepInterval)
+	}
+	if cfg.LogFile != "/var/log/houfeng/center.log" {
+		t.Fatalf("LogFile = %q, want trimmed file path", cfg.LogFile)
 	}
 	if cfg.TelegramBotToken != "bot-token" || cfg.TelegramChatID != "chat-001" {
 		t.Fatalf("Telegram config = %#v, want populated values", cfg)

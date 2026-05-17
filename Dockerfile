@@ -30,22 +30,23 @@ FROM debian:bookworm-slim AS runtime
 
 RUN set -eux; \
 	apt-get update; \
-	apt-get install -y --no-install-recommends ca-certificates; \
+	apt-get install -y --no-install-recommends ca-certificates gosu; \
 	rm -rf /var/lib/apt/lists/*; \
 	groupadd --system houfeng; \
-	useradd --system --gid houfeng --home-dir /app --shell /usr/sbin/nologin houfeng
+	useradd --system --gid houfeng --home-dir /app --shell /usr/sbin/nologin houfeng; \
+	install -d -o houfeng -g houfeng -m 0755 /var/log/houfeng
 
 WORKDIR /app
 
 ENV HOUFENG_HTTP_ADDR=:16001
 ENV HOUFENG_WEB_DIST_DIR=/app/web/dist
+ENV HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 
 COPY --from=go-build --chown=houfeng:houfeng /out/houfeng-center /usr/local/bin/houfeng-center
 COPY --from=web-build --chown=houfeng:houfeng /src/web/dist/ /app/web/dist/
-COPY --chown=houfeng:houfeng scripts/docker-entrypoint.sh /usr/local/bin/houfeng-docker-entrypoint
+COPY scripts/docker-entrypoint.sh /usr/local/bin/houfeng-docker-entrypoint
 RUN chmod 0755 /usr/local/bin/houfeng-docker-entrypoint
 
-USER houfeng
 EXPOSE 16001
 ENTRYPOINT ["/usr/local/bin/houfeng-docker-entrypoint"]
 CMD ["/usr/local/bin/houfeng-center"]

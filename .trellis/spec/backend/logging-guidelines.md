@@ -10,10 +10,10 @@
 
 格式：
 
-- **center**：`bootstrap.go` / 各 worker 通过 `slog.Default()` 取默认 logger（即 stdlib 默认 text handler，写到 stderr）。
+- **center**：`cmd/houfeng-center/main.go` 启动时调用 `setupLogging`，将 `slog.Default()` 设为 text handler。未配置 `HOUFENG_LOG_FILE` 时写 stdout；配置后写 stdout + append-only 文件。
 - **agent**：`cmd/houfeng-agent/main.go:26` 显式构造 `slog.New(slog.NewTextHandler(os.Stdout, nil))` 写入 stdout，便于 systemd journal 直接收集。
 
-> 入口文件特殊用法：`cmd/houfeng-center/main.go` 仍使用 stdlib 的 `"log".Fatalf(...)`（启动期致命错误退出，例如 `log.Fatalf("load center config: %v", err)`，见 `main.go:17/25/30`）。这是**仅限二进制 main 函数的启动期错误**的例外，其他业务代码不要再引 `"log"`。
+> 入口文件特殊用法：`cmd/houfeng-center/main.go` / `cmd/houfeng-agent/main.go` 的启动期致命错误使用 `slog.Error(..., "error", err)` 后 `os.Exit(1)`。center 在配置加载失败或 logging 初始化失败时还未完成 `setupLogging`，因此这两类错误只走 stdlib 默认 stderr；logging 初始化成功后的 bootstrap / run 失败会进入配置后的 stdout 或 stdout+file handler。
 
 ---
 
@@ -29,7 +29,7 @@
 
 每个 worker 构造器都允许 `logger == nil` 时回退到 `slog.Default()`（参考 `retention/worker.go:20-22`、`auth/cleanup.go:18-20`、`incidents/service.go:143-145`），所以单测可以传 `slog.Default()` 或 `slog.New(slog.NewTextHandler(io.Discard, nil))`（参考 `retention/worker_test.go:204`，把日志重定向到 `io.Discard` 抑制噪音）。
 
-**约定**：业务包**不要**自己读 env 决定 log level / format。所有进程级配置由二进制入口（cmd/）一次设定。
+**约定**：业务包**不要**自己读 env 决定 log level / format。所有进程级配置由二进制入口（cmd/）一次设定。`HOUFENG_LOG_FILE` 是 center-only 进程配置，由 `internal/center/config.LoadCenterConfig` 解析后只在 `cmd/houfeng-center` 应用；业务包和 agent 不读取它。
 
 ### Agent
 
@@ -113,9 +113,9 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 
 | 维度 | center | agent |
 |------|--------|-------|
-| Logger 来源 | `slog.Default()`（继承 stdlib 默认 handler，写 stderr） | 显式 `slog.New(slog.NewTextHandler(os.Stdout, nil))` 写 stdout |
-| 部署 | 由 systemd 收 stderr | 由 systemd 收 stdout，目录约定见 `docs/deploy/systemd/houfeng-agent.service` |
-| 启动期错误 | `cmd/houfeng-center/main.go` 用 stdlib `log.Fatalf` | `cmd/houfeng-agent/main.go:19-21` 用 `slog.Error("load agent config", "error", err)` + `os.Exit(1)` |
+| Logger 来源 | `cmd/houfeng-center/setupLogging` 配置 `slog.Default()`，未设 `HOUFENG_LOG_FILE` 时写 stdout，已设时写 stdout + 文件 | 显式 `slog.New(slog.NewTextHandler(os.Stdout, nil))` 写 stdout |
+| 部署 | systemd / Docker 收 stdout，同时可选写 `HOUFENG_LOG_FILE`（部署示例为 `/var/log/houfeng/center.log`） | 由 systemd 收 stdout，目录约定见 `docs/deploy/systemd/houfeng-agent.service` |
+| 启动期错误 | `cmd/houfeng-center/main.go` 用 `slog.Error(...)` + `os.Exit(1)`；配置或 logging 初始化失败时只写 stderr | `cmd/houfeng-agent/main.go:19-21` 用 `slog.Error("load agent config", "error", err)` + `os.Exit(1)` |
 | 是否可 log Telegram 内容 | 否（含 chat 内容） | agent 不接触通知，无此问题 |
 
 差异是历史遗留，**新代码不要试图统一**——先保持一致。如果以后要切 JSON handler、加 trace id，应该一次性同时改 cmd/houfeng-center 与 cmd/houfeng-agent，不要单边升级。
@@ -135,5 +135,4 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 
 ## 已知 gap
 
-- 当前 slog handler 是 stdlib 默认 text 输出，**未配置最小 level、未输出 source 行号、不带 trace id**。如果 fleet 规模扩大需要更结构化日志（例如切到 `slog.NewJSONHandler` + LokiQuery），应统一在 `cmd/houfeng-center/main.go` 与 `cmd/houfeng-agent/main.go` 同步切换，并把可复用结论写进本 spec 或当前 active docs。
-- `cmd/houfeng-center/main.go` 仍混用 stdlib `"log"`，与全仓 `log/slog` 风格不一致。短期内为启动失败兜底保留；新代码任何业务路径**禁止**再引 `"log"` 包。
+- 当前 slog handler 是 stdlib text 输出，**未配置最小 level、未输出 source 行号、不带 trace id**。center 可以 tee 到 `HOUFENG_LOG_FILE`，但不做内建轮转；轮转由 Docker/systemd/logrotate 等宿主工具负责。如果 fleet 规模扩大需要更结构化日志（例如切到 `slog.NewJSONHandler` + LokiQuery），应统一评估 cmd/houfeng-center 与 cmd/houfeng-agent 的 handler 配置，并把可复用结论写进本 spec 或当前 active docs。

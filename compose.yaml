@@ -11,8 +11,11 @@ services:
     environment:
       HOUFENG_HTTP_ADDR: ":16001"
       HOUFENG_WEB_DIST_DIR: /app/web/dist
+      HOUFENG_LOG_FILE: /var/log/houfeng/center.log
     ports:
       - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
+    volumes:
+      - ./data/logs:/var/log/houfeng
 
   db:
     image: postgres:16-alpine

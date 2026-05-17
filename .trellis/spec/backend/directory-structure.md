@@ -261,6 +261,7 @@ if ok {
 
 2. **Signatures**
    - Image definition: repository root `Dockerfile` builds a single project image containing `houfeng-center`, a small runtime entrypoint, and baked `web/dist`.
+   - Runtime entrypoint: `scripts/docker-entrypoint.sh` assembles `HOUFENG_DATABASE_URL`, prepares the configured `HOUFENG_LOG_FILE` parent directory for the non-root `houfeng` user, then runs `houfeng-center` as that user.
    - Published Compose file: `compose.yaml` service set is exactly `houfeng` + `db` for MVP.
    - Project image reference: `houfeng.image = linnea7171/houfeng:latest`; release publishing produces `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `linnea7171/houfeng:latest`.
    - Release automation: `.github/workflows/release-please.yml` runs on `push` to `main`, uses `googleapis/release-please-action`, and reads `release-please-config.json` plus `.release-please-manifest.json`.
@@ -269,7 +270,9 @@ if ok {
    - Runtime web path: `HOUFENG_WEB_DIST_DIR=/app/web/dist` inside the project image.
    - Runtime HTTP default: project image and Compose set `HOUFENG_HTTP_ADDR=:16001`; default port mapping is `127.0.0.1:16001:16001`, with host port override allowed.
    - Database URL shape: `postgres://houfeng:<password>@db:5432/houfeng?sslmode=disable`, assembled by the project image entrypoint at runtime from env-file values unless an explicit `HOUFENG_DATABASE_URL` is already set.
+   - Center log file config: deployed center uses `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`; unset keeps stdout-only local behavior.
    - PostgreSQL data path: default Compose bind mount is `./data/postgres:/var/lib/postgresql/data` so operators can migrate the directory directly.
+   - Center log path: default Compose bind mount is `./data/logs:/var/log/houfeng` so operators can collect `./data/logs/center.log` for troubleshooting.
    - Minimal env template: `docs/deploy/compose.env.example` copied to untracked `docs/deploy/compose.env`.
    - Secret-bearing Compose values are loaded from the env file; the tracked `compose.yaml` avoids password-like environment assignment lines such as `HOUFENG_DATABASE_URL:`, `POSTGRES_PASSWORD:`, and `HOUFENG_INITIAL_PASSWORD:` so repository secret scanners do not flag placeholder deployment configuration.
 
@@ -282,12 +285,14 @@ if ok {
    - Release Please requires `RELEASE_PLEASE_TOKEN`; Docker publishing requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. These are repository secrets only and must not appear in docs as concrete values, compose examples, or committed env files.
    - Do not add a separate `main`-push Docker publishing workflow, `pull_request` Docker publishing, or a workaround env such as `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` when an official Node 24 action major exists.
    - `houfeng` runs only `houfeng-center`; it does not start Vite, Nginx, Caddy, Postgres, or an agent inside the project container.
+   - The project container may start as root only for entrypoint setup that fixes the bind-mounted log directory and then drops to the `houfeng` user before running the center.
    - `db` uses the official PostgreSQL image with a user-migratable host directory mounted at `/var/lib/postgresql/data`; center applies embedded migrations at startup.
    - Compose may bind Houfeng to host loopback for an operator-managed reverse proxy upstream; TLS termination stays outside the app container/Compose MVP.
    - `HOUFENG_PUBLIC_BASE_URL` may be empty for first login, but must be set to an externally reachable absolute `http(s)` URL before one-command agent onboarding.
+   - `HOUFENG_LOG_FILE` is center-only. When set, the center must tee structured `slog` output to stdout and the configured file; startup fails if the file cannot be opened.
    - Quick-start env stays minimal: database password, initial admin username/password, and visible `HOUFENG_PUBLIC_BASE_URL`; do not add Telegram, agent env, retention/session/incident tuning, or release automation secrets to this template.
-   - Application file logging is a required follow-up for troubleshooting and user feedback if not implemented. Do not add a log bind mount unless the app actually writes files there; stdout/stderr-only logging must not be documented as sufficient long-term behavior.
-   - Agents remain Linux/systemd host installs through center-generated onboarding commands. Do not add an `agent` Compose service, Docker agent deployment docs, Docker socket mounts, host PID/network namespace requirements, or Kubernetes manifests under this contract.
+   - Do not add a log bind mount unless the center app actually writes files there; stdout/stderr-only logging must not be documented as sufficient long-term behavior for deployed center troubleshooting.
+   - Agents remain Linux/systemd host installs through center-generated onboarding commands. Do not add an `agent` Compose service, Docker agent deployment docs, Docker socket mounts, host PID/network namespace requirements, Kubernetes manifests, or agent file logging under this contract.
 
 4. **Validation & Error Matrix**
 
@@ -302,6 +307,8 @@ if ok {
    | `compose.yaml` uses project service name `center` | Reject in review; service name must be `houfeng` |
    | `compose.yaml` keeps project container port `8080` as the Docker default | Reject in review; Docker/Compose default must be `16001` inside and outside |
    | `compose.yaml` adds an `agent` service | Reject in review; agents are host systemd services |
+   | `compose.yaml` maps `/var/log/houfeng` but the center image does not set `HOUFENG_LOG_FILE` | Reject in review; the bind mount must back a real file-writing path |
+   | First Compose startup creates `./data/logs` as a root-owned host directory | Entrypoint must prepare/chown the mounted log directory before dropping privileges so center startup can open the file |
    | `docs/deploy/compose.env` is committed | Reject in review; only `docs/deploy/compose.env.example` is tracked |
    | `compose.yaml` contains `HOUFENG_DATABASE_URL:`, `POSTGRES_PASSWORD:`, or `HOUFENG_INITIAL_PASSWORD:` assignment lines | Reject in review; secrets must come from the env file and the tracked Compose file must avoid password-like assignments |
    | Missing `POSTGRES_PASSWORD` / `HOUFENG_INITIAL_PASSWORD` in env file | The project image entrypoint or dependent container startup should fail before serving traffic |
@@ -311,6 +318,8 @@ if ok {
 
 5. **Good / Base / Bad Cases**
    - Good: operator copies `docs/deploy/compose.env.example` to `docs/deploy/compose.env`, replaces passwords, runs `docker compose --env-file docs/deploy/compose.env up -d`, and accesses Houfeng on `127.0.0.1:16001` through a local reverse proxy upstream.
+   - Good: first Compose startup creates/prepares `./data/logs/` and the center writes `./data/logs/center.log` while still running as the non-root `houfeng` user.
+   - Good: operator collects `./data/logs/center.log` and recent `docker compose logs houfeng` output when reporting center issues.
    - Good: operator backs up or migrates `./data/postgres/` as an ordinary host directory before moving the deployment.
    - Good: feature work lands through a branch PR; the merge to `main` runs Release Please, opens/updates a release PR, the release PR passes CI and is merged, the resulting GitHub Release fires Docker publishing, and Docker Hub receives `vX.Y.Z`, `X.Y.Z`, and release-controlled `latest`.
    - Good: release-only automation builds the root `Dockerfile` on published GitHub releases, tags/pushes `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `latest`, and leaves Compose without local `build:`.
@@ -321,7 +330,8 @@ if ok {
 
 6. **Tests Required**
    - `docker compose --env-file docs/deploy/compose.env.example -f compose.yaml config --quiet` must pass.
-   - Static check must confirm `compose.yaml` has no `HOUFENG_DATABASE_URL:`, `POSTGRES_PASSWORD:`, or `HOUFENG_INITIAL_PASSWORD:` assignment lines, has no `build:` for `houfeng`, has no `agent` service, references `linnea7171/houfeng:latest`, maps `127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001`, bind-mounts `./data/postgres`, and wires `depends_on.condition: service_healthy` for PostgreSQL.
+   - Static check must confirm `compose.yaml` has no `HOUFENG_DATABASE_URL:`, `POSTGRES_PASSWORD:`, or `HOUFENG_INITIAL_PASSWORD:` assignment lines, has no `build:` for `houfeng`, has no `agent` service, references `linnea7171/houfeng:latest`, maps `127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001`, bind-mounts `./data/postgres`, bind-mounts `./data/logs:/var/log/houfeng`, and wires `depends_on.condition: service_healthy` for PostgreSQL.
+   - Static check must confirm the runtime image includes a privilege-drop helper and `scripts/docker-entrypoint.sh` prepares the configured log directory before executing `houfeng-center` as `houfeng`.
    - `git diff --check` must pass after Docker/docs edits.
    - Search touched docs/configs for stale `center` service naming, `127.0.0.1:8080`, Docker `:8080` defaults, `postgres-data` named-volume wording, misleading log mount wording, and stale `--build` / local-build quick-start wording before review.
    - For Dockerfile changes, run a lightweight Dockerfile validation or image build when Docker is available; if unavailable, state that explicitly and rely on review plus existing `make verify-go` / `make verify-web` gates.
