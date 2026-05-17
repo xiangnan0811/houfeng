@@ -3,7 +3,7 @@
   "name": "fix-agent-arm64-release-dirty",
   "title": "fix: agent arm64 release asset dirty metadata",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
