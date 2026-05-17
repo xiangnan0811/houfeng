@@ -96,7 +96,7 @@ The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project
 
 Sensitive Compose values such as the PostgreSQL password and initial admin password live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` intentionally avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignment lines and loads those values through `env_file` so repository secret scanners do not flag placeholder deployment configuration.
 
-Maintainers publish Docker images through `.github/workflows/publish-images.yml`. Configure GitHub repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, then publish a normal GitHub Release such as `v1.2.3` to push `linnea7171/houfeng:v1.2.3`, `linnea7171/houfeng:1.2.3`, and `linnea7171/houfeng:latest`. Manual workflow dispatch requires explicit `version` and `source_ref` inputs and does not update `latest`.
+Maintainers publish Docker images through the release pipeline. Configure GitHub repository secrets `RELEASE_PLEASE_TOKEN`, `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`. After an eligible conventional feature/fix/docs PR merges to `main`, `.github/workflows/release-please.yml` opens or updates a release PR. When that release PR passes CI and is merged, Release Please publishes a GitHub Release such as `v1.2.3`; the `release.published` event then runs `.github/workflows/publish-images.yml` and pushes `linnea7171/houfeng:v1.2.3`, `linnea7171/houfeng:1.2.3`, and `linnea7171/houfeng:latest`. Manual image workflow dispatch requires explicit `version` and `source_ref` inputs and does not update `latest`.
 
 `compose.yaml` starts exactly two required services:
 
