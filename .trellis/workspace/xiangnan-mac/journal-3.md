@@ -636,3 +636,36 @@ Hardened Houfeng light/dark UI surfaces by tokenizing drawer, modal, login, stat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 138: Agent release asset publishing
+
+**Date**: 2026-05-17
+**Task**: Agent release asset publishing
+**Branch**: `feature/agent-release-assets`
+
+### Summary
+
+Backfilled v0.3.1 agent release assets and updated the release workflow/docs/spec so future releases upload installer-required agent binaries and checksums automatically.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3e04b4b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
