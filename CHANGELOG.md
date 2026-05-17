@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/xiangnan0811/houfeng/compare/v0.3.3...v0.3.4) (2026-05-17)
+
+
+### Bug Fixes
+
+* build static agent release assets ([a585250](https://github.com/xiangnan0811/houfeng/commit/a5852508ad5274d1281669378a8ee6d118248869))
+
 ## [0.3.3](https://github.com/xiangnan0811/houfeng/compare/v0.3.2...v0.3.3) (2026-05-17)
 
 
