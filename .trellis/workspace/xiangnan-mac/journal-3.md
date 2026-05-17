@@ -702,3 +702,36 @@ Fixed agent release asset builds so both linux/amd64 and linux/arm64 binaries ar
 ### Next Steps
 
 - None - task complete
+
+
+## Session 140: Fix static agent release assets
+
+**Date**: 2026-05-17
+**Task**: Fix static agent release assets
+**Branch**: `feature/fix-agent-static-release-assets`
+
+### Summary
+
+Fixed agent release builds to use CGO_ENABLED=0 for Linux amd64/arm64 assets and added release workflow validation to reject dynamic libc dependencies after Debian 11 glibc startup failures.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `68a019f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
