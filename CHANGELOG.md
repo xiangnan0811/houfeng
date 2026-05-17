@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/xiangnan0811/houfeng/compare/v0.3.1...v0.3.2) (2026-05-17)
+
+
+### Bug Fixes
+
+* mark agent asset publishing release ([d5a85a7](https://github.com/xiangnan0811/houfeng/commit/d5a85a73c707795f718fd51834af9de847f880f5))
+
 ## [0.3.1](https://github.com/xiangnan0811/houfeng/compare/v0.3.0...v0.3.1) (2026-05-17)
 
 
