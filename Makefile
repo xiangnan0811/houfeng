@@ -75,8 +75,8 @@ build-agent-release:
 		mkdir -p $(AGENT_RELEASE_DIR); \
 		build_dir="$$(mktemp -d)"; \
 		trap 'rm -rf "$$build_dir"' EXIT; \
-		GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "-s -w -X houfeng/agent/runtime.agentVersion=$(VERSION)" -o "$$build_dir/houfeng-agent_$(VERSION)_linux_amd64" ./cmd/houfeng-agent; \
-		GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "-s -w -X houfeng/agent/runtime.agentVersion=$(VERSION)" -o "$$build_dir/houfeng-agent_$(VERSION)_linux_arm64" ./cmd/houfeng-agent; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "-s -w -X houfeng/agent/runtime.agentVersion=$(VERSION)" -o "$$build_dir/houfeng-agent_$(VERSION)_linux_amd64" ./cmd/houfeng-agent; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "-s -w -X houfeng/agent/runtime.agentVersion=$(VERSION)" -o "$$build_dir/houfeng-agent_$(VERSION)_linux_arm64" ./cmd/houfeng-agent; \
 		cp "$$build_dir/houfeng-agent_$(VERSION)_linux_amd64" $(AGENT_RELEASE_AMD64); \
 		cp "$$build_dir/houfeng-agent_$(VERSION)_linux_arm64" $(AGENT_RELEASE_ARM64); \
 		cd $(AGENT_RELEASE_DIR) && \

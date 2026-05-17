@@ -1,0 +1,4 @@
+{"type":"context","path":"CLAUDE.md","note":"Agent one-command install boundary: release assets are linux amd64/arm64 binaries plus sha256sums.txt; installer verifies checksum before replacing binary."}
+{"type":"context","path":".trellis/spec/backend/directory-structure.md","note":"Agent one-command install contract and release workflow validation requirements apply to installer/release asset changes."}
+{"type":"context","path":".trellis/spec/backend/quality-guidelines.md","note":"Makefile and workflow changes require local Go verification plus GitHub Actions verification."}
+{"type":"context","path":".trellis/spec/guides/branch-workflow-governance.md","note":"Implementation must stay on a feature branch and land through PR/release flow."}

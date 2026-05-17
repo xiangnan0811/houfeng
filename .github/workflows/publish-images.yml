@@ -119,6 +119,12 @@ jobs:
               go version -m "$asset" >&2
               exit 1
             fi
+            ldd_output="$(ldd "$asset" 2>&1 || true)"
+            if ! grep -q 'not a dynamic executable' <<< "$ldd_output"; then
+              echo "$asset must not depend on dynamic libc." >&2
+              printf '%s\n' "$ldd_output" >&2
+              exit 1
+            fi
           done
 
       - name: Upload agent release assets
