@@ -3231,14 +3231,45 @@ html.theme-classic-light .dashboard-command-surface {
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
 }
 
 .asset-operation-field--wide {
   grid-column: 1 / -1;
 }
 
+.asset-operation-field select,
+.asset-operation-field textarea {
+  width: 100%;
+  background: var(--control-bg);
+  border: var(--border-w) solid var(--control-border);
+  border-radius: var(--radius-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-primary);
+  font: inherit;
+  transition:
+    background-color var(--dur-micro) var(--ease-calm),
+    border-color var(--dur-micro) var(--ease-calm),
+    box-shadow var(--dur-micro) var(--ease-calm);
+}
+
+.asset-operation-field select:hover,
+.asset-operation-field textarea:hover {
+  background: var(--control-bg-hover);
+  border-color: var(--panel-border-strong);
+}
+
+.asset-operation-field select:focus,
+.asset-operation-field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .asset-operation-field textarea {
   min-height: 74px;
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
   resize: vertical;
 }
 
@@ -4394,6 +4425,7 @@ html.theme-classic-light .dashboard-command-surface {
 
 .asset-create-drawer,
 .asset-filter-drawer,
+.node-create-drawer,
 .target-create-drawer {
   display: flex;
   flex-direction: column;
@@ -4401,6 +4433,7 @@ html.theme-classic-light .dashboard-command-surface {
   min-width: 0;
 }
 
+.node-create-drawer__eyebrow,
 .target-create-drawer__eyebrow {
   margin: 0;
   color: var(--text-muted);
@@ -4410,6 +4443,19 @@ html.theme-classic-light .dashboard-command-surface {
   text-transform: uppercase;
 }
 
+.node-create-drawer__intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: var(--border-w) solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: var(--radius-2);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface-elevated) 58%, transparent);
+}
+
+.node-create-drawer__intro h3,
 .target-create-drawer__title {
   margin: 0;
   color: var(--text-primary);
@@ -4418,6 +4464,7 @@ html.theme-classic-light .dashboard-command-surface {
   line-height: var(--type-h2-leading);
 }
 
+.node-create-drawer__intro p:not(.node-create-drawer__eyebrow),
 .target-create-drawer__description {
   margin: 0;
   color: var(--text-secondary);
@@ -4425,6 +4472,7 @@ html.theme-classic-light .dashboard-command-surface {
   line-height: var(--type-small-leading);
 }
 
+.node-create-drawer__field,
 .target-create-drawer__form label {
   display: flex;
   flex-direction: column;
@@ -4433,6 +4481,7 @@ html.theme-classic-light .dashboard-command-surface {
   font-size: var(--type-small-size);
 }
 
+.node-create-drawer__field textarea,
 .target-create-drawer__form input,
 .target-create-drawer__form select,
 .target-create-drawer__form textarea {
@@ -4448,6 +4497,7 @@ html.theme-classic-light .dashboard-command-surface {
               box-shadow var(--dur-micro) var(--ease-calm);
 }
 
+.node-create-drawer__field textarea:hover,
 .target-create-drawer__form input:hover,
 .target-create-drawer__form select:hover,
 .target-create-drawer__form textarea:hover {
@@ -4455,6 +4505,7 @@ html.theme-classic-light .dashboard-command-surface {
   border-color: var(--panel-border-strong);
 }
 
+.node-create-drawer__field textarea:focus,
 .target-create-drawer__form input:focus,
 .target-create-drawer__form select:focus,
 .target-create-drawer__form textarea:focus {
@@ -4462,23 +4513,27 @@ html.theme-classic-light .dashboard-command-surface {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.node-create-drawer__field textarea,
 .target-create-drawer__form textarea {
   font-family: var(--font-mono);
   font-size: var(--type-code-size);
 }
 
 .asset-create-form,
+.node-create-drawer__form,
 .target-create-drawer__form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: var(--space-3);
 }
 
-.asset-create-form {
+.asset-create-form,
+.node-create-drawer__form {
   grid-template-columns: 1fr;
 }
 
-.asset-create-form__group {
+.asset-create-form__group,
+.node-create-drawer__group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(calc(var(--space-12) * 4), 100%), 1fr));
   gap: var(--space-3);
@@ -4490,7 +4545,8 @@ html.theme-classic-light .dashboard-command-surface {
   background: color-mix(in srgb, var(--surface-elevated) 14%, transparent);
 }
 
-.asset-create-form__group legend {
+.asset-create-form__group legend,
+.node-create-drawer__group legend {
   padding: 0 var(--space-1);
   color: var(--text-muted);
   font-size: var(--type-eyebrow-size);
@@ -4499,11 +4555,13 @@ html.theme-classic-light .dashboard-command-surface {
   text-transform: uppercase;
 }
 
-.asset-create-form__group--wide {
+.asset-create-form__group--wide,
+.node-create-drawer__group--wide {
   grid-template-columns: 1fr;
 }
 
-.asset-create-form__actions {
+.asset-create-form__actions,
+.node-create-drawer__actions {
   position: sticky;
   bottom: calc(-1 * var(--space-3));
   margin-inline: calc(-1 * var(--space-1));
@@ -4523,6 +4581,9 @@ html.theme-classic-light .dashboard-command-surface {
 .asset-create-form .create-form__error,
 .asset-create-form .page-form-actions,
 .asset-create-form .input-field:has(input[name='note']),
+.node-create-drawer__form .create-form__error,
+.node-create-drawer__form .page-form-actions,
+.node-create-drawer__field--wide,
 .target-create-drawer__form .create-form__error,
 .target-create-drawer__form .page-form-actions,
 .target-create-drawer__form > p:has(textarea) {
@@ -4533,9 +4594,45 @@ html.theme-classic-light .dashboard-command-surface {
   margin: 0;
 }
 
+.node-create-drawer__field textarea,
 .target-create-drawer__form textarea {
   min-height: 96px;
   resize: vertical;
+}
+
+.node-create-drawer__status-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-3);
+  align-items: start;
+  min-width: 0;
+  padding: var(--space-3);
+  border: var(--border-w) solid color-mix(in srgb, var(--accent-2) 26%, var(--border));
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--accent-2) 7%, var(--surface));
+}
+
+.node-create-drawer__status-card span {
+  color: var(--text-muted);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+}
+
+.node-create-drawer__status-card strong {
+  color: var(--accent-2);
+  font-size: var(--type-state-size);
+  font-weight: var(--type-state-weight);
+  letter-spacing: var(--type-state-tracking);
+}
+
+.node-create-drawer__status-card p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
 }
 
 .asset-filter-drawer .filter-select {
@@ -5839,7 +5936,7 @@ html.theme-classic-light .dashboard-command-surface {
 .probe-observations__error {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: color-mix(in srgb, var(--color-state-critical) 70%, white 30%);
+  color: color-mix(in srgb, var(--color-state-critical) 78%, var(--text-primary));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6015,7 +6112,7 @@ html.theme-classic-light .dashboard-command-surface {
   gap: 4px;
   min-width: 160px;
   z-index: 10;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-overlay);
 }
 .watchtower-actions-menu__panel button {
   text-align: left;
@@ -6449,9 +6546,8 @@ html.theme-classic-light .dashboard-command-surface {
   margin-top: var(--space-2);
 }
 .command-output--stderr {
-  background: var(--color-state-critical);
-  background: rgba(182, 73, 58, 0.08);
-  border-color: rgba(182, 73, 58, 0.25);
+  background: color-mix(in srgb, var(--color-state-critical) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-state-critical) 25%, transparent);
   color: var(--color-state-critical);
 }
 .command-output__expand {
@@ -6598,7 +6694,7 @@ html.theme-classic-light .dashboard-command-surface {
 }
 .batch-bar__error {
   font-size: var(--type-small-size);
-  color: color-mix(in srgb, var(--color-state-critical) 70%, white 30%);
+  color: color-mix(in srgb, var(--color-state-critical) 78%, var(--text-primary));
 }
 
 .batch-command__actions {
