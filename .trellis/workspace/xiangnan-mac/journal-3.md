@@ -872,3 +872,36 @@ Updated MetricChart hover tooltips to show second-level timestamps while keeping
 ### Next Steps
 
 - None - task complete
+
+
+## Session 145: 修复资产联动割裂体验
+
+**Date**: 2026-05-18
+**Task**: 修复资产联动割裂体验
+**Branch**: `fix/integration-linkage-ux`
+
+### Summary
+
+完成 Asset Ledger 联动修复：取消类 VPS 续费决策受控同步订阅自动续费，关联表单改用 Provider/Node/Target/Service 选择器，补齐订阅 URL 上下文、空态动作、spec 合同、后端/前端测试与浏览器走查。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9273667` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
