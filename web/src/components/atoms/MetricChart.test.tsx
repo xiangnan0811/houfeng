@@ -7,11 +7,11 @@ import {
   type MetricChartThreshold,
 } from './MetricChart'
 
-function makeSamples(count: number, base = 50): MetricChartSample[] {
+function makeSamples(count: number, base = 50, stepMs = 60_000): MetricChartSample[] {
   const start = new Date('2026-04-30T08:00:00Z').getTime()
   return Array.from({ length: count }, (_, i) => ({
     value: base + i * 5,
-    observedAt: new Date(start + i * 60_000).toISOString(),
+    observedAt: new Date(start + i * stepMs).toISOString(),
   }))
 }
 
@@ -88,8 +88,8 @@ describe('MetricChart', () => {
     expect(maintGroups[0].querySelector('polygon')).toBeTruthy()
   })
 
-  it('shows a crosshair tooltip when hovered (interactive multi-sample)', () => {
-    const samples = makeSamples(5, 10) // values 10, 15, 20, 25, 30
+  it('shows a crosshair tooltip with second-level time while axis stays minute-level', () => {
+    const samples = makeSamples(5, 10, 5_000) // 5-second cadence, values 10, 15, 20, 25, 30
     const { container } = render(
       <MetricChart samples={samples} width={300} height={140} formatValue={(v) => v.toFixed(1)} />,
     )
@@ -118,6 +118,17 @@ describe('MetricChart', () => {
     // Tooltip should display one of the sample values formatted by formatValue
     const formattedValues = samples.map((s) => s.value.toFixed(1))
     expect(formattedValues).toContain(valueNode!.textContent)
+
+    const tooltipTime = container.querySelector('.metric-chart__tooltip-time')
+    expect(tooltipTime?.textContent).toMatch(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/)
+    expect(tooltipTime?.textContent).toMatch(/:0[5-9]$|:[1-5]\d$/)
+
+    const axisTexts = Array.from(container.querySelectorAll('.metric-chart__axis-text'))
+    const xLabels = axisTexts
+      .map((node) => node.textContent ?? '')
+      .filter((text) => /^\d{2}:\d{2}$/.test(text))
+    expect(xLabels.length).toBeGreaterThan(0)
+    expect(xLabels.every((text) => !/^\d{2}:\d{2}:\d{2}$/.test(text))).toBe(true)
 
     // Crosshair line should be visible
     expect(container.querySelector('.metric-chart__cursor')).toBeTruthy()

@@ -839,3 +839,36 @@ Updated the center-served agent installer to enable then restart active services
 ### Next Steps
 
 - None - task complete
+
+
+## Session 144: Show seconds in chart tooltips
+
+**Date**: 2026-05-18
+**Task**: Show seconds in chart tooltips
+**Branch**: `fix/node-chart-tooltip-seconds`
+
+### Summary
+
+Updated MetricChart hover tooltips to show second-level timestamps while keeping X-axis tick labels at minute precision, with tests covering 5-second samples.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8081244` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
