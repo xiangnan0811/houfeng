@@ -1,0 +1,4 @@
+{"type":"check","command":"cd web && npm run test -- --run NodeDetailPage.test.tsx","note":"Verify the linked VPS slow-response regression and node detail tests."}
+{"type":"check","command":"cd web && npm run lint","note":"Ensure React hooks dependencies and TypeScript lint rules stay clean."}
+{"type":"check","command":"cd web && npm run build","note":"Ensure strict TS and Vite production build pass."}
+{"type":"check","command":"browser sanity on the node detail page if a local/real center is available","note":"Because this is user-visible UI loading behavior, verify in browser when possible and state if not available."}
