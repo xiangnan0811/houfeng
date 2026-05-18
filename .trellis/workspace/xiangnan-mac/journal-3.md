@@ -815,17 +815,22 @@ Updated the center-served agent installer to enable then restart active services
 
 ### Main Changes
 
-(Add details)
+- Replaced `systemctl enable --now houfeng-agent` with explicit enable plus restart-active/start-inactive behavior.
+- Preserved existing post-enrollment sync credentials during installer re-runs.
+- Updated deployment docs and installer script assertions for the new systemd sequence.
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
-| `4dffa97` | (see git log) |
+| `4dffa97` | fix: restart agent after installer upgrade |
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `TMPDIR=/tmp go test ./internal/center/installer`
+- [OK] `git diff --check`
+- [OK] `TMPDIR=/tmp make verify-go`
+- [OK] `./scripts/verify.sh`
 
 ### Status
 
