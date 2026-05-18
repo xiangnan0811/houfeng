@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/xiangnan0811/houfeng/compare/v0.4.2...v0.4.3) (2026-05-18)
+
+
+### Bug Fixes
+
+* connect asset renewal and linkage flows ([9273667](https://github.com/xiangnan0811/houfeng/commit/9273667b11d931004f01a54dd20a60bbc61284dc))
+
 ## [0.4.2](https://github.com/xiangnan0811/houfeng/compare/v0.4.1...v0.4.2) (2026-05-18)
 
 
