@@ -597,6 +597,13 @@ export type VPSRenewalDecision =
   | 'auto_renew_cancelled'
   | 'replaced'
 
+export type RenewalSubscriptionLinkageStatus =
+  | 'none'
+  | 'subscription_updated'
+  | 'subscription_already_cancelled'
+  | 'no_active_subscription'
+  | 'multiple_active_subscriptions'
+
 export type SubscriptionStatus = 'active' | 'paused' | 'cancelled' | 'expired' | 'unknown'
 
 export type AssetServiceType = 'web' | 'api' | 'database' | 'worker' | 'proxy' | 'other'
@@ -719,6 +726,18 @@ export type VPSAssetRecord = {
   created_at: string
   updated_at: string
   archived_at?: string | null
+}
+
+export type RenewalSubscriptionLinkage = {
+  status: RenewalSubscriptionLinkageStatus
+  candidate_count: number
+  subscription_id?: string
+  updated: boolean
+  message: string
+}
+
+export type VPSAssetUpdateResult = VPSAssetRecord & {
+  renewal_subscription_linkage?: RenewalSubscriptionLinkage | null
 }
 
 export type CreateVPSAssetInput = {

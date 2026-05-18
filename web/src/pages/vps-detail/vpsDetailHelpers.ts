@@ -12,6 +12,7 @@ import type {
   FactEditFormState,
   ServiceDraftState,
   VPSDetailPageState,
+  VPSDetailSelectorState,
 } from './types'
 
 export const INITIAL_STATE: VPSDetailPageState = {
@@ -23,6 +24,18 @@ export const INITIAL_STATE: VPSDetailPageState = {
   domains: [],
   subscriptions: [],
   subscriptionsError: null,
+}
+
+export const INITIAL_SELECTOR_STATE: VPSDetailSelectorState = {
+  nodesLoading: false,
+  nodesError: null,
+  nodes: [],
+  providersLoading: false,
+  providersError: null,
+  providers: [],
+  targetsLoading: false,
+  targetsError: null,
+  targets: [],
 }
 
 export const INITIAL_EXPERIENCE_DRAFT: ExperienceDraftState = {

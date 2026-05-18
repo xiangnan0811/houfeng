@@ -1,5 +1,5 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { type FormEvent, useEffect, useId, useMemo, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
   Badge,
@@ -402,6 +402,10 @@ function providerName(providerID: string | null, providers: ProviderRecord[]): s
 
 export function VPSPage() {
   const navigate = useNavigate()
+  const createProviderSelectId = useId()
+  const createLifecycleSelectId = useId()
+  const createUsageSelectId = useId()
+  const createRenewalSelectId = useId()
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
   const [draftFilters, setDraftFilters] = useState<FilterState>(filters)
@@ -795,9 +799,9 @@ export function VPSPage() {
             <fieldset className="asset-create-form__group">
               <legend>基础识别</legend>
               <Input label="VPS 名称" value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} />
-              <label className="input-field">
+              <label className="input-field" htmlFor={createProviderSelectId}>
                 <span className="input-field__label">资产服务商</span>
-                <select className="input" value={createForm.providerID} onChange={(event) => setCreateForm({ ...createForm, providerID: event.target.value })}>
+                <select id={createProviderSelectId} aria-label="资产服务商" className="input" value={createForm.providerID} onChange={(event) => setCreateForm({ ...createForm, providerID: event.target.value })}>
                   <option value="">未关联服务商</option>
                   {providerSelectOptions.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -805,6 +809,13 @@ export function VPSPage() {
                     </option>
                   ))}
                 </select>
+                <span className="input-field__hint">
+                  {state.providers.length === 0
+                    ? '还没有服务商主数据，可先去创建服务商，或临时保留名称快照。'
+                    : '优先选择服务商主数据；名称快照用于导入兼容和展示。'}
+                  {' '}
+                  <Link className="text-link" to="/providers">服务商列表</Link>
+                </span>
               </label>
               <Input label="服务商名称快照" value={createForm.providerName} onChange={(event) => setCreateForm({ ...createForm, providerName: event.target.value })} />
               <Input label="产品名" value={createForm.productName} onChange={(event) => setCreateForm({ ...createForm, productName: event.target.value })} />
@@ -828,21 +839,21 @@ export function VPSPage() {
               <legend>运行与决策</legend>
               <Input label="操作系统" value={createForm.osName} onChange={(event) => setCreateForm({ ...createForm, osName: event.target.value })} />
               <Input label="虚拟化" value={createForm.virtualization} onChange={(event) => setCreateForm({ ...createForm, virtualization: event.target.value })} />
-              <label className="input-field">
+              <label className="input-field" htmlFor={createLifecycleSelectId}>
                 <span className="input-field__label">生命周期</span>
-                <select className="input" value={createForm.lifecycleStatus} onChange={(event) => setCreateForm({ ...createForm, lifecycleStatus: event.target.value as VPSLifecycleStatus })}>
+                <select id={createLifecycleSelectId} aria-label="生命周期" className="input" value={createForm.lifecycleStatus} onChange={(event) => setCreateForm({ ...createForm, lifecycleStatus: event.target.value as VPSLifecycleStatus })}>
                   {LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
-              <label className="input-field">
+              <label className="input-field" htmlFor={createUsageSelectId}>
                 <span className="input-field__label">用途状态</span>
-                <select className="input" value={createForm.usageStatus} onChange={(event) => setCreateForm({ ...createForm, usageStatus: event.target.value as VPSUsageStatus })}>
+                <select id={createUsageSelectId} aria-label="用途状态" className="input" value={createForm.usageStatus} onChange={(event) => setCreateForm({ ...createForm, usageStatus: event.target.value as VPSUsageStatus })}>
                   {USAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
-              <label className="input-field">
+              <label className="input-field" htmlFor={createRenewalSelectId}>
                 <span className="input-field__label">续费决策</span>
-                <select className="input" value={createForm.renewalDecision} onChange={(event) => setCreateForm({ ...createForm, renewalDecision: event.target.value as VPSRenewalDecision })}>
+                <select id={createRenewalSelectId} aria-label="续费决策" className="input" value={createForm.renewalDecision} onChange={(event) => setCreateForm({ ...createForm, renewalDecision: event.target.value as VPSRenewalDecision })}>
                   {RENEWAL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>

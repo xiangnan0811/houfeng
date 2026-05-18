@@ -1,12 +1,16 @@
-import type { FormEvent } from 'react'
+import { useId, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Button, Input } from '../../components/atoms'
-import type { VPSUsageStatus } from '../../lib/types'
+import type { ProviderRecord, VPSUsageStatus } from '../../lib/types'
 import type { FactEditFormState } from './types'
 import { USAGE_OPTIONS } from './vpsDetailOptions'
 
 type VPSFactsEditFormProps = {
   draft: FactEditFormState
+  providers: ProviderRecord[]
+  providersLoading: boolean
+  providersError: string | null
   submitting: boolean
   error: string | null
   notice: string | null
@@ -17,6 +21,9 @@ type VPSFactsEditFormProps = {
 
 export function VPSFactsEditForm({
   draft,
+  providers,
+  providersLoading,
+  providersError,
   submitting,
   error,
   notice,
@@ -24,10 +31,50 @@ export function VPSFactsEditForm({
   onDraftChange,
   onSubmit,
 }: VPSFactsEditFormProps) {
+  const providerSelectId = useId()
+  const usageSelectId = useId()
+
+  function handleProviderChange(providerID: string) {
+    const provider = providers.find((item) => item.provider_id === providerID)
+    onDraftChange({
+      ...draft,
+      providerID,
+      providerName: provider ? provider.name : draft.providerName,
+    })
+  }
+
   return (
     <form className="asset-facts-edit-form" onSubmit={onSubmit}>
       <Input label="VPS 名称" value={draft.displayName} onChange={(event) => onDraftChange({ ...draft, displayName: event.target.value })} />
-      <Input label="Provider ID" value={draft.providerID} onChange={(event) => onDraftChange({ ...draft, providerID: event.target.value })} />
+      <label className="input-field" htmlFor={providerSelectId}>
+        <span className="input-field__label">资产服务商</span>
+        <select
+          id={providerSelectId}
+          aria-label="资产服务商"
+          className="input"
+          value={draft.providerID}
+          disabled={providersLoading}
+          onChange={(event) => handleProviderChange(event.target.value)}
+        >
+          <option value="">未关联服务商</option>
+          {providers.map((provider) => (
+            <option key={provider.provider_id} value={provider.provider_id}>
+              {provider.name} · {provider.country || '地区未填'} · {provider.provider_id}
+            </option>
+          ))}
+        </select>
+        <span className="input-field__hint">
+          {providersLoading
+            ? '正在读取服务商…'
+            : providersError
+              ? `服务商不可用：${providersError}`
+              : providers.length === 0
+                ? '还没有服务商主数据，请先创建或保留名称快照。'
+                : '选择服务商会同步更新名称快照，仍可手动修正快照。'}
+          {' '}
+          <Link className="text-link" to="/providers">服务商列表</Link>
+        </span>
+      </label>
       <Input label="服务商名称快照" value={draft.providerName} onChange={(event) => onDraftChange({ ...draft, providerName: event.target.value })} />
       <Input label="产品名" value={draft.productName} onChange={(event) => onDraftChange({ ...draft, productName: event.target.value })} />
       <Input label="订单号" value={draft.orderRef} onChange={(event) => onDraftChange({ ...draft, orderRef: event.target.value })} />
@@ -42,9 +89,11 @@ export function VPSFactsEditForm({
       <Input label="SSH 用户" value={draft.sshUser} onChange={(event) => onDraftChange({ ...draft, sshUser: event.target.value })} />
       <Input label="操作系统" value={draft.osName} onChange={(event) => onDraftChange({ ...draft, osName: event.target.value })} />
       <Input label="虚拟化" value={draft.virtualization} onChange={(event) => onDraftChange({ ...draft, virtualization: event.target.value })} />
-      <label className="input-field">
+      <label className="input-field" htmlFor={usageSelectId}>
         <span className="input-field__label">用途状态</span>
         <select
+          id={usageSelectId}
+          aria-label="用途状态"
           className="input"
           value={draft.usageStatus}
           onChange={(event) => onDraftChange({

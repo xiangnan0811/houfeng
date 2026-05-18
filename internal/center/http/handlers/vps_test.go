@@ -63,6 +63,22 @@ func (f *fakeVPSAssetRepository) PatchVPSAsset(_ context.Context, vpsID string, 
 	return f.patchVPSAssetResult, nil
 }
 
+type fakeVPSAssetRenewalLinkageRepository struct {
+	fakeVPSAssetRepository
+	linkageResult vpsassets.RenewalSubscriptionLinkage
+	linkageInput  vpsassets.PatchInput
+	linkageVPSID  string
+}
+
+func (f *fakeVPSAssetRenewalLinkageRepository) PatchVPSAssetWithSubscriptionRenewalLinkage(_ context.Context, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error) {
+	f.linkageVPSID = vpsID
+	f.linkageInput = input
+	if f.patchVPSAssetErr != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, f.patchVPSAssetErr
+	}
+	return f.patchVPSAssetResult, f.linkageResult, nil
+}
+
 type fakeRenewalTimelineRepository struct {
 	timeline             renewals.VPSTimeline
 	err                  error
@@ -402,6 +418,58 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	}
 	if body.DisplayName != "Tokyo Edge Archived" || body.ArchivedAt == nil {
 		t.Fatalf("body = %#v, want archived asset", body)
+	}
+}
+
+func TestVPSItemPatchesCancellationDecisionWithSubscriptionLinkage(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeVPSAssetRenewalLinkageRepository{
+		fakeVPSAssetRepository: fakeVPSAssetRepository{patchVPSAssetResult: vpsassets.Record{
+			VPSID:           "vps_001",
+			DisplayName:     "Tokyo Edge",
+			SSHPort:         22,
+			LifecycleStatus: vpsassets.LifecycleActive,
+			UsageStatus:     vpsassets.UsageInUse,
+			RenewalDecision: vpsassets.RenewalCancel,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}},
+		linkageResult: vpsassets.RenewalSubscriptionLinkage{
+			Status:         vpsassets.RenewalSubscriptionLinkageUpdated,
+			CandidateCount: 1,
+			SubscriptionID: "sub_001",
+			Updated:        true,
+			Message:        "已同步取消关联订阅的自动续费。",
+		},
+	}
+
+	handler := handlers.VPSItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
+		"renewal_decision":"cancel",
+		"renewal_reason":" too expensive "
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.linkageVPSID != "vps_001" {
+		t.Fatalf("linkage vps id = %q, want vps_001", repo.linkageVPSID)
+	}
+	if !repo.linkageInput.RenewalDecision.Set || repo.linkageInput.RenewalDecision.Value != vpsassets.RenewalCancel {
+		t.Fatalf("linkage renewal decision = %#v, want cancel", repo.linkageInput.RenewalDecision)
+	}
+	var body struct {
+		VPSID                      string                               `json:"vps_id"`
+		RenewalSubscriptionLinkage vpsassets.RenewalSubscriptionLinkage `json:"renewal_subscription_linkage"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.VPSID != "vps_001" || body.RenewalSubscriptionLinkage.Status != vpsassets.RenewalSubscriptionLinkageUpdated || body.RenewalSubscriptionLinkage.SubscriptionID != "sub_001" {
+		t.Fatalf("body = %#v, want vps patch response with linkage summary", body)
 	}
 }
 

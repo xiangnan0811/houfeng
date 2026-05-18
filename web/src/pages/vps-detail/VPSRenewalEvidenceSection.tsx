@@ -11,6 +11,7 @@ import {
 import { VPSDetailEvidenceCard } from './VPSDetailEvidenceCard'
 
 type VPSRenewalEvidenceSectionProps = {
+  vpsID: string
   primarySubscription: SubscriptionRecord | null
   subscriptionLoadFailed: boolean
   subscriptionError: string | null
@@ -18,6 +19,7 @@ type VPSRenewalEvidenceSectionProps = {
 }
 
 export function VPSRenewalEvidenceSection({
+  vpsID,
   primarySubscription,
   subscriptionLoadFailed,
   subscriptionError,
@@ -39,7 +41,10 @@ export function VPSRenewalEvidenceSection({
           {subscriptionLoadFailed ? '订阅证据未知' : primarySubscription ? '订阅证据已读取' : '订阅证据为空'}
         </span>
         <div className="section-heading__actions">
-          <Link className="btn btn--secondary btn--sm" to="/subscriptions">订阅列表</Link>
+          <Link className="btn btn--secondary btn--sm" to={`/subscriptions?vps_id=${encodeURIComponent(vpsID)}`}>订阅列表</Link>
+          {!primarySubscription && !subscriptionLoadFailed ? (
+            <Link className="btn btn--ghost btn--sm" to={`/subscriptions?vps_id=${encodeURIComponent(vpsID)}&create=1`}>创建订阅</Link>
+          ) : null}
         </div>
       </div>
 

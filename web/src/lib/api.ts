@@ -43,6 +43,7 @@ import type {
   VPSAssetDetail,
   VPSAssetListFilter,
   VPSAssetRecord,
+  VPSAssetUpdateResult,
   VPSExperienceLogRecord,
   VPSNodeLinkRecord,
   VPSNodeSummary,
@@ -481,8 +482,8 @@ export function getVPSAsset(vpsId: string) {
   return requestJSON<VPSAssetDetail>(`/api/vps/${vpsId}`)
 }
 
-export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promise<VPSAssetRecord> {
-  return patchJSONBody<VPSAssetRecord>(`/api/vps/${vpsId}`, input)
+export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promise<VPSAssetUpdateResult> {
+  return patchJSONBody<VPSAssetUpdateResult>(`/api/vps/${vpsId}`, input)
 }
 
 export function getVPSTimeline(vpsId: string) {

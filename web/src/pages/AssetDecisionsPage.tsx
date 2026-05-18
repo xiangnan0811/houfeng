@@ -395,6 +395,11 @@ export function AssetDecisionsPage() {
     () => groupSubscriptionsByVPS(state.subscriptions),
     [state.subscriptions],
   )
+  const vpsByID = useMemo(() => {
+    const rows = new Map<string, VPSAssetRecord>()
+    for (const vps of [...state.unreviewed, ...state.migrate, ...state.cancel]) rows.set(vps.vps_id, vps)
+    return rows
+  }, [state.cancel, state.migrate, state.unreviewed])
   const decisionQueue = useMemo(
     () =>
       buildDecisionQueue(
@@ -490,9 +495,21 @@ export function AssetDecisionsPage() {
         setState((current) => ({
           ...current,
           ...updateDecisionQueues(current, updated),
+          subscriptions: current.subscriptions.map((subscription) =>
+            updated.renewal_subscription_linkage?.updated && subscription.subscription_id === updated.renewal_subscription_linkage.subscription_id
+              ? { ...subscription, auto_renew: false, auto_renew_cancelled: true }
+              : subscription,
+          ),
+          renewals: current.renewals.map((subscription) =>
+            updated.renewal_subscription_linkage?.updated && subscription.subscription_id === updated.renewal_subscription_linkage.subscription_id
+              ? { ...subscription, auto_renew: false, auto_renew_cancelled: true }
+              : subscription,
+          ),
         }))
         closeDecisionDrawer()
-        setDecisionNotice(`续费决策已保存：${updated.display_name} -> ${renewalQueueLabel(updated.renewal_decision)}`)
+        const baseNotice = `续费决策已保存：${updated.display_name} -> ${renewalQueueLabel(updated.renewal_decision)}`
+        const linkageMessage = updated.renewal_subscription_linkage?.message
+        setDecisionNotice(linkageMessage ? `${baseNotice}。${linkageMessage}` : baseNotice)
       })
       .catch((error: unknown) => {
         setDecisionError(describeError(error, '更新续费决策失败'))
@@ -628,10 +645,16 @@ export function AssetDecisionsPage() {
           loading={state.renewalsLoading}
           error={state.renewalsError}
           renewals={state.renewals}
+          vpsByID={vpsByID}
+          renderVPSReference={(subscription, vps) => (
+            <Link className="text-link" to={`/vps/${subscription.vps_id}`}>
+              {vps?.display_name ?? subscription.vps_id}
+            </Link>
+          )}
           renderActions={(subscription) => (
             <span className="asset-decision-actions">
               <Link className="text-link" to={`/vps/${subscription.vps_id}`}>VPS</Link>
-              <Link className="text-link" to={`/subscriptions?renew_within_days=${renewalWindow}`}>订阅</Link>
+              <Link className="text-link" to={`/subscriptions?vps_id=${subscription.vps_id}&renew_within_days=${renewalWindow}`}>订阅</Link>
             </span>
           )}
         />

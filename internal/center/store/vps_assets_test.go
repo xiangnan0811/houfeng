@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -454,6 +455,230 @@ func TestPostgresVPSAssetPatchRecordsRenewalDecisionHistory(t *testing.T) {
 	historyArgs := args[2]
 	if len(historyArgs) != 6 || historyArgs[1] != "vps_001" || historyArgs[2] != "keep" || historyArgs[3] != "cancel" || historyArgs[4] != "too expensive" {
 		t.Fatalf("history args = %#v, want keep -> cancel with reason", historyArgs)
+	}
+}
+
+func TestPostgresVPSAssetPatchCancellationDecisionCancelsSingleActiveSubscription(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	renewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC))
+	tx := &fakeVPSAssetTx{}
+	var subscriptionPatchArgs []any
+	priceHistoryInserted := false
+	tx.query = func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+		if !strings.Contains(sql, "from subscriptions") || !strings.Contains(sql, "for update") {
+			t.Fatalf("unexpected Query SQL %q", sql)
+		}
+		if len(args) != 2 || args[0] != "vps_001" || args[1] != "active" {
+			t.Fatalf("active subscription args = %#v, want vps_001 active", args)
+		}
+		return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{{scan: func(dest ...any) error {
+			scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+				SubscriptionID:     "sub_001",
+				VPSID:              "vps_001",
+				Price:              120,
+				Currency:           "USD",
+				BillingCycle:       "annual",
+				BillingMonths:      12,
+				MonthlyPrice:       10,
+				RenewAt:            &renewAt,
+				AutoRenew:          true,
+				AutoRenewCancelled: false,
+				Status:             subscriptions.StatusActive,
+				CreatedAt:          now.Add(-time.Hour),
+				UpdatedAt:          now.Add(-time.Hour),
+			})
+			return nil
+		}}}}, nil
+	}
+	tx.queryRow = func(_ context.Context, sql string, callArgs ...any) pgx.Row {
+		switch {
+		case strings.Contains(sql, "for update") && strings.Contains(sql, "from vps_assets"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Tokyo Edge",
+					SSHPort:         22,
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalKeep,
+					Importance:      "normal",
+					CreatedAt:       now.Add(-time.Hour),
+					UpdatedAt:       now.Add(-time.Hour),
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "update vps_assets"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Tokyo Edge",
+					SSHPort:         22,
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalCancel,
+					Importance:      "normal",
+					CreatedAt:       now.Add(-time.Hour),
+					UpdatedAt:       now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "insert into renewal_decisions"):
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "rdec_001"
+				*(dest[1].(*string)) = "vps_001"
+				fromDecision := "keep"
+				*(dest[2].(**string)) = &fromDecision
+				*(dest[3].(*string)) = "cancel"
+				*(dest[4].(*string)) = "cancel provider"
+				*(dest[5].(*time.Time)) = now
+				*(dest[6].(*time.Time)) = now
+				return nil
+			}}
+		case strings.Contains(sql, "update subscriptions"):
+			subscriptionPatchArgs = append([]any(nil), callArgs...)
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+					SubscriptionID:     "sub_001",
+					VPSID:              "vps_001",
+					Price:              120,
+					Currency:           "USD",
+					BillingCycle:       "annual",
+					BillingMonths:      12,
+					MonthlyPrice:       10,
+					RenewAt:            &renewAt,
+					AutoRenew:          false,
+					AutoRenewCancelled: true,
+					Status:             subscriptions.StatusActive,
+					CreatedAt:          now.Add(-time.Hour),
+					UpdatedAt:          now,
+				})
+				return nil
+			}}
+		case strings.Contains(sql, "insert into price_histories"):
+			priceHistoryInserted = true
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				priceHistoryID, ok := callArgs[0].(string)
+				if !ok || !strings.HasPrefix(priceHistoryID, "ph_") {
+					t.Fatalf("price history id arg = %#v, want ph_ prefix", callArgs[0])
+				}
+				scanPriceHistoryRecordDestinations(dest, priceHistoryFixture(priceHistoryID, now, renewAt, renewAt))
+				return nil
+			}}
+		default:
+			t.Fatalf("unexpected QueryRow SQL %q", sql)
+			return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+		}
+	}
+
+	repo := &PostgresVPSAssetRepository{
+		db: fakeVPSAssetDB{},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
+
+	record, linkage, err := repo.PatchVPSAssetWithSubscriptionRenewalLinkage(context.Background(), "vps_001", vpsassets.PatchInput{
+		RenewalDecision: vpsassets.PatchRenewal(vpsassets.RenewalCancel),
+		RenewalReason:   vpsassets.PatchString(" cancel provider "),
+	})
+	if err != nil {
+		t.Fatalf("PatchVPSAssetWithSubscriptionRenewalLinkage() error = %v", err)
+	}
+	if record.RenewalDecision != vpsassets.RenewalCancel {
+		t.Fatalf("RenewalDecision = %q, want cancel", record.RenewalDecision)
+	}
+	if linkage.Status != vpsassets.RenewalSubscriptionLinkageUpdated || !linkage.Updated || linkage.SubscriptionID != "sub_001" || linkage.CandidateCount != 1 {
+		t.Fatalf("linkage = %#v, want subscription update", linkage)
+	}
+	if !priceHistoryInserted {
+		t.Fatal("expected subscription auto-renew linkage to record price history")
+	}
+	if len(subscriptionPatchArgs) != 25 || subscriptionPatchArgs[0] != "sub_001" || subscriptionPatchArgs[15] != true || subscriptionPatchArgs[16] != false || subscriptionPatchArgs[17] != true || subscriptionPatchArgs[18] != true {
+		t.Fatalf("subscription patch args = %#v, want auto_renew=false and auto_renew_cancelled=true", subscriptionPatchArgs)
+	}
+	if !tx.committed || tx.rolledBack == 0 {
+		t.Fatalf("transaction committed=%t rollbackCalls=%d, want committed with deferred rollback", tx.committed, tx.rolledBack)
+	}
+}
+
+func TestPostgresVPSAssetPatchCancellationDecisionDoesNotBulkUpdateAmbiguousSubscriptions(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name          string
+		subscriptions []subscriptions.Record
+		wantStatus    vpsassets.RenewalSubscriptionLinkageStatus
+	}{
+		{name: "none", subscriptions: nil, wantStatus: vpsassets.RenewalSubscriptionLinkageNoActiveSubscription},
+		{name: "multiple", subscriptions: []subscriptions.Record{{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusActive}, {SubscriptionID: "sub_002", VPSID: "vps_001", Status: subscriptions.StatusActive}}, wantStatus: vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := &fakeVPSAssetTx{}
+			tx.query = func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "from subscriptions") {
+					t.Fatalf("unexpected Query SQL %q", sql)
+				}
+				rows := make([]fakeSubscriptionScan, 0, len(tt.subscriptions))
+				for _, record := range tt.subscriptions {
+					record := record
+					if record.Price == 0 {
+						record.Price = 10
+						record.Currency = "USD"
+						record.BillingMonths = 1
+						record.MonthlyPrice = 10
+					}
+					rows = append(rows, fakeSubscriptionScan{scan: func(dest ...any) error {
+						scanSubscriptionRecordDestinations(dest, record)
+						return nil
+					}})
+				}
+				return &fakeSubscriptionRows{rows: rows}, nil
+			}
+			tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "for update") && strings.Contains(sql, "from vps_assets"):
+					return fakeVPSAssetRow{scan: func(dest ...any) error {
+						scanVPSAssetRecordDestinations(dest, vpsassets.Record{VPSID: "vps_001", DisplayName: "Tokyo Edge", SSHPort: 22, LifecycleStatus: vpsassets.LifecycleActive, UsageStatus: vpsassets.UsageInUse, RenewalDecision: vpsassets.RenewalKeep, Importance: "normal", CreatedAt: now, UpdatedAt: now})
+						return nil
+					}}
+				case strings.Contains(sql, "update vps_assets"):
+					return fakeVPSAssetRow{scan: func(dest ...any) error {
+						scanVPSAssetRecordDestinations(dest, vpsassets.Record{VPSID: "vps_001", DisplayName: "Tokyo Edge", SSHPort: 22, LifecycleStatus: vpsassets.LifecycleActive, UsageStatus: vpsassets.UsageInUse, RenewalDecision: vpsassets.RenewalCancel, Importance: "normal", CreatedAt: now, UpdatedAt: now})
+						return nil
+					}}
+				case strings.Contains(sql, "insert into renewal_decisions"):
+					return fakeVPSAssetRow{scan: func(dest ...any) error {
+						*(dest[0].(*string)) = "rdec_001"
+						*(dest[1].(*string)) = "vps_001"
+						fromDecision := "keep"
+						*(dest[2].(**string)) = &fromDecision
+						*(dest[3].(*string)) = "cancel"
+						*(dest[4].(*string)) = ""
+						*(dest[5].(*time.Time)) = now
+						*(dest[6].(*time.Time)) = now
+						return nil
+					}}
+				case strings.Contains(sql, "update subscriptions"), strings.Contains(sql, "insert into price_histories"):
+					t.Fatalf("ambiguous linkage should not update subscriptions or history: %q", sql)
+				}
+				t.Fatalf("unexpected QueryRow SQL %q", sql)
+				return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+			}
+
+			repo := &PostgresVPSAssetRepository{db: fakeVPSAssetDB{}, beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}
+			_, linkage, err := repo.PatchVPSAssetWithSubscriptionRenewalLinkage(context.Background(), "vps_001", vpsassets.PatchInput{RenewalDecision: vpsassets.PatchRenewal(vpsassets.RenewalCancel)})
+			if err != nil {
+				t.Fatalf("PatchVPSAssetWithSubscriptionRenewalLinkage() error = %v", err)
+			}
+			if linkage.Status != tt.wantStatus || linkage.Updated {
+				t.Fatalf("linkage = %#v, want status %q without update", linkage, tt.wantStatus)
+			}
+		})
 	}
 }
 

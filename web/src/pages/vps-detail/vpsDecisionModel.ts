@@ -68,7 +68,7 @@ export function renewalTone(
 }
 
 export function primaryNode(detail: VPSAssetDetail): VPSNodeSummary | null {
-  return detail.node_links[0] ?? null
+  return detail.node_links?.[0] ?? null
 }
 
 export function toneToGlyphState(tone: Exclude<WorkbenchTone, 'neutral'>) {
@@ -220,7 +220,7 @@ function buildNextAction(
       summary: '续费和成本证据不可用。页面不会把读取失败误判为真实缺订阅。',
       tone: 'notice',
       linkLabel: '核对订阅',
-      to: '/subscriptions',
+      to: `/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}`,
     }
   }
   if (!primarySubscription) {
@@ -229,7 +229,7 @@ function buildNextAction(
       summary: '订阅接口已成功返回空结果，当前缺少真实续费日和月化成本。',
       tone: 'critical',
       linkLabel: '补订阅',
-      to: '/subscriptions',
+      to: `/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}&create=1`,
     }
   }
   if (!node) {

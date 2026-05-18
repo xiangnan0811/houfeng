@@ -1,12 +1,16 @@
-import type { FormEvent } from 'react'
+import { useId, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Badge, Button, Input } from '../../components/atoms'
-import type { AssetServiceStatus, AssetServiceType } from '../../lib/types'
+import type { AssetServiceStatus, AssetServiceType, TargetRecord } from '../../lib/types'
 import type { ServiceDraftState } from './types'
 import { SERVICE_STATUS_OPTIONS, SERVICE_TYPE_OPTIONS } from './vpsDetailOptions'
 
 type VPSServicesFormProps = {
   draft: ServiceDraftState
+  targets: TargetRecord[]
+  targetsLoading: boolean
+  targetsError: string | null
   submitting: boolean
   error: string | null
   notice: string | null
@@ -18,6 +22,9 @@ type VPSServicesFormProps = {
 
 export function VPSServicesForm({
   draft,
+  targets,
+  targetsLoading,
+  targetsError,
   submitting,
   error,
   notice,
@@ -26,6 +33,11 @@ export function VPSServicesForm({
   onFeedbackClear,
   onSubmit,
 }: VPSServicesFormProps) {
+  const serviceTypeSelectId = useId()
+  const serviceStatusSelectId = useId()
+  const targetSelectId = useId()
+  const noteId = useId()
+
   return (
     <form className="asset-operation-form asset-service-form" onSubmit={onSubmit}>
       <div className="asset-operation-form__header">
@@ -44,9 +56,11 @@ export function VPSServicesForm({
         }}
         placeholder="例如：Blog"
       />
-      <label className="asset-operation-field">
+      <label className="asset-operation-field" htmlFor={serviceTypeSelectId}>
         <span>服务类型</span>
         <select
+          id={serviceTypeSelectId}
+          aria-label="服务类型"
           value={draft.serviceType}
           onChange={(event) => {
             onDraftChange({
@@ -61,9 +75,11 @@ export function VPSServicesForm({
           ))}
         </select>
       </label>
-      <label className="asset-operation-field">
+      <label className="asset-operation-field" htmlFor={serviceStatusSelectId}>
         <span>服务状态</span>
         <select
+          id={serviceStatusSelectId}
+          aria-label="服务状态"
           value={draft.status}
           onChange={(event) => {
             onDraftChange({
@@ -100,15 +116,37 @@ export function VPSServicesForm({
         }}
         placeholder="443"
       />
-      <Input
-        label="Target ID"
-        value={draft.targetID}
-        onChange={(event) => {
-          onDraftChange({ ...draft, targetID: event.target.value })
-          onFeedbackClear()
-        }}
-        placeholder="tg_..."
-      />
+      <label className="asset-operation-field" htmlFor={targetSelectId}>
+        <span>关联 Target</span>
+        <select
+          id={targetSelectId}
+          aria-label="关联 Target"
+          value={draft.targetID}
+          disabled={targetsLoading || targets.length === 0}
+          onChange={(event) => {
+            onDraftChange({ ...draft, targetID: event.target.value })
+            onFeedbackClear()
+          }}
+        >
+          <option value="">不关联 Target</option>
+          {targets.map((target) => (
+            <option key={target.target_id} value={target.target_id}>
+              {target.name} · {target.target_id} · {target.host || 'host 未填'} · {target.run_status}
+            </option>
+          ))}
+        </select>
+        <small>
+          {targetsLoading
+            ? '正在读取 Target 列表…'
+            : targetsError
+              ? `Target 列表不可用：${targetsError}`
+              : targets.length === 0
+                ? '没有可关联的 Target；可先创建观测入口，或保留为空。'
+                : 'Target 仅用于跳转引用，不会创建或修改 ProbeItem。'}
+          {' '}
+          <Link className="text-link" to="/targets">Target 列表</Link>
+        </small>
+      </label>
       <Input
         label="服务标签"
         hint="用逗号分隔"
@@ -119,9 +157,11 @@ export function VPSServicesForm({
         }}
         placeholder="prod, public"
       />
-      <label className="asset-operation-field asset-operation-field--wide">
+      <label className="asset-operation-field asset-operation-field--wide" htmlFor={noteId}>
         <span>服务备注</span>
         <textarea
+          id={noteId}
+          aria-label="服务备注"
           value={draft.note}
           onChange={(event) => {
             onDraftChange({ ...draft, note: event.target.value })

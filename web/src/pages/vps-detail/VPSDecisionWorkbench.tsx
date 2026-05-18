@@ -179,7 +179,7 @@ export function VPSDecisionWorkbench({
                 ? `${formatMoney(primarySubscription.price, primarySubscription.currency)} / ${primarySubscription.billing_cycle}`
                 : `${timeline.price_histories.length} 条价格历史`}
             </span>
-            <Link className="text-link" to="/subscriptions">订阅列表</Link>
+            <Link className="text-link" to={`/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}`}>订阅列表</Link>
           </div>
         </article>
 

@@ -1,14 +1,25 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/renewals"
+	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 )
+
+type renewalSubscriptionLinker interface {
+	PatchVPSAssetWithSubscriptionRenewalLinkage(context.Context, string, vpsassets.PatchInput) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error)
+}
+
+type vpsPatchResponse struct {
+	vpsassets.Record
+	RenewalSubscriptionLinkage *vpsassets.RenewalSubscriptionLinkage `json:"renewal_subscription_linkage,omitempty"`
+}
 
 func VPSCollection(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http.Handler {
 	var linkRepo assetlinks.Repository
@@ -136,13 +147,30 @@ func VPSItem(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http
 				return
 			}
 
-			record, err := repo.PatchVPSAsset(r.Context(), vpsID, input)
+			var linkage *vpsassets.RenewalSubscriptionLinkage
+			var record vpsassets.Record
+			var err error
+			if input.RenewalDecision.Set && vpsassets.IsCancellationRenewalDecision(input.RenewalDecision.Value) {
+				if linker, ok := repo.(renewalSubscriptionLinker); ok {
+					var linked vpsassets.RenewalSubscriptionLinkage
+					record, linked, err = linker.PatchVPSAssetWithSubscriptionRenewalLinkage(r.Context(), vpsID, input)
+					linkage = &linked
+				} else {
+					record, err = repo.PatchVPSAsset(r.Context(), vpsID, input)
+				}
+			} else {
+				record, err = repo.PatchVPSAsset(r.Context(), vpsID, input)
+			}
 			if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
 				writeError(w, http.StatusNotFound, "vps asset not found")
 				return
 			}
-			if errors.Is(err, vpsassets.ErrInvalidVPSAssetInput) {
+			if errors.Is(err, vpsassets.ErrInvalidVPSAssetInput) || errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
 				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			if errors.Is(err, subscriptions.ErrSubscriptionNotFound) {
+				writeError(w, http.StatusNotFound, "subscription not found")
 				return
 			}
 			if err != nil {
@@ -156,6 +184,10 @@ func VPSItem(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http
 					return
 				}
 				record.ActiveNodeLinkCount = count
+			}
+			if linkage != nil {
+				writeJSON(w, http.StatusOK, vpsPatchResponse{Record: record, RenewalSubscriptionLinkage: linkage})
+				return
 			}
 			writeJSON(w, http.StatusOK, record)
 		default:
