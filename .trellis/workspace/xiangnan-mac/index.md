@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 140
-- **Last Active**: 2026-05-17
+- **Total Sessions**: 141
+- **Last Active**: 2026-05-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~737 | Active |
+| `journal-3.md` | ~770 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 141 | 2026-05-18 | Fix node linked VPS loading | `ba6b0b1` | `fix/node-linked-vps-loading` |
 | 140 | 2026-05-17 | Fix static agent release assets | `68a019f` | `feature/fix-agent-static-release-assets` |
 | 139 | 2026-05-17 | Fix agent release asset metadata | `2ca51d0` | `feature/fix-agent-arm64-release-dirty` |
 | 138 | 2026-05-17 | Agent release asset publishing | `3e04b4b` | `feature/agent-release-assets` |
