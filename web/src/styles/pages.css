@@ -3149,6 +3149,13 @@ html.theme-classic-light .dashboard-command-surface {
   line-height: 1.4;
 }
 
+.node-vps-table__hint {
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.5;
+}
+
 .asset-status-stack,
 .asset-labels,
 .asset-hero-meta {

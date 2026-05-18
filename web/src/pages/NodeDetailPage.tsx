@@ -96,6 +96,12 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   })
   const [linkedVPSVisible, setLinkedVPSVisible] = useState(false)
   const linkedVPSSectionRef = useRef<HTMLDivElement | null>(null)
+  const linkedVPSFetchRef = useRef({
+    nodeId: null as string | null,
+    inFlight: false,
+    fetched: false,
+    requestId: 0,
+  })
   const currentRouteNodeIdRef = useRef<string | null>(nodeId ?? null)
   const currentRequestedNodeIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
@@ -204,6 +210,12 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   }, [nodeId])
 
   useEffect(() => {
+    linkedVPSFetchRef.current = {
+      nodeId: nodeId ?? null,
+      inFlight: false,
+      fetched: false,
+      requestId: linkedVPSFetchRef.current.requestId + 1,
+    }
     setLinkedVPSVisible(false)
     setLinkedVPSState({
       requestedNodeId: null,
@@ -233,7 +245,6 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   }, [linkedVPSVisible, state.node, state.requestedNodeId])
 
   useEffect(() => {
-    let cancelled = false
     if (!nodeId) {
       setLinkedVPSState({
         requestedNodeId: null,
@@ -245,14 +256,24 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       return
     }
     if (!linkedVPSVisible) return
-    if (state.requestedNodeId !== nodeId || !state.node) {
-      return
+    if (state.requestedNodeId !== nodeId || !state.node) return
+
+    if (linkedVPSFetchRef.current.nodeId !== nodeId) {
+      linkedVPSFetchRef.current = {
+        nodeId,
+        inFlight: false,
+        fetched: false,
+        requestId: linkedVPSFetchRef.current.requestId + 1,
+      }
     }
-    if (
-      linkedVPSState.requestedNodeId === nodeId &&
-      (linkedVPSState.loading || linkedVPSState.loaded)
-    ) {
-      return
+    if (linkedVPSFetchRef.current.inFlight || linkedVPSFetchRef.current.fetched) return
+
+    const requestId = linkedVPSFetchRef.current.requestId + 1
+    linkedVPSFetchRef.current = {
+      nodeId,
+      inFlight: true,
+      fetched: false,
+      requestId,
     }
 
     setLinkedVPSState((current) => ({
@@ -265,7 +286,15 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
 
     listVPSForNode(nodeId)
       .then((records) => {
-        if (cancelled) return
+        const fetchState = linkedVPSFetchRef.current
+        if (
+          !isMountedRef.current ||
+          currentRouteNodeIdRef.current !== nodeId ||
+          currentRequestedNodeIdRef.current !== nodeId ||
+          fetchState.nodeId !== nodeId ||
+          fetchState.requestId !== requestId
+        ) return
+        linkedVPSFetchRef.current = { nodeId, inFlight: false, fetched: true, requestId }
         setLinkedVPSState({
           requestedNodeId: nodeId,
           records: Array.isArray(records) ? records : [],
@@ -275,7 +304,15 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
         })
       })
       .catch((error: unknown) => {
-        if (cancelled) return
+        const fetchState = linkedVPSFetchRef.current
+        if (
+          !isMountedRef.current ||
+          currentRouteNodeIdRef.current !== nodeId ||
+          currentRequestedNodeIdRef.current !== nodeId ||
+          fetchState.nodeId !== nodeId ||
+          fetchState.requestId !== requestId
+        ) return
+        linkedVPSFetchRef.current = { nodeId, inFlight: false, fetched: true, requestId }
         setLinkedVPSState({
           requestedNodeId: nodeId,
           records: [],
@@ -284,19 +321,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
           error: describeError(error, '加载关联 VPS 失败'),
         })
       })
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    linkedVPSState.loaded,
-    linkedVPSState.loading,
-    linkedVPSState.requestedNodeId,
-    linkedVPSVisible,
-    nodeId,
-    state.node,
-    state.requestedNodeId,
-  ])
+  }, [linkedVPSVisible, nodeId, state.node, state.requestedNodeId])
 
   useEffect(() => {
     let cancelled = false
