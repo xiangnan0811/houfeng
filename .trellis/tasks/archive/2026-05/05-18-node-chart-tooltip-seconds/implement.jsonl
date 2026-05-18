@@ -1,0 +1,4 @@
+{"file":".trellis/spec/web/index.md","reason":"Frontend task touching node detail chart behavior; use web spec index as authority."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Follow page/component layering and avoid unnecessary extraction or new abstractions."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Defines Vitest, lint, build, and verify-web expectations for frontend changes."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Implementation must stay on a non-main branch and land through PR."}

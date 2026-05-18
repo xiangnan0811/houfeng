@@ -1,0 +1,2 @@
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Verify tooltip formatting with relevant frontend tests and make verify-web."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Search existing date/time formatters before adding or changing formatter code."}
