@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend task touching embedded installer script and Go tests; use backend spec index as authority."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines Go test placement, verify-go, and commit quality gates for installer tests."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Installer output must avoid secrets and remain operationally useful without logging tokens."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Task must be developed on a feature branch and land via PR, not local main."}

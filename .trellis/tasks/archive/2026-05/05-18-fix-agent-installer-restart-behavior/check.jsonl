@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run focused installer tests, make verify-go, and full verification before commit/PR."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Installer behavior spans center-served script, systemd host behavior, docs, and operator UI expectations."}
