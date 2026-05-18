@@ -1,12 +1,17 @@
-import type { FormEvent } from 'react'
+import { useId, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Badge, Button, Input } from '../../components/atoms'
-import type { AssetDomainStatus } from '../../lib/types'
+import type { AssetDomainStatus, AssetServiceRecord, TargetRecord } from '../../lib/types'
 import type { DomainDraftState } from './types'
 import { DOMAIN_STATUS_OPTIONS } from './vpsDetailOptions'
 
 type VPSDomainsFormProps = {
   draft: DomainDraftState
+  services: AssetServiceRecord[]
+  targets: TargetRecord[]
+  targetsLoading: boolean
+  targetsError: string | null
   submitting: boolean
   error: string | null
   notice: string | null
@@ -18,6 +23,10 @@ type VPSDomainsFormProps = {
 
 export function VPSDomainsForm({
   draft,
+  services,
+  targets,
+  targetsLoading,
+  targetsError,
   submitting,
   error,
   notice,
@@ -26,6 +35,11 @@ export function VPSDomainsForm({
   onFeedbackClear,
   onSubmit,
 }: VPSDomainsFormProps) {
+  const statusSelectId = useId()
+  const serviceSelectId = useId()
+  const targetSelectId = useId()
+  const noteId = useId()
+
   return (
     <form className="asset-operation-form asset-service-form" onSubmit={onSubmit}>
       <div className="asset-operation-form__header">
@@ -44,9 +58,11 @@ export function VPSDomainsForm({
         }}
         placeholder="www.example.com"
       />
-      <label className="asset-operation-field">
+      <label className="asset-operation-field" htmlFor={statusSelectId}>
         <span>域名状态</span>
         <select
+          id={statusSelectId}
+          aria-label="域名状态"
           value={draft.status}
           onChange={(event) => {
             onDraftChange({
@@ -70,24 +86,60 @@ export function VPSDomainsForm({
         }}
         placeholder="官网 / API / 回源"
       />
-      <Input
-        label="Service ID"
-        value={draft.serviceID}
-        onChange={(event) => {
-          onDraftChange({ ...draft, serviceID: event.target.value })
-          onFeedbackClear()
-        }}
-        placeholder="svc_..."
-      />
-      <Input
-        label="Target ID"
-        value={draft.targetID}
-        onChange={(event) => {
-          onDraftChange({ ...draft, targetID: event.target.value })
-          onFeedbackClear()
-        }}
-        placeholder="tg_..."
-      />
+      <label className="asset-operation-field" htmlFor={serviceSelectId}>
+        <span>关联服务</span>
+        <select
+          id={serviceSelectId}
+          aria-label="关联服务"
+          value={draft.serviceID}
+          disabled={services.length === 0}
+          onChange={(event) => {
+            onDraftChange({ ...draft, serviceID: event.target.value })
+            onFeedbackClear()
+          }}
+        >
+          <option value="">不关联服务</option>
+          {services.map((service) => (
+            <option key={service.service_id} value={service.service_id}>
+              {service.name} · {service.service_id} · {service.status}
+            </option>
+          ))}
+        </select>
+        <small>
+          {services.length === 0 ? '当前 VPS 还没有服务记录，可先创建服务或保留为空。' : '仅关联当前 VPS 的服务记录。'}
+        </small>
+      </label>
+      <label className="asset-operation-field" htmlFor={targetSelectId}>
+        <span>关联 Target</span>
+        <select
+          id={targetSelectId}
+          aria-label="关联 Target"
+          value={draft.targetID}
+          disabled={targetsLoading || targets.length === 0}
+          onChange={(event) => {
+            onDraftChange({ ...draft, targetID: event.target.value })
+            onFeedbackClear()
+          }}
+        >
+          <option value="">不关联 Target</option>
+          {targets.map((target) => (
+            <option key={target.target_id} value={target.target_id}>
+              {target.name} · {target.target_id} · {target.host || 'host 未填'} · {target.run_status}
+            </option>
+          ))}
+        </select>
+        <small>
+          {targetsLoading
+            ? '正在读取 Target 列表…'
+            : targetsError
+              ? `Target 列表不可用：${targetsError}`
+              : targets.length === 0
+                ? '没有可关联的 Target；可先创建观测入口，或保留为空。'
+                : 'Target 仅用于跳转引用，不会创建或修改 ProbeItem。'}
+          {' '}
+          <Link className="text-link" to="/targets">Target 列表</Link>
+        </small>
+      </label>
       <Input
         label="注册商"
         value={draft.registrar}
@@ -138,9 +190,11 @@ export function VPSDomainsForm({
         }}
         placeholder="prod, public"
       />
-      <label className="asset-operation-field asset-operation-field--wide">
+      <label className="asset-operation-field asset-operation-field--wide" htmlFor={noteId}>
         <span>域名备注</span>
         <textarea
+          id={noteId}
+          aria-label="域名备注"
           value={draft.note}
           onChange={(event) => {
             onDraftChange({ ...draft, note: event.target.value })

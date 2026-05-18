@@ -112,7 +112,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
     expect(screen.getByRole('heading', { name: '资产决策' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '资产决策工作队列' })).toBeInTheDocument()
     expect(screen.getByText('2026-05-20')).toBeInTheDocument()
@@ -178,7 +178,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: '处理 vps_review' }))
     const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
     fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
@@ -221,14 +221,14 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('tab', { name: /未关联/ }))
     await waitFor(() => expect(screen.getByRole('heading', { name: '当前视图暂无待处理 VPS' })).toBeInTheDocument())
     expect(screen.getByText('这组队列暂时没有需要人工决策的资产；可回到全部队列、库存或订阅证据继续核对。')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '核对 VPS 库存' })).toHaveAttribute('href', '/vps')
     expect(screen.getByRole('link', { name: '补充订阅证据' })).toHaveAttribute('href', '/subscriptions')
     fireEvent.click(screen.getByRole('button', { name: '查看全部队列' }))
-    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
   })
 
   it('navigates from a queue row while keeping row actions isolated', async () => {
@@ -250,7 +250,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
 
     fireEvent.click(screen.getByRole('button', { name: '处理 vps_review' }))
     expect(await screen.findByRole('dialog', { name: '续费决策处理' })).toBeInTheDocument()
@@ -258,7 +258,9 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '续费决策处理' })).not.toBeInTheDocument())
 
-    const queueRow = screen.getByText('Tokyo Review').closest('li')
+    const queueRow = screen.getAllByText('Tokyo Review')
+      .map((element) => element.closest('li'))
+      .find((row) => row?.classList.contains('asset-decision-row'))
     expect(queueRow).not.toBeNull()
     fireEvent.click(queueRow!)
     await waitFor(() => expect(screen.getByText('vps detail route')).toBeInTheDocument())
@@ -281,7 +283,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('Tokyo Review')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
 
     fireEvent.click(screen.getByRole('button', { name: '处理 vps_review' }))
     let drawer = await screen.findByRole('dialog', { name: '续费决策处理' })

@@ -50,6 +50,24 @@ const serviceBody = {
   updated_at: '2026-05-10T08:00:00Z',
 }
 
+const targetBody = {
+  target_id: 'tg_001',
+  name: 'Blog Target',
+  target_type: 'service',
+  host: 'blog.example.com',
+  base_port: 443,
+  execution_node_labels: ['edge'],
+  run_status: '启用',
+  group: 'edge',
+  labels: ['prod'],
+  note: '',
+  current_health_status: '正常',
+  current_active_incident_count: 0,
+  current_primary_issue_summary: '',
+  created_at: '2026-05-10T08:00:00Z',
+  updated_at: '2026-05-10T08:00:00Z',
+}
+
 const domainBody = {
   domain_id: 'dom_001',
   vps_id: 'vps_001',
@@ -362,7 +380,7 @@ describe('VPSDetailPage', () => {
     expect(screen.getAllByText('订阅读取失败').length).toBeGreaterThan(0)
     expect(screen.getByText('先恢复订阅证据')).toBeInTheDocument()
     expect(screen.getByText('读取失败')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions')
+    expect(screen.getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
     expect(screen.getAllByText('subscription backend down').length).toBeGreaterThan(0)
     expect(screen.getAllByText('订阅未知').length).toBeGreaterThan(0)
     expect(screen.queryByText('缺订阅')).not.toBeInTheDocument()
@@ -438,7 +456,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
     expect(screen.getByText('补录续费成本')).toBeInTheDocument()
     expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
-    expect(screen.getByRole('link', { name: '补订阅' })).toHaveAttribute('href', '/subscriptions')
+    expect(screen.getByRole('link', { name: '补订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_missing_subscription&create=1')
     expect(screen.queryByText('订阅读取失败')).not.toBeInTheDocument()
   })
 
@@ -646,14 +664,14 @@ describe('VPSDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
     let nodeDialog = screen.getByRole('dialog', { name: '关联 Node' })
-    fireEvent.change(within(nodeDialog).getByLabelText('Node ID'), { target: { value: 'nd_stale' } })
+    expect(within(nodeDialog).getByLabelText('选择 Node')).toBeDisabled()
     fireEvent.change(within(nodeDialog).getByLabelText('关联备注'), { target: { value: 'stale note' } })
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog', { name: '关联 Node' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
     nodeDialog = screen.getByRole('dialog', { name: '关联 Node' })
-    expect(within(nodeDialog).getByLabelText('Node ID')).toHaveValue('')
+    expect(within(nodeDialog).getByLabelText('选择 Node')).toHaveValue('')
     expect(within(nodeDialog).getByLabelText('关联备注')).toHaveValue('')
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
 
@@ -690,7 +708,7 @@ describe('VPSDetailPage', () => {
     expect(within(domainDialog).getByLabelText('域名')).toHaveValue('')
     fireEvent.click(within(domainDialog).getByRole('button', { name: '取消' }))
 
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(8))
   })
 
   it('updates VPS facts and refreshes detail plus timeline', async () => {
@@ -782,6 +800,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse(updatedRecord))
       .mockResolvedValueOnce(mockJSONResponse(refreshedDetail))
       .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
@@ -818,7 +837,12 @@ describe('VPSDetailPage', () => {
     expect(screen.getByRole('heading', { name: 'Tokyo Edge 2' })).toBeInTheDocument()
     expect(screen.getByText('192.0.2.1 -> 198.51.100.5')).toBeInTheDocument()
     expect(screen.getByText('deploy@edge.example.com:2222')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/providers', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -849,22 +873,22 @@ describe('VPSDetailPage', () => {
         note: 'updated',
       }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/timeline', {
+    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/timeline', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(10, '/api/vps/vps_001/services', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(10, '/api/vps/vps_001/domains', {
+    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/vps/vps_001/domains', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -926,6 +950,24 @@ describe('VPSDetailPage', () => {
         },
       ],
     }
+    const nodeOption = {
+      node_id: 'nd_002',
+      display_name: 'Seoul Node',
+      group: 'edge',
+      region: 'KR',
+      city: 'Seoul',
+      provider: 'Node Hint',
+      lifecycle_status: '在用',
+      monitoring_status: '启用',
+      binding_status: '已绑定',
+      labels: [],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+    }
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
@@ -933,6 +975,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([nodeOption]))
       .mockResolvedValueOnce(mockJSONResponse({
         link_id: 'vpn_001',
         vps_id: 'vps_001',
@@ -964,13 +1007,18 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
-    fireEvent.change(within(screen.getByRole('dialog', { name: '关联 Node' })).getByLabelText('Node ID'), { target: { value: 'nd_002' } })
+    await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/nodes', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    }))
+    fireEvent.change(within(screen.getByRole('dialog', { name: '关联 Node' })).getByLabelText('选择 Node'), { target: { value: 'nd_002' } })
     fireEvent.change(within(screen.getByRole('dialog', { name: '关联 Node' })).getByLabelText('关联备注'), { target: { value: 'secondary' } })
     fireEvent.click(within(screen.getByRole('dialog', { name: '关联 Node' })).getByRole('button', { name: '关联 Node' }))
 
     await waitFor(() => expect(screen.getAllByText('Seoul Node').length).toBeGreaterThan(0))
     expect(screen.getByText('Node 关联已更新')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/link-node', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/link-node', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -984,7 +1032,7 @@ describe('VPSDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '解除关联' }))
     await waitFor(() => expect(screen.queryByText('Seoul Node')).not.toBeInTheDocument())
     expect(screen.getByText('Node 关联已解除')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/unlink-node', {
+    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/unlink-node', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1423,6 +1471,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([targetBody]))
       .mockResolvedValueOnce(mockJSONResponse(createdService, 201))
       .mockResolvedValueOnce(mockJSONResponse([createdService]))
     vi.stubGlobal('fetch', fetchMock)
@@ -1438,12 +1487,17 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '新增服务' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    }))
     const serviceDrawer = screen.getByRole('dialog', { name: '新增服务' })
     fireEvent.change(within(serviceDrawer).getByLabelText('服务名称'), { target: { value: 'Blog' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('服务类型'), { target: { value: 'api' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('入口 URL'), { target: { value: 'https://blog.example.com' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('端口'), { target: { value: '443' } })
-    fireEvent.change(within(serviceDrawer).getByLabelText('Target ID'), { target: { value: 'tg_001' } })
+    fireEvent.change(within(serviceDrawer).getByLabelText('关联 Target'), { target: { value: 'tg_001' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('服务标签'), { target: { value: 'prod, public' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('服务备注'), { target: { value: 'primary service' } })
     fireEvent.click(within(serviceDrawer).getByRole('button', { name: '创建服务记录' }))
@@ -1452,7 +1506,7 @@ describe('VPSDetailPage', () => {
     expect(screen.getByText('Blog')).toBeInTheDocument()
     expect(screen.getByText('https://blog.example.com')).toBeInTheDocument()
     expect(screen.getByText('端口 443')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/services', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1471,7 +1525,7 @@ describe('VPSDetailPage', () => {
         note: 'primary service',
       }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/services', {
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/services', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -1533,7 +1587,7 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(invalidServiceDrawer).getByRole('button', { name: '创建服务记录' }))
 
     expect(screen.getAllByText('服务名称不能为空。').length).toBeGreaterThan(0)
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
   })
 
   it('creates a domain record for the current VPS and refreshes domains', async () => {
@@ -1583,6 +1637,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([serviceBody]))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([targetBody]))
       .mockResolvedValueOnce(mockJSONResponse(createdDomain, 201))
       .mockResolvedValueOnce(mockJSONResponse([createdDomain]))
       .mockResolvedValueOnce(mockJSONResponse([]))
@@ -1599,12 +1654,17 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '新增域名' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    }))
     const domainDrawer = screen.getByRole('dialog', { name: '新增域名' })
     fireEvent.change(within(domainDrawer).getByLabelText('域名'), { target: { value: 'API.Example.COM.' } })
     fireEvent.change(within(domainDrawer).getByLabelText('域名状态'), { target: { value: 'active' } })
     fireEvent.change(within(domainDrawer).getByLabelText('用途'), { target: { value: 'api' } })
-    fireEvent.change(within(domainDrawer).getByLabelText('Service ID'), { target: { value: 'svc_001' } })
-    fireEvent.change(within(domainDrawer).getByLabelText('Target ID'), { target: { value: 'tg_001' } })
+    fireEvent.change(within(domainDrawer).getByLabelText('关联服务'), { target: { value: 'svc_001' } })
+    fireEvent.change(within(domainDrawer).getByLabelText('关联 Target'), { target: { value: 'tg_001' } })
     fireEvent.change(within(domainDrawer).getByLabelText('注册商'), { target: { value: 'NameSilo' } })
     fireEvent.change(within(domainDrawer).getByLabelText('过期日期'), { target: { value: '2026-07-01' } })
     fireEvent.click(within(domainDrawer).getByLabelText('自动续费'))
@@ -1616,7 +1676,7 @@ describe('VPSDetailPage', () => {
     expect(screen.getByText('api.example.com')).toBeInTheDocument()
     expect(screen.getByText('NameSilo')).toBeInTheDocument()
     expect(screen.getByText('2026-07-01')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/domains', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/domains', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1638,7 +1698,7 @@ describe('VPSDetailPage', () => {
         note: 'primary domain',
       }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/domains', {
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/domains', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -1701,7 +1761,7 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(invalidDomainDrawer).getByRole('button', { name: '创建域名记录' }))
 
     expect(screen.getAllByText('域名必须是不带协议、路径和空格的完整域名。').length).toBeGreaterThan(0)
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
   })
 
   it('renders compact empty states when the VPS has no timeline records', async () => {

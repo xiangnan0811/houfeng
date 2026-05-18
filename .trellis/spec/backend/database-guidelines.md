@@ -271,6 +271,80 @@ _, err := tx.Exec(ctx, `
 - `started_at` 与 `renew_at` 是 nullable `date`：未知日期用 `null`，不要写假日期。
 - `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。
 - 订阅 CRUD 不得创建 `vps_node_links`、不得改写 `nodes.provider`、不得增加 Dashboard / import / currency exchange 行为。
+- 受控例外：用户显式在 `PATCH /api/vps/{vps_id}` 将 VPS `renewal_decision` 改成取消类决策（当前为 `cancel` 或 `auto_renew_cancelled`）时，VPS patch 事务可以同步处理该 VPS 的明确订阅事实。只有恰好一条 `status='active'` 的订阅候选时，才能在同一事务里把该订阅 `auto_renew=false`、`auto_renew_cancelled=true`，并按既有 `price_histories` 机制记录自动续费字段变化；无 active 订阅或多 active 订阅时只返回 linkage status/message，不批量写订阅。
+- 上述例外仍属于 Asset Ledger 内部 VPS↔Subscription 用户决策流：不得创建或修改 `vps_node_links`、Provider、Node、Target、ProbeItem、Agent 计划或运行时控制；subscription 自己的 CRUD 仍不得反向改写 VPS renewal decision。
+
+#### Scenario: VPS renewal decision links subscription auto-renew
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `PATCH /api/vps/{vps_id}`、`internal/center/store/vps_assets.go` 的 history transaction path、`subscriptions` 自动续费字段，或前端续费决策保存 flow。
+
+##### 2. Signatures
+
+- Backend API: `PATCH /api/vps/{vps_id}` with body containing `renewal_decision` and optional `renewal_reason`.
+- Response: VPS record fields plus optional `renewal_subscription_linkage` object when a cancellation-class decision path was evaluated.
+- Linkage response fields: `status`, `candidate_count`, optional `subscription_id`, `updated`, `message`.
+- Store method: `PatchVPSAssetWithSubscriptionRenewalLinkage(ctx, vpsID, input) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error)`.
+- DB writes: `vps_assets`, `renewal_decisions`, optional one `subscriptions` row, optional one `price_histories` row, all in one transaction.
+
+##### 3. Contracts
+
+- Cancellation-class decisions are currently `cancel` and `auto_renew_cancelled` only; `migrate`, `observe`, `keep`, `replaced`, and `unreviewed` must not modify subscriptions.
+- The transaction must `select ... for update` the VPS row before patching and must lock active subscription candidates before deciding whether to write.
+- Exactly one `subscriptions.status = 'active'` row for the VPS is the only unambiguous write case.
+- In the write case, final subscription state must be `auto_renew=false` and `auto_renew_cancelled=true`.
+- The linkage write must reuse the existing subscription patch/history semantics: when automatic-renewal fields change, insert `price_histories` in the same transaction.
+- The response `message` is user-facing Chinese copy; frontend may display it directly but must not infer extra writes from it.
+- This path must not create/update `vps_node_links`, Provider, Node, Target, ProbeItem, Agent plans, runtime controls, Dashboard summary rows, or import state.
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| VPS not found | Return existing `vps asset not found` behavior; no subscription write |
+| invalid VPS patch input | Return invalid VPS input; no subscription write |
+| renewal decision unchanged | Do not insert renewal history and do not evaluate subscription linkage |
+| cancellation-class decision with 0 active subscriptions | Save VPS decision/history, return `status=no_active_subscription`, no subscription write |
+| cancellation-class decision with >1 active subscriptions | Save VPS decision/history, return `status=multiple_active_subscriptions`, no subscription write |
+| exactly 1 active subscription already cancelled | Save VPS decision/history, return `status=subscription_already_cancelled`, do not add no-op price history |
+| exactly 1 active subscription needing cancellation | Save VPS decision/history, update subscription, insert price history, return `status=subscription_updated` |
+
+##### 5. Good/Base/Bad Cases
+
+- Good: 用户在 VPS 详情把 `renewal_decision` 从 `keep` 改为 `cancel`，该 VPS 只有一条 active 订阅；响应包含 `subscription_updated`，VPS timeline 有 renewal decision，subscription timeline 有 auto-renew price history。
+- Base: 用户把 `renewal_decision` 改为 `migrate`；只更新 VPS 决策和 history，不返回联动写入结果。
+- Bad: 因为某 VPS 有两条 active 订阅而批量把两条都取消自动续费。
+- Bad: 从 subscription PATCH 反向把 VPS renewal decision 改成 `auto_renew_cancelled`。
+
+##### 6. Tests Required
+
+- Store tests: exactly-one active subscription update, no active subscription, multiple active subscriptions, already-cancelled subscription, non-cancellation decision no write, unchanged decision no history/no write.
+- Handler tests: cancellation-class PATCH returns `renewal_subscription_linkage`; ordinary PATCH still returns the plain VPS record contract used by existing clients.
+- Frontend tests: decision save displays linkage message/action for `no_active_subscription` and keeps normal decision-save notice for non-linkage decisions.
+
+##### 7. Wrong vs Correct
+
+```go
+// 错误：取消类决策后单独再 patch subscription，两个事务可能漂移。
+record, _ := repo.PatchVPSAsset(ctx, vpsID, input)
+_, _ = subscriptionRepo.PatchSubscription(ctx, subID, subscriptions.PatchInput{AutoRenewCancelled: subscriptions.PatchBool(true)})
+```
+
+```go
+// 正确：VPS 当前状态、renewal history、subscription 当前状态和 price history 同事务完成。
+record, linkage, err := repo.PatchVPSAssetWithSubscriptionRenewalLinkage(ctx, vpsID, input)
+```
+
+```go
+// 错误：跨观测边界自动改 Node 运行态。
+_, _ = tx.Exec(ctx, `update nodes set lifecycle_status = '不续费' where node_id = $1`, nodeID)
+```
+
+```go
+// 正确：只返回 linkage status，让 UI 引导用户显式处理 Node/Target/Agent 相关动作。
+return vpsassets.RenewalSubscriptionLinkage{Status: vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription}
+```
 
 ### Asset Ledger VPS node links
 
@@ -297,7 +371,7 @@ _, err := tx.Exec(ctx, `
 - `PATCH /api/vps/{vps_id}` 只有在显式设置 `renewal_decision` 且最终值发生变化时才插入历史；只改其他字段或设置为原值不得插入历史。
 - VPS 当前状态更新与 history insert 必须在同一个事务中完成，并先 `select ... for update` 锁定 VPS 行，避免当前状态和历史漂移。
 - `GET /api/vps/{vps_id}/timeline` 返回真实表驱动的 `renewal_decisions[]`、`price_histories[]`、`ip_histories[]`、`spec_snapshots[]`、`experience_logs[]`，不得返回占位假数据。
-- 续费决策历史不得创建 `vps_node_links`，不得改写 `nodes.provider`、Node lifecycle / monitoring / health、Target、Agent 或 subscription。
+- 续费决策历史本身不得创建 `vps_node_links`，不得改写 `nodes.provider`、Node lifecycle / monitoring / health、Target 或 Agent。唯一可同时改写 subscription 的路径是上一节定义的 `PATCH /api/vps/{vps_id}` 取消类续费决策受控联动例外；该路径必须同时保留 renewal decision history 与 subscription price history。
 
 `db/migrations/0021_create_asset_histories.sql` 添加 `price_histories`、`ip_histories`、`vps_spec_snapshots`，用于补齐资产层价格、IP、规格变化历史。三张表补充当前状态字段，不替代 `subscriptions` 或 `vps_assets` 当前状态。
 

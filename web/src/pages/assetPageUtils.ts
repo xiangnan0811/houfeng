@@ -114,7 +114,7 @@ export function vpsAccessLabel(vps: VPSAssetRecord): string {
 
 export function hasMissingVPSFacts(vps: VPSAssetRecord): boolean {
   return (
-    (!vps.provider_id && !vps.provider_name.trim()) ||
+    (!vps.provider_id && !(vps.provider_name ?? '').trim()) ||
     !vpsLocationHasValue(vps) ||
     (!vps.ssh_host && !vps.ipv4 && !vps.ipv6)
   )
@@ -134,7 +134,7 @@ export function buildVPSQualityIssues(
   if (vps.active_node_link_count <= 0) {
     issues.push({ key: 'unlinked-node', label: '未关联 Node', tone: 'alert' })
   }
-  if (!vps.provider_id && !vps.provider_name.trim()) {
+  if (!vps.provider_id && !(vps.provider_name ?? '').trim()) {
     issues.push({ key: 'missing-provider', label: '缺服务商', tone: 'notice' })
   }
   if (!vpsLocationHasValue(vps)) {

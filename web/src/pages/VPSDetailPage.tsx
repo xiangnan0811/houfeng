@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { Drawer } from '../components/atoms'
 import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
@@ -11,7 +11,10 @@ import {
   getVPSAsset,
   getVPSTimeline,
   linkVPSNode,
+  listNodes,
+  listProviders,
   listSubscriptions,
+  listTargets,
   listVPSDomains,
   listVPSServices,
   unlinkVPSNode,
@@ -23,6 +26,7 @@ import type {
   CreateAssetDomainInput,
   CreateAssetServiceInput,
   CreateVPSExperienceLogInput,
+  RenewalSubscriptionLinkage,
   SubscriptionRecord,
   UpdateVPSAssetInput,
   VPSAssetDetail,
@@ -64,6 +68,7 @@ import {
   detailToFactEditForm,
   INITIAL_DOMAIN_DRAFT,
   INITIAL_EXPERIENCE_DRAFT,
+  INITIAL_SELECTOR_STATE,
   INITIAL_SERVICE_DRAFT,
   INITIAL_STATE,
 } from './vps-detail/vpsDetailHelpers'
@@ -97,10 +102,39 @@ function selectPrimarySubscription(subscriptions: SubscriptionRecord[]): Subscri
   return subscriptions[0] ?? null
 }
 
+function normalizeVPSDetail(detail: VPSAssetDetail): VPSAssetDetail {
+  return {
+    ...detail,
+    node_links: detail.node_links ?? [],
+  }
+}
+
+function subscriptionLinkageNotice(linkage?: RenewalSubscriptionLinkage | null): string {
+  if (!linkage || linkage.status === 'none') {
+    return '续费决策已更新，资产历史已刷新'
+  }
+  return `续费决策已更新，资产历史已刷新。${linkage.message}`
+}
+
+function subscriptionLinkageAction(linkage: RenewalSubscriptionLinkage | null | undefined, vpsID: string): { to: string; label: string } | null {
+  if (!linkage) return null
+  if (linkage.status === 'no_active_subscription') {
+    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}&create=1`, label: '创建该 VPS 订阅' }
+  }
+  if (linkage.status === 'multiple_active_subscriptions') {
+    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}`, label: '去订阅页选择处理' }
+  }
+  if (linkage.subscription_id) {
+    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}`, label: '查看关联订阅' }
+  }
+  return null
+}
+
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
   const [state, setState] = useState(INITIAL_STATE)
+  const [selectors, setSelectors] = useState(INITIAL_SELECTOR_STATE)
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraftState>({
     renewalDecision: 'unreviewed',
     reason: '',
@@ -108,6 +142,7 @@ export function VPSDetailPage() {
   const [decisionSubmitting, setDecisionSubmitting] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [decisionNotice, setDecisionNotice] = useState<string | null>(null)
+  const [decisionAction, setDecisionAction] = useState<{ to: string; label: string } | null>(null)
   const [activeDrawer, setActiveDrawer] = useState<VPSDetailDrawerMode>(null)
   const [factDraft, setFactDraft] = useState<FactEditFormState | null>(null)
   const [factSubmitting, setFactSubmitting] = useState(false)
@@ -152,21 +187,23 @@ export function VPSDetailPage() {
     ])
       .then(([detail, timeline, services, domains, subscriptionState]) => {
         if (cancelled) return
+        const normalizedDetail = normalizeVPSDetail(detail)
         setState({
           vpsId,
           error: null,
-          detail,
+          detail: normalizedDetail,
           timeline,
           services,
           domains,
           subscriptions: subscriptionState.subscriptions,
           subscriptionsError: subscriptionState.subscriptionsError,
         })
-        setDecisionDraft({ renewalDecision: detail.renewal_decision, reason: '' })
+        setDecisionDraft({ renewalDecision: normalizedDetail.renewal_decision, reason: '' })
         setDecisionError(null)
         setDecisionNotice(null)
+        setDecisionAction(null)
         setActiveDrawer(null)
-        setFactDraft(detailToFactEditForm(detail))
+        setFactDraft(detailToFactEditForm(normalizedDetail))
         setFactError(null)
         setFactNotice(null)
         setLinkDraft({ nodeId: '', note: '' })
@@ -206,7 +243,7 @@ export function VPSDetailPage() {
   }, [vpsId])
 
   async function refreshDetail(targetVPSId: string): Promise<VPSAssetDetail> {
-    const detail = await getVPSAsset(targetVPSId)
+    const detail = normalizeVPSDetail(await getVPSAsset(targetVPSId))
     setState((current) => {
       if (current.vpsId !== targetVPSId || !current.timeline) return current
       return { ...current, error: null, detail }
@@ -215,13 +252,14 @@ export function VPSDetailPage() {
   }
 
   async function refreshDetailAndTimeline(targetVPSId: string): Promise<VPSAssetDetail> {
-    const [detail, timeline, services, domains, subscriptionState] = await Promise.all([
+    const [detailResult, timeline, services, domains, subscriptionState] = await Promise.all([
       getVPSAsset(targetVPSId),
       getVPSTimeline(targetVPSId),
       listVPSServices(targetVPSId),
       listVPSDomains(targetVPSId),
       loadSubscriptions(targetVPSId),
     ])
+    const detail = normalizeVPSDetail(detailResult)
     setState({
       vpsId: targetVPSId,
       error: null,
@@ -256,6 +294,7 @@ export function VPSDetailPage() {
   function clearDecisionFeedback() {
     setDecisionError(null)
     setDecisionNotice(null)
+    setDecisionAction(null)
   }
 
   function handleDecisionDraftChange(draft: DecisionDraftState) {
@@ -310,6 +349,30 @@ export function VPSDetailPage() {
     }
   }
 
+  function ensureNodesLoaded() {
+    if (selectors.nodesLoading || selectors.nodes.length > 0) return
+    setSelectors((current) => ({ ...current, nodesLoading: true, nodesError: null }))
+    listNodes()
+      .then((nodes) => setSelectors((current) => ({ ...current, nodesLoading: false, nodesError: null, nodes })))
+      .catch((error: unknown) => setSelectors((current) => ({ ...current, nodesLoading: false, nodesError: describeError(error, '加载 Node 列表失败'), nodes: [] })))
+  }
+
+  function ensureProvidersLoaded() {
+    if (selectors.providersLoading || selectors.providers.length > 0) return
+    setSelectors((current) => ({ ...current, providersLoading: true, providersError: null }))
+    listProviders()
+      .then((providers) => setSelectors((current) => ({ ...current, providersLoading: false, providersError: null, providers })))
+      .catch((error: unknown) => setSelectors((current) => ({ ...current, providersLoading: false, providersError: describeError(error, '加载服务商列表失败'), providers: [] })))
+  }
+
+  function ensureTargetsLoaded() {
+    if (selectors.targetsLoading || selectors.targets.length > 0) return
+    setSelectors((current) => ({ ...current, targetsLoading: true, targetsError: null }))
+    listTargets()
+      .then((targets) => setSelectors((current) => ({ ...current, targetsLoading: false, targetsError: null, targets })))
+      .catch((error: unknown) => setSelectors((current) => ({ ...current, targetsLoading: false, targetsError: describeError(error, '加载 Target 列表失败'), targets: [] })))
+  }
+
   function openDrawer(mode: NonNullable<VPSDetailDrawerMode>) {
     if (mode === 'decision') {
       clearDecisionFeedback()
@@ -317,15 +380,18 @@ export function VPSDetailPage() {
     if (mode === 'node-link') {
       clearLinkFormFeedback()
       setUnlinkError(null)
+      ensureNodesLoaded()
     }
     if (mode === 'experience') {
       clearExperienceFeedback()
     }
     if (mode === 'service') {
       clearServiceFeedback()
+      ensureTargetsLoaded()
     }
     if (mode === 'domain') {
       clearDomainFeedback()
+      ensureTargetsLoaded()
     }
     setActiveDrawer(mode)
   }
@@ -378,13 +444,14 @@ export function VPSDetailPage() {
     const reason = decisionDraft.reason.trim()
     setDecisionSubmitting(true)
     try {
-      await updateVPSAsset(detail.vps_id, {
+      const updated = await updateVPSAsset(detail.vps_id, {
         renewal_decision: decisionDraft.renewalDecision,
         ...(reason ? { renewal_reason: reason } : {}),
       })
       const refreshed = await refreshDetailAndTimeline(detail.vps_id)
       setDecisionDraft({ renewalDecision: refreshed.renewal_decision, reason: '' })
-      setDecisionNotice('续费决策已更新，资产历史已刷新')
+      setDecisionNotice(subscriptionLinkageNotice(updated.renewal_subscription_linkage))
+      setDecisionAction(subscriptionLinkageAction(updated.renewal_subscription_linkage, detail.vps_id))
       setActiveDrawer(null)
     } catch (error: unknown) {
       setDecisionError(describeError(error, '更新续费决策失败'))
@@ -394,6 +461,7 @@ export function VPSDetailPage() {
   }
 
   function openFactEdit(detail: VPSAssetDetail) {
+    ensureProvidersLoaded()
     setFactDraft(detailToFactEditForm(detail))
     setFactError(null)
     setFactNotice(null)
@@ -437,7 +505,7 @@ export function VPSDetailPage() {
 
     const nodeId = linkDraft.nodeId.trim()
     if (!nodeId) {
-      setLinkError('Node ID 不能为空')
+      setLinkError('请选择要关联的 Node。')
       setLinkNotice(null)
       return
     }
@@ -669,6 +737,9 @@ export function VPSDetailPage() {
       return factDraft ? (
         <VPSFactsEditForm
           draft={factDraft}
+          providers={selectors.providers}
+          providersLoading={selectors.providersLoading}
+          providersError={selectors.providersError}
           submitting={factSubmitting}
           error={factError}
           notice={factNotice}
@@ -683,6 +754,9 @@ export function VPSDetailPage() {
         <VPSNodeLinkForm
           detail={detail}
           draft={linkDraft}
+          nodes={selectors.nodes}
+          nodesLoading={selectors.nodesLoading}
+          nodesError={selectors.nodesError}
           controlsDisabled={linkControlsDisabled}
           submitting={linkSubmitting}
           error={linkError}
@@ -713,6 +787,9 @@ export function VPSDetailPage() {
       return (
         <VPSServicesForm
           draft={serviceDraft}
+          targets={selectors.targets}
+          targetsLoading={selectors.targetsLoading}
+          targetsError={selectors.targetsError}
           submitting={serviceSubmitting}
           error={serviceError}
           notice={serviceNotice}
@@ -727,6 +804,10 @@ export function VPSDetailPage() {
       return (
         <VPSDomainsForm
           draft={domainDraft}
+          services={state.services}
+          targets={selectors.targets}
+          targetsLoading={selectors.targetsLoading}
+          targetsError={selectors.targetsError}
           submitting={domainSubmitting}
           error={domainError}
           notice={domainNotice}
@@ -769,11 +850,20 @@ export function VPSDetailPage() {
         </p>
       ) : null}
       {decisionNotice ? (
-        <p className="asset-operation-feedback" role="status">{decisionNotice}</p>
+        <p className="asset-operation-feedback" role="status">
+          {decisionNotice}
+          {decisionAction ? (
+            <>
+              {' '}
+              <Link className="text-link" to={decisionAction.to}>{decisionAction.label}</Link>
+            </>
+          ) : null}
+        </p>
       ) : null}
 
       <div className="page-stack vps-detail-evidence-stack">
         <VPSRenewalEvidenceSection
+          vpsID={detail.vps_id}
           primarySubscription={primarySubscription}
           subscriptionLoadFailed={subscriptionLoadFailed}
           subscriptionError={state.subscriptionsError}
@@ -787,7 +877,7 @@ export function VPSDetailPage() {
         />
 
         <VPSNodeLinksSection
-          nodes={detail.node_links}
+          nodes={detail.node_links ?? []}
           unlinkingNodeId={unlinkingNodeId}
           linkFeedback={activeDrawer === 'node-link' ? null : linkFeedback}
           linkFeedbackIsError={linkFeedbackIsError}

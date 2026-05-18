@@ -4,7 +4,10 @@ import type {
   AssetServiceRecord,
   AssetServiceStatus,
   AssetServiceType,
+  NodeRecord,
+  ProviderRecord,
   SubscriptionRecord,
+  TargetRecord,
   VPSAssetDetail,
   VPSExperienceCategory,
   VPSExperienceSeverity,
@@ -22,6 +25,18 @@ export type VPSDetailPageState = {
   domains: AssetDomainRecord[]
   subscriptions: SubscriptionRecord[]
   subscriptionsError: string | null
+}
+
+export type VPSDetailSelectorState = {
+  nodesLoading: boolean
+  nodesError: string | null
+  nodes: NodeRecord[]
+  providersLoading: boolean
+  providersError: string | null
+  providers: ProviderRecord[]
+  targetsLoading: boolean
+  targetsError: string | null
+  targets: TargetRecord[]
 }
 
 export type VPSDetailDrawerMode =

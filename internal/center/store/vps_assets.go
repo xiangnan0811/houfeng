@@ -12,6 +12,7 @@ import (
 
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/renewals"
+	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -296,51 +297,91 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 }
 
 func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistory(ctx context.Context, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {
+	record, _, err := r.patchVPSAssetWithHistoryAndOptionalSubscriptionLinkage(ctx, vpsID, input, false)
+	return record, err
+}
+
+func (r *PostgresVPSAssetRepository) PatchVPSAssetWithSubscriptionRenewalLinkage(ctx context.Context, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error) {
+	input = vpsassets.NormalizePatchInput(input)
+	if err := vpsassets.ValidatePatchInput(input); err != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
+	}
+	if !input.HasChanges() {
+		record, err := r.GetVPSAsset(ctx, vpsID)
+		return record, noRenewalSubscriptionLinkage(), err
+	}
+	if !input.RenewalDecision.Set || !vpsassets.IsCancellationRenewalDecision(input.RenewalDecision.Value) {
+		record, err := r.PatchVPSAsset(ctx, vpsID, input)
+		return record, noRenewalSubscriptionLinkage(), err
+	}
+	return r.patchVPSAssetWithHistoryAndOptionalSubscriptionLinkage(ctx, vpsID, input, true)
+}
+
+func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscriptionLinkage(ctx context.Context, vpsID string, input vpsassets.PatchInput, linkSubscription bool) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error) {
 	if r.beginTx == nil {
-		return vpsassets.Record{}, errors.New("vps asset repository cannot record asset history without transaction support")
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, errors.New("vps asset repository cannot record asset history without transaction support")
 	}
 
 	tx, err := r.beginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return vpsassets.Record{}, fmt.Errorf("begin vps asset history transaction: %w", err)
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("begin vps asset history transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	current, err := scanVPSAsset(tx.QueryRow(ctx, `
-		select `+vpsAssetSelectColumns+`
-		from vps_assets
-		where vps_id = $1
-		for update`, vpsID))
+			select `+vpsAssetSelectColumns+`
+			from vps_assets
+			where vps_id = $1
+			for update`, vpsID))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, vpsassets.ErrVPSAssetNotFound
 	}
 	if err != nil {
-		return vpsassets.Record{}, fmt.Errorf("query vps asset %q before history patch: %w", vpsID, err)
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("query vps asset %q before history patch: %w", vpsID, err)
 	}
 
 	record, err := patchVPSAssetRow(ctx, tx, vpsID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, vpsassets.ErrVPSAssetNotFound
 	}
 	if err != nil {
 		if isVPSAssetInvalidPostgresError(err) {
-			return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+			return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, vpsassets.ErrInvalidVPSAssetInput
 		}
-		return vpsassets.Record{}, fmt.Errorf("patch vps asset %q: %w", vpsID, err)
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("patch vps asset %q: %w", vpsID, err)
 	}
 
+	if err := recordVPSAssetHistoryChanges(ctx, tx, current, record, input); err != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
+	}
+
+	linkage := noRenewalSubscriptionLinkage()
+	if linkSubscription && current.RenewalDecision != record.RenewalDecision && vpsassets.IsCancellationRenewalDecision(record.RenewalDecision) {
+		linkage, err = cancelSingleActiveSubscriptionAutoRenew(ctx, tx, record.VPSID)
+		if err != nil {
+			return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("commit vps asset history transaction: %w", err)
+	}
+	return record, linkage, nil
+}
+
+func recordVPSAssetHistoryChanges(ctx context.Context, tx pgx.Tx, current, record vpsassets.Record, input vpsassets.PatchInput) error {
 	if current.RenewalDecision != record.RenewalDecision {
 		fromDecision := current.RenewalDecision
 		if _, err := createRenewalDecision(ctx, tx, renewals.CreateDecisionInput{
-			VPSID:        vpsID,
+			VPSID:        record.VPSID,
 			FromDecision: &fromDecision,
 			ToDecision:   record.RenewalDecision,
 			Reason:       input.RenewalReason.Value,
 		}); err != nil {
 			if errors.Is(err, renewals.ErrInvalidRenewalDecisionInput) || errors.Is(err, renewals.ErrRenewalTimelineNotFound) {
-				return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+				return vpsassets.ErrInvalidVPSAssetInput
 			}
-			return vpsassets.Record{}, fmt.Errorf("record renewal decision history for vps %q: %w", vpsID, err)
+			return fmt.Errorf("record renewal decision history for vps %q: %w", record.VPSID, err)
 		}
 	}
 
@@ -353,9 +394,9 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistory(ctx context.Contex
 			ToIPv6:   record.IPv6,
 		}); err != nil {
 			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
-				return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+				return vpsassets.ErrInvalidVPSAssetInput
 			}
-			return vpsassets.Record{}, fmt.Errorf("record ip history for vps %q: %w", vpsID, err)
+			return fmt.Errorf("record ip history for vps %q: %w", record.VPSID, err)
 		}
 	}
 
@@ -370,16 +411,164 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistory(ctx context.Contex
 			Virtualization: record.Virtualization,
 		}); err != nil {
 			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
-				return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
+				return vpsassets.ErrInvalidVPSAssetInput
 			}
-			return vpsassets.Record{}, fmt.Errorf("record spec snapshot for vps %q: %w", vpsID, err)
+			return fmt.Errorf("record spec snapshot for vps %q: %w", record.VPSID, err)
+		}
+	}
+	return nil
+}
+
+func noRenewalSubscriptionLinkage() vpsassets.RenewalSubscriptionLinkage {
+	return vpsassets.RenewalSubscriptionLinkage{
+		Status:  vpsassets.RenewalSubscriptionLinkageNone,
+		Message: "续费决策不需要联动订阅自动续费。",
+	}
+}
+
+func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vpsID string) (vpsassets.RenewalSubscriptionLinkage, error) {
+	records, err := listActiveSubscriptionsForVPSForUpdate(ctx, tx, vpsID)
+	if err != nil {
+		return vpsassets.RenewalSubscriptionLinkage{}, err
+	}
+	if len(records) == 0 {
+		return vpsassets.RenewalSubscriptionLinkage{
+			Status:         vpsassets.RenewalSubscriptionLinkageNoActiveSubscription,
+			CandidateCount: 0,
+			Message:        "缺少生效中的订阅记录，续费决策已保存但没有自动取消订阅自动续费。",
+		}, nil
+	}
+	if len(records) > 1 {
+		return vpsassets.RenewalSubscriptionLinkage{
+			Status:         vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription,
+			CandidateCount: len(records),
+			Message:        "存在多条生效中的订阅记录，续费决策已保存但未自动批量修改订阅；请到订阅页选择要取消自动续费的记录。",
+		}, nil
+	}
+
+	current := records[0]
+	input := subscriptions.NormalizePatchInput(subscriptions.PatchInput{
+		AutoRenew:          subscriptions.PatchBool(false),
+		AutoRenewCancelled: subscriptions.PatchBool(true),
+	})
+	if err := subscriptions.ValidatePatchInput(input); err != nil {
+		return vpsassets.RenewalSubscriptionLinkage{}, err
+	}
+	if !subscriptionPriceHistoryChanged(current, applySubscriptionPatchPreview(current, input)) {
+		return vpsassets.RenewalSubscriptionLinkage{
+			Status:         vpsassets.RenewalSubscriptionLinkageAlreadyCancelled,
+			CandidateCount: 1,
+			SubscriptionID: current.SubscriptionID,
+			Message:        "关联订阅已处于取消自动续费状态。",
+		}, nil
+	}
+
+	updated, err := patchSubscriptionRow(ctx, tx, current.SubscriptionID, input)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vpsassets.RenewalSubscriptionLinkage{}, subscriptions.ErrSubscriptionNotFound
+	}
+	if err != nil {
+		if isSubscriptionInvalidPostgresError(err) {
+			return vpsassets.RenewalSubscriptionLinkage{}, subscriptions.ErrInvalidSubscriptionInput
+		}
+		return vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("patch subscription %q for vps renewal linkage: %w", current.SubscriptionID, err)
+	}
+	if subscriptionPriceHistoryChanged(current, updated) {
+		if _, err := createPriceHistory(ctx, tx, renewals.CreatePriceHistoryInput{
+			From: current,
+			To:   updated,
+		}); err != nil {
+			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+				return vpsassets.RenewalSubscriptionLinkage{}, subscriptions.ErrInvalidSubscriptionInput
+			}
+			return vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("record price history for subscription %q: %w", current.SubscriptionID, err)
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return vpsassets.Record{}, fmt.Errorf("commit vps asset history transaction: %w", err)
+	return vpsassets.RenewalSubscriptionLinkage{
+		Status:         vpsassets.RenewalSubscriptionLinkageUpdated,
+		CandidateCount: 1,
+		SubscriptionID: updated.SubscriptionID,
+		Updated:        true,
+		Message:        "已同步取消关联订阅的自动续费。",
+	}, nil
+}
+
+func listActiveSubscriptionsForVPSForUpdate(ctx context.Context, tx pgx.Tx, vpsID string) ([]subscriptions.Record, error) {
+	rows, err := tx.Query(ctx, `
+		select `+subscriptionSelectColumns+`
+		from subscriptions
+		where vps_id = $1 and status = $2
+		order by renew_at asc nulls last, subscription_id
+		for update`, vpsID, string(subscriptions.StatusActive))
+	if err != nil {
+		return nil, fmt.Errorf("query active subscriptions for vps %q: %w", vpsID, err)
 	}
-	return record, nil
+	defer rows.Close()
+
+	records := make([]subscriptions.Record, 0)
+	for rows.Next() {
+		record, err := scanSubscription(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan active subscription for vps %q: %w", vpsID, err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active subscriptions for vps %q: %w", vpsID, err)
+	}
+	return records, nil
+}
+
+func applySubscriptionPatchPreview(record subscriptions.Record, input subscriptions.PatchInput) subscriptions.Record {
+	if input.VPSID.Set {
+		record.VPSID = input.VPSID.Value
+	}
+	if input.Price.Set {
+		record.Price = input.Price.Value
+	}
+	if input.Currency.Set {
+		record.Currency = input.Currency.Value
+	}
+	if input.BillingCycle.Set {
+		record.BillingCycle = input.BillingCycle.Value
+	}
+	if input.BillingMonths.Set {
+		record.BillingMonths = input.BillingMonths.Value
+	}
+	if input.Price.Set || input.BillingMonths.Set {
+		record.MonthlyPrice = subscriptions.CalculateMonthlyPrice(record.Price, record.BillingMonths)
+	}
+	if input.StartedAt.Set {
+		record.StartedAt = cloneSubscriptionDate(input.StartedAt.Value)
+	}
+	if input.RenewAt.Set {
+		record.RenewAt = cloneSubscriptionDate(input.RenewAt.Value)
+	}
+	if input.AutoRenew.Set {
+		record.AutoRenew = input.AutoRenew.Value
+	}
+	if input.AutoRenewCancelled.Set {
+		record.AutoRenewCancelled = input.AutoRenewCancelled.Value
+	}
+	if input.Status.Set {
+		record.Status = input.Status.Value
+	}
+	if input.PaymentMethod.Set {
+		record.PaymentMethod = input.PaymentMethod.Value
+	}
+	if input.Note.Set {
+		record.Note = input.Note.Value
+	}
+	return record
+}
+
+func cloneSubscriptionDate(value *subscriptions.Date) *subscriptions.Date {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func patchRequiresVPSAssetHistory(input vpsassets.PatchInput) bool {

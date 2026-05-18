@@ -3,13 +3,15 @@ import type { ReactNode } from 'react'
 import { PageState } from './PageState'
 import { DataTable, type DataTableColumn } from './atoms'
 import { formatDate, formatMoney } from '../lib/format'
-import type { SubscriptionRecord } from '../lib/types'
+import type { SubscriptionRecord, VPSAssetRecord } from '../lib/types'
 import { SubscriptionStatusBadge } from '../pages/assetPageBadges'
 
 type AssetDecisionRenewalTableProps = {
   loading: boolean
   error: string | null
   renewals: SubscriptionRecord[]
+  vpsByID?: Map<string, VPSAssetRecord>
+  renderVPSReference?: (subscription: SubscriptionRecord, vps: VPSAssetRecord | undefined) => ReactNode
   renderActions: (subscription: SubscriptionRecord) => ReactNode
 }
 
@@ -17,18 +19,23 @@ export function AssetDecisionRenewalTable({
   loading,
   error,
   renewals,
+  vpsByID,
+  renderVPSReference,
   renderActions,
 }: AssetDecisionRenewalTableProps) {
   const columns: DataTableColumn<SubscriptionRecord>[] = [
     {
       key: 'subscription',
       label: '订阅 / VPS',
-      render: (subscription) => (
-        <div className="asset-table__identity">
-          <strong>{subscription.vps_id}</strong>
-          <span>{subscription.subscription_id}</span>
-        </div>
-      ),
+      render: (subscription) => {
+        const vps = vpsByID?.get(subscription.vps_id)
+        return (
+          <div className="asset-table__identity">
+            <strong>{renderVPSReference ? renderVPSReference(subscription, vps) : (vps?.display_name ?? subscription.vps_id)}</strong>
+            <span>{vps ? subscription.vps_id : 'VPS 名称未加载'} · {subscription.subscription_id}</span>
+          </div>
+        )
+      },
     },
     {
       key: 'renew',

@@ -184,6 +184,7 @@ function vpsOptions(vps: VPSAssetRecord[]): FilterSelectOption[] {
 export function SubscriptionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
+  const createRequested = searchParams.get('create') === '1'
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState<CreateSubscriptionFormState>(INITIAL_CREATE_FORM)
@@ -193,6 +194,11 @@ export function SubscriptionsPage() {
   const [editForm, setEditForm] = useState<CreateSubscriptionFormState>(INITIAL_CREATE_FORM)
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+  const createPanelOpen = createOpen || createRequested
+  const effectiveCreateForm =
+    createRequested && filters.vps_id && createForm.vpsID === ''
+      ? { ...createForm, vpsID: filters.vps_id }
+      : createForm
 
   useEffect(() => {
     let cancelled = false
@@ -226,17 +232,34 @@ export function SubscriptionsPage() {
     setSearchParams(new URLSearchParams(), { replace: true })
   }
 
+  function clearCreateRequest() {
+    if (!createRequested) return
+    const params = filtersToParams(filters)
+    setSearchParams(params, { replace: true })
+  }
+
+  function openCreatePanel() {
+    setCreateOpen(true)
+    setCreateForm({ ...INITIAL_CREATE_FORM, vpsID: filters.vps_id ?? '' })
+    setCreateError(null)
+    setEditingSubscriptionId(null)
+    setEditForm(INITIAL_CREATE_FORM)
+    setEditError(null)
+  }
+
+  function closeCreatePanel() {
+    setCreateOpen(false)
+    setCreateForm(INITIAL_CREATE_FORM)
+    setCreateError(null)
+    clearCreateRequest()
+  }
+
   function toggleCreatePanel() {
-    setCreateOpen((open) => {
-      const next = !open
-      if (!next) {
-        setCreateForm(INITIAL_CREATE_FORM)
-        setCreateError(null)
-      } else {
-        cancelEdit()
-      }
-      return next
-    })
+    if (createPanelOpen) {
+      closeCreatePanel()
+      return
+    }
+    openCreatePanel()
   }
 
   function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
@@ -245,7 +268,7 @@ export function SubscriptionsPage() {
 
     let input: CreateSubscriptionInput
     try {
-      input = buildCreateInput(createForm)
+      input = buildCreateInput(effectiveCreateForm)
     } catch (error: unknown) {
       setCreateError(describeError(error, '订阅输入无效'))
       return
@@ -263,8 +286,7 @@ export function SubscriptionsPage() {
           ],
           vps: current.vps,
         }))
-        setCreateForm(INITIAL_CREATE_FORM)
-        setCreateOpen(false)
+        closeCreatePanel()
       })
       .catch((error: unknown) => {
         setCreateError(describeError(error, '创建订阅失败'))
@@ -275,6 +297,7 @@ export function SubscriptionsPage() {
   function startEdit(subscription: SubscriptionRecord) {
     setCreateOpen(false)
     setCreateError(null)
+    clearCreateRequest()
     setEditingSubscriptionId(subscription.subscription_id)
     setEditForm(subscriptionToForm(subscription))
     setEditError(null)
@@ -322,6 +345,8 @@ export function SubscriptionsPage() {
     if (!vpsID) return ''
     return state.vps.find((item) => item.vps_id === vpsID)?.display_name ?? vpsID
   }
+
+  const selectedContextVPS = filters.vps_id ? state.vps.find((item) => item.vps_id === filters.vps_id) : null
 
   const columns: DataTableColumn<SubscriptionRecord>[] = [
     {
@@ -400,25 +425,61 @@ export function SubscriptionsPage() {
           </p>
         </div>
         <div className="page-panel__actions">
-          <Button variant={createOpen ? 'secondary' : 'primary'} onClick={toggleCreatePanel}>
-            {createOpen ? '收起创建' : state.subscriptions.length === 0 ? '创建第一条订阅' : '新建订阅'}
+          <Button variant={createPanelOpen ? 'secondary' : 'primary'} onClick={toggleCreatePanel}>
+            {createPanelOpen ? '收起创建' : state.subscriptions.length === 0 ? '创建第一条订阅' : '新建订阅'}
           </Button>
         </div>
       </section>
 
-      {createOpen && (
+      {filters.vps_id ? (
+        <section className="page-panel page-panel--inline">
+          <div>
+            <div className="page-panel__eyebrow">CONTEXT</div>
+            <h2 className="page-panel__title">当前 VPS 上下文</h2>
+            <p className="page-panel__description">
+              正在查看 {selectedContextVPS ? `${selectedContextVPS.display_name}（${selectedContextVPS.vps_id}）` : filters.vps_id} 的订阅记录；创建表单会默认带入该 VPS。
+            </p>
+          </div>
+          <div className="page-panel__actions">
+            <Link className="btn btn--ghost btn--md" to={`/vps/${filters.vps_id}`}>返回 VPS 详情</Link>
+            <Button variant="secondary" onClick={openCreatePanel}>
+              为该 VPS 新建订阅
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {!state.loading && state.vps.length === 0 ? (
+        <section className="page-panel page-panel--inline">
+          <div>
+            <div className="page-panel__eyebrow">PREREQUISITE</div>
+            <h2 className="page-panel__title">需要先录入 VPS</h2>
+            <p className="page-panel__description">订阅必须绑定到一台 VPS。当前没有 VPS 资产，请先建立资产记录再补订阅。</p>
+          </div>
+          <div className="page-panel__actions">
+            <Link className="btn btn--primary btn--md" to="/vps">去创建 VPS</Link>
+          </div>
+        </section>
+      ) : null}
+
+      {createPanelOpen && (
         <section className="page-panel">
           <div className="page-panel__eyebrow">CREATE</div>
           <h2 className="page-panel__title">订阅创建</h2>
           <form onSubmit={handleCreateSubmit}>
             <label className="input-field">
               <span className="input-field__label">订阅 VPS</span>
-              <select className="input" value={createForm.vpsID} onChange={(event) => setCreateForm({ ...createForm, vpsID: event.target.value })}>
+              <select className="input" value={effectiveCreateForm.vpsID} disabled={state.vps.length === 0} onChange={(event) => setCreateForm({ ...createForm, vpsID: event.target.value })}>
                 <option value="">选择 VPS</option>
                 {vpsSelectOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
+              {state.vps.length === 0 ? (
+                <span className="input-field__hint">还没有 VPS 可选。<Link className="text-link" to="/vps">去创建 VPS</Link></span>
+              ) : filters.vps_id ? (
+                <span className="input-field__hint">已从 URL 上下文预填当前 VPS，可切换为其他 VPS。</span>
+              ) : null}
             </label>
             <Input label="价格" type="number" min="0" step="0.01" value={createForm.price} onChange={(event) => setCreateForm({ ...createForm, price: event.target.value })} />
             <Input label="币种" value={createForm.currency} onChange={(event) => setCreateForm({ ...createForm, currency: event.target.value })} />
@@ -552,7 +613,11 @@ export function SubscriptionsPage() {
             columns={columns}
             rows={state.subscriptions}
             rowKey={(subscription) => subscription.subscription_id}
-            emptyContent={<span className="empty-inline">暂无订阅</span>}
+            emptyContent={
+              <span className="empty-inline">
+                {filters.vps_id ? '当前 VPS 暂无订阅，可用上方按钮创建。' : '暂无订阅；请先选择 VPS 或创建订阅记录。'}
+              </span>
+            }
           />
         )}
       </section>

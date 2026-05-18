@@ -154,7 +154,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 2. Signatures
 
-- Frontend API: `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。
+- Frontend API: `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。
 - Decision queue data: `AssetDecisionsPage` 拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
 - VPS inventory data: `VPSPage` 拉取全量 `listVPSAssets()`、`listProviders()` 和 `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views。
 - URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|archived`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
@@ -162,11 +162,13 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 #### 3. Contracts
 
 - Asset Decisions 首屏主 surface 必须是一个统一工作队列；不得恢复三张同权 VPS queue table。
-- 决策编辑必须在 drawer 或同等次级 surface 中完成；保存成功 notice 应在队列 surface 可见。
+- 决策编辑必须在 drawer 或同等次级 surface 中完成；保存成功 notice 应在队列 surface 可见。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
 - `VPSAssetRecord.active_node_link_count` 只能展示 Node 关联数量或未关联状态，**不得**展示 linked node health、最近心跳或异常，除非后端 contract 新增并同步类型/测试。
 - 资料质量提示只能来自已有字段：缺订阅、`active_node_link_count <= 0`、缺 provider、缺 location、缺 SSH/IP access。不要从 provider 名称、region 文案或标签推断风险。
 - VPS inventory quick views 中 derived filters 在前端执行即可；40+ VPS 量级不引入新缓存/状态库，不新增 API 字段。
 - Dashboard 深链进入 VPS 页时，query 必须被页面首屏可见的 tab/chip/drawer 状态承接；不能静默丢弃。
+- 常规业务对象关联输入不得要求用户复制内部 ID：VPS facts 的 Provider、VPS↔Node link 的 Node、VPS service/domain 的 Target、domain 的 Service 都应使用页面加载的数据选择器，并保留“未关联/不关联”选项。选择器为空或加载失败时必须给出明确说明和到对应列表/创建流程的入口；选择 Node/Target 只创建资产引用或链接，不隐式修改 Node/Target/Agent/ProbeItem 语义。
+- `/subscriptions?vps_id=<id>&create=1` 是可落地上下文：订阅页必须显示当前 VPS 筛选/上下文，创建表单预填该 VPS，用户仍可切换或清除筛选。
 
 #### 4. Validation & Error Matrix
 
@@ -177,19 +179,56 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | VPS inventory subscriptions empty | 行级展示 `缺订阅`，quick view `缺订阅` 可筛出对应 VPS |
 | VPS inventory URL has unsupported `view` | 降级为 `all`，下次用户操作时写回合法 query |
 | user removes a chip or clears all filters | URL-state 与 visible rows 同步更新，不重新请求 `/api/vps?...` derived query |
+| `/subscriptions?vps_id=<id>&create=1` | 显示当前 VPS context panel，创建表单打开并预填该 VPS；关闭创建表单时移除 `create=1` 但保留 `vps_id` |
+| selector candidate list is empty | 表单保留空值能力，显示去对应列表/创建流程的 Link/action，不要求手输内部 ID |
+| selector list request fails | 表单显示局部错误/提示，已保存主页面数据仍可查看；不得把加载失败当成真实“无候选” |
 
 #### 5. Good/Base/Bad Cases
 
 - Good: `/vps?view=unlinked&renewal_decision=unreviewed` 首屏显示 `视图: 未关联` 和 `续费: 未评估` chips，列表只显示同时满足条件的 rows。
 - Good: 资产决策保存 `migrate` 后，VPS 从 `待评估` tab 消失并出现在 `迁移` tab，notice 留在队列 surface。
+- Good: 资产决策保存 `cancel` 后，notice 继续展示 `VPS -> 取消`，并追加 API 返回的订阅联动消息 / 订阅页 action。
+- Good: VPS 详情打开 Node link Drawer 时懒加载 `listNodes()`，用 `选择 Node` selector 展示名称、ID、provider、生命周期和健康状态。
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
 - Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked node health。
 - Bad: Page 直接 `fetch('/api/vps')` 或在组件层调 API；业务请求必须走 `lib/api.ts`。
+- Bad: 在 VPS 详情表单里让用户输入 `nd_...`、`tg_...`、`svc_...` 作为常规路径，且不给候选列表或落地入口。
 
 #### 6. Tests Required
 
-- `AssetDecisionsPage.test.tsx`: 续费窗口请求、统一工作队列渲染、drawer 更新决策、保存后队列移动/移除、错误/空态。
-- `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/Node/资料质量展示、创建 VPS 流程。
+- `AssetDecisionsPage.test.tsx`: 续费窗口请求、统一工作队列渲染、drawer 更新决策、保存后队列移动/移除、取消类联动 message/action、错误/空态。
+- `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/Node/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
+- `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
+- `VPSDetailPage.test.tsx`: Provider/Node/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：常规关联让用户复制内部 ID，且加载失败时只能猜。
+<Input label="Node ID" value={draft.nodeId} onChange={...} placeholder="nd_..." />
+```
+
+```tsx
+// 正确：页面加载候选，选择器展示可辨识信息；无候选时给出落地入口。
+<select aria-label="选择 Node" value={draft.nodeId} onChange={...}>
+  <option value="">选择现有 Node</option>
+  {nodes.map((node) => <option value={node.node_id}>{node.display_name} · {node.node_id}</option>)}
+</select>
+<Link to="/nodes">Node 列表</Link>
+```
+
+```tsx
+// 错误：接到 create=1 后用 effect 同步 setState 打开表单，触发 react-hooks/set-state-in-effect。
+useEffect(() => {
+  if (searchParams.get('create') === '1') setCreateOpen(true)
+}, [searchParams])
+```
+
+```tsx
+// 正确：把 URL 作为可见状态来源，必要的本地开关只处理用户交互。
+const createRequested = searchParams.get('create') === '1'
+const createPanelOpen = createOpen || createRequested
+```
 
 ### Asset service 数据流
 
@@ -287,7 +326,7 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 
 #### Contracts
 
-- `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。
+- `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。Provider/Node/Target selector 数据可在对应 Drawer 打开时懒加载，避免主详情首屏为选择器阻塞。
 - VPS scoped subscription 只作为续费/成本 evidence。订阅请求失败时显示请求错误和未知状态，不得把 failure 当成真实 `缺订阅`。
 - `VPSAssetDetail.node_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_node_link_count` 在列表页只能代表数量的限制。
 - 决策、facts、Node link、experience log、service create、domain create 的复杂输入使用 Drawer。关闭 Drawer 后，保存成功 notice 必须留在主页面可见 surface 内。

@@ -82,6 +82,12 @@ export function NodeLinkedVPSSection({
       >
         <p className="node-vps-table__hint">
           VPS 是资产账本里的购买、续费与归属对象；节点是 agent 接入后的运行实例。
+          {!loading && loaded && records.length === 0 ? (
+            <>
+              {' '}
+              <Link className="text-link" to="/vps?view=unlinked">去 VPS 库存选择并关联</Link>
+            </>
+          ) : null}
         </p>
         {error ? <p className="empty-inline" role="alert">{error}</p> : null}
         <DataTable

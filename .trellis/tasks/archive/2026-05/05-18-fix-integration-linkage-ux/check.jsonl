@@ -1,0 +1,11 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/05-18-fix-integration-linkage-ux/prd.md", "reason": "requirements and acceptance criteria for verification"}
+{"file": ".trellis/tasks/05-18-fix-integration-linkage-ux/research/frontend-linkage-audit.md", "reason": "frontend gaps to verify"}
+{"file": ".trellis/tasks/05-18-fix-integration-linkage-ux/research/backend-linkage-audit.md", "reason": "backend gaps to verify"}
+{"file": ".trellis/tasks/05-18-fix-integration-linkage-ux/research/spec-linkage-context.md", "reason": "spec boundaries to verify"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "backend asset ledger and linkage invariants"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "backend quality checklist"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "frontend data and URL-state contracts"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "frontend component and drawer conventions"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "frontend styling constraints"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "frontend verification requirements"}

@@ -37,6 +37,8 @@ const (
 
 type RenewalDecision string
 
+type RenewalSubscriptionLinkageStatus string
+
 const (
 	RenewalUnreviewed         RenewalDecision = "unreviewed"
 	RenewalKeep               RenewalDecision = "keep"
@@ -45,6 +47,12 @@ const (
 	RenewalCancel             RenewalDecision = "cancel"
 	RenewalAutoRenewCancelled RenewalDecision = "auto_renew_cancelled"
 	RenewalReplaced           RenewalDecision = "replaced"
+
+	RenewalSubscriptionLinkageNone                       RenewalSubscriptionLinkageStatus = "none"
+	RenewalSubscriptionLinkageUpdated                    RenewalSubscriptionLinkageStatus = "subscription_updated"
+	RenewalSubscriptionLinkageAlreadyCancelled           RenewalSubscriptionLinkageStatus = "subscription_already_cancelled"
+	RenewalSubscriptionLinkageNoActiveSubscription       RenewalSubscriptionLinkageStatus = "no_active_subscription"
+	RenewalSubscriptionLinkageMultipleActiveSubscription RenewalSubscriptionLinkageStatus = "multiple_active_subscriptions"
 )
 
 const (
@@ -81,6 +89,14 @@ type Record struct {
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
 	ArchivedAt          *time.Time      `json:"archived_at"`
+}
+
+type RenewalSubscriptionLinkage struct {
+	Status         RenewalSubscriptionLinkageStatus `json:"status"`
+	CandidateCount int                              `json:"candidate_count"`
+	SubscriptionID string                           `json:"subscription_id,omitempty"`
+	Updated        bool                             `json:"updated"`
+	Message        string                           `json:"message"`
 }
 
 type CreateInput struct {
@@ -503,6 +519,15 @@ func IsValidUsageStatus(status UsageStatus) bool {
 func IsValidRenewalDecision(decision RenewalDecision) bool {
 	switch decision {
 	case RenewalUnreviewed, RenewalKeep, RenewalObserve, RenewalMigrate, RenewalCancel, RenewalAutoRenewCancelled, RenewalReplaced:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsCancellationRenewalDecision(decision RenewalDecision) bool {
+	switch decision {
+	case RenewalCancel, RenewalAutoRenewCancelled:
 		return true
 	default:
 		return false
