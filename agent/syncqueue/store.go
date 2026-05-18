@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultMaxEntries = 2048
+	defaultMaxEntries = 65536
 	defaultMaxAge     = 72 * time.Hour
 )
 

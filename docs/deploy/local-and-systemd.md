@@ -53,7 +53,7 @@ HOUFENG_HTTP_ADDR=:8080
 HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
 HOUFENG_PUBLIC_BASE_URL=https://center.example.com
-HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
 HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
@@ -131,7 +131,7 @@ Minimum `/etc/houfeng-agent/agent.env`:
 HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
 HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
-HOUFENG_AGENT_BUFFER_MAX_ENTRIES=2048
+HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h
 ```
 
@@ -169,7 +169,7 @@ HOUFENG_HTTP_ADDR=:8080
 HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
 HOUFENG_PUBLIC_BASE_URL=https://center.example.com
-HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
 HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
@@ -217,7 +217,7 @@ sudo tee /etc/houfeng-agent/agent.env >/dev/null <<'EOF'
 HOUFENG_AGENT_SERVER_URL=https://center.example.com
 HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
-HOUFENG_AGENT_BUFFER_MAX_ENTRIES=2048
+HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h
 EOF
 sudo chown root:houfeng-agent /etc/houfeng-agent/agent.env

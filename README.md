@@ -45,7 +45,7 @@ export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
 export HOUFENG_PUBLIC_BASE_URL='http://localhost:8080'
-export HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+export HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
 export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
 

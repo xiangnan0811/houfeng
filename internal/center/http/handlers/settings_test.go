@@ -139,12 +139,12 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	updated.Telegram.BotToken = "bot-token"
 	updated.Telegram.ChatID = "chat-id"
 	updated.Telegram.RuntimeManaged = true
-	updated.HostSampleFrequencyTier = "1m"
-	updated.ProbeFrequencyDefaults.HTTP = "1m"
+	updated.HostSampleFrequencyTier = "5s"
+	updated.ProbeFrequencyDefaults.HTTP = "5s"
 	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"1m","probe_frequency_defaults":{"tcp":"5m","http":"1m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":60,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -153,8 +153,8 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
-	if repo.putSettingsInput.HostSampleFrequencyTier != "1m" {
-		t.Fatalf("expected persisted host sample frequency tier %q, got %q", "1m", repo.putSettingsInput.HostSampleFrequencyTier)
+	if repo.putSettingsInput.HostSampleFrequencyTier != "5s" {
+		t.Fatalf("expected persisted host sample frequency tier %q, got %q", "5s", repo.putSettingsInput.HostSampleFrequencyTier)
 	}
 	if repo.putSettingsInput.Telegram.BotToken != "bot-token" {
 		t.Fatalf("expected repository input bot token %q, got %q", "bot-token", repo.putSettingsInput.Telegram.BotToken)
@@ -194,11 +194,11 @@ func TestSettingsHandlerPreservesExistingTelegramTokenWhenBotTokenIsOmitted(t *t
 	updated.Telegram.BotToken = "current-token"
 	updated.Telegram.ChatID = "chat-id"
 	updated.Telegram.RuntimeManaged = false
-	updated.HostSampleFrequencyTier = "1m"
+	updated.HostSampleFrequencyTier = "5s"
 	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"chat-id"},"host_sample_frequency_tier":"1m","probe_frequency_defaults":{"tcp":"5m","http":"1m","tls":"15m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":60,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":14,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"chat-id"},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":14,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -219,7 +219,7 @@ func TestSettingsHandlerPreservesExistingTelegramTokenWhenBotTokenIsOmitted(t *t
 }
 
 func TestSettingsHandlerPreservesEffectiveFreshInstallSettingsOnUnrelatedSave(t *testing.T) {
-	coreTier := "1m"
+	coreTier := "5s"
 	current := centersettings.Default()
 	current.IncidentDefaults.SweepIntervalSeconds = 90
 	current.OverrideRules.NodeLabels = []centersettings.NodeLabelOverrideRule{{
@@ -235,7 +235,7 @@ func TestSettingsHandlerPreservesEffectiveFreshInstallSettingsOnUnrelatedSave(t 
 	}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"","runtime_managed":false},"host_sample_frequency_tier":"5m","probe_frequency_defaults":{"tcp":"5m","http":"5m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":90,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[{"label":"核心","overrides":{"host_sample_frequency_tier":"1m"}}],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":14,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"","runtime_managed":false},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":90,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[{"label":"核心","overrides":{"host_sample_frequency_tier":"5s"}}],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":14,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -256,11 +256,11 @@ func TestSettingsHandlerPreservesEffectiveFreshInstallSettingsOnUnrelatedSave(t 
 	if repo.putSettingsInput.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier == nil {
 		t.Fatal("HostSampleFrequencyTier override = nil, want preserved legacy core override")
 	}
-	if *repo.putSettingsInput.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier != "1m" {
+	if *repo.putSettingsInput.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier != "5s" {
 		t.Fatalf(
 			"HostSampleFrequencyTier override = %q, want %q",
 			*repo.putSettingsInput.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier,
-			"1m",
+			"5s",
 		)
 	}
 }
@@ -269,7 +269,7 @@ func TestSettingsHandlerRejectsUnknownFieldsOnPut(t *testing.T) {
 	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","unexpected":true},"host_sample_frequency_tier":"5m","probe_frequency_defaults":{"tcp":"5m","http":"5m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":60,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","unexpected":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -287,7 +287,7 @@ func TestSettingsHandlerMapsValidationFailureToBadRequest(t *testing.T) {
 	}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"","chat_id":""},"host_sample_frequency_tier":"5m","probe_frequency_defaults":{"tcp":"5m","http":"5m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":60,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"","chat_id":""},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -302,7 +302,7 @@ func TestSettingsHandlerRejectsTelegramTokenWithoutChatID(t *testing.T) {
 	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"replacement-token","chat_id":""},"host_sample_frequency_tier":"5m","probe_frequency_defaults":{"tcp":"5m","http":"5m","tls":"5m"},"incident_defaults":{"heartbeat_interval_seconds":30,"stale_threshold_intervals":3,"sweep_interval_seconds":60,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"replacement-token","chat_id":""},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"node_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 

@@ -254,14 +254,23 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate(Default()) error = %v", err)
 	}
-	if got.HostSampleFrequencyTier != "5m" {
-		t.Fatalf("HostSampleFrequencyTier = %q, want %q", got.HostSampleFrequencyTier, "5m")
+	if got.HostSampleFrequencyTier != "5s" {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", got.HostSampleFrequencyTier, "5s")
 	}
-	if got.ProbeFrequencyDefaults.HTTP != "5m" {
-		t.Fatalf("ProbeFrequencyDefaults.HTTP = %q, want %q", got.ProbeFrequencyDefaults.HTTP, "5m")
+	if got.ProbeFrequencyDefaults.TCP != "5s" {
+		t.Fatalf("ProbeFrequencyDefaults.TCP = %q, want %q", got.ProbeFrequencyDefaults.TCP, "5s")
+	}
+	if got.ProbeFrequencyDefaults.HTTP != "5s" {
+		t.Fatalf("ProbeFrequencyDefaults.HTTP = %q, want %q", got.ProbeFrequencyDefaults.HTTP, "5s")
 	}
 	if got.ProbeFrequencyDefaults.TLS != "6h" {
 		t.Fatalf("ProbeFrequencyDefaults.TLS = %q, want %q", got.ProbeFrequencyDefaults.TLS, "6h")
+	}
+	if got.IncidentDefaults.HeartbeatIntervalSeconds != 5 {
+		t.Fatalf("HeartbeatIntervalSeconds = %d, want 5", got.IncidentDefaults.HeartbeatIntervalSeconds)
+	}
+	if got.IncidentDefaults.SweepIntervalSeconds != 5 {
+		t.Fatalf("SweepIntervalSeconds = %d, want 5", got.IncidentDefaults.SweepIntervalSeconds)
 	}
 	if got.Telegram.RuntimeManaged {
 		t.Fatal("Telegram.RuntimeManaged = true, want false by default")

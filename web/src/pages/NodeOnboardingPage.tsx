@@ -50,7 +50,7 @@ const MANUAL_SERVER_PLACEHOLDER = '<center public base URL>'
 const manualEnvSnippet = `HOUFENG_AGENT_SERVER_URL=${MANUAL_SERVER_PLACEHOLDER}
 HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
-HOUFENG_AGENT_BUFFER_MAX_ENTRIES=2048
+HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h`
 const manualTokenSnippet = `printf '%s' '${MANUAL_TOKEN_PLACEHOLDER}' | sudo tee /etc/houfeng-agent/token >/dev/null`
 

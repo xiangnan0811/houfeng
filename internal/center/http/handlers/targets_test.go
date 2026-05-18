@@ -149,7 +149,7 @@ func TestCreateProbeItemHandlerReturnsCreatedRecord(t *testing.T) {
 			ProbeItemID:    "pb_001",
 			ProbeKind:      "http",
 			Enabled:        true,
-			FrequencyTier:  "1m",
+			FrequencyTier:  targets.FrequencyTier5s,
 			TimeoutSeconds: 5,
 			Config:         json.RawMessage(`{"scheme":"https","path":"/healthz","method":"GET","expected_status_range":[200,299]}`),
 			CreatedAt:      now,
@@ -158,7 +158,7 @@ func TestCreateProbeItemHandlerReturnsCreatedRecord(t *testing.T) {
 	}
 
 	handler := handlers.TargetProbeItems(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/probe-items", strings.NewReader(`{"probe_kind":"http","enabled":true,"frequency_tier":"1m","timeout_seconds":5,"config":{"scheme":"https","path":"/healthz","method":"GET","expected_status_range":[200,299]}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/probe-items", strings.NewReader(`{"probe_kind":"http","enabled":true,"frequency_tier":"5s","timeout_seconds":5,"config":{"scheme":"https","path":"/healthz","method":"GET","expected_status_range":[200,299]}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -175,6 +175,9 @@ func TestCreateProbeItemHandlerReturnsCreatedRecord(t *testing.T) {
 
 	if body.ProbeItemID != "pb_001" {
 		t.Fatalf("expected probe_item_id %q, got %q", "pb_001", body.ProbeItemID)
+	}
+	if repo.createProbeItemInput.FrequencyTier != targets.FrequencyTier5s {
+		t.Fatalf("create input frequency tier = %q, want %q", repo.createProbeItemInput.FrequencyTier, targets.FrequencyTier5s)
 	}
 }
 

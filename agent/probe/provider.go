@@ -270,6 +270,8 @@ func decodeTLSConfig(raw json.RawMessage) (tlsConfig, error) {
 
 func frequencyTierDuration(tier string) (time.Duration, bool) {
 	switch tier {
+	case agentapi.FrequencyTier5s:
+		return 5 * time.Second, true
 	case agentapi.FrequencyTier1m:
 		return time.Minute, true
 	case agentapi.FrequencyTier5m:

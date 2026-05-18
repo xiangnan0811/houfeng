@@ -20,7 +20,7 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-const defaultHeartbeatInterval = 30 * time.Second
+const defaultHeartbeatInterval = 5 * time.Second
 
 var errNotificationSuppressed = errors.New("incident notification suppressed")
 
@@ -323,7 +323,7 @@ func NewSettingsBackedService(nodesRepo NodeRepository, targetsRepo TargetReposi
 		heartbeatInterval = defaultHeartbeatInterval
 	}
 	if sweepInterval <= 0 {
-		sweepInterval = time.Minute
+		sweepInterval = 5 * time.Second
 	}
 	return &Service{
 		nodes:                     nodesRepo,

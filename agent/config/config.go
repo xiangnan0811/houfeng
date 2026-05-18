@@ -10,7 +10,7 @@ import (
 
 const (
 	DefaultBufferFile       = "/var/lib/houfeng-agent/sync-buffer.json"
-	DefaultBufferMaxEntries = 2048
+	DefaultBufferMaxEntries = 65536
 	DefaultBufferMaxAge     = 72 * time.Hour
 )
 

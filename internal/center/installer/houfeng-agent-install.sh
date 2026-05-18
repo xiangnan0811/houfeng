@@ -145,7 +145,7 @@ cat > /etc/houfeng-agent/agent.env <<EOF_ENV
 HOUFENG_AGENT_SERVER_URL=${SERVER_URL}
 HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
-HOUFENG_AGENT_BUFFER_MAX_ENTRIES=2048
+HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h
 EOF_ENV
 chown root:houfeng-agent /etc/houfeng-agent/agent.env

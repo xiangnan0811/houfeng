@@ -20,7 +20,7 @@ func TestSyncResponseRoundTripWithPlan(t *testing.T) {
 			AcceptedAt: acceptedAt,
 			Status:     "accepted",
 			Plan: &agentapi.SyncPlan{
-				HostSampleFrequencyTier: agentapi.FrequencyTier1m,
+				HostSampleFrequencyTier: agentapi.FrequencyTier5s,
 			},
 		}
 
@@ -43,8 +43,8 @@ func TestSyncResponseRoundTripWithPlan(t *testing.T) {
 		if roundTrip.Plan == nil {
 			t.Fatal("Plan = nil, want non-nil")
 		}
-		if roundTrip.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier1m {
-			t.Fatalf("HostSampleFrequencyTier = %q, want %q", roundTrip.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier1m)
+		if roundTrip.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier5s {
+			t.Fatalf("HostSampleFrequencyTier = %q, want %q", roundTrip.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier5s)
 		}
 		if len(roundTrip.Plan.ProbeAssignments) != 0 {
 			t.Fatalf("len(ProbeAssignments) = %d, want 0", len(roundTrip.Plan.ProbeAssignments))
@@ -66,7 +66,7 @@ func TestSyncResponseRoundTripWithPlan(t *testing.T) {
 						MaintenanceContext: false,
 						ProbeItemID:        "probe-http",
 						ProbeKind:          agentapi.ProbeKindHTTP,
-						FrequencyTier:      agentapi.FrequencyTier1m,
+						FrequencyTier:      agentapi.FrequencyTier5s,
 						TimeoutSeconds:     5,
 						Config:             json.RawMessage(`{"path":"/healthz","method":"GET"}`),
 					},

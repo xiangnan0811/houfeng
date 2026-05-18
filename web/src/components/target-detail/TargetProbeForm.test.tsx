@@ -10,7 +10,7 @@ function form(overrides: Partial<ProbeCreateFormState> = {}): ProbeCreateFormSta
   return {
     probeKind: 'tcp',
     enabled: true,
-    frequencyTier: '5m',
+    frequencyTier: '5s',
     timeoutSeconds: '5',
     port: '443',
     httpScheme: 'https',
@@ -43,7 +43,7 @@ describe('TargetProbeForm', () => {
 
     expect(screen.getByText('ProbeItem 创建')).toBeInTheDocument()
     expect(screen.getByLabelText('端口')).toBeInTheDocument()
-    expect(screen.getByLabelText('频率档位')).toHaveValue('5m')
+    expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
     expect(screen.getByRole('button', { name: '创建 ProbeItem' })).toBeInTheDocument()
   })
 

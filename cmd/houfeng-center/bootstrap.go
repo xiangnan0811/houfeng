@@ -104,7 +104,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		notifier,
 		notifierSettingsRepo,
 		slog.Default(),
-		30*time.Second,
+		5*time.Second,
 		cfg.IncidentSweepInterval,
 	)
 	syncSvc := syncing.NewService(syncRepo, incidentSvc)
@@ -289,18 +289,18 @@ func applyEffectiveFreshInstallSettings(record centersettings.CenterSettings, in
 
 func incidentSweepIntervalSeconds(interval time.Duration) int {
 	if interval <= 0 {
-		interval = time.Minute
+		interval = 5 * time.Second
 	}
 	seconds := int(interval.Round(time.Second) / time.Second)
 	if seconds <= 0 {
-		return 60
+		return 5
 	}
 	return seconds
 }
 
 func ensureLegacyCoreHostSampleOverride(rules []centersettings.NodeLabelOverrideRule) []centersettings.NodeLabelOverrideRule {
 	const coreNodeLabel = "核心"
-	coreTier := targets.FrequencyTier1m
+	coreTier := targets.FrequencyTier5s
 
 	for i, rule := range rules {
 		if rule.Label != coreNodeLabel {

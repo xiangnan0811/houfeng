@@ -351,11 +351,11 @@ func TestSettingsPresentationRepositoryReturnsEffectiveFreshInstallSettings(t *t
 	if got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier == nil {
 		t.Fatal("HostSampleFrequencyTier override = nil, want legacy core override")
 	}
-	if *got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier1m {
+	if *got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier5s {
 		t.Fatalf(
 			"HostSampleFrequencyTier override = %q, want %q",
 			*got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier,
-			targets.FrequencyTier1m,
+			targets.FrequencyTier5s,
 		)
 	}
 }
@@ -424,11 +424,11 @@ func TestEnsureLegacyCoreHostSampleOverrideAugmentsExistingCoreRule(t *testing.T
 	if got[0].Overrides.HostSampleFrequencyTier == nil {
 		t.Fatal("HostSampleFrequencyTier override = nil, want legacy core override added in-place")
 	}
-	if *got[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier1m {
+	if *got[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier5s {
 		t.Fatalf(
 			"HostSampleFrequencyTier override = %q, want %q",
 			*got[0].Overrides.HostSampleFrequencyTier,
-			targets.FrequencyTier1m,
+			targets.FrequencyTier5s,
 		)
 	}
 	if got[0].Overrides.ProbeFrequencyDefaults == nil || got[0].Overrides.ProbeFrequencyDefaults.HTTP == nil {

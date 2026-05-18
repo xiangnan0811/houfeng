@@ -51,7 +51,7 @@ func TestRouterKeepsSettingsOutOfSPAFallback(t *testing.T) {
 		WebDistDir: "testdata/web",
 		SettingsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"host_sample_frequency_tier":"5m"}`))
+			_, _ = w.Write([]byte(`{"host_sample_frequency_tier":"5s"}`))
 		}),
 	})
 
@@ -73,7 +73,7 @@ func TestRouterKeepsSettingsOutOfSPAFallback(t *testing.T) {
 		t.Fatalf("expected API response, got SPA fallback body %q", string(body))
 	}
 
-	if !strings.Contains(string(body), `"host_sample_frequency_tier":"5m"`) {
+	if !strings.Contains(string(body), `"host_sample_frequency_tier":"5s"`) {
 		t.Fatalf("expected settings payload, got %q", string(body))
 	}
 }

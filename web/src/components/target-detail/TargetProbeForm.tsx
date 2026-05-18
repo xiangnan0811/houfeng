@@ -25,6 +25,7 @@ const PROBE_KIND_OPTIONS = [
 ] as const
 
 const FREQUENCY_TIER_OPTIONS = [
+  { value: '5s', label: '5 秒' },
   { value: '1m', label: '1 分钟' },
   { value: '5m', label: '5 分钟' },
   { value: '15m', label: '15 分钟' },

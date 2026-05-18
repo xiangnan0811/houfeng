@@ -11,7 +11,7 @@ import (
 const (
 	defaultHTTPAddr              = ":8080"
 	defaultWebDistDir            = "web/dist"
-	defaultIncidentSweepInterval = time.Minute
+	defaultIncidentSweepInterval = 5 * time.Second
 )
 
 type CenterConfig struct {
