@@ -221,11 +221,71 @@ describe('NodeDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge VPS')).toBeInTheDocument())
     expect(screen.getByText('primary host')).toBeInTheDocument()
+    expect(screen.getByText('VPS 是资产账本里的购买、续费与归属对象；节点是 agent 接入后的运行实例。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_001/vps', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
+  })
+
+  it('settles linked VPS loading after a delayed response', async () => {
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+    const linkedVPSResponse = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(nodeRecord({
+        node_id: 'nd_slow',
+        display_name: 'Slow Linked VPS Node',
+        binding_status: '已绑定',
+        current_health_status: '正常',
+        current_active_incident_count: 0,
+        current_primary_issue_summary: '',
+      })))
+      .mockResolvedValueOnce(mockJSONResponse({
+        node_id: 'nd_slow',
+        latest_host_sample: null,
+        recent_host_samples: [],
+      }))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockReturnValueOnce(linkedVPSResponse.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_slow']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('正在加载关联 VPS…')).toBeInTheDocument())
+
+    linkedVPSResponse.resolve(mockJSONResponse([
+      {
+        vps_id: 'vps_slow',
+        display_name: 'Slow Response VPS',
+        provider_id: 'pv_001',
+        provider_name: 'Hetzner',
+        country: 'DE',
+        region: 'Bavaria',
+        city: 'Nuremberg',
+        lifecycle_status: 'active',
+        usage_status: 'in_use',
+        renewal_decision: 'keep',
+        importance: 'normal',
+        labels: ['asset-ledger'],
+        archived_at: null,
+        linked_at: '2026-04-24T09:06:00Z',
+        note: 'delayed response',
+      },
+    ]))
+
+    await waitFor(() => expect(screen.getByText('Slow Response VPS')).toBeInTheDocument())
+    expect(screen.getByText('delayed response')).toBeInTheDocument()
+    expect(screen.queryByText('正在加载关联 VPS…')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('renders node header and latest host sample cards', async () => {

@@ -1,0 +1,5 @@
+{"type":"context","path":"CLAUDE.md","note":"Frontend is React/Vite with pure CSS/BEM and API calls through web/src/lib/api.ts; Node is an agent-observed server while VPS is an Asset Ledger object that can link to Node."}
+{"type":"context","path":".trellis/spec/web/state-and-data.md","note":"Page data fetching uses local useState/useEffect with cancelled guards carefully; business requests must go through lib/api.ts and loading/error/empty states must converge."}
+{"type":"context","path":".trellis/spec/web/component-conventions.md","note":"Route/detail loading and empty states should remain user-visible and componentized; page owns data, components stay pure display."}
+{"type":"context","path":".trellis/spec/web/quality-guidelines.md","note":"Run targeted Vitest plus lint/build; page tests should use fetch mocks and user-visible assertions."}
+{"type":"context","path":".trellis/spec/guides/branch-workflow-governance.md","note":"Implementation must happen on a feature branch and land through PR if committed."}

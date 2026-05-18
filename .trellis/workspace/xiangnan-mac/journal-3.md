@@ -735,3 +735,36 @@ Fixed agent release builds to use CGO_ENABLED=0 for Linux amd64/arm64 assets and
 ### Next Steps
 
 - None - task complete
+
+
+## Session 141: Fix node linked VPS loading
+
+**Date**: 2026-05-18
+**Task**: Fix node linked VPS loading
+**Branch**: `fix/node-linked-vps-loading`
+
+### Summary
+
+Fixed the Node detail linked VPS lazy-load state so delayed VPS association responses settle correctly, added regression coverage, and clarified the VPS asset versus Node runtime distinction in the UI.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba6b0b1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

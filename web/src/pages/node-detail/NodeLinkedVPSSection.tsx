@@ -80,6 +80,9 @@ export function NodeLinkedVPSSection({
         title="关联 VPS"
         aside={loading ? '加载中' : loaded ? `${records.length} 台` : '待同步'}
       >
+        <p className="node-vps-table__hint">
+          VPS 是资产账本里的购买、续费与归属对象；节点是 agent 接入后的运行实例。
+        </p>
         {error ? <p className="empty-inline" role="alert">{error}</p> : null}
         <DataTable
           className="asset-table node-vps-table"
