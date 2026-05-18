@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/xiangnan0811/houfeng/compare/v0.3.5...v0.3.6) (2026-05-18)
+
+
+### Bug Fixes
+
+* tune agent observability cadence ([6b70f07](https://github.com/xiangnan0811/houfeng/commit/6b70f07143db0dd9c801f6da2d76bb45081226d1))
+
 ## [0.3.5](https://github.com/xiangnan0811/houfeng/compare/v0.3.4...v0.3.5) (2026-05-18)
 
 
