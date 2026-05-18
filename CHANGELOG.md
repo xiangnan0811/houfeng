@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/xiangnan0811/houfeng/compare/v0.4.1...v0.4.2) (2026-05-18)
+
+
+### Bug Fixes
+
+* show seconds in chart tooltips ([#116](https://github.com/xiangnan0811/houfeng/issues/116)) ([bd06540](https://github.com/xiangnan0811/houfeng/commit/bd06540ccb6bf3f39543894f0a14191ebe569b85))
+
 ## [0.4.1](https://github.com/xiangnan0811/houfeng/compare/v0.4.0...v0.4.1) (2026-05-18)
 
 
