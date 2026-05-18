@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/xiangnan0811/houfeng/compare/v0.4.0...v0.4.1) (2026-05-18)
+
+
+### Bug Fixes
+
+* document installer restart verification ([#114](https://github.com/xiangnan0811/houfeng/issues/114)) ([d962113](https://github.com/xiangnan0811/houfeng/commit/d962113542345965b1b49dcd0373fe8809787f75))
+
 ## [0.4.0](https://github.com/xiangnan0811/houfeng/compare/v0.3.6...v0.4.0) (2026-05-18)
 
 
