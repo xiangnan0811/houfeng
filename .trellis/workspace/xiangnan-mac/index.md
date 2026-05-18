@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 143
+- **Total Sessions**: 144
 - **Last Active**: 2026-05-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~836 | Active |
+| `journal-3.md` | ~874 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 144 | 2026-05-18 | Show seconds in chart tooltips | `8081244` | `fix/node-chart-tooltip-seconds` |
 | 143 | 2026-05-18 | Fix agent installer restart behavior | `4dffa97` | `fix/agent-installer-restart-behavior` |
 | 142 | 2026-05-18 | Tune agent observability cadence | `95469bb` | `feature/tune-agent-observability-cadence` |
 | 141 | 2026-05-18 | Fix node linked VPS loading | `ba6b0b1` | `fix/node-linked-vps-loading` |
