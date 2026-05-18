@@ -191,5 +191,11 @@ chmod 0644 /etc/systemd/system/houfeng-agent.service
 
 info "installed houfeng-agent binary, config, token file, and systemd unit"
 systemctl daemon-reload
-systemctl enable --now houfeng-agent
-info "houfeng-agent service enabled and started"
+systemctl enable houfeng-agent
+if systemctl is-active --quiet houfeng-agent; then
+  systemctl restart houfeng-agent
+  info "houfeng-agent service enabled and restarted"
+else
+  systemctl start houfeng-agent
+  info "houfeng-agent service enabled and started"
+fi

@@ -801,3 +801,36 @@ Added five-second observability cadence across agent runtime/probes, center defa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 143: Fix agent installer restart behavior
+
+**Date**: 2026-05-18
+**Task**: Fix agent installer restart behavior
+**Branch**: `fix/agent-installer-restart-behavior`
+
+### Summary
+
+Updated the center-served agent installer to enable then restart active services or start inactive services after replacing binary/config, preserving bound-node sync credentials. Added script sequence tests and aligned deployment docs. Verified with installer tests, make verify-go, git diff --check, and ./scripts/verify.sh.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4dffa97` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -183,11 +183,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now houfeng-center
 ```
 
-Then create a Node in the web UI and open its Node onboarding workspace. The primary path is the generated one-command installer:
+Then create a Node in the web UI and open its Node onboarding workspace. The primary path is the generated one-command installer. During early development, the same generated command is also the accepted agent upgrade path for an already-bound systemd node:
 
 1. Click **生成一键安装命令**.
 2. Copy the command shown by the center.
-3. Run it once on the target Linux systemd host with root privileges or a sudo-capable account.
+3. Run it on the target Linux systemd host with root privileges or a sudo-capable account.
 
 The generated command has this shape:
 
@@ -204,7 +204,7 @@ Important behavior:
 - GitHub Release hosts only `houfeng-agent_<version>_linux_amd64`, `houfeng-agent_<version>_linux_arm64`, and `sha256sums.txt`; the install script is not taken from GitHub raw/release assets.
 - Treat the generated command as a secret: do not paste it into tickets, chat, screenshots, process logs, or shell transcripts you plan to share.
 
-The installer supports Linux systemd hosts on `amd64` and `arm64`. It fails before writing runtime files when the OS, architecture, service manager, downloader, or checksum tools are unsupported. It downloads the selected release asset and `sha256sums.txt` from the configured release repository, verifies the exact checksum entry before replacing `/usr/local/bin/houfeng-agent` or starting systemd, writes `/etc/houfeng-agent/agent.env`, writes `/etc/houfeng-agent/token` with mode `0600` when the file does not already contain post-enrollment sync credentials, creates `/var/lib/houfeng-agent`, installs the systemd unit, and runs `systemctl daemon-reload` plus `systemctl enable --now houfeng-agent`.
+The installer supports Linux systemd hosts on `amd64` and `arm64`. It fails before writing runtime files when the OS, architecture, service manager, downloader, or checksum tools are unsupported. It downloads the selected release asset and `sha256sums.txt` from the configured release repository, verifies the exact checksum entry before replacing `/usr/local/bin/houfeng-agent` or changing systemd state, writes `/etc/houfeng-agent/agent.env`, writes `/etc/houfeng-agent/token` with mode `0600` when the file does not already contain post-enrollment sync credentials, creates `/var/lib/houfeng-agent`, installs the systemd unit, runs `systemctl daemon-reload`, enables the service, then restarts an already-active `houfeng-agent` or starts it when inactive. Re-running the command on a bound node preserves the existing sync credentials and activates the newly installed agent binary without requiring a separate manual restart.
 
 Manual installation remains a troubleshooting fallback when investigating installer failures:
 
@@ -227,10 +227,15 @@ sudo chown houfeng-agent:houfeng-agent /etc/houfeng-agent/token
 sudo chmod 0600 /etc/houfeng-agent/token
 sudo install -o root -g root -m 0644 docs/deploy/systemd/houfeng-agent.service /etc/systemd/system/houfeng-agent.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now houfeng-agent
+sudo systemctl enable houfeng-agent
+if systemctl is-active --quiet houfeng-agent; then
+  sudo systemctl restart houfeng-agent
+else
+  sudo systemctl start houfeng-agent
+fi
 ```
 
-Adjust users, paths, PostgreSQL URL, TLS/reverse-proxy setup, public center URL, and token file ownership for the target host. Do not enable the agent until `/etc/houfeng-agent/token` contains a valid unexpired enrollment token.
+Adjust users, paths, PostgreSQL URL, TLS/reverse-proxy setup, public center URL, and token file ownership for the target host. Do not start or restart the agent until `/etc/houfeng-agent/token` contains a valid unexpired enrollment token or post-enrollment sync credentials.
 
 ## Authentication
 
