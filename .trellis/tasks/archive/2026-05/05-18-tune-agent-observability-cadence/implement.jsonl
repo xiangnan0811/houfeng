@@ -1,0 +1,7 @@
+{"type":"context","path":"CLAUDE.md","note":"Houfeng topology is one Go center + PostgreSQL + outbound systemd agents; agents stay thin and follow center-issued plans."}
+{"type":"context","path":".trellis/spec/backend/quality-guidelines.md","note":"Backend quality gate is make verify-go; cross frontend/backend work should use ./scripts/verify.sh."}
+{"type":"context","path":".trellis/spec/backend/database-guidelines.md","note":"Migrations are the only schema/default data evolution path; add next unused migration, keep SQL idempotent, do not edit old migrations."}
+{"type":"context","path":".trellis/spec/web/quality-guidelines.md","note":"Frontend changes require lint, Vitest --run, and build; API shape/type changes must update web/src/lib/types.ts and tests."}
+{"type":"context","path":".trellis/spec/guides/cross-layer-thinking-guide.md","note":"This task spans DB/settings/store/agent contract/agent runtime/frontend, so keep one end-to-end frequency data flow consistent."}
+{"type":"context","path":".trellis/spec/guides/code-reuse-thinking-guide.md","note":"Frequency tier constants and options are repeated; search all 5m/1m tier references before changing defaults."}
+{"type":"context","path":".trellis/spec/guides/branch-workflow-governance.md","note":"Implementation must remain on feature/tune-agent-observability-cadence and land by PR, not local main."}

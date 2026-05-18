@@ -1,0 +1,6 @@
+{"type":"check","command":"go test ./internal/contracts/agentapi ./internal/center/settings ./internal/center/targets ./internal/center/store ./internal/center/http/handlers ./internal/center/incidents ./agent/runtime ./agent/probe ./agent/syncqueue","note":"Target cadence-related Go packages before full verify."}
+{"type":"check","command":"make verify-go","note":"Run the backend quality gate after Go and migration changes."}
+{"type":"check","command":"cd web && npm run test -- --run SettingsPage.test.tsx TargetDetailPage.test.tsx TargetProbeForm.test.tsx api.test.ts","note":"Verify frontend frequency defaults/options and API typing changes."}
+{"type":"check","command":"cd web && npm run lint && cd web && npm run build","note":"Ensure frontend lint and strict TS/Vite build pass."}
+{"type":"check","command":"./scripts/verify.sh","note":"Required because this task changes Go backend/agent and web frontend together."}
+{"type":"check","command":"browser sanity on Settings page and Target detail probe form if a local center is available","note":"User-visible frequency options should be checked in browser; state explicitly if no local UI validation was possible."}
