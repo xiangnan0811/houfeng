@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/xiangnan0811/houfeng/compare/v0.3.4...v0.3.5) (2026-05-18)
+
+
+### Bug Fixes
+
+* settle linked VPS loading ([b0759a3](https://github.com/xiangnan0811/houfeng/commit/b0759a3a265e409cf60a722bf618009a33a1d1c6))
+
 ## [0.3.4](https://github.com/xiangnan0811/houfeng/compare/v0.3.3...v0.3.4) (2026-05-17)
 
 
