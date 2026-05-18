@@ -768,3 +768,36 @@ Fixed the Node detail linked VPS lazy-load state so delayed VPS association resp
 ### Next Steps
 
 - None - task complete
+
+
+## Session 142: Tune agent observability cadence
+
+**Date**: 2026-05-18
+**Task**: Tune agent observability cadence
+**Branch**: `feature/tune-agent-observability-cadence`
+
+### Summary
+
+Added five-second observability cadence across agent runtime/probes, center defaults/migration/incidents, web frequency UI, docs, installer snippets, and queue sizing. Verified with full scripts/verify.sh and git diff --check; browser sanity was not run in this session due no browser automation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `95469bb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

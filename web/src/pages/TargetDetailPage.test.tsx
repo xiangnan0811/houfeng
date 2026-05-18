@@ -685,7 +685,7 @@ describe('TargetDetailPage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
-    expect(screen.getByLabelText('频率档位')).toHaveValue('5m')
+    expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
 
     fireEvent.change(screen.getByLabelText('Probe 类型'), {
       target: { value: 'tls' },
@@ -695,12 +695,12 @@ describe('TargetDetailPage', () => {
     fireEvent.change(screen.getByLabelText('Probe 类型'), {
       target: { value: 'http' },
     })
-    expect(screen.getByLabelText('频率档位')).toHaveValue('5m')
+    expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
 
     fireEvent.change(screen.getByLabelText('Probe 类型'), {
       target: { value: 'tcp' },
     })
-    expect(screen.getByLabelText('频率档位')).toHaveValue('5m')
+    expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
   })
 
   it('keeps ProbeItem creation validation errors inside the probe panel', async () => {

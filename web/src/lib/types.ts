@@ -165,7 +165,7 @@ export type CreateTargetInput = {
 
 export type ProbeKind = 'tcp' | 'http' | 'tls'
 
-export type FrequencyTier = '1m' | '5m' | '15m' | '6h'
+export type FrequencyTier = '5s' | '1m' | '5m' | '15m' | '6h'
 
 export type ProbeItemRecord = {
   probe_item_id: string

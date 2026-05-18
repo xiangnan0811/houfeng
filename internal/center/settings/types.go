@@ -141,16 +141,16 @@ type RetentionPolicy struct {
 
 func Default() CenterSettings {
 	return CenterSettings{
-		HostSampleFrequencyTier: targets.FrequencyTier5m,
+		HostSampleFrequencyTier: targets.FrequencyTier5s,
 		ProbeFrequencyDefaults: ProbeFrequencyDefaults{
-			TCP:  targets.FrequencyTier5m,
-			HTTP: targets.FrequencyTier5m,
+			TCP:  targets.FrequencyTier5s,
+			HTTP: targets.FrequencyTier5s,
 			TLS:  targets.FrequencyTier6h,
 		},
 		IncidentDefaults: IncidentDefaults{
-			HeartbeatIntervalSeconds: 30,
+			HeartbeatIntervalSeconds: 5,
 			StaleThresholdIntervals:  3,
-			SweepIntervalSeconds:     60,
+			SweepIntervalSeconds:     5,
 			NotifyOnStarted:          true,
 			NotifyOnEscalated:        true,
 			NotifyOnRecovered:        true,

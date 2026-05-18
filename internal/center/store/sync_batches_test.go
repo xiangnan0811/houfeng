@@ -358,8 +358,8 @@ func TestSyncBatchPlanReturnsAcceptedAtAndDerivedPlan(t *testing.T) {
 	if result.AcceptedAt.IsZero() {
 		t.Fatal("AcceptedAt is zero, want non-zero")
 	}
-	if result.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier1m {
-		t.Fatalf("HostSampleFrequencyTier = %q, want %q", result.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier1m)
+	if result.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier5s {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", result.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier5s)
 	}
 	if len(result.Plan.ProbeAssignments) != 1 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(result.Plan.ProbeAssignments))

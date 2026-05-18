@@ -48,8 +48,8 @@ func TestLoadAgentConfigProvidesDurableBufferDefaults(t *testing.T) {
 	if cfg.BufferFile != "/var/lib/houfeng-agent/sync-buffer.json" {
 		t.Fatalf("BufferFile = %q, want default", cfg.BufferFile)
 	}
-	if cfg.BufferMaxEntries != 2048 {
-		t.Fatalf("BufferMaxEntries = %d, want 2048", cfg.BufferMaxEntries)
+	if cfg.BufferMaxEntries != 65536 {
+		t.Fatalf("BufferMaxEntries = %d, want 65536", cfg.BufferMaxEntries)
 	}
 	if cfg.BufferMaxAge != 72*time.Hour {
 		t.Fatalf("BufferMaxAge = %s, want 72h", cfg.BufferMaxAge)

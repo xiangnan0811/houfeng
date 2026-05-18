@@ -311,8 +311,8 @@ func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v", err)
 	}
-	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier1m {
-		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier1m)
+	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier5s {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier5s)
 	}
 	if len(plan.ProbeAssignments) != 1 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(plan.ProbeAssignments))
@@ -356,8 +356,8 @@ func TestBuildSyncPlanReturnsDefaultCadenceAndNoAssignmentsForLabelLessNode(t *t
 	if err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v", err)
 	}
-	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier5m {
-		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier5m)
+	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier5s {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier5s)
 	}
 	if len(plan.ProbeAssignments) != 0 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 0", len(plan.ProbeAssignments))

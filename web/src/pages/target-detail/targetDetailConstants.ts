@@ -3,8 +3,8 @@ import type { FrequencyTier, ProbeKind } from '../../lib/types'
 import type { HistoryTab, TimeWindow } from './types'
 
 export const DEFAULT_FREQUENCY_BY_PROBE_KIND: Record<ProbeKind, FrequencyTier> = {
-  tcp: '5m',
-  http: '5m',
+  tcp: '5s',
+  http: '5s',
   tls: '6h',
 }
 
@@ -17,7 +17,7 @@ export const PROBE_CONFIG_KEYS: Record<ProbeKind, Set<string>> = {
 export const INITIAL_PROBE_CREATE_FORM: ProbeCreateFormState = {
   probeKind: 'tcp',
   enabled: true,
-  frequencyTier: '5m',
+  frequencyTier: '5s',
   timeoutSeconds: '5',
   port: '',
   httpScheme: 'https',

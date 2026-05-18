@@ -113,16 +113,16 @@ const settingsResponseBody = {
     enabled: false,
     webhook_url: '',
   },
-  host_sample_frequency_tier: '5m',
+  host_sample_frequency_tier: '5s',
   probe_frequency_defaults: {
-    tcp: '5m',
-    http: '1m',
-    tls: '15m',
+    tcp: '5s',
+    http: '5s',
+    tls: '6h',
   },
   incident_defaults: {
-    heartbeat_interval_seconds: 30,
+    heartbeat_interval_seconds: 5,
     stale_threshold_intervals: 3,
-    sweep_interval_seconds: 60,
+    sweep_interval_seconds: 5,
     notify_on_started: true,
     notify_on_escalated: true,
     notify_on_recovered: true,
@@ -187,16 +187,16 @@ const settingsUpdateBody = {
     enabled: false,
     webhook_url: '',
   },
-  host_sample_frequency_tier: '1m',
+  host_sample_frequency_tier: '5s',
   probe_frequency_defaults: {
-    tcp: '5m',
-    http: '1m',
-    tls: '15m',
+    tcp: '5s',
+    http: '5s',
+    tls: '6h',
   },
   incident_defaults: {
-    heartbeat_interval_seconds: 30,
+    heartbeat_interval_seconds: 5,
     stale_threshold_intervals: 3,
-    sweep_interval_seconds: 60,
+    sweep_interval_seconds: 5,
     notify_on_started: true,
     notify_on_escalated: true,
     notify_on_recovered: true,
@@ -1264,7 +1264,7 @@ describe('api helpers', () => {
     const requestBody = {
       probe_kind: 'http',
       enabled: false,
-      frequency_tier: '5m',
+      frequency_tier: '5s',
       timeout_seconds: 8,
       config: {
         scheme: 'https',
@@ -1318,7 +1318,7 @@ describe('api helpers', () => {
     const requestBody = {
       probe_kind: 'http',
       enabled: true,
-      frequency_tier: '1m',
+      frequency_tier: '5s',
       timeout_seconds: 5,
       config: {
         scheme: 'https',

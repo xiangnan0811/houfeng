@@ -24,16 +24,16 @@ const settingsResponseBody = {
     enabled: false,
     webhook_url: '',
   },
-  host_sample_frequency_tier: '5m',
+  host_sample_frequency_tier: '5s',
   probe_frequency_defaults: {
-    tcp: '5m',
-    http: '1m',
-    tls: '15m',
+    tcp: '5s',
+    http: '5s',
+    tls: '6h',
   },
   incident_defaults: {
-    heartbeat_interval_seconds: 30,
+    heartbeat_interval_seconds: 5,
     stale_threshold_intervals: 3,
-    sweep_interval_seconds: 60,
+    sweep_interval_seconds: 5,
     notify_on_started: true,
     notify_on_escalated: true,
     notify_on_recovered: true,
@@ -118,7 +118,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('设置', { selector: '.page-panel__eyebrow' })).toBeInTheDocument()
     expect(screen.getByText('频率档位')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '默认频率档位' })).toBeInTheDocument()
-    expect(screen.getByLabelText('当前节点主机样本频率')).toHaveValue('5m')
+    expect(screen.getByLabelText('当前节点主机样本频率')).toHaveValue('5s')
     expect(
       screen.getByText('当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。'),
     ).toBeInTheDocument()
@@ -241,14 +241,14 @@ describe('SettingsPage', () => {
       },
       host_sample_frequency_tier: '1m',
       probe_frequency_defaults: {
-        tcp: '5m',
-        http: '1m',
-        tls: '15m',
+        tcp: '5s',
+        http: '5s',
+        tls: '6h',
       },
       incident_defaults: {
-        heartbeat_interval_seconds: 30,
+        heartbeat_interval_seconds: 5,
         stale_threshold_intervals: 3,
-        sweep_interval_seconds: 60,
+        sweep_interval_seconds: 5,
         notify_on_started: true,
         notify_on_escalated: true,
         notify_on_recovered: true,
@@ -349,14 +349,14 @@ describe('SettingsPage', () => {
       },
       host_sample_frequency_tier: '1m',
       probe_frequency_defaults: {
-        tcp: '5m',
-        http: '1m',
-        tls: '15m',
+        tcp: '5s',
+        http: '5s',
+        tls: '6h',
       },
       incident_defaults: {
-        heartbeat_interval_seconds: 30,
+        heartbeat_interval_seconds: 5,
         stale_threshold_intervals: 3,
-        sweep_interval_seconds: 60,
+        sweep_interval_seconds: 5,
         notify_on_started: true,
         notify_on_escalated: true,
         notify_on_recovered: true,
@@ -432,16 +432,16 @@ describe('SettingsPage', () => {
         enabled: false,
         webhook_url: '',
       },
-      host_sample_frequency_tier: '5m',
+      host_sample_frequency_tier: '5s',
       probe_frequency_defaults: {
-        tcp: '5m',
-        http: '1m',
-        tls: '15m',
+        tcp: '5s',
+        http: '5s',
+        tls: '6h',
       },
       incident_defaults: {
-        heartbeat_interval_seconds: 30,
+        heartbeat_interval_seconds: 5,
         stale_threshold_intervals: 3,
-        sweep_interval_seconds: 60,
+        sweep_interval_seconds: 5,
         notify_on_started: true,
         notify_on_escalated: true,
         notify_on_recovered: true,

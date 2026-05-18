@@ -39,7 +39,7 @@ export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
 export HOUFENG_PUBLIC_BASE_URL='http://127.0.0.1:8080'
-export HOUFENG_INCIDENT_SWEEP_INTERVAL=1m
+export HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
 export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
 ```
@@ -209,7 +209,7 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets/<target_id>
   -d '{
     "probe_kind": "http",
     "enabled": true,
-    "frequency_tier": "1m",
+    "frequency_tier": "5s",
     "timeout_seconds": 3,
     "config": {
       "scheme": "http",
@@ -220,7 +220,7 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets/<target_id>
   }'
 ```
 
-Expected: the target detail page and runtime facts eventually show probe observations. Supported frequency tiers are `1m`, `5m`, `15m`, and `6h`.
+Expected: the target detail page and runtime facts show probe observations on the next due sync. Supported frequency tiers are `5s`, `1m`, `5m`, `15m`, and `6h`.
 
 Check:
 

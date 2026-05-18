@@ -20,7 +20,7 @@ const selectAgentPlanNodeLabelsSQL = `
 	select labels,
 		lifecycle_status,
 		monitoring_status,
-		coalesce(nullif(cs.host_sample_frequency_tier, ''), '5m') as host_sample_frequency_tier,
+		coalesce(nullif(cs.host_sample_frequency_tier, ''), '5s') as host_sample_frequency_tier,
 		coalesce(
 			cs.override_rules,
 			'{"node_labels":[],"target_types":[],"target_labels":[]}'::jsonb
@@ -246,11 +246,6 @@ func labelSet(labels []string) map[string]struct{} {
 	return set
 }
 
-func legacyHostSampleFrequencyTier(labels []string) string {
-	for _, label := range labels {
-		if label == "核心" {
-			return agentapi.FrequencyTier1m
-		}
-	}
-	return agentapi.FrequencyTier5m
+func legacyHostSampleFrequencyTier([]string) string {
+	return agentapi.FrequencyTier5s
 }

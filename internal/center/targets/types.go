@@ -20,6 +20,7 @@ const (
 	ProbeKindHTTP = "http"
 	ProbeKindTLS  = "tls"
 
+	FrequencyTier5s  = "5s"
 	FrequencyTier1m  = "1m"
 	FrequencyTier5m  = "5m"
 	FrequencyTier15m = "15m"
@@ -51,6 +52,7 @@ var allowedProbeKinds = map[string]struct{}{
 }
 
 var allowedFrequencyTiers = map[string]struct{}{
+	FrequencyTier5s:  {},
 	FrequencyTier1m:  {},
 	FrequencyTier5m:  {},
 	FrequencyTier15m: {},

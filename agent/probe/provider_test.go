@@ -104,7 +104,7 @@ func TestCollectDueOnlyRunsAssignmentsWhenDue(t *testing.T) {
 		nil,
 	)
 	plan := &agentapi.SyncPlan{ProbeAssignments: []agentapi.ProbeAssignment{{
-		TargetID: "tg_tcp", ProbeItemID: "pb_tcp", ProbeKind: agentapi.ProbeKindTCP, FrequencyTier: agentapi.FrequencyTier1m, TimeoutSeconds: 5, Config: []byte(`{"port":443}`),
+		TargetID: "tg_tcp", ProbeItemID: "pb_tcp", ProbeKind: agentapi.ProbeKindTCP, FrequencyTier: agentapi.FrequencyTier5s, TimeoutSeconds: 5, Config: []byte(`{"port":443}`),
 	}}}
 	firstAt := time.Date(2026, time.April, 24, 12, 0, 0, 0, time.UTC)
 	observations, err := provider.CollectDue(context.Background(), plan, firstAt)
@@ -115,7 +115,7 @@ func TestCollectDueOnlyRunsAssignmentsWhenDue(t *testing.T) {
 		t.Fatalf("first run observations=%d calls=%d, want 1/1", len(observations), calls)
 	}
 
-	observations, err = provider.CollectDue(context.Background(), plan, firstAt.Add(30*time.Second))
+	observations, err = provider.CollectDue(context.Background(), plan, firstAt.Add(4*time.Second))
 	if err != nil {
 		t.Fatalf("second CollectDue() error = %v", err)
 	}
@@ -123,7 +123,7 @@ func TestCollectDueOnlyRunsAssignmentsWhenDue(t *testing.T) {
 		t.Fatalf("not-due run observations=%d calls=%d, want 0/1", len(observations), calls)
 	}
 
-	observations, err = provider.CollectDue(context.Background(), plan, firstAt.Add(61*time.Second))
+	observations, err = provider.CollectDue(context.Background(), plan, firstAt.Add(5*time.Second))
 	if err != nil {
 		t.Fatalf("third CollectDue() error = %v", err)
 	}
