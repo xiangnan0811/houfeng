@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/xiangnan0811/houfeng/compare/v0.5.0...v0.6.0) (2026-05-19)
+
+
+### Features
+
+* restore asset ledger ia release trigger ([#125](https://github.com/xiangnan0811/houfeng/issues/125)) ([a91f62c](https://github.com/xiangnan0811/houfeng/commit/a91f62c368a6db1bbae8bd9f3968276e86559fce))
+
 ## [0.5.0](https://github.com/xiangnan0811/houfeng/compare/v0.4.3...v0.5.0) (2026-05-19)
 
 
