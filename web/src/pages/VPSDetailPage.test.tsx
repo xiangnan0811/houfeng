@@ -94,6 +94,19 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
+function openVPSActionsMenu() {
+  const summary = screen.getByLabelText('VPS 详情操作')
+  const menu = summary.closest('details')
+  if (!menu?.hasAttribute('open')) {
+    fireEvent.click(summary)
+  }
+}
+
+function clickVPSAction(name: string) {
+  openVPSActionsMenu()
+  fireEvent.click(screen.getByRole('button', { name }))
+}
+
 describe('VPSDetailPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -271,42 +284,82 @@ describe('VPSDetailPage', () => {
       cache: 'no-store',
       credentials: 'include',
     })
+    expect(screen.getByRole('button', { name: '处理决策' })).toBeInTheDocument()
+    expect(screen.getByLabelText('VPS 详情操作')).toBeInTheDocument()
+    openVPSActionsMenu()
+    expect(screen.getByRole('button', { name: '编辑基础信息' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '记录经验' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关联 Node' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新增服务' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新增域名' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '归档 VPS' })).toBeInTheDocument()
     expect(screen.getByText('资产判断')).toBeInTheDocument()
     expect(screen.getByText('下一步动作')).toBeInTheDocument()
     expect(screen.getByText('先核对运行异常')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看 Node' })).toHaveAttribute('href', '/nodes/nd_001')
     expect(screen.getByLabelText('资产判断证据状态')).toBeInTheDocument()
     expect(screen.getByText('续费与成本')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '续费与成本证据' })).toBeInTheDocument()
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/续费日 2026-06-01/).length).toBeGreaterThan(0)
-    expect(screen.getByRole('heading', { name: '决策依据与经验记录' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '判断证据摘要' })).toBeInTheDocument()
+    expect(screen.getByText('续费窗口')).toBeInTheDocument()
     expect(screen.getAllByText('Node 证据').length).toBeGreaterThan(0)
-    expect(screen.getByRole('heading', { name: 'Node 观测证据' })).toBeInTheDocument()
-    expect(screen.getByText(/关联 Node 监控用于解释续费决策/)).toBeInTheDocument()
-    expect(screen.getByText('基础信息')).toBeInTheDocument()
-    expect(screen.getAllByText('192.0.2.1').length).toBeGreaterThan(0)
-    expect(screen.getByRole('heading', { name: 'Node 观测证据' })).toBeInTheDocument()
+    expect(screen.getByText('服务与域名')).toBeInTheDocument()
+    expect(screen.getByText('最近历史')).toBeInTheDocument()
+    expect(screen.getByText('资料摘要')).toBeInTheDocument()
+    expect(screen.getByText(/1 服务 · 1 域名/)).toBeInTheDocument()
     expect(screen.getAllByText('Tokyo Node').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('latency high').length).toBeGreaterThan(0)
-    expect(screen.getByText('资产历史')).toBeInTheDocument()
-    expect(screen.getByText('未评估 -> 保留')).toBeInTheDocument()
-    expect(screen.getAllByText('稳定承载边缘流量').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('USD 10.00 -> USD 12.00').length).toBeGreaterThan(0)
-    expect(screen.getByText('192.0.2.10 -> 192.0.2.1')).toBeInTheDocument()
-    expect(screen.getByText('root@192.0.2.1:22')).toBeInTheDocument()
-    expect(screen.getAllByText('晚高峰丢包').length).toBeGreaterThan(0)
-    expect(screen.getByText('已向服务商提交工单')).toBeInTheDocument()
-    expect(screen.getByLabelText('服务与域名上下文')).toBeInTheDocument()
-    expect(screen.getByText('服务资产')).toBeInTheDocument()
-    expect(screen.getByText('Blog')).toBeInTheDocument()
-    expect(screen.getByText('https://blog.example.com')).toBeInTheDocument()
-    expect(screen.getByText('tg_001')).toBeInTheDocument()
-    expect(screen.getByText('域名资产')).toBeInTheDocument()
-    expect(screen.getByText('www.example.com')).toBeInTheDocument()
-    expect(screen.getByText('NameSilo')).toBeInTheDocument()
-    expect(screen.getByText('2026-07-01')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '访问摘要' })).toBeInTheDocument()
+    expect(screen.getAllByText(/latency high/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/晚高峰丢包/)).toBeInTheDocument()
+    expect(screen.getByText('Blog；www.example.com')).toBeInTheDocument()
+    expect(screen.getByText(/cx22 · nrt/)).toBeInTheDocument()
+    expect(screen.getAllByText('192.0.2.1').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('heading', { name: '续费与成本证据' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '决策依据与经验记录' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Node 观测证据' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '基础信息' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '资产历史' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '服务资产' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '域名资产' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '访问摘要' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看 Node 详情' }))
+    const nodeDrawer = screen.getByRole('dialog', { name: 'Node 观测证据' })
+    expect(within(nodeDrawer).getAllByRole('heading', { name: 'Node 观测证据' }).length).toBeGreaterThan(0)
+    expect(within(nodeDrawer).getByText(/关联 Node 监控用于解释续费决策/)).toBeInTheDocument()
+    expect(within(nodeDrawer).getAllByText('Tokyo Node').length).toBeGreaterThan(0)
+    fireEvent.click(within(nodeDrawer).getByLabelText('关闭'))
+
+    fireEvent.click(screen.getByRole('button', { name: '服务详情' }))
+    const servicesDrawer = screen.getByRole('dialog', { name: '服务资产详情' })
+    expect(within(servicesDrawer).getByRole('heading', { name: '服务资产' })).toBeInTheDocument()
+    expect(within(servicesDrawer).getByText('https://blog.example.com')).toBeInTheDocument()
+    expect(within(servicesDrawer).getByText('tg_001')).toBeInTheDocument()
+    fireEvent.click(within(servicesDrawer).getByLabelText('关闭'))
+
+    fireEvent.click(screen.getByRole('button', { name: '域名详情' }))
+    const domainsDrawer = screen.getByRole('dialog', { name: '域名资产详情' })
+    expect(within(domainsDrawer).getByRole('heading', { name: '域名资产' })).toBeInTheDocument()
+    expect(within(domainsDrawer).getByText('www.example.com')).toBeInTheDocument()
+    expect(within(domainsDrawer).getByText('NameSilo')).toBeInTheDocument()
+    expect(within(domainsDrawer).getByText('2026-07-01')).toBeInTheDocument()
+    fireEvent.click(within(domainsDrawer).getByLabelText('关闭'))
+
+    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    expect(within(timelineDrawer).getByRole('heading', { name: '资产历史' })).toBeInTheDocument()
+    expect(within(timelineDrawer).getByText('未评估 -> 保留')).toBeInTheDocument()
+    expect(within(timelineDrawer).getAllByText('稳定承载边缘流量').length).toBeGreaterThan(0)
+    expect(within(timelineDrawer).getAllByText('USD 10.00 -> USD 12.00').length).toBeGreaterThan(0)
+    expect(within(timelineDrawer).getByText('192.0.2.10 -> 192.0.2.1')).toBeInTheDocument()
+    expect(within(timelineDrawer).getByText('root@192.0.2.1:22')).toBeInTheDocument()
+    expect(within(timelineDrawer).getByText('已向服务商提交工单')).toBeInTheDocument()
+    fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
+
+    fireEvent.click(screen.getByRole('button', { name: '查看基础资料' }))
+    const factsDrawer = screen.getByRole('dialog', { name: '基础资料详情' })
+    expect(within(factsDrawer).getByRole('heading', { name: '基础信息' })).toBeInTheDocument()
+    expect(within(factsDrawer).getByText('vps_001')).toBeInTheDocument()
   })
 
   it('does not treat subscription load failures as missing subscription facts', async () => {
@@ -551,8 +604,11 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
 
     await waitFor(() => expect(screen.getByText('续费决策已更新，资产历史已刷新')).toBeInTheDocument())
-    expect(screen.getByText('保留 -> 取消')).toBeInTheDocument()
     expect(screen.getAllByText('too expensive').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    expect(within(timelineDrawer).getByText('保留 -> 取消')).toBeInTheDocument()
+    fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
       method: 'PATCH',
       headers: {
@@ -651,59 +707,59 @@ describe('VPSDetailPage', () => {
     expect(within(decisionDialog).getByLabelText('决策理由')).toHaveValue('')
     fireEvent.click(within(decisionDialog).getByRole('button', { name: '取消' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑基础信息' }))
+    clickVPSAction('编辑基础信息')
     let factsDialog = screen.getByRole('dialog', { name: '编辑基础信息' })
     fireEvent.change(within(factsDialog).getByLabelText('VPS 名称'), { target: { value: 'Stale VPS' } })
     fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
     expect(screen.queryByRole('dialog', { name: '编辑基础信息' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑基础信息' }))
+    clickVPSAction('编辑基础信息')
     factsDialog = screen.getByRole('dialog', { name: '编辑基础信息' })
     expect(within(factsDialog).getByLabelText('VPS 名称')).toHaveValue('Tokyo Edge')
     fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
+    clickVPSAction('关联 Node')
     let nodeDialog = screen.getByRole('dialog', { name: '关联 Node' })
     expect(within(nodeDialog).getByLabelText('选择 Node')).toBeDisabled()
     fireEvent.change(within(nodeDialog).getByLabelText('关联备注'), { target: { value: 'stale note' } })
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog', { name: '关联 Node' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
+    clickVPSAction('关联 Node')
     nodeDialog = screen.getByRole('dialog', { name: '关联 Node' })
     expect(within(nodeDialog).getByLabelText('选择 Node')).toHaveValue('')
     expect(within(nodeDialog).getByLabelText('关联备注')).toHaveValue('')
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '记录经验' }))
+    clickVPSAction('记录经验')
     let experienceDialog = screen.getByRole('dialog', { name: '经验记录' })
     fireEvent.change(within(experienceDialog).getByLabelText('摘要'), { target: { value: 'stale experience' } })
     fireEvent.click(within(experienceDialog).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog', { name: '经验记录' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '记录经验' }))
+    clickVPSAction('记录经验')
     experienceDialog = screen.getByRole('dialog', { name: '经验记录' })
     expect(within(experienceDialog).getByLabelText('摘要')).toHaveValue('')
     fireEvent.click(within(experienceDialog).getByRole('button', { name: '取消' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '新增服务' }))
+    clickVPSAction('新增服务')
     let serviceDialog = screen.getByRole('dialog', { name: '新增服务' })
     fireEvent.change(within(serviceDialog).getByLabelText('服务名称'), { target: { value: 'stale service' } })
     fireEvent.click(within(serviceDialog).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog', { name: '新增服务' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '新增服务' }))
+    clickVPSAction('新增服务')
     serviceDialog = screen.getByRole('dialog', { name: '新增服务' })
     expect(within(serviceDialog).getByLabelText('服务名称')).toHaveValue('')
     fireEvent.click(within(serviceDialog).getByRole('button', { name: '取消' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '新增域名' }))
+    clickVPSAction('新增域名')
     let domainDialog = screen.getByRole('dialog', { name: '新增域名' })
     fireEvent.change(within(domainDialog).getByLabelText('域名'), { target: { value: 'stale.example.com' } })
     fireEvent.click(within(domainDialog).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog', { name: '新增域名' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '新增域名' }))
+    clickVPSAction('新增域名')
     domainDialog = screen.getByRole('dialog', { name: '新增域名' })
     expect(within(domainDialog).getByLabelText('域名')).toHaveValue('')
     fireEvent.click(within(domainDialog).getByRole('button', { name: '取消' }))
@@ -819,7 +875,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑基础信息' }))
+    clickVPSAction('编辑基础信息')
     const factsDrawer = screen.getByRole('dialog', { name: '编辑基础信息' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: 'Tokyo Edge 2' } })
     fireEvent.change(within(factsDrawer).getByLabelText('产品名'), { target: { value: 'cx32' } })
@@ -835,8 +891,13 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('基础信息已更新，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Tokyo Edge 2' })).toBeInTheDocument()
-    expect(screen.getByText('192.0.2.1 -> 198.51.100.5')).toBeInTheDocument()
-    expect(screen.getByText('deploy@edge.example.com:2222')).toBeInTheDocument()
+    expect(screen.getAllByText('edge.example.com').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('2222').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    expect(within(timelineDrawer).getByText('192.0.2.1 -> 198.51.100.5')).toBeInTheDocument()
+    expect(within(timelineDrawer).getByText('deploy@edge.example.com:2222')).toBeInTheDocument()
+    fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/providers', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1006,7 +1067,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '关联 Node' }))
+    clickVPSAction('关联 Node')
     await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/nodes', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1029,7 +1090,9 @@ describe('VPSDetailPage', () => {
       body: JSON.stringify({ node_id: 'nd_002', note: 'secondary' }),
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '解除关联' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看 Node 详情' }))
+    const nodeEvidenceDrawer = screen.getByRole('dialog', { name: 'Node 观测证据' })
+    fireEvent.click(within(nodeEvidenceDrawer).getByRole('button', { name: '解除关联' }))
     await waitFor(() => expect(screen.queryByText('Seoul Node')).not.toBeInTheDocument())
     expect(screen.getByText('Node 关联已解除')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/unlink-node', {
@@ -1118,7 +1181,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '记录经验' }))
+    clickVPSAction('记录经验')
     const experienceDrawer = screen.getByRole('dialog', { name: '经验记录' })
     fireEvent.change(within(experienceDrawer).getByLabelText('分类'), { target: { value: 'network' } })
     fireEvent.change(within(experienceDrawer).getByLabelText('级别'), { target: { value: 'warning' } })
@@ -1128,8 +1191,11 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(experienceDrawer).getByRole('button', { name: '写入经验记录' }))
 
     await waitFor(() => expect(screen.getAllByText('经验记录已写入资产历史').length).toBeGreaterThan(0))
-    expect(screen.getAllByText('晚高峰丢包').length).toBeGreaterThan(0)
-    expect(screen.getByText('连续三天 tcp probe 抖动')).toBeInTheDocument()
+    expect(screen.getByText(/晚高峰丢包/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    expect(within(timelineDrawer).getByText('连续三天 tcp probe 抖动')).toBeInTheDocument()
+    fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/experience-logs', {
       method: 'POST',
       headers: {
@@ -1238,7 +1304,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '归档 VPS' }))
+    clickVPSAction('归档 VPS')
 
     expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
     expect(screen.getByText('不会删除 VPS、订阅、Node 关联或资产历史。后续可恢复为闲置。')).toBeInTheDocument()
@@ -1247,6 +1313,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('VPS 已归档，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getAllByText('已归档').length).toBeGreaterThan(0)
+    openVPSActionsMenu()
     expect(screen.getByRole('button', { name: '恢复为闲置' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
       method: 'PATCH',
@@ -1331,7 +1398,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Archive Fail Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '归档 VPS' }))
+    clickVPSAction('归档 VPS')
     fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
 
     await waitFor(() => expect(screen.getByText('archive failed')).toBeInTheDocument())
@@ -1409,11 +1476,17 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Archived Edge' })).toBeInTheDocument())
-    expect(screen.getByText(/已归档时间：/)).toBeInTheDocument()
+    expect(screen.getAllByText('已归档').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/已归档时间：/)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '恢复为闲置' }))
+    clickVPSAction('恢复为闲置')
+
+    expect(screen.getByRole('alertdialog', { name: '确认恢复 VPS' })).toBeInTheDocument()
+    expect(screen.getByText('不会删除或重建 VPS、订阅、Node 关联或资产历史。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认恢复' }))
 
     await waitFor(() => expect(screen.getByText('VPS 已恢复为闲置，资产历史已刷新')).toBeInTheDocument())
+    openVPSActionsMenu()
     expect(screen.getByRole('button', { name: '归档 VPS' })).toBeInTheDocument()
     expect(screen.getAllByText('闲置').length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_archived', {
@@ -1486,7 +1559,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '新增服务' }))
+    clickVPSAction('新增服务')
     await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1503,9 +1576,13 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(serviceDrawer).getByRole('button', { name: '创建服务记录' }))
 
     await waitFor(() => expect(screen.getByText('服务记录已创建')).toBeInTheDocument())
-    expect(screen.getByText('Blog')).toBeInTheDocument()
-    expect(screen.getByText('https://blog.example.com')).toBeInTheDocument()
-    expect(screen.getByText('端口 443')).toBeInTheDocument()
+    expect(screen.getByText('Blog；域名上下文待补录')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '服务详情' }))
+    const serviceDetailDrawer = screen.getByRole('dialog', { name: '服务资产详情' })
+    expect(within(serviceDetailDrawer).getByText('Blog')).toBeInTheDocument()
+    expect(within(serviceDetailDrawer).getByText('https://blog.example.com')).toBeInTheDocument()
+    expect(within(serviceDetailDrawer).getByText('端口 443')).toBeInTheDocument()
+    fireEvent.click(within(serviceDetailDrawer).getByLabelText('关闭'))
     expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/services', {
       method: 'POST',
       headers: {
@@ -1582,7 +1659,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '新增服务' }))
+    clickVPSAction('新增服务')
     const invalidServiceDrawer = screen.getByRole('dialog', { name: '新增服务' })
     fireEvent.click(within(invalidServiceDrawer).getByRole('button', { name: '创建服务记录' }))
 
@@ -1653,7 +1730,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '新增域名' }))
+    clickVPSAction('新增域名')
     await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1673,9 +1750,13 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(domainDrawer).getByRole('button', { name: '创建域名记录' }))
 
     await waitFor(() => expect(screen.getByText('域名记录已创建')).toBeInTheDocument())
-    expect(screen.getByText('api.example.com')).toBeInTheDocument()
-    expect(screen.getByText('NameSilo')).toBeInTheDocument()
-    expect(screen.getByText('2026-07-01')).toBeInTheDocument()
+    expect(screen.getByText('Blog；api.example.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '域名详情' }))
+    const domainDetailDrawer = screen.getByRole('dialog', { name: '域名资产详情' })
+    expect(within(domainDetailDrawer).getByText('api.example.com')).toBeInTheDocument()
+    expect(within(domainDetailDrawer).getByText('NameSilo')).toBeInTheDocument()
+    expect(within(domainDetailDrawer).getByText('2026-07-01')).toBeInTheDocument()
+    fireEvent.click(within(domainDetailDrawer).getByLabelText('关闭'))
     expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/domains', {
       method: 'POST',
       headers: {
@@ -1755,7 +1836,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '新增域名' }))
+    clickVPSAction('新增域名')
     const invalidDomainDrawer = screen.getByRole('dialog', { name: '新增域名' })
     fireEvent.change(within(invalidDomainDrawer).getByLabelText('域名'), { target: { value: 'https://example.com/path' } })
     fireEvent.click(within(invalidDomainDrawer).getByRole('button', { name: '创建域名记录' }))
@@ -1821,12 +1902,32 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Empty Edge' })).toBeInTheDocument())
-    expect(screen.getByText('暂无续费决策历史')).toBeInTheDocument()
-    expect(screen.getByText('暂无价格变化历史')).toBeInTheDocument()
-    expect(screen.getByText('暂无 IP 变化历史')).toBeInTheDocument()
-    expect(screen.getByText('暂无规格快照')).toBeInTheDocument()
-    expect(screen.getByText('暂无经验记录')).toBeInTheDocument()
-    expect(screen.getByText('尚未记录服务')).toBeInTheDocument()
-    expect(screen.getByText('尚未记录域名')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '判断证据摘要' })).toBeInTheDocument()
+    expect(screen.getByText('服务上下文待补录；域名上下文待补录')).toBeInTheDocument()
+    expect(screen.queryByText('暂无续费决策历史')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无价格变化历史')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无 IP 变化历史')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无规格快照')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无经验记录')).not.toBeInTheDocument()
+    expect(screen.queryByText('尚未记录服务')).not.toBeInTheDocument()
+    expect(screen.queryByText('尚未记录域名')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    expect(within(timelineDrawer).getByText('暂无续费决策历史')).toBeInTheDocument()
+    expect(within(timelineDrawer).getByText('暂无价格变化历史')).toBeInTheDocument()
+    expect(within(timelineDrawer).getByText('暂无 IP 变化历史')).toBeInTheDocument()
+    expect(within(timelineDrawer).getByText('暂无规格快照')).toBeInTheDocument()
+    expect(within(timelineDrawer).getByText('暂无经验记录')).toBeInTheDocument()
+    fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
+
+    fireEvent.click(screen.getByRole('button', { name: '服务详情' }))
+    const servicesDrawer = screen.getByRole('dialog', { name: '服务资产详情' })
+    expect(within(servicesDrawer).getByText('尚未记录服务')).toBeInTheDocument()
+    fireEvent.click(within(servicesDrawer).getByLabelText('关闭'))
+
+    fireEvent.click(screen.getByRole('button', { name: '域名详情' }))
+    const domainsDrawer = screen.getByRole('dialog', { name: '域名资产详情' })
+    expect(within(domainsDrawer).getByText('尚未记录域名')).toBeInTheDocument()
   })
 })

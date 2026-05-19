@@ -1,0 +1,7 @@
+{"file":".trellis/spec/web/directory-structure.md","reason":"VPS Detail page/components 落点与路由页边界"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"组件拆分、Drawer 表单、操作入口收口与 props 约束"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"页面数据加载、API helper、状态刷新和前端类型消费"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"VPS Detail 信息架构样式需遵循 BEM、design tokens、dark-first"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"前端测试、lint、build 和 UI 行为验证要求"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用 Node Detail action menu/DetailSection 思路，避免新增重复结构"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"确认 feature 分支开发和提交/PR 流程"}

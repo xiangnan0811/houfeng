@@ -1,0 +1,6 @@
+{"file":".trellis/spec/web/component-conventions.md","reason":"检查组件边界、Drawer 状态清理、操作入口语义"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"检查样式是否走 tokens/BEM 且没有新增局部 CSS"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"检查 VPS Detail 数据流和 API 状态刷新没有破坏"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"检查 lint/test/build 与关键 UI 测试覆盖"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查是否复用现有组件/模式并删除低价值重复结构"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"检查分支、工作树、提交前验证流程"}

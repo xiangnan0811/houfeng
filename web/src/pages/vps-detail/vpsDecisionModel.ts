@@ -17,21 +17,15 @@ export type WorkbenchEvidence = {
   tone: Exclude<WorkbenchTone, 'neutral'>
 }
 
-export type NextAction =
-  | {
-      title: string
-      summary: string
-      tone: Exclude<WorkbenchTone, 'neutral'>
-      buttonLabel: string
-      onAction: () => void
-    }
-  | {
-      title: string
-      summary: string
-      tone: Exclude<WorkbenchTone, 'neutral'>
-      linkLabel: string
-      to: string
-    }
+export type NextAction = {
+  title: string
+  summary: string
+  tone: Exclude<WorkbenchTone, 'neutral'>
+  buttonLabel?: string
+  onAction?: () => void
+  linkLabel?: string
+  to?: string
+}
 
 type BuildDecisionModelInput = {
   detail: VPSAssetDetail

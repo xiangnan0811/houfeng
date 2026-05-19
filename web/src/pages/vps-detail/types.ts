@@ -46,6 +46,11 @@ export type VPSDetailDrawerMode =
   | 'experience'
   | 'service'
   | 'domain'
+  | 'node-evidence'
+  | 'services-detail'
+  | 'domains-detail'
+  | 'timeline-detail'
+  | 'facts-detail'
   | null
 
 export type FactEditFormState = {
