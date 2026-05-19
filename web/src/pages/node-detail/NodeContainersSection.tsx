@@ -71,7 +71,7 @@ export function NodeContainersSection({ sample }: NodeContainersSectionProps) {
           emptyContent="暂无容器数据"
         />
       ) : (
-        <p style={{ color: 'var(--text-muted)' }}>暂无容器数据</p>
+        <p className="empty-inline">暂无容器数据</p>
       )}
     </>
   )

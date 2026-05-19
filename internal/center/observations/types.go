@@ -18,8 +18,10 @@ type HostSampleWrite struct {
 	Load15               float64
 	MemUsedPct           float64
 	MemAvailableBytes    int64
+	MemTotalBytes        int64
 	SwapUsedPct          float64
 	DiskUsedPct          float64
+	DiskTotalBytes       int64
 	InodeUsedPct         float64
 	NetInBytesPerSec     int64
 	NetOutBytesPerSec    int64

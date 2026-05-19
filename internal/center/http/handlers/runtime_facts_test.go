@@ -42,10 +42,12 @@ func TestNodeRuntimeFactsReturnsLatestHostSample(t *testing.T) {
 		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
 			NodeID: "nd_001",
 			LatestHostSample: &runtimefacts.HostSample{
-				NodeID:       "nd_001",
-				ObservedAt:   now,
-				ReceivedAt:   now,
-				AgentVersion: "1.0.0",
+				NodeID:         "nd_001",
+				ObservedAt:     now,
+				ReceivedAt:     now,
+				AgentVersion:   "1.0.0",
+				MemTotalBytes:  8589934592,
+				DiskTotalBytes: 107374182400,
 			},
 		},
 	}
@@ -69,6 +71,12 @@ func TestNodeRuntimeFactsReturnsLatestHostSample(t *testing.T) {
 	}
 	if body.LatestHostSample == nil || body.LatestHostSample.AgentVersion != "1.0.0" {
 		t.Fatalf("expected latest host sample, got %#v", body.LatestHostSample)
+	}
+	if body.LatestHostSample.MemTotalBytes != 8589934592 {
+		t.Fatalf("mem_total_bytes = %d, want %d", body.LatestHostSample.MemTotalBytes, int64(8589934592))
+	}
+	if body.LatestHostSample.DiskTotalBytes != 107374182400 {
+		t.Fatalf("disk_total_bytes = %d, want %d", body.LatestHostSample.DiskTotalBytes, int64(107374182400))
 	}
 }
 
@@ -200,10 +208,12 @@ func TestNodeRuntimeFactsDefaultWindowIs24h(t *testing.T) {
 		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
 			NodeID: "nd_001",
 			LatestHostSample: &runtimefacts.HostSample{
-				NodeID:       "nd_001",
-				ObservedAt:   now,
-				ReceivedAt:   now,
-				AgentVersion: "1.0.0",
+				NodeID:         "nd_001",
+				ObservedAt:     now,
+				ReceivedAt:     now,
+				AgentVersion:   "1.0.0",
+				MemTotalBytes:  8589934592,
+				DiskTotalBytes: 107374182400,
 			},
 		},
 	}
@@ -226,10 +236,12 @@ func TestNodeRuntimeFactsWith7dWindow(t *testing.T) {
 		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
 			NodeID: "nd_001",
 			LatestHostSample: &runtimefacts.HostSample{
-				NodeID:       "nd_001",
-				ObservedAt:   now,
-				ReceivedAt:   now,
-				AgentVersion: "1.0.0",
+				NodeID:         "nd_001",
+				ObservedAt:     now,
+				ReceivedAt:     now,
+				AgentVersion:   "1.0.0",
+				MemTotalBytes:  8589934592,
+				DiskTotalBytes: 107374182400,
 			},
 		},
 	}
@@ -251,10 +263,12 @@ func TestNodeRuntimeFactsWith30dWindow(t *testing.T) {
 		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
 			NodeID: "nd_001",
 			LatestHostSample: &runtimefacts.HostSample{
-				NodeID:       "nd_001",
-				ObservedAt:   now,
-				ReceivedAt:   now,
-				AgentVersion: "1.0.0",
+				NodeID:         "nd_001",
+				ObservedAt:     now,
+				ReceivedAt:     now,
+				AgentVersion:   "1.0.0",
+				MemTotalBytes:  8589934592,
+				DiskTotalBytes: 107374182400,
 			},
 		},
 	}

@@ -16,7 +16,7 @@ func TestCollectReturnsCurrentMetricsAndFirstSampleZeroRates(t *testing.T) {
 		"/proc/net/dev":   "Inter-|\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\neth0: 1000 0 0 0 0 0 0 0 500 0 0 0 0 0 0 0\nlo: 10 0 0 0 0 0 0 0 10 0 0 0 0 0 0 0\n",
 		"/proc/diskstats": "8 0 sda 0 0 100 0 0 0 200 0 0 50 0\n",
 	}), func(string) (hostsample.FilesystemStats, error) {
-		return hostsample.FilesystemStats{Blocks: 1000, Bfree: 200, Files: 100, Ffree: 20}, nil
+		return hostsample.FilesystemStats{Blocks: 1000, Bfree: 200, Bsize: 4096, Files: 100, Ffree: 20}, nil
 	})
 
 	sample, err := provider.Collect(time.Date(2026, time.April, 24, 12, 0, 0, 0, time.UTC))
@@ -32,11 +32,17 @@ func TestCollectReturnsCurrentMetricsAndFirstSampleZeroRates(t *testing.T) {
 	if sample.MemAvailableBytes != 250*1024 {
 		t.Fatalf("MemAvailableBytes = %d, want %d", sample.MemAvailableBytes, 250*1024)
 	}
+	if sample.MemTotalBytes != 1000*1024 {
+		t.Fatalf("MemTotalBytes = %d, want %d", sample.MemTotalBytes, 1000*1024)
+	}
 	if sample.SwapUsedPct != 20 {
 		t.Fatalf("SwapUsedPct = %v, want 20", sample.SwapUsedPct)
 	}
 	if sample.DiskUsedPct != 80 {
 		t.Fatalf("DiskUsedPct = %v, want 80", sample.DiskUsedPct)
+	}
+	if sample.DiskTotalBytes != 1000*4096 {
+		t.Fatalf("DiskTotalBytes = %d, want %d", sample.DiskTotalBytes, 1000*4096)
 	}
 	if sample.InodeUsedPct != 80 {
 		t.Fatalf("InodeUsedPct = %v, want 80", sample.InodeUsedPct)
@@ -59,7 +65,7 @@ func TestCollectComputesRateBasedFieldsFromPreviousSnapshot(t *testing.T) {
 		"/proc/diskstats": {"8 0 sda 0 0 100 0 0 0 200 0 0 100 0\n", "8 0 sda 0 0 300 0 0 0 500 0 0 300 0\n"},
 	}
 	provider := hostsample.NewWithDeps(sequencedReadFile(files), func(string) (hostsample.FilesystemStats, error) {
-		return hostsample.FilesystemStats{Blocks: 1000, Bfree: 500, Files: 100, Ffree: 50}, nil
+		return hostsample.FilesystemStats{Blocks: 1000, Bfree: 500, Bsize: 4096, Files: 100, Ffree: 50}, nil
 	})
 
 	firstAt := time.Date(2026, time.April, 24, 12, 0, 0, 0, time.UTC)
@@ -106,7 +112,7 @@ func TestCollectIgnoresPartitionRowsInDiskStats(t *testing.T) {
 		},
 	}
 	provider := hostsample.NewWithDeps(sequencedReadFile(files), func(string) (hostsample.FilesystemStats, error) {
-		return hostsample.FilesystemStats{Blocks: 1000, Bfree: 500, Files: 100, Ffree: 50}, nil
+		return hostsample.FilesystemStats{Blocks: 1000, Bfree: 500, Bsize: 4096, Files: 100, Ffree: 50}, nil
 	})
 
 	firstAt := time.Date(2026, time.April, 24, 12, 0, 0, 0, time.UTC)

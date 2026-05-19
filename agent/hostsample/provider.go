@@ -16,6 +16,7 @@ import (
 type FilesystemStats struct {
 	Blocks uint64
 	Bfree  uint64
+	Bsize  uint64
 	Files  uint64
 	Ffree  uint64
 }
@@ -92,7 +93,7 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 	if err != nil {
 		return agentapi.HostSamplePayload{}, fmt.Errorf("read /proc/meminfo: %w", err)
 	}
-	memUsedPct, memAvailableBytes, swapUsedPct, err := parseMemInfo(meminfoRaw)
+	memUsedPct, memAvailableBytes, memTotalBytes, swapUsedPct, err := parseMemInfo(meminfoRaw)
 	if err != nil {
 		return agentapi.HostSamplePayload{}, err
 	}
@@ -146,8 +147,10 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 		Load15:            load15,
 		MemUsedPct:        memUsedPct,
 		MemAvailableBytes: memAvailableBytes,
+		MemTotalBytes:     memTotalBytes,
 		SwapUsedPct:       swapUsedPct,
 		DiskUsedPct:       diskUsedPct,
+		DiskTotalBytes:    diskTotalBytes(fsStats),
 		InodeUsedPct:      inodeUsedPct,
 		UptimeSeconds:     uptimeSeconds,
 	}
@@ -241,8 +244,10 @@ func (p *Provider) collectDarwin(observedAt time.Time) (agentapi.HostSamplePaylo
 		Load15:            load15,
 		MemUsedPct:        memUsedPct,
 		MemAvailableBytes: memAvailableBytes,
+		MemTotalBytes:     int64(memTotalBytes),
 		SwapUsedPct:       swapUsedPct,
 		DiskUsedPct:       diskUsedPct,
+		DiskTotalBytes:    diskTotalBytes(fsStats),
 		InodeUsedPct:      inodeUsedPct,
 		UptimeSeconds:     uptimeSeconds,
 	}, nil
@@ -260,6 +265,7 @@ func defaultStatFS(path string) (FilesystemStats, error) {
 	return FilesystemStats{
 		Blocks: stat.Blocks,
 		Bfree:  stat.Bfree,
+		Bsize:  uint64(stat.Bsize),
 		Files:  stat.Files,
 		Ffree:  stat.Ffree,
 	}, nil
@@ -416,7 +422,7 @@ func parseDarwinUptime(raw []byte, observedAt time.Time) (int64, error) {
 	return 0, fmt.Errorf("parse darwin boottime: sec missing")
 }
 
-func parseMemInfo(raw []byte) (float64, int64, float64, error) {
+func parseMemInfo(raw []byte) (float64, int64, int64, float64, error) {
 	values := map[string]uint64{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		fields := strings.Fields(line)
@@ -426,17 +432,18 @@ func parseMemInfo(raw []byte) (float64, int64, float64, error) {
 		key := strings.TrimSuffix(fields[0], ":")
 		value, err := strconv.ParseUint(fields[1], 10, 64)
 		if err != nil {
-			return 0, 0, 0, fmt.Errorf("parse %s: %w", key, err)
+			return 0, 0, 0, 0, fmt.Errorf("parse %s: %w", key, err)
 		}
 		values[key] = value
 	}
 	memTotal := values["MemTotal"]
 	memAvailable := values["MemAvailable"]
 	if memTotal == 0 {
-		return 0, 0, 0, fmt.Errorf("parse /proc/meminfo: MemTotal missing")
+		return 0, 0, 0, 0, fmt.Errorf("parse /proc/meminfo: MemTotal missing")
 	}
 	memUsedPct := float64(memTotal-memAvailable) / float64(memTotal) * 100
 	memAvailableBytes := int64(memAvailable * 1024)
+	memTotalBytes := int64(memTotal * 1024)
 
 	swapTotal := values["SwapTotal"]
 	swapFree := values["SwapFree"]
@@ -444,7 +451,7 @@ func parseMemInfo(raw []byte) (float64, int64, float64, error) {
 	if swapTotal > 0 {
 		swapUsedPct = float64(swapTotal-swapFree) / float64(swapTotal) * 100
 	}
-	return memUsedPct, memAvailableBytes, swapUsedPct, nil
+	return memUsedPct, memAvailableBytes, memTotalBytes, swapUsedPct, nil
 }
 
 func parseUptime(raw []byte) (int64, error) {
@@ -604,6 +611,13 @@ func deriveUsagePercents(stats FilesystemStats) (float64, float64) {
 		inodeUsedPct = float64(stats.Files-stats.Ffree) / float64(stats.Files) * 100
 	}
 	return diskUsedPct, inodeUsedPct
+}
+
+func diskTotalBytes(stats FilesystemStats) int64 {
+	if stats.Blocks == 0 || stats.Bsize == 0 {
+		return 0
+	}
+	return int64(stats.Blocks * stats.Bsize)
 }
 
 func cpuUsagePct(previous, current snapshot) float64 {

@@ -24,7 +24,7 @@ func TestCollectDarwinReturnsCoreMetricsWithoutProcFS(t *testing.T) {
 			return nil, fmt.Errorf("unexpected file read %q", path)
 		},
 		func(string) (FilesystemStats, error) {
-			return FilesystemStats{Blocks: 1000, Bfree: 200, Files: 100, Ffree: 20}, nil
+			return FilesystemStats{Blocks: 1000, Bfree: 200, Bsize: 4096, Files: 100, Ffree: 20}, nil
 		},
 		func(name string, args ...string) ([]byte, error) {
 			key := strings.TrimSpace(name + " " + strings.Join(args, " "))
@@ -46,6 +46,9 @@ func TestCollectDarwinReturnsCoreMetricsWithoutProcFS(t *testing.T) {
 	if sample.MemAvailableBytes != 350*4096 {
 		t.Fatalf("MemAvailableBytes = %d, want %d", sample.MemAvailableBytes, 350*4096)
 	}
+	if sample.MemTotalBytes != 4096000 {
+		t.Fatalf("MemTotalBytes = %d, want %d", sample.MemTotalBytes, 4096000)
+	}
 	if sample.MemUsedPct != 65 {
 		t.Fatalf("MemUsedPct = %v, want 65", sample.MemUsedPct)
 	}
@@ -54,6 +57,9 @@ func TestCollectDarwinReturnsCoreMetricsWithoutProcFS(t *testing.T) {
 	}
 	if sample.DiskUsedPct != 80 {
 		t.Fatalf("DiskUsedPct = %v, want 80", sample.DiskUsedPct)
+	}
+	if sample.DiskTotalBytes != 1000*4096 {
+		t.Fatalf("DiskTotalBytes = %d, want %d", sample.DiskTotalBytes, 1000*4096)
 	}
 	if sample.InodeUsedPct != 80 {
 		t.Fatalf("InodeUsedPct = %v, want 80", sample.InodeUsedPct)

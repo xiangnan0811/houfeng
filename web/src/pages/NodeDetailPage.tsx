@@ -21,7 +21,6 @@ import {
   restoreRetiredNodeToObserving,
   retireNode,
   resumeNodeMonitoring,
-  updateNodeMetadata,
 } from '../lib/api'
 import type { ActiveIncidentRecord, NodeOnboardingState } from '../lib/types'
 import { NodeDetailPageBody } from './node-detail/NodeDetailPageBody'
@@ -38,7 +37,6 @@ import {
   applyOnboardingRecordToNode,
   describeError,
   mergeNonMetadataNodeRecord,
-  parseLabels,
 } from './node-detail/nodeDetailHelpers'
 import type {
   BindingConflictAction,
@@ -72,12 +70,6 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     error: null,
   })
   const [bindingAction, setBindingAction] = useState<BindingConflictAction | null>(null)
-  const [metadataEditing, setMetadataEditing] = useState(false)
-  const [metadataLabelDraft, setMetadataLabelDraft] = useState('')
-  const [metadataNoteDraft, setMetadataNoteDraft] = useState('')
-  const [metadataGroupDraft, setMetadataGroupDraft] = useState('')
-  const [metadataSubmitting, setMetadataSubmitting] = useState(false)
-  const [metadataError, setMetadataError] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyTab, setHistoryTab] = useState<HistoryTab>('events')
   const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(null)
@@ -720,34 +712,6 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     setTimeWindow(nextTimeWindow)
   }
 
-  function handleMetadataGroupDraftChange(value: string) {
-    setMetadataGroupDraft(value)
-  }
-
-  function handleMetadataLabelDraftChange(value: string) {
-    setMetadataLabelDraft(value)
-  }
-
-  function handleMetadataNoteDraftChange(value: string) {
-    setMetadataNoteDraft(value)
-  }
-
-  function startMetadataEdit(currentNode: NonNullable<NodeDetailPageState['node']>) {
-    setMetadataEditing(true)
-    setMetadataGroupDraft(currentNode.group || '')
-    setMetadataLabelDraft(currentNode.labels.join(', '))
-    setMetadataNoteDraft(currentNode.note)
-    setMetadataError(null)
-  }
-
-  function cancelMetadataEdit() {
-    setMetadataEditing(false)
-    setMetadataGroupDraft('')
-    setMetadataLabelDraft('')
-    setMetadataNoteDraft('')
-    setMetadataError(null)
-  }
-
   function startRetireConfirmation() {
     setShowRetireConfirmation(true)
     setLifecycleError(null)
@@ -770,67 +734,6 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
 
   function closeHistoryDrawer() {
     setHistoryOpen(false)
-  }
-
-  async function handleMetadataSave() {
-    if (!node) return
-
-    const actionNodeId = node.node_id
-    setMetadataSubmitting(true)
-    setMetadataError(null)
-
-    try {
-      const updated = await updateNodeMetadata(
-        actionNodeId,
-        {
-          group: metadataGroupDraft.trim() || undefined,
-          labels: parseLabels(metadataLabelDraft),
-          note: metadataNoteDraft.trim(),
-        },
-        {
-          expectedUpdatedAt: node.updated_at,
-        },
-      )
-      if (
-        !isMountedRef.current ||
-        currentRouteNodeIdRef.current !== actionNodeId ||
-        currentRequestedNodeIdRef.current !== actionNodeId
-      ) {
-        return
-      }
-      setState((current) => ({
-        ...current,
-        node:
-          current.requestedNodeId === actionNodeId && current.node
-            ? {
-                ...current.node,
-                labels: updated.labels,
-                note: updated.note,
-                updated_at: updated.updated_at,
-              }
-            : current.node,
-      }))
-      setMetadataEditing(false)
-      setMetadataLabelDraft('')
-      setMetadataNoteDraft('')
-    } catch (metadataError) {
-      if (
-        !isMountedRef.current ||
-        currentRouteNodeIdRef.current !== actionNodeId ||
-        currentRequestedNodeIdRef.current !== actionNodeId
-      ) {
-        return
-      }
-      setMetadataError(describeError(metadataError, '标签或备注更新失败'))
-    } finally {
-      if (
-        isMountedRef.current &&
-        currentRouteNodeIdRef.current === actionNodeId &&
-        currentRequestedNodeIdRef.current === actionNodeId
-      ) {
-        setMetadataSubmitting(false)
-      }
-    }
   }
 
   async function handleCommandExecute(cmdId: string) {
@@ -912,18 +815,6 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       onBindingReset={() => void handleBindingAction('reset', resetNodeBinding)}
       timeWindow={timeWindow}
       onTimeWindowChange={handleTimeWindowChange}
-      metadataEditing={metadataEditing}
-      metadataGroupDraft={metadataGroupDraft}
-      metadataLabelDraft={metadataLabelDraft}
-      metadataNoteDraft={metadataNoteDraft}
-      metadataSubmitting={metadataSubmitting}
-      metadataError={metadataError}
-      onMetadataGroupDraftChange={handleMetadataGroupDraftChange}
-      onMetadataLabelDraftChange={handleMetadataLabelDraftChange}
-      onMetadataNoteDraftChange={handleMetadataNoteDraftChange}
-      onStartMetadataEdit={() => startMetadataEdit(node)}
-      onCancelMetadataEdit={cancelMetadataEdit}
-      onSaveMetadata={() => void handleMetadataSave()}
       showRetireConfirmation={showRetireConfirmation}
       lifecycleSubmitting={lifecycleSubmitting}
       lifecycleError={lifecycleError}

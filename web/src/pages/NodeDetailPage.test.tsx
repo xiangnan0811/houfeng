@@ -117,23 +117,6 @@ function openRuntimeMenu() {
   fireEvent.click(summary)
 }
 
-/**
- * Open one of the secondary collapsible blocks (标签与备注 / 生命周期 / 接入凭证状态).
- * Clicks the trigger regardless of whether the same label appears elsewhere
- * (e.g. NodeLabelsAndNote also renders a "标签与备注" h2 inside the body).
- */
-function openSecondary(label: string) {
-  const matches = screen.getAllByText(label)
-  const trigger =
-    matches.find((node) => node.closest('button.collapsible-section__trigger')) ??
-    matches.find((node) => node.tagName === 'SUMMARY')
-  const clickable = trigger?.tagName === 'BUTTON' ? trigger : trigger?.closest('button, summary')
-  if (!clickable) {
-    throw new Error(`No collapsible trigger matching "${label}" found`)
-  }
-  fireEvent.click(clickable)
-}
-
 function NodeDetailTestHarness() {
   const navigate = useNavigate()
 
@@ -327,8 +310,10 @@ describe('NodeDetailPage', () => {
             load_15: 0.5,
             mem_used_pct: 65,
             mem_available_bytes: 2147483648,
+            mem_total_bytes: 8589934592,
             swap_used_pct: 0,
             disk_used_pct: 52,
+            disk_total_bytes: 107374182400,
             inode_used_pct: 11,
             net_in_bytes_per_sec: 1024,
             net_out_bytes_per_sec: 2048,
@@ -393,6 +378,10 @@ describe('NodeDetailPage', () => {
     // Each metric card head renders the current value via MonoDigits
     expect(screen.getAllByText('12.5%').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText(/2.0 GB/i)).toBeInTheDocument()
+    expect(screen.getByText('总内存')).toBeInTheDocument()
+    expect(screen.getByText(/8.0 GB/i)).toBeInTheDocument()
+    expect(screen.getByText('总磁盘')).toBeInTheDocument()
+    expect(screen.getByText(/100.0 GB/i)).toBeInTheDocument()
     expect(screen.queryByText('将在 incidents / events 切片接入后替换为真实内容。')).not.toBeInTheDocument()
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_001', {
@@ -425,6 +414,79 @@ describe('NodeDetailPage', () => {
     )
   })
 
+
+  it('renders unknown memory and disk capacity as dash for older samples', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            nodeRecord({
+              node_id: 'nd_unknown_capacity',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            node_id: 'nd_unknown_capacity',
+            latest_host_sample: {
+              node_id: 'nd_unknown_capacity',
+              observed_at: '2026-04-24T10:05:00Z',
+              received_at: '2026-04-24T10:05:01Z',
+              agent_version: 'dev',
+              fingerprint: 'fp-unknown-capacity',
+              cpu_usage_pct: 10,
+              load_1: 0.1,
+              load_5: 0.2,
+              load_15: 0.3,
+              mem_used_pct: 40,
+              mem_available_bytes: 2147483648,
+              mem_total_bytes: 0,
+              swap_used_pct: 0,
+              disk_used_pct: 30,
+              disk_total_bytes: 0,
+              inode_used_pct: 5,
+              net_in_bytes_per_sec: 0,
+              net_out_bytes_per_sec: 0,
+              cpu_iowait_pct: 0,
+              cpu_steal_pct: 0,
+              disk_read_bytes_per_sec: 0,
+              disk_write_bytes_per_sec: 0,
+              disk_busy_pct: 0,
+              uptime_seconds: 3600,
+              maintenance_context: false,
+              is_backfilled: false,
+              sync_batch_id: 'sync-unknown-capacity',
+            },
+            recent_host_samples: [],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/nodes/nd_unknown_capacity']}>
+        <Routes>
+          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('总内存')).toBeInTheDocument()
+    expect(screen.getByText('总磁盘')).toBeInTheDocument()
+    expect(screen.queryByText('0 B')).not.toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2)
+  })
 
   it('renders sparklines and a sample-count meta line when recent host samples are present', async () => {
     vi.stubGlobal(
@@ -465,8 +527,10 @@ describe('NodeDetailPage', () => {
               load_15: 1.9,
               mem_used_pct: 62,
               mem_available_bytes: 1073741824,
+              mem_total_bytes: 8589934592,
               swap_used_pct: 0,
               disk_used_pct: 41,
+              disk_total_bytes: 107374182400,
               inode_used_pct: 9,
               net_in_bytes_per_sec: 1024,
               net_out_bytes_per_sec: 2048,
@@ -493,8 +557,10 @@ describe('NodeDetailPage', () => {
                 load_15: 1.9,
                 mem_used_pct: 62,
                 mem_available_bytes: 1073741824,
+                mem_total_bytes: 8589934592,
                 swap_used_pct: 0,
                 disk_used_pct: 41,
+                disk_total_bytes: 107374182400,
                 inode_used_pct: 9,
                 net_in_bytes_per_sec: 1024,
                 net_out_bytes_per_sec: 2048,
@@ -520,8 +586,10 @@ describe('NodeDetailPage', () => {
                 load_15: 1.5,
                 mem_used_pct: 58,
                 mem_available_bytes: 2147483648,
+                mem_total_bytes: 8589934592,
                 swap_used_pct: 0,
                 disk_used_pct: 40,
+                disk_total_bytes: 107374182400,
                 inode_used_pct: 8,
                 net_in_bytes_per_sec: 900,
                 net_out_bytes_per_sec: 1800,
@@ -686,8 +754,10 @@ describe('NodeDetailPage', () => {
               load_15: 0.5,
               mem_used_pct: 71,
               mem_available_bytes: 1073741824,
+              mem_total_bytes: 8589934592,
               swap_used_pct: 2,
               disk_used_pct: 88,
+              disk_total_bytes: 107374182400,
               inode_used_pct: 23,
               net_in_bytes_per_sec: 2048,
               net_out_bytes_per_sec: 1024,
@@ -760,10 +830,10 @@ describe('NodeDetailPage', () => {
     expect(screen.getByText(formatDateTime('2026-04-27T09:04:00Z'))).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()
     expect(screen.getByText(/同一台机器重装或合法替换/)).toBeInTheDocument()
-    // Secondary <details> summaries surface the standard sections (still collapsed)
-    expect(screen.getAllByText('标签与备注')[0]).toBeInTheDocument()
-    expect(screen.getByText('生命周期')).toBeInTheDocument()
-    expect(screen.getByText('接入凭证状态')).toBeInTheDocument()
+    expect(screen.queryByText('标签与备注')).not.toBeInTheDocument()
+    expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
+    expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
+    openRuntimeMenu()
     expect(screen.getByRole('link', { name: '打开接入工作台' })).toHaveAttribute(
       'href',
       '/nodes/nd_conflict/onboarding',
@@ -872,7 +942,7 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
     )
-    // "已绑定" StatusBadge surfaces in multiple places (header badge row + 接入凭证状态 summary)
+    // "已绑定" StatusBadge remains visible in the header badge row
     expect(screen.getAllByText('已绑定').length).toBeGreaterThanOrEqual(1)
     expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/binding/confirm-rebind', {
       method: 'POST',
@@ -963,7 +1033,7 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
     )
-    // "未绑定" StatusBadge surfaces in multiple places (header + 接入凭证状态 summary)
+    // "未绑定" StatusBadge remains visible in the header badge row
     expect(screen.getAllByText('未绑定').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -1065,8 +1135,10 @@ describe('NodeDetailPage', () => {
           load_15: 0.2,
           mem_used_pct: 54,
           mem_available_bytes: 3221225472,
+          mem_total_bytes: 8589934592,
           swap_used_pct: 0,
           disk_used_pct: 40,
+          disk_total_bytes: 107374182400,
           inode_used_pct: 8,
           net_in_bytes_per_sec: 1024,
           net_out_bytes_per_sec: 2048,
@@ -1478,7 +1550,7 @@ describe('NodeDetailPage', () => {
     })
   })
 
-  it('renders a lifecycle card for retired nodes with restore-to-observing guidance', async () => {
+  it('renders restore-to-observing in the watchtower actions menu for retired nodes', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -1510,14 +1582,11 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
-    // The 生命周期 section is collapsed by default; expand to assert
-    openSecondary('生命周期')
+    openRuntimeMenu()
 
-    expect(
-      screen.getByText('已退役节点在 V1 中只能先恢复到观察中，不能直接恢复为在用。'),
-    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '退役节点' })).not.toBeInTheDocument()
+    expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
   })
 
   it('retires a node from Node detail with inline confirmation instead of window.confirm', async () => {
@@ -1564,7 +1633,7 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
-    openSecondary('生命周期')
+    openRuntimeMenu()
     expect(screen.getByRole('button', { name: '退役节点' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '退役节点' }))
@@ -1631,7 +1700,7 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
-    openSecondary('生命周期')
+    openRuntimeMenu()
     fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
 
     // "观察中" StatusBadge surfaces in multiple places (lifecycle badge in header)
@@ -1648,7 +1717,7 @@ describe('NodeDetailPage', () => {
     )
   })
 
-  it('keeps lifecycle action errors local to the lifecycle card', async () => {
+  it('keeps lifecycle action errors visible near the action surface', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -1678,14 +1747,14 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
-    openSecondary('生命周期')
+    openRuntimeMenu()
     fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('invalid lifecycle transition'),
     )
     expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
-    expect(screen.getByText('生命周期')).toBeInTheDocument()
+    expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
   })
 
   it('ignores a stale runtime-action success after switching to a different node route', async () => {
@@ -1860,7 +1929,7 @@ describe('NodeDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
-    openSecondary('生命周期')
+    openRuntimeMenu()
 
     fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
     fireEvent.click(screen.getByRole('button', { name: 'switch node' }))
@@ -1973,676 +2042,6 @@ describe('NodeDetailPage', () => {
   })
 
 
-
-  it('renders empty note copy as 暂无备注 in node detail metadata', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          mockJSONResponse(
-            nodeRecord({
-              node_id: 'nd_001',
-              binding_status: '已绑定',
-              labels: ['edge'],
-              note: '',
-              current_health_status: '正常',
-              current_active_incident_count: 0,
-              current_primary_issue_summary: '',
-            }),
-          ),
-        )
-        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockJSONResponse([])),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/nd_001']}>
-        <Routes>
-          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openSecondary('标签与备注')
-
-    expect(screen.getByText('备注：暂无备注')).toBeInTheDocument()
-  })
-
-  it('shows and edits node labels and note metadata', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          nodeRecord({
-            node_id: 'nd_001',
-            binding_status: '已绑定',
-            labels: ['edge'],
-            note: 'keep me',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          nodeRecord({
-            node_id: 'nd_001',
-            binding_status: '已绑定',
-            labels: ['edge', 'core'],
-            note: 'trimmed note',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-            updated_at: '2026-04-27T09:10:00Z',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          nodeRecord({
-            node_id: 'nd_001',
-            binding_status: '已绑定',
-            labels: ['edge', 'core'],
-            note: 'second note',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-            updated_at: '2026-04-27T09:15:00Z',
-          }),
-        ),
-      )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/nd_001']}>
-        <Routes>
-          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openSecondary('标签与备注')
-
-    expect(screen.getByRole('heading', { name: '标签与备注' })).toBeInTheDocument()
-    expect(screen.getByText('标签：edge')).toBeInTheDocument()
-    expect(screen.getByText('备注：keep me')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core, edge' },
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
-      target: { value: '  trimmed note  ' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/nodes/nd_001', {
-        method: 'PATCH',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'If-Match': '"2026-04-27T09:05:00Z"',
-        },
-        cache: 'no-store',
-        credentials: 'include',
-        body: JSON.stringify({ labels: ['edge', 'core'], note: 'trimmed note' }),
-      }),
-    )
-    expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
-    expect(screen.getByText('备注：trimmed note')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
-      target: { value: 'second note' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/nodes/nd_001', {
-        method: 'PATCH',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'If-Match': '"2026-04-27T09:10:00Z"',
-        },
-        cache: 'no-store',
-        credentials: 'include',
-        body: JSON.stringify({ labels: ['edge', 'core'], note: 'second note' }),
-      }),
-    )
-    expect(screen.getByText('备注：second note')).toBeInTheDocument()
-  })
-
-  it('shows a metadata update failure without replacing the current detail', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          mockJSONResponse(
-            nodeRecord({
-              node_id: 'nd_001',
-              binding_status: '已绑定',
-              labels: ['edge'],
-              note: 'keep me',
-              current_health_status: '正常',
-              current_active_incident_count: 0,
-              current_primary_issue_summary: '',
-            }),
-          ),
-        )
-        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockJSONResponse({ error: 'metadata write failed' }, 409)),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/nd_001']}>
-        <Routes>
-          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openSecondary('标签与备注')
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
-      target: { value: 'new note' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
-
-    await waitFor(() =>
-      expect(screen.getByText('metadata write failed')).toBeInTheDocument(),
-    )
-    expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('new note')
-    expect(screen.queryByText('备注：new note')).not.toBeInTheDocument()
-  })
-
-  it('ignores a stale metadata save after switching to a different node route', async () => {
-    const metadataSave = deferredResponse()
-
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          mockJSONResponse(
-            nodeRecord({
-              node_id: 'nd_001',
-              binding_status: '已绑定',
-              labels: ['edge'],
-              note: 'keep me',
-              current_health_status: '正常',
-              current_active_incident_count: 0,
-              current_primary_issue_summary: '',
-            }),
-          ),
-        )
-        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockImplementationOnce(() => metadataSave.promise)
-        .mockResolvedValueOnce(
-          mockJSONResponse({
-            node_id: 'nd_002',
-            display_name: 'Seoul Edge',
-            region: 'ap-northeast-2',
-            city: 'Seoul',
-            provider: 'Hetzner',
-            lifecycle_status: '在用',
-            monitoring_status: '启用',
-            binding_status: '已绑定',
-            labels: ['seoul'],
-            note: 'seoul note',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-            created_at: '2026-04-20T00:00:00Z',
-            updated_at: '2026-04-24T09:10:00Z',
-          }),
-        )
-        .mockResolvedValueOnce(
-          mockJSONResponse({
-            node_id: 'nd_002',
-            latest_host_sample: null,
-          }),
-        )
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockJSONResponse([])),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/nd_001']}>
-        <NodeDetailTestHarness />
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openSecondary('标签与备注')
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core' },
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
-      target: { value: 'new note' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
-    fireEvent.click(screen.getByRole('button', { name: 'switch node' }))
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
-    )
-
-    metadataSave.resolve(
-      mockJSONResponse(
-        nodeRecord({
-          node_id: 'nd_001',
-          binding_status: '已绑定',
-          labels: ['edge', 'core'],
-          note: 'new note',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          updated_at: '2026-04-27T09:45:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
-    )
-    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-    expect(screen.queryByText('备注：new note')).not.toBeInTheDocument()
-    expect(screen.getByText('备注：seoul note')).toBeInTheDocument()
-  })
-
-
-  it('preserves saved metadata when a later runtime response returns stale labels and note', async () => {
-    const metadataSave = deferredResponse()
-    const runtimeAction = deferredResponse()
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          nodeRecord({
-            node_id: 'nd_001',
-            binding_status: '已绑定',
-            labels: ['edge'],
-            note: 'keep me',
-            monitoring_status: '启用',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockImplementationOnce(() => metadataSave.promise)
-      .mockImplementationOnce(() => runtimeAction.promise)
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/nd_001']}>
-        <Routes>
-          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openSecondary('标签与备注')
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core' },
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
-      target: { value: 'new note' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
-
-    openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
-
-    metadataSave.resolve(
-      mockJSONResponse(
-        nodeRecord({
-          node_id: 'nd_001',
-          binding_status: '已绑定',
-          labels: ['edge', 'core'],
-          note: 'new note',
-          monitoring_status: '启用',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          updated_at: '2026-04-27T09:12:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() => expect(screen.getByText('标签：edge · core')).toBeInTheDocument())
-    expect(screen.getByText('备注：new note')).toBeInTheDocument()
-
-    runtimeAction.resolve(
-      mockJSONResponse(
-        nodeRecord({
-          node_id: 'nd_001',
-          binding_status: '已绑定',
-          labels: ['edge'],
-          note: 'keep me',
-          monitoring_status: '维护中',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          updated_at: '2026-04-27T09:15:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() => expect(screen.getByRole('button', { name: '退出维护' })).toBeInTheDocument())
-    expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
-    expect(screen.getByText('备注：new note')).toBeInTheDocument()
-  })
-
-  it('preserves saved metadata when a later lifecycle response returns stale labels and note', async () => {
-    const metadataSave = deferredResponse()
-    const lifecycleAction = deferredResponse()
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          nodeRecord({
-            node_id: 'nd_001',
-            binding_status: '已绑定',
-            labels: ['edge'],
-            note: 'keep me',
-            lifecycle_status: '在用',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockImplementationOnce(() => metadataSave.promise)
-      .mockImplementationOnce(() => lifecycleAction.promise)
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/nd_001']}>
-        <Routes>
-          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openSecondary('标签与备注')
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core' },
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
-      target: { value: 'new note' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
-
-    openSecondary('生命周期')
-    fireEvent.click(screen.getByRole('button', { name: '退役节点' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认退役' }))
-
-    metadataSave.resolve(
-      mockJSONResponse(
-        nodeRecord({
-          node_id: 'nd_001',
-          binding_status: '已绑定',
-          labels: ['edge', 'core'],
-          note: 'new note',
-          lifecycle_status: '在用',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          updated_at: '2026-04-27T09:12:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() => expect(screen.getByText('标签：edge · core')).toBeInTheDocument())
-    expect(screen.getByText('备注：new note')).toBeInTheDocument()
-
-    lifecycleAction.resolve(
-      mockJSONResponse(
-        nodeRecord({
-          node_id: 'nd_001',
-          binding_status: '已绑定',
-          labels: ['edge'],
-          note: 'keep me',
-          lifecycle_status: '已退役',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          updated_at: '2026-04-27T09:15:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() => expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument())
-    expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
-    expect(screen.getByText('备注：new note')).toBeInTheDocument()
-  })
-
-  it('preserves saved metadata when a later binding response returns stale labels and note', async () => {
-    const metadataSave = deferredResponse()
-    const bindingAction = deferredResponse()
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          nodeRecord({
-            node_id: 'nd_conflict',
-            binding_status: '指纹变更待确认',
-            labels: ['edge'],
-            note: 'keep me',
-            current_health_status: '关注',
-            current_active_incident_count: 1,
-            current_primary_issue_summary: '检测到新的指纹接入请求',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse(onboardingConflictState({ labels: ['edge'], note: 'keep me' })))
-      .mockImplementationOnce(() => metadataSave.promise)
-      .mockImplementationOnce(() => bindingAction.promise)
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/nd_conflict']}>
-        <Routes>
-          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    await waitForEnabledButton('确认重绑定')
-    openSecondary('标签与备注')
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core' },
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
-      target: { value: 'new note' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
-
-    fireEvent.click(screen.getByRole('button', { name: '确认重绑定' }))
-
-    metadataSave.resolve(
-      mockJSONResponse(
-        nodeRecord({
-          node_id: 'nd_conflict',
-          binding_status: '指纹变更待确认',
-          labels: ['edge', 'core'],
-          note: 'new note',
-          current_health_status: '关注',
-          current_active_incident_count: 1,
-          current_primary_issue_summary: '检测到新的指纹接入请求',
-          updated_at: '2026-04-27T09:12:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() => expect(screen.getByText('标签：edge · core')).toBeInTheDocument())
-    expect(screen.getByText('备注：new note')).toBeInTheDocument()
-
-    bindingAction.resolve(
-      mockJSONResponse(
-        onboardingConflictState({
-          binding_status: '已绑定',
-          labels: ['edge'],
-          note: 'keep me',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          updated_at: '2026-04-27T09:15:00Z',
-        }),
-      ),
-    )
-
-    // "已绑定" StatusBadge surfaces in multiple places (header + 接入凭证状态 summary).
-    await waitFor(() => expect(screen.getAllByText('已绑定').length).toBeGreaterThanOrEqual(1))
-    expect(screen.getByText('标签：edge · core')).toBeInTheDocument()
-    expect(screen.getByText('备注：new note')).toBeInTheDocument()
-  })
-
-  it('keeps newer runtime fields when a metadata save resolves with stale non-metadata data', async () => {
-    const metadataSave = deferredResponse()
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          nodeRecord({
-            node_id: 'nd_001',
-            binding_status: '已绑定',
-            labels: ['edge'],
-            note: 'keep me',
-            monitoring_status: '启用',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('nd_001')))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockImplementationOnce(() => metadataSave.promise)
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          nodeRecord({
-            node_id: 'nd_001',
-            binding_status: '已绑定',
-            labels: ['edge'],
-            note: 'keep me',
-            monitoring_status: '维护中',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-            updated_at: '2026-04-27T09:15:00Z',
-          }),
-        ),
-      )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/nodes/nd_001']}>
-        <Routes>
-          <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openSecondary('标签与备注')
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core' },
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), {
-      target: { value: 'new note' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
-
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '正在保存…' })).toBeDisabled(),
-    )
-
-    openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
-
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
-    )
-
-    metadataSave.resolve(
-      mockJSONResponse(
-        nodeRecord({
-          node_id: 'nd_001',
-          binding_status: '已绑定',
-          labels: ['edge', 'core'],
-          note: 'new note',
-          monitoring_status: '启用',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          updated_at: '2026-04-27T09:05:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() => expect(screen.getByText('标签：edge · core')).toBeInTheDocument())
-    expect(screen.getByText('备注：new note')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '退出维护' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
-  })
 
   // ────────────────────────────────────────────────────────────
   // Watchtower (PR2) — danger zone, metric grid, secondary collapse
@@ -2762,8 +2161,10 @@ describe('NodeDetailPage', () => {
               load_15: 0.6,
               mem_used_pct: 55,
               mem_available_bytes: 1073741824,
+              mem_total_bytes: 8589934592,
               swap_used_pct: 1,
               disk_used_pct: 60,
+              disk_total_bytes: 107374182400,
               inode_used_pct: 12,
               net_in_bytes_per_sec: 1024,
               net_out_bytes_per_sec: 2048,
@@ -2815,7 +2216,7 @@ describe('NodeDetailPage', () => {
     ]))
   })
 
-  it('keeps the watchtower secondary sections collapsed by default', async () => {
+  it('removes the old folded property sections while keeping standalone data sections', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -2848,13 +2249,12 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    const secondarySections = Array.from(container.querySelectorAll('.collapsible-section.watchtower-secondary'))
-    expect(secondarySections.length).toBe(4)
-    secondarySections.forEach((section) => {
-      const trigger = section.querySelector('.collapsible-section__trigger')
-      expect(trigger).not.toBeNull()
-      expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    })
+    expect(container.querySelectorAll('.collapsible-section.watchtower-secondary').length).toBe(0)
+    expect(screen.queryByText('标签与备注')).not.toBeInTheDocument()
+    expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
+    expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '关联 VPS' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '容器列表' })).toBeInTheDocument()
     // Page footer surfaces the snapshot meta line
     expect(container.querySelector('.watchtower-snapshot-meta')).not.toBeNull()
   })
@@ -2890,8 +2290,10 @@ describe('NodeDetailPage', () => {
               load_15: 0.3,
               mem_used_pct: 40,
               mem_available_bytes: 8589934592,
+              mem_total_bytes: 8589934592,
               swap_used_pct: 0,
               disk_used_pct: 30,
+              disk_total_bytes: 107374182400,
               inode_used_pct: 5,
               net_in_bytes_per_sec: 0,
               net_out_bytes_per_sec: 0,
@@ -2939,8 +2341,7 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    // Open the 容器列表 section.
-    openSecondary('容器列表')
+    expect(screen.getByRole('heading', { name: '容器列表' })).toBeInTheDocument()
 
     // Verify container names appear.
     expect(screen.getByText('nginx-prod')).toBeInTheDocument()
@@ -2989,8 +2390,10 @@ describe('NodeDetailPage', () => {
               load_15: 0.1,
               mem_used_pct: 30,
               mem_available_bytes: 10737418240,
+              mem_total_bytes: 8589934592,
               swap_used_pct: 0,
               disk_used_pct: 20,
+              disk_total_bytes: 107374182400,
               inode_used_pct: 3,
               net_in_bytes_per_sec: 0,
               net_out_bytes_per_sec: 0,
@@ -3022,7 +2425,7 @@ describe('NodeDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    openSecondary('容器列表')
+    expect(screen.getByRole('heading', { name: '容器列表' })).toBeInTheDocument()
     expect(screen.getByText('暂无容器数据')).toBeInTheDocument()
   })
 
@@ -3292,7 +2695,7 @@ describe('NodeDetailPage', () => {
 
   // ── Command execution ──
 
-  it('shows 执行命令… button in the watchtower header operations popover', async () => {
+  it('shows onboarding, command, and lifecycle actions in the watchtower header operations popover', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -3328,8 +2731,12 @@ describe('NodeDetailPage', () => {
 
     openRuntimeMenu()
 
-    // The 执行命令… button must render inside the operations popover.
+    expect(screen.getByRole('link', { name: '打开接入工作台' })).toHaveAttribute(
+      'href',
+      '/nodes/nd_cmd/onboarding',
+    )
     expect(screen.getByRole('button', { name: '执行命令…' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '退役节点' })).toBeInTheDocument()
   })
 
   it('opens command drawer with 8 preset command options', async () => {

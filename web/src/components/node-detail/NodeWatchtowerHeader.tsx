@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { StatusBadge } from '../StatusBadge'
 import { Hostname, MonoDigits, Timestamp } from '../atoms'
 import { Button } from '../atoms/Button'
@@ -15,6 +17,10 @@ type Props = {
   registerActionRef: (action: NodeRuntimeAction, element: HTMLButtonElement | null) => void
   onOpenHistory: () => void
   onOpenCommands: () => void
+  isRetiredNode: boolean
+  lifecycleSubmitting: boolean
+  onRestoreLifecycle: () => void
+  onStartRetire: () => void
 }
 
 function locationLine(node: NodeRecord): string {
@@ -31,6 +37,10 @@ export function NodeWatchtowerHeader({
   registerActionRef,
   onOpenHistory,
   onOpenCommands,
+  isRetiredNode,
+  lifecycleSubmitting,
+  onRestoreLifecycle,
+  onStartRetire,
 }: Props) {
   const labelText = formatLabelList(node.labels)
   const agentVersion = latestSample?.agent_version || '—'
@@ -58,34 +68,51 @@ export function NodeWatchtowerHeader({
             <Button variant="ghost" size="sm" onClick={onOpenHistory}>
               查看历史
             </Button>
-            {runtimeActions.length > 0 ? (
-              <details className="watchtower-actions-menu">
-                <summary aria-label="运行控制操作">…</summary>
-                <div className="watchtower-actions-menu__panel">
-                  {runtimeActions.map(({ action, label }) => (
-                    <button
-                      key={action}
-                      ref={(element) => registerActionRef(action, element)}
-                      type="button"
-                      disabled={runtimeSubmitting}
-                      onClick={() => onRuntimeAction(action)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+            <details className="watchtower-actions-menu">
+              <summary aria-label="运行控制操作">…</summary>
+              <div className="watchtower-actions-menu__panel">
+                {runtimeActions.map(({ action, label }) => (
+                  <button
+                    key={action}
+                    ref={(element) => registerActionRef(action, element)}
+                    type="button"
+                    disabled={runtimeSubmitting}
+                    onClick={() => onRuntimeAction(action)}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <Link className="watchtower-actions-menu__item" to={`/nodes/${node.node_id}/onboarding`}>
+                  打开接入工作台
+                </Link>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onOpenCommands()
+                  }}
+                >
+                  执行命令…
+                </button>
+                {isRetiredNode ? (
                   <button
                     type="button"
-                    className="btn btn--ghost btn--sm"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onOpenCommands()
-                    }}
+                    disabled={lifecycleSubmitting}
+                    onClick={() => onRestoreLifecycle()}
                   >
-                    执行命令…
+                    {lifecycleSubmitting ? '正在恢复…' : '恢复到观察中'}
                   </button>
-                </div>
-              </details>
-            ) : null}
+                ) : (
+                  <button
+                    type="button"
+                    disabled={lifecycleSubmitting}
+                    onClick={() => onStartRetire()}
+                  >
+                    退役节点
+                  </button>
+                )}
+              </div>
+            </details>
           </div>
         </div>
       </div>

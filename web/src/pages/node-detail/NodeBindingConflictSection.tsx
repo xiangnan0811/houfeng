@@ -1,8 +1,6 @@
-import { Link } from 'react-router-dom'
-
 import { DetailSection } from '../../components/DetailSection'
 import { Hostname, MonoDigits, Timestamp } from '../../components/atoms'
-import type { NodeOnboardingState, NodeRecord } from '../../lib/types'
+import type { NodeOnboardingState } from '../../lib/types'
 import {
   NODE_BINDING_CONFIRM_REBIND_LABEL,
   NODE_BINDING_REJECT_PENDING_LABEL,
@@ -16,7 +14,6 @@ import {
 import type { BindingConflictAction } from './types'
 
 type NodeBindingConflictSectionProps = {
-  node: NodeRecord
   bindingConflict: NodeOnboardingState | null
   loading: boolean
   error: string | null
@@ -28,7 +25,6 @@ type NodeBindingConflictSectionProps = {
 }
 
 export function NodeBindingConflictSection({
-  node,
   bindingConflict,
   loading,
   error,
@@ -102,9 +98,9 @@ export function NodeBindingConflictSection({
             {bindingAction === 'reset' ? '正在重置…' : NODE_BINDING_RESET_LABEL}
           </button>
         </div>
-        <Link className="text-link" to={`/nodes/${node.node_id}/onboarding`}>
-          打开接入工作台
-        </Link>
+        <p>
+          如需重新生成一次性接入命令，请从右上角运行控制菜单打开接入工作台。
+        </p>
       </article>
     </DetailSection>
   )

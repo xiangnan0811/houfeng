@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 
-import { CollapsibleSection } from '../../components/CollapsibleSection'
+import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { DetailSection } from '../../components/DetailSection'
 import {
   NodeWatchtowerHeader,
   NodeWatchtowerMetrics,
@@ -14,15 +15,12 @@ import type {
   StateChangeEventRecord,
   VPSSummary,
 } from '../../lib/types'
-import { NodeAccessCredentialSection } from './NodeAccessCredentialSection'
 import { NodeBindingConflictSection } from './NodeBindingConflictSection'
 import { NodeCommandDrawer } from './NodeCommandDrawer'
 import { NodeContainersSection } from './NodeContainersSection'
 import { NodeDangerCard } from './NodeDangerCard'
 import { NodeHistoryDrawer } from './NodeHistoryDrawer'
-import { NodeLifecycleSection } from './NodeLifecycleSection'
 import { NodeLinkedVPSSection } from './NodeLinkedVPSSection'
-import { NodeMetadataSection } from './NodeMetadataSection'
 import { NodeRuntimePauseConfirmation } from './NodeRuntimePauseConfirmation'
 import { NodeSnapshotMeta } from './NodeSnapshotMeta'
 import { NodeTimeWindowTabs } from './NodeTimeWindowTabs'
@@ -67,18 +65,6 @@ type NodeDetailPageBodyProps = {
   onBindingReset: () => void
   timeWindow: TimeWindow
   onTimeWindowChange: (value: TimeWindow) => void
-  metadataEditing: boolean
-  metadataGroupDraft: string
-  metadataLabelDraft: string
-  metadataNoteDraft: string
-  metadataSubmitting: boolean
-  metadataError: string | null
-  onMetadataGroupDraftChange: (value: string) => void
-  onMetadataLabelDraftChange: (value: string) => void
-  onMetadataNoteDraftChange: (value: string) => void
-  onStartMetadataEdit: () => void
-  onCancelMetadataEdit: () => void
-  onSaveMetadata: () => void
   showRetireConfirmation: boolean
   lifecycleSubmitting: NodeLifecycleAction | null
   lifecycleError: string | null
@@ -129,18 +115,6 @@ export function NodeDetailPageBody({
   onBindingReset,
   timeWindow,
   onTimeWindowChange,
-  metadataEditing,
-  metadataGroupDraft,
-  metadataLabelDraft,
-  metadataNoteDraft,
-  metadataSubmitting,
-  metadataError,
-  onMetadataGroupDraftChange,
-  onMetadataLabelDraftChange,
-  onMetadataNoteDraftChange,
-  onStartMetadataEdit,
-  onCancelMetadataEdit,
-  onSaveMetadata,
   showRetireConfirmation,
   lifecycleSubmitting,
   lifecycleError,
@@ -190,6 +164,10 @@ export function NodeDetailPageBody({
         registerActionRef={registerActionRef}
         onOpenHistory={() => onOpenHistory('events')}
         onOpenCommands={onOpenCommands}
+        isRetiredNode={isRetiredNode}
+        lifecycleSubmitting={lifecycleSubmitting !== null}
+        onRestoreLifecycle={onLifecycleRestore}
+        onStartRetire={onStartRetire}
       />
 
       {pendingRuntimeConfirmation?.action === 'pause' ? (
@@ -212,7 +190,6 @@ export function NodeDetailPageBody({
 
       {showBindingConflict ? (
         <NodeBindingConflictSection
-          node={node}
           bindingConflict={bindingConflict}
           loading={bindingConflictLoading}
           error={bindingConflictError}
@@ -240,46 +217,32 @@ export function NodeDetailPageBody({
         error={linkedVPSError}
       />
 
-      <div className="watchtower-property-list">
-        <CollapsibleSection title="标签与备注" className="watchtower-secondary">
-          <NodeMetadataSection
-            node={node}
-            editing={metadataEditing}
-            groupDraft={metadataGroupDraft}
-            labelDraft={metadataLabelDraft}
-            noteDraft={metadataNoteDraft}
-            submitting={metadataSubmitting}
-            error={metadataError}
-            onGroupDraftChange={onMetadataGroupDraftChange}
-            onLabelDraftChange={onMetadataLabelDraftChange}
-            onNoteDraftChange={onMetadataNoteDraftChange}
-            onStartEdit={onStartMetadataEdit}
-            onCancelEdit={onCancelMetadataEdit}
-            onSave={onSaveMetadata}
-          />
-        </CollapsibleSection>
+      {!isRetiredNode && showRetireConfirmation ? (
+        <ActionConfirmationCard
+          title="确认退役节点"
+          current="当前：节点仍在当前工作集中。"
+          result="操作后：节点生命周期变为已退役。"
+          impact="这不是删除，会让节点退出当前工作集并停止承担观测任务。"
+          unchanged="不会清空事件、观测记录或 agent 绑定历史。"
+          confirmLabel={lifecycleSubmitting === 'retire' ? '正在退役…' : '确认退役'}
+          error={lifecycleError}
+          disabled={lifecycleSubmitting !== null}
+          onConfirm={onConfirmRetire}
+          onCancel={onCancelRetire}
+        />
+      ) : lifecycleError ? (
+        <p className="watchtower-runtime-error" role="alert">
+          {lifecycleError}
+        </p>
+      ) : null}
 
-        <CollapsibleSection title="生命周期" className="watchtower-secondary">
-          <NodeLifecycleSection
-            isRetiredNode={isRetiredNode}
-            showRetireConfirmation={showRetireConfirmation}
-            submitting={lifecycleSubmitting}
-            error={lifecycleError}
-            onRestore={onLifecycleRestore}
-            onStartRetire={onStartRetire}
-            onConfirmRetire={onConfirmRetire}
-            onCancelRetire={onCancelRetire}
-          />
-        </CollapsibleSection>
-
-        <CollapsibleSection title="接入凭证状态" className="watchtower-secondary">
-          <NodeAccessCredentialSection node={node} />
-        </CollapsibleSection>
-
-        <CollapsibleSection title="容器列表" className="watchtower-secondary">
-          <NodeContainersSection sample={sample} />
-        </CollapsibleSection>
-      </div>
+      <DetailSection
+        eyebrow="RUNTIME FACTS"
+        title="容器列表"
+        aside={sample?.containers?.length ? `${sample.containers.length} 个` : '暂无数据'}
+      >
+        <NodeContainersSection sample={sample} />
+      </DetailSection>
 
       <NodeSnapshotMeta sample={sample} />
 

@@ -1041,8 +1041,8 @@ func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, node
 	rows, err := r.db.Query(ctx, `
 		select
 			node_id, observed_at, received_at, agent_version, fingerprint,
-			cpu_usage_pct, load_1, load_5, load_15, mem_used_pct, mem_available_bytes,
-			swap_used_pct, disk_used_pct, inode_used_pct, net_in_bytes_per_sec,
+			cpu_usage_pct, load_1, load_5, load_15, mem_used_pct, mem_available_bytes, mem_total_bytes,
+			swap_used_pct, disk_used_pct, disk_total_bytes, inode_used_pct, net_in_bytes_per_sec,
 			net_out_bytes_per_sec, cpu_iowait_pct, cpu_steal_pct, disk_read_bytes_per_sec,
 			disk_write_bytes_per_sec, disk_busy_pct, uptime_seconds,
 			maintenance_context, is_backfilled, sync_batch_id
@@ -1058,8 +1058,8 @@ func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, node
 		var sample runtimefacts.HostSample
 		if err := rows.Scan(
 			&sample.NodeID, &sample.ObservedAt, &sample.ReceivedAt, &sample.AgentVersion, &sample.Fingerprint,
-			&sample.CPUUsagePct, &sample.Load1, &sample.Load5, &sample.Load15, &sample.MemUsedPct, &sample.MemAvailableBytes,
-			&sample.SwapUsedPct, &sample.DiskUsedPct, &sample.InodeUsedPct, &sample.NetInBytesPerSec,
+			&sample.CPUUsagePct, &sample.Load1, &sample.Load5, &sample.Load15, &sample.MemUsedPct, &sample.MemAvailableBytes, &sample.MemTotalBytes,
+			&sample.SwapUsedPct, &sample.DiskUsedPct, &sample.DiskTotalBytes, &sample.InodeUsedPct, &sample.NetInBytesPerSec,
 			&sample.NetOutBytesPerSec, &sample.CPUIOWaitPct, &sample.CPUStealPct, &sample.DiskReadBytesPerSec,
 			&sample.DiskWriteBytesPerSec, &sample.DiskBusyPct, &sample.UptimeSeconds,
 			&sample.MaintenanceContext, &sample.IsBackfilled, &sample.SyncBatchID,
