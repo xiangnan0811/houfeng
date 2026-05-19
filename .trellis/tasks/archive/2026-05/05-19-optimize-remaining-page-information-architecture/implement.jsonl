@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/05-19-optimize-remaining-page-information-architecture/research/overview-list-pages-audit.md","reason":"MVP scope and IA priorities for SubscriptionsPage and ProvidersPage."}
+{"file":".trellis/tasks/05-19-optimize-remaining-page-information-architecture/research/detail-special-pages-audit.md","reason":"Boundary for any surgical detail-page follow-up fixes."}
+{"file":".trellis/tasks/05-19-optimize-remaining-page-information-architecture/research/design-patterns-for-page-ia.md","reason":"Surface-selection rules from v2 design guidance and recent Node/VPS refactors."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"React component and atoms/shared-component conventions for page refactors."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Dark-first BEM/design-token styling constraints."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"URL state, API state, and data-loading behavior constraints."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Testing and verification expectations for web changes."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing UI atoms and avoid unnecessary new abstractions."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep frontend IA changes aligned with backend/API contracts without changing models."}
