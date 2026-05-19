@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ProvidersPage } from './ProvidersPage'
@@ -41,8 +41,11 @@ describe('ProvidersPage', () => {
 
     expect(screen.getByText('正在加载服务商…')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
+    expect(screen.getByText('服务商主数据概览')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '服务商创建表单' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建服务商' }))
+    expect(screen.getByRole('dialog', { name: '服务商创建表单' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('服务商名称'), { target: { value: 'Vultr' } })
     fireEvent.change(screen.getByLabelText('网站'), { target: { value: 'https://vultr.com' } })
     fireEvent.change(screen.getByLabelText('面板地址'), { target: { value: 'https://my.vultr.com' } })
@@ -74,6 +77,27 @@ describe('ProvidersPage', () => {
     })
   })
 
+  it('resets provider create draft and errors after drawer cancel', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ProvidersPage />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建第一个服务商' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '创建第一个服务商' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建服务商' }))
+    expect(screen.getByText('服务商名称不能为空。')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('服务商名称'), { target: { value: 'Draft Provider' } })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '服务商创建表单' })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '创建第一个服务商' }))
+
+    expect(screen.queryByText('服务商名称不能为空。')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('服务商名称')).toHaveValue('')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps invalid provider input local', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
@@ -82,6 +106,7 @@ describe('ProvidersPage', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: '创建第一个服务商' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '创建第一个服务商' }))
+    expect(screen.getByRole('dialog', { name: '服务商创建表单' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '创建服务商' }))
 
     expect(screen.getByText('服务商名称不能为空。')).toBeInTheDocument()
@@ -118,7 +143,9 @@ describe('ProvidersPage', () => {
     render(<ProvidersPage />)
 
     await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: '服务商编辑表单' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '编辑 Hetzner' }))
+    expect(screen.getByRole('dialog', { name: '服务商编辑表单' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('服务商名称'), { target: { value: 'Hetzner Cloud' } })
     fireEvent.change(screen.getByLabelText('评分'), { target: { value: '' } })
     fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'core, backup, core' } })
@@ -144,5 +171,43 @@ describe('ProvidersPage', () => {
         note: '',
       }),
     })
+  })
+
+  it('resets provider edit draft and errors after drawer cancel', async () => {
+    const provider = {
+      provider_id: 'pv_001',
+      name: 'Hetzner',
+      website: 'https://hetzner.com',
+      panel_url: 'https://console.hetzner.cloud',
+      account_hint: 'main',
+      country: 'DE',
+      note: '',
+      rating: 5,
+      labels: ['core'],
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+    }
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([provider]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ProvidersPage />)
+
+    await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Hetzner' }))
+    const firstEditDialog = screen.getByRole('dialog', { name: '服务商编辑表单' })
+    fireEvent.change(within(firstEditDialog).getByLabelText('服务商名称'), { target: { value: '' } })
+    fireEvent.click(within(firstEditDialog).getByRole('button', { name: '保存服务商' }))
+    await waitFor(() => expect(within(firstEditDialog).getByText('服务商名称不能为空。')).toBeInTheDocument())
+    fireEvent.change(within(firstEditDialog).getByLabelText('服务商名称'), { target: { value: 'Draft Hetzner' } })
+    fireEvent.click(within(firstEditDialog).getByRole('button', { name: '取消编辑' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '服务商编辑表单' })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Hetzner' }))
+
+    const editDialog = screen.getByRole('dialog', { name: '服务商编辑表单' })
+    expect(within(editDialog).queryByText('服务商名称不能为空。')).not.toBeInTheDocument()
+    expect(within(editDialog).getByLabelText('服务商名称')).toHaveValue('Hetzner')
+    expect(within(editDialog).getByLabelText('评分')).toHaveValue(5)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
