@@ -6109,30 +6109,33 @@ html.theme-classic-light .dashboard-command-surface {
 .watchtower-actions-menu__panel {
   position: absolute;
   right: 0;
-  top: calc(100% + 4px);
+  top: calc(100% + var(--space-1));
   background: var(--surface-elevated);
-  border: 1px solid var(--border);
+  border: var(--border-w) solid var(--border);
   border-radius: var(--radius-2);
   padding: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   min-width: 160px;
   z-index: 10;
   box-shadow: var(--shadow-overlay);
 }
-.watchtower-actions-menu__panel button {
+.watchtower-actions-menu__panel button,
+.watchtower-actions-menu__item {
   text-align: left;
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-1);
   background: transparent;
   color: var(--text-primary);
   border: none;
   cursor: pointer;
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--type-small-size);
+  text-decoration: none;
 }
-.watchtower-actions-menu__panel button:hover:not(:disabled) {
+.watchtower-actions-menu__panel button:hover:not(:disabled),
+.watchtower-actions-menu__item:hover {
   background: var(--surface-pressed);
 }
 .watchtower-actions-menu__panel button:disabled {
@@ -6379,6 +6382,10 @@ html.theme-classic-light .dashboard-command-surface {
 }
 .watchtower-metric-card__sub div {
   display: inline;
+}
+.watchtower-metric-card__sub-item--end {
+  margin-left: auto;
+  text-align: right;
 }
 .watchtower-metric-card__sub dt {
   display: inline;

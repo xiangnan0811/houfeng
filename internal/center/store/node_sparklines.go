@@ -41,8 +41,10 @@ var ValidSparklineMetrics = map[string]bool{
 	"load_15":                  true,
 	"mem_used_pct":             true,
 	"mem_available_bytes":      true,
+	"mem_total_bytes":          true,
 	"swap_used_pct":            true,
 	"disk_used_pct":            true,
+	"disk_total_bytes":         true,
 	"inode_used_pct":           true,
 	"net_in_bytes_per_sec":     true,
 	"net_out_bytes_per_sec":    true,
@@ -64,8 +66,10 @@ const getNodeSparklinesSQL = `
 		load_15,
 		mem_used_pct,
 		mem_available_bytes,
+		mem_total_bytes,
 		swap_used_pct,
 		disk_used_pct,
+		disk_total_bytes,
 		inode_used_pct,
 		net_in_bytes_per_sec,
 		net_out_bytes_per_sec,
@@ -105,28 +109,32 @@ func (r *PostgresNodeSparklinesRepository) GetNodeSparklines(ctx context.Context
 			return 4
 		case "mem_available_bytes":
 			return 5
-		case "swap_used_pct":
+		case "mem_total_bytes":
 			return 6
-		case "disk_used_pct":
+		case "swap_used_pct":
 			return 7
-		case "inode_used_pct":
+		case "disk_used_pct":
 			return 8
-		case "net_in_bytes_per_sec":
+		case "disk_total_bytes":
 			return 9
-		case "net_out_bytes_per_sec":
+		case "inode_used_pct":
 			return 10
-		case "cpu_iowait_pct":
+		case "net_in_bytes_per_sec":
 			return 11
-		case "cpu_steal_pct":
+		case "net_out_bytes_per_sec":
 			return 12
-		case "disk_read_bytes_per_sec":
+		case "cpu_iowait_pct":
 			return 13
-		case "disk_write_bytes_per_sec":
+		case "cpu_steal_pct":
 			return 14
-		case "disk_busy_pct":
+		case "disk_read_bytes_per_sec":
 			return 15
-		case "uptime_seconds":
+		case "disk_write_bytes_per_sec":
 			return 16
+		case "disk_busy_pct":
+			return 17
+		case "uptime_seconds":
+			return 18
 		default:
 			return -1
 		}
@@ -155,8 +163,8 @@ func (r *PostgresNodeSparklinesRepository) GetNodeSparklines(ctx context.Context
 	for rows.Next() {
 		var nodeID string
 		var observedAt time.Time
-		// 17 numeric columns matching the SELECT order.
-		var vals [17]float64
+		// 19 numeric columns matching the SELECT order.
+		var vals [19]float64
 
 		if err := rows.Scan(
 			&nodeID,
@@ -167,17 +175,19 @@ func (r *PostgresNodeSparklinesRepository) GetNodeSparklines(ctx context.Context
 			&vals[3],  // load_15
 			&vals[4],  // mem_used_pct
 			&vals[5],  // mem_available_bytes
-			&vals[6],  // swap_used_pct
-			&vals[7],  // disk_used_pct
-			&vals[8],  // inode_used_pct
-			&vals[9],  // net_in_bytes_per_sec
-			&vals[10], // net_out_bytes_per_sec
-			&vals[11], // cpu_iowait_pct
-			&vals[12], // cpu_steal_pct
-			&vals[13], // disk_read_bytes_per_sec
-			&vals[14], // disk_write_bytes_per_sec
-			&vals[15], // disk_busy_pct
-			&vals[16], // uptime_seconds
+			&vals[6],  // mem_total_bytes
+			&vals[7],  // swap_used_pct
+			&vals[8],  // disk_used_pct
+			&vals[9],  // disk_total_bytes
+			&vals[10], // inode_used_pct
+			&vals[11], // net_in_bytes_per_sec
+			&vals[12], // net_out_bytes_per_sec
+			&vals[13], // cpu_iowait_pct
+			&vals[14], // cpu_steal_pct
+			&vals[15], // disk_read_bytes_per_sec
+			&vals[16], // disk_write_bytes_per_sec
+			&vals[17], // disk_busy_pct
+			&vals[18], // uptime_seconds
 		); err != nil {
 			return nil, fmt.Errorf("scan host_sample row: %w", err)
 		}

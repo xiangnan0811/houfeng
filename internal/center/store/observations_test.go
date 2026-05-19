@@ -69,3 +69,24 @@ func TestRecordBatchPersistsObservationProvenanceColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordBatchPersistsHostSampleCapacityColumns(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("observations.go")
+	if err != nil {
+		t.Fatalf("ReadFile(observations.go) error = %v", err)
+	}
+
+	text := string(source)
+	for _, want := range []string{
+		"mem_total_bytes,",
+		"disk_total_bytes,",
+		"sample.MemTotalBytes,",
+		"sample.DiskTotalBytes,",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("RecordBatch() source missing %q", want)
+		}
+	}
+}

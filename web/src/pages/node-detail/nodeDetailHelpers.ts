@@ -85,19 +85,6 @@ export function pauseConfirmationCurrent(node: NodeRecord) {
     : '当前：监控运行状态为启用。'
 }
 
-export function parseLabels(value: string) {
-  const result: string[] = []
-  const seen = new Set<string>()
-
-  for (const label of value.split(/[,，]/).map((item) => item.trim()).filter(Boolean)) {
-    if (seen.has(label)) continue
-    seen.add(label)
-    result.push(label)
-  }
-
-  return result
-}
-
 export function mergeNonMetadataNodeRecord<T extends NodeRecord>(current: NodeRecord, updated: T): T {
   return {
     ...updated,

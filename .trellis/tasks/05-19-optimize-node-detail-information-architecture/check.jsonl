@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Go verify、contract/store/runtime facts 测试检查"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"前端 lint/test/build 与 UI 验证检查"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"节点详情页视觉和样式是否符合 v2 设计体系"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"确认 mem/disk total 字段跨层没有遗漏"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"确认未在 main 上提交或直接推送"}

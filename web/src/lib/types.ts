@@ -98,8 +98,10 @@ export type HostSample = {
   load_15: number
   mem_used_pct: number
   mem_available_bytes: number
+  mem_total_bytes: number
   swap_used_pct: number
   disk_used_pct: number
+  disk_total_bytes: number
   inode_used_pct: number
   net_in_bytes_per_sec: number
   net_out_bytes_per_sec: number

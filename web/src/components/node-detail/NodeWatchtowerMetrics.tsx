@@ -64,6 +64,11 @@ function cardRibbonClass(priority: MetricPriority): string {
   return ''
 }
 
+function formatCapacityBytes(value?: number | null): string {
+  if (value == null || !Number.isFinite(value) || value <= 0) return '—'
+  return formatBytes(value)
+}
+
 export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }: Props) {
   if (!sample) {
     return (
@@ -179,6 +184,12 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
                 <MonoDigits>{formatBytes(sample.mem_available_bytes)}</MonoDigits>
               </dd>
             </div>
+            <div className="watchtower-metric-card__sub-item--end">
+              <dt>总内存</dt>
+              <dd>
+                <MonoDigits>{formatCapacityBytes(sample.mem_total_bytes)}</MonoDigits>
+              </dd>
+            </div>
           </dl>
         </article>
       ),
@@ -223,6 +234,12 @@ export function NodeWatchtowerMetrics({ sample, samples, isMaintenance = false }
                   {formatBytesPerSecond(sample.disk_read_bytes_per_sec)} /{' '}
                   {formatBytesPerSecond(sample.disk_write_bytes_per_sec)}
                 </MonoDigits>
+              </dd>
+            </div>
+            <div className="watchtower-metric-card__sub-item--end">
+              <dt>总磁盘</dt>
+              <dd>
+                <MonoDigits>{formatCapacityBytes(sample.disk_total_bytes)}</MonoDigits>
               </dd>
             </div>
           </dl>

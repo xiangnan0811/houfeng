@@ -69,8 +69,10 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 				load_15,
 				mem_used_pct,
 				mem_available_bytes,
+				mem_total_bytes,
 				swap_used_pct,
 				disk_used_pct,
+				disk_total_bytes,
 				inode_used_pct,
 				net_in_bytes_per_sec,
 				net_out_bytes_per_sec,
@@ -85,7 +87,7 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 				sync_batch_id,
 				containers
 			) values (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
 			)`,
 			sample.NodeID,
 			sample.ObservedAt,
@@ -98,8 +100,10 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 			sample.Load15,
 			sample.MemUsedPct,
 			sample.MemAvailableBytes,
+			sample.MemTotalBytes,
 			sample.SwapUsedPct,
 			sample.DiskUsedPct,
+			sample.DiskTotalBytes,
 			sample.InodeUsedPct,
 			sample.NetInBytesPerSec,
 			sample.NetOutBytesPerSec,

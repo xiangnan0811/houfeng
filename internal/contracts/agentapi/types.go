@@ -95,8 +95,10 @@ type HostSamplePayload struct {
 	Load15               float64         `json:"load_15"`
 	MemUsedPct           float64         `json:"mem_used_pct"`
 	MemAvailableBytes    int64           `json:"mem_available_bytes"`
+	MemTotalBytes        int64           `json:"mem_total_bytes"`
 	SwapUsedPct          float64         `json:"swap_used_pct"`
 	DiskUsedPct          float64         `json:"disk_used_pct"`
+	DiskTotalBytes       int64           `json:"disk_total_bytes"`
 	InodeUsedPct         float64         `json:"inode_used_pct"`
 	NetInBytesPerSec     int64           `json:"net_in_bytes_per_sec"`
 	NetOutBytesPerSec    int64           `json:"net_out_bytes_per_sec"`

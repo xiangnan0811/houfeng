@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"跨 agent/contract/store/runtime facts 的代码落点与边界"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"新增 host_samples 持久化字段与迁移约束"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"agent-center contract 与持久化字段变更的测试/验证要求"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"节点详情页组件拆分、菜单操作与纯展示组件约束"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"runtime facts API 字段与前端类型/页面消费对齐"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"页面信息架构与样式修改需使用既有 BEM/token 体系"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"前端测试、lint、build 与用户可见 UI 验证要求"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"容量字段跨 agent、DB、API、前端的数据流检查"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"实现工作必须在 feature 分支进行"}

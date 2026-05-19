@@ -49,20 +49,23 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 					*(dest[8].(*float64)) = 0.6
 					*(dest[9].(*float64)) = 72
 					*(dest[10].(*int64)) = 2147483648
-					*(dest[11].(*float64)) = 0
-					*(dest[12].(*float64)) = 61
-					*(dest[13].(*float64)) = 22
-					*(dest[14].(*int64)) = 1200
-					*(dest[15].(*int64)) = 900
-					*(dest[16].(*float64)) = 1.2
-					*(dest[17].(*float64)) = 0.1
-					*(dest[18].(*int64)) = 400
-					*(dest[19].(*int64)) = 300
-					*(dest[20].(*float64)) = 5
-					*(dest[21].(*int64)) = 3600
-					*(dest[22].(*bool)) = false
-					*(dest[23].(*bool)) = false
-					*(dest[24].(*string)) = "sync_001"
+					*(dest[11].(*int64)) = 8589934592
+					*(dest[12].(*float64)) = 0
+					*(dest[13].(*float64)) = 61
+					*(dest[14].(*int64)) = 107374182400
+					*(dest[15].(*float64)) = 22
+					*(dest[16].(*int64)) = 1200
+					*(dest[17].(*int64)) = 900
+					*(dest[18].(*float64)) = 1.2
+					*(dest[19].(*float64)) = 0.1
+					*(dest[20].(*int64)) = 400
+					*(dest[21].(*int64)) = 300
+					*(dest[22].(*float64)) = 5
+					*(dest[23].(*int64)) = 3600
+					*(dest[24].(*bool)) = false
+					*(dest[25].(*bool)) = false
+					*(dest[26].(*string)) = "sync_001"
+					*(dest[27].(*[]byte)) = []byte("[]")
 					return nil
 				}}
 			default:
@@ -86,20 +89,23 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 					*(dest[8].(*float64)) = 0.6
 					*(dest[9].(*float64)) = 72
 					*(dest[10].(*int64)) = 2147483648
-					*(dest[11].(*float64)) = 0
-					*(dest[12].(*float64)) = 61
-					*(dest[13].(*float64)) = 22
-					*(dest[14].(*int64)) = 1200
-					*(dest[15].(*int64)) = 900
-					*(dest[16].(*float64)) = 1.2
-					*(dest[17].(*float64)) = 0.1
-					*(dest[18].(*int64)) = 400
-					*(dest[19].(*int64)) = 300
-					*(dest[20].(*float64)) = 5
-					*(dest[21].(*int64)) = 3600
-					*(dest[22].(*bool)) = false
-					*(dest[23].(*bool)) = false
-					*(dest[24].(*string)) = "sync_001"
+					*(dest[11].(*int64)) = 8589934592
+					*(dest[12].(*float64)) = 0
+					*(dest[13].(*float64)) = 61
+					*(dest[14].(*int64)) = 107374182400
+					*(dest[15].(*float64)) = 22
+					*(dest[16].(*int64)) = 1200
+					*(dest[17].(*int64)) = 900
+					*(dest[18].(*float64)) = 1.2
+					*(dest[19].(*float64)) = 0.1
+					*(dest[20].(*int64)) = 400
+					*(dest[21].(*int64)) = 300
+					*(dest[22].(*float64)) = 5
+					*(dest[23].(*int64)) = 3600
+					*(dest[24].(*bool)) = false
+					*(dest[25].(*bool)) = false
+					*(dest[26].(*string)) = "sync_001"
+					*(dest[27].(*[]byte)) = []byte("[]")
 					return nil
 				}},
 				{scan: func(dest ...any) error {
@@ -115,20 +121,23 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 					*(dest[8].(*float64)) = 0.3
 					*(dest[9].(*float64)) = 60
 					*(dest[10].(*int64)) = 3221225472
-					*(dest[11].(*float64)) = 0
-					*(dest[12].(*float64)) = 55
-					*(dest[13].(*float64)) = 21
-					*(dest[14].(*int64)) = 1100
-					*(dest[15].(*int64)) = 800
-					*(dest[16].(*float64)) = 0.8
-					*(dest[17].(*float64)) = 0.1
-					*(dest[18].(*int64)) = 300
-					*(dest[19].(*int64)) = 250
-					*(dest[20].(*float64)) = 4
-					*(dest[21].(*int64)) = 3000
-					*(dest[22].(*bool)) = false
-					*(dest[23].(*bool)) = false
-					*(dest[24].(*string)) = "sync_000"
+					*(dest[11].(*int64)) = 8589934592
+					*(dest[12].(*float64)) = 0
+					*(dest[13].(*float64)) = 55
+					*(dest[14].(*int64)) = 107374182400
+					*(dest[15].(*float64)) = 21
+					*(dest[16].(*int64)) = 1100
+					*(dest[17].(*int64)) = 800
+					*(dest[18].(*float64)) = 0.8
+					*(dest[19].(*float64)) = 0.1
+					*(dest[20].(*int64)) = 300
+					*(dest[21].(*int64)) = 250
+					*(dest[22].(*float64)) = 4
+					*(dest[23].(*int64)) = 3000
+					*(dest[24].(*bool)) = false
+					*(dest[25].(*bool)) = false
+					*(dest[26].(*string)) = "sync_000"
+					*(dest[27].(*[]byte)) = []byte("[]")
 					return nil
 				}},
 			}}, nil
@@ -150,6 +159,12 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 	}
 	if facts.LatestHostSample.CPUIOWaitPct != 1.2 {
 		t.Fatalf("LatestHostSample.CPUIOWaitPct = %v, want %v", facts.LatestHostSample.CPUIOWaitPct, 1.2)
+	}
+	if facts.LatestHostSample.MemTotalBytes != 8589934592 {
+		t.Fatalf("LatestHostSample.MemTotalBytes = %d, want %d", facts.LatestHostSample.MemTotalBytes, int64(8589934592))
+	}
+	if facts.LatestHostSample.DiskTotalBytes != 107374182400 {
+		t.Fatalf("LatestHostSample.DiskTotalBytes = %d, want %d", facts.LatestHostSample.DiskTotalBytes, int64(107374182400))
 	}
 	if len(facts.RecentHostSamples) != 2 {
 		t.Fatalf("len(RecentHostSamples) = %d, want 2", len(facts.RecentHostSamples))
@@ -396,6 +411,9 @@ func TestRuntimeFactSQLLocksLatestAndRecentOrderingAndProbeJoinShape(t *testing.
 	if !strings.Contains(runtimeFactsLatestHostSampleSQL, "order by observed_at desc, id desc") {
 		t.Fatalf("runtimeFactsLatestHostSampleSQL = %q, want latest host sample ordering", runtimeFactsLatestHostSampleSQL)
 	}
+	if !strings.Contains(runtimeFactsLatestHostSampleSQL, "mem_total_bytes") || !strings.Contains(runtimeFactsLatestHostSampleSQL, "disk_total_bytes") {
+		t.Fatalf("runtimeFactsLatestHostSampleSQL = %q, want capacity columns", runtimeFactsLatestHostSampleSQL)
+	}
 	if !strings.Contains(runtimeFactsLatestProbeObservationsSQL, "join probe_items") {
 		t.Fatalf("runtimeFactsLatestProbeObservationsSQL = %q, want probe_items join", runtimeFactsLatestProbeObservationsSQL)
 	}
@@ -404,6 +422,9 @@ func TestRuntimeFactSQLLocksLatestAndRecentOrderingAndProbeJoinShape(t *testing.
 	}
 	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "where node_id = $1") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "observed_at >= $2") {
 		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want node_id and observed_at lower bound filters", runtimeFactsRecentHostSamplesSQL)
+	}
+	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "mem_total_bytes") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "disk_total_bytes") {
+		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want capacity columns", runtimeFactsRecentHostSamplesSQL)
 	}
 	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "order by observed_at desc, id desc") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "limit $3") {
 		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want recent host ordering and limit", runtimeFactsRecentHostSamplesSQL)
