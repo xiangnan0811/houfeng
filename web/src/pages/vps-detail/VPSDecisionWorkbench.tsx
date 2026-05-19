@@ -92,7 +92,6 @@ export function VPSDecisionWorkbench({
         </div>
         <div className="section-heading__actions">
           <Button variant="primary" size="sm" onClick={onDecisionEdit}>调整决策</Button>
-          <Button variant="secondary" size="sm" onClick={onExperienceLog}>记录经验</Button>
         </div>
       </div>
 
@@ -102,14 +101,16 @@ export function VPSDecisionWorkbench({
           <h3>{nextAction.title}</h3>
           <span>{nextAction.summary}</span>
           <div className="vps-workbench-next__actions">
-            {'onAction' in nextAction ? (
+            {nextAction.to && nextAction.linkLabel ? (
+              <Link className="btn btn--primary btn--sm" to={nextAction.to}>
+                {nextAction.linkLabel}
+              </Link>
+            ) : nextAction.onAction && nextAction.buttonLabel === '调整决策' ? (
               <Button variant="primary" size="sm" onClick={nextAction.onAction}>
                 {nextAction.buttonLabel}
               </Button>
             ) : (
-              <Link className="btn btn--primary btn--sm" to={nextAction.to}>
-                {nextAction.linkLabel}
-              </Link>
+              <span className="vps-workbench-next__hint">在右上角操作菜单处理</span>
             )}
           </div>
         </article>
@@ -144,7 +145,7 @@ export function VPSDecisionWorkbench({
             <span>
               <MonoDigits>{timeline.renewal_decisions.length}</MonoDigits> 条决策历史
             </span>
-            <Button variant="ghost" size="sm" onClick={onDecisionEdit}>更新判断</Button>
+            <span>主 CTA 可调整判断</span>
           </div>
         </article>
 
@@ -206,7 +207,7 @@ export function VPSDecisionWorkbench({
                 '需要关联 Node'
               )}
             </span>
-            <Button variant="ghost" size="sm" onClick={onNodeLink}>补 Node 证据</Button>
+            <span>更多操作已收口到右上角菜单</span>
           </div>
         </article>
 

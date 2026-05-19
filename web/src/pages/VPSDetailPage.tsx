@@ -32,13 +32,11 @@ import type {
   VPSAssetDetail,
   VPSNodeSummary,
 } from '../lib/types'
-import { VPSAccessSummarySection } from './vps-detail/VPSAccessSummarySection'
 import { VPSDecisionWorkbench } from './vps-detail/VPSDecisionWorkbench'
 import { VPSDetailErrorPanel } from './vps-detail/VPSDetailErrorPanel'
 import { VPSDetailHero } from './vps-detail/VPSDetailHero'
 import { VPSDetailLoading } from './vps-detail/VPSDetailLoading'
 import { VPSDetailMissingID } from './vps-detail/VPSDetailMissingID'
-import { VPSDecisionEvidenceSection } from './vps-detail/VPSDecisionEvidenceSection'
 import { VPSDomainsForm } from './vps-detail/VPSDomainsForm'
 import { VPSDomainsSection } from './vps-detail/VPSDomainsSection'
 import { VPSExperienceLogForm } from './vps-detail/VPSExperienceLogForm'
@@ -47,8 +45,8 @@ import { VPSFactsSection } from './vps-detail/VPSFactsSection'
 import { VPSLifecycleCard } from './vps-detail/VPSLifecycleCard'
 import { VPSNodeLinkForm } from './vps-detail/VPSNodeLinkForm'
 import { VPSNodeLinksSection } from './vps-detail/VPSNodeLinksSection'
+import { VPSOperationsSummary } from './vps-detail/VPSOperationsSummary'
 import { VPSRenewalDecisionForm } from './vps-detail/VPSRenewalDecisionForm'
-import { VPSRenewalEvidenceSection } from './vps-detail/VPSRenewalEvidenceSection'
 import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import type {
@@ -154,7 +152,7 @@ export function VPSDetailPage() {
   const [linkNotice, setLinkNotice] = useState<string | null>(null)
   const [unlinkingNodeId, setUnlinkingNodeId] = useState<string | null>(null)
   const [unlinkError, setUnlinkError] = useState<string | null>(null)
-  const [lifecycleConfirmingArchive, setLifecycleConfirmingArchive] = useState(false)
+  const [lifecycleConfirmingAction, setLifecycleConfirmingAction] = useState<'archive' | 'restore' | null>(null)
   const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [lifecycleNotice, setLifecycleNotice] = useState<string | null>(null)
@@ -210,7 +208,7 @@ export function VPSDetailPage() {
         setLinkError(null)
         setLinkNotice(null)
         setUnlinkError(null)
-        setLifecycleConfirmingArchive(false)
+        setLifecycleConfirmingAction(null)
         setLifecycleError(null)
         setLifecycleNotice(null)
         setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
@@ -341,12 +339,9 @@ export function VPSDetailPage() {
     setDomainDraft(draft)
   }
 
-  function handleLifecycleConfirmingArchiveChange(open: boolean) {
-    setLifecycleConfirmingArchive(open)
+  function closeLifecycleConfirmation() {
+    setLifecycleConfirmingAction(null)
     setLifecycleError(null)
-    if (open) {
-      setLifecycleNotice(null)
-    }
   }
 
   function ensureNodesLoaded() {
@@ -426,7 +421,16 @@ export function VPSDetailPage() {
       setDomainDraft(INITIAL_DOMAIN_DRAFT)
       clearDomainFeedback()
     }
+    if (activeDrawer === 'node-evidence') {
+      setUnlinkError(null)
+    }
     setActiveDrawer(null)
+  }
+
+  function openLifecycleConfirmation(action: 'archive' | 'restore') {
+    setLifecycleConfirmingAction(action)
+    setLifecycleError(null)
+    setLifecycleNotice(null)
   }
 
   async function handleDecisionSubmit(event: FormEvent<HTMLFormElement>) {
@@ -566,7 +570,7 @@ export function VPSDetailPage() {
       await updateVPSAsset(detail.vps_id, { lifecycle_status: 'archived' })
       const refreshed = await refreshDetailAndTimeline(detail.vps_id)
       setFactDraft(detailToFactEditForm(refreshed))
-      setLifecycleConfirmingArchive(false)
+      setLifecycleConfirmingAction(null)
       setLifecycleNotice('VPS 已归档，资产历史已刷新')
     } catch (error: unknown) {
       setLifecycleError(describeError(error, '归档 VPS 失败'))
@@ -587,6 +591,7 @@ export function VPSDetailPage() {
       await updateVPSAsset(detail.vps_id, { lifecycle_status: 'idle' })
       const refreshed = await refreshDetailAndTimeline(detail.vps_id)
       setFactDraft(detailToFactEditForm(refreshed))
+      setLifecycleConfirmingAction(null)
       setLifecycleNotice('VPS 已恢复为闲置，资产历史已刷新')
     } catch (error: unknown) {
       setLifecycleError(describeError(error, '恢复 VPS 失败'))
@@ -713,6 +718,11 @@ export function VPSDetailPage() {
     if (activeDrawer === 'experience') return '经验记录'
     if (activeDrawer === 'service') return '新增服务'
     if (activeDrawer === 'domain') return '新增域名'
+    if (activeDrawer === 'node-evidence') return 'Node 观测证据'
+    if (activeDrawer === 'services-detail') return '服务资产详情'
+    if (activeDrawer === 'domains-detail') return '域名资产详情'
+    if (activeDrawer === 'timeline-detail') return '资产历史详情'
+    if (activeDrawer === 'facts-detail') return '基础资料详情'
     return 'VPS 操作'
   }
 
@@ -818,6 +828,51 @@ export function VPSDetailPage() {
         />
       )
     }
+    if (activeDrawer === 'node-evidence') {
+      return (
+        <VPSNodeLinksSection
+          nodes={detail.node_links ?? []}
+          unlinkingNodeId={unlinkingNodeId}
+          linkFeedback={linkFeedback}
+          linkFeedbackIsError={linkFeedbackIsError}
+          onOpenLink={() => openDrawer('node-link')}
+          onUnlinkNode={(node) => void handleUnlinkNode(node)}
+        />
+      )
+    }
+    if (activeDrawer === 'services-detail') {
+      return (
+        <VPSServicesSection
+          services={state.services}
+          error={serviceError}
+          notice={serviceNotice}
+          onCreate={() => openDrawer('service')}
+        />
+      )
+    }
+    if (activeDrawer === 'domains-detail') {
+      return (
+        <VPSDomainsSection
+          domains={state.domains}
+          error={domainError}
+          notice={domainNotice}
+          onCreate={() => openDrawer('domain')}
+        />
+      )
+    }
+    if (activeDrawer === 'timeline-detail') {
+      return <VPSTimelinePanel timeline={timeline} />
+    }
+    if (activeDrawer === 'facts-detail') {
+      return (
+        <VPSFactsSection
+          detail={detail}
+          error={factError}
+          notice={factNotice}
+          onEdit={() => openFactEdit(detail)}
+        />
+      )
+    }
     return null
   }
 
@@ -825,9 +880,17 @@ export function VPSDetailPage() {
     <div className="page-stack asset-page vps-detail-page">
       <VPSDetailHero
         detail={detail}
+        isArchived={isArchived}
+        lifecycleSubmitting={lifecycleSubmitting}
         onBack={() => navigate(-1)}
         onDecisionEdit={() => openDrawer('decision')}
         onFactEdit={() => openFactEdit(detail)}
+        onExperienceLog={() => openDrawer('experience')}
+        onNodeLink={() => openDrawer('node-link')}
+        onServiceCreate={() => openDrawer('service')}
+        onDomainCreate={() => openDrawer('domain')}
+        onArchiveStart={() => openLifecycleConfirmation('archive')}
+        onRestoreStart={() => openLifecycleConfirmation('restore')}
       />
 
       <VPSDecisionWorkbench
@@ -861,69 +924,44 @@ export function VPSDetailPage() {
         </p>
       ) : null}
 
-      <div className="page-stack vps-detail-evidence-stack">
-        <VPSRenewalEvidenceSection
-          vpsID={detail.vps_id}
-          primarySubscription={primarySubscription}
-          subscriptionLoadFailed={subscriptionLoadFailed}
-          subscriptionError={state.subscriptionsError}
-          timeline={timeline}
-        />
+      <VPSOperationsSummary
+        detail={detail}
+        timeline={timeline}
+        primarySubscription={primarySubscription}
+        subscriptionLoadFailed={subscriptionLoadFailed}
+        subscriptionError={state.subscriptionsError}
+        services={state.services}
+        domains={state.domains}
+        factNotice={factNotice}
+        factError={activeDrawer === 'facts' ? null : factError}
+        linkFeedback={activeDrawer === 'node-link' || activeDrawer === 'node-evidence' ? null : linkFeedback}
+        linkFeedbackIsError={linkFeedbackIsError}
+        serviceNotice={serviceNotice}
+        serviceError={activeDrawer === 'service' ? null : serviceError}
+        domainNotice={domainNotice}
+        domainError={activeDrawer === 'domain' ? null : domainError}
+        experienceNotice={experienceNotice}
+        lifecycleNotice={lifecycleNotice}
+        lifecycleError={lifecycleConfirmingAction ? null : lifecycleError}
+        onOpenFacts={() => openDrawer('facts-detail')}
+        onOpenNodeEvidence={() => openDrawer('node-evidence')}
+        onOpenServices={() => openDrawer('services-detail')}
+        onOpenDomains={() => openDrawer('domains-detail')}
+        onOpenTimeline={() => openDrawer('timeline-detail')}
+      />
 
-        <VPSDecisionEvidenceSection
-          timeline={timeline}
-          notice={experienceNotice}
-          onExperienceLog={() => openDrawer('experience')}
-        />
-
-        <VPSNodeLinksSection
-          nodes={detail.node_links ?? []}
-          unlinkingNodeId={unlinkingNodeId}
-          linkFeedback={activeDrawer === 'node-link' ? null : linkFeedback}
-          linkFeedbackIsError={linkFeedbackIsError}
-          onOpenLink={() => openDrawer('node-link')}
-          onUnlinkNode={(node) => void handleUnlinkNode(node)}
-        />
-
-        <VPSFactsSection
-          detail={detail}
-          error={activeDrawer === 'facts' ? null : factError}
-          notice={factNotice}
-          onEdit={() => openFactEdit(detail)}
-        />
-
-        <section className="vps-detail-context-grid" aria-label="服务与域名上下文">
-          <VPSServicesSection
-            services={state.services}
-            error={activeDrawer === 'service' ? null : serviceError}
-            notice={serviceNotice}
-            onCreate={() => openDrawer('service')}
-          />
-
-          <VPSDomainsSection
-            domains={state.domains}
-            error={activeDrawer === 'domain' ? null : domainError}
-            notice={domainNotice}
-            onCreate={() => openDrawer('domain')}
-          />
-        </section>
-
-        <VPSTimelinePanel timeline={timeline} />
-
-        <VPSAccessSummarySection detail={detail} />
-
+      {lifecycleConfirmingAction ? (
         <VPSLifecycleCard
           detail={detail}
-          isArchived={isArchived}
-          confirmingArchive={lifecycleConfirmingArchive}
+          action={lifecycleConfirmingAction}
           submitting={lifecycleSubmitting}
           error={lifecycleError}
           notice={lifecycleNotice}
-          onArchiveConfirmOpenChange={handleLifecycleConfirmingArchiveChange}
+          onCancel={closeLifecycleConfirmation}
           onArchive={() => void handleArchiveVPS()}
           onRestore={() => void handleRestoreVPS()}
         />
-      </div>
+      ) : null}
 
       <Drawer
         open={activeDrawer !== null}
