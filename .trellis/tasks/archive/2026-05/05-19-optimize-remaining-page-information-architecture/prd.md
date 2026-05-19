@@ -108,6 +108,10 @@
 
 **Consequences**: 本批次优先解决影响资产运营链路的旧 CRUD 平铺问题，风险低于直接重排观测详情页；Target Detail 的 ProbeItem/事件/趋势层级问题延期到单独任务处理。
 
+## Post-merge Notes
+
+- PR #124 was squash-merged with the GitHub-generated title `Optimize asset ledger page information architecture (#124)`, so Release Please could not parse the merged commit as the original `feat:` commit. A follow-up conventional commit records this release-trigger correction without changing product behavior.
+
 ## Technical Notes
 
 - Likely page families: Dashboard / Nodes / Targets / Target Detail / Asset Decisions / Subscriptions / Providers / Events / Settings / onboarding / compare / login, plus Node Detail and VPS Detail review.
