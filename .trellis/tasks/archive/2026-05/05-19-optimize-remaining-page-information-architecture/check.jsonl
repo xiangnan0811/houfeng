@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/05-19-optimize-remaining-page-information-architecture/research/overview-list-pages-audit.md","reason":"Verify MVP implementation matches chosen page priorities and deferrals."}
+{"file":".trellis/tasks/05-19-optimize-remaining-page-information-architecture/research/design-patterns-for-page-ia.md","reason":"Check create/edit Drawer migration and summaries follow intended IA patterns."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Check component boundaries, atoms usage, and testable React structure."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Check BEM/design-token CSS and dark-first visual consistency."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Check URL-driven create/filter behavior, API loading, and error handling are preserved."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Check required tests and verification commands are covered."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check implementation reuses existing primitives and avoids needless abstraction."}

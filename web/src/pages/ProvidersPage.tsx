@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
-import { Button, DataTable, Input, MonoDigits, Timestamp, type DataTableColumn } from '../components/atoms'
+import { Button, DataTable, Drawer, Input, MonoDigits, Timestamp, type DataTableColumn } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createProvider, listProviders, updateProvider } from '../lib/api'
 import { formatOptional } from '../lib/format'
@@ -119,17 +119,17 @@ export function ProvidersPage() {
     }
   }, [])
 
-  function toggleCreatePanel() {
-    setCreateOpen((open) => {
-      const next = !open
-      if (!next) {
-        setCreateForm(INITIAL_CREATE_FORM)
-        setCreateError(null)
-      } else {
-        cancelEdit()
-      }
-      return next
-    })
+  function openCreateDrawer() {
+    setCreateOpen(true)
+    setCreateForm(INITIAL_CREATE_FORM)
+    setCreateError(null)
+    cancelEdit()
+  }
+
+  function closeCreateDrawer() {
+    setCreateOpen(false)
+    setCreateForm(INITIAL_CREATE_FORM)
+    setCreateError(null)
   }
 
   function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
@@ -152,8 +152,7 @@ export function ProvidersPage() {
           error: null,
           providers: [provider, ...current.providers.filter((item) => item.provider_id !== provider.provider_id)],
         }))
-        setCreateForm(INITIAL_CREATE_FORM)
-        setCreateOpen(false)
+        closeCreateDrawer()
       })
       .catch((error: unknown) => {
         setCreateError(describeError(error, '创建服务商失败'))
@@ -162,8 +161,7 @@ export function ProvidersPage() {
   }
 
   function startEdit(provider: ProviderRecord) {
-    setCreateOpen(false)
-    setCreateError(null)
+    closeCreateDrawer()
     setEditingProviderId(provider.provider_id)
     setEditForm(providerToForm(provider))
     setEditError(null)
@@ -264,6 +262,12 @@ export function ProvidersPage() {
     },
   ]
 
+  const providerCount = state.providers.length
+  const countryCount = new Set(state.providers.map((provider) => provider.country.trim()).filter(Boolean)).size
+  const accountCount = state.providers.filter((provider) => provider.account_hint.trim() !== '').length
+  const lowRatedCount = state.providers.filter((provider) => provider.rating != null && provider.rating <= 2).length
+  const labeledCount = state.providers.filter((provider) => provider.labels.length > 0).length
+
   return (
     <div className="page-stack asset-page providers-page">
       <section className="page-panel page-panel--inline">
@@ -275,68 +279,41 @@ export function ProvidersPage() {
           </p>
         </div>
         <div className="page-panel__actions">
-          <Button variant={createOpen ? 'secondary' : 'primary'} onClick={toggleCreatePanel}>
-            {createOpen ? '收起创建' : state.providers.length === 0 ? '创建第一个服务商' : '新建服务商'}
+          <Button onClick={openCreateDrawer}>
+            {providerCount === 0 ? '创建第一个服务商' : '新建服务商'}
           </Button>
         </div>
       </section>
 
-      {createOpen && (
-        <section className="page-panel">
-          <div className="page-panel__eyebrow">CREATE</div>
-          <h2 className="page-panel__title">服务商创建</h2>
-          <form onSubmit={handleCreateSubmit}>
-            <Input label="服务商名称" value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} />
-            <Input label="网站" value={createForm.website} onChange={(event) => setCreateForm({ ...createForm, website: event.target.value })} />
-            <Input label="面板地址" value={createForm.panelURL} onChange={(event) => setCreateForm({ ...createForm, panelURL: event.target.value })} />
-            <Input label="账号提示" value={createForm.accountHint} onChange={(event) => setCreateForm({ ...createForm, accountHint: event.target.value })} />
-            <Input label="国家 / 地区" value={createForm.country} onChange={(event) => setCreateForm({ ...createForm, country: event.target.value })} />
-            <Input label="评分" type="number" min="1" max="5" value={createForm.rating} onChange={(event) => setCreateForm({ ...createForm, rating: event.target.value })} />
-            <Input label="标签" hint="用逗号分隔" value={createForm.labels} onChange={(event) => setCreateForm({ ...createForm, labels: event.target.value })} />
-            <Input label="备注" value={createForm.note} onChange={(event) => setCreateForm({ ...createForm, note: event.target.value })} />
-            {createError && (
-              <p className="create-form__error" role="alert">
-                {createError}
-              </p>
-            )}
-            <div className="page-form-actions">
-              <Button type="submit" disabled={createSubmitting}>
-                {createSubmitting ? '创建中…' : '创建服务商'}
-              </Button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      {editingProviderId && (
-        <section className="page-panel">
-          <div className="page-panel__eyebrow">EDIT</div>
-          <h2 className="page-panel__title">服务商编辑</h2>
-          <form onSubmit={handleEditSubmit}>
-            <Input label="服务商名称" value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} />
-            <Input label="网站" value={editForm.website} onChange={(event) => setEditForm({ ...editForm, website: event.target.value })} />
-            <Input label="面板地址" value={editForm.panelURL} onChange={(event) => setEditForm({ ...editForm, panelURL: event.target.value })} />
-            <Input label="账号提示" value={editForm.accountHint} onChange={(event) => setEditForm({ ...editForm, accountHint: event.target.value })} />
-            <Input label="国家 / 地区" value={editForm.country} onChange={(event) => setEditForm({ ...editForm, country: event.target.value })} />
-            <Input label="评分" type="number" min="1" max="5" value={editForm.rating} onChange={(event) => setEditForm({ ...editForm, rating: event.target.value })} />
-            <Input label="标签" hint="用逗号分隔" value={editForm.labels} onChange={(event) => setEditForm({ ...editForm, labels: event.target.value })} />
-            <Input label="备注" value={editForm.note} onChange={(event) => setEditForm({ ...editForm, note: event.target.value })} />
-            {editError && (
-              <p className="create-form__error" role="alert">
-                {editError}
-              </p>
-            )}
-            <div className="page-form-actions">
-              <Button type="button" variant="secondary" onClick={cancelEdit} disabled={editSubmitting}>
-                取消编辑
-              </Button>
-              <Button type="submit" disabled={editSubmitting}>
-                {editSubmitting ? '保存中…' : '保存服务商'}
-              </Button>
-            </div>
-          </form>
-        </section>
-      )}
+      <section className="page-panel providers-command-panel">
+        <div className="section-heading section-heading--inline">
+          <div>
+            <p className="section-heading__eyebrow">MASTER DATA CONTEXT</p>
+            <h2>服务商主数据概览</h2>
+            <p className="section-heading__description">
+              只保留辅助扫描服务商列表的轻量上下文；创建与编辑进入右侧抽屉，避免打断表格核对。
+            </p>
+          </div>
+        </div>
+        <dl className="asset-workbench-summary">
+          <div className="asset-workbench-summary__item">
+            <dt>服务商</dt>
+            <dd>{state.loading ? '正在读取' : state.error ? '不可用' : <><MonoDigits>{providerCount}</MonoDigits> 个记录</>}</dd>
+          </div>
+          <div className="asset-workbench-summary__item">
+            <dt>国家 / 地区</dt>
+            <dd>{state.loading || state.error ? '—' : <><MonoDigits>{countryCount}</MonoDigits> 个已记录</>}</dd>
+          </div>
+          <div className="asset-workbench-summary__item">
+            <dt>资料覆盖</dt>
+            <dd>{state.loading || state.error ? '—' : <>账号提示 <MonoDigits>{accountCount}</MonoDigits> · 标签 <MonoDigits>{labeledCount}</MonoDigits></>}</dd>
+          </div>
+          <div className="asset-workbench-summary__item">
+            <dt>低评分</dt>
+            <dd>{state.loading || state.error ? '—' : <><MonoDigits>{lowRatedCount}</MonoDigits> 个需复核</>}</dd>
+          </div>
+        </dl>
+      </section>
 
       <section className="page-panel">
         <div className="section-heading">
@@ -345,7 +322,7 @@ export function ProvidersPage() {
             <h2>服务商列表</h2>
           </div>
           <span className="section-heading__meta">
-            <MonoDigits>{state.providers.length}</MonoDigits> 个服务商
+            <MonoDigits>{providerCount}</MonoDigits> 个服务商
           </span>
         </div>
 
@@ -375,6 +352,92 @@ export function ProvidersPage() {
           />
         )}
       </section>
+
+      <Drawer
+        open={createOpen}
+        onClose={closeCreateDrawer}
+        title="服务商创建"
+        ariaLabel="服务商创建表单"
+      >
+        <div className="asset-create-drawer providers-drawer">
+          <p className="page-panel__description">
+            服务商是 VPS 资产的主数据引用；创建后即可在 VPS 表单中选择，不会修改已有 Node 事实。
+          </p>
+          <form className="asset-create-form" onSubmit={handleCreateSubmit}>
+            <fieldset className="asset-create-form__group">
+              <legend>基础资料</legend>
+              <Input label="服务商名称" value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} />
+              <Input label="网站" value={createForm.website} onChange={(event) => setCreateForm({ ...createForm, website: event.target.value })} />
+              <Input label="面板地址" value={createForm.panelURL} onChange={(event) => setCreateForm({ ...createForm, panelURL: event.target.value })} />
+              <Input label="账号提示" value={createForm.accountHint} onChange={(event) => setCreateForm({ ...createForm, accountHint: event.target.value })} />
+              <Input label="国家 / 地区" value={createForm.country} onChange={(event) => setCreateForm({ ...createForm, country: event.target.value })} />
+              <Input label="评分" type="number" min="1" max="5" value={createForm.rating} onChange={(event) => setCreateForm({ ...createForm, rating: event.target.value })} />
+            </fieldset>
+            <fieldset className="asset-create-form__group asset-create-form__group--wide">
+              <legend>备注标签</legend>
+              <Input label="标签" hint="用逗号分隔" value={createForm.labels} onChange={(event) => setCreateForm({ ...createForm, labels: event.target.value })} />
+              <Input name="note" label="备注" value={createForm.note} onChange={(event) => setCreateForm({ ...createForm, note: event.target.value })} />
+            </fieldset>
+            {createError && (
+              <p className="create-form__error" role="alert">
+                {createError}
+              </p>
+            )}
+            <div className="page-form-actions asset-create-form__actions">
+              <span className="asset-create-form__hint">关闭抽屉会丢弃未提交草稿。</span>
+              <Button type="button" variant="secondary" onClick={closeCreateDrawer} disabled={createSubmitting}>
+                取消
+              </Button>
+              <Button type="submit" disabled={createSubmitting}>
+                {createSubmitting ? '创建中…' : '创建服务商'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </Drawer>
+
+      <Drawer
+        open={editingProviderId != null}
+        onClose={cancelEdit}
+        title="服务商编辑"
+        ariaLabel="服务商编辑表单"
+      >
+        <div className="asset-create-drawer providers-drawer">
+          <p className="page-panel__description">
+            编辑服务商主数据只影响资产台账展示和后续选择器，不会回写观测端的 provider hint。
+          </p>
+          <form className="asset-create-form" onSubmit={handleEditSubmit}>
+            <fieldset className="asset-create-form__group">
+              <legend>基础资料</legend>
+              <Input label="服务商名称" value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} />
+              <Input label="网站" value={editForm.website} onChange={(event) => setEditForm({ ...editForm, website: event.target.value })} />
+              <Input label="面板地址" value={editForm.panelURL} onChange={(event) => setEditForm({ ...editForm, panelURL: event.target.value })} />
+              <Input label="账号提示" value={editForm.accountHint} onChange={(event) => setEditForm({ ...editForm, accountHint: event.target.value })} />
+              <Input label="国家 / 地区" value={editForm.country} onChange={(event) => setEditForm({ ...editForm, country: event.target.value })} />
+              <Input label="评分" type="number" min="1" max="5" value={editForm.rating} onChange={(event) => setEditForm({ ...editForm, rating: event.target.value })} />
+            </fieldset>
+            <fieldset className="asset-create-form__group asset-create-form__group--wide">
+              <legend>备注标签</legend>
+              <Input label="标签" hint="用逗号分隔" value={editForm.labels} onChange={(event) => setEditForm({ ...editForm, labels: event.target.value })} />
+              <Input name="note" label="备注" value={editForm.note} onChange={(event) => setEditForm({ ...editForm, note: event.target.value })} />
+            </fieldset>
+            {editError && (
+              <p className="create-form__error" role="alert">
+                {editError}
+              </p>
+            )}
+            <div className="page-form-actions asset-create-form__actions">
+              <span className="asset-create-form__hint">取消会恢复为当前已保存的服务商资料。</span>
+              <Button type="button" variant="secondary" onClick={cancelEdit} disabled={editSubmitting}>
+                取消编辑
+              </Button>
+              <Button type="submit" disabled={editSubmitting}>
+                {editSubmitting ? '保存中…' : '保存服务商'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </Drawer>
     </div>
   )
 }

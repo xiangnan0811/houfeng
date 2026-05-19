@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -82,6 +82,10 @@ describe('SubscriptionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
+    expect(screen.getByText('续费与成本证据')).toBeInTheDocument()
+    expect(screen.getByText('当前筛选')).toBeInTheDocument()
+    expect(screen.getByText('最近续费')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '订阅创建表单' })).not.toBeInTheDocument()
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('生效中').length).toBeGreaterThan(0)
 
@@ -113,7 +117,9 @@ describe('SubscriptionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('button', { name: '创建第一条订阅' })).toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: '订阅创建表单' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '创建第一条订阅' }))
+    expect(screen.getByRole('dialog', { name: '订阅创建表单' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('订阅 VPS'), { target: { value: 'vps_001' } })
     fireEvent.change(screen.getByLabelText('价格'), { target: { value: '24' } })
     fireEvent.change(screen.getByLabelText('币种'), { target: { value: 'usd' } })
@@ -148,6 +154,63 @@ describe('SubscriptionsPage', () => {
     })
   })
 
+  it('closes URL-requested create drawer without dropping filters', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?vps_id=vps_001&create=1']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: '订阅创建表单' })).toBeInTheDocument())
+    expect(screen.getByLabelText('订阅 VPS')).toHaveValue('vps_001')
+    fireEvent.change(screen.getByLabelText('价格'), { target: { value: '99' } })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '订阅创建表单' })).not.toBeInTheDocument())
+    expect(screen.getByText('VPS: Tokyo Edge')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(screen.getByRole('button', { name: '为该 VPS 新建订阅' }))
+    expect(screen.getByRole('dialog', { name: '订阅创建表单' })).toBeInTheDocument()
+    expect(screen.getByLabelText('订阅 VPS')).toHaveValue('vps_001')
+    expect(screen.getByLabelText('价格')).toHaveValue(null)
+  })
+
+  it('resets URL-requested create draft and errors after drawer cancel', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?vps_id=vps_001&create=1']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: '订阅创建表单' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '创建订阅' }))
+    expect(screen.getByText('价格必须为非负数字。')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('价格'), { target: { value: '99' } })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '订阅创建表单' })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '为该 VPS 新建订阅' }))
+
+    const createDialog = screen.getByRole('dialog', { name: '订阅创建表单' })
+    expect(within(createDialog).queryByText('价格必须为非负数字。')).not.toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('订阅 VPS')).toHaveValue('vps_001')
+    expect(within(createDialog).getByLabelText('价格')).toHaveValue(null)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('updates subscriptions through PATCH and shows backend monthly price', async () => {
     const updated = {
       ...subscription,
@@ -177,7 +240,9 @@ describe('SubscriptionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
+    expect(screen.queryByRole('dialog', { name: '订阅编辑表单' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '编辑 sub_001' }))
+    expect(screen.getByRole('dialog', { name: '订阅编辑表单' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('价格'), { target: { value: '24' } })
     fireEvent.change(screen.getByLabelText('计费周期'), { target: { value: 'quarterly' } })
     fireEvent.change(screen.getByLabelText('计费月数'), { target: { value: '3' } })
@@ -214,5 +279,37 @@ describe('SubscriptionsPage', () => {
         note: 'review',
       }),
     })
+  })
+
+  it('resets subscription edit draft and errors after drawer cancel', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: '编辑 sub_001' }))
+    const firstEditDialog = screen.getByRole('dialog', { name: '订阅编辑表单' })
+    fireEvent.change(within(firstEditDialog).getByLabelText('币种'), { target: { value: 'US1' } })
+    fireEvent.click(within(firstEditDialog).getByRole('button', { name: '保存订阅' }))
+    await waitFor(() => expect(within(firstEditDialog).getByText('币种必须为 3 位大写代码。')).toBeInTheDocument())
+    fireEvent.change(within(firstEditDialog).getByLabelText('支付方式'), { target: { value: 'draft-pay' } })
+    fireEvent.click(within(firstEditDialog).getByRole('button', { name: '取消编辑' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '订阅编辑表单' })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '编辑 sub_001' }))
+
+    const editDialog = screen.getByRole('dialog', { name: '订阅编辑表单' })
+    expect(within(editDialog).queryByText('币种必须为 3 位大写代码。')).not.toBeInTheDocument()
+    expect(within(editDialog).getByLabelText('币种')).toHaveValue('USD')
+    expect(within(editDialog).getByLabelText('支付方式')).toHaveValue('card')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
