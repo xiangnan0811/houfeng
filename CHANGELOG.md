@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/xiangnan0811/houfeng/compare/v0.4.3...v0.5.0) (2026-05-19)
+
+
+### Features
+
+* optimize vps detail information architecture ([1b2260b](https://github.com/xiangnan0811/houfeng/commit/1b2260bc82f82a9d29faf27b6b55ac856383ebfd))
+* optimize vps detail information architecture ([beedfe2](https://github.com/xiangnan0811/houfeng/commit/beedfe2d25379aab73197ddabe8835a90972e9a7))
+
 ## [0.4.3](https://github.com/xiangnan0811/houfeng/compare/v0.4.2...v0.4.3) (2026-05-18)
 
 
