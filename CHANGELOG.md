@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/xiangnan0811/houfeng/compare/v0.12.0...v0.13.0) (2026-05-20)
+
+
+### Features
+
+* optimize target detail information architecture ([#140](https://github.com/xiangnan0811/houfeng/issues/140)) ([a74c439](https://github.com/xiangnan0811/houfeng/commit/a74c439600cc8afba7c6fe229eca1dfa927f5264))
+
 ## [0.12.0](https://github.com/xiangnan0811/houfeng/compare/v0.11.0...v0.12.0) (2026-05-20)
 
 
