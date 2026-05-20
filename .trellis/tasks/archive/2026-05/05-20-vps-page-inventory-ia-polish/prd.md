@@ -70,7 +70,7 @@
 - [x] 前端通过 `npm --prefix web run lint`、`TMPDIR="$PWD/.tmp/vitest" npm --prefix web run test -- --run`、`npm --prefix web run build`。
 - [x] 最终完整验证通过 `TMPDIR="$PWD/.tmp/verify-tmp" GOCACHE="$PWD/.tmp/go-cache" ./scripts/verify.sh`。
 - [x] UI/浏览器 sanity 覆盖 VPSPage golden path；使用 mock-backed 数据，已明确非真实 authenticated center/PostgreSQL caveat。
-- [ ] 按分支/PR/release 约定完成后续流程。
+- [x] PR #135 已合并，main CI 已通过；release follow-up 通过 conventional PR 触发。
 
 ## Out of Scope
 
@@ -96,3 +96,4 @@
   - `TMPDIR="$PWD/.tmp/verify-tmp" GOCACHE="$PWD/.tmp/go-cache" ./scripts/verify.sh` — PASS.
 - Local verification caveats: npm emitted the existing engine warning because local Node is `v24.14.1` while `web/package.json` requires `22.x`; npm audit still reports 1 moderate vulnerability.
 - Browser sanity evidence: `research/browser-sanity.md` PASS via DevTools-based local Vite run with mock-backed `asset-workflows` equivalent data at `1440x1000` and `390x900`; Python Playwright was unavailable, so this was not a direct `scripts/visual_evidence.py` run and did not exercise real authenticated center/PostgreSQL.
+- PR #135 merged into `main` as `60baf19` and main CI passed. The squash commit title omitted the conventional `feat:` prefix, so Release Please did not open a release PR from that merge; this archive evidence update is submitted as a conventional follow-up PR to trigger the expected release flow without changing application behavior.
