@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/05-20-continue-page-information-architecture-optimization/research/next-candidate-pages-audit.md","reason":"Defines chosen TargetDetailPage scope, candidate ranking, concrete IA changes, files likely touched, and risk boundaries."}
+{"file":".trellis/tasks/archive/2026-05/05-19-optimize-remaining-page-information-architecture/research/design-patterns-for-page-ia.md","reason":"Carries reusable IA surface-selection rules from recent Node/VPS/asset ledger work."}
+{"file":".trellis/tasks/archive/2026-05/05-19-optimize-remaining-page-information-architecture/research/detail-special-pages-audit.md","reason":"Prior detail-page audit that flagged TargetDetailPage as the clearest remaining IA gap."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Component layering, Drawer, PageState, DataTable, and interactive semantics constraints."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Pure CSS, BEM, design-token, and no page-local/business inline-style constraints."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Frontend state/data, API client, URL-state, and security-sensitive UI constraints."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Testing and verification expectations for web page changes."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing Target detail components/forms and avoid unnecessary new abstractions."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep IA changes aligned with backend/API contracts without changing models."}
