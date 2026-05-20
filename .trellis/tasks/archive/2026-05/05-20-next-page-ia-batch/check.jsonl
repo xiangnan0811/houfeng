@@ -1,0 +1,11 @@
+{"path":".trellis/tasks/05-20-next-page-ia-batch/prd.md","kind":"task_prd","note":"Check final implementation against safety-frozen NodeOnboardingPage IA scope, frozen install/token/binding contracts, acceptance criteria, and Definition of Done."}
+{"path":".trellis/tasks/05-20-next-page-ia-batch/research/remaining-page-ia-audit.md","kind":"research","note":"Use audit to verify recommended onboarding scope was followed and alternatives were not accidentally included."}
+{"path":".trellis/tasks/05-20-next-page-ia-batch/research/design-spec-candidate-audit.md","kind":"research","note":"Check visual/IA hierarchy, one-command primary path, binding conflict priority, and manual fallback de-emphasis match design rationale."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Check page/component layering, PageState conventions, no unnecessary abstractions, modal/drawer contracts, and no nested interaction regressions."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"Check BEM/tokens/pages.css usage, no page-local CSS, no business inline style regression, no new styling system."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"Check Node onboarding one-command install data flow, token secrecy, no browser-origin command synthesis, manual placeholders, config error matrix, and tests."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Check focused NodeOnboardingPage tests, full web tests, lint, build, full verify, and browser sanity evidence/caveats."}
+{"path":"docs/design/v2-houfeng/component-spec.md","kind":"design","note":"Check page remains aligned with high-density engineering visual/IA contract and does not introduce decorative sprawl."}
+{"path":"docs/operations/v2-visual-evidence.md","kind":"ops","note":"Check browser sanity route/data-source/caveat reporting."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Check reuse discipline and avoid overfitting/over-abstraction."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Check frontend-only scope and no backend/API/agent installer/enrollment behavior drift."}

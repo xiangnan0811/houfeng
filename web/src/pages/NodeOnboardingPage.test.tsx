@@ -59,7 +59,7 @@ describe('NodeOnboardingPage', () => {
     window.sessionStorage.clear()
   })
 
-  it('makes one-command install primary before any token is generated', async () => {
+  it('makes one-command install the highest-priority work before any token is generated', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(mockJSONResponse(createOnboardingState())),
@@ -71,7 +71,11 @@ describe('NodeOnboardingPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('节点接入')).toBeInTheDocument()
+    const priorityWork = screen.getByRole('region', { name: '当前接入工作' })
+    expect(within(priorityWork).getByText('当前主路径')).toBeInTheDocument()
+    expect(within(priorityWork).getByRole('heading', { name: '用 center 生成的一键命令接入 agent' })).toBeInTheDocument()
+    expect(within(priorityWork).getByRole('link', { name: '进入一键安装' })).toHaveAttribute('href', '/nodes/nd_001/onboarding#one-command-install')
+    expect(screen.getByRole('heading', { name: '复制一条 center 生成的命令完成安装' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '生成一键安装命令' })).toBeInTheDocument()
     expect(
       screen.getByText('命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。'),
@@ -80,7 +84,9 @@ describe('NodeOnboardingPage', () => {
       screen.getByText('安装命令包含 30 分钟有效的一次性 enrollment token。', { exact: false }),
     ).toBeInTheDocument()
     expect(screen.getByText('尚未生成一键安装命令。')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '接入流程与当前证据' })).toBeInTheDocument()
     expect(screen.getByText('手工安装仍可作为排障路径')).toBeInTheDocument()
+    expect(screen.getByText('低权重兜底')).toBeInTheDocument()
     expect(screen.getByText('HOUFENG_AGENT_SERVER_URL=<center public base URL>', { exact: false })).toBeInTheDocument()
     expect(
       screen.getByText("printf '%s' '<30-minute enrollment token>' | sudo tee /etc/houfeng-agent/token >/dev/null"),
@@ -110,10 +116,12 @@ describe('NodeOnboardingPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    // Phase stepper now carries the phase narrative; summary cards still
-    // surface the host-sample / observation flags.
-    expect(screen.getByText('首批样本')).toBeInTheDocument()
-    expect(screen.getByText('未到达')).toBeInTheDocument()
+    // Phase stepper carries the phase narrative; evidence flags are subordinate
+    // context near the stepper rather than a competing summary strip.
+    const evidence = screen.getByLabelText('接入证据上下文')
+    expect(within(evidence).getByText('首批 host sample')).toBeInTheDocument()
+    expect(within(evidence).getAllByText('未到达').length).toBeGreaterThan(0)
+    expect(within(evidence).getByText('只表示 agent 曾上报主机样本。')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /查看节点详情/ })).not.toBeInTheDocument()
   })
 
@@ -384,6 +392,8 @@ describe('NodeOnboardingPage', () => {
 
     expect(within(conflictCard).getByText('sha256:c…abcdef')).toBeInTheDocument()
     expect(within(conflictCard).getByText('sha256:p…567890')).toBeInTheDocument()
+    expect(within(conflictCard).queryByText('sha256:pendabcdef1234567890')).not.toBeInTheDocument()
+    expect(within(conflictCard).getByText('触发待确认的安装尝试可能已经消耗一次性 token', { exact: false })).toBeInTheDocument()
     expect(within(conflictCard).getByText(formatDateTime('2026-04-26T09:15:00Z'))).toBeInTheDocument()
     expect(within(conflictCard).getByText(formatDateTime('2026-04-26T09:18:00Z'))).toBeInTheDocument()
     expect(within(conflictCard).getByText('4')).toBeInTheDocument()
@@ -394,6 +404,49 @@ describe('NodeOnboardingPage', () => {
     expect(within(conflictCard).getByRole('button', { name: '重置绑定…' })).toBeInTheDocument()
     // No ActionConfirmationCard yet.
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('elevates binding conflict above install and evidence context when fingerprint review is pending', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(
+          createOnboardingState(
+            {
+              binding_status: '指纹变更待确认',
+              phase: '绑定冲突待处理',
+              current_binding_fingerprint_summary: 'sha256:c…abcdef',
+            },
+            {
+              fingerprint: 'sha256:pendabcdef1234567890',
+              first_seen_at: '2026-04-26T09:15:00Z',
+              last_seen_at: '2026-04-26T09:18:00Z',
+              attempt_count: 4,
+            },
+          ),
+        ),
+      ),
+    )
+
+    renderOnboardingPage()
+
+    await screen.findByRole('article', {
+      name: '高优先级：绑定冲突待处理',
+    })
+
+    const priorityWork = screen.getByRole('region', { name: '当前接入工作' })
+    expect(within(priorityWork).getByText('最高优先级')).toBeInTheDocument()
+    expect(within(priorityWork).getByRole('heading', { name: '先处理绑定冲突' })).toBeInTheDocument()
+    expect(within(priorityWork).getByRole('link', { name: '查看冲突处置' })).toHaveAttribute('href', '/nodes/nd_001/onboarding#binding-conflict')
+    expect(screen.getByRole('heading', { name: '先确认 agent 指纹，再继续接入' })).toBeInTheDocument()
+
+    const allHeadings = screen.getAllByRole('heading').map((heading) => heading.textContent ?? '')
+    expect(allHeadings.indexOf('先确认 agent 指纹，再继续接入')).toBeLessThan(
+      allHeadings.indexOf('复制一条 center 生成的命令完成安装'),
+    )
+    expect(allHeadings.indexOf('先确认 agent 指纹，再继续接入')).toBeLessThan(
+      allHeadings.indexOf('接入流程与当前证据'),
+    )
   })
 
   it('warns that conflict resolution requires a regenerated command after token consumption', async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, type To } from 'react-router-dom'
 
 import {
   Card,
@@ -44,6 +44,15 @@ type InstallCommandState = {
   hidden: boolean
 }
 
+type OnboardingPrimaryWork = {
+  eyebrow: string
+  title: string
+  description: string
+  actionLabel: string
+  actionTo: To
+  tone: 'accent' | 'critical'
+}
+
 const MANUAL_TOKEN_PLACEHOLDER = '<30-minute enrollment token>'
 const MANUAL_SERVER_PLACEHOLDER = '<center public base URL>'
 
@@ -55,7 +64,7 @@ HOUFENG_AGENT_BUFFER_MAX_AGE=72h`
 const manualTokenSnippet = `printf '%s' '${MANUAL_TOKEN_PLACEHOLDER}' | sudo tee /etc/houfeng-agent/token >/dev/null`
 
 const installChecklist = [
-  '复制一键安装命令。',
+  '复制 center 生成的一键安装命令。',
   '在目标 VPS 的 root shell 或具备 sudo 的账号中粘贴执行。',
   '安装器会校验 linux/amd64 或 linux/arm64、systemd、下载工具和 checksum 工具。',
   '安装器下载 GitHub Release 中的 houfeng-agent，并用 sha256sums.txt 校验后再写入本机。',
@@ -207,6 +216,46 @@ function CopyButton({
   )
 }
 
+function describePrimaryWork(onboarding: NodeOnboardingState): OnboardingPrimaryWork {
+  if (onboarding.binding_status === '指纹变更待确认') {
+    return {
+      eyebrow: '最高优先级',
+      title: '先处理绑定冲突',
+      description: '新的 agent 指纹正在请求接入。确认或拒绝之前，不要继续把安装命令当作已完成接入证据。',
+      actionLabel: '查看冲突处置',
+      actionTo: '#binding-conflict',
+      tone: 'critical',
+    }
+  }
+
+  return {
+    eyebrow: '当前主路径',
+    title: '用 center 生成的一键命令接入 agent',
+    description: '从这里生成 30 分钟一次性命令，在目标 VPS 上执行；浏览器只展示后端返回的命令，不拼接生产 URL。',
+    actionLabel: '进入一键安装',
+    actionTo: '#one-command-install',
+    tone: 'accent',
+  }
+}
+
+function OnboardingPriorityCard({ work }: { work: OnboardingPrimaryWork }) {
+  return (
+    <section
+      className={`onboarding-priority onboarding-priority--${work.tone}`}
+      aria-label="当前接入工作"
+    >
+      <div className="onboarding-priority__content">
+        <p className="onboarding-priority__eyebrow">{work.eyebrow}</p>
+        <h2>{work.title}</h2>
+        <p>{work.description}</p>
+      </div>
+      <Link className="btn btn--primary btn--md" to={work.actionTo}>
+        {work.actionLabel}
+      </Link>
+    </section>
+  )
+}
+
 function InstallCommandPanel({
   nodeId,
   issue,
@@ -230,11 +279,22 @@ function InstallCommandPanel({
   const primaryLabel = issue ? '重新生成安装命令' : '生成一键安装命令'
 
   return (
-    <div className="page-stack">
-      <Card cardRole="warning">
-        <p className="onboarding-token__hint onboarding-token__hint--critical">
-          安装命令包含 30 分钟有效的一次性 enrollment token。请把它当作敏感信息处理，不要粘贴到工单、聊天、日志或截图里。
-        </p>
+    <div className="page-stack onboarding-install-workbench">
+      <Card cardRole="warning" className="onboarding-install-brief">
+        <div className="onboarding-install-brief__copy">
+          <p className="onboarding-token__hint onboarding-token__hint--critical">
+            安装命令包含 30 分钟有效的一次性 enrollment token。请把它当作敏感信息处理，不要粘贴到工单、聊天、日志或截图里。
+          </p>
+          {issue ? (
+            <p className="onboarding-steps__hint">
+              重新生成会立即使上一条安装命令里的 enrollment token 失效；如果命令过期、丢失或已经被隐藏，请重新生成。
+            </p>
+          ) : (
+            <p className="onboarding-steps__hint">
+              命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。
+            </p>
+          )}
+        </div>
         <div className="onboarding-token__actions">
           <button
             type="button"
@@ -250,15 +310,6 @@ function InstallCommandPanel({
             </button>
           ) : null}
         </div>
-        {issue ? (
-          <p className="onboarding-steps__hint">
-            重新生成会立即使上一条安装命令里的 enrollment token 失效；如果命令过期、丢失或已经被隐藏，请重新生成。
-          </p>
-        ) : (
-          <p className="onboarding-steps__hint">
-            命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。
-          </p>
-        )}
         {error ? (
           <p role="alert" className="onboarding-token__error-summary">
             <MonoDigits>{error}</MonoDigits>
@@ -431,6 +482,7 @@ export function NodeOnboardingPage() {
 
   const pendingBinding = onboarding.pending_binding
   const showBindingConflict = onboarding.binding_status === '指纹变更待确认'
+  const priorityWork = describePrimaryWork(onboarding)
   const installIssue = installCommandState.issue
   const installAside = installIssue ? (
     <span>
@@ -568,35 +620,22 @@ export function NodeOnboardingPage() {
         </div>
       </section>
 
-      <DetailSection eyebrow="接入进度" title="接入流程">
-        <Stepper steps={derivePhaseSteps(onboarding)} ariaLabel="节点接入进度" />
-        {onboarding.phase === '接入完成' ? (
-          <p className="onboarding-completed-link">
-            <Link className="text-link" to={`/nodes/${onboarding.node_id}`}>
-              查看节点详情 →
-            </Link>
-          </p>
-        ) : null}
-      </DetailSection>
-
-      <div className="summary-grid">
-        <article className="summary-card">
-          <p className="summary-card__label">首批样本</p>
-          <p className="summary-card__value">{onboarding.has_host_sample ? '已到达' : '未到达'}</p>
-        </article>
-        <article className="summary-card">
-          <p className="summary-card__label">已接收观测</p>
-          <p className="summary-card__value">
-            {onboarding.has_accepted_observation ? '已接收' : '未接收'}
-          </p>
-        </article>
-      </div>
+      <OnboardingPriorityCard work={priorityWork} />
 
       {showBindingConflict ? (
-        <DetailSection eyebrow="绑定冲突" title="绑定冲突处置" ribbon="critical" aside="高优先级">
+        <DetailSection
+          eyebrow="最高优先级 · 绑定冲突"
+          title="先确认 agent 指纹，再继续接入"
+          ribbon="critical"
+          aside="阻塞接入"
+        >
+          <div id="binding-conflict" className="onboarding-anchor" aria-hidden="true" />
           <article className="metric-card" aria-label="高优先级：绑定冲突待处理">
             <h3>高优先级：绑定冲突待处理</h3>
             <p>系统检测到新的指纹接入请求，请先确认是否接受新的绑定关系。</p>
+            <p className="onboarding-token__hint onboarding-token__hint--critical">
+              触发待确认的安装尝试可能已经消耗一次性 token；确认或拒绝后如需继续接入，请重新生成一键安装命令。
+            </p>
             <dl>
               <div>
                 <dt>当前已绑定指纹</dt>
@@ -691,7 +730,13 @@ export function NodeOnboardingPage() {
         </DetailSection>
       ) : null}
 
-      <DetailSection eyebrow="一键安装" title="复制一条命令完成安装" ribbon="accent" aside={installAside}>
+      <DetailSection
+        eyebrow="一键安装 · 主路径"
+        title="复制一条 center 生成的命令完成安装"
+        ribbon="accent"
+        aside={installAside}
+      >
+        <div id="one-command-install" className="onboarding-anchor" aria-hidden="true" />
         <InstallCommandPanel
           nodeId={onboarding.node_id}
           issue={installCommandState.issue}
@@ -714,6 +759,37 @@ export function NodeOnboardingPage() {
         />
       </DetailSection>
 
+      <DetailSection
+        eyebrow="进度与证据"
+        title="接入流程与当前证据"
+        aside={onboarding.phase}
+      >
+        <Stepper steps={derivePhaseSteps(onboarding)} ariaLabel="节点接入进度" />
+        <div className="onboarding-evidence-context" aria-label="接入证据上下文">
+          <article className="onboarding-evidence-context__item">
+            <p className="onboarding-evidence-context__label">首批 host sample</p>
+            <p className="onboarding-evidence-context__value">
+              {onboarding.has_host_sample ? '已到达' : '未到达'}
+            </p>
+            <p className="onboarding-evidence-context__hint">只表示 agent 曾上报主机样本。</p>
+          </article>
+          <article className="onboarding-evidence-context__item">
+            <p className="onboarding-evidence-context__label">已接收观测</p>
+            <p className="onboarding-evidence-context__value">
+              {onboarding.has_accepted_observation ? '已接收' : '未接收'}
+            </p>
+            <p className="onboarding-evidence-context__hint">用于支撑等待稳定观测 / 接入完成判断。</p>
+          </article>
+        </div>
+        {onboarding.phase === '接入完成' ? (
+          <p className="onboarding-completed-link">
+            <Link className="text-link" to={`/nodes/${onboarding.node_id}`}>
+              查看节点详情 →
+            </Link>
+          </p>
+        ) : null}
+      </DetailSection>
+
       <DetailSection eyebrow="安装器行为" title="命令执行后会做什么">
         <ol className="onboarding-steps">
           {installChecklist.map((item) => (
@@ -724,10 +800,15 @@ export function NodeOnboardingPage() {
         </ol>
       </DetailSection>
 
-      <DetailSection eyebrow="手工回退" title="手工安装仍可作为排障路径" ribbon="notice">
-        <Card cardRole="dim">
+      <DetailSection
+        eyebrow="排障回退"
+        title="手工安装仍可作为排障路径"
+        ribbon="notice"
+        aside="低权重兜底"
+      >
+        <Card cardRole="dim" className="onboarding-manual-fallback">
           <p className="onboarding-token__hint">
-            优先使用上方一键命令。若需要排查安装器问题，可按部署文档手工安装二进制、写入 systemd 与以下配置；不要使用浏览器地址推导生产 Center URL。
+            优先使用上方一键命令。仅在排查安装器、下载或 systemd 写入问题时，按部署文档手工安装二进制、写入 systemd 与以下配置；不要使用浏览器地址推导生产 Center URL。
           </p>
           <div className="onboarding-snippet">
             <pre>
