@@ -493,6 +493,8 @@ describe('TargetDetailPage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
+    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    expect(screen.getByText('ProbeItem 工作面')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Probe 类型'), {
       target: { value: 'http' },
     })
@@ -520,6 +522,7 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
 
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: 'ProbeItem 表单抽屉' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_002/probe-items', {
       method: 'POST',
       headers: {
@@ -703,7 +706,66 @@ describe('TargetDetailPage', () => {
     expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
   })
 
-  it('keeps ProbeItem creation validation errors inside the probe panel', async () => {
+  it('resets ProbeItem drawer drafts and validation errors when cancelled', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_002',
+          name: 'Cache',
+          target_type: 'service',
+          host: 'cache.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({ target_id: 'tg_002', latest_probe_observations: [] }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_002']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
+    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
+    const openDrawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    expect(within(openDrawer).getByText('端口必须为正整数。')).toBeInTheDocument()
+
+    fireEvent.click(within(openDrawer).getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('dialog', { name: 'ProbeItem 表单抽屉' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+
+    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
+    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    expect(screen.queryByText('端口必须为正整数。')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('端口')).toHaveValue('443')
+    expect(screen.getByLabelText('Probe 类型')).toHaveValue('tcp')
+  })
+
+  it('keeps ProbeItem creation validation errors inside the probe drawer', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -749,7 +811,8 @@ describe('TargetDetailPage', () => {
     fireEvent.change(screen.getByLabelText('端口'), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
 
-    expect(screen.getByText('端口必须为正整数。')).toBeInTheDocument()
+    const drawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    expect(within(drawer).getByText('端口必须为正整数。')).toBeInTheDocument()
     expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
@@ -831,8 +894,10 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
     fireEvent.click(probeActionButton('编辑'))
-    expect(screen.getAllByText('ProbeItem 编辑')[0]).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
+    const drawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    expect(drawer).toBeInTheDocument()
+    expect(within(drawer).getByText('ProbeItem 编辑')).toBeInTheDocument()
+    expect(within(drawer).getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByLabelText('HTTP 路径')).toHaveValue('/healthz')
 
     fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/ready' } })
@@ -1078,11 +1143,21 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
 
-    expect(screen.getByRole('button', { name: '正在保存…' })).toBeDisabled()
+    const pendingDrawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    expect(within(pendingDrawer).getByRole('button', { name: '正在保存…' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toBeDisabled()
     expect(probeActionButton('编辑')).toBeDisabled()
     expect(probeActionButton('停用')).toBeDisabled()
     expect(probeActionButton('删除')).toBeDisabled()
+
+    fireEvent.click(within(pendingDrawer).getByRole('button', { name: '关闭' }))
+    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    const overlay = document.body.querySelector('.drawer-overlay')
+    expect(overlay).not.toBeNull()
+    fireEvent.mouseDown(overlay!)
+    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
 
     saveResponse.resolve(
       mockJSONResponse({
@@ -1106,6 +1181,8 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument(),
     )
+    expect(screen.queryByRole('dialog', { name: 'ProbeItem 表单抽屉' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加 ProbeItem' })).not.toBeDisabled()
   })
 
   it('serializes row ProbeItem mutations across multiple rows', async () => {
@@ -3469,7 +3546,7 @@ describe('TargetDetailPage', () => {
     expect(within(dangerZone as HTMLElement).getByText('告警')).toBeInTheDocument()
   })
 
-  it('renders secondary details sections collapsed by default', async () => {
+  it('keeps ProbeItem evidence default-visible while secondary details stay collapsed', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -3546,8 +3623,15 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Collapsed Target' })).toBeInTheDocument(),
     )
 
-    const secondaryDetails = document.querySelectorAll('.watchtower-secondary')
-    expect(secondaryDetails.length).toBeGreaterThanOrEqual(3)
+    const probeSection = screen.getByRole('heading', { name: 'ProbeItem 列表' }).closest('section')
+    expect(probeSection).toHaveClass('detail-section')
+    expect(probeSection).not.toHaveClass('watchtower-secondary')
+    expect(within(probeSection as HTMLElement).getByText('TCP')).toBeInTheDocument()
+    expect(within(probeSection as HTMLElement).getByText('10 ms')).toBeInTheDocument()
+    expect(within(probeSection as HTMLElement).getByText('nd_col')).toBeInTheDocument()
+
+    const secondaryDetails = document.querySelectorAll('details.watchtower-secondary')
+    expect(secondaryDetails.length).toBeGreaterThanOrEqual(1)
 
     for (const details of secondaryDetails) {
       expect(details).not.toHaveAttribute('open')

@@ -583,6 +583,15 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     setProbeCreateOpen(true)
   }
 
+  function closeProbeForm(target: TargetRecord) {
+    if (probeCreateSubmitting) return
+    probeFormRequestRef.current += 1
+    setProbeCreateOpen(false)
+    setProbeFormMode({ kind: 'create' })
+    setProbeCreateForm(initialProbeCreateFormForTarget(target))
+    setProbeCreateError(null)
+  }
+
   function replaceProbeItem(updated: ProbeItemRecord) {
     setState((current) => ({
       ...current,
@@ -846,15 +855,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       probeCreateSubmitting={probeCreateSubmitting}
       probeCreateError={probeCreateError}
       probeMutationError={probeMutationError}
-      onToggleCreate={() => {
-        if (probeCreateSubmitting) return
-        if (probeCreateOpen && probeFormMode.kind === 'create') {
-          probeFormRequestRef.current += 1
-          setProbeCreateOpen(false)
-          return
-        }
-        openProbeCreateForm(target)
-      }}
+      onOpenProbeCreate={() => openProbeCreateForm(target)}
+      onCloseProbeForm={() => closeProbeForm(target)}
       onProbeSubmit={handleProbeCreate}
       onProbeKindChange={(probeKind) => {
         if (probeFormMode.kind === 'edit') {
