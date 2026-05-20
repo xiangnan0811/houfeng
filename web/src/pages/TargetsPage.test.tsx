@@ -1213,6 +1213,59 @@ describe('TargetsPage', () => {
       screen.getByRole('heading', { name: '核对 1 个暂停 / 归档入口' }),
     ).toBeInTheDocument()
     expect(screen.getByText('运行 已归档')).toBeInTheDocument()
+    expect(screen.queryByText(/批量范围：当前筛选范围内/)).not.toBeInTheDocument()
+  })
+
+  it('shows target list command band and group-scoped batch range near the table', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_group_1',
+          name: 'Group API 1',
+          group: 'edge',
+          run_status: '启用',
+        }),
+        targetRecord({
+          target_id: 'tg_group_2',
+          name: 'Group API 2',
+          group: 'edge',
+          run_status: '暂停',
+        }),
+        targetRecord({
+          target_id: 'tg_other',
+          name: 'Other API',
+          group: 'core',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets?group=edge']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Group API 1')).toBeInTheDocument())
+
+    expect(screen.getByRole('heading', { name: '目标列表扫描' })).toBeInTheDocument()
+    expect(screen.getByLabelText('目标列表当前范围')).toHaveTextContent('当前筛选范围')
+    expect(screen.getByLabelText('目标列表当前范围')).toHaveTextContent('2/3')
+    expect(screen.getByText('Group API 2')).toBeInTheDocument()
+    expect(screen.queryByText('Other API')).not.toBeInTheDocument()
+    expect(screen.getByText('批量范围：当前筛选范围内的 2 个目标')).toBeInTheDocument()
+
+    const batchBarEl = document.querySelector('.batch-bar')
+    expect(batchBarEl).not.toBeNull()
+    const checkbox = batchBarEl!.querySelector('input[type="checkbox"]') as HTMLInputElement
+    fireEvent.click(checkbox)
+
+    expect(within(batchBarEl as HTMLElement).getByRole('button', { name: '进入维护' })).toBeInTheDocument()
+    expect(within(batchBarEl as HTMLElement).getByRole('button', { name: '退出维护' })).toBeInTheDocument()
+    expect(within(batchBarEl as HTMLElement).getByRole('button', { name: '暂停' })).toBeInTheDocument()
+    expect(within(batchBarEl as HTMLElement).getByRole('button', { name: '恢复' })).toBeInTheDocument()
   })
 
   it('toggles "仅看异常" and clears all filters via FilterBar', async () => {
@@ -1434,6 +1487,10 @@ describe('TargetsPage', () => {
       screen.getByRole('heading', { name: 'Target 入口证据当前稳定' }),
     ).toBeInTheDocument()
     expect(screen.getByText('完整 Target 库存')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '目标列表扫描' })).toBeInTheDocument()
+    expect(screen.getByLabelText('目标列表当前范围')).toHaveTextContent('完整列表范围')
+    expect(screen.getByLabelText('目标列表当前范围')).toHaveTextContent('1/1')
+    expect(screen.getByRole('button', { name: '创建 Target' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '没有需要优先核对的 Target' })).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: '查看资产决策' })[0]).toHaveAttribute(
       'href',

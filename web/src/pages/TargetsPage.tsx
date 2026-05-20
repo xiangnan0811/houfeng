@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, DataTable, Drawer } from '../components/atoms'
+import { Button, DataTable, Drawer, MonoDigits } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
@@ -626,90 +626,115 @@ export function TargetsPage() {
         onCreateClick={() => openCreateDrawer()}
       />
 
-      {targets.length === 0 ? (
-        <PageState
-          kind="empty"
-          surface="empty"
-          title="候风尚未配置任何观测目标"
-          description="创建第一个目标后，可以继续为它配置 ProbeItem。"
-          action={
-            <button type="button" className="btn btn--primary btn--md" onClick={() => openCreateDrawer()}>
-              新建第一个目标
-            </button>
-          }
-        />
-      ) : (
-        <div className="observability-list-frame observability-list-frame--targets">
-          <TargetsFilterPanel
-            hasActiveFilters={hasActiveFilters}
-            filterState={filterState}
-            groupOptions={groupOptions}
-            labelOptions={labelOptions}
-            executionLabelOptions={executionLabelOptions}
-            onClearAll={clearAllFilters}
-            onSingleFilterChange={setSingleFilter}
-            onMultiFilterChange={setMultiFilter}
-            onAbnormalFilterChange={setAbnormalFilter}
-          />
-          <TargetsBatchPanel
-            show={groupFilterActive && filteredTargets.length > 0}
-            filteredTargetCount={filteredTargets.length}
-            selectAll={selectAll}
-            batchSubmitting={batchSubmitting}
-            batchError={batchError}
-            pendingBatchAction={pendingBatchAction}
-            onSelectAllChange={setSelectAll}
-            onBatchAction={(action) => void executeBatchTargetAction(action as TargetRuntimeAction)}
-            onConfirmBatchPause={() => void executeBatchTargetPauseConfirmed()}
-            onCancelBatchPause={() => setPendingBatchAction(null)}
-          />
-          {filteredTargets.length === 0 ? (
-            <PageState
-              kind="empty"
-              surface="empty"
-              title="没有匹配当前筛选的目标"
-              description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
-              action={
-                <button type="button" className="btn btn--ghost btn--md" onClick={clearAllFilters}>
-                  清空筛选
-                </button>
-              }
-            />
-          ) : (
-            <div className="page-panel page-panel--scroll-x targets-table-panel">
-              <DataTable<TargetRecord>
-                columns={columns}
-                rows={filteredTargets}
-                rowKey={(target) => target.target_id}
-                density="compact"
-                className="targets-table"
-                onRowClick={(target) => {
-                  if (!shouldNavigateOnRowClick(target)) return
-                  navigate(`/targets/${target.target_id}`)
-                }}
-              />
-            </div>
-          )}
-
-          <TargetsRuntimeOverlays
-            targets={filteredTargets}
-            pendingConfirmation={pendingConfirmation}
-            runtimeErrors={runtimeErrors}
-            runtimeBusyTargetId={runtimeBusyTargetId}
-            onConfirmRuntimeAction={(target, action) => {
-              void handleRuntimeAction(target, action, true)
-            }}
-            onCancelConfirmation={(targetId, action) => {
-              queueFocusRestore(targetId, action)
-              setPendingConfirmation((current) =>
-                current?.targetId === targetId && current.action === action
-                  ? null
-                  : current,
-              )
-            }}
-          />
+      <div className="observability-list-frame observability-list-frame--targets">
+        <div className="list-command-band list-command-band--targets" aria-label="目标列表控制带">
+          <div className="list-command-band__main">
+            <p className="list-command-band__eyebrow">LIST SCAN</p>
+            <h3 className="list-command-band__title">目标列表扫描</h3>
+            <p className="list-command-band__description">
+              筛选在这里编辑，批量操作只作用于当前筛选范围；点击行进入 Target 详情继续核对 ProbeItem 证据。
+            </p>
+          </div>
+          <div className="list-command-band__meta" aria-label="目标列表当前范围">
+            <span>{hasActiveFilters ? '当前筛选范围' : '完整列表范围'}</span>
+            <strong>
+              <MonoDigits>{filteredTargets.length}</MonoDigits>
+              <small>/</small>
+              <MonoDigits>{targets.length}</MonoDigits>
+            </strong>
+          </div>
+          <div className="list-command-band__actions">
+            <Button variant="secondary" size="sm" onClick={() => openCreateDrawer()}>
+              创建 Target
+            </Button>
+          </div>
         </div>
-      )}
+
+        {targets.length === 0 ? (
+          <PageState
+            kind="empty"
+            surface="empty"
+            title="候风尚未配置任何观测目标"
+            description="创建第一个目标后，可以继续为它配置 ProbeItem。"
+            action={
+              <button type="button" className="btn btn--primary btn--md" onClick={() => openCreateDrawer()}>
+                新建第一个目标
+              </button>
+            }
+          />
+        ) : (
+          <>
+            <TargetsFilterPanel
+              hasActiveFilters={hasActiveFilters}
+              filterState={filterState}
+              groupOptions={groupOptions}
+              labelOptions={labelOptions}
+              executionLabelOptions={executionLabelOptions}
+              onClearAll={clearAllFilters}
+              onSingleFilterChange={setSingleFilter}
+              onMultiFilterChange={setMultiFilter}
+              onAbnormalFilterChange={setAbnormalFilter}
+            />
+            <TargetsBatchPanel
+              show={groupFilterActive && filteredTargets.length > 0}
+              filteredTargetCount={filteredTargets.length}
+              selectAll={selectAll}
+              batchSubmitting={batchSubmitting}
+              batchError={batchError}
+              pendingBatchAction={pendingBatchAction}
+              onSelectAllChange={setSelectAll}
+              onBatchAction={(action) => void executeBatchTargetAction(action as TargetRuntimeAction)}
+              onConfirmBatchPause={() => void executeBatchTargetPauseConfirmed()}
+              onCancelBatchPause={() => setPendingBatchAction(null)}
+            />
+            {filteredTargets.length === 0 ? (
+              <PageState
+                kind="empty"
+                surface="empty"
+                title="没有匹配当前筛选的目标"
+                description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
+                action={
+                  <button type="button" className="btn btn--ghost btn--md" onClick={clearAllFilters}>
+                    清空筛选
+                  </button>
+                }
+              />
+            ) : (
+              <div className="page-panel page-panel--scroll-x targets-table-panel">
+                <DataTable<TargetRecord>
+                  columns={columns}
+                  rows={filteredTargets}
+                  rowKey={(target) => target.target_id}
+                  density="compact"
+                  className="targets-table"
+                  onRowClick={(target) => {
+                    if (!shouldNavigateOnRowClick(target)) return
+                    navigate(`/targets/${target.target_id}`)
+                  }}
+                />
+              </div>
+            )}
+
+            <TargetsRuntimeOverlays
+              targets={filteredTargets}
+              pendingConfirmation={pendingConfirmation}
+              runtimeErrors={runtimeErrors}
+              runtimeBusyTargetId={runtimeBusyTargetId}
+              onConfirmRuntimeAction={(target, action) => {
+                void handleRuntimeAction(target, action, true)
+              }}
+              onCancelConfirmation={(targetId, action) => {
+                queueFocusRestore(targetId, action)
+                setPendingConfirmation((current) =>
+                  current?.targetId === targetId && current.action === action
+                    ? null
+                    : current,
+                )
+              }}
+            />
+          </>
+        )}
+      </div>
     </section>
   )
 }

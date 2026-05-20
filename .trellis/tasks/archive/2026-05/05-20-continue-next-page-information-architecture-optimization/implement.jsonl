@@ -1,0 +1,10 @@
+{"path":".trellis/tasks/05-20-continue-next-page-information-architecture-optimization/prd.md","kind":"task_prd","note":"Current task requirements: user selected TargetsPage + NodesPage joint list-control IA pass, with frozen behavior contracts."}
+{"path":".trellis/tasks/05-20-continue-next-page-information-architecture-optimization/research/targets-nodes-list-control-audit.md","kind":"research","note":"Primary implementation research: current Targets/Nodes IA composition, safe presentation-level gaps, boundaries, and test impact."}
+{"path":".trellis/tasks/archive/2026-05/05-20-continue-page-information-architecture-optimization/research/next-candidate-pages-audit.md","kind":"prior_research","note":"Prior candidate ranking and rationale for list-page risk/value tradeoffs."}
+{"path":".trellis/tasks/archive/2026-05/05-20-continue-page-information-architecture-optimization/prd.md","kind":"prior_task_prd","note":"Immediately previous Target Detail IA task and completed page IA conventions."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Page composition, Drawer, DataTable row guard, route/component boundaries."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"BEM/tokens/pages.css/no business inline style constraints."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"API client, URL state, Node onboarding install-command security contract."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Web test/lint/build expectations and page-test patterns."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Reuse existing shared components and avoid premature abstractions."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Protect cross-layer contracts while changing frontend IA."}

@@ -97,27 +97,7 @@ export function NodesListSection({
   onCancelPause,
   onCreateNode,
 }: NodesListSectionProps) {
-  if (baseNodes.length === 0) {
-    return (
-      <PageState
-        kind="empty"
-        surface="empty"
-        title={nodeListView === 'binding-conflict' ? '没有绑定异常节点' : '候风尚未接入任何节点'}
-        description={
-          nodeListView === 'binding-conflict'
-            ? '当前没有等待绑定确认的节点。'
-            : '请先创建第一个节点，完成接入后再用它支撑 VPS 运行事实。'
-        }
-        action={
-          nodeListView === 'binding-conflict' ? null : (
-            <button type="button" className="btn btn--primary btn--md" onClick={onCreateNode}>
-              新建第一个节点
-            </button>
-          )
-        }
-      />
-    )
-  }
+  const firstRunEmpty = baseNodes.length === 0
 
   const visibleColumns = showTrends
     ? columns
@@ -125,40 +105,62 @@ export function NodesListSection({
 
   return (
     <>
-      <NodesFilterPanel
-        hasActiveFilters={hasActiveFilters}
-        filterState={filterState}
-        groupOptions={groupOptions}
-        regionOptions={regionOptions}
-        cityOptions={cityOptions}
-        providerOptions={providerOptions}
-        labelOptions={labelOptions}
-        onClearAll={onClearAllFilters}
-        onSingleFilterChange={onSingleFilterChange}
-        onMultiFilterChange={onMultiFilterChange}
-        onAbnormalFilterChange={onAbnormalFilterChange}
-        onOnboardingFilterChange={onOnboardingFilterChange}
-      />
+      {firstRunEmpty ? null : (
+        <NodesFilterPanel
+          hasActiveFilters={hasActiveFilters}
+          filterState={filterState}
+          groupOptions={groupOptions}
+          regionOptions={regionOptions}
+          cityOptions={cityOptions}
+          providerOptions={providerOptions}
+          labelOptions={labelOptions}
+          onClearAll={onClearAllFilters}
+          onSingleFilterChange={onSingleFilterChange}
+          onMultiFilterChange={onMultiFilterChange}
+          onAbnormalFilterChange={onAbnormalFilterChange}
+          onOnboardingFilterChange={onOnboardingFilterChange}
+        />
+      )}
 
-      <NodesBatchPanel
-        hasActiveFilters={hasActiveFilters}
-        filteredNodeCount={nodes.length}
-        selectAll={selectAll}
-        batchSubmitting={batchSubmitting}
-        batchError={batchError}
-        commandOpen={commandOpen}
-        commandID={commandID}
-        pendingBatchAction={pendingBatchAction}
-        onSelectAllChange={onSelectAllChange}
-        onBatchAction={onBatchAction}
-        onCommandOpenChange={onCommandOpenChange}
-        onCommandIDChange={onCommandIDChange}
-        onExecuteBatchCommand={onExecuteBatchCommand}
-        onConfirmBatchPause={onConfirmBatchPause}
-        onCancelBatchPause={onCancelBatchPause}
-      />
+      {firstRunEmpty ? null : (
+        <NodesBatchPanel
+          hasActiveFilters={hasActiveFilters}
+          filteredNodeCount={nodes.length}
+          selectAll={selectAll}
+          batchSubmitting={batchSubmitting}
+          batchError={batchError}
+          commandOpen={commandOpen}
+          commandID={commandID}
+          pendingBatchAction={pendingBatchAction}
+          onSelectAllChange={onSelectAllChange}
+          onBatchAction={onBatchAction}
+          onCommandOpenChange={onCommandOpenChange}
+          onCommandIDChange={onCommandIDChange}
+          onExecuteBatchCommand={onExecuteBatchCommand}
+          onConfirmBatchPause={onConfirmBatchPause}
+          onCancelBatchPause={onCancelBatchPause}
+        />
+      )}
 
-      {nodes.length === 0 ? (
+      {firstRunEmpty ? (
+        <PageState
+          kind="empty"
+          surface="empty"
+          title={nodeListView === 'binding-conflict' ? '没有绑定异常节点' : '候风尚未接入任何节点'}
+          description={
+            nodeListView === 'binding-conflict'
+              ? '当前没有等待绑定确认的节点。'
+              : '请先创建第一个节点，完成接入后再用它支撑 VPS 运行事实。'
+          }
+          action={
+            nodeListView === 'binding-conflict' ? null : (
+              <button type="button" className="btn btn--primary btn--md" onClick={onCreateNode}>
+                新建第一个节点
+              </button>
+            )
+          }
+        />
+      ) : nodes.length === 0 ? (
         <PageState
           kind="empty"
           surface="empty"

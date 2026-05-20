@@ -46,6 +46,7 @@ export function NodesFilterPanel({
 }: NodesFilterPanelProps) {
   return (
     <FilterBar
+      className="list-filter-panel"
       hasActiveFilters={hasActiveFilters}
       onClearAll={onClearAll}
       activeChips={
