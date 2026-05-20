@@ -1,0 +1,9 @@
+{"path":".trellis/tasks/05-20-continue-next-page-information-architecture-optimization/prd.md","kind":"task_prd","note":"Check against selected C scope and frozen behavior contracts."}
+{"path":".trellis/tasks/05-20-continue-next-page-information-architecture-optimization/research/targets-nodes-list-control-audit.md","kind":"research","note":"Check implementation against recommended joint-pass boundary, must-preserve behaviors, and test impact."}
+{"path":".trellis/tasks/archive/2026-05/05-20-continue-page-information-architecture-optimization/research/next-candidate-pages-audit.md","kind":"prior_research","note":"Prior risk notes for TargetsPage/NodesPage and lower-priority exclusions."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Verify Drawer/focus/reset, DataTable row guard, route/page/component layering."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"Verify BEM/tokens/pages.css/no business inline style/no new CSS system."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"Verify URL filters, API client usage, and Node onboarding security remain intact."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Verify page tests and web commands are appropriate."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Check reuse of existing components and avoid unnecessary abstractions."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Check frontend-only changes did not drift into backend/API semantics."}
