@@ -1,0 +1,10 @@
+{"path":".trellis/tasks/05-20-vps-page-inventory-ia-polish/prd.md","kind":"task_prd","note":"Implementation source of truth: limited frontend-only VPSPage IA polish, frozen URL/filter/evidence/join/create contracts, acceptance criteria, and verification requirements."}
+{"path":".trellis/tasks/05-20-vps-page-inventory-ia-polish/research/vps-page-ia-audit.md","kind":"research","note":"Primary audit: current VPSPage IA, safe polish seams, frozen contracts, tests, and browser-sanity guidance."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Follow DataTable row guard, Drawer draft/discard/reset conventions, page/component layering, and avoid unnecessary abstractions."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"Use pages.css, BEM-ish classes, design tokens, dark-first density, and no new CSS system/page-local CSS."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"Preserve Asset Ledger/VPS URL-state filters, evidence failure matrix, API helper usage, and snake_case data contracts."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Use Vitest/jsdom page tests, web lint/test/build verification, and browser-sanity evidence expectations."}
+{"path":"docs/design/v2-houfeng/component-spec.md","kind":"design","note":"VPSPage visual/IA contract: high-density inventory, quick views/chips/drawer filters/DataTable subscription join."}
+{"path":"docs/operations/v2-visual-evidence.md","kind":"ops","note":"Browser sanity workflow and asset-workflows mock API for /vps route."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Reuse existing FilterBar/DataTable/Drawer/asset helpers; avoid over-abstraction."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Keep changes frontend-only and protect backend/API/import/asset ledger assumptions."}

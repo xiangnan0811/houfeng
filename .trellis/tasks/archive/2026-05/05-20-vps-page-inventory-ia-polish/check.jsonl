@@ -1,0 +1,10 @@
+{"path":".trellis/tasks/05-20-vps-page-inventory-ia-polish/prd.md","kind":"task_prd","note":"Check final implementation against limited VPSPage IA scope, frozen contracts, acceptance criteria, and Definition of Done."}
+{"path":".trellis/tasks/05-20-vps-page-inventory-ia-polish/research/vps-page-ia-audit.md","kind":"research","note":"Use audit to verify safe seams were respected and URL/filter/evidence/join/create semantics did not regress."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Check DataTable guards, Drawer draft/discard/reset behavior, component layering, and no unnecessary abstractions."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"Check BEM/tokens/pages.css usage, no page-local CSS, no business inline style regression, no new styling system."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"Check Asset Ledger/VPS URL-state filters, evidence failure matrix, API helper usage, and data contract preservation."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Check tests and verification evidence for focused VPSPage tests, full web tests, lint, build, full verify, and browser sanity."}
+{"path":"docs/design/v2-houfeng/component-spec.md","kind":"design","note":"Check VPSPage remains aligned with high-density inventory visual/IA contract."}
+{"path":"docs/operations/v2-visual-evidence.md","kind":"ops","note":"Check browser sanity route/data-source/caveat reporting."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Check reuse discipline and avoid overfitting/over-abstraction."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Check frontend-only scope and no backend/API/import behavior drift."}

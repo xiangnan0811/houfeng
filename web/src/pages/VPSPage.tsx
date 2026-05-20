@@ -395,6 +395,18 @@ function subscriptionEvidenceLabel(status: SubscriptionEvidenceStatus, error: st
   return '订阅证据已读取'
 }
 
+function subscriptionEvidenceShortLabel(status: SubscriptionEvidenceStatus): string {
+  if (status === 'loading') return '读取中'
+  if (status === 'error') return '不可用'
+  return '已读取'
+}
+
+function subscriptionEvidenceBoundaryText(status: SubscriptionEvidenceStatus): string {
+  if (status === 'ready') return '订阅 join 已完成；缺订阅视图可作为资料缺口入口。'
+  if (status === 'loading') return '订阅证据读取中；表格暂不判定缺订阅。'
+  return '订阅证据不可用；缺订阅视图暂不作为事实。'
+}
+
 function providerName(providerID: string | null, providers: ProviderRecord[]): string {
   if (!providerID) return ''
   return providers.find((provider) => provider.provider_id === providerID)?.name ?? providerID
@@ -500,6 +512,16 @@ export function VPSPage() {
   const unlinkedCount = inventoryRows.filter((row) => row.vps.active_node_link_count <= 0).length
   const missingFactsCount = inventoryRows.filter((row) => hasMissingVPSFacts(row.vps)).length
   const renewalDueCount = inventoryRows.filter((row) => row.renewalDue).length
+  const fieldFilterCount = [filters.provider_id, filters.lifecycle_status, filters.usage_status, filters.renewal_decision]
+    .filter(Boolean).length
+  const evidenceLabel = subscriptionEvidenceLabel(subscriptionEvidence, state.subscriptionsError)
+  const evidenceShortLabel = subscriptionEvidenceShortLabel(subscriptionEvidence)
+  const evidenceBoundaryText = subscriptionEvidenceBoundaryText(subscriptionEvidence)
+  const subscriptionQualityMeta = subscriptionEvidence === 'ready'
+    ? `缺订阅 ${missingSubscriptionCount}`
+    : subscriptionEvidence === 'loading'
+      ? '等待订阅证据'
+      : evidenceLabel
   const quickViews = [
     { value: 'all', label: '全部', count: inventoryRows.length },
     { value: 'renewal', label: '30天续费', count: renewalDueCount },
@@ -525,10 +547,8 @@ export function VPSPage() {
     {
       label: '质量 / Node',
       value: `${missingFactsCount} / ${unlinkedCount}`,
-      meta: subscriptionEvidence === 'error'
-        ? subscriptionEvidenceLabel(subscriptionEvidence, state.subscriptionsError)
-        : `缺订阅 ${missingSubscriptionCount}`,
-      tone: subscriptionEvidence === 'error'
+      meta: subscriptionQualityMeta,
+      tone: subscriptionEvidence !== 'ready'
         ? 'notice'
         : missingFactsCount + unlinkedCount + missingSubscriptionCount > 0
           ? 'alert'
@@ -700,60 +720,93 @@ export function VPSPage() {
             <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台 VPS
           </span>
         </div>
-        <Tabs
-          items={quickViews}
-          value={filters.view}
-          onChange={(view) => setFilter('view', view)}
-          variant="pill"
-        />
-        <div className="vps-inventory-command__body">
-          <div className="vps-inventory-focus" aria-label="VPS 盘点焦点">
-            {inventorySignals.map((item) => (
-              <article
-                key={item.label}
-                className={['vps-inventory-focus__item', `vps-inventory-focus__item--${item.tone}`].join(' ')}
-              >
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-                <small>{item.meta}</small>
-              </article>
-            ))}
+        <div className="vps-inventory-lens" aria-label="当前库存 lens">
+          <div className="vps-inventory-lens__summary">
+            <span>当前 lens</span>
+            <strong>{quickViewLabel(filters.view)}</strong>
+            <small>
+              <MonoDigits>{filteredRows.length}</MonoDigits> 台匹配；来自 <MonoDigits>{inventoryRows.length}</MonoDigits> 台库存记录
+            </small>
           </div>
-          <FilterBar
-            className="vps-filter-bar"
-            hasActiveFilters={active}
-            onClearAll={clearFilters}
-            activeChips={
-              <>
-                {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
-                {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
-                {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
-                {filters.usage_status && <FilterChip label={`用途: ${usageLabel(filters.usage_status)}`} onRemove={() => setFilter('usage_status', null)} />}
-                {filters.renewal_decision && <FilterChip label={`续费: ${renewalLabel(filters.renewal_decision)}`} onRemove={() => setFilter('renewal_decision', null)} />}
-              </>
-            }
-          >
-            <div className="vps-filter-bar__summary">
-              <span>字段筛选在 drawer 中调整；表格是资产核对主视图。</span>
+          <Tabs
+            items={quickViews}
+            value={filters.view}
+            onChange={(view) => setFilter('view', view)}
+            variant="pill"
+          />
+        </div>
+        <div className="vps-inventory-command__body">
+          <div className="vps-inventory-command__evidence" aria-label="库存证据状态">
+            <div className="vps-evidence-card" role="status">
+              <div className="vps-evidence-card__header">
+                <span>订阅证据</span>
+                <Badge tone={subscriptionEvidence === 'ready' ? 'normal' : 'notice'}>{evidenceShortLabel}</Badge>
+              </div>
+              <strong>{evidenceLabel}</strong>
+              <small>{evidenceBoundaryText}</small>
             </div>
-            <Button variant="secondary" onClick={openFilterDrawer}>高级筛选</Button>
-          </FilterBar>
+            <div className="vps-inventory-focus" aria-label="VPS 盘点焦点">
+              {inventorySignals.map((item) => (
+                <article
+                  key={item.label}
+                  className={['vps-inventory-focus__item', `vps-inventory-focus__item--${item.tone}`].join(' ')}
+                >
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.meta}</small>
+                </article>
+              ))}
+            </div>
+          </div>
+          <div className="vps-filter-context" aria-label="筛选状态">
+            <div className="vps-filter-context__header">
+              <div>
+                <span>字段筛选</span>
+                <strong>{fieldFilterCount > 0 ? `${fieldFilterCount} 项已应用` : '未应用字段筛选'}</strong>
+              </div>
+              <small>URL 状态同步；Drawer 草稿仅在应用后生效。</small>
+            </div>
+            <FilterBar
+              className="vps-filter-bar"
+              hasActiveFilters={active}
+              onClearAll={clearFilters}
+              activeChips={
+                <>
+                  {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
+                  {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
+                  {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
+                  {filters.usage_status && <FilterChip label={`用途: ${usageLabel(filters.usage_status)}`} onRemove={() => setFilter('usage_status', null)} />}
+                  {filters.renewal_decision && <FilterChip label={`续费: ${renewalLabel(filters.renewal_decision)}`} onRemove={() => setFilter('renewal_decision', null)} />}
+                </>
+              }
+            >
+              <div className="vps-filter-bar__summary">
+                <span>Quick view 负责库存 lens；服务商、生命周期、用途和续费决策在高级筛选中调整。</span>
+              </div>
+              <Button variant="secondary" onClick={openFilterDrawer}>高级筛选</Button>
+            </FilterBar>
+          </div>
         </div>
         {subscriptionEvidence === 'error' && (
-          <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+          <p className="asset-operation-feedback asset-operation-feedback--notice vps-evidence-notice" role="status">
             订阅证据不可用，缺订阅视图暂不作为事实。{state.subscriptionsError}
           </p>
         )}
       </section>
 
       <section className="page-panel page-panel--scroll-x vps-inventory-table-panel">
-        <div className="section-heading">
+        <div className="section-heading vps-inventory-table-panel__heading">
           <div>
-            <p className="section-heading__eyebrow">VPS ASSETS</p>
+            <p className="section-heading__eyebrow">VPS ASSETS · WORK AREA</p>
             <h2>VPS 库存表</h2>
+            <p className="section-heading__description">
+              表格承接当前 lens「{quickViewLabel(filters.view)}」、字段筛选和订阅证据状态；行点击进入单台 VPS 详情补齐证据。
+            </p>
           </div>
-          <span className="section-heading__meta">
-            <MonoDigits>{filteredRows.length}</MonoDigits> 台 VPS
+          <span className="section-heading__meta vps-inventory-table-panel__meta">
+            <span>显示 <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台</span>
+            <span>订阅证据：{evidenceShortLabel}</span>
+            <span>字段筛选：{fieldFilterCount > 0 ? `${fieldFilterCount} 项` : '无'}</span>
           </span>
         </div>
 

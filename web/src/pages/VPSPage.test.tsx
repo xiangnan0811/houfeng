@@ -121,6 +121,13 @@ describe('VPSPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '库存核对' })).toBeInTheDocument()
+    expect(screen.getByLabelText('当前库存 lens')).toHaveTextContent('当前 lens')
+    expect(screen.getByLabelText('当前库存 lens')).toHaveTextContent('全部')
+    expect(screen.getByText('订阅证据已读取')).toBeInTheDocument()
+    expect(screen.getByText('订阅 join 已完成；缺订阅视图可作为资料缺口入口。')).toBeInTheDocument()
+    expect(screen.getByText('未应用字段筛选')).toBeInTheDocument()
+    expect(screen.getByText(/表格承接当前 lens「全部」/)).toBeInTheDocument()
+    expect(screen.getByText('VPS ASSETS · WORK AREA')).toBeInTheDocument()
     expect(screen.getAllByText('在用').length).toBeGreaterThan(0)
     expect(screen.getAllByText('承载业务').length).toBeGreaterThan(0)
     expect(screen.getAllByText('保留').length).toBeGreaterThan(0)
@@ -147,12 +154,16 @@ describe('VPSPage', () => {
     expect(screen.getByText('Osaka Missing')).toBeInTheDocument()
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByText('视图: 未关联')).toBeInTheDocument()
+    expect(screen.getByLabelText('当前库存 lens')).toHaveTextContent('未关联')
+    expect(screen.getByText(/表格承接当前 lens「未关联」/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
     const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
     fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
     expect(screen.getByText('生命周期: 测试中')).toBeInTheDocument()
+    expect(screen.getByText('1 项已应用')).toBeInTheDocument()
+    expect(screen.getByText('字段筛选：1 项')).toBeInTheDocument()
     expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(3)
 
@@ -182,7 +193,10 @@ describe('VPSPage', () => {
     await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
     expect(screen.getByText('订阅未知')).toBeInTheDocument()
     expect(screen.getByText('证据不可用')).toBeInTheDocument()
-    expect(screen.getByText(/订阅证据不可用，缺订阅视图暂不作为事实/)).toBeInTheDocument()
+    expect(screen.getByText('不可用')).toBeInTheDocument()
+    expect(screen.getByText('订阅证据不可用；缺订阅视图暂不作为事实。')).toBeInTheDocument()
+    expect(screen.getAllByText(/订阅证据不可用：subscription database unavailable/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/订阅证据不可用，缺订阅视图暂不作为事实/).length).toBeGreaterThan(0)
     expect(within(screen.getByRole('table')).queryByText('缺订阅')).not.toBeInTheDocument()
     expect(screen.queryByText('无法核算续费')).not.toBeInTheDocument()
 
@@ -252,11 +266,15 @@ describe('VPSPage', () => {
   })
 
   it('marks missing subscriptions only after subscription evidence is ready', async () => {
+    let resolveSubscriptions: (value: Response) => void = () => {}
+    const subscriptionsPromise = new Promise<Response>((resolve) => {
+      resolveSubscriptions = resolve
+    })
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse([missingFactsVPS]))
       .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockReturnValueOnce(subscriptionsPromise)
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -266,6 +284,14 @@ describe('VPSPage', () => {
         </Routes>
       </MemoryRouter>,
     )
+
+    await waitFor(() => expect(screen.getByText('订阅证据读取中；表格暂不判定缺订阅。')).toBeInTheDocument())
+    expect(screen.getByText('字段筛选：无')).toBeInTheDocument()
+    expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
+    expect(screen.queryByText('无法核算续费')).not.toBeInTheDocument()
+    expect(screen.getAllByText('等待订阅证据').length).toBeGreaterThan(0)
+
+    resolveSubscriptions(mockJSONResponse([]))
 
     await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
     expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
