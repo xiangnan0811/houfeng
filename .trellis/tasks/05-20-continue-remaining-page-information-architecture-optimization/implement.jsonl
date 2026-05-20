@@ -1,0 +1,10 @@
+{"path":".trellis/tasks/05-20-continue-remaining-page-information-architecture-optimization/prd.md","kind":"task_prd","note":"Current task requirements: user selected NodeComparePage-only IA scope and frozen contracts."}
+{"path":".trellis/tasks/05-20-continue-remaining-page-information-architecture-optimization/research/remaining-pages-ia-audit.md","kind":"research","note":"Primary research: remaining page audit, NodeCompare recommendation, concrete changes and must-preserve behavior."}
+{"path":".trellis/tasks/archive/2026-05/05-20-continue-page-information-architecture-optimization/research/next-candidate-pages-audit.md","kind":"prior_research","note":"Prior audit also identified NodeComparePage as low-risk comparison summary candidate."}
+{"path":".trellis/tasks/archive/2026-05/05-20-continue-next-page-information-architecture-optimization/research/targets-nodes-list-control-audit.md","kind":"prior_research","note":"Recently completed observability list IA context; avoid reworking Targets/Nodes in this task."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Page composition, PageState, DataTable/Drawer conventions and component layering."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"BEM/tokens/pages.css/no business inline style constraints."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"API client and frontend state contracts; preserve request shapes and route state."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Web test/lint/build expectations and page-test patterns."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Reuse existing node detail metrics and atoms; avoid unnecessary abstractions."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Protect API/query contracts while changing frontend IA."}

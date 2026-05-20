@@ -100,22 +100,45 @@ describe('NodeComparePage', () => {
     expect(screen.getByRole('link', { name: '返回节点列表' })).toHaveAttribute('href', '/nodes')
   })
 
-  it('renders A/B identity composition and metric placeholders from node/runtime facts', async () => {
+  it('renders command context, A/B summary, and metric placeholders from node/runtime facts', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(nodeRecord('nd_a', 'Tokyo Edge')))
       .mockResolvedValueOnce(mockJSONResponse(runtimeFacts('nd_a')))
-      .mockResolvedValueOnce(mockJSONResponse(nodeRecord('nd_b', 'Osaka Core', { current_health_status: '告警' })))
+      .mockResolvedValueOnce(mockJSONResponse(nodeRecord('nd_b', 'Osaka Core', {
+        current_health_status: '告警',
+        group: 'core',
+        region: 'ap-northeast-3',
+        city: 'Osaka',
+        provider: 'AWS',
+      })))
       .mockResolvedValueOnce(mockJSONResponse({ node_id: 'nd_b', latest_host_sample: null, recent_host_samples: [] }))
     vi.stubGlobal('fetch', fetchMock)
 
     renderNodeCompare('/nodes/compare?id=nd_a&id=nd_b')
 
     await waitFor(() => expect(screen.getByRole('link', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '判断两个 Node 是否需要深入排查' })).toBeInTheDocument()
+    expect(screen.getByText('节点对比 · 24h runtime facts')).toBeInTheDocument()
+    expect(screen.getByText('先对齐 A/B 的身份、健康、运行态、绑定态、位置与样本可用性；只有差异明显时再下钻详细主机指标。')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'A/B 摘要判断' })).toBeInTheDocument()
+    expect(screen.getByText('默认先看状态与样本是否可比；详细图表保留在下方。')).toBeInTheDocument()
     expect(screen.getByText('对比对象 A')).toBeInTheDocument()
     expect(screen.getByText('对比对象 B')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Osaka Core' })).toHaveAttribute('href', '/nodes/nd_b')
     expect(screen.getAllByRole('link', { name: '节点详情' })).toHaveLength(2)
+    expect(screen.getAllByText('健康状态')).toHaveLength(2)
+    expect(screen.getAllByText('生命周期')).toHaveLength(2)
+    expect(screen.getAllByText('运行 / 绑定')).toHaveLength(2)
+    expect(screen.getAllByText('位置上下文')).toHaveLength(2)
+    expect(screen.getAllByText('样本可用性')).toHaveLength(2)
+    expect(screen.getAllByText('edge · Vultr · ap-northeast-1 · Tokyo')).toHaveLength(2)
+    expect(screen.getAllByText('core · AWS · ap-northeast-3 · Osaka')).toHaveLength(2)
+    expect(screen.getByText('有样本')).toBeInTheDocument()
+    expect(screen.getByText('无样本')).toBeInTheDocument()
+    expect(screen.getByText(/窗口样本/)).toBeInTheDocument()
+    expect(screen.getByText('24h runtime facts 暂无 HostSample')).toBeInTheDocument()
+    expect(screen.getByText('详细趋势仍使用 NodeWatchtowerMetrics')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'CPU 使用率' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '尚未收到主机样本' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_a', {
@@ -124,6 +147,16 @@ describe('NodeComparePage', () => {
       credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_a/runtime-facts?window=24h', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_b', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/nodes/nd_b/runtime-facts?window=24h', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -142,6 +175,8 @@ describe('NodeComparePage', () => {
     renderNodeCompare('/nodes/compare?id=nd_a&id=nd_missing')
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'B 节点不可用' })).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '判断两个 Node 是否需要深入排查' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'B 摘要不可用' })).toBeInTheDocument()
     expect(screen.getAllByText('节点不存在').length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: '返回节点列表重新选择' })).toHaveAttribute('href', '/nodes')
   })
