@@ -1,0 +1,11 @@
+{"path":".trellis/tasks/05-20-next-page-ia-batch/prd.md","kind":"task_prd","note":"Implementation source of truth: NodeOnboardingPage safety-frozen IA polish, frozen install/token/binding contracts, acceptance criteria, and verification requirements."}
+{"path":".trellis/tasks/05-20-next-page-ia-batch/research/remaining-page-ia-audit.md","kind":"research","note":"Primary audit selecting NodeOnboardingPage over remaining candidates and documenting safe seams, frozen contracts, tests, and browser sanity guidance."}
+{"path":".trellis/tasks/05-20-next-page-ia-batch/research/design-spec-candidate-audit.md","kind":"research","note":"Design/spec audit: v2 IA criteria, why onboarding is under-aligned, and safety-frozen display-only scope."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Follow page/component layering, PageState conventions, no unnecessary abstractions, Drawer/modal discipline, and CSS/class conventions."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"Use pages.css, BEM-ish classes, design tokens, dark-first density, and no new CSS system/page-local CSS."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"Critical Node onboarding one-command install data flow: backend-issued command only, no browser URL synthesis, token secrecy, config error matrix, and required tests."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Use Vitest/jsdom page tests, lint/test/build/full verify, and browser sanity evidence expectations."}
+{"path":"docs/design/v2-houfeng/component-spec.md","kind":"design","note":"Visual/IA contract for high-density page hierarchy, command surfaces, PageState, cards, and engineering-tool UI."}
+{"path":"docs/operations/v2-visual-evidence.md","kind":"ops","note":"Browser sanity workflow and caveat reporting for mock-backed UI evidence."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Reuse existing atoms/DetailSection/ActionConfirmationCard patterns; avoid over-abstraction."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Keep changes frontend-only and protect backend/API/agent installer/enrollment contracts."}
