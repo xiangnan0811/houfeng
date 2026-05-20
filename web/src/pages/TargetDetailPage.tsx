@@ -381,6 +381,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const target = isCurrentTarget ? state.target : null
   const probeItems = isCurrentTarget ? state.probeItems : []
   const incidents = hasCurrentActivity ? state.incidents : []
+  const incidentsError = hasCurrentActivity ? state.incidentsError : null
   const events = hasCurrentActivity ? state.events : []
   const eventsError = hasCurrentActivity ? state.eventsError : null
   const runtimeConfirmationActive = pendingRuntimeConfirmation !== null
@@ -452,6 +453,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           current.target?.target_id === actionTargetId
             ? {
                 ...current.target,
+                group: updated.group,
                 labels: updated.labels,
                 note: updated.note,
                 updated_at: updated.updated_at,
@@ -826,7 +828,9 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     <TargetDetailPageBody
       target={target}
       probeItems={probeItems}
+      activityLoaded={hasCurrentActivity}
       incidents={incidents}
+      incidentsError={incidentsError}
       events={events}
       eventsError={eventsError}
       recentObservations={recentObservations}

@@ -1,0 +1,10 @@
+{"file":".trellis/tasks/05-21-next-page-ia-batch/prd.md","reason":"Task PRD with TargetDetailPage scope, frozen contracts, acceptance criteria, and implementation approach."}
+{"file":".trellis/tasks/05-21-next-page-ia-batch/research/remaining-page-ia-audit.md","reason":"Candidate page audit and recommended next scope."}
+{"file":".trellis/tasks/05-21-next-page-ia-batch/research/design-spec-candidate-audit.md","reason":"Design/spec fit audit and TargetDetailPage selection rationale."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Frontend component layering, Drawer/reset/focus, DataTable, and page-state conventions."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Pure CSS, design token, BEM, and pages.css constraints."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"API client, data-shape, and frontend state/data boundaries."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Web test/lint/build expectations and verification bar."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Houfeng v2 visual language authority and anti-patterns."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"TargetDetailPage visual contract and shared component expectations."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Browser sanity and visual evidence workflow/caveats."}

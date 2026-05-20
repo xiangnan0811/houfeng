@@ -1,0 +1,10 @@
+{"file":".trellis/tasks/05-21-next-page-ia-batch/prd.md","reason":"Task PRD with acceptance criteria and frozen contracts to verify independently."}
+{"file":".trellis/tasks/05-21-next-page-ia-batch/research/remaining-page-ia-audit.md","reason":"Candidate audit and selected TargetDetailPage scope for check context."}
+{"file":".trellis/tasks/05-21-next-page-ia-batch/research/design-spec-candidate-audit.md","reason":"Design/spec candidate audit and v2 TargetDetailPage expectations."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Check Drawer/reset/focus, component layering, and interaction contracts."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Check CSS location, tokens, BEM, and no page-local CSS/dependencies."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Check API/data boundaries and evidence truthfulness constraints."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Check required test/lint/build verification bar."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Check visual-language alignment and anti-pattern avoidance."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Check TargetDetailPage section contract alignment."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Check browser sanity evidence workflow and caveat requirements."}

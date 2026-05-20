@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import { DetailSection } from '../DetailSection'
 import { EventList } from '../EventList'
 import type { StateChangeEventRecord } from '../../lib/types'
@@ -6,11 +8,12 @@ type TargetRecentEventsProps = {
   loaded: boolean
   events: StateChangeEventRecord[]
   error: string | null
+  aside?: ReactNode
 }
 
-export function TargetRecentEvents({ loaded, events, error }: TargetRecentEventsProps) {
+export function TargetRecentEvents({ loaded, events, error, aside }: TargetRecentEventsProps) {
   return (
-    <DetailSection eyebrow="事件" title="事件">
+    <DetailSection eyebrow="事件证据" title="事件" ribbon="accent-2" aside={aside}>
       {!loaded ? (
         <div className="empty-state">
           <h3>正在加载相关事件…</h3>

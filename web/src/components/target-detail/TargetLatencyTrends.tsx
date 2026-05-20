@@ -27,6 +27,7 @@ export type TargetLatencyTrend = {
 type TargetLatencyTrendsProps = {
   probeItems: ProbeItemRecord[]
   recentObservations: ProbeObservation[]
+  timeWindow?: '24h' | '7d' | '30d'
   isMaintenance?: boolean
   watchtower?: boolean
 }
@@ -86,8 +87,13 @@ function deriveLatencyTrends(
     })
 }
 
-function describeMeta(observations: ProbeObservation[]): string {
-  if (observations.length === 0) return '近 24h 暂无观测'
+function formatTimeWindowLabel(timeWindow: string): string {
+  return `近 ${timeWindow}`
+}
+
+function describeMeta(observations: ProbeObservation[], timeWindow: string): string {
+  const timeWindowLabel = formatTimeWindowLabel(timeWindow)
+  if (observations.length === 0) return `${timeWindowLabel} 暂无观测`
   const sorted = [...observations].sort(
     (a, b) =>
       new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime(),
@@ -96,7 +102,7 @@ function describeMeta(observations: ProbeObservation[]): string {
   const newest = sorted[sorted.length - 1]
   const backfillCount = observations.filter((o) => o.is_backfilled).length
   const parts = [
-    `24h ${observations.length} 样本`,
+    `${timeWindowLabel} ${observations.length} 样本`,
     `最早 ${formatDateTime(oldest.observed_at)}`,
     `最新 ${formatDateTime(newest.observed_at)}`,
   ]
@@ -107,11 +113,12 @@ function describeMeta(observations: ProbeObservation[]): string {
 export function TargetLatencyTrends({
   probeItems,
   recentObservations,
+  timeWindow = '24h',
   isMaintenance = false,
   watchtower = false,
 }: TargetLatencyTrendsProps) {
   const trends = deriveLatencyTrends(probeItems, recentObservations)
-  const meta = describeMeta(recentObservations)
+  const meta = describeMeta(recentObservations, timeWindow)
   const tone = isMaintenance ? 'maintenance' : 'accent'
 
   if (watchtower) {
@@ -119,7 +126,7 @@ export function TargetLatencyTrends({
       <section aria-label="近期延迟趋势">
         {trends.length === 0 ? (
           <div className="empty-state">
-            <h3>近 24h 暂无可用延迟样本</h3>
+            <h3>{formatTimeWindowLabel(timeWindow)} 暂无可用延迟样本</h3>
             <p>
               该目标尚未收到带有 latency_ms 的成功观测，或所有 ProbeItem 当前均处于停用状态。
             </p>
@@ -146,7 +153,7 @@ export function TargetLatencyTrends({
                     height={60}
                     expand
                     interactive
-                    ariaLabel={`${trend.kindLabel} 延迟近 24h 趋势`}
+                    ariaLabel={`${trend.kindLabel} 延迟${formatTimeWindowLabel(timeWindow)} 趋势`}
                     formatValue={(v) => formatLatency(v)}
                   />
                   <dl className="watchtower-metric-card__sub">
@@ -205,7 +212,7 @@ export function TargetLatencyTrends({
     >
       {trends.length === 0 ? (
         <div className="empty-state">
-          <h3>近 24h 暂无可用延迟样本</h3>
+          <h3>{formatTimeWindowLabel(timeWindow)} 暂无可用延迟样本</h3>
           <p>
             该目标尚未收到带有 latency_ms 的成功观测，或所有 ProbeItem 当前均处于停用状态。
           </p>
@@ -230,7 +237,7 @@ export function TargetLatencyTrends({
                 height={60}
                 expand
                 interactive
-                ariaLabel={`${trend.kindLabel} 延迟近 24h 趋势`}
+                ariaLabel={`${trend.kindLabel} 延迟${formatTimeWindowLabel(timeWindow)} 趋势`}
                 formatValue={(v) => formatLatency(v)}
               />
               <dl>
