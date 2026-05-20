@@ -153,8 +153,13 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
+    expect(screen.getByRole('region', { name: '目标判断摘要' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '当前没有活跃异常' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '运行控制与近期延迟' })).toBeInTheDocument()
     expect(screen.getAllByText('标签与备注')[0]).toBeInTheDocument()
     expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '当前异常' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument()
     expect(screen.getByText('HTTP')).toBeInTheDocument()
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
@@ -428,6 +433,10 @@ describe('TargetDetailPage', () => {
       expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
     )
     expect(screen.getByText('请为该入口添加至少一种观测方式。')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '当前异常' })).toBeInTheDocument()
+    expect(screen.getByText('一切正常，暂未发现需要处理的活跃异常。')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument()
+    expect(screen.getByText('系统暂时没有新的状态变更事件。')).toBeInTheDocument()
   })
 
   it('creates an HTTP ProbeItem from the empty state and appends it to the list', async () => {
@@ -1932,8 +1941,12 @@ describe('TargetDetailPage', () => {
 
     expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByText('origin timeout')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
+    expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
+    expect(screen.getAllByText('events unavailable')[0]).toBeInTheDocument()
     // Danger zone is rendered because current_active_incident_count > 0
-    expect(screen.getByText('HTTP 探测失败')).toBeInTheDocument()
+    expect(screen.getAllByText('HTTP 探测失败')[0]).toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: '目标详情不可用' }),
     ).not.toBeInTheDocument()
@@ -2949,7 +2962,7 @@ describe('TargetDetailPage', () => {
     expect(screen.getByText('备注：暂无备注')).toBeInTheDocument()
   })
 
-  it('edits target labels and note from the detail page', async () => {
+  it('edits target labels, group, and note from the detail page', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -2961,6 +2974,7 @@ describe('TargetDetailPage', () => {
           base_port: 443,
           execution_node_labels: ['edge'],
           run_status: '启用',
+          group: 'prod',
           labels: ['公开'],
           note: '现网入口',
           current_health_status: '正常',
@@ -2990,6 +3004,7 @@ describe('TargetDetailPage', () => {
           base_port: 443,
           execution_node_labels: ['edge'],
           run_status: '启用',
+          group: 'core',
           labels: ['alpha', 'beta'],
           note: '新的备注',
           current_health_status: '正常',
@@ -3014,10 +3029,14 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: '标签与备注' })).toBeInTheDocument()
+    expect(screen.getByText('Group：prod')).toBeInTheDocument()
     expect(screen.getByText('公开')).toBeInTheDocument()
     expect(screen.getByText('备注：现网入口')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    fireEvent.change(screen.getByLabelText('Group'), {
+      target: { value: ' core ' },
+    })
     fireEvent.change(screen.getByLabelText('标签'), {
       target: { value: 'alpha, beta' },
     })
@@ -3026,7 +3045,8 @@ describe('TargetDetailPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
 
-    await waitFor(() => expect(screen.getByText('alpha · beta')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Group：core')).toBeInTheDocument())
+    expect(screen.getByText('alpha · beta')).toBeInTheDocument()
     expect(screen.getByText('备注：新的备注')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001', {
       method: 'PATCH',
@@ -3036,8 +3056,9 @@ describe('TargetDetailPage', () => {
         'If-Match': '"2026-04-24T09:05:00Z"',
       },
       cache: 'no-store',
-        credentials: 'include',
+      credentials: 'include',
       body: JSON.stringify({
+        group: 'core',
         labels: ['alpha', 'beta'],
         note: '新的备注',
       }),
@@ -3473,10 +3494,8 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'No Issues' })).toBeInTheDocument(),
     )
 
-    expect(screen.queryByText('当前主问题')).not.toBeInTheDocument()
-    expect(
-      document.querySelector('.watchtower-danger'),
-    ).not.toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: '当前没有活跃异常' }).length).toBeGreaterThan(0)
+    expect(document.querySelector('.watchtower-danger')).not.toBeInTheDocument()
   })
 
   it('renders the danger zone with summary and status badge when active incidents exist', async () => {
@@ -3630,6 +3649,8 @@ describe('TargetDetailPage', () => {
     expect(within(probeSection as HTMLElement).getByText('10 ms')).toBeInTheDocument()
     expect(within(probeSection as HTMLElement).getByText('nd_col')).toBeInTheDocument()
 
+    expect(screen.getByRole('heading', { name: '标签、备注与生命周期' })).toBeInTheDocument()
+
     const secondaryDetails = document.querySelectorAll('details.watchtower-secondary')
     expect(secondaryDetails.length).toBeGreaterThanOrEqual(1)
 
@@ -3640,7 +3661,113 @@ describe('TargetDetailPage', () => {
 
   // ── Time window Tabs ──
 
-  it('renders time window Tabs with 24h / 7d / 30d options', async () => {
+  it('refetches only runtime facts when the time window changes', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_node_labels: ['edge'],
+          run_status: '启用',
+          labels: ['公开'],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          last_success_at: '2026-04-24T09:00:00Z',
+          last_failure_at: null,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            probe_item_id: 'pb_7d',
+            target_id: 'tg_001',
+            probe_kind: 'http',
+            enabled: true,
+            frequency_tier: '1m',
+            timeout_seconds: 5,
+            config: { path: '/healthz', method: 'GET' },
+            created_at: '2026-04-20T00:00:00Z',
+            updated_at: '2026-04-24T09:05:00Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          latest_probe_observations: [],
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          target_id: 'tg_001',
+          latest_probe_observations: [],
+          recent_probe_observations: [
+            {
+              node_id: 'nd_7d',
+              target_id: 'tg_001',
+              probe_item_id: 'pb_7d',
+              probe_kind: 'http',
+              observed_at: '2026-04-24T10:05:00Z',
+              received_at: '2026-04-24T10:05:01Z',
+              agent_version: 'dev',
+              fingerprint: 'fp-7d',
+              result_kind: 'success',
+              latency_ms: 95,
+              http_status: 200,
+              tls_expiry_days: null,
+              maintenance_context: false,
+              is_backfilled: false,
+              sync_batch_id: 'sync-7d',
+            },
+          ],
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
+    )
+
+    const tablist = screen.getByRole('tablist')
+    expect(tablist).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '24h' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: '30d' })).toHaveAttribute('aria-selected', 'false')
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+
+    fireEvent.click(screen.getByRole('tab', { name: '7d' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/targets/tg_001/runtime-facts?window=7d', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(screen.getAllByText('95 ms').length).toBeGreaterThan(0))
+    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByText('近 7d 暂无可用延迟样本')).not.toBeInTheDocument()
+  })
+
+  it('uses loaded events in the history drawer and lazy-loads incidents only on the incidents tab', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -3670,14 +3797,36 @@ describe('TargetDetailPage', () => {
           latest_probe_observations: [],
         }),
       )
+      .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
-        mockJSONResponse({
-          target_id: 'tg_001',
-          latest_probe_observations: [],
-        }),
+        mockJSONResponse([
+          {
+            event_id: 'evt_loaded',
+            incident_id: 'inc_loaded',
+            incident_class: 'target_probe_failure',
+            object_type: 'target',
+            object_id: 'tg_001',
+            event_type: 'incident_started',
+            severity: '告警',
+            summary: '已加载事件直接进入历史抽屉',
+            created_at: '2026-04-24T09:10:00Z',
+          },
+        ]),
       )
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          {
+            incident_id: 'inc_history',
+            incident_class: 'target_probe_failure',
+            object_type: 'target',
+            object_id: 'tg_001',
+            severity: '告警',
+            started_at: '2026-04-23T08:00:00Z',
+            last_evaluated_at: '2026-04-24T09:00:00Z',
+            source_summary: '历史异常首次切换后加载',
+          },
+        ]),
+      )
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -3691,12 +3840,31 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
+    expect(fetchMock).toHaveBeenCalledTimes(5)
 
-    const tablist = screen.getByRole('tablist')
-    expect(tablist).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '24h' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'false')
-    expect(screen.getByRole('tab', { name: '30d' })).toHaveAttribute('aria-selected', 'false')
+    fireEvent.click(screen.getAllByRole('button', { name: '查看历史' })[0])
+
+    const drawer = await screen.findByRole('dialog', { name: '目标历史抽屉' })
+    expect(within(drawer).getByText('已加载事件直接进入历史抽屉')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+
+    fireEvent.click(within(drawer).getByRole('tab', { name: '历史异常' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/incidents?object_type=target&object_id=tg_001&include_resolved=true',
+      {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      },
+    )
+    expect(await within(drawer).findByText('历史异常首次切换后加载')).toBeInTheDocument()
+
+    fireEvent.click(within(drawer).getByRole('tab', { name: '事件时间线' }))
+    fireEvent.click(within(drawer).getByRole('tab', { name: '历史异常' }))
+
+    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
 })

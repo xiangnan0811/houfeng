@@ -35,10 +35,17 @@ export function TargetLabelsAndNote({
   onCancelEdit,
   onSubmit,
 }: TargetLabelsAndNoteProps) {
+  const itemClass = [
+    'watchtower-property-item',
+    editing && 'watchtower-property-item--editing',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <div className="watchtower-property-item" style={{ flexDirection: editing ? 'column' : 'row', alignItems: editing ? 'stretch' : 'center' }}>
+    <div className={itemClass}>
       {editing ? (
-        <form onSubmit={onSubmit} className="page-stack" style={{ width: '100%' }}>
+        <form onSubmit={onSubmit} className="page-stack watchtower-property-item__form">
           <label>
             Group
             <input
@@ -78,7 +85,7 @@ export function TargetLabelsAndNote({
             </Button>
           </div>
           {error ? (
-            <p role="alert" aria-live="assertive" style={{ color: 'var(--color-state-critical)' }}>
+            <p role="alert" aria-live="assertive" className="watchtower-property-item__error">
               {error}
             </p>
           ) : null}
@@ -97,7 +104,7 @@ export function TargetLabelsAndNote({
               备注：{target.note.trim() || '暂无备注'}
             </span>
             {error ? (
-              <span role="alert" aria-live="assertive" style={{ color: 'var(--color-state-critical)' }}>
+              <span role="alert" aria-live="assertive" className="watchtower-property-item__error">
                 {error}
               </span>
             ) : null}
