@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/xiangnan0811/houfeng/compare/v0.7.0...v0.8.0) (2026-05-20)
+
+
+### Features
+
+* align observability list controls ([5ebe113](https://github.com/xiangnan0811/houfeng/commit/5ebe1134ca2fc44fc157d3e6ea328f88799d3aca))
+
 ## [0.7.0](https://github.com/xiangnan0811/houfeng/compare/v0.6.0...v0.7.0) (2026-05-20)
 
 
