@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/xiangnan0811/houfeng/compare/v0.10.0...v0.11.0) (2026-05-20)
+
+
+### Features
+
+* trigger vps page ia release ([#136](https://github.com/xiangnan0811/houfeng/issues/136)) ([01c60a7](https://github.com/xiangnan0811/houfeng/commit/01c60a75bb92d5772889a2e4dfa805e5dc37c4f5))
+
 ## [0.10.0](https://github.com/xiangnan0811/houfeng/compare/v0.9.0...v0.10.0) (2026-05-20)
 
 
