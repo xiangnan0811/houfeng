@@ -1,0 +1,8 @@
+{"path":".trellis/tasks/05-20-settings-page-limited-ia-cleanup/prd.md","kind":"task_prd","note":"Implementation source of truth: limited frontend-only SettingsPage IA cleanup, frozen token/save/runtime contracts, acceptance criteria, and verification requirements."}
+{"path":".trellis/tasks/05-20-settings-page-limited-ia-cleanup/research/settings-page-ia-audit.md","kind":"research","note":"Primary audit: current Settings structure, safe seams, inline style debt, frozen contracts, tests, and recommended verification."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Follow page/component layering, controlled form component expectations, Modal conventions, and avoid over-abstracting oversized SettingsPage."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"Use pages.css, BEM-ish classes, design tokens, and remove business inline styles where practical; no new CSS system."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"Preserve API client usage, snake_case contract types, local state conventions, and no direct page fetch/API shape changes."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Use Vitest/jsdom page tests and web lint/test/build verification commands."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Reuse existing atoms/DetailSection/settings subcomponents and avoid new abstractions unless clearly needed."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Keep the IA cleanup frontend-only and protect backend/settings/notification delivery assumptions."}
