@@ -1,5 +1,6 @@
 import type { RefObject } from 'react'
 
+import { DetailSection } from '../../components/DetailSection'
 import {
   TargetProbeList,
   type PendingProbeConfirmation,
@@ -38,25 +39,26 @@ export function TargetProbeListSection({
   onCancelDeleteConfirmation,
 }: TargetProbeListSectionProps) {
   return (
-    <details className="watchtower-secondary">
-      <summary>ProbeItem 列表</summary>
-      <div className="watchtower-secondary__body">
-        <TargetProbeList
-          probeItems={probeItems}
-          observationsByProbe={observationsByProbe}
-          actionsDisabled={actionsDisabled}
-          pendingProbeConfirmation={pendingProbeConfirmation}
-          confirmationCardDisabled={confirmationCardDisabled}
-          pendingProbeConfirmationCardRef={pendingProbeConfirmationCardRef}
-          registerDeleteButtonRef={registerDeleteButtonRef}
-          onAddProbe={onAddProbe}
-          onEdit={onEdit}
-          onToggle={onToggle}
-          onDelete={onDelete}
-          onConfirmDelete={onConfirmDelete}
-          onCancelDeleteConfirmation={onCancelDeleteConfirmation}
-        />
-      </div>
-    </details>
+    <DetailSection
+      eyebrow="ProbeItem 证据"
+      title="ProbeItem 列表"
+      ribbon="accent"
+    >
+      <TargetProbeList
+        probeItems={probeItems}
+        observationsByProbe={observationsByProbe}
+        actionsDisabled={actionsDisabled}
+        pendingProbeConfirmation={pendingProbeConfirmation}
+        confirmationCardDisabled={confirmationCardDisabled}
+        pendingProbeConfirmationCardRef={pendingProbeConfirmationCardRef}
+        registerDeleteButtonRef={registerDeleteButtonRef}
+        onAddProbe={onAddProbe}
+        onEdit={onEdit}
+        onToggle={onToggle}
+        onDelete={onDelete}
+        onConfirmDelete={onConfirmDelete}
+        onCancelDeleteConfirmation={onCancelDeleteConfirmation}
+      />
+    </DetailSection>
   )
 }

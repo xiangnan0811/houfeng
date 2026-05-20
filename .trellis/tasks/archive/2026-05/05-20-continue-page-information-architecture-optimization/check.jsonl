@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/05-20-continue-page-information-architecture-optimization/research/next-candidate-pages-audit.md","reason":"Check implementation matches chosen TargetDetailPage-only MVP and preserves deferred-page boundaries."}
+{"file":".trellis/tasks/archive/2026-05/05-19-optimize-remaining-page-information-architecture/research/design-patterns-for-page-ia.md","reason":"Check Drawer/default evidence/detail IA decisions follow established patterns."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Check component boundaries, Drawer behavior, PageState/DataTable semantics, and focus/reset expectations."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Check BEM/design-token CSS and removal/avoidance of business inline layout styles."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Check API payloads, route guards, stale response safety, and local state behavior are preserved."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Check required tests, lint, build, and browser sanity coverage."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check existing Target detail primitives are reused rather than duplicated."}

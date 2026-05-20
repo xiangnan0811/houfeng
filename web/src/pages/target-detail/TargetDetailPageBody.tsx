@@ -20,6 +20,7 @@ import { TargetDangerCard } from './TargetDangerCard'
 import { TargetHistoryDrawer } from './TargetHistoryDrawer'
 import { TargetLifecycleSection } from './TargetLifecycleSection'
 import { TargetMetadataSection } from './TargetMetadataSection'
+import { TargetProbeFormDrawer } from './TargetProbeFormDrawer'
 import { TargetProbeListSection } from './TargetProbeListSection'
 import { TargetProbeManagementSection } from './TargetProbeManagementSection'
 import { TargetRuntimePauseConfirmation } from './TargetRuntimePauseConfirmation'
@@ -56,7 +57,8 @@ type TargetDetailPageBodyProps = {
   probeCreateSubmitting: boolean
   probeCreateError: string | null
   probeMutationError: string | null
-  onToggleCreate: () => void
+  onOpenProbeCreate: () => void
+  onCloseProbeForm: () => void
   onProbeSubmit: (event: FormEvent<HTMLFormElement>) => void
   onProbeKindChange: (probeKind: ProbeKind) => void
   onProbeFieldChange: <K extends keyof ProbeCreateFormState>(
@@ -120,7 +122,8 @@ export function TargetDetailPageBody({
   probeCreateSubmitting,
   probeCreateError,
   probeMutationError,
-  onToggleCreate,
+  onOpenProbeCreate,
+  onCloseProbeForm,
   onProbeSubmit,
   onProbeKindChange,
   onProbeFieldChange,
@@ -230,17 +233,10 @@ export function TargetDetailPageBody({
       <div className="watchtower-property-list">
         <TargetProbeManagementSection
           addProbeButtonRef={addProbeButtonRef}
-          probeCreateOpen={probeCreateOpen}
-          probeFormMode={probeFormMode}
-          probeCreateForm={probeCreateForm}
-          probeCreateSubmitting={probeCreateSubmitting}
-          probeCreateError={probeCreateError}
+          probeFormOpen={probeCreateOpen}
           probeMutationError={probeMutationError}
           addDisabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
-          onToggleCreate={onToggleCreate}
-          onSubmit={onProbeSubmit}
-          onProbeKindChange={onProbeKindChange}
-          onFieldChange={onProbeFieldChange}
+          onOpenCreate={onOpenProbeCreate}
         />
 
         <TargetMetadataSection
@@ -274,6 +270,19 @@ export function TargetDetailPageBody({
       </div>
 
       <TargetSnapshotMeta />
+
+      <TargetProbeFormDrawer
+        target={target}
+        open={probeCreateOpen}
+        mode={probeFormMode}
+        form={probeCreateForm}
+        submitting={probeCreateSubmitting}
+        error={probeCreateError}
+        onClose={onCloseProbeForm}
+        onSubmit={onProbeSubmit}
+        onProbeKindChange={onProbeKindChange}
+        onFieldChange={onProbeFieldChange}
+      />
 
       <TargetHistoryDrawer
         target={target}

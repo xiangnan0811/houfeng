@@ -6428,6 +6428,37 @@ html.theme-classic-light .dashboard-command-surface {
   border: none;
   padding: 0;
 }
+.watchtower-property-item__error {
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--color-state-critical);
+}
+.target-probe-drawer {
+  display: grid;
+  gap: var(--space-4);
+}
+.target-probe-drawer__intro {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.target-probe-drawer__eyebrow {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-sans);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  line-height: var(--type-small-leading);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.target-probe-drawer__description {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--type-small-size);
+  color: var(--text-secondary);
+}
 
 @media (max-width: 1180px) {
   .watchtower-diagnosis {
