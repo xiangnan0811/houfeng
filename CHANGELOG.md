@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/xiangnan0811/houfeng/compare/v0.11.0...v0.12.0) (2026-05-20)
+
+
+### Features
+
+* optimize node onboarding information architecture ([#138](https://github.com/xiangnan0811/houfeng/issues/138)) ([b1dee12](https://github.com/xiangnan0811/houfeng/commit/b1dee1283c49fde80f41e55101f7c88f70b5bbaf))
+
 ## [0.11.0](https://github.com/xiangnan0811/houfeng/compare/v0.10.0...v0.11.0) (2026-05-20)
 
 
