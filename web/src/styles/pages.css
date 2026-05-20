@@ -4506,16 +4506,139 @@ html.theme-classic-light .dashboard-command-surface {
   gap: var(--space-3);
 }
 
+.vps-inventory-lens {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.28fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-3);
+  border: var(--border-w) solid color-mix(in srgb, var(--accent) 16%, var(--border));
+  border-radius: var(--radius-3);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 52%),
+    color-mix(in srgb, var(--surface-elevated) 56%, transparent);
+}
+
+.vps-inventory-lens__summary {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+  min-width: 0;
+}
+
+.vps-inventory-lens__summary span,
+.vps-filter-context__header span,
+.vps-evidence-card__header span {
+  color: var(--text-muted);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.vps-inventory-lens__summary strong,
+.vps-filter-context__header strong,
+.vps-evidence-card strong {
+  color: var(--text-primary);
+  font-size: var(--type-body-size);
+  line-height: 1.3;
+}
+
+.vps-inventory-lens__summary small,
+.vps-filter-context__header small,
+.vps-evidence-card small {
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.4;
+}
+
 .vps-inventory-command__body {
   display: grid;
-  grid-template-columns: minmax(0, 0.82fr) minmax(320px, 0.5fr);
+  grid-template-columns: minmax(0, 0.72fr) minmax(320px, 0.5fr);
   gap: var(--space-3);
   align-items: start;
+}
+
+.vps-inventory-command__evidence,
+.vps-filter-context {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.vps-evidence-card,
+.vps-filter-context {
+  padding: var(--space-3);
+  border: var(--border-w) solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: var(--radius-2);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 76%, transparent), color-mix(in srgb, var(--surface) 90%, transparent)),
+    var(--surface);
+}
+
+.vps-evidence-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.vps-evidence-card__header,
+.vps-filter-context__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.vps-filter-context__header > div {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+  min-width: 0;
+}
+
+.vps-filter-context__header small {
+  max-width: 28ch;
+  text-align: right;
 }
 
 .vps-inventory-table-panel {
   border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
   box-shadow: var(--shadow-soft);
+}
+
+.vps-inventory-table-panel__heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.vps-inventory-table-panel__heading .section-heading__description {
+  max-width: 72ch;
+  line-height: 1.45;
+}
+
+.vps-inventory-table-panel__meta {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+  align-items: flex-end;
+  min-width: max-content;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-w) solid color-mix(in srgb, var(--accent) 14%, var(--border));
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--surface-elevated) 58%, transparent);
+}
+
+.vps-filter-bar {
+  padding: var(--space-3);
+  border-radius: var(--radius-2);
+  box-shadow: none;
 }
 
 .vps-filter-bar .filter-bar__controls-row {
@@ -4526,6 +4649,13 @@ html.theme-classic-light .dashboard-command-surface {
   color: var(--text-secondary);
   font-size: var(--type-small-size);
   line-height: 1.45;
+}
+
+.vps-evidence-notice {
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-w) solid color-mix(in srgb, var(--color-state-notice) 24%, var(--border));
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--color-state-notice) 8%, transparent);
 }
 
 .vps-inventory-table .data-table__row {
@@ -5065,8 +5195,19 @@ html.theme-classic-light .dashboard-command-surface {
     flex-direction: column;
   }
 
+  .vps-inventory-lens,
   .vps-inventory-command__body {
     grid-template-columns: 1fr;
+  }
+
+  .vps-inventory-table-panel__heading {
+    grid-template-columns: 1fr;
+  }
+
+  .vps-inventory-table-panel__meta {
+    align-items: flex-start;
+    width: 100%;
+    min-width: 0;
   }
 
   .asset-decision-board__summary {
@@ -5355,6 +5496,15 @@ html.theme-classic-light .dashboard-command-surface {
   .vps-service-table,
   .vps-domain-table {
     min-width: 760px;
+  }
+
+  .vps-filter-context__header {
+    flex-direction: column;
+  }
+
+  .vps-filter-context__header small {
+    max-width: none;
+    text-align: left;
   }
 
   .vps-filter-bar__summary {
