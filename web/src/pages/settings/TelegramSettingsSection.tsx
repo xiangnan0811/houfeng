@@ -18,9 +18,20 @@ type TelegramSettingsSectionProps = {
   onToggleExpand?: () => void
 }
 
-export function TelegramSettingsSection({ settings, form, onChange, wrapper = 'detail', isExpanded = true, onToggleExpand }: TelegramSettingsSectionProps) {
+export function TelegramSettingsSection({
+  settings,
+  form,
+  onChange,
+  wrapper = 'detail',
+  isExpanded = true,
+  onToggleExpand,
+}: TelegramSettingsSectionProps) {
+  const innerContentClass = [
+    'settings-section-body',
+    wrapper === 'none' && 'settings-section-body--modal',
+  ].filter(Boolean).join(' ')
   const innerContent = (
-    <div style={{ paddingTop: wrapper === 'detail' ? 'var(--space-4)' : 0 }}>
+    <div className={innerContentClass}>
       <div className="settings-form-grid">
         <Input
           label="新的 Telegram Bot Token"
@@ -36,7 +47,7 @@ export function TelegramSettingsSection({ settings, form, onChange, wrapper = 'd
           onChange={(event) => onChange({ telegramChatId: event.target.value })}
         />
 
-        <article className="summary-card" style={{ gridColumn: '1 / -1', maxWidth: '960px' }}>
+        <article className="summary-card settings-summary-card--wide">
           <span className="summary-card__label">当前持久化状态</span>
           <strong className="summary-card__value summary-card__value--text">
             {settings.token_present && settings.token_masked_summary ? (
@@ -50,7 +61,7 @@ export function TelegramSettingsSection({ settings, form, onChange, wrapper = 'd
           </strong>
         </article>
 
-        <div className="settings-fieldset" style={{ gridColumn: '1 / -1' }}>
+        <div className="settings-fieldset settings-fieldset--wide">
           <Toggle
             label="运行时接管"
             checked={form.telegramRuntimeManaged}
@@ -59,7 +70,7 @@ export function TelegramSettingsSection({ settings, form, onChange, wrapper = 'd
           <SectionIntro>使用持久化 Telegram 配置接管运行中的通知器</SectionIntro>
         </div>
       </div>
-      <div style={{ marginTop: 'var(--space-4)' }}>
+      <div className="settings-section-notes">
         <SectionIntro>
           {!settings.runtime_managed
             ? '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'
@@ -83,7 +94,7 @@ export function TelegramSettingsSection({ settings, form, onChange, wrapper = 'd
       eyebrow="Telegram"
       title="Telegram 通知设置"
       aside={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        <div className="settings-section-aside">
           <span className={`badge ${settings.token_present ? 'badge--success' : ''}`}>
             {settings.token_present ? '已配置持久化 Token' : '未配置'}
           </span>

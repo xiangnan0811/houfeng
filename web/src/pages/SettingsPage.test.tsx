@@ -116,6 +116,7 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     expect(screen.getByText('设置', { selector: '.page-panel__eyebrow' })).toBeInTheDocument()
+    expect(screen.getByText('当前分组：通用与外观。先确认浏览器外观、本地主题与中心下发的默认采样/Probe 频率。')).toBeInTheDocument()
     expect(screen.getByText('频率档位')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '默认频率档位' })).toBeInTheDocument()
     expect(screen.getByLabelText('当前节点主机样本频率')).toHaveValue('5s')
@@ -125,6 +126,9 @@ describe('SettingsPage', () => {
 
     openTelegramSettings()
 
+    expect(screen.getByText('当前分组：通知与告警。先看通道状态，再维护新增渠道与 incident 默认通知策略。')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '通知通道状态' })).toBeInTheDocument()
+    expect(screen.getByText('已保存或正在编辑的 Telegram / 飞书通道会显示在这里；新增渠道仍先进入草稿，确认后才写入主表单。')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument()
     expect(screen.getByText('全局默认')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '全局默认规则' })).toBeInTheDocument()
@@ -146,6 +150,7 @@ describe('SettingsPage', () => {
 
     openTab('高级与策略')
 
+    expect(screen.getByText('当前分组：高级与策略。集中处理覆盖 JSON 与保留策略，保存前请确认风险边界。')).toBeInTheDocument()
     expect(screen.getByText('覆盖规则')).toBeInTheDocument()
     expect(screen.getByText('保留策略')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '少量覆盖规则' })).toBeInTheDocument()
@@ -164,6 +169,8 @@ describe('SettingsPage', () => {
     expect(
       screen.queryByText('当前仅保存保留策略，尚未自动执行清理或聚合任务。'),
     ).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '保存状态与风险边界' })).toBeInTheDocument()
+    expect(screen.getByText('本页保持单个全量保存：通知密钥、运行时接管、覆盖 JSON 与保留策略会一起校验并提交。')).toBeInTheDocument()
   })
 
   it('keeps the runtime management toggle checked when persisted settings explicitly disable Telegram delivery', async () => {

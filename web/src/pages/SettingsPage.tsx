@@ -32,7 +32,24 @@ type State = {
   form: SettingsFormState | null
 }
 
+type SettingsTab = 'general' | 'notifications' | 'advanced'
 type NotificationChannel = 'telegram' | 'feishu'
+
+const SETTINGS_TAB_ITEMS: Array<{ value: SettingsTab; label: string }> = [
+  { value: 'general', label: '通用与外观' },
+  { value: 'notifications', label: '通知与告警' },
+  { value: 'advanced', label: '高级与策略' },
+]
+
+const SETTINGS_TAB_CONTEXT: Record<SettingsTab, string> = {
+  general: '当前分组：通用与外观。先确认浏览器外观、本地主题与中心下发的默认采样/Probe 频率。',
+  notifications: '当前分组：通知与告警。先看通道状态，再维护新增渠道与 incident 默认通知策略。',
+  advanced: '当前分组：高级与策略。集中处理覆盖 JSON 与保留策略，保存前请确认风险边界。',
+}
+
+function tabPanelClass(tab: SettingsTab, activeTab: SettingsTab) {
+  return ['settings-tab-panel', activeTab !== tab && 'settings-tab-panel--hidden'].filter(Boolean).join(' ')
+}
 
 function describeError(error: unknown, fallback: string) {
   if (error instanceof ApiError) return error.message
@@ -303,7 +320,7 @@ function buildUpdateInput(form: SettingsFormState, currentSettings: SettingsReco
 }
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<'general' | 'notifications' | 'advanced'>('general')
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general')
   const [state, setState] = useState<State>({
     loading: true,
     saving: false,
@@ -391,6 +408,14 @@ export function SettingsPage() {
   }
 
   const { settings, form } = state
+  const hasNotificationChannels = activeChannels.size > 0
+  const telegramStatus = settings.telegram.token_present ? '已保存 Token' : '未保存 Token'
+  const telegramRuntimeStatus = settings.telegram.runtime_managed ? ' · 运行时接管' : ''
+  const statusPreviewItems = [
+    `Telegram：${telegramStatus}${telegramRuntimeStatus}`,
+    `飞书：${form.feishuEnabled && form.feishuWebhookUrl.trim() ? '已启用' : '未启用'}`,
+    `保留策略：原始 ${form.retentionPolicy.rawLayerDays} 天 / 事件 ${form.retentionPolicy.eventLayerDays} 天`,
+  ]
 
   function patchForm(updater: (form: SettingsFormState) => SettingsFormState) {
     setState((current) => ({
@@ -472,27 +497,19 @@ export function SettingsPage() {
 
   return (
     <form className="page-stack settings-page" onSubmit={handleSubmit}>
-      <section className="page-panel">
+      <section className="page-panel settings-page__hero">
         <p className="page-panel__eyebrow">设置</p>
         <h2 className="page-panel__title">设置 / Settings</h2>
         <p className="page-panel__description">
-          集中维护 Telegram 通知、默认频率、全局规则、少量覆盖与保留策略，保持页面信息密度低于观测页。
+          集中维护 Telegram 通知、默认频率、全局规则、少量覆盖与保留策略；先判断当前分组，再在页尾统一保存。
         </p>
-        <div style={{ marginTop: 'var(--space-4)' }}>
-          <Tabs
-            variant="pill"
-            value={activeTab}
-            onChange={setActiveTab}
-            items={[
-              { value: 'general', label: '通用与外观' },
-              { value: 'notifications', label: '通知与告警' },
-              { value: 'advanced', label: '高级与策略' },
-            ]}
-          />
+        <div className="settings-page__tabs">
+          <Tabs variant="pill" value={activeTab} onChange={setActiveTab} items={SETTINGS_TAB_ITEMS} />
+          <p className="settings-page__tab-context">{SETTINGS_TAB_CONTEXT[activeTab]}</p>
         </div>
       </section>
 
-      <div style={{ display: activeTab === 'general' ? 'contents' : 'none' }}>
+      <div className={tabPanelClass('general', activeTab)} aria-hidden={activeTab !== 'general'}>
         <ThemeSettingsSection />
         <FrequencyDefaultsSection
           hostSampleFrequencyTier={form.hostSampleFrequencyTier}
@@ -509,50 +526,77 @@ export function SettingsPage() {
         />
       </div>
 
-      <div style={{ display: activeTab === 'notifications' ? 'contents' : 'none' }}>
-        {activeChannels.has('telegram') && (
-          <TelegramSettingsSection
-            settings={settings.telegram}
-            form={form}
-            isExpanded={expandedChannels.has('telegram')}
-            onToggleExpand={() => setExpandedChannels(prev => {
-              const next = new Set(prev)
-              if (next.has('telegram')) next.delete('telegram')
-              else next.add('telegram')
-              return next
-            })}
-            onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
-          />
-        )}
+      <div className={tabPanelClass('notifications', activeTab)} aria-hidden={activeTab !== 'notifications'}>
+        <section className="settings-notification-group" aria-labelledby="settings-notification-channels-title">
+          <header className="settings-notification-group__header">
+            <p className="settings-notification-group__eyebrow">已配置 / 可编辑通道</p>
+            <h2 className="settings-notification-group__title" id="settings-notification-channels-title">
+              通知通道状态
+            </h2>
+            <p className="settings-notification-group__description">
+              已保存或正在编辑的 Telegram / 飞书通道会显示在这里；新增渠道仍先进入草稿，确认后才写入主表单。
+            </p>
+          </header>
+          <div className="settings-notification-group__body">
+            {activeChannels.has('telegram') && (
+              <TelegramSettingsSection
+                settings={settings.telegram}
+                form={form}
+                isExpanded={expandedChannels.has('telegram')}
+                onToggleExpand={() =>
+                  setExpandedChannels((prev) => {
+                    const next = new Set(prev)
+                    if (next.has('telegram')) next.delete('telegram')
+                    else next.add('telegram')
+                    return next
+                  })
+                }
+                onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
+              />
+            )}
 
-        {activeChannels.has('feishu') && (
-          <FeishuSettingsSection
-            form={form}
-            isExpanded={expandedChannels.has('feishu')}
-            onToggleExpand={() => setExpandedChannels(prev => {
-              const next = new Set(prev)
-              if (next.has('feishu')) next.delete('feishu')
-              else next.add('feishu')
-              return next
-            })}
-            onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
-          />
-        )}
+            {activeChannels.has('feishu') && (
+              <FeishuSettingsSection
+                form={form}
+                isExpanded={expandedChannels.has('feishu')}
+                onToggleExpand={() =>
+                  setExpandedChannels((prev) => {
+                    const next = new Set(prev)
+                    if (next.has('feishu')) next.delete('feishu')
+                    else next.add('feishu')
+                    return next
+                  })
+                }
+                onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
+              />
+            )}
+
+            {!hasNotificationChannels && (
+              <p className="settings-channel-manager__hint">
+                尚未配置可编辑通道；新增 Telegram 或飞书后会出现在这里。
+              </p>
+            )}
+          </div>
+        </section>
 
         <DetailSection eyebrow="渠道管理" title="新增通知渠道">
-          {activeChannels.size === 0 && (
-            <p style={{ fontSize: 'var(--type-small-size)', color: 'var(--text-secondary)', marginBottom: 'var(--space-3)' }}>当前未配置任何通知渠道，请点击下方按钮添加。</p>
-          )}
-          <button
-            type="button"
-            className="btn btn--secondary btn--md"
-            onClick={() => {
-              setChannelDraft(null)
-              setModalState('select')
-            }}
-          >
-            + 新增通知渠道
-          </button>
+          <div className="settings-channel-manager">
+            <p className="settings-channel-manager__hint">
+              {hasNotificationChannels
+                ? '如需启用新的通知通道，请从这里选择并配置。'
+                : '当前未配置任何通知渠道，请点击下方按钮添加。'}
+            </p>
+            <button
+              type="button"
+              className="btn btn--secondary btn--md"
+              onClick={() => {
+                setChannelDraft(null)
+                setModalState('select')
+              }}
+            >
+              + 新增通知渠道
+            </button>
+          </div>
         </DetailSection>
 
         <IncidentDefaultsSection
@@ -561,7 +605,7 @@ export function SettingsPage() {
         />
       </div>
 
-      <div style={{ display: activeTab === 'advanced' ? 'contents' : 'none' }}>
+      <div className={tabPanelClass('advanced', activeTab)} aria-hidden={activeTab !== 'advanced'}>
         <OverrideRulesSection
           form={form}
           onChange={(patch) => patchForm((currentForm) => ({ ...currentForm, ...patch }))}
@@ -578,22 +622,49 @@ export function SettingsPage() {
         />
       </div>
 
-      {state.saveError ? <section className="page-panel">{state.saveError}</section> : null}
-      {state.saveSuccess ? <section className="page-panel">{state.saveSuccess}</section> : null}
-
-      <div className="settings-actions">
-        <button type="submit" className="btn btn--primary btn--md" disabled={state.saving}>
-          {state.saving ? '正在保存…' : '保存设置'}
-        </button>
-      </div>
+      <section className="settings-save-footer" aria-labelledby="settings-save-footer-title">
+        <div className="settings-save-footer__content">
+          <p className="settings-save-footer__eyebrow">页面级保存</p>
+          <h2 className="settings-save-footer__title" id="settings-save-footer-title">
+            保存状态与风险边界
+          </h2>
+          <p className="settings-save-footer__description">
+            本页保持单个全量保存：通知密钥、运行时接管、覆盖 JSON 与保留策略会一起校验并提交。
+          </p>
+          <ul className="settings-save-footer__summary" aria-label="保存前配置摘要">
+            {statusPreviewItems.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          {state.saveError ? (
+            <p className="settings-save-footer__message settings-save-footer__message--error" role="alert">
+              {state.saveError}
+            </p>
+          ) : null}
+          {state.saveSuccess ? (
+            <p className="settings-save-footer__message settings-save-footer__message--success">
+              {state.saveSuccess}
+            </p>
+          ) : null}
+        </div>
+        <div className="settings-actions settings-save-footer__actions">
+          <button type="submit" className="btn btn--primary btn--md" disabled={state.saving}>
+            {state.saving ? '正在保存…' : '保存设置'}
+          </button>
+        </div>
+      </section>
 
       <Modal
         open={modalState !== 'closed'}
         onClose={closeChannelModal}
         title={
-          modalState === 'select' ? '新增通知渠道' :
-          modalState === 'configure-telegram' ? '配置 Telegram 通知' :
-          modalState === 'configure-feishu' ? '配置飞书通知' : ''
+          modalState === 'select'
+            ? '新增通知渠道'
+            : modalState === 'configure-telegram'
+              ? '配置 Telegram 通知'
+              : modalState === 'configure-feishu'
+                ? '配置飞书通知'
+                : ''
         }
         footer={
           modalState === 'configure-telegram' ? (
@@ -626,10 +697,8 @@ export function SettingsPage() {
         }
       >
         {modalState === 'select' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-            <p className="empty-inline" style={{ marginBottom: 'var(--space-2)' }}>
-              请选择要配置的通知渠道：
-            </p>
+          <div className="settings-channel-modal">
+            <p className="empty-inline settings-channel-modal__intro">请选择要配置的通知渠道：</p>
             <button
               type="button"
               className="settings-channel-option"
@@ -641,9 +710,11 @@ export function SettingsPage() {
                 <span className="settings-channel-option__icon" aria-hidden="true">
                   TG
                 </span>
-                <div>
-                  <strong style={{ display: 'block' }}>Telegram</strong>
-                  <span className="empty-inline" style={{ fontSize: '12px' }}>通过 Telegram Bot 发送告警通知，支持运行时接管</span>
+                <div className="settings-channel-option__text">
+                  <strong className="settings-channel-option__title">Telegram</strong>
+                  <span className="settings-channel-option__description">
+                    通过 Telegram Bot 发送告警通知，支持运行时接管
+                  </span>
                 </div>
               </div>
             </button>
@@ -659,9 +730,9 @@ export function SettingsPage() {
                 <span className="settings-channel-option__icon" aria-hidden="true">
                   FS
                 </span>
-                <div>
-                  <strong style={{ display: 'block' }}>飞书 (Feishu)</strong>
-                  <span className="empty-inline" style={{ fontSize: '12px' }}>通过飞书群组 Webhook 机器人发送告警卡片</span>
+                <div className="settings-channel-option__text">
+                  <strong className="settings-channel-option__title">飞书 (Feishu)</strong>
+                  <span className="settings-channel-option__description">通过飞书群组 Webhook 机器人发送告警卡片</span>
                 </div>
               </div>
             </button>

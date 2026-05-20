@@ -34,13 +34,12 @@ function OverrideTextarea({ ariaLabel, value, onChange }: OverrideTextareaProps)
   }
 
   return (
-    <div className="input-field" style={{ maxWidth: '960px' }}>
+    <div className="input-field override-rule-field">
       <label className="input-field__label">{ariaLabel}</label>
       <div className="input-field__shell">
         <textarea
           aria-label={ariaLabel}
-          className="input mono"
-          style={{ height: 'auto', minHeight: '120px', padding: '12px', resize: 'vertical' }}
+          className="input mono override-rule-field__textarea"
           rows={10}
           value={value}
           onChange={(event) => onChange(event.target.value)}

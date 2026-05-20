@@ -13,9 +13,19 @@ type FeishuSettingsSectionProps = {
   onToggleExpand?: () => void
 }
 
-export function FeishuSettingsSection({ form, onChange, wrapper = 'detail', isExpanded = true, onToggleExpand }: FeishuSettingsSectionProps) {
+export function FeishuSettingsSection({
+  form,
+  onChange,
+  wrapper = 'detail',
+  isExpanded = true,
+  onToggleExpand,
+}: FeishuSettingsSectionProps) {
+  const innerContentClass = [
+    'settings-section-body',
+    wrapper === 'none' && 'settings-section-body--modal',
+  ].filter(Boolean).join(' ')
   const innerContent = (
-    <div style={{ paddingTop: wrapper === 'detail' ? 'var(--space-4)' : 0 }}>
+    <div className={innerContentClass}>
       <div className="settings-form-grid">
         <Input
           label="Webhook URL"
@@ -25,7 +35,7 @@ export function FeishuSettingsSection({ form, onChange, wrapper = 'detail', isEx
           onChange={(event) => onChange({ feishuWebhookUrl: event.target.value })}
         />
 
-        <div className="settings-fieldset" style={{ gridColumn: '1 / -1' }}>
+        <div className="settings-fieldset settings-fieldset--wide">
           <Toggle
             label="启用飞书通知"
             checked={form.feishuEnabled}
@@ -34,7 +44,7 @@ export function FeishuSettingsSection({ form, onChange, wrapper = 'detail', isEx
         </div>
       </div>
 
-      <div style={{ marginTop: 'var(--space-4)' }}>
+      <div className="settings-section-notes">
         <SectionIntro>
           {form.feishuEnabled && form.feishuWebhookUrl.trim()
             ? '飞书通知已启用，incident 发生时将同时通过飞书群机器人推送消息。'
@@ -54,7 +64,7 @@ export function FeishuSettingsSection({ form, onChange, wrapper = 'detail', isEx
       title="飞书通知设置"
       ribbon="accent-2"
       aside={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        <div className="settings-section-aside">
           <span className={`badge ${form.feishuEnabled ? 'badge--success' : ''}`}>
             {form.feishuEnabled && form.feishuWebhookUrl.trim() ? '已配置' : '未配置'}
           </span>
