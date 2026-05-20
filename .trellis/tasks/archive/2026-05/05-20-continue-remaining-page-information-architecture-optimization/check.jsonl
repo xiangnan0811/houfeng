@@ -1,0 +1,9 @@
+{"path":".trellis/tasks/05-20-continue-remaining-page-information-architecture-optimization/prd.md","kind":"task_prd","note":"Check implementation against NodeCompare-only scope and frozen contracts."}
+{"path":".trellis/tasks/05-20-continue-remaining-page-information-architecture-optimization/research/remaining-pages-ia-audit.md","kind":"research","note":"Check against recommended NodeCompare changes and must-preserve behavior."}
+{"path":".trellis/tasks/archive/2026-05/05-20-continue-page-information-architecture-optimization/research/next-candidate-pages-audit.md","kind":"prior_research","note":"Prior NodeCompare risk notes and scope boundaries."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Verify PageState semantics, component layering, and reuse of shared components."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"Verify BEM/tokens/pages.css/no inline business styles/no new CSS system."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"Verify API client usage and no request/query contract changes."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Verify page tests and web verification commands."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Check reuse and avoid over-abstraction."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Check frontend-only IA changes do not alter backend/API assumptions."}

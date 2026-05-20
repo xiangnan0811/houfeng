@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { DetailSection } from '../components/DetailSection'
 import { NodeWatchtowerMetrics } from '../components/node-detail'
-import { Hostname, StatusGlyph } from '../components/atoms'
+import { Hostname, MonoDigits, StatusGlyph, Timestamp, type HealthState } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { StatusBadge } from '../components/StatusBadge'
 import { ApiError, getNode, getNodeRuntimeFacts } from '../lib/api'
@@ -19,6 +19,8 @@ type NodeState = {
 type StoredNodeState = NodeState & {
   nodeId: string | null
 }
+
+type CompareSide = 'left' | 'right'
 
 function useNodeData(nodeId: string | null): NodeState {
   const [state, setState] = useState<StoredNodeState>(() => ({
@@ -85,20 +87,20 @@ export function NodeComparePage() {
 
   return (
     <div className="page-stack">
-      <header className="section-heading section-heading--inline">
-        <div>
-          <p className="section-heading__eyebrow">节点对比</p>
-          <h2 className="section-heading__title">指标对比</h2>
-        </div>
-        <Link className="btn btn--ghost btn--md" to="/nodes">返回节点列表</Link>
-      </header>
+      <CompareCommandPanel stateA={nodeA} stateB={nodeB} />
 
       <div className="compare-identity">
         <CompareNodeIdentity state={nodeA} side="left" />
         <CompareNodeIdentity state={nodeB} side="right" />
       </div>
 
-      <DetailSection title="主机指标对比">
+      <CompareSummaryStrip stateA={nodeA} stateB={nodeB} />
+
+      <DetailSection
+        eyebrow="24h runtime facts"
+        title="主机指标对比"
+        aside="详细趋势仍使用 NodeWatchtowerMetrics"
+      >
         <div className="compare-metrics">
           <div className="compare-metrics__col">
             {!nodeA.loading && !nodeA.error && nodeA.runtimeFacts ? (
@@ -126,8 +128,196 @@ export function NodeComparePage() {
   )
 }
 
-function CompareNodeIdentity({ state, side }: { state: NodeState; side: 'left' | 'right' }) {
-  const label = side === 'left' ? 'A' : 'B'
+function sideLabel(side: CompareSide): 'A' | 'B' {
+  return side === 'left' ? 'A' : 'B'
+}
+
+function nodeHealthGlyphState(node: NodeRecord): HealthState {
+  if (node.monitoring_status === '维护中') return 'maintenance'
+  if (node.monitoring_status === '暂停') return 'offline'
+  if (node.current_health_status === '正常') return 'normal'
+  if (node.current_health_status === '关注') return 'notice'
+  if (node.current_health_status === '告警') return 'alert'
+  if (node.current_health_status === '严重') return 'critical'
+  return 'offline'
+}
+
+function nodeContext(node: NodeRecord): string {
+  const parts = [node.group, node.provider, node.region, node.city].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : '位置上下文未标记'
+}
+
+function CompareCommandPanel({ stateA, stateB }: { stateA: NodeState; stateB: NodeState }) {
+  return (
+    <section className="compare-command" aria-labelledby="node-compare-title">
+      <div className="compare-command__intro">
+        <p className="compare-command__eyebrow">节点对比 · 24h runtime facts</p>
+        <h1 id="node-compare-title">判断两个 Node 是否需要深入排查</h1>
+        <p>
+          先对齐 A/B 的身份、健康、运行态、绑定态、位置与样本可用性；只有差异明显时再下钻详细主机指标。
+        </p>
+      </div>
+      <div className="compare-command__aside">
+        <div className="compare-command__selection" aria-label="当前对比对象">
+          <CompareCommandPeer state={stateA} side="left" />
+          <CompareCommandPeer state={stateB} side="right" />
+        </div>
+        <Link className="btn btn--ghost btn--md" to="/nodes">返回节点列表</Link>
+      </div>
+    </section>
+  )
+}
+
+function CompareCommandPeer({ state, side }: { state: NodeState; side: CompareSide }) {
+  const label = sideLabel(side)
+  if (state.loading) {
+    return (
+      <article className="compare-command-peer">
+        <span className="compare-command-peer__side">{label}</span>
+        <div className="compare-command-peer__body">
+          <span className="compare-command-peer__label">{label} 节点</span>
+          <strong>读取中</strong>
+          <span>正在读取身份与运行事实</span>
+        </div>
+      </article>
+    )
+  }
+  if (state.error || !state.node) {
+    return (
+      <article className="compare-command-peer compare-command-peer--error">
+        <span className="compare-command-peer__side">{label}</span>
+        <div className="compare-command-peer__body">
+          <span className="compare-command-peer__label">{label} 节点</span>
+          <strong>不可用</strong>
+          <span>{state.error ?? '节点不可用'}</span>
+        </div>
+      </article>
+    )
+  }
+  const node = state.node
+  return (
+    <article className="compare-command-peer">
+      <span className="compare-command-peer__side">{label}</span>
+      <StatusGlyph state={nodeHealthGlyphState(node)} size="sm" ariaLabel={`${label} 节点健康状态`} />
+      <div className="compare-command-peer__body">
+        <span className="compare-command-peer__label">{label} 节点</span>
+        <strong>{node.display_name}</strong>
+        <span>{node.current_health_status} · {node.monitoring_status}</span>
+      </div>
+    </article>
+  )
+}
+
+function CompareSummaryStrip({ stateA, stateB }: { stateA: NodeState; stateB: NodeState }) {
+  return (
+    <section className="compare-summary-strip" aria-labelledby="compare-summary-title">
+      <header className="compare-summary-strip__header">
+        <div>
+          <p className="compare-summary-strip__eyebrow">Compare Summary</p>
+          <h2 id="compare-summary-title">A/B 摘要判断</h2>
+        </div>
+        <p>默认先看状态与样本是否可比；详细图表保留在下方。</p>
+      </header>
+      <div className="compare-summary-strip__grid">
+        <CompareSummaryCard state={stateA} side="left" />
+        <CompareSummaryCard state={stateB} side="right" />
+      </div>
+    </section>
+  )
+}
+
+function CompareSummaryCard({ state, side }: { state: NodeState; side: CompareSide }) {
+  const label = sideLabel(side)
+  if (state.loading) {
+    return (
+      <PageState
+        kind="loading"
+        title={`${label} 摘要读取中`}
+        description="正在建立 24h runtime facts 摘要。"
+        surface="empty"
+        compact
+        className="compare-summary-card compare-summary-card--state"
+      />
+    )
+  }
+  if (state.error || !state.node) {
+    return (
+      <PageState
+        kind="error"
+        title={`${label} 摘要不可用`}
+        description="该侧节点无法生成摘要，详细指标会保持不可用状态。"
+        technicalSummary={state.error ?? '节点不可用'}
+        surface="empty"
+        compact
+        className="compare-summary-card compare-summary-card--state"
+      />
+    )
+  }
+
+  const node = state.node
+  const sample = state.runtimeFacts?.latest_host_sample ?? null
+  const sampleCount = state.runtimeFacts?.recent_host_samples.length ?? 0
+
+  return (
+    <article className="compare-summary-card" aria-label={`${label} 侧摘要`}>
+      <header className="compare-summary-card__header">
+        <span className="compare-summary-card__side">{label}</span>
+        <div>
+          <p>{label} 侧摘要</p>
+          <h3>{node.display_name}</h3>
+        </div>
+      </header>
+      <dl className="compare-summary-card__rows">
+        <div className="compare-summary-row">
+          <dt>健康状态</dt>
+          <dd>
+            <StatusGlyph state={nodeHealthGlyphState(node)} size="sm" ariaLabel={`${label} 健康状态`} />
+            <StatusBadge label={node.current_health_status} />
+          </dd>
+        </div>
+        <div className="compare-summary-row">
+          <dt>生命周期</dt>
+          <dd><StatusBadge label={node.lifecycle_status} /></dd>
+        </div>
+        <div className="compare-summary-row">
+          <dt>运行 / 绑定</dt>
+          <dd>
+            <StatusBadge label={node.monitoring_status} />
+            <StatusBadge label={node.binding_status} />
+          </dd>
+        </div>
+        <div className="compare-summary-row compare-summary-row--stacked">
+          <dt>位置上下文</dt>
+          <dd>{nodeContext(node)}</dd>
+        </div>
+        <div className="compare-summary-row compare-summary-row--stacked">
+          <dt>样本可用性</dt>
+          <dd>
+            <span className="compare-summary-row__sample">
+              <StatusGlyph
+                state={sample ? (sample.maintenance_context ? 'maintenance' : 'normal') : 'offline'}
+                size="sm"
+                ariaLabel={`${label} 样本状态`}
+              />
+              {sample ? '有样本' : '无样本'}
+            </span>
+            {sample ? (
+              <span className="compare-summary-row__detail">
+                窗口样本 <MonoDigits>{sampleCount}</MonoDigits> 条 · 最近观测{' '}
+                <Timestamp value={sample.observed_at} mode="absolute" />
+              </span>
+            ) : (
+              <span className="compare-summary-row__detail">24h runtime facts 暂无 HostSample</span>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </article>
+  )
+}
+
+function CompareNodeIdentity({ state, side }: { state: NodeState; side: CompareSide }) {
+  const label = sideLabel(side)
   if (state.loading) {
     return (
       <PageState
@@ -154,21 +344,12 @@ function CompareNodeIdentity({ state, side }: { state: NodeState; side: 'left' |
     )
   }
   const node = state.node
-  const location = [node.group, node.region, node.city, node.provider].filter(Boolean).join(' · ') || '未标记位置'
   return (
     <div className="compare-identity__card">
       <div className="compare-identity__header">
         <span className="compare-identity__side">{label}</span>
         <StatusGlyph
-          state={
-            node.monitoring_status === '维护中' ? 'maintenance'
-            : node.monitoring_status === '暂停' ? 'offline'
-            : node.current_health_status === '正常' ? 'normal'
-            : node.current_health_status === '关注' ? 'notice'
-            : node.current_health_status === '告警' ? 'alert'
-            : node.current_health_status === '严重' ? 'critical'
-            : 'offline'
-          }
+          state={nodeHealthGlyphState(node)}
           size="md"
           ariaLabel={`${label} 节点健康状态`}
         />
@@ -184,7 +365,7 @@ function CompareNodeIdentity({ state, side }: { state: NodeState; side: 'left' |
       </div>
       <p className="compare-identity__meta">
         <Hostname truncate maxChars={24}>{node.node_id}</Hostname>
-        <span>{location}</span>
+        <span>{nodeContext(node)}</span>
       </p>
       <div className="badge-row">
         <StatusBadge label={node.lifecycle_status} />
