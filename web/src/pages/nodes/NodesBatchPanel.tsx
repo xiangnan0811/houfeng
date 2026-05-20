@@ -47,6 +47,7 @@ export function NodesBatchPanel({
             />
             全选 ({filteredNodeCount})
           </label>
+          <span className="batch-bar__scope">批量范围：当前筛选范围内的 {filteredNodeCount} 个节点</span>
           {selectAll ? (
             <div className="batch-bar__actions">
               <button
@@ -96,7 +97,7 @@ export function NodesBatchPanel({
           <p className="page-panel__eyebrow">批量命令执行</p>
           <h3 className="page-panel__title">下发命令到已选节点</h3>
           <p className="page-panel__description">
-            将对 {filteredNodeCount} 个节点下发命令。请输入命令 ID。
+            将对当前筛选范围内的 {filteredNodeCount} 个节点下发命令。请输入命令 ID。
           </p>
           <p>
             <label>
@@ -132,7 +133,7 @@ export function NodesBatchPanel({
       {pendingBatchAction === 'pause' ? (
         <ActionConfirmationCard
           title="确认批量暂停节点监控"
-          current={`将对 ${filteredNodeCount} 个节点执行暂停操作。`}
+          current={`将对当前筛选范围内的 ${filteredNodeCount} 个节点执行暂停操作。`}
           result="操作后：所有已选节点的监控运行状态变为暂停。"
           impact="会停止主机指标采集，并停止这些节点承担的探针执行。趋势图会从此开始出现数据空档。"
           unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"

@@ -30,19 +30,31 @@ export function NodesToolbar({
   onAutoRefreshChange,
 }: NodesToolbarProps) {
   return (
-    <div className="nodes-toolbar" aria-label="节点列表工具栏">
-      <div className="nodes-toolbar__primary">
+    <div className="nodes-toolbar list-command-band list-command-band--nodes" aria-label="节点列表工具栏">
+      <div className="list-command-band__main">
+        <p className="list-command-band__eyebrow">LIST SCAN</p>
+        <h3 className="list-command-band__title">节点列表扫描</h3>
+        <p className="list-command-band__description">
+          筛选在这里编辑，批量操作作用于当前筛选范围；节点专属的对比、趋势和自动刷新保留在同一控制带。
+        </p>
+      </div>
+      <div className="nodes-toolbar__primary list-command-band__controls">
         <Tabs<NodeListView>
           variant="pill"
           items={viewTabs}
           value={nodeListView}
           onChange={onNodeListViewChange}
         />
-        <span className="nodes-toolbar__result">
-          当前显示 <MonoDigits>{displayedCount}</MonoDigits> / <MonoDigits>{baseCount}</MonoDigits>
-        </span>
+        <div className="list-command-band__meta" aria-label="节点列表当前范围">
+          <span>{nodeListView === 'binding-conflict' ? '绑定异常视图' : '当前列表范围'}</span>
+          <strong>
+            <MonoDigits>{displayedCount}</MonoDigits>
+            <small>/</small>
+            <MonoDigits>{baseCount}</MonoDigits>
+          </strong>
+        </div>
       </div>
-      <div className="nodes-toolbar__actions">
+      <div className="nodes-toolbar__actions list-command-band__actions">
         <button
           type="button"
           className={`btn btn--ghost btn--sm ${!showTrends ? 'btn--active' : ''}`}

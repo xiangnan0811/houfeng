@@ -40,6 +40,7 @@ export function TargetsFilterPanel({
 }: TargetsFilterPanelProps) {
   return (
     <FilterBar
+      className="list-filter-panel"
       hasActiveFilters={hasActiveFilters}
       onClearAll={onClearAll}
       activeChips={

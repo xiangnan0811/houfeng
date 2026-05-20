@@ -115,6 +115,9 @@ describe('NodesPage', () => {
       screen.getByText('用运行事实确认服务器是否在线、证据是否新鲜，以及哪些 VPS 需要补接入、维护解释或异常排查。'),
     ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '节点列表扫描' })).toBeInTheDocument()
+    expect(screen.getByLabelText('节点列表当前范围')).toHaveTextContent('当前列表范围')
+    expect(screen.getByLabelText('节点列表当前范围')).toHaveTextContent('0/0')
     expect(screen.getByRole('tab', { name: /全部节点/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
@@ -1350,7 +1353,7 @@ describe('NodesPage', () => {
     await waitFor(() => expect(screen.getByText('Normal Edge')).toBeInTheDocument())
   })
 
-  it('toggles the create node form panel via the section heading button', async () => {
+  it('opens the create node drawer from the section heading button', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(mockJSONResponse([])),
@@ -1371,10 +1374,11 @@ describe('NodesPage', () => {
     expect(screen.queryByText('节点创建')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
-    expect(screen.getByText('节点创建')).toBeInTheDocument()
+    const createDrawer = screen.getByRole('dialog', { name: '创建节点表单' })
+    expect(within(createDrawer).getByText('节点创建')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
-    expect(screen.queryByText('节点创建')).not.toBeInTheDocument()
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '创建节点表单' })).not.toBeInTheDocument()
   })
 
   it('renders three mini sparklines per row when sparklines data is loaded', async () => {
@@ -1510,6 +1514,7 @@ describe('NodesPage', () => {
     const batchBarEl = document.querySelector('.batch-bar')
     expect(batchBarEl).not.toBeNull()
     expect(screen.getByText('全选 (2)')).toBeInTheDocument()
+    expect(screen.getByText('批量范围：当前筛选范围内的 2 个节点')).toBeInTheDocument()
 
     // Click the select-all checkbox within the batch bar
     const checkbox = batchBarEl!.querySelector('input[type="checkbox"]') as HTMLInputElement

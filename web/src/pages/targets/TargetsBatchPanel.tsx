@@ -28,7 +28,7 @@ export function TargetsBatchPanel({
   return (
     <>
       {show ? (
-        <div className="batch-bar">
+        <div className={`batch-bar${selectAll ? ' batch-bar--active' : ''}`}>
           <label className="batch-bar__toggle">
             <input
               type="checkbox"
@@ -37,6 +37,7 @@ export function TargetsBatchPanel({
             />
             全选 ({filteredTargetCount})
           </label>
+          <span className="batch-bar__scope">批量范围：当前筛选范围内的 {filteredTargetCount} 个目标</span>
           {selectAll ? (
             <div className="batch-bar__actions">
               <button
@@ -76,7 +77,7 @@ export function TargetsBatchPanel({
       {pendingBatchAction === 'pause' ? (
         <ActionConfirmationCard
           title="确认批量暂停目标"
-          current={`将对 ${filteredTargetCount} 个目标执行暂停操作。`}
+          current={`将对当前筛选范围内的 ${filteredTargetCount} 个目标执行暂停操作。`}
           result="操作后：所有已选目标运行状态变为暂停。"
           impact="会停止这些目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。"
           unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。"
