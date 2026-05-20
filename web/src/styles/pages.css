@@ -1944,6 +1944,24 @@ html.theme-classic-light .dashboard-command-surface {
   letter-spacing: 0.04em;
 }
 
+.settings-channel-option__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.settings-channel-option__title {
+  display: block;
+  color: var(--text-primary);
+}
+
+.settings-channel-option__description {
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.4;
+}
+
 /* Inline tags and badges helpers used outside of <Badge> atom */
 .badge-row {
   display: flex;
@@ -3076,6 +3094,164 @@ html.theme-classic-light .dashboard-command-surface {
   flex-wrap: wrap;
   padding-top: var(--space-2);
   border-top: var(--border-w) dashed var(--border-dashed);
+}
+
+.settings-page__tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.settings-page__tab-context,
+.settings-section-intro {
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.5;
+}
+
+.settings-page__tab-context {
+  margin: 0;
+  max-width: 760px;
+}
+
+.settings-tab-panel {
+  display: contents;
+}
+
+.settings-tab-panel--hidden {
+  display: none;
+}
+
+.settings-notification-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.settings-notification-group__header {
+  padding: var(--space-4) var(--space-5);
+  background: color-mix(in srgb, var(--surface-elevated) 20%, transparent);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-3);
+}
+
+.settings-notification-group__eyebrow,
+.settings-save-footer__eyebrow {
+  margin: 0 0 var(--space-1) 0;
+  color: var(--text-muted);
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+}
+
+.settings-notification-group__title,
+.settings-save-footer__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--type-h2-size);
+  font-weight: var(--type-h2-weight);
+  line-height: var(--type-h2-leading);
+}
+
+.settings-notification-group__description,
+.settings-save-footer__description {
+  margin: var(--space-2) 0 0 0;
+  max-width: 760px;
+  color: var(--text-secondary);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
+}
+
+.settings-notification-group__body,
+.settings-channel-manager,
+.settings-channel-modal,
+.settings-section-body,
+.settings-section-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.settings-channel-manager__hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+  line-height: 1.5;
+}
+
+.settings-section-body {
+  padding-top: var(--space-4);
+}
+
+.settings-section-body--modal {
+  padding-top: 0;
+}
+
+.settings-section-aside {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.settings-summary-card--wide,
+.settings-fieldset--wide,
+.override-rule-field {
+  grid-column: 1 / -1;
+  max-width: 960px;
+}
+
+.settings-save-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background:
+    linear-gradient(180deg, var(--panel-bg-elevated) 0%, var(--panel-bg) 100%);
+  border: var(--border-w) solid var(--panel-border);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-soft);
+}
+
+.settings-save-footer__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-save-footer__summary > li {
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-secondary);
+  background: var(--panel-bg-muted);
+  border: var(--border-w) solid var(--panel-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--type-small-size);
+}
+
+.settings-save-footer__message {
+  margin: var(--space-3) 0 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  font-size: var(--type-small-size);
+  line-height: 1.5;
+}
+
+.settings-save-footer__message--error {
+  color: color-mix(in srgb, var(--color-state-critical) 74%, var(--text-primary));
+  background: color-mix(in srgb, var(--color-state-critical) 9%, transparent);
+  border: var(--border-w) solid color-mix(in srgb, var(--color-state-critical) 36%, transparent);
+}
+
+.settings-save-footer__message--success {
+  color: color-mix(in srgb, var(--color-state-normal) 72%, var(--text-primary));
+  background: color-mix(in srgb, var(--color-state-normal) 10%, transparent);
+  border: var(--border-w) solid color-mix(in srgb, var(--color-state-normal) 32%, transparent);
 }
 
 .settings-cluster {
@@ -4972,6 +5148,7 @@ html.theme-classic-light .dashboard-command-surface {
   .asset-operation-actions .btn,
   .events-filter-drawer__actions .btn,
   .page-form-actions .btn,
+  .settings-save-footer__actions .btn,
   .settings-actions .btn,
   .watchtower-property-item__actions .btn {
     justify-content: center;
@@ -5000,6 +5177,8 @@ html.theme-classic-light .dashboard-command-surface {
   .section-heading__actions,
   .page-form-actions,
   .asset-operation-actions,
+  .settings-save-footer,
+  .settings-save-footer__actions,
   .settings-actions,
   .event-filter-actions,
   .watchtower-property-item__actions,
@@ -5014,6 +5193,7 @@ html.theme-classic-light .dashboard-command-surface {
   .section-heading__actions .btn,
   .page-form-actions .btn,
   .asset-operation-actions .btn,
+  .settings-save-footer__actions .btn,
   .settings-actions .btn,
   .event-filter-actions .btn,
   .watchtower-property-item__actions .btn,
@@ -5027,6 +5207,20 @@ html.theme-classic-light .dashboard-command-surface {
   .settings-form-grid--tight {
     grid-template-columns: minmax(0, 1fr);
     max-width: none;
+  }
+
+  .settings-notification-group__header,
+  .settings-save-footer {
+    padding: var(--space-4);
+  }
+
+  .settings-save-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-section-aside {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .section-heading {
@@ -6086,6 +6280,13 @@ html.theme-classic-light .dashboard-command-surface {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.override-rule-field__textarea {
+  height: auto;
+  min-height: 120px;
+  padding: var(--space-3);
+  resize: vertical;
 }
 .override-rule-preview {
   background: var(--panel-bg-muted);

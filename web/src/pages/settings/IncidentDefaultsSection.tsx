@@ -103,7 +103,7 @@ function IncidentDefaultsEditor({ value, onChange }: IncidentDefaultsSectionProp
           onChange={(event) => update('sweepIntervalSeconds', event.target.value)}
         />
 
-        <div className="settings-fieldset" style={{ gridColumn: '1 / -1' }}>
+        <div className="settings-fieldset settings-fieldset--wide">
           <Toggle
             label="异常开始通知"
             checked={value.notifyOnStarted}

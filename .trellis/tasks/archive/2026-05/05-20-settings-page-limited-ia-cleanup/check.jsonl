@@ -1,0 +1,8 @@
+{"path":".trellis/tasks/05-20-settings-page-limited-ia-cleanup/prd.md","kind":"task_prd","note":"Check final implementation against limited SettingsPage IA scope, frozen contracts, acceptance criteria, and Definition of Done."}
+{"path":".trellis/tasks/05-20-settings-page-limited-ia-cleanup/research/settings-page-ia-audit.md","kind":"research","note":"Use audit to verify safe seams were respected and no sensitive token/save/runtime semantics regressed."}
+{"path":".trellis/spec/web/component-conventions.md","kind":"spec","note":"Check component/page layering, Modal semantics, controlled state, and no unnecessary abstractions."}
+{"path":".trellis/spec/web/styling-guidelines.md","kind":"spec","note":"Check Settings inline style debt reduction, BEM/tokens/pages.css usage, and no new styling system."}
+{"path":".trellis/spec/web/state-and-data.md","kind":"spec","note":"Check API client usage and unchanged request/response/payload contracts."}
+{"path":".trellis/spec/web/quality-guidelines.md","kind":"spec","note":"Check test coverage and verification evidence for SettingsPage, full web tests, lint, build, and browser sanity."}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","kind":"guide","note":"Check reuse discipline and avoid overfitting/over-abstraction."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","kind":"guide","note":"Check frontend-only scope and no backend/API/notification behavior drift."}
