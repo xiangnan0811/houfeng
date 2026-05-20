@@ -1,0 +1,340 @@
+{
+  "baseUrl": "http://127.0.0.1:5178/",
+  "route": "/vps",
+  "dataSource": "mock-api asset-workflows via CDP Fetch.fulfillRequest",
+  "results": [
+    {
+      "label": "1440x1000",
+      "width": 1440,
+      "height": 1000,
+      "initial": {
+        "currentUrl": "http://127.0.0.1:5178/vps",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 1440,
+        "viewportHeight": 1000,
+        "docScrollWidth": 1440,
+        "bodyScrollWidth": 1440,
+        "bodyTextLength": 1512,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 总览 工作台 资产 续费决策 VPS 服务商 订阅 观测 节点 1 入口探测 1 事件 系统 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:26 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 5 / 5 台 VP",
+        "selectedTab": "全部 5",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 5,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts ams-core-01 vps_ams_core ams-core-01.example.test Hetzner NL · EU-West · Amsterdam CPX31 USD 10.50/月 2026-05-28 · 8 天后 自动续费 在用 承载业务 未评估 2 Node 资料完整 prod web archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-canc",
+        "filterChips": [],
+        "dialogs": [],
+        "overflowingText": []
+      },
+      "initialScreenshot": "/Users/weibo/Code/houfeng/.trellis/tasks/05-20-vps-page-inventory-ia-polish/research/screenshots/vps-1440x1000-initial.png",
+      "unlinked": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 1440,
+        "viewportHeight": 1000,
+        "docScrollWidth": 1440,
+        "bodyScrollWidth": 1440,
+        "bodyTextLength": 1199,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 总览 工作台 资产 续费决策 VPS 服务商 订阅 观测 节点 1 入口探测 1 事件 系统 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:26 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VP",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [],
+        "overflowingText": []
+      },
+      "unlinkedScreenshot": "/Users/weibo/Code/houfeng/.trellis/tasks/05-20-vps-page-inventory-ia-polish/research/screenshots/vps-1440x1000-unlinked.png",
+      "draftDrawer": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 1440,
+        "viewportHeight": 1000,
+        "docScrollWidth": 1440,
+        "bodyScrollWidth": 1440,
+        "bodyTextLength": 1342,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 总览 工作台 资产 续费决策 VPS 服务商 订阅 观测 节点 1 入口探测 1 事件 系统 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:26 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VP",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [
+          {
+            "label": "VPS 高级筛选",
+            "text": "高级筛选 × 服务商 全部 Hetzner Vultr Netcup 生命周期 全部 在用 闲置 测试中 待迁移 待取消 已取消 已归档 用途状态 全部 承载业务 暂无用途 备用 测试用途 未确认 续费决策 全部 未评估 保留 观察 迁移 取消 已取消自动续费 已替换 重置 应用筛选"
+          }
+        ],
+        "overflowingText": []
+      },
+      "afterDrawerClose": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 1440,
+        "viewportHeight": 1000,
+        "docScrollWidth": 1440,
+        "bodyScrollWidth": 1440,
+        "bodyTextLength": 1199,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 总览 工作台 资产 续费决策 VPS 服务商 订阅 观测 节点 1 入口探测 1 事件 系统 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:26 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VP",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [],
+        "overflowingText": []
+      },
+      "createDrawer": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 1440,
+        "viewportHeight": 1000,
+        "docScrollWidth": 1440,
+        "bodyScrollWidth": 1440,
+        "bodyTextLength": 1557,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 总览 工作台 资产 续费决策 VPS 服务商 订阅 观测 节点 1 入口探测 1 事件 系统 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:26 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VP",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [
+          {
+            "label": "VPS 创建表单",
+            "text": "VPS 创建 × 创建只记录资产库存基础事实；订阅、Node 关联和详细编辑继续在对应页面补齐。 基础识别 VPS 名称 资产服务商 未关联服务商 Hetzner Vultr Netcup 优先选择服务商主数据；名称快照用于导入兼容和展示。 服务商列表 服务商名称快照 产品名 订单号 访问入口 国家 区域 城市 数据中心 IPV4 IPV6 SSH HOST SSH 端口 SSH 用户 运行与决策 操作系统 虚拟化 生命周期 在用 闲置 测试中 待迁移 待取消 已取消 已归档 用途状态 承载业务 暂无用途 备用 测试用途 未确认 续费决策 未评估 保留 观察 迁移 取消 已取消自动续费 已替换"
+          }
+        ],
+        "overflowingText": []
+      },
+      "createScreenshot": "/Users/weibo/Code/houfeng/.trellis/tasks/05-20-vps-page-inventory-ia-polish/research/screenshots/vps-1440x1000-create-drawer.png",
+      "final": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 1440,
+        "viewportHeight": 1000,
+        "docScrollWidth": 1440,
+        "bodyScrollWidth": 1440,
+        "bodyTextLength": 1199,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 总览 工作台 资产 续费决策 VPS 服务商 订阅 观测 节点 1 入口探测 1 事件 系统 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:26 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VP",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [],
+        "overflowingText": []
+      }
+    },
+    {
+      "label": "390x900",
+      "width": 390,
+      "height": 900,
+      "initial": {
+        "currentUrl": "http://127.0.0.1:5178/vps",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 390,
+        "viewportHeight": 900,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "bodyTextLength": 1500,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 工作台 续费决策 VPS 服务商 订阅 节点 1 入口探测 1 事件 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:37 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 5 / 5 台 VPS 当前 LENS 全部",
+        "selectedTab": "全部 5",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 5,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts ams-core-01 vps_ams_core ams-core-01.example.test Hetzner NL · EU-West · Amsterdam CPX31 USD 10.50/月 2026-05-28 · 8 天后 自动续费 在用 承载业务 未评估 2 Node 资料完整 prod web archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-canc",
+        "filterChips": [],
+        "dialogs": [],
+        "overflowingText": []
+      },
+      "initialScreenshot": "/Users/weibo/Code/houfeng/.trellis/tasks/05-20-vps-page-inventory-ia-polish/research/screenshots/vps-390x900-initial.png",
+      "unlinked": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 390,
+        "viewportHeight": 900,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "bodyTextLength": 1187,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 工作台 续费决策 VPS 服务商 订阅 节点 1 入口探测 1 事件 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:37 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VPS 当前 LENS 未关",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [],
+        "overflowingText": []
+      },
+      "unlinkedScreenshot": "/Users/weibo/Code/houfeng/.trellis/tasks/05-20-vps-page-inventory-ia-polish/research/screenshots/vps-390x900-unlinked.png",
+      "draftDrawer": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 390,
+        "viewportHeight": 900,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "bodyTextLength": 1330,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 工作台 续费决策 VPS 服务商 订阅 节点 1 入口探测 1 事件 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:37 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VPS 当前 LENS 未关",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [
+          {
+            "label": "VPS 高级筛选",
+            "text": "高级筛选 × 服务商 全部 Hetzner Vultr Netcup 生命周期 全部 在用 闲置 测试中 待迁移 待取消 已取消 已归档 用途状态 全部 承载业务 暂无用途 备用 测试用途 未确认 续费决策 全部 未评估 保留 观察 迁移 取消 已取消自动续费 已替换 重置 应用筛选"
+          }
+        ],
+        "overflowingText": []
+      },
+      "afterDrawerClose": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 390,
+        "viewportHeight": 900,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "bodyTextLength": 1187,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 工作台 续费决策 VPS 服务商 订阅 节点 1 入口探测 1 事件 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:37 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VPS 当前 LENS 未关",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [],
+        "overflowingText": []
+      },
+      "createDrawer": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 390,
+        "viewportHeight": 900,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "bodyTextLength": 1545,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 工作台 续费决策 VPS 服务商 订阅 节点 1 入口探测 1 事件 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:37 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VPS 当前 LENS 未关",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [
+          {
+            "label": "VPS 创建表单",
+            "text": "VPS 创建 × 创建只记录资产库存基础事实；订阅、Node 关联和详细编辑继续在对应页面补齐。 基础识别 VPS 名称 资产服务商 未关联服务商 Hetzner Vultr Netcup 优先选择服务商主数据；名称快照用于导入兼容和展示。 服务商列表 服务商名称快照 产品名 订单号 访问入口 国家 区域 城市 数据中心 IPV4 IPV6 SSH HOST SSH 端口 SSH 用户 运行与决策 操作系统 虚拟化 生命周期 在用 闲置 测试中 待迁移 待取消 已取消 已归档 用途状态 承载业务 暂无用途 备用 测试用途 未确认 续费决策 未评估 保留 观察 迁移 取消 已取消自动续费 已替换"
+          }
+        ],
+        "overflowingText": []
+      },
+      "createScreenshot": "/Users/weibo/Code/houfeng/.trellis/tasks/05-20-vps-page-inventory-ia-polish/research/screenshots/vps-390x900-create-drawer.png",
+      "final": {
+        "currentUrl": "http://127.0.0.1:5178/vps?view=unlinked",
+        "title": "候风 · 服务器舰队控制面",
+        "viewportWidth": 390,
+        "viewportHeight": 900,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390,
+        "bodyTextLength": 1187,
+        "bodyTextSample": "跳到主内容 候风 HOUFENG FLEET CONTROL PLANE 工作台 续费决策 VPS 服务商 订阅 节点 1 入口探测 1 事件 设置 摘要已加载 · 存在活跃异常 v1.0 · dashboard 21:09:37 V Visual Evidence 管理员 ▾ 全局状态 活跃异常 2 个 节点 1 · 入口 1 异常节点 异常入口 ASSET LEDGER VPS 面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。 新建 VPS INVENTORY VIEWS 库存核对 3 / 5 台 VPS 当前 LENS 未关",
+        "selectedTab": "未关联 3",
+        "hasInventoryAudit": true,
+        "hasLensAria": true,
+        "hasCurrentLensCopy": true,
+        "hasQuickTabs": true,
+        "hasSubscriptionEvidence": true,
+        "hasFilterContext": true,
+        "hasWorkAreaCopy": true,
+        "tableRows": 3,
+        "tableText": "VPS 服务商 / 区域 订阅 / 续费 决策 关联 / 质量 标签 tokyo-lab-unlinked vps_tokyo_lab 接入信息缺失 — 位置缺失 — 缺订阅 无法核算续费 测试中 未确认 未评估 未关联 Node 缺订阅 未关联 Node 缺服务商 缺位置 缺访问入口 needs-facts archive-old-2019 vps_archive_old 203.0.113.40 Netcup DE · EU-Central · Nuremberg Legacy VPS EUR 3.00/月 2026-04-30 · 已过期 20 天 已取消自动续费 已归档 暂无用途 保留 未关联 Node 未关联 Node archived fra-legacy-cancel vps_fra_legacy 203.0.113.7 Netcup DE · EU-Central · Frankfurt RS 1000 EUR 5.00/月 2026-05-25 · 5 天后 已取消自动续费 待取消 暂无用途 取消 未关联 Node 未关联 Node legacy cost-revie",
+        "filterChips": [
+          "视图: 未关联 ×"
+        ],
+        "dialogs": [],
+        "overflowingText": []
+      }
+    }
+  ],
+  "failures": []
+}
