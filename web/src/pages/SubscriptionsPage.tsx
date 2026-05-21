@@ -203,6 +203,7 @@ export function SubscriptionsPage() {
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
   const createRequested = searchParams.get('create') === '1'
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
+  const [reloadKey, setReloadKey] = useState(0)
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState<CreateSubscriptionFormState>(INITIAL_CREATE_FORM)
   const [createSubmitting, setCreateSubmitting] = useState(false)
@@ -243,7 +244,7 @@ export function SubscriptionsPage() {
     return () => {
       cancelled = true
     }
-  }, [filters.renew_window, filters.status, filters.vps_id])
+  }, [filters.renew_window, filters.status, filters.vps_id, reloadKey])
 
   function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     const next = { ...filters, [key]: value }
@@ -447,7 +448,7 @@ export function SubscriptionsPage() {
           <div className="page-panel__eyebrow">ASSET LEDGER</div>
           <h1 className="page-panel__title">订阅</h1>
           <p className="page-panel__description">
-            记录 VPS 的价格、计费周期、续费日期与自动续费状态。月付折算由后端计算，前端只展示结果。
+            订阅页是 VPS 续费、成本和支付责任的证据表。这里记录原始价格、计费周期、续费日期与自动续费状态；月付折算由后端计算，前端只展示结果。
           </p>
         </div>
         <div className="page-panel__actions">
@@ -463,7 +464,7 @@ export function SubscriptionsPage() {
             <div className="page-panel__eyebrow">CONTEXT</div>
             <h2 className="page-panel__title">当前 VPS 上下文</h2>
             <p className="page-panel__description">
-              正在查看 {selectedContextVPS ? `${selectedContextVPS.display_name}（${selectedContextVPS.vps_id}）` : filters.vps_id} 的订阅记录；创建表单会默认带入该 VPS。
+              正在查看 {selectedContextVPS ? `${selectedContextVPS.display_name}（${selectedContextVPS.vps_id}）` : filters.vps_id} 的续费与成本证据；创建表单会默认带入该 VPS，关闭抽屉后仍保留当前 VPS 筛选上下文。
             </p>
           </div>
           <div className="page-panel__actions">
@@ -480,7 +481,7 @@ export function SubscriptionsPage() {
           <div>
             <div className="page-panel__eyebrow">PREREQUISITE</div>
             <h2 className="page-panel__title">需要先录入 VPS</h2>
-            <p className="page-panel__description">订阅必须绑定到一台 VPS。当前没有 VPS 资产，请先建立资产记录再补订阅。</p>
+            <p className="page-panel__description">订阅必须通过选择器绑定到一台 VPS，不能手输内部 ID。当前没有 VPS 资产，请先建立资产记录再补续费证据。</p>
           </div>
           <div className="page-panel__actions">
             <Link className="btn btn--primary btn--md" to="/vps">去创建 VPS</Link>
@@ -495,7 +496,7 @@ export function SubscriptionsPage() {
             <p className="section-heading__eyebrow">RENEWAL / COST EVIDENCE</p>
             <h2>续费与成本证据</h2>
             <p className="section-heading__description">
-              当前摘要只基于已应用筛选后的订阅记录，帮助判断下一笔续费、自动续费责任和失效订阅噪音。
+              当前摘要只基于已应用筛选后的订阅记录，帮助判断续费窗口、月化成本证据、自动续费责任和失效订阅噪音。
             </p>
           </div>
         </div>
@@ -505,11 +506,11 @@ export function SubscriptionsPage() {
             <dd>{state.loading ? '正在读取' : state.error ? '不可用' : <><MonoDigits>{filteredCount}</MonoDigits> 条订阅</>}</dd>
           </div>
           <div className="asset-workbench-summary__item">
-            <dt>最近续费</dt>
+            <dt>下一笔续费证据</dt>
             <dd>{state.loading || state.error ? '—' : upcomingRenewal}</dd>
           </div>
           <div className="asset-workbench-summary__item">
-            <dt>生效 / 续费方式</dt>
+            <dt>自动续费责任</dt>
             <dd>{state.loading || state.error ? '—' : <>生效 <MonoDigits>{activeCount}</MonoDigits> · 手动 <MonoDigits>{manualRenewCount}</MonoDigits> · 自动 <MonoDigits>{autoRenewCount}</MonoDigits></>}</dd>
           </div>
           <div className="asset-workbench-summary__item">
@@ -519,7 +520,19 @@ export function SubscriptionsPage() {
         </dl>
       </section>
 
-      <section className="page-panel">
+      <section className="page-panel subscriptions-filter-panel">
+        <div className="section-heading section-heading--inline subscriptions-filter-panel__heading">
+          <div>
+            <p className="section-heading__eyebrow">APPLIED FILTER CONTEXT</p>
+            <h2>当前筛选上下文</h2>
+            <p className="section-heading__description">
+              URL 是订阅证据表的请求真相；续费窗口会按 renew_at 升序读取，VPS 深链创建会保留当前筛选上下文。
+            </p>
+          </div>
+          <span className="section-heading__meta">
+            {active ? '已应用筛选' : '显示全部订阅证据'}
+          </span>
+        </div>
         <FilterBar
           hasActiveFilters={active}
           onClearAll={clearFilters}
@@ -540,11 +553,14 @@ export function SubscriptionsPage() {
       <section className="page-panel">
         <div className="section-heading">
           <div>
-            <p className="section-heading__eyebrow">SUBSCRIPTIONS</p>
-            <h2>订阅列表</h2>
+            <p className="section-heading__eyebrow">SUBSCRIPTION EVIDENCE TABLE</p>
+            <h2>订阅续费证据表</h2>
+            <p className="section-heading__description">
+              表格优先展示 VPS、原始金额、后端月付折算、续费日和自动续费状态；创建和编辑只在抽屉中补证据。
+            </p>
           </div>
           <span className="section-heading__meta">
-            <MonoDigits>{filteredCount}</MonoDigits> 条订阅
+            <MonoDigits>{filteredCount}</MonoDigits> 条证据记录
           </span>
         </div>
 
@@ -558,9 +574,21 @@ export function SubscriptionsPage() {
         ) : state.error ? (
           <PageStateView
             kind="error"
-            title="订阅列表不可用"
-            description={state.error}
+            title="订阅证据读取失败"
+            description="订阅续费与成本证据暂时不可用；不要把读取失败当作真实缺订阅。"
             technicalSummary={state.error}
+            action={(
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setState((current) => ({ ...current, loading: true, error: null }))
+                  setReloadKey((current) => current + 1)
+                }}
+              >
+                重新读取订阅
+              </Button>
+            )}
             surface="empty"
             compact
           />
@@ -570,11 +598,23 @@ export function SubscriptionsPage() {
             columns={columns}
             rows={state.subscriptions}
             rowKey={(subscription) => subscription.subscription_id}
-            emptyContent={
-              <span className="empty-inline">
-                {filters.vps_id ? '当前 VPS 暂无订阅，可用上方按钮创建。' : '暂无订阅；请先选择 VPS 或创建订阅记录。'}
-              </span>
-            }
+            emptyContent={(
+              <PageStateView
+                kind="empty"
+                eyebrow="SUBSCRIPTION EVIDENCE"
+                title={filters.vps_id ? '当前 VPS 尚无订阅证据' : '尚未记录订阅续费证据'}
+                description={filters.vps_id
+                  ? '可从当前 VPS 上下文创建订阅，表单会预填该 VPS，也允许切换到其他 VPS。'
+                  : '先选择一台 VPS 并创建订阅记录，用原始价格、周期和续费日期支撑资产成本判断。'}
+                action={(
+                  <Button variant="secondary" size="sm" onClick={openCreatePanel}>
+                    {filters.vps_id ? '补当前 VPS 订阅证据' : '补第一条订阅证据'}
+                  </Button>
+                )}
+                surface="empty"
+                compact
+              />
+            )}
           />
         )}
       </section>
@@ -586,9 +626,12 @@ export function SubscriptionsPage() {
         ariaLabel="订阅创建表单"
       >
         <div className="asset-create-drawer subscriptions-drawer">
-          <p className="page-panel__description">
-            创建订阅只提交原始价格、周期和续费状态；月付折算继续以后端返回值为准。
-          </p>
+          <div className="asset-drawer-context">
+            <p className="asset-drawer-context__eyebrow">RENEWAL / COST EVIDENCE</p>
+            <p>
+              创建订阅只提交原始价格、周期和续费状态；月付折算继续以后端返回值为准。VPS 绑定通过选择器完成，不需要输入内部 ID。
+            </p>
+          </div>
           <form className="asset-create-form" onSubmit={handleCreateSubmit}>
             <fieldset className="asset-create-form__group">
               <legend>绑定与价格</legend>
@@ -656,9 +699,12 @@ export function SubscriptionsPage() {
         ariaLabel="订阅编辑表单"
       >
         <div className="asset-create-drawer subscriptions-drawer">
-          <p className="page-panel__description">
-            编辑保持原始订阅字段语义不变；保存后列表展示后端重新计算的月付折算。
-          </p>
+          <div className="asset-drawer-context">
+            <p className="asset-drawer-context__eyebrow">EDIT RENEWAL EVIDENCE</p>
+            <p>
+              编辑保持原始订阅字段语义不变；保存后列表展示后端重新计算的月付折算，前端不会提交 monthly_price。
+            </p>
+          </div>
           <form className="asset-create-form" onSubmit={handleEditSubmit}>
             <fieldset className="asset-create-form__group">
               <legend>绑定与价格</legend>
