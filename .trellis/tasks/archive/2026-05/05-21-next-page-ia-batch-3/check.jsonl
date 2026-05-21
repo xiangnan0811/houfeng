@@ -1,0 +1,10 @@
+{"file":".trellis/tasks/05-21-next-page-ia-batch-3/prd.md","reason":"Task PRD with AssetDecisionsPage micro-polish scope, frozen contracts, acceptance criteria, and technical approach to verify independently."}
+{"file":".trellis/tasks/05-21-next-page-ia-batch-3/research/remaining-page-ia-audit.md","reason":"Remaining route/page audit and selection rationale for the targeted AssetDecisionsPage scope."}
+{"file":".trellis/tasks/05-21-next-page-ia-batch-3/research/design-spec-candidate-audit.md","reason":"Design/spec fit audit, residual candidate ranking, and narrow-scope caveats for independent check."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Check page assembly, PageState, Drawer reset/focus, DataTable/self-drawn row behavior, and interaction guard conventions."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Check CSS location, tokens, BEM-ish naming, no new page-local CSS, and no new styling systems."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Check Asset Ledger API/data boundaries, queue/evidence semantics, payload contracts, and no invented linked-node facts."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Check required web test/lint/build verification bar and colocated test coverage."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Check v2 visual-language alignment and avoid KPI-wall/card-wall or low-density drift."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Check AssetDecisionsPage component/page pattern alignment without rewriting settled architecture."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Check browser sanity evidence workflow and caveat reporting."}
