@@ -36,8 +36,12 @@ export function LoginPage() {
       <form className="login-page__card" onSubmit={onSubmit}>
         <header className="login-page__brand">
           <div className="login-page__brand-zh">候风</div>
-          <div className="login-page__brand-en">FLEET CONTROL PLANE</div>
-          <div className="login-page__motto">察 变 · 守 望</div>
+          <div className="login-page__brand-en" aria-label="HOUFENG Fleet Control Plane">
+            <span>HOUFENG</span>
+            <span aria-hidden="true">·</span>
+            <span>Fleet Control Plane</span>
+          </div>
+          <div className="login-page__motto">察变 · 守望</div>
         </header>
         {error && (
           <div role="alert" className="login-page__error">
@@ -57,10 +61,10 @@ export function LoginPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        <Button type="submit" disabled={submitting} variant="primary">
-          登 录
+        <Button type="submit" disabled={submitting} variant="primary" size="lg" className="login-page__submit">
+          登录
         </Button>
-        <footer className="login-page__footer">v1.0</footer>
+        <footer className="login-page__footer">center 会话认证 · agent 仅出站同步</footer>
       </form>
     </div>
   )

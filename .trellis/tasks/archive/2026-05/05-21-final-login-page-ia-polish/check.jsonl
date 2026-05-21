@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/05-21-final-login-page-ia-polish/prd.md","reason":"Check final implementation against the tiny LoginPage scope, frozen auth contracts, and acceptance criteria."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Verify component/page conventions and avoidance of unnecessary abstractions or route/data changes."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Verify styling remains token/BEM/pure CSS and uses only the existing LoginPage CSS exception."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Verify no new API/state-management behavior and auth flow semantics remain unchanged."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Verify focused tests and CI-relevant commands are run or caveats are recorded truthfully."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Verify work remains on the feature branch and does not touch protected main directly."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Verify active design language, typography, truthful copy, and no false product positioning."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Verify LoginPage template and Button primary lg contract are met."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Verify browser sanity attempt/caveat handling follows project guidance."}
