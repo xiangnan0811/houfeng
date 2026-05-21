@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/05-21-final-login-page-ia-polish/prd.md","reason":"Implementation scope, frozen LoginPage auth contracts, acceptance criteria, and out-of-scope boundaries."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"React/page/component conventions, existing atom usage, and no unnecessary abstraction guidance."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"LoginPage CSS exception, pure CSS/token/BEM constraints, and active visual authority."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Auth context/state boundaries and no new data/API/state-management constraints."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Focused test, lint, build, browser sanity, and verification expectations."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Feature branch workflow and no-main-development constraints."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Active Houfeng v2 visual language, truthful product tone, tokens, typography, and dark-first constraints."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"LoginPage template and Button primary large contract."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Browser sanity workflow for user-visible UI changes and local-only evidence handling."}
