@@ -440,6 +440,9 @@ export function SubscriptionsPage() {
     (subscription) => subscription.status === 'cancelled' || subscription.status === 'expired',
   ).length
   const upcomingRenewal = describeUpcomingRenewal(state.subscriptions)
+  const hasWorkbenchContext = Boolean(
+    filters.vps_id || (!state.loading && !state.error && state.vps.length === 0),
+  )
 
   return (
     <div className="page-stack asset-page subscriptions-page">
@@ -458,96 +461,96 @@ export function SubscriptionsPage() {
         </div>
       </section>
 
-      {filters.vps_id ? (
-        <section className="page-panel page-panel--inline">
+      <section className="page-panel subscriptions-evidence-workbench">
+        <div className="section-heading section-heading--inline subscriptions-evidence-workbench__heading">
           <div>
-            <div className="page-panel__eyebrow">CONTEXT</div>
-            <h2 className="page-panel__title">当前 VPS 上下文</h2>
-            <p className="page-panel__description">
-              正在查看 {selectedContextVPS ? `${selectedContextVPS.display_name}（${selectedContextVPS.vps_id}）` : filters.vps_id} 的续费与成本证据；创建表单会默认带入该 VPS，关闭抽屉后仍保留当前 VPS 筛选上下文。
-            </p>
-          </div>
-          <div className="page-panel__actions">
-            <Link className="btn btn--ghost btn--md" to={`/vps/${filters.vps_id}`}>返回 VPS 详情</Link>
-            <Button onClick={openCreatePanel}>
-              为该 VPS 新建订阅
-            </Button>
-          </div>
-        </section>
-      ) : null}
-
-      {!state.loading && !state.error && state.vps.length === 0 ? (
-        <section className="page-panel page-panel--inline">
-          <div>
-            <div className="page-panel__eyebrow">PREREQUISITE</div>
-            <h2 className="page-panel__title">需要先录入 VPS</h2>
-            <p className="page-panel__description">订阅必须通过选择器绑定到一台 VPS，不能手输内部 ID。当前没有 VPS 资产，请先建立资产记录再补续费证据。</p>
-          </div>
-          <div className="page-panel__actions">
-            <Link className="btn btn--primary btn--md" to="/vps">去创建 VPS</Link>
-          </div>
-        </section>
-      ) : null}
-
-
-      <section className="page-panel subscriptions-command-panel">
-        <div className="section-heading section-heading--inline">
-          <div>
-            <p className="section-heading__eyebrow">RENEWAL / COST EVIDENCE</p>
-            <h2>续费与成本证据</h2>
+            <p className="section-heading__eyebrow">SUBSCRIPTION EVIDENCE WORKBENCH</p>
+            <h2>订阅证据工作台</h2>
             <p className="section-heading__description">
-              当前摘要只基于已应用筛选后的订阅记录，帮助判断续费窗口、月化成本证据、自动续费责任和失效订阅噪音。
-            </p>
-          </div>
-        </div>
-        <dl className="asset-workbench-summary">
-          <div className="asset-workbench-summary__item">
-            <dt>当前筛选</dt>
-            <dd>{state.loading ? '正在读取' : state.error ? '不可用' : <><MonoDigits>{filteredCount}</MonoDigits> 条订阅</>}</dd>
-          </div>
-          <div className="asset-workbench-summary__item">
-            <dt>下一笔续费证据</dt>
-            <dd>{state.loading || state.error ? '—' : upcomingRenewal}</dd>
-          </div>
-          <div className="asset-workbench-summary__item">
-            <dt>自动续费责任</dt>
-            <dd>{state.loading || state.error ? '—' : <>生效 <MonoDigits>{activeCount}</MonoDigits> · 手动 <MonoDigits>{manualRenewCount}</MonoDigits> · 自动 <MonoDigits>{autoRenewCount}</MonoDigits></>}</dd>
-          </div>
-          <div className="asset-workbench-summary__item">
-            <dt>取消 / 过期</dt>
-            <dd>{state.loading || state.error ? '—' : <><MonoDigits>{inactiveCount}</MonoDigits> 条保留作历史证据</>}</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="page-panel subscriptions-filter-panel">
-        <div className="section-heading section-heading--inline subscriptions-filter-panel__heading">
-          <div>
-            <p className="section-heading__eyebrow">APPLIED FILTER CONTEXT</p>
-            <h2>当前筛选上下文</h2>
-            <p className="section-heading__description">
-              URL 是订阅证据表的请求真相；续费窗口会按 renew_at 升序读取，VPS 深链创建会保留当前筛选上下文。
+              将筛选后的续费证据摘要、URL 请求真相、VPS 上下文和前置资产要求收束到同一条扫描路径；下方表格仍是主要证据表。
             </p>
           </div>
           <span className="section-heading__meta">
-            {active ? '已应用筛选' : '显示全部订阅证据'}
+            {active ? 'URL 筛选已应用' : 'URL 显示全部订阅证据'}
           </span>
         </div>
-        <FilterBar
-          hasActiveFilters={active}
-          onClearAll={clearFilters}
-          activeChips={
-            <>
-              {filters.vps_id && <FilterChip label={`VPS: ${vpsName(filters.vps_id)}`} onRemove={() => setFilter('vps_id', null)} />}
-              {filters.status && <FilterChip label={`状态: ${subscriptionStatusLabel(filters.status)}`} onRemove={() => setFilter('status', null)} />}
-              {filters.renew_window && <FilterChip label={`续费窗口: 未来 ${filters.renew_window} 天`} onRemove={() => setFilter('renew_window', null)} />}
-            </>
-          }
-        >
-          <FilterSelect label="VPS" value={filters.vps_id} options={vpsSelectOptions} onChange={(value) => setFilter('vps_id', value)} />
-          <FilterSelect label="状态" value={filters.status} options={STATUS_OPTIONS} onChange={(value) => setFilter('status', value as SubscriptionStatus | null)} />
-          <FilterSelect label="续费窗口" value={filters.renew_window} options={RENEW_WINDOW_OPTIONS} onChange={(value) => setFilter('renew_window', value)} />
-        </FilterBar>
+
+        <div className={hasWorkbenchContext ? 'subscriptions-evidence-workbench__grid subscriptions-evidence-workbench__grid--with-context' : 'subscriptions-evidence-workbench__grid'}>
+          <div className="subscriptions-evidence-workbench__main">
+            <dl className="asset-workbench-summary subscriptions-evidence-workbench__summary">
+              <div className="asset-workbench-summary__item">
+                <dt>当前筛选</dt>
+                <dd>{state.loading ? '正在读取' : state.error ? '不可用' : <><MonoDigits>{filteredCount}</MonoDigits> 条订阅</>}</dd>
+              </div>
+              <div className="asset-workbench-summary__item">
+                <dt>下一笔续费证据</dt>
+                <dd>{state.loading || state.error ? '—' : upcomingRenewal}</dd>
+              </div>
+              <div className="asset-workbench-summary__item">
+                <dt>自动续费责任</dt>
+                <dd>{state.loading || state.error ? '—' : <>生效 <MonoDigits>{activeCount}</MonoDigits> · 手动 <MonoDigits>{manualRenewCount}</MonoDigits> · 自动 <MonoDigits>{autoRenewCount}</MonoDigits></>}</dd>
+              </div>
+              <div className="asset-workbench-summary__item">
+                <dt>取消 / 过期</dt>
+                <dd>{state.loading || state.error ? '—' : <><MonoDigits>{inactiveCount}</MonoDigits> 条保留作历史证据</>}</dd>
+              </div>
+            </dl>
+
+            <div className="subscriptions-evidence-workbench__truth">
+              <p className="subscriptions-evidence-workbench__truth-title">URL / FILTER TRUTH</p>
+              <p>
+                筛选计数只代表当前 URL 返回的订阅证据，不等于全量台账；URL 是订阅证据表的请求真相。续费窗口会按 renew_at 升序读取（sort=renew_at&order=asc）。monthly_price 由后端计算，前端创建/编辑 payload 只提交原始价格、周期和续费状态。创建和编辑只在 Drawer 中补证据，关闭会丢弃未提交草稿和校验错误。
+              </p>
+            </div>
+
+            <FilterBar
+              hasActiveFilters={active}
+              onClearAll={clearFilters}
+              activeChips={
+                <>
+                  {filters.vps_id && <FilterChip label={`VPS: ${vpsName(filters.vps_id)}`} onRemove={() => setFilter('vps_id', null)} />}
+                  {filters.status && <FilterChip label={`状态: ${subscriptionStatusLabel(filters.status)}`} onRemove={() => setFilter('status', null)} />}
+                  {filters.renew_window && <FilterChip label={`续费窗口: 未来 ${filters.renew_window} 天`} onRemove={() => setFilter('renew_window', null)} />}
+                </>
+              }
+            >
+              <FilterSelect label="VPS" value={filters.vps_id} options={vpsSelectOptions} onChange={(value) => setFilter('vps_id', value)} />
+              <FilterSelect label="状态" value={filters.status} options={STATUS_OPTIONS} onChange={(value) => setFilter('status', value as SubscriptionStatus | null)} />
+              <FilterSelect label="续费窗口" value={filters.renew_window} options={RENEW_WINDOW_OPTIONS} onChange={(value) => setFilter('renew_window', value)} />
+            </FilterBar>
+          </div>
+
+          {hasWorkbenchContext ? (
+            <aside className="subscriptions-evidence-workbench__context" aria-label="订阅证据上下文">
+              {filters.vps_id ? (
+                <div className="subscriptions-evidence-workbench__context-card">
+                  <p className="subscriptions-evidence-workbench__context-eyebrow">VPS CONTEXT</p>
+                  <h3>VPS 筛选上下文</h3>
+                  <p>
+                    正在查看 {selectedContextVPS ? `${selectedContextVPS.display_name}（${selectedContextVPS.vps_id}）` : filters.vps_id} 的续费与成本证据；创建表单会默认带入该 VPS，关闭抽屉后仍保留当前 VPS 筛选上下文。
+                  </p>
+                  <div className="subscriptions-evidence-workbench__context-actions">
+                    <Link className="btn btn--ghost btn--sm" to={`/vps/${filters.vps_id}`}>返回 VPS 详情</Link>
+                    <Button size="sm" onClick={openCreatePanel}>
+                      为该 VPS 新建订阅
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {!state.loading && !state.error && state.vps.length === 0 ? (
+                <div className="subscriptions-evidence-workbench__context-card subscriptions-evidence-workbench__context-card--warning">
+                  <p className="subscriptions-evidence-workbench__context-eyebrow">PREREQUISITE</p>
+                  <h3>需要先录入 VPS</h3>
+                  <p>订阅必须通过选择器绑定到一台 VPS，不能手输内部 ID。当前没有 VPS 资产，请先建立资产记录再补续费证据。</p>
+                  <div className="subscriptions-evidence-workbench__context-actions">
+                    <Link className="btn btn--primary btn--sm" to="/vps">去创建 VPS</Link>
+                  </div>
+                </div>
+              ) : null}
+            </aside>
+          ) : null}
+        </div>
       </section>
 
       <section className="page-panel">
