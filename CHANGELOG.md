@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/xiangnan0811/houfeng/compare/v0.15.0...v0.16.0) (2026-05-21)
+
+
+### Features
+
+* optimize settings page information architecture ([fa328bd](https://github.com/xiangnan0811/houfeng/commit/fa328bda1eeb300267631dcd48c318fc9cc66242))
+
 ## [0.15.0](https://github.com/xiangnan0811/houfeng/compare/v0.14.0...v0.15.0) (2026-05-21)
 
 
