@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/xiangnan0811/houfeng/compare/v0.16.0...v0.17.0) (2026-05-21)
+
+
+### Features
+
+* optimize subscription evidence information architecture ([14f5d5d](https://github.com/xiangnan0811/houfeng/commit/14f5d5d4e5a35eb388a23da012ab750c1add0ec2))
+
 ## [0.16.0](https://github.com/xiangnan0811/houfeng/compare/v0.15.0...v0.16.0) (2026-05-21)
 
 
