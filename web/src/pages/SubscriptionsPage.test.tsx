@@ -75,19 +75,31 @@ describe('SubscriptionsPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([vps]))
     vi.stubGlobal('fetch', fetchMock)
 
-    render(
+    const { container } = render(
       <MemoryRouter initialEntries={['/subscriptions']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
-    expect(screen.getByText('续费与成本证据')).toBeInTheDocument()
-    expect(screen.getByText('当前筛选上下文')).toBeInTheDocument()
+    expect(container.querySelectorAll('.subscriptions-evidence-workbench')).toHaveLength(1)
+    expect(container.querySelectorAll('.subscriptions-command-panel, .subscriptions-filter-panel')).toHaveLength(0)
+    expect(screen.getByText('订阅证据工作台')).toBeInTheDocument()
     expect(screen.getByText('订阅续费证据表')).toBeInTheDocument()
     expect(screen.getByText('当前筛选')).toBeInTheDocument()
     expect(screen.getByText('下一笔续费证据')).toBeInTheDocument()
+    expect(screen.getByText(/筛选计数只代表当前 URL 返回的订阅证据/)).toBeInTheDocument()
     expect(screen.getByText(/URL 是订阅证据表的请求真相/)).toBeInTheDocument()
+    expect(screen.getByText(/sort=renew_at&order=asc/)).toBeInTheDocument()
+    expect(screen.getByText(/monthly_price 由后端计算/)).toBeInTheDocument()
+    expect(screen.getByText(/创建和编辑只在 Drawer 中补证据/)).toBeInTheDocument()
+    const workbench = container.querySelector('.subscriptions-evidence-workbench')
+    expect(workbench).not.toBeNull()
+    expect(within(workbench as HTMLElement).queryByLabelText('订阅证据上下文')).not.toBeInTheDocument()
+    expect(container.querySelector('.subscriptions-evidence-workbench__grid')).not.toHaveClass('subscriptions-evidence-workbench__grid--with-context')
+    const tablePanel = workbench?.nextElementSibling as HTMLElement | null
+    expect(tablePanel).not.toBeNull()
+    expect(within(tablePanel as HTMLElement).getByRole('heading', { name: '订阅续费证据表' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '订阅创建表单' })).not.toBeInTheDocument()
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('生效中').length).toBeGreaterThan(0)
@@ -102,6 +114,27 @@ describe('SubscriptionsPage', () => {
       }),
     )
     expect(screen.getByText('续费窗口: 未来 30 天')).toBeInTheDocument()
+  })
+
+  it('keeps the no-VPS prerequisite actionable inside the evidence workbench', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('需要先录入 VPS')).toBeInTheDocument())
+    const workbench = container.querySelector('.subscriptions-evidence-workbench')
+    expect(workbench).not.toBeNull()
+    expect(container.querySelector('.subscriptions-evidence-workbench__grid')).toHaveClass('subscriptions-evidence-workbench__grid--with-context')
+    expect(within(workbench as HTMLElement).getByText(/订阅必须通过选择器绑定到一台 VPS/)).toBeInTheDocument()
+    expect(within(workbench as HTMLElement).getByRole('link', { name: '去创建 VPS' })).toHaveAttribute('href', '/vps')
   })
 
   it('creates subscriptions without sending monthly_price', async () => {
@@ -168,13 +201,18 @@ describe('SubscriptionsPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([vps]))
     vi.stubGlobal('fetch', fetchMock)
 
-    render(
+    const { container } = render(
       <MemoryRouter initialEntries={['/subscriptions?vps_id=vps_001&create=1']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.getByRole('dialog', { name: '订阅创建表单' })).toBeInTheDocument())
+    const workbench = container.querySelector('.subscriptions-evidence-workbench')
+    expect(workbench).not.toBeNull()
+    expect(container.querySelector('.subscriptions-evidence-workbench__grid')).toHaveClass('subscriptions-evidence-workbench__grid--with-context')
+    expect(within(workbench as HTMLElement).getByText(/正在查看 Tokyo Edge（vps_001）/)).toBeInTheDocument()
+    expect(within(workbench as HTMLElement).getByRole('link', { name: '返回 VPS 详情' })).toHaveAttribute('href', '/vps/vps_001')
     expect(screen.getByText(/关闭抽屉后仍保留当前 VPS 筛选上下文/)).toBeInTheDocument()
     expect(screen.getByLabelText('订阅 VPS')).toHaveValue('vps_001')
     fireEvent.change(screen.getByLabelText('价格'), { target: { value: '99' } })

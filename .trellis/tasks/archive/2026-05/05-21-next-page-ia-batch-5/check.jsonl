@@ -1,0 +1,10 @@
+{"file":".trellis/tasks/05-21-next-page-ia-batch-5/prd.md","reason":"Check implementation against chosen SubscriptionsPage scope, frozen contracts, and acceptance criteria."}
+{"file":".trellis/tasks/05-21-next-page-ia-batch-5/research/remaining-page-ia-audit.md","reason":"Validate the batch stayed narrow given low remaining broad IA value."}
+{"file":".trellis/tasks/05-21-next-page-ia-batch-5/research/design-spec-candidate-audit.md","reason":"Validate the selected page hierarchy mismatch was addressed without overreaching."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Verify PageState, Drawer reset, selector, and DataTable interaction contracts are preserved."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Verify styling stays pure CSS, token-based, BEM, and in pages.css when needed."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Verify SubscriptionsPage URL-state, create=1, selector, and payload contracts are preserved."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Verify tests and CI-relevant commands are run or caveats are recorded."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Verify active visual/page hierarchy language guides the final IA."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Verify the result remains consistent with v2 components and does not invent unsupported page templates."}
+{"file":"docs/operations/v2-visual-evidence.md","reason":"Verify browser sanity attempt/caveat handling follows project guidance."}
