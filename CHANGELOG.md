@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/xiangnan0811/houfeng/compare/v0.13.0...v0.14.0) (2026-05-21)
+
+
+### Features
+
+* optimize asset support page information architecture ([9a51187](https://github.com/xiangnan0811/houfeng/commit/9a511874ff40051fa19b69403f52e7049f6a29e3))
+
 ## [0.13.0](https://github.com/xiangnan0811/houfeng/compare/v0.12.0...v0.13.0) (2026-05-20)
 
 
