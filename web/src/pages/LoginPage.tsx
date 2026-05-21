@@ -64,7 +64,7 @@ export function LoginPage() {
         <Button type="submit" disabled={submitting} variant="primary" size="lg" className="login-page__submit">
           登录
         </Button>
-        <footer className="login-page__footer">center 会话认证 · agent 仅出站同步</footer>
+        <footer className="login-page__footer">中心会话认证 · Agent 仅出站同步</footer>
       </form>
     </div>
   )

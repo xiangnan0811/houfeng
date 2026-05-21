@@ -53,7 +53,7 @@ describe('LoginPage', () => {
     expect(screen.getByText('候风')).toBeInTheDocument()
     expect(screen.getByLabelText('HOUFENG Fleet Control Plane')).toBeInTheDocument()
     expect(screen.getByText('察变 · 守望')).toBeInTheDocument()
-    expect(screen.getByText('center 会话认证 · agent 仅出站同步')).toBeInTheDocument()
+    expect(screen.getByText('中心会话认证 · Agent 仅出站同步')).toBeInTheDocument()
 
     const submitButton = screen.getByRole('button', { name: '登录' })
     expect(submitButton).toHaveClass('btn--primary')
