@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/xiangnan0811/houfeng/compare/v0.14.0...v0.15.0) (2026-05-21)
+
+
+### Features
+
+* optimize asset decision queue information architecture ([2899795](https://github.com/xiangnan0811/houfeng/commit/28997952b70948a73b398d64685fff42ec135ad1))
+
 ## [0.14.0](https://github.com/xiangnan0811/houfeng/compare/v0.13.0...v0.14.0) (2026-05-21)
 
 
