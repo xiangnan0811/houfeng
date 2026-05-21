@@ -52,7 +52,7 @@ function buildCreateProviderInput(form: CreateProviderFormState): CreateProvider
   if (form.name.trim() === '') {
     throw new Error('服务商名称不能为空。')
   }
-  const rating = form.rating.trim() === '' ? null : Number.parseInt(form.rating.trim(), 10)
+  const rating = form.rating.trim() === '' ? null : Number(form.rating.trim())
   if (rating != null && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
     throw new Error('评分必须为 1 到 5。')
   }
@@ -88,6 +88,7 @@ function buildUpdateProviderInput(form: CreateProviderFormState): UpdateProvider
 
 export function ProvidersPage() {
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
+  const [reloadKey, setReloadKey] = useState(0)
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState<CreateProviderFormState>(INITIAL_CREATE_FORM)
   const [createSubmitting, setCreateSubmitting] = useState(false)
@@ -117,7 +118,7 @@ export function ProvidersPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadKey])
 
   function openCreateDrawer() {
     setCreateOpen(true)
@@ -275,7 +276,7 @@ export function ProvidersPage() {
           <div className="page-panel__eyebrow">ASSET LEDGER</div>
           <h1 className="page-panel__title">服务商</h1>
           <p className="page-panel__description">
-            管理 VPS 资产层的服务商主数据。这里记录面板入口、账号提示、国家和标签，不会同步修改 Node 的 provider hint。
+            服务商与账号主数据是 VPS 台账、续费证据和资产决策的引用底座。这里记录面板入口、账号提示、国家和标签，不会同步修改 Node 的 provider hint。
           </p>
         </div>
         <div className="page-panel__actions">
@@ -291,26 +292,26 @@ export function ProvidersPage() {
             <p className="section-heading__eyebrow">MASTER DATA CONTEXT</p>
             <h2>服务商主数据概览</h2>
             <p className="section-heading__description">
-              只保留辅助扫描服务商列表的轻量上下文；创建与编辑进入右侧抽屉，避免打断表格核对。
+              服务商页只承载资产台账的账号证据和供应商归档口径；主路径仍是下方高密度列表，创建与编辑进入右侧抽屉。
             </p>
           </div>
         </div>
         <dl className="asset-workbench-summary">
           <div className="asset-workbench-summary__item">
-            <dt>服务商</dt>
-            <dd>{state.loading ? '正在读取' : state.error ? '不可用' : <><MonoDigits>{providerCount}</MonoDigits> 个记录</>}</dd>
+            <dt>主数据记录</dt>
+            <dd>{state.loading ? '正在读取' : state.error ? '不可用' : <><MonoDigits>{providerCount}</MonoDigits> 个服务商</>}</dd>
           </div>
           <div className="asset-workbench-summary__item">
-            <dt>国家 / 地区</dt>
-            <dd>{state.loading || state.error ? '—' : <><MonoDigits>{countryCount}</MonoDigits> 个已记录</>}</dd>
+            <dt>地区证据</dt>
+            <dd>{state.loading || state.error ? '—' : <><MonoDigits>{countryCount}</MonoDigits> 个国家 / 地区</>}</dd>
           </div>
           <div className="asset-workbench-summary__item">
-            <dt>资料覆盖</dt>
+            <dt>账号证据覆盖</dt>
             <dd>{state.loading || state.error ? '—' : <>账号提示 <MonoDigits>{accountCount}</MonoDigits> · 标签 <MonoDigits>{labeledCount}</MonoDigits></>}</dd>
           </div>
           <div className="asset-workbench-summary__item">
-            <dt>低评分</dt>
-            <dd>{state.loading || state.error ? '—' : <><MonoDigits>{lowRatedCount}</MonoDigits> 个需复核</>}</dd>
+            <dt>复核线索</dt>
+            <dd>{state.loading || state.error ? '—' : <><MonoDigits>{lowRatedCount}</MonoDigits> 个低评分</>}</dd>
           </div>
         </dl>
       </section>
@@ -318,11 +319,14 @@ export function ProvidersPage() {
       <section className="page-panel">
         <div className="section-heading">
           <div>
-            <p className="section-heading__eyebrow">PROVIDERS</p>
-            <h2>服务商列表</h2>
+            <p className="section-heading__eyebrow">PROVIDER EVIDENCE TABLE</p>
+            <h2>服务商账号证据表</h2>
+            <p className="section-heading__description">
+              按服务商、账号提示、地区、评分和标签核对资产引用口径；表格是默认扫描路径，行内操作只打开本页编辑抽屉。
+            </p>
           </div>
           <span className="section-heading__meta">
-            <MonoDigits>{providerCount}</MonoDigits> 个服务商
+            <MonoDigits>{providerCount}</MonoDigits> 个主数据记录
           </span>
         </div>
 
@@ -336,9 +340,21 @@ export function ProvidersPage() {
         ) : state.error ? (
           <PageStateView
             kind="error"
-            title="服务商列表不可用"
-            description={state.error}
+            title="服务商证据读取失败"
+            description="服务商主数据暂时不可用，VPS 资产页仍不会从这里自动改写任何 Node provider hint。"
             technicalSummary={state.error}
+            action={(
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setState((current) => ({ ...current, loading: true, error: null }))
+                  setReloadKey((current) => current + 1)
+                }}
+              >
+                重新读取服务商
+              </Button>
+            )}
             surface="empty"
             compact
           />
@@ -348,7 +364,21 @@ export function ProvidersPage() {
             columns={columns}
             rows={state.providers}
             rowKey={(provider) => provider.provider_id}
-            emptyContent={<span className="empty-inline">暂无服务商</span>}
+            emptyContent={(
+              <PageStateView
+                kind="empty"
+                eyebrow="PROVIDER MASTER DATA"
+                title="尚未记录服务商账号证据"
+                description="先创建服务商主数据，再在 VPS 表单中作为人工选择的供应商引用；这里不会反向同步观测端字段。"
+                action={(
+                  <Button variant="secondary" size="sm" onClick={openCreateDrawer}>
+                    补第一条服务商证据
+                  </Button>
+                )}
+                surface="empty"
+                compact
+              />
+            )}
           />
         )}
       </section>
@@ -360,9 +390,12 @@ export function ProvidersPage() {
         ariaLabel="服务商创建表单"
       >
         <div className="asset-create-drawer providers-drawer">
-          <p className="page-panel__description">
-            服务商是 VPS 资产的主数据引用；创建后即可在 VPS 表单中选择，不会修改已有 Node 事实。
-          </p>
+          <div className="asset-drawer-context">
+            <p className="asset-drawer-context__eyebrow">MASTER DATA EVIDENCE</p>
+            <p>
+              新建服务商只补齐资产台账的供应商与账号证据；创建后可在 VPS 表单中选择，不会修改已有 Node 事实。
+            </p>
+          </div>
           <form className="asset-create-form" onSubmit={handleCreateSubmit}>
             <fieldset className="asset-create-form__group">
               <legend>基础资料</legend>
@@ -403,9 +436,12 @@ export function ProvidersPage() {
         ariaLabel="服务商编辑表单"
       >
         <div className="asset-create-drawer providers-drawer">
-          <p className="page-panel__description">
-            编辑服务商主数据只影响资产台账展示和后续选择器，不会回写观测端的 provider hint。
-          </p>
+          <div className="asset-drawer-context">
+            <p className="asset-drawer-context__eyebrow">EDIT MASTER DATA</p>
+            <p>
+              编辑服务商主数据只影响资产台账展示和后续选择器，不会回写观测端的 provider hint 或其他已关联资产事实。
+            </p>
+          </div>
           <form className="asset-create-form" onSubmit={handleEditSubmit}>
             <fieldset className="asset-create-form__group">
               <legend>基础资料</legend>

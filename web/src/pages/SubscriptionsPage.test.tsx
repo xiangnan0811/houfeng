@@ -83,8 +83,11 @@ describe('SubscriptionsPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
     expect(screen.getByText('续费与成本证据')).toBeInTheDocument()
+    expect(screen.getByText('当前筛选上下文')).toBeInTheDocument()
+    expect(screen.getByText('订阅续费证据表')).toBeInTheDocument()
     expect(screen.getByText('当前筛选')).toBeInTheDocument()
-    expect(screen.getByText('最近续费')).toBeInTheDocument()
+    expect(screen.getByText('下一笔续费证据')).toBeInTheDocument()
+    expect(screen.getByText(/URL 是订阅证据表的请求真相/)).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '订阅创建表单' })).not.toBeInTheDocument()
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('生效中').length).toBeGreaterThan(0)
@@ -116,10 +119,14 @@ describe('SubscriptionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '创建第一条订阅' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('尚未记录订阅续费证据')).toBeInTheDocument())
+    expect(screen.getByText(/原始价格、周期和续费日期支撑资产成本判断/)).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '订阅创建表单' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '创建第一条订阅' }))
-    expect(screen.getByRole('dialog', { name: '订阅创建表单' })).toBeInTheDocument()
+    const createDialog = screen.getByRole('dialog', { name: '订阅创建表单' })
+    expect(createDialog).toBeInTheDocument()
+    expect(within(createDialog).getByText('RENEWAL / COST EVIDENCE')).toBeInTheDocument()
+    expect(within(createDialog).getByText(/VPS 绑定通过选择器完成/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('订阅 VPS'), { target: { value: 'vps_001' } })
     fireEvent.change(screen.getByLabelText('价格'), { target: { value: '24' } })
     fireEvent.change(screen.getByLabelText('币种'), { target: { value: 'usd' } })
@@ -168,6 +175,7 @@ describe('SubscriptionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('dialog', { name: '订阅创建表单' })).toBeInTheDocument())
+    expect(screen.getByText(/关闭抽屉后仍保留当前 VPS 筛选上下文/)).toBeInTheDocument()
     expect(screen.getByLabelText('订阅 VPS')).toHaveValue('vps_001')
     fireEvent.change(screen.getByLabelText('价格'), { target: { value: '99' } })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
@@ -242,7 +250,10 @@ describe('SubscriptionsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
     expect(screen.queryByRole('dialog', { name: '订阅编辑表单' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '编辑 sub_001' }))
-    expect(screen.getByRole('dialog', { name: '订阅编辑表单' })).toBeInTheDocument()
+    const editDialog = screen.getByRole('dialog', { name: '订阅编辑表单' })
+    expect(editDialog).toBeInTheDocument()
+    expect(within(editDialog).getByText('EDIT RENEWAL EVIDENCE')).toBeInTheDocument()
+    expect(within(editDialog).getByText(/不会提交 monthly_price/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('价格'), { target: { value: '24' } })
     fireEvent.change(screen.getByLabelText('计费周期'), { target: { value: 'quarterly' } })
     fireEvent.change(screen.getByLabelText('计费月数'), { target: { value: '3' } })
@@ -279,6 +290,30 @@ describe('SubscriptionsPage', () => {
         note: 'review',
       }),
     })
+  })
+
+  it('shows subscription evidence error state without treating it as missing data', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'subscriptions unavailable' }, 500))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('订阅证据读取失败')).toBeInTheDocument())
+    expect(screen.getByText('subscriptions unavailable')).toBeInTheDocument()
+    expect(screen.getByText(/不要把读取失败当作真实缺订阅/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重新读取订阅' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+    await waitFor(() => expect(screen.getByText('尚未记录订阅续费证据')).toBeInTheDocument())
   })
 
   it('resets subscription edit draft and errors after drawer cancel', async () => {
