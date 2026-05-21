@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/xiangnan0811/houfeng/compare/v0.17.0...v0.18.0) (2026-05-21)
+
+
+### Features
+
+* refine login page auth boundary copy ([#152](https://github.com/xiangnan0811/houfeng/issues/152)) ([de7e1b0](https://github.com/xiangnan0811/houfeng/commit/de7e1b071be9e6c0baf4c1c361a06090ac76d73d))
+
 ## [0.17.0](https://github.com/xiangnan0811/houfeng/compare/v0.16.0...v0.17.0) (2026-05-21)
 
 
