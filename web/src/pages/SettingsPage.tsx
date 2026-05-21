@@ -42,9 +42,9 @@ const SETTINGS_TAB_ITEMS: Array<{ value: SettingsTab; label: string }> = [
 ]
 
 const SETTINGS_TAB_CONTEXT: Record<SettingsTab, string> = {
-  general: '当前分组：通用与外观。先确认浏览器外观、本地主题与中心下发的默认采样/Probe 频率。',
-  notifications: '当前分组：通知与告警。先看通道状态，再维护新增渠道与 incident 默认通知策略。',
-  advanced: '当前分组：高级与策略。集中处理覆盖 JSON 与保留策略，保存前请确认风险边界。',
+  general: '当前分组：通用与外观。主题是本地浏览器偏好；默认采样/Probe 频率仍按页尾统一保存进入中心策略。',
+  notifications: '当前分组：通知与告警。先看通道状态，再维护新增渠道与 incident 默认通知策略；新增渠道确认后才进入主表单。',
+  advanced: '当前分组：高级与策略。集中处理覆盖 JSON 与保留策略；覆盖、清理窗口与持久化边界都在页尾统一提交前校验。',
 }
 
 function tabPanelClass(tab: SettingsTab, activeTab: SettingsTab) {
@@ -501,7 +501,7 @@ export function SettingsPage() {
         <p className="page-panel__eyebrow">设置</p>
         <h2 className="page-panel__title">设置 / Settings</h2>
         <p className="page-panel__description">
-          集中维护 Telegram 通知、默认频率、全局规则、少量覆盖与保留策略；先判断当前分组，再在页尾统一保存。
+          集中维护本地主题、Telegram/飞书通知、默认频率、全局规则、少量覆盖与保留策略；先判断当前分组，再在页尾统一保存。
         </p>
         <div className="settings-page__tabs">
           <Tabs variant="pill" value={activeTab} onChange={setActiveTab} items={SETTINGS_TAB_ITEMS} />
@@ -534,7 +534,7 @@ export function SettingsPage() {
               通知通道状态
             </h2>
             <p className="settings-notification-group__description">
-              已保存或正在编辑的 Telegram / 飞书通道会显示在这里；新增渠道仍先进入草稿，确认后才写入主表单。
+              已保存或正在编辑的 Telegram / 飞书通道会显示在这里；新增渠道仍先进入 modal 草稿，点击“添加并编辑”后才写入主表单，关闭会丢弃草稿。
             </p>
           </header>
           <div className="settings-notification-group__body">
@@ -579,12 +579,12 @@ export function SettingsPage() {
           </div>
         </section>
 
-        <DetailSection eyebrow="渠道管理" title="新增通知渠道">
+        <DetailSection eyebrow="渠道管理" title="新增通知渠道" ribbon="accent-2">
           <div className="settings-channel-manager">
             <p className="settings-channel-manager__hint">
               {hasNotificationChannels
-                ? '如需启用新的通知通道，请从这里选择并配置。'
-                : '当前未配置任何通知渠道，请点击下方按钮添加。'}
+                ? '如需启用新的通知通道，请从这里选择并配置；modal 草稿只有确认后才进入主表单，并仍需页尾统一保存。'
+                : '当前未配置任何通知渠道，请点击下方按钮添加；modal 草稿关闭即丢弃，确认后仍需页尾统一保存。'}
             </p>
             <button
               type="button"
@@ -629,7 +629,7 @@ export function SettingsPage() {
             保存状态与风险边界
           </h2>
           <p className="settings-save-footer__description">
-            本页保持单个全量保存：通知密钥、运行时接管、覆盖 JSON 与保留策略会一起校验并提交。
+            本页保持单个全量保存：通知密钥、运行时接管、覆盖 JSON 与保留策略会一起校验并提交；未替换的 Telegram Token 不会写入 payload。
           </p>
           <ul className="settings-save-footer__summary" aria-label="保存前配置摘要">
             {statusPreviewItems.map((item) => (

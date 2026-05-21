@@ -47,7 +47,7 @@ export function FrequencyDefaultsSection({
   onProbeFrequencyDefaultsChange,
 }: FrequencyDefaultsSectionProps) {
   return (
-    <DetailSection eyebrow="频率档位" title="默认频率档位">
+    <DetailSection eyebrow="频率档位" title="默认频率档位" ribbon="normal">
       <SectionIntro>当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。</SectionIntro>
       <div className="settings-form-grid">
         <FrequencySelect

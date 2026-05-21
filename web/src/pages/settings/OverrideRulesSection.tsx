@@ -65,9 +65,9 @@ function TargetTypeSummary() {
 
 export function OverrideRulesSection({ form, onChange }: OverrideRulesSectionProps) {
   return (
-    <DetailSection eyebrow="覆盖规则" title="少量覆盖规则" aside={<TargetTypeSummary />}>
+    <DetailSection eyebrow="覆盖规则" title="少量覆盖规则" ribbon="notice" aside={<TargetTypeSummary />}>
       <SectionIntro>
-        仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；异常默认覆盖仍仅作为持久化策略保存。
+        仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；异常默认覆盖仍仅作为持久化策略保存，并在页尾统一提交前校验 JSON 数组。
       </SectionIntro>
       <div className="settings-cluster">
         <OverrideTextarea

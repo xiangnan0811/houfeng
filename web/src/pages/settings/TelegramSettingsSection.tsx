@@ -79,7 +79,7 @@ export function TelegramSettingsSection({
               : '当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。'}
         </SectionIntro>
         <SectionIntro>
-          接口不会回显明文 Token。留空会继续保留当前已保存的 Token；只有在需要替换时才输入新的 Token。
+          接口不会回显明文 Token；页面只展示 masked token summary。留空会继续保留当前已保存的 Token，并在保存 payload 中省略 bot_token；只有在需要替换时才输入新的 Token。
         </SectionIntro>
       </div>
     </div>
@@ -93,6 +93,7 @@ export function TelegramSettingsSection({
     <DetailSection
       eyebrow="Telegram"
       title="Telegram 通知设置"
+      ribbon="accent-2"
       aside={
         <div className="settings-section-aside">
           <span className={`badge ${settings.token_present ? 'badge--success' : ''}`}>

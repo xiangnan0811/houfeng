@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { ThemeProvider } from '../lib/theme-context'
 import { SettingsPage } from './SettingsPage'
 
 function mockJSONResponse(body: unknown, status = 200) {
@@ -94,6 +95,14 @@ describe('SettingsPage', () => {
     vi.restoreAllMocks()
   })
 
+  function renderSettingsPage() {
+    return render(
+      <ThemeProvider>
+        <SettingsPage />
+      </ThemeProvider>,
+    )
+  }
+
   function openTab(name: string) {
     fireEvent.click(screen.getByRole('tab', { name }))
   }
@@ -103,22 +112,29 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
   }
 
+  function expectDetailSectionRibbon(heading: string, ribbonClass: string) {
+    expect(screen.getByRole('heading', { name: heading }).closest('section')).toHaveClass(ribbonClass)
+  }
+
   it('loads persisted settings into the required sections and keeps Telegram and retention copy truthful', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)),
     )
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     expect(screen.getByText('正在加载设置…')).toBeInTheDocument()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
     expect(screen.getByText('设置', { selector: '.page-panel__eyebrow' })).toBeInTheDocument()
-    expect(screen.getByText('当前分组：通用与外观。先确认浏览器外观、本地主题与中心下发的默认采样/Probe 频率。')).toBeInTheDocument()
+    expect(screen.getByText('当前分组：通用与外观。主题是本地浏览器偏好；默认采样/Probe 频率仍按页尾统一保存进入中心策略。')).toBeInTheDocument()
+    expect(screen.getByText('主题只写入当前浏览器的本地偏好，不会提交到中心设置，也不会影响其他操作员或运行时策略。')).toBeInTheDocument()
+    expectDetailSectionRibbon('主题', 'detail-section--ribbon-notice')
     expect(screen.getByText('频率档位')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '默认频率档位' })).toBeInTheDocument()
+    expectDetailSectionRibbon('默认频率档位', 'detail-section--ribbon-normal')
     expect(screen.getByLabelText('当前节点主机样本频率')).toHaveValue('5s')
     expect(
       screen.getByText('当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。'),
@@ -126,12 +142,15 @@ describe('SettingsPage', () => {
 
     openTelegramSettings()
 
-    expect(screen.getByText('当前分组：通知与告警。先看通道状态，再维护新增渠道与 incident 默认通知策略。')).toBeInTheDocument()
+    expect(screen.getByText('当前分组：通知与告警。先看通道状态，再维护新增渠道与 incident 默认通知策略；新增渠道确认后才进入主表单。')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '通知通道状态' })).toBeInTheDocument()
-    expect(screen.getByText('已保存或正在编辑的 Telegram / 飞书通道会显示在这里；新增渠道仍先进入草稿，确认后才写入主表单。')).toBeInTheDocument()
+    expect(screen.getByText('已保存或正在编辑的 Telegram / 飞书通道会显示在这里；新增渠道仍先进入 modal 草稿，点击“添加并编辑”后才写入主表单，关闭会丢弃草稿。')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument()
+    expectDetailSectionRibbon('Telegram 通知设置', 'detail-section--ribbon-accent-2')
+    expectDetailSectionRibbon('新增通知渠道', 'detail-section--ribbon-accent-2')
     expect(screen.getByText('全局默认')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '全局默认规则' })).toBeInTheDocument()
+    expectDetailSectionRibbon('全局默认规则', 'detail-section--ribbon-notice')
     expect(screen.getByLabelText('Telegram Chat ID')).toHaveValue('chat-id')
 
     expect(
@@ -145,32 +164,37 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('switch', { name: '运行时接管' })).not.toBeChecked()
     expect(screen.getByText('当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。')).toBeInTheDocument()
     expect(
-      screen.getByText('heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路。'),
+      screen.getByText('heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路；阈值字段仍按页尾统一保存后整体校验提交。'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('接口不会回显明文 Token；页面只展示 masked token summary。留空会继续保留当前已保存的 Token，并在保存 payload 中省略 bot_token；只有在需要替换时才输入新的 Token。'),
     ).toBeInTheDocument()
 
     openTab('高级与策略')
 
-    expect(screen.getByText('当前分组：高级与策略。集中处理覆盖 JSON 与保留策略，保存前请确认风险边界。')).toBeInTheDocument()
+    expect(screen.getByText('当前分组：高级与策略。集中处理覆盖 JSON 与保留策略；覆盖、清理窗口与持久化边界都在页尾统一提交前校验。')).toBeInTheDocument()
     expect(screen.getByText('覆盖规则')).toBeInTheDocument()
     expect(screen.getByText('保留策略')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '少量覆盖规则' })).toBeInTheDocument()
+    expectDetailSectionRibbon('少量覆盖规则', 'detail-section--ribbon-notice')
     expect(screen.getByRole('heading', { name: '数据保留策略' })).toBeInTheDocument()
+    expectDetailSectionRibbon('数据保留策略', 'detail-section--ribbon-notice')
     expect((screen.getByLabelText('节点标签覆盖规则 JSON') as HTMLTextAreaElement).value).toContain(
       '"label": "edge"',
     )
     expect(
       screen.getByText(
-        '仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；异常默认覆盖仍仅作为持久化策略保存。',
+        '仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；异常默认覆盖仍仅作为持久化策略保存，并在页尾统一提交前校验 JSON 数组。',
       ),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础。'),
+      screen.getByText('中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础；窗口变更只在保存后进入持久化策略。'),
     ).toBeInTheDocument()
     expect(
       screen.queryByText('当前仅保存保留策略，尚未自动执行清理或聚合任务。'),
     ).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '保存状态与风险边界' })).toBeInTheDocument()
-    expect(screen.getByText('本页保持单个全量保存：通知密钥、运行时接管、覆盖 JSON 与保留策略会一起校验并提交。')).toBeInTheDocument()
+    expect(screen.getByText('本页保持单个全量保存：通知密钥、运行时接管、覆盖 JSON 与保留策略会一起校验并提交；未替换的 Telegram Token 不会写入 payload。')).toBeInTheDocument()
   })
 
   it('keeps the runtime management toggle checked when persisted settings explicitly disable Telegram delivery', async () => {
@@ -189,7 +213,7 @@ describe('SettingsPage', () => {
       ),
     )
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
@@ -215,7 +239,7 @@ describe('SettingsPage', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
@@ -308,7 +332,7 @@ describe('SettingsPage', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
@@ -411,7 +435,7 @@ describe('SettingsPage', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
@@ -480,7 +504,7 @@ describe('SettingsPage', () => {
       vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)),
     )
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument(),
@@ -507,7 +531,7 @@ describe('SettingsPage', () => {
       vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)),
     )
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument(),
@@ -537,7 +561,7 @@ describe('SettingsPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument())
 
@@ -589,7 +613,7 @@ describe('SettingsPage', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<SettingsPage />)
+    renderSettingsPage()
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '设置 / Settings' })).toBeInTheDocument(),
