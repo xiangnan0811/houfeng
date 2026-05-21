@@ -231,8 +231,8 @@ function load5ThresholdKey(field: ThresholdField): keyof SettingsIncidentDefault
 
 export function IncidentDefaultsSection({ value, onChange }: IncidentDefaultsSectionProps) {
   return (
-    <DetailSection eyebrow="全局默认" title="全局默认规则">
-      <SectionIntro>heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路。</SectionIntro>
+    <DetailSection eyebrow="全局默认" title="全局默认规则" ribbon="notice">
+      <SectionIntro>heartbeat/sweep 时间参数与通知时机开关已接入实时异常与通知链路；阈值字段仍按页尾统一保存后整体校验提交。</SectionIntro>
       <IncidentDefaultsEditor value={value} onChange={onChange} />
     </DetailSection>
   )

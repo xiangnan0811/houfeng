@@ -28,7 +28,7 @@ function RetentionInput({ ariaLabel, value, onChange }: RetentionInputProps) {
 
 export function RetentionPolicySection({ value, onChange }: RetentionPolicySectionProps) {
   return (
-    <DetailSection eyebrow="保留策略" title="数据保留策略">
+    <DetailSection eyebrow="保留策略" title="数据保留策略" ribbon="notice">
       <div className="settings-form-grid settings-form-grid--tight">
         <RetentionInput
           ariaLabel="原始层保留天数"
@@ -51,7 +51,7 @@ export function RetentionPolicySection({ value, onChange }: RetentionPolicySecti
           onChange={(nextValue) => onChange({ notificationLayerDays: nextValue })}
         />
       </div>
-      <SectionIntro>中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础。</SectionIntro>
+      <SectionIntro>中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础；窗口变更只在保存后进入持久化策略。</SectionIntro>
     </DetailSection>
   )
 }
