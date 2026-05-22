@@ -37,7 +37,7 @@ export function NodesBatchPanel({
 }: NodesBatchPanelProps) {
   return (
     <>
-      {hasActiveFilters && filteredNodeCount > 0 ? (
+      {filteredNodeCount > 0 ? (
         <div className={`batch-bar${selectAll ? ' batch-bar--active' : ''}`}>
           <label className="batch-bar__toggle">
             <input
@@ -47,7 +47,9 @@ export function NodesBatchPanel({
             />
             全选 ({filteredNodeCount})
           </label>
-          <span className="batch-bar__scope">批量范围：当前筛选范围内的 {filteredNodeCount} 个节点</span>
+          <span className="batch-bar__scope">
+            批量范围：{hasActiveFilters ? '当前筛选范围内' : '完整列表中的'} {filteredNodeCount} 个节点
+          </span>
           {selectAll ? (
             <div className="batch-bar__actions">
               <button

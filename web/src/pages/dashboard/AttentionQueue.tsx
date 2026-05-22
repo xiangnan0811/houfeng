@@ -73,7 +73,7 @@ export function AttentionQueue({ items }: AttentionQueueProps) {
       </div>
       {items.length > visibleItems.length ? (
         <p className="dashboard-attention__limit">
-          首页显示最高优先级 <MonoDigits>{visibleItems.length}</MonoDigits> 项；完整队列请进入节点、目标或事件页处理。
+          仅显示 P<MonoDigits>{visibleItems.length}</MonoDigits> 以内；完整队列进节点 / 目标 / 事件。
         </p>
       ) : null}
     </div>

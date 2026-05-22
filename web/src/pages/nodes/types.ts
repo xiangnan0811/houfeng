@@ -15,7 +15,9 @@ export type NodeFilterState = {
 
 export type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
 
-export type NodeListView = 'all' | 'binding-conflict'
+export type NodeListView = 'all' | 'runtime-attention' | 'binding-conflict'
+
+export type NodeQuickView = 'all' | 'abnormal' | 'onboarding' | 'runtime-attention' | 'binding-conflict'
 
 export type PendingNodeConfirmation = {
   nodeId: string

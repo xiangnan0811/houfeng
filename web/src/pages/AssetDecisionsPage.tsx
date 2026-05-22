@@ -77,10 +77,10 @@ const INITIAL_PAGE_STATE: PageState = {
   cancel: [],
 }
 const QUEUE_CONTEXT_ITEMS = [
-  '排序依据：续费窗口、未评估、迁移/取消、Node 关联数量、订阅证据缺口',
-  '订阅读取失败不会被当成缺订阅',
-  'Node 信号只显示关联数量，不展示健康/心跳',
-  'Drawer 是处理单台 VPS 续费决策的次级面板',
+  '续费 / 未评估 / 迁移取消 / Node / 订阅排序',
+  '订阅读取失败 ≠ 缺订阅',
+  'Node 只显示数量',
+  'Drawer 处理',
 ]
 
 function describeError(error: unknown, fallback: string): string {
@@ -213,7 +213,7 @@ function renderSubscriptionSignal(subscription: SubscriptionRecord | null) {
       <div className="asset-decision-signal asset-decision-signal--critical">
         <span>订阅</span>
         <strong>缺订阅</strong>
-        <small>无法判断续费成本</small>
+        <small>成本未知</small>
       </div>
     )
   }
@@ -255,7 +255,7 @@ function renderDecisionQueueItem(
       <div className="asset-decision-row__rank">
         <strong>P{index + 1}</strong>
         <span>{queueReasonLabel(item)}</span>
-        <small>按证据排序</small>
+        <small>P{index + 1}</small>
       </div>
       <div className="asset-decision-row__main">
         <div className="asset-decision-row__title">
@@ -286,7 +286,7 @@ function renderDecisionQueueItem(
               '未关联'
             )}
           </strong>
-          <small>仅显示关联数量</small>
+          <small>数量</small>
         </div>
         <div className="asset-decision-quality" aria-label={`${vps.display_name} 数据质量`}>
           {renderQualityIssues(item.qualityIssues)}
@@ -303,7 +303,7 @@ function renderDecisionQueueItem(
         </Link>
         <Button
           size="sm"
-          variant="secondary"
+          variant="primary"
           aria-label={`处理 ${vps.vps_id}`}
           onClick={(event) => {
             event.stopPropagation()
@@ -451,21 +451,21 @@ export function AssetDecisionsPage() {
     {
       label: '优先处理',
       value: `${priorityDecisionCount}`,
-      meta: `${renewalWindow} 天续费窗口 + 未评估`,
+      meta: `${renewalWindow} 天 + 未评估`,
       tone: priorityDecisionCount > 0 ? 'critical' : 'normal',
     },
     {
       label: '证据缺口',
       value: evidenceUnavailable ? '—' : `${qualityGapCount}`,
       meta: evidenceUnavailable
-        ? '队列证据读取失败，缺口未评估'
-        : `订阅证据成功后：缺订阅 ${missingSubscriptionCount} / Node 数量为 0 的 ${unlinkedCount}`,
+        ? '证据失败，缺口未评估'
+        : `缺订阅 ${missingSubscriptionCount} / 未关联 ${unlinkedCount}`,
       tone: qualityGapCount > 0 ? 'alert' : 'normal',
     },
     {
       label: 'Drawer 处理',
       value: `${lifecycleActionCount}`,
-      meta: `迁移 ${state.migrate.length} / 取消 ${state.cancel.length}；逐台打开处理`,
+      meta: `迁移 ${state.migrate.length} / 取消 ${state.cancel.length}`,
       tone: lifecycleActionCount > 0 ? 'alert' : 'normal',
     },
   ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'alert' | 'critical' }>
@@ -557,13 +557,11 @@ export function AssetDecisionsPage() {
         <div>
           <div className="page-panel__eyebrow">ASSET LEDGER</div>
           <h1 className="page-panel__title">资产决策</h1>
-          <p className="page-panel__description">
-            Asset Ledger 的主工作队列：先在统一队列中判断续费、迁移、取消和资料缺口，再进入单台 VPS Drawer 处理续费决策。
-          </p>
+          <p className="page-panel__description">续费 / 迁移 / 取消 / 缺口。</p>
         </div>
         <div className="page-panel__actions">
-          <Link className="btn btn--secondary btn--md" to="/vps">VPS 库存</Link>
-          <Link className="btn btn--secondary btn--md" to="/subscriptions">订阅列表</Link>
+          <Link className="btn btn--ghost btn--md" to="/vps">VPS 库存</Link>
+          <Link className="btn btn--ghost btn--md" to="/subscriptions">订阅列表</Link>
         </div>
       </section>
 
@@ -572,12 +570,15 @@ export function AssetDecisionsPage() {
           <div>
             <p className="section-heading__eyebrow">DECISION QUEUE</p>
             <h2>资产决策工作队列</h2>
-            <p>按续费窗口、未评估、迁移/取消、Node 关联数量和订阅证据缺口排序；订阅读取失败会显示错误，不会被当成真实缺订阅。</p>
-            <ul className="asset-decision-board__context" aria-label="队列证据边界">
-              {QUEUE_CONTEXT_ITEMS.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+            <p>证据排序。</p>
+            <details className="asset-decision-board__context" aria-label="队列证据边界">
+              <summary>证据边界</summary>
+              <ul>
+                {QUEUE_CONTEXT_ITEMS.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </details>
             <dl className="asset-decision-board__summary" aria-label="资产决策指标">
               <div>
                 <dt>当前视图 / 全部</dt>
@@ -591,15 +592,15 @@ export function AssetDecisionsPage() {
                 <dt>证据缺口</dt>
                 <dd>
                   {evidenceUnavailable ? (
-                    '队列证据失败，缺口未评估'
+                    '证据失败，缺口未评估'
                   ) : (
-                    <>缺订阅 <MonoDigits>{missingSubscriptionCount}</MonoDigits> / 未关联 Node <MonoDigits>{unlinkedCount}</MonoDigits></>
+                    <>缺订阅 <MonoDigits>{missingSubscriptionCount}</MonoDigits> / 未关联 <MonoDigits>{unlinkedCount}</MonoDigits></>
                   )}
                 </dd>
               </div>
               <div>
                 <dt>迁移 / 取消</dt>
-                <dd><MonoDigits>{state.migrate.length}</MonoDigits> / <MonoDigits>{state.cancel.length}</MonoDigits> 台待跟进</dd>
+                <dd><MonoDigits>{state.migrate.length}</MonoDigits> / <MonoDigits>{state.cancel.length}</MonoDigits></dd>
               </div>
             </dl>
           </div>
@@ -616,11 +617,9 @@ export function AssetDecisionsPage() {
                 ))}
               </select>
             </label>
-            <p>窗口只重载续费候选证据；队列仍使用已加载订阅证据和 VPS 决策切片。</p>
           </div>
         </div>
         <div className="asset-decision-tabs" aria-label="队列筛选上下文">
-          <p>筛选不会改变排序公式；缺订阅仅在全量订阅证据成功读取后才作为资料缺口显示。</p>
           <Tabs items={queueTabs} value={queueView} onChange={setQueueView} variant="pill" />
         </div>
         <div className="asset-decision-focus" aria-label="资产决策处理焦点">
@@ -649,7 +648,7 @@ export function AssetDecisionsPage() {
             title="资产决策队列不可用"
             description={(
               <>
-                {state.vpsError}。队列证据读取失败时不会把 VPS 渲染成缺订阅，请重试；如果错误来自订阅证据，可先查看订阅列表确认数据源。
+                {state.vpsError}。缺口未评估，请重试。
               </>
             )}
             technicalSummary={state.vpsError}
@@ -665,7 +664,7 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="empty"
             title="当前视图暂无待处理 VPS"
-            description="这组队列暂时没有需要人工决策的资产；可回到全部队列、库存或订阅证据继续核对。若订阅证据曾读取失败，请不要把空视图解读为缺订阅事实。"
+            description="这组队列暂无待处理资产。可回到全部、库存或订阅。"
             action={queueEmptyAction}
             surface="empty"
             compact
@@ -684,9 +683,6 @@ export function AssetDecisionsPage() {
           <div>
             <p className="section-heading__eyebrow">RENEWAL EVIDENCE</p>
             <h2>续费候选证据</h2>
-            <p className="section-heading__description">
-              次级证据区只展示续费窗口内的订阅记录，用来支撑上方队列判断；读取失败时保留错误边界，不反推 VPS 缺订阅。
-            </p>
           </div>
           <span className="section-heading__meta">
             {renewalEvidenceLabel}

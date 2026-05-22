@@ -11,7 +11,6 @@ type NodesSupportSurfaceProps = {
   displayedNodeCount: number
   abnormalNodeCount: number
   pendingOnboardingNodeCount: number
-  maintenanceOrPausedNodeCount: number
   evidenceLead: NodeEvidenceLead
   topEvidence: NodeEvidenceItem | null
   filterContext: string[]
@@ -28,7 +27,6 @@ export function NodesSupportSurface({
   displayedNodeCount,
   abnormalNodeCount,
   pendingOnboardingNodeCount,
-  maintenanceOrPausedNodeCount,
   evidenceLead,
   topEvidence,
   filterContext,
@@ -59,9 +57,6 @@ export function NodesSupportSurface({
         <div>
           <p className="observability-support__eyebrow">OBSERVABILITY SUPPORT</p>
           <h2 className="observability-support__title">资产判断支撑</h2>
-          <p className="observability-support__description">
-            用运行事实确认服务器是否在线、证据是否新鲜，以及哪些 VPS 需要补接入、维护解释或异常排查。
-          </p>
         </div>
         <div className="observability-support__scope" aria-label="当前节点筛选范围">
           <span>{hasActiveFilters ? '当前筛选' : '完整库存'}</span>
@@ -107,7 +102,7 @@ export function NodesSupportSurface({
               <MonoDigits>{abnormalNodeCount}</MonoDigits>
             </Badge>
           </div>
-          <p>健康状态不是正常的节点，优先进入异常排查和资产稳定性判断。</p>
+          <p>健康异常</p>
           <div className="observability-support-lane__actions">
             <Button
               variant="secondary"
@@ -130,7 +125,7 @@ export function NodesSupportSurface({
               <MonoDigits>{pendingOnboardingNodeCount}</MonoDigits>
             </Badge>
           </div>
-          <p>待接入、未绑定或指纹变更待确认的节点会削弱 VPS 证据可信度。</p>
+          <p>未接入 / 待确认</p>
           <div className="observability-support-lane__actions">
             <Button
               variant="secondary"
@@ -146,38 +141,12 @@ export function NodesSupportSurface({
           </div>
         </article>
 
-        <article className="observability-support-lane observability-support-lane--maintenance">
-          <div className="observability-support-lane__head">
-            <span>维护 / 暂停</span>
-            <Badge
-              variant="count"
-              tone={maintenanceOrPausedNodeCount > 0 ? 'maintenance' : 'normal'}
-            >
-              <MonoDigits>{maintenanceOrPausedNodeCount}</MonoDigits>
-            </Badge>
-          </div>
-          <p>维护或暂停会解释趋势空窗，避免把人为窗口误判成资产故障。</p>
-          <div className="observability-support-lane__actions">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onRuntimeAttentionClick}
-              disabled={maintenanceOrPausedNodeCount === 0}
-            >
-              运行关注
-            </Button>
-            <Link className="observability-support-link" to="/events?object_type=node&maintenance_only=1">
-              维护事件
-            </Link>
-          </div>
-        </article>
-
         <article className="observability-support-lane observability-support-lane--asset">
           <div className="observability-support-lane__head">
             <span>VPS 关联</span>
             <Badge variant="info" tone="neutral">资产上下文</Badge>
           </div>
-          <p>需要判断资产健康时，先从未关联 VPS 和节点详情确认这台服务器是否有可用观测证据。</p>
+          <p>资产侧核对</p>
           <div className="observability-support-lane__actions">
             <Link className="observability-support-link" to="/vps?view=unlinked">
               未关联 VPS
@@ -219,9 +188,9 @@ export function NodesSupportSurface({
             stable
             glyph={<StatusGlyph state="normal" ariaLabel="Node 证据稳定" />}
             eyebrow="运行证据"
-            title="没有需要优先核对的 Node"
-            description="当前列表没有异常、接入缺口、维护或暂停对象。"
-            meta="继续从 VPS 库存、订阅和资产决策队列核对资产侧事实。"
+            title="Node 当前稳定"
+            description="无异常 / 接入缺口。"
+            meta="VPS 库存 / 资产决策"
             action={
               <Link className="btn btn--ghost btn--sm" to="/vps">
                 查看 VPS

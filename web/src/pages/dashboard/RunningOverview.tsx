@@ -23,13 +23,13 @@ export function RunningOverview({ overview, maintenanceTotal, contextItems }: Ru
           <StatusGlyph state={isMaintenance ? 'maintenance' : 'normal'} size="md" />
           <div>
             <span className="dashboard-overview-panel__eyebrow">
-              {isMaintenance ? '观察窗口' : '稳定窗口'}
+              {isMaintenance ? '维护' : '运行'}
             </span>
-            <h3>{isMaintenance ? '维护观察中' : '当前没有活跃异常'}</h3>
+            <h3>{isMaintenance ? '维护中' : '无活跃异常'}</h3>
             <p>
               {isMaintenance
-                ? '维护对象进入观察状态，首页保留事件和库存上下文，不把维护态提升为紧急异常。'
-                : '处理队列保持为空，首页转为运行概览与管理入口。'}
+                ? '维护态观察。'
+                : '处理队列为空。'}
             </p>
           </div>
         </div>
