@@ -938,3 +938,36 @@ Updated MetricChart hover tooltips to show second-level timestamps while keeping
 ### Next Steps
 
 - None - task complete
+
+
+## Session 147: Frontend phase 2 IA
+
+**Date**: 2026-05-22
+**Task**: Frontend phase 2 IA
+**Branch**: `feat/ui-ia-phase-2`
+
+### Summary
+
+Refined Dashboard, Nodes, and Asset Decisions into workflow-first frontend information architecture; updated web spec and verification artifacts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4ff1e02` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
