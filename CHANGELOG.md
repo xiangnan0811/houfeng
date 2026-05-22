@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/xiangnan0811/houfeng/compare/v0.18.0...v0.19.0) (2026-05-22)
+
+
+### Features
+
+* refine Houfeng workbench visual system ([6d77cef](https://github.com/xiangnan0811/houfeng/commit/6d77cef1e5243b4a9ab89080485e1af002866bb8))
+
 ## [0.18.0](https://github.com/xiangnan0811/houfeng/compare/v0.17.0...v0.18.0) (2026-05-21)
 
 
