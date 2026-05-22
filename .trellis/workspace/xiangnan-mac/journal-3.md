@@ -971,3 +971,44 @@ Refined Dashboard, Nodes, and Asset Decisions into workflow-first frontend infor
 ### Next Steps
 
 - None - task complete
+
+
+## Session 148: Frontend IA compression correction
+
+**Date**: 2026-05-22
+**Task**: Frontend IA compression and hierarchy pass
+**Branch**: `feat/ui-ia-phase-2`
+
+### Summary
+
+Corrected the phase-two frontend IA result after density review: compressed explanatory copy, reduced decorative visual weight, and tightened Dashboard, Nodes, VPS, and Asset Decisions around workflow hierarchy.
+
+### Main Changes
+
+- Compressed visible explanatory prose across Dashboard command surface, Nodes hero/support/toolbar, VPS inventory and create flows, and Asset Decisions queue/evidence surfaces.
+- Weakened residual glow, gradients, decorative overlays, hover lift, and tinted panel emphasis in page-level CSS while preserving the Houfeng v2 dark-first theme.
+- Kept primary workflows explicit: Dashboard `今日第一步`, Nodes quick view/list scanning, VPS inventory lens/table, and Asset Decisions priority queue with row-level handling.
+- Updated route tests to assert compact labels and evidence boundaries instead of long explanatory copy.
+- Archived Trellis task `05-22-ui-ia-compression-hierarchy` after verification.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `954e82c` | feat: compress frontend workflow hierarchy |
+
+### Testing
+
+- [OK] `cd web && TMPDIR=/Users/weibo/Code/houfeng/web/.tmp npx vitest run src/pages/DashboardPage.test.tsx src/pages/NodesPage.test.tsx src/pages/VPSPage.test.tsx src/pages/AssetDecisionsPage.test.tsx` — 4 files / 49 tests passed.
+- [OK] `TMPDIR=/Users/weibo/Code/houfeng/web/.tmp make verify-web` — lint, 63 Vitest files / 495 tests, TypeScript build, and Vite build passed.
+- [OK] Browser sanity report updated at `.trellis/tasks/archive/2026-05/05-22-ui-ia-compression-hierarchy/research/browser-sanity.md` with PASS with caveats.
+- [WARN] Local Node is `v24.14.1`; `web/package.json` requires `22.x`.
+- [WARN] `npm ci` reports one moderate audit item; dependencies were not changed for this UI/IA task.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
