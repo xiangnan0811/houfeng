@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 145
-- **Last Active**: 2026-05-18
+- **Total Sessions**: 146
+- **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~907 | Active |
+| `journal-3.md` | ~940 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 146 | 2026-05-22 | 前端第一阶段 UI 视觉优化收口 | `6d77cef` | `ui-workbench-visual-pass` |
 | 145 | 2026-05-18 | 修复资产联动割裂体验 | `9273667` | `fix/integration-linkage-ux` |
 | 144 | 2026-05-18 | Show seconds in chart tooltips | `8081244` | `fix/node-chart-tooltip-seconds` |
 | 143 | 2026-05-18 | Fix agent installer restart behavior | `4dffa97` | `fix/agent-installer-restart-behavior` |

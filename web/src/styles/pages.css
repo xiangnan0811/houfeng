@@ -256,10 +256,10 @@
   min-width: 0;
 }
 
-/* Hero panel: like page-panel but with the brand-accent backdrop on top of dashboard / overview pages */
+/* Hero panel: restrained workbench entry surface for overview pages */
 .hero-panel {
   min-width: 0;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-bg-elevated) 88%, transparent), var(--panel-bg));
+  background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-3);
   padding: var(--space-5) var(--space-6);
@@ -270,10 +270,12 @@
 .hero-panel::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: var(--bg-aurora);
+  inset: var(--space-4) auto var(--space-4) 0;
+  width: var(--border-w-strong);
+  background: var(--accent);
+  border-radius: var(--radius-pill);
   pointer-events: none;
-  opacity: 0.48;
+  opacity: 0.72;
 }
 .hero-panel__content,
 .hero-panel__meta {
@@ -345,17 +347,12 @@
 .dashboard-command-surface::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: var(--space-4) auto var(--space-4) 0;
+  width: var(--border-w-strong);
   pointer-events: none;
-  background:
-    linear-gradient(
-      120deg,
-      color-mix(in srgb, var(--surface-elevated) 18%, transparent),
-      transparent 34%,
-      color-mix(in srgb, var(--dashboard-command-color) 4%, transparent) 66%,
-      transparent
-    );
-  opacity: 0.78;
+  background: var(--dashboard-command-color);
+  border-radius: var(--radius-pill);
+  opacity: 0.72;
 }
 html.theme-houfeng-light .dashboard-command-surface,
 html.theme-classic-light .dashboard-command-surface {
@@ -473,26 +470,14 @@ html.theme-classic-light .dashboard-command-surface {
   border: var(--border-w) solid color-mix(in srgb, var(--dashboard-focus-color) 18%, var(--border));
   border-top-color: color-mix(in srgb, var(--dashboard-focus-color) 42%, var(--border));
   border-radius: var(--radius-1);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--dashboard-focus-color) 6%, transparent),
-      transparent 76%
-    ),
-    color-mix(in srgb, var(--surface-elevated) 18%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 18%, transparent);
   transition:
     background-color var(--dur-micro) var(--ease-calm),
     border-color var(--dur-micro) var(--ease-calm);
 }
 .dashboard-command-focus__item:hover {
   border-color: color-mix(in srgb, var(--dashboard-focus-color) 34%, var(--border));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--dashboard-focus-color) 8%, transparent),
-      transparent 76%
-    ),
-    color-mix(in srgb, var(--surface-elevated) 34%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 34%, transparent);
 }
 .dashboard-command-focus__item:focus-visible {
   outline: var(--border-w-strong) solid var(--accent);
@@ -561,9 +546,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-4);
   border: var(--border-w) solid color-mix(in srgb, var(--dashboard-primary-color) 42%, var(--border));
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--dashboard-primary-color) 14%, transparent), transparent 62%),
-    color-mix(in srgb, var(--surface-elevated) 46%, transparent);
+  background: color-mix(in srgb, var(--dashboard-primary-color) 8%, var(--surface));
 }
 .dashboard-command-primary::before {
   content: '';
@@ -1270,15 +1253,11 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-4);
   border: var(--border-w) solid color-mix(in srgb, var(--border) 82%, transparent);
   border-radius: var(--radius-1);
-  background:
-    linear-gradient(120deg, color-mix(in srgb, var(--surface-elevated) 44%, transparent), transparent 64%),
-    color-mix(in srgb, var(--surface) 74%, transparent);
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
 }
 .dashboard-overview-panel--maintenance .dashboard-overview-panel__lead {
   border-color: color-mix(in srgb, var(--color-state-maintenance) 32%, var(--border));
-  background:
-    linear-gradient(120deg, color-mix(in srgb, var(--color-state-maintenance) 9%, transparent), transparent 62%),
-    color-mix(in srgb, var(--surface) 74%, transparent);
+  background: color-mix(in srgb, var(--color-state-maintenance) 6%, var(--surface));
 }
 .dashboard-overview-panel__eyebrow {
   display: block;
@@ -1737,21 +1716,16 @@ html.theme-classic-light .dashboard-command-surface {
 /* Detail section: collapsible sub-block with eyebrow + title + body */
 .detail-section {
   min-width: 0;
-  background:
-    linear-gradient(180deg, var(--panel-bg-elevated) 0%, var(--panel-bg) 100%);
+  background: var(--panel-bg);
   border: var(--border-w) solid var(--panel-border);
   border-radius: var(--radius-3);
-  box-shadow:
-    0 var(--border-w) 0 color-mix(in srgb, var(--text-primary) 3%, transparent) inset,
-    var(--shadow-soft);
+  box-shadow: var(--shadow-soft);
   overflow: hidden;
 }
 .detail-section__header {
   padding: var(--space-4) var(--space-5);
   border-bottom: var(--border-w) solid var(--panel-border);
-  background:
-    linear-gradient(90deg, var(--panel-highlight) 0%, transparent 42%),
-    color-mix(in srgb, var(--panel-bg-muted) 82%, transparent);
+  background: var(--panel-bg-muted);
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -1827,8 +1801,7 @@ html.theme-classic-light .dashboard-command-surface {
   opacity: 0.75;
 }
 .summary-card {
-  background:
-    linear-gradient(180deg, var(--control-bg-hover) 0%, var(--control-bg) 100%);
+  background: var(--control-bg);
   border: var(--border-w) solid var(--control-border);
   border-radius: var(--radius-2);
   padding: var(--space-3) var(--space-4);
@@ -1900,8 +1873,7 @@ html.theme-classic-light .dashboard-command-surface {
   min-height: 72px;
   padding: var(--space-3) var(--space-4);
   color: var(--text-primary);
-  background:
-    linear-gradient(180deg, var(--control-bg-hover) 0%, var(--control-bg) 100%);
+  background: var(--control-bg);
   border: var(--border-w) solid var(--control-border);
   border-radius: var(--radius-2);
   cursor: pointer;
@@ -2042,8 +2014,7 @@ html.theme-classic-light .dashboard-command-surface {
 
 /* Empty / inline empty states */
 .empty-state {
-  background:
-    linear-gradient(180deg, var(--panel-bg-elevated), var(--panel-bg));
+  background: var(--panel-bg);
   border: var(--border-w) dashed var(--border-dashed);
   border-radius: var(--radius-2);
   padding: var(--space-6);
@@ -2279,10 +2250,8 @@ html.theme-classic-light .dashboard-command-surface {
 }
 .page-stack textarea { font-family: var(--font-mono); font-size: var(--type-code-size); }
 .page-stack button:not(.btn):not(.tab):not(.toggle):not(.filter-chip__remove):not(.data-table__sort-btn) {
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--accent) 20%, transparent) 0%,
-    color-mix(in srgb, var(--accent) 10%, transparent) 100%);
-  border: 1px solid var(--accent);
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
   color: var(--text-primary);
   border-radius: var(--radius-2);
   padding: 7px 14px;
@@ -2291,7 +2260,8 @@ html.theme-classic-light .dashboard-command-surface {
   cursor: pointer;
 }
 .page-stack button:not(.btn):not(.tab):not(.toggle):not(.filter-chip__remove):not(.data-table__sort-btn):hover {
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--control-bg-hover);
+  border-color: var(--accent-border);
 }
 .page-stack button:not(.btn):not(.tab):not(.toggle):not(.filter-chip__remove):not(.data-table__sort-btn):disabled {
   opacity: 0.5;
@@ -2623,7 +2593,6 @@ html.theme-classic-light .dashboard-command-surface {
 
 .observability-support {
   --observability-support-color: var(--accent);
-  --observability-support-soft: color-mix(in srgb, var(--observability-support-color) 6%, transparent);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -2631,9 +2600,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-3);
   border-radius: var(--radius-2);
   border-top: var(--border-w-strong) solid color-mix(in srgb, var(--observability-support-color) 58%, var(--border));
-  background:
-    linear-gradient(135deg, var(--observability-support-soft), transparent 42%),
-    color-mix(in srgb, var(--panel-bg) 92%, transparent);
+  background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
 }
 
 .observability-support--nodes {
@@ -2732,9 +2699,7 @@ html.theme-classic-light .dashboard-command-surface {
   border: var(--border-w) solid color-mix(in srgb, var(--border) 76%, transparent);
   border-left: var(--border-w-strong) solid var(--evidence-lead-color);
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--evidence-lead-color) 5%, transparent), transparent 58%),
-    color-mix(in srgb, var(--surface-elevated) 24%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 24%, transparent);
 }
 
 .observability-evidence-lead--normal {
@@ -2839,9 +2804,7 @@ html.theme-classic-light .dashboard-command-surface {
 }
 
 .observability-evidence-focus--stable {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--color-state-normal) 5%, transparent), transparent 56%),
-    color-mix(in srgb, var(--surface-elevated) 22%, transparent);
+  background: color-mix(in srgb, var(--color-state-normal) 5%, var(--surface));
 }
 
 .observability-evidence-focus__glyph {
@@ -2902,9 +2865,7 @@ html.theme-classic-light .dashboard-command-surface {
   border: var(--border-w) solid color-mix(in srgb, var(--border) 76%, transparent);
   border-top: var(--border-w-strong) solid color-mix(in srgb, var(--observability-lane-color) 56%, var(--border));
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--observability-lane-color) 3%, transparent), transparent 64%),
-    color-mix(in srgb, var(--surface-elevated) 18%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 18%, transparent);
 }
 
 .observability-support-lane--normal {
@@ -3216,8 +3177,7 @@ html.theme-classic-light .dashboard-command-surface {
   align-items: end;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
-  background:
-    linear-gradient(180deg, var(--panel-bg-elevated) 0%, var(--panel-bg) 100%);
+  background: var(--panel-bg);
   border: var(--border-w) solid var(--panel-border);
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-soft);
@@ -3502,13 +3462,7 @@ html.theme-classic-light .dashboard-command-surface {
 
 .asset-lifecycle-card {
   border-color: color-mix(in srgb, var(--color-state-critical) 38%, var(--border));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--color-state-critical) 9%, transparent),
-      transparent 42%
-    ),
-    var(--surface-elevated);
+  background: color-mix(in srgb, var(--color-state-critical) 5%, var(--surface-elevated));
 }
 
 .asset-lifecycle-card__eyebrow {
@@ -3676,9 +3630,7 @@ html.theme-classic-light .dashboard-command-surface {
   flex-direction: column;
   gap: var(--space-4);
   border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, transparent), transparent 58%),
-    var(--surface);
+  background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
 
@@ -3697,9 +3649,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-3);
   border: var(--border-w) solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 50%),
-    color-mix(in srgb, var(--surface-elevated) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 82%, transparent);
 }
 
 .vps-workbench__lead::before {
@@ -3848,16 +3798,12 @@ html.theme-classic-light .dashboard-command-surface {
 
 .vps-workbench-card--notice {
   border-color: color-mix(in srgb, var(--color-state-notice) 28%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-state-notice) 6%, transparent), transparent 72%),
-    var(--surface-elevated);
+  background: color-mix(in srgb, var(--color-state-notice) 5%, var(--surface-elevated));
 }
 
 .vps-workbench-card--critical {
   border-color: color-mix(in srgb, var(--color-state-critical) 30%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-state-critical) 6%, transparent), transparent 72%),
-    var(--surface-elevated);
+  background: color-mix(in srgb, var(--color-state-critical) 5%, var(--surface-elevated));
 }
 
 .vps-workbench-card__header,
@@ -3979,9 +3925,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-5);
   border: var(--border-w) solid var(--panel-border);
   border-radius: var(--radius-3);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 38%, transparent), transparent 64%),
-    var(--panel-bg);
+  background: var(--panel-bg);
   box-shadow: var(--shadow-soft);
 }
 
@@ -4019,17 +3963,13 @@ html.theme-classic-light .dashboard-command-surface {
 
 .vps-operations-card--notice {
   border-color: color-mix(in srgb, var(--color-state-notice) 28%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-state-notice) 6%, transparent), transparent 72%),
-    var(--surface-elevated);
+  background: color-mix(in srgb, var(--color-state-notice) 5%, var(--surface-elevated));
 }
 
 .vps-operations-card--alert,
 .vps-operations-card--critical {
   border-color: color-mix(in srgb, var(--color-state-critical) 30%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-state-critical) 6%, transparent), transparent 72%),
-    var(--surface-elevated);
+  background: color-mix(in srgb, var(--color-state-critical) 5%, var(--surface-elevated));
 }
 
 .vps-operations-card__header,
@@ -4147,9 +4087,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-3);
   border: var(--border-w) solid color-mix(in srgb, var(--accent) 18%, var(--border));
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 58%),
-    color-mix(in srgb, var(--surface-elevated) 52%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 52%, transparent);
 }
 
 .asset-drawer-context__eyebrow {
@@ -4240,16 +4178,12 @@ html.theme-classic-light .dashboard-command-surface {
   flex-direction: column;
   gap: var(--space-2);
   border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 58%),
-    color-mix(in srgb, var(--surface-elevated) 34%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 34%, transparent);
 }
 
 .subscriptions-evidence-workbench__context-card--warning {
   border-color: color-mix(in srgb, var(--color-state-notice) 34%, var(--border));
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--color-state-notice) 8%, transparent), transparent 58%),
-    color-mix(in srgb, var(--surface-elevated) 34%, transparent);
+  background: color-mix(in srgb, var(--color-state-notice) 5%, var(--surface-elevated));
 }
 
 .subscriptions-evidence-workbench__context-card h3 {
@@ -4450,9 +4384,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-2) var(--space-3);
   border: var(--border-w) solid color-mix(in srgb, var(--border) 82%, transparent);
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 80%, transparent), color-mix(in srgb, var(--surface) 88%, transparent)),
-    var(--surface);
+  background: color-mix(in srgb, var(--surface-elevated) 48%, var(--surface));
 }
 
 .asset-decision-focus__item::before,
@@ -4568,16 +4500,12 @@ html.theme-classic-light .dashboard-command-surface {
 
 .asset-decision-row--critical {
   border-color: color-mix(in srgb, var(--color-state-critical) 36%, var(--border));
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--color-state-critical) 8%, transparent), transparent 36%),
-    var(--surface);
+  background: color-mix(in srgb, var(--color-state-critical) 5%, var(--surface));
 }
 
 .asset-decision-row--alert {
   border-color: color-mix(in srgb, var(--color-state-alert) 32%, var(--border));
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--color-state-alert) 7%, transparent), transparent 34%),
-    var(--surface);
+  background: color-mix(in srgb, var(--color-state-alert) 5%, var(--surface));
 }
 
 .asset-decision-row--notice {
@@ -4714,9 +4642,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-3);
   border: var(--border-w) solid color-mix(in srgb, var(--accent) 16%, var(--border));
   border-radius: var(--radius-3);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 52%),
-    color-mix(in srgb, var(--surface-elevated) 56%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 56%, transparent);
 }
 
 .vps-inventory-lens__summary {
@@ -4773,9 +4699,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-3);
   border: var(--border-w) solid color-mix(in srgb, var(--border) 82%, transparent);
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 76%, transparent), color-mix(in srgb, var(--surface) 90%, transparent)),
-    var(--surface);
+  background: color-mix(in srgb, var(--surface-elevated) 48%, var(--surface));
 }
 
 .vps-evidence-card {
@@ -4858,15 +4782,11 @@ html.theme-classic-light .dashboard-command-surface {
 }
 
 .vps-inventory-table .data-table__row {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--surface-elevated) 18%, transparent), transparent 44%),
-    var(--row-bg);
+  background: var(--row-bg);
 }
 
 .vps-inventory-table .data-table__row:hover {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent) 6%, transparent), transparent 52%),
-    var(--row-bg-hover);
+  background: var(--row-bg-hover);
 }
 
 .asset-table-empty-state {
@@ -4977,9 +4897,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-4);
   border: var(--border-w) solid color-mix(in srgb, var(--accent) 18%, var(--border));
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 58%),
-    color-mix(in srgb, var(--surface-elevated) 58%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 58%, transparent);
 }
 
 .node-create-drawer__intro h3,
@@ -5915,9 +5833,7 @@ html.theme-classic-light .dashboard-command-surface {
   border: var(--border-w) solid var(--border);
   border-top: var(--border-w-strong) solid var(--accent);
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--surface-elevated) 72%, transparent), color-mix(in srgb, var(--surface) 88%, transparent)),
-    var(--surface);
+  background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
 
@@ -5950,14 +5866,12 @@ html.theme-classic-light .dashboard-command-surface {
   text-decoration: none;
   cursor: pointer;
   transition: background-color var(--dur-micro) var(--ease-calm),
-              border-color var(--dur-micro) var(--ease-calm),
-              transform var(--dur-micro) var(--ease-calm);
+              border-color var(--dur-micro) var(--ease-calm);
 }
 
 .nodes-hero-stat:hover {
   background: color-mix(in srgb, var(--surface-elevated) 72%, transparent);
   border-color: var(--border-strong);
-  transform: translateY(-1px);
 }
 
 .nodes-hero-stat:focus-visible {
@@ -6073,14 +5987,10 @@ html.theme-classic-light .dashboard-command-surface {
   padding: 0;
 }
 .nodes-table .data-table__row {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--surface-elevated) 14%, transparent), transparent 48%),
-    var(--row-bg);
+  background: var(--row-bg);
 }
 .nodes-table .data-table__row:hover {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%),
-    var(--row-bg-hover);
+  background: var(--row-bg-hover);
 }
 .nodes-table .nodes-table__name {
   font-family: var(--font-sans);
@@ -6274,16 +6184,12 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-5);
   border: var(--border-w-strong) solid var(--accent-border);
   border-radius: var(--radius-3);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 58%),
-    var(--panel-bg);
+  background: var(--panel-bg);
   box-shadow: var(--shadow-soft);
 }
 .onboarding-priority--critical {
   border-color: color-mix(in srgb, var(--color-state-critical) 52%, var(--border) 48%);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--color-state-critical) 14%, transparent), transparent 62%),
-    var(--panel-bg);
+  background: color-mix(in srgb, var(--color-state-critical) 5%, var(--panel-bg));
 }
 .onboarding-priority__content {
   display: flex;
@@ -6359,8 +6265,7 @@ html.theme-classic-light .dashboard-command-surface {
   color: var(--text-muted);
 }
 .onboarding-manual-fallback {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 74%, transparent), var(--surface));
+  background: var(--surface);
 }
 .onboarding-token__hint {
   font-size: var(--type-small-size);
@@ -6522,14 +6427,10 @@ html.theme-classic-light .dashboard-command-surface {
   min-width: 0;
 }
 .targets-table .data-table__row {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--surface-elevated) 16%, transparent), transparent 46%),
-    var(--row-bg);
+  background: var(--row-bg);
 }
 .targets-table .data-table__row:hover {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 6%, transparent), transparent 60%),
-    var(--row-bg-hover);
+  background: var(--row-bg-hover);
 }
 .targets-table .targets-table__name {
   font-family: var(--font-sans);
@@ -6944,9 +6845,7 @@ html.theme-classic-light .dashboard-command-surface {
   border: var(--border-w) solid var(--border);
   border-top: var(--border-w-strong) solid var(--border);
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--surface-elevated) 72%, transparent), color-mix(in srgb, var(--surface) 88%, transparent)),
-    var(--surface);
+  background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
 .target-overview--normal { border-top-color: var(--color-state-normal); }
@@ -6954,9 +6853,7 @@ html.theme-classic-light .dashboard-command-surface {
 .target-overview--alert { border-top-color: var(--color-state-alert); }
 .target-overview--critical {
   border-top-color: var(--color-state-critical);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--color-state-critical) 9%, transparent), transparent 58%),
-    color-mix(in srgb, var(--surface-elevated) 70%, var(--surface));
+  background: color-mix(in srgb, var(--color-state-critical) 5%, var(--surface));
 }
 .target-overview--maintenance { border-top-color: var(--color-state-maintenance); }
 .target-overview--offline { border-top-color: var(--color-state-offline); }
@@ -7094,9 +6991,7 @@ html.theme-classic-light .dashboard-command-surface {
   border: var(--border-w) solid var(--border);
   border-top: var(--border-w-strong) solid var(--border);
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--surface-elevated) 72%, transparent), color-mix(in srgb, var(--surface) 88%, transparent)),
-    var(--surface);
+  background: var(--surface);
   padding: var(--space-4);
   box-shadow: var(--shadow-soft);
 }
@@ -7105,9 +7000,7 @@ html.theme-classic-light .dashboard-command-surface {
 .watchtower-diagnosis--alert { border-top-color: var(--color-state-alert); }
 .watchtower-diagnosis--critical {
   border-top-color: var(--color-state-critical);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--color-state-critical) 9%, transparent), transparent 58%),
-    color-mix(in srgb, var(--surface-elevated) 70%, var(--surface));
+  background: color-mix(in srgb, var(--color-state-critical) 5%, var(--surface));
 }
 .watchtower-diagnosis--maintenance { border-top-color: var(--color-state-maintenance); }
 .watchtower-diagnosis--offline { border-top-color: var(--color-state-offline); }
@@ -7263,9 +7156,7 @@ html.theme-classic-light .dashboard-command-surface {
   }
 }
 .watchtower-metric-card {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 96%, transparent), color-mix(in srgb, var(--surface) 82%, transparent)),
-    var(--surface);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-2);
   padding: var(--space-3);
@@ -7284,9 +7175,7 @@ html.theme-classic-light .dashboard-command-surface {
 .watchtower-metric-card--critical {
   border-left: 2px solid var(--color-state-critical);
   padding-left: calc(var(--space-3) - 1px);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-state-critical) 8%, transparent), transparent 48%),
-    var(--surface-elevated);
+  background: color-mix(in srgb, var(--color-state-critical) 5%, var(--surface));
 }
 .watchtower-metric-card__head {
   display: flex;
@@ -7592,18 +7481,18 @@ html.theme-classic-light .dashboard-command-surface {
   border: var(--border-w) solid color-mix(in srgb, var(--accent) 28%, var(--panel-border));
   border-top: var(--border-w-strong) solid var(--accent);
   border-radius: var(--radius-3);
-  background:
-    linear-gradient(120deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent 58%),
-    linear-gradient(180deg, var(--panel-bg-elevated), var(--panel-bg));
+  background: var(--panel-bg);
   box-shadow: var(--shadow-soft);
 }
 .compare-command::before {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: var(--space-4) auto var(--space-4) 0;
+  width: var(--border-w-strong);
   pointer-events: none;
-  background: var(--bg-aurora);
-  opacity: 0.32;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  opacity: 0.72;
 }
 .compare-command__intro,
 .compare-command__aside {
@@ -7714,9 +7603,7 @@ html.theme-classic-light .dashboard-command-surface {
   gap: var(--space-3);
 }
 .compare-identity__card {
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--surface-elevated) 72%, transparent), color-mix(in srgb, var(--surface) 88%, transparent)),
-    var(--surface);
+  background: var(--surface);
   border: var(--border-w) solid color-mix(in srgb, var(--border) 82%, transparent);
   border-radius: var(--radius-2);
   padding: var(--space-3);
@@ -7816,9 +7703,7 @@ html.theme-classic-light .dashboard-command-surface {
   padding: var(--space-3);
   border: var(--border-w) solid color-mix(in srgb, var(--border) 82%, transparent);
   border-radius: var(--radius-2);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated) 42%, transparent), transparent 72%),
-    var(--surface);
+  background: var(--surface);
 }
 .compare-summary-card--state {
   min-height: 100%;

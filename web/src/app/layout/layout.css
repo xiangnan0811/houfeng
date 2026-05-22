@@ -49,8 +49,8 @@
   position: fixed;
   inset: 0 0 0 var(--shell-sidebar-width);
   pointer-events: none;
-  background: var(--bg-aurora);
-  opacity: 0.38;
+  background: transparent;
+  opacity: 0;
   z-index: -1;
 }
 
@@ -206,11 +206,11 @@
 .sync-status__dot { width: 8px; height: 8px; border-radius: 50%; }
 .sync-status--ok .sync-status__dot {
   background: var(--color-state-normal);
-  box-shadow: 0 0 10px var(--color-state-normal);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-state-normal) 14%, transparent);
   animation: sync-breathe 2s ease-in-out infinite alternate;
 }
-.sync-status--degraded .sync-status__dot { background: var(--color-state-notice); box-shadow: 0 0 10px var(--color-state-notice); }
-.sync-status--down .sync-status__dot { background: var(--color-state-critical); box-shadow: 0 0 10px var(--color-state-critical); }
+.sync-status--degraded .sync-status__dot { background: var(--color-state-notice); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-state-notice) 14%, transparent); }
+.sync-status--down .sync-status__dot { background: var(--color-state-critical); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-state-critical) 14%, transparent); }
 
 @keyframes sync-breathe {
   0% { opacity: 0.6; transform: scale(0.9); }
@@ -254,7 +254,7 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -362,12 +362,7 @@
   gap: var(--space-3);
   padding: var(--space-2) 0 var(--space-4);
   margin-bottom: var(--space-4);
-  background: linear-gradient(
-    180deg,
-    var(--bg) 0%,
-    color-mix(in srgb, var(--bg) 92%, transparent) 68%,
-    transparent 100%
-  );
+  background: var(--bg);
   min-height: 48px;
 }
 .top-bar::before {
@@ -511,7 +506,7 @@
   outline: none;
   background: var(--bg);
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-border);
 }
 
 .global-search__menu {
@@ -619,7 +614,7 @@
 
   .app-shell__main::before {
     inset: 0;
-    opacity: 0.24;
+    opacity: 0.08;
   }
 
   .sidebar {
