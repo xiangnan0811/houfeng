@@ -2,11 +2,8 @@ import { DataTable, type DataTableColumn, type DataTableSortState } from '../../
 import { PageState } from '../../components/PageState'
 import type { NodeRecord } from '../../lib/types'
 import { NodesBatchPanel } from './NodesBatchPanel'
-import { NodesFilterPanel } from './NodesFilterPanel'
 import { NodesRuntimeOverlays } from './NodesRuntimeOverlays'
 import type {
-  NodeFilterOption,
-  NodeFilterState,
   NodeListView,
   PendingNodeConfirmation,
 } from './types'
@@ -19,12 +16,7 @@ type NodesListSectionProps = {
   showTrends: boolean
   sortState: DataTableSortState | null
   hasActiveFilters: boolean
-  filterState: NodeFilterState
-  groupOptions: NodeFilterOption[]
-  regionOptions: NodeFilterOption[]
-  cityOptions: NodeFilterOption[]
-  providerOptions: NodeFilterOption[]
-  labelOptions: NodeFilterOption[]
+  batchPanelVisible: boolean
   selectAll: boolean
   batchSubmitting: boolean
   batchError: string | null
@@ -35,13 +27,6 @@ type NodesListSectionProps = {
   pendingConfirmation: PendingNodeConfirmation | null
   runtimeBusyNodeId: string | null
   onClearAllFilters: () => void
-  onSingleFilterChange: (
-    key: 'group' | 'region' | 'city' | 'provider' | 'lifecycle' | 'run_status' | 'health',
-    value: string | null,
-  ) => void
-  onMultiFilterChange: (key: 'labels', values: string[]) => void
-  onAbnormalFilterChange: (checked: boolean) => void
-  onOnboardingFilterChange: (checked: boolean) => void
   onSelectAllChange: (checked: boolean) => void
   onBatchAction: (action: string) => void
   onCommandOpenChange: (open: boolean) => void
@@ -64,12 +49,7 @@ export function NodesListSection({
   showTrends,
   sortState,
   hasActiveFilters,
-  filterState,
-  groupOptions,
-  regionOptions,
-  cityOptions,
-  providerOptions,
-  labelOptions,
+  batchPanelVisible,
   selectAll,
   batchSubmitting,
   batchError,
@@ -80,10 +60,6 @@ export function NodesListSection({
   pendingConfirmation,
   runtimeBusyNodeId,
   onClearAllFilters,
-  onSingleFilterChange,
-  onMultiFilterChange,
-  onAbnormalFilterChange,
-  onOnboardingFilterChange,
   onSelectAllChange,
   onBatchAction,
   onCommandOpenChange,
@@ -97,7 +73,11 @@ export function NodesListSection({
   onCancelPause,
   onCreateNode,
 }: NodesListSectionProps) {
-  const firstRunEmpty = baseNodes.length === 0
+  const firstRunEmpty = baseNodes.length === 0 && !hasActiveFilters && nodeListView === 'all'
+  const bindingConflictEmpty =
+    baseNodes.length === 0 && !hasActiveFilters && nodeListView === 'binding-conflict'
+  const runtimeAttentionEmpty =
+    baseNodes.length === 0 && !hasActiveFilters && nodeListView === 'runtime-attention'
 
   const visibleColumns = showTrends
     ? columns
@@ -105,24 +85,7 @@ export function NodesListSection({
 
   return (
     <>
-      {firstRunEmpty ? null : (
-        <NodesFilterPanel
-          hasActiveFilters={hasActiveFilters}
-          filterState={filterState}
-          groupOptions={groupOptions}
-          regionOptions={regionOptions}
-          cityOptions={cityOptions}
-          providerOptions={providerOptions}
-          labelOptions={labelOptions}
-          onClearAll={onClearAllFilters}
-          onSingleFilterChange={onSingleFilterChange}
-          onMultiFilterChange={onMultiFilterChange}
-          onAbnormalFilterChange={onAbnormalFilterChange}
-          onOnboardingFilterChange={onOnboardingFilterChange}
-        />
-      )}
-
-      {firstRunEmpty ? null : (
+      {firstRunEmpty || !batchPanelVisible ? null : (
         <NodesBatchPanel
           hasActiveFilters={hasActiveFilters}
           filteredNodeCount={nodes.length}
@@ -146,19 +109,27 @@ export function NodesListSection({
         <PageState
           kind="empty"
           surface="empty"
-          title={nodeListView === 'binding-conflict' ? '没有绑定异常节点' : '候风尚未接入任何节点'}
-          description={
-            nodeListView === 'binding-conflict'
-              ? '当前没有等待绑定确认的节点。'
-              : '请先创建第一个节点，完成接入后再用它支撑 VPS 运行事实。'
-          }
-          action={
-            nodeListView === 'binding-conflict' ? null : (
-              <button type="button" className="btn btn--primary btn--md" onClick={onCreateNode}>
-                新建第一个节点
-              </button>
-            )
-          }
+          title="候风尚未接入任何节点"
+          description="请先创建第一个节点，完成接入后再用它支撑 VPS 运行事实。"
+          action={(
+            <button type="button" className="btn btn--primary btn--md" onClick={onCreateNode}>
+              新建第一个节点
+            </button>
+          )}
+        />
+      ) : bindingConflictEmpty ? (
+        <PageState
+          kind="empty"
+          surface="empty"
+          title="没有绑定异常节点"
+          description="当前没有等待绑定确认的节点。"
+        />
+      ) : runtimeAttentionEmpty ? (
+        <PageState
+          kind="empty"
+          surface="empty"
+          title="没有维护或暂停节点"
+          description="当前没有维护中或暂停监控的节点。"
         />
       ) : nodes.length === 0 ? (
         <PageState

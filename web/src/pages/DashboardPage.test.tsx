@@ -265,12 +265,9 @@ describe('DashboardPage', () => {
       '/targets/tg_001',
     )
 
-    const nextActions = within(commandSurface).getByLabelText('下一步动作')
-    expect(within(nextActions).getByRole('heading', { name: '今天先做什么' })).toBeInTheDocument()
-    expect(within(nextActions).getByRole('link', { name: /进入资产决策队列：待决策 4/ })).toHaveAttribute(
-      'href',
-      '/asset-decisions',
-    )
+    const nextActions = within(commandSurface).getByLabelText('次级动作')
+    expect(within(nextActions).getByRole('heading', { name: '完成第一步后再处理' })).toBeInTheDocument()
+    expect(within(nextActions).queryByRole('link', { name: /进入资产决策队列：待决策 4/ })).not.toBeInTheDocument()
     expect(within(nextActions).getByRole('link', { name: /处理严重事件：严重对象 1/ })).toHaveAttribute(
       'href',
       '/events?severity=严重',
@@ -362,7 +359,7 @@ describe('DashboardPage', () => {
       'href',
       '/nodes?abnormal=1',
     )
-    expect(within(commandSurface).getByRole('link', { name: /处理观测异常：异常节点 1 · 异常目标 0/ })).toHaveAttribute(
+    expect(within(commandSurface).getByRole('link', { name: '下一步：处理观测异常' })).toHaveAttribute(
       'href',
       '/nodes?abnormal=1',
     )
@@ -453,8 +450,9 @@ describe('DashboardPage', () => {
     )
     const controls = within(commandSurface).getByLabelText('工作台主要动作')
     expect(within(controls).getByRole('link', { name: '核对 VPS 库存' })).toHaveAttribute('href', '/vps')
-    const nextActions = within(commandSurface).getByLabelText('下一步动作')
-    expect(within(nextActions).getByRole('link', { name: /核对 VPS 库存/ })).toHaveAttribute('href', '/vps')
+    const nextActions = within(commandSurface).getByLabelText('次级动作')
+    expect(within(nextActions).getByRole('heading', { name: '完成第一步后再处理' })).toBeInTheDocument()
+    expect(within(nextActions).queryByRole('link', { name: /核对 VPS 库存/ })).not.toBeInTheDocument()
     expect(within(nextActions).getByRole('link', { name: /查看 24h 事件流/ })).toHaveAttribute(
       'href',
       '/events?time_range=24h',
@@ -522,7 +520,8 @@ describe('DashboardPage', () => {
     )
     const controls = within(commandSurface).getByLabelText('工作台主要动作')
     expect(within(controls).getByRole('link', { name: '创建第一个节点' })).toHaveAttribute('href', '/nodes')
-    const nextActions = within(commandSurface).getByLabelText('下一步动作')
+    const nextActions = within(commandSurface).getByLabelText('次级动作')
+    expect(within(nextActions).getByRole('heading', { name: '完成第一步后再处理' })).toBeInTheDocument()
     expect(within(nextActions).getByRole('link', { name: /查看节点接入/ })).toHaveAttribute(
       'href',
       '/nodes?onboarding=pending',

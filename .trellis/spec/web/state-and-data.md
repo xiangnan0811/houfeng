@@ -102,7 +102,7 @@ setInstallIssue(issue)
 ### Dashboard 数据可信度
 
 - `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实，并且**不得默认展示所有 contract 字段**。当前可用事实来自 `DashboardOverview`：dashboard 生成时间、总节点/目标数、异常/严重/维护计数、库存完整度计数、24h 新异常/恢复趋势、真实全量 `group_summaries`、通知配置布尔摘要、异常节点/目标摘要、最近事件；这些字段是可用事实池，不是首页全部展示清单。
-- Dashboard 首屏按 asset-decision-first command surface 做渐进披露：顶部只展示一个 `工作台 command surface`，内部固定包含 `资产决策队列`、`观测异常队列`、`下一步动作`。异常态下方继续展示统一异常处理队列、工作台内 `运行上下文` 和紧凑 `管理入口`；其中处理队列仍是主任务，运行上下文与管理入口只能作为队列下方的辅助跳转，不得拆成独立 page section。正常 / 维护态下方展示运行概览、运行上下文与紧凑管理入口；首次接入态下方只展示 onboarding。不要为了“contract 已返回”而渲染 API loaded facts、独立 KPI/summary strip、`系统快捷入口` 详情列表、`Group 摘要` 列表或 `最近事件摘要` 列表。
+- Dashboard 首屏按 asset-decision-first command surface 做渐进披露：顶部只展示一个 `工作台 command surface`，并把现有优先级决策收敛成一个主行动块 `今日第一步`。资产决策与观测异常事实可以作为同一 surface 内的证据 lane 支撑主行动；刷新、自动刷新、管理入口和非主行动链接必须降为低权重控制或 `次级动作`，不得恢复成与主 CTA 同权的第三 lane。异常态下方继续展示统一异常处理队列、工作台内 `运行上下文` 和紧凑 `管理入口`；其中处理队列仍是主任务，运行上下文与管理入口只能作为队列下方的辅助跳转，不得拆成独立 page section。正常 / 维护态下方展示运行概览、运行上下文与紧凑管理入口；首次接入态下方只展示 onboarding。不要为了“contract 已返回”而渲染 API loaded facts、独立 KPI/summary strip、`系统快捷入口` 详情列表、`Group 摘要` 列表或 `最近事件摘要` 列表。
 - Command surface 的顶部可以展示一个低高度 `今日判断摘要` 轨道，但它只能汇总当前最高优先级判断：资产压力 / 资产主线、严重异常 / 观测异常 / 维护观察 / 观测稳定、以及第一条下一步动作。它不是 KPI strip，不得扩展为全量 dashboard metric 列表；每项必须链接到已有 Dashboard 深链承接页，且 390px 视口下折叠为单列。
 - `snapshot_generated_at` 只能写成 `生成时间`、`摘要生成` 这类接口生成时间提示。它不是 Center health、agent heartbeat、sync freshness 或全链路实时性证明，不要写 `中心运行正常` / `同步于` / `健康检查通过` 之类文案。
 - `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。`group_summaries` 必须来自后端全量聚合，但它默认不在 Dashboard 首屏展开；如果未来重新展示 Group 上下文，必须保持轻量、服务当前状态决策，数组为空时只显示轻量说明，不在前端制造 `未分组 0` 行。
@@ -144,6 +144,28 @@ overview.asset_summary.vps_assets.map(...)
 <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
 ```
 
+### Nodes 列表工作台状态
+
+NodesPage 是运行证据扫描页，不应把筛选、批量操作、趋势开关和刷新控制全部平铺成首屏同权入口。主路径是 quick view → 节点列表 → 行级处理；高级字段筛选和批量操作是次级控制。
+
+#### Contracts
+
+- Quick view 负责表达当前扫描主线，至少覆盖全部、异常、待接入、维护/暂停、绑定异常；维护/暂停视图必须同时包含 `monitoring_status === '维护中'` 与 `monitoring_status === '暂停'`，不要用单个 `run_status` 推断。
+- 高级筛选使用 Drawer 的 applied/draft 分离：打开时从当前已应用筛选初始化草稿；只有点击完成/应用才提交到列表状态；取消、Esc、overlay 和头部关闭必须丢弃草稿，不能改变列表或触发隐式请求。
+- 高级筛选计数只统计已应用字段筛选，必须覆盖 lifecycle、health、monitoring/run status、group、region、labels、search 等会改变列表的维度；quick view 本身不混入字段筛选计数。
+- 批量操作区默认隐藏；只有用户显式打开批量操作、已经选择全量/部分节点、存在待确认批量动作、提交中或错误需要展示时才出现。批量动作按钮仍必须以明确选择为前提，不因列表有数据而默认高亮。
+- NodesSupportSurface 只作为资产判断支撑，不作为第二个主工作台；文案要压缩，support lane 数量保持克制，资产侧问题应导向 VPS 库存或资产决策队列。
+
+#### Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Drawer 内修改筛选后取消 / Esc / overlay 关闭 | 列表不变；重新打开 Drawer 恢复当前 applied filters |
+| 点击完成 / 应用筛选 | Drawer 关闭，列表和 visible chips 使用新筛选 |
+| runtime attention quick view | 同时显示维护中与暂停节点；空态不得误报为全局无节点 |
+| 无选择且未打开批量操作 | 批量 bar 不渲染 |
+| 打开批量操作但未全选 | 显示范围/选择入口，不显示实际批量动作按钮 |
+
 ### Asset Ledger 列表与决策队列数据流
 
 Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端做轻量 join，用于人工核对和资料质量提示；这不是后端字段扩展，也不能创造未存在的健康语义。
@@ -174,6 +196,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 | Condition | Expected behavior |
 | --- | --- |
+| Asset Decisions evidence-boundary explanation grows long | 保持优先级队列为主 surface，证据边界用 `<details>` / 低权重说明承载，不抢占主视觉 |
 | subscriptions list failed in Asset Decisions renewal window | 续费候选 evidence 显示错误，VPS 决策队列仍可显示已加载 VPS |
 | all subscriptions failed while building decision queue | VPS 队列显示加载错误，避免把全量缺订阅误报为真实数据质量 |
 | VPS inventory subscriptions empty | 行级展示 `缺订阅`，quick view `缺订阅` 可筛出对应 VPS |

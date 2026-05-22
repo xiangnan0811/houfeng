@@ -572,12 +572,15 @@ export function AssetDecisionsPage() {
           <div>
             <p className="section-heading__eyebrow">DECISION QUEUE</p>
             <h2>资产决策工作队列</h2>
-            <p>按续费窗口、未评估、迁移/取消、Node 关联数量和订阅证据缺口排序；订阅读取失败会显示错误，不会被当成真实缺订阅。</p>
-            <ul className="asset-decision-board__context" aria-label="队列证据边界">
-              {QUEUE_CONTEXT_ITEMS.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+            <p>按续费窗口、未评估、迁移/取消、Node 关联数量和订阅证据缺口排序。</p>
+            <details className="asset-decision-board__context" aria-label="队列证据边界">
+              <summary>证据边界</summary>
+              <ul>
+                {QUEUE_CONTEXT_ITEMS.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </details>
             <dl className="asset-decision-board__summary" aria-label="资产决策指标">
               <div>
                 <dt>当前视图 / 全部</dt>

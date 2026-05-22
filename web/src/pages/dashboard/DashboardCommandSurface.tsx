@@ -517,7 +517,7 @@ export function DashboardCommandSurface({
             {onRefresh ? (
               <button
                 type="button"
-                className="btn btn--ghost btn--md"
+                className="btn btn--ghost btn--sm dashboard-command-surface__quiet-action"
                 disabled={refreshing}
                 onClick={onRefresh}
               >
@@ -650,18 +650,18 @@ export function DashboardCommandSurface({
           ) : null}
         </section>
 
-        <section className="dashboard-command-lane dashboard-command-lane--actions" aria-label="下一步动作">
+        <section className="dashboard-command-lane dashboard-command-lane--actions" aria-label="次级动作">
           <div className="dashboard-command-lane__header">
             <div>
-              <p className="dashboard-command-lane__eyebrow">下一步动作</p>
-              <h2>今天先做什么</h2>
+              <p className="dashboard-command-lane__eyebrow">次级动作</p>
+              <h2>完成第一步后再处理</h2>
             </div>
             <span className="dashboard-command-lane__signal dashboard-command-lane__signal--muted">
-              按序执行
+              低优先级
             </span>
           </div>
           <div className="dashboard-action-list">
-            {actions.map((action, index) => (
+            {actions.filter((action) => !action.primary).map((action, index) => (
               <Link
                 className={`dashboard-action-row dashboard-action-row--${action.tone}${action.primary ? ' dashboard-action-row--primary' : ''}`}
                 to={action.to}

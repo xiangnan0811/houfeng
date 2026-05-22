@@ -1,52 +1,62 @@
 import { Link } from 'react-router-dom'
 
-import { MonoDigits, Tabs, type TabItem } from '../../components/atoms'
+import { Button, MonoDigits, Tabs, type TabItem } from '../../components/atoms'
 import { AUTO_REFRESH_OPTIONS, type AutoRefreshOption } from '../../lib/useAutoRefresh'
-import type { NodeListView } from './types'
+import type { NodeQuickView } from './types'
 
 type NodesToolbarProps = {
-  viewTabs: TabItem<NodeListView>[]
-  nodeListView: NodeListView
+  quickViewTabs: TabItem<NodeQuickView>[]
+  activeQuickView: NodeQuickView
   displayedCount: number
   baseCount: number
+  fieldFilterCount: number
+  hasActiveFilters: boolean
+  batchPanelOpen: boolean
   showTrends: boolean
   compareSet: Set<string>
   autoRefresh: AutoRefreshOption
-  onNodeListViewChange: (value: NodeListView) => void
+  onQuickViewChange: (value: NodeQuickView) => void
+  onOpenFilters: () => void
+  onToggleBatchPanel: () => void
   onShowTrendsChange: (value: boolean) => void
   onAutoRefreshChange: (value: AutoRefreshOption) => void
 }
 
 export function NodesToolbar({
-  viewTabs,
-  nodeListView,
+  quickViewTabs,
+  activeQuickView,
   displayedCount,
   baseCount,
+  fieldFilterCount,
+  hasActiveFilters,
+  batchPanelOpen,
   showTrends,
   compareSet,
   autoRefresh,
-  onNodeListViewChange,
+  onQuickViewChange,
+  onOpenFilters,
+  onToggleBatchPanel,
   onShowTrendsChange,
   onAutoRefreshChange,
 }: NodesToolbarProps) {
   return (
     <div className="nodes-toolbar list-command-band list-command-band--nodes" aria-label="节点列表工具栏">
       <div className="list-command-band__main">
-        <p className="list-command-band__eyebrow">LIST SCAN</p>
-        <h3 className="list-command-band__title">节点列表扫描</h3>
+        <p className="list-command-band__eyebrow">NODE QUICK VIEW</p>
+        <h3 className="list-command-band__title">节点证据扫描</h3>
         <p className="list-command-band__description">
-          筛选在这里编辑，批量操作作用于当前筛选范围；节点专属的对比、趋势和自动刷新保留在同一控制带。
+          Quick view 决定当前扫描主线；字段筛选、批量操作、趋势与刷新进入次级控制区。
         </p>
       </div>
       <div className="nodes-toolbar__primary list-command-band__controls">
-        <Tabs<NodeListView>
+        <Tabs<NodeQuickView>
           variant="pill"
-          items={viewTabs}
-          value={nodeListView}
-          onChange={onNodeListViewChange}
+          items={quickViewTabs}
+          value={activeQuickView}
+          onChange={onQuickViewChange}
         />
         <div className="list-command-band__meta" aria-label="节点列表当前范围">
-          <span>{nodeListView === 'binding-conflict' ? '绑定异常视图' : '当前列表范围'}</span>
+          <span>{hasActiveFilters ? '当前扫描范围' : '完整 Node 库存'}</span>
           <strong>
             <MonoDigits>{displayedCount}</MonoDigits>
             <small>/</small>
@@ -54,7 +64,17 @@ export function NodesToolbar({
           </strong>
         </div>
       </div>
-      <div className="nodes-toolbar__actions list-command-band__actions">
+      <div className="nodes-toolbar__actions list-command-band__actions" aria-label="节点次级动作">
+        <Button variant="secondary" size="sm" onClick={onOpenFilters}>
+          高级筛选{fieldFilterCount > 0 ? ` · ${fieldFilterCount}` : ''}
+        </Button>
+        <Button
+          variant={batchPanelOpen ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={onToggleBatchPanel}
+        >
+          批量操作
+        </Button>
         <button
           type="button"
           className={`btn btn--ghost btn--sm ${!showTrends ? 'btn--active' : ''}`}

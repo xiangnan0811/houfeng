@@ -308,10 +308,8 @@ export function buildNodeEvidenceLead(args: {
   }
 }
 
-export function runtimeAttentionFilter(nodes: NodeRecord[]): string | null {
-  if (nodes.some((node) => node.monitoring_status === '维护中')) return '维护中'
-  if (nodes.some((node) => node.monitoring_status === '暂停')) return '暂停'
-  return null
+export function isRuntimeAttentionNode(node: NodeRecord) {
+  return node.monitoring_status === '维护中' || node.monitoring_status === '暂停'
 }
 
 export function pauseConfirmationCurrent(node: NodeRecord) {
