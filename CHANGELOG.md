@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/xiangnan0811/houfeng/compare/v0.19.0...v0.20.0) (2026-05-22)
+
+
+### Features
+
+* compress frontend workflow hierarchy ([954e82c](https://github.com/xiangnan0811/houfeng/commit/954e82cc6fe4385db2a50dbdf8173aa879a98a49))
+* refine frontend workflow information architecture ([4ff1e02](https://github.com/xiangnan0811/houfeng/commit/4ff1e0205b838f94739ed21acf96d83762303f3c))
+
 ## [0.19.0](https://github.com/xiangnan0811/houfeng/compare/v0.18.0...v0.19.0) (2026-05-22)
 
 
