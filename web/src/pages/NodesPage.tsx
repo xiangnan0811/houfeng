@@ -799,22 +799,6 @@ export function NodesPage() {
         onCreateClick={toggleCreateDrawer}
       />
 
-      <NodesSupportSurface
-        totalNodeCount={nodes.length}
-        displayedNodeCount={sortedFilteredNodes.length}
-        abnormalNodeCount={abnormalNodeCount}
-        pendingOnboardingNodeCount={pendingOnboardingNodeCount}
-        evidenceLead={evidenceLead}
-        topEvidence={topEvidence}
-        filterContext={filterContext}
-        hasActiveFilters={hasActiveFilters}
-        onAbnormalClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
-        onOnboardingClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
-        onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
-        onClearFilters={clearAllFilters}
-        onCreateClick={toggleCreateDrawer}
-      />
-
       <CreateNodeDrawer
         open={createOpen}
         form={createForm}
@@ -842,7 +826,7 @@ export function NodesPage() {
             <strong>
               <MonoDigits>{sortedFilteredNodes.length}</MonoDigits> / <MonoDigits>{baseNodes.length}</MonoDigits> 个节点
             </strong>
-            <small>Quick view 控制主扫描路径；字段筛选会在完成后同步到 URL。</small>
+            <small>完成后同步 URL。</small>
           </div>
           {draftFilterState ? (
             <NodesFilterPanel
@@ -895,6 +879,22 @@ export function NodesPage() {
           onToggleBatchPanel={() => setBatchPanelOpen((current) => !current)}
           onShowTrendsChange={setShowTrends}
           onAutoRefreshChange={setAutoRefresh}
+        />
+
+        <NodesSupportSurface
+          totalNodeCount={nodes.length}
+          displayedNodeCount={sortedFilteredNodes.length}
+          abnormalNodeCount={abnormalNodeCount}
+          pendingOnboardingNodeCount={pendingOnboardingNodeCount}
+          evidenceLead={evidenceLead}
+          topEvidence={topEvidence}
+          filterContext={filterContext}
+          hasActiveFilters={hasActiveFilters}
+          onAbnormalClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
+          onOnboardingClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
+          onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
+          onClearFilters={clearAllFilters}
+          onCreateClick={toggleCreateDrawer}
         />
 
         <NodesListSection

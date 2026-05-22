@@ -165,9 +165,9 @@ function nodeEvidenceReason(node: NodeRecord): string {
   if (isBindingConflictNode(node)) return NODE_BINDING_CONFLICT_SUMMARY
   if (node.current_primary_issue_summary) return node.current_primary_issue_summary
   if (node.current_health_status !== '正常') return `健康状态：${node.current_health_status}`
-  if (isPendingOnboardingNode(node)) return '节点接入或绑定尚未稳定'
-  if (node.monitoring_status === '维护中') return '维护窗口内，趋势空窗应按维护上下文解读'
-  if (node.monitoring_status === '暂停') return '监控暂停，当前不能作为实时运行证据'
+  if (isPendingOnboardingNode(node)) return '接入 / 绑定未完成'
+  if (node.monitoring_status === '维护中') return '维护窗口'
+  if (node.monitoring_status === '暂停') return '监控暂停'
   return '当前没有明显异常'
 }
 
@@ -247,7 +247,7 @@ export function buildNodeEvidenceLead(args: {
     return {
       eyebrow: '当前筛选',
       title: '没有匹配当前证据条件',
-      description: '当前筛选没有返回节点。先清空或收窄条件，再继续判断观测证据。',
+      description: '调整筛选。',
       actionKind: 'clear',
       actionLabel: '清空证据筛选',
       tone: 'offline',
@@ -258,7 +258,7 @@ export function buildNodeEvidenceLead(args: {
     return {
       eyebrow: '首次接入',
       title: '先建立第一条 Node 证据',
-      description: '还没有可用于资产判断的运行节点。创建节点并完成接入后，VPS 才有运行事实支撑。',
+      description: '创建并接入。',
       actionKind: 'create',
       actionLabel: '建立 Node 证据',
       tone: 'notice',
@@ -269,10 +269,10 @@ export function buildNodeEvidenceLead(args: {
     return {
       eyebrow: '优先证据',
       title: `先处理 ${abnormalNodeCount} 个异常节点`,
-      description: '异常 Node 会直接影响 VPS 稳定性判断，优先进入节点详情或事件时间线核对。',
+      description: '进详情处理。',
       actionKind: 'abnormal',
       actionLabel: '聚焦异常证据',
-      tone: abnormalNodeCount > 0 ? 'alert' : 'normal',
+      tone: 'alert',
     }
   }
 
@@ -280,7 +280,7 @@ export function buildNodeEvidenceLead(args: {
     return {
       eyebrow: '接入证据',
       title: `补齐 ${pendingOnboardingNodeCount} 个接入 / 绑定状态`,
-      description: '待接入、未绑定或绑定冲突的节点还不能作为可信运行证据。',
+      description: '未完成。',
       actionKind: 'onboarding',
       actionLabel: '聚焦接入证据',
       tone: 'notice',
@@ -291,7 +291,7 @@ export function buildNodeEvidenceLead(args: {
     return {
       eyebrow: '运行上下文',
       title: `核对 ${maintenanceOrPausedNodeCount} 个维护 / 暂停节点`,
-      description: '维护和暂停会解释趋势空窗，避免把人为窗口误判成资产故障。',
+      description: '维护 / 暂停空窗。',
       actionKind: 'runtime',
       actionLabel: '聚焦运行证据',
       tone: 'maintenance',
@@ -301,7 +301,7 @@ export function buildNodeEvidenceLead(args: {
   return {
     eyebrow: '证据稳定',
     title: 'Node 运行证据当前稳定',
-    description: '当前没有异常、接入缺口或维护暂停对象。下一步可回到 VPS 库存和资产决策队列核对资产侧问题。',
+    description: '无异常 / 接入缺口。',
     actionKind: 'asset',
     actionLabel: '查看 VPS 库存',
     tone: 'normal',

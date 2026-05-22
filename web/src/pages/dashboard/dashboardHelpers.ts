@@ -239,12 +239,12 @@ export function buildFleetState(
   maintenanceTotal: number,
   isFreshInstall: boolean,
 ): FleetState {
-  const recentSummary = `最近 24h 新增 ${overview.recent_new_incident_count} 次异常，恢复 ${overview.recent_recovery_count} 次。`
+  const recentSummary = `24h 新增 ${overview.recent_new_incident_count} / 恢复 ${overview.recent_recovery_count}`
 
   if (isFreshInstall) {
     return {
       title: '开始接入第一台服务器',
-      description: '候风还没有节点与目标。先创建节点并接入 agent，再创建观测目标与 ProbeItem。',
+      description: '创建 Node，再配置目标。',
       tone: 'notice',
       primaryCta: { label: '创建第一个节点', to: DASHBOARD_LINKS.nodes },
       secondaryCtas: [],
@@ -254,7 +254,7 @@ export function buildFleetState(
   if (severeTotal > 0) {
     return {
       title: '需要处理严重异常',
-      description: `${abnormalTotal} 个对象异常，其中 ${severeTotal} 个严重；${recentSummary}`,
+      description: `异常 ${abnormalTotal} / 严重 ${severeTotal}；${recentSummary}`,
       tone: 'critical',
       primaryCta: { label: '查看当前异常', to: DASHBOARD_LINKS.eventsSevere },
       secondaryCtas: [
@@ -267,7 +267,7 @@ export function buildFleetState(
   if (abnormalTotal > 0) {
     return {
       title: '存在活跃异常',
-      description: `${abnormalTotal} 个对象需要关注；${recentSummary}`,
+      description: `异常 ${abnormalTotal}；${recentSummary}`,
       tone: 'alert',
       primaryCta: { label: '查看当前异常', to: DASHBOARD_LINKS.events24h },
       secondaryCtas: [
@@ -280,7 +280,7 @@ export function buildFleetState(
   if (maintenanceTotal > 0) {
     return {
       title: '系统处于维护观察中',
-      description: `${maintenanceTotal} 个对象处于维护相关状态；${recentSummary}`,
+      description: `维护 ${maintenanceTotal}；${recentSummary}`,
       tone: 'maintenance',
       primaryCta: { label: '查看维护事件', to: DASHBOARD_LINKS.eventsMaintenance },
       secondaryCtas: [
@@ -292,7 +292,7 @@ export function buildFleetState(
 
   return {
     title: '系统运行正常',
-    description: `当前没有活跃异常；${recentSummary}`,
+    description: `无活跃异常；${recentSummary}`,
     tone: 'normal',
     primaryCta: { label: '查看节点', to: DASHBOARD_LINKS.nodes },
     secondaryCtas: [

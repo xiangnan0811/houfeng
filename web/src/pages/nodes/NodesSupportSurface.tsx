@@ -57,9 +57,6 @@ export function NodesSupportSurface({
         <div>
           <p className="observability-support__eyebrow">OBSERVABILITY SUPPORT</p>
           <h2 className="observability-support__title">资产判断支撑</h2>
-          <p className="observability-support__description">
-            运行事实只服务一个判断：这台服务器能否支撑 VPS 资产决策。
-          </p>
         </div>
         <div className="observability-support__scope" aria-label="当前节点筛选范围">
           <span>{hasActiveFilters ? '当前筛选' : '完整库存'}</span>
@@ -105,7 +102,7 @@ export function NodesSupportSurface({
               <MonoDigits>{abnormalNodeCount}</MonoDigits>
             </Badge>
           </div>
-          <p>非正常健康状态会直接削弱资产稳定性判断。</p>
+          <p>健康异常</p>
           <div className="observability-support-lane__actions">
             <Button
               variant="secondary"
@@ -128,7 +125,7 @@ export function NodesSupportSurface({
               <MonoDigits>{pendingOnboardingNodeCount}</MonoDigits>
             </Badge>
           </div>
-          <p>接入或绑定未稳定时，Node 不能作为可信运行证据。</p>
+          <p>未接入 / 待确认</p>
           <div className="observability-support-lane__actions">
             <Button
               variant="secondary"
@@ -149,7 +146,7 @@ export function NodesSupportSurface({
             <span>VPS 关联</span>
             <Badge variant="info" tone="neutral">资产上下文</Badge>
           </div>
-          <p>资产侧疑问回到 VPS 库存和决策队列核对关联证据。</p>
+          <p>资产侧核对</p>
           <div className="observability-support-lane__actions">
             <Link className="observability-support-link" to="/vps?view=unlinked">
               未关联 VPS
@@ -191,9 +188,9 @@ export function NodesSupportSurface({
             stable
             glyph={<StatusGlyph state="normal" ariaLabel="Node 证据稳定" />}
             eyebrow="运行证据"
-            title="没有需要优先核对的 Node"
-            description="当前列表没有异常、接入缺口、维护或暂停对象。"
-            meta="继续从 VPS 库存、订阅和资产决策队列核对资产侧事实。"
+            title="Node 当前稳定"
+            description="无异常 / 接入缺口。"
+            meta="VPS 库存 / 资产决策"
             action={
               <Link className="btn btn--ghost btn--sm" to="/vps">
                 查看 VPS

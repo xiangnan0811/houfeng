@@ -109,13 +109,10 @@ describe('NodesPage', () => {
     expect(screen.getByRole('heading', { name: '节点观测' })).toBeInTheDocument()
     expect(screen.getByText('观测 · 节点')).toBeInTheDocument()
     expect(
-      screen.getByText('以运行事实支撑 VPS 资产判断，优先扫描 VPS 关联、接入状态、维护 / 暂停与异常证据。'),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText('运行事实只服务一个判断：这台服务器能否支撑 VPS 资产决策。'),
+      screen.getByText('异常、接入、维护 / 暂停。'),
     ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '节点证据扫描' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '节点扫描' })).toBeInTheDocument()
     expect(screen.getByText('NODE QUICK VIEW')).toBeInTheDocument()
     expect(screen.getByLabelText('节点列表当前范围')).toHaveTextContent('完整 Node 库存')
     expect(screen.getByLabelText('节点列表当前范围')).toHaveTextContent('0/0')
@@ -1147,9 +1144,6 @@ describe('NodesPage', () => {
     await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
-    expect(
-      screen.getByText('运行事实只服务一个判断：这台服务器能否支撑 VPS 资产决策。'),
-    ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '先处理 1 个异常节点' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '优先核对：Alerting Edge' })).toBeInTheDocument()
     expect(screen.getByText('健康状态：告警')).toBeInTheDocument()
@@ -1158,7 +1152,7 @@ describe('NodesPage', () => {
       '/nodes/nd_alert',
     )
     expect(screen.getByText('VPS 关联')).toBeInTheDocument()
-    expect(screen.getByText('资产侧疑问回到 VPS 库存和决策队列核对关联证据。')).toBeInTheDocument()
+    expect(screen.getByText('资产侧核对')).toBeInTheDocument()
     expect(within(screen.getByLabelText('节点观测证据摘要')).queryByText('运行上下文')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '未关联 VPS' })).toHaveAttribute(
       'href',
@@ -1228,7 +1222,7 @@ describe('NodesPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '没有匹配当前证据条件' })).toBeInTheDocument(),
     )
-    expect(screen.getByText('当前筛选没有返回节点。先清空或收窄条件，再继续判断观测证据。')).toBeInTheDocument()
+    expect(screen.getByText('调整筛选。')).toBeInTheDocument()
     expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '清空证据筛选' }))
@@ -1264,8 +1258,8 @@ describe('NodesPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Node 运行证据当前稳定' })).toBeInTheDocument(),
     )
-    expect(screen.getByRole('heading', { name: '没有需要优先核对的 Node' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看 VPS 库存' })).toHaveAttribute('href', '/vps')
+    expect(screen.getByRole('heading', { name: 'Node 当前稳定' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看 VPS' })).toHaveAttribute('href', '/vps')
     expect(screen.queryByText(/linked node health/i)).not.toBeInTheDocument()
   })
 

@@ -28,9 +28,7 @@ export function NodesHero({
       <div>
         <p className="section-heading__eyebrow">观测 · 节点</p>
         <h2 className="section-heading__title">节点观测</h2>
-        <p className="section-heading__description">
-          以运行事实支撑 VPS 资产判断，优先扫描 VPS 关联、接入状态、维护 / 暂停与异常证据。
-        </p>
+        <p className="section-heading__description">异常、接入、维护 / 暂停。</p>
       </div>
       <div className="nodes-hero__aside" aria-label="节点库存摘要">
         <div className="nodes-hero__stats">

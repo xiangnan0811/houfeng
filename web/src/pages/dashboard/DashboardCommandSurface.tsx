@@ -100,34 +100,27 @@ function commandDescription(
   maintenanceTotal: number,
   isFreshInstall: boolean,
 ) {
-  if (isFreshInstall) {
-    return '先创建节点、接入 agent，再补齐 VPS 资产与观测目标；工作台会在有数据后显示续费、决策和异常队列。'
-  }
+  if (isFreshInstall) return '接入 Node → 补 VPS → 配目标。'
 
   const summary = overview.asset_summary
   const pressureTotal = assetPressureCount(summary)
-  const assetCopy = pressureTotal > 0
-    ? `资产侧 ${pressureTotal} 项信号`
-    : '资产侧暂无待处理信号'
+  const assetCopy = `资产 ${pressureTotal}`
   const observationCopy =
     abnormalTotal > 0
-      ? `观测侧 ${abnormalTotal} 个异常对象，其中严重 ${severeTotal}`
+      ? `异常 ${abnormalTotal} · 严重 ${severeTotal}`
       : maintenanceTotal > 0
-        ? `观测侧 ${maintenanceTotal} 个对象处于维护观察`
-        : '观测侧暂无活跃异常'
-  const renewalCopy =
-    summary.renewal_due_30d_vps_count > 0
-      ? `30 天续费 ${summary.renewal_due_30d_vps_count} 台 VPS`
-      : '30 天内暂无续费压力'
-  return `${assetCopy}；${observationCopy}；${renewalCopy}。`
+        ? `维护 ${maintenanceTotal}`
+        : '异常 0'
+  const renewalCopy = `续费 ${summary.renewal_due_30d_vps_count}`
+  return `${assetCopy} / ${observationCopy} / ${renewalCopy}`
 }
 
 function assetFocusDetail(summary: DashboardAssetSummary, pressureTotal: number) {
-  if (pressureTotal === 0) return '续费、决策与关联均稳定'
+  if (pressureTotal === 0) return '稳定'
   const lifecycleReviewCount = summary.to_cancel_vps_count + summary.to_migrate_vps_count
   return `续费 ${summary.renewal_due_30d_vps_count} · 决策 ${
     summary.unreviewed_vps_count + lifecycleReviewCount
-  } · 缺关联 ${summary.unlinked_vps_count}`
+  } · 未关联 ${summary.unlinked_vps_count}`
 }
 
 function observabilityFocus(
@@ -140,7 +133,7 @@ function observabilityFocus(
     return {
       label: '严重异常',
       value: severeTotal,
-      detail: `异常对象 ${abnormalTotal} · 先看事件证据`,
+      detail: `异常 ${abnormalTotal} · 事件证据`,
       to: DASHBOARD_LINKS.eventsSevere,
       tone: 'critical',
       emphasis: true,
@@ -172,7 +165,7 @@ function observabilityFocus(
   return {
     label: '观测稳定',
     value: 0,
-    detail: '当前没有活跃异常对象',
+    detail: '无活跃异常',
     to: DASHBOARD_LINKS.events24h,
     tone: 'normal',
   }
@@ -221,7 +214,7 @@ function assetRows(summary: DashboardAssetSummary): CommandRow[] {
     {
       label: '待决策',
       value: summary.unreviewed_vps_count,
-      detail: '续费状态未评估',
+      detail: '未评估',
       to: DASHBOARD_LINKS.assetDecisions,
       tone: summary.unreviewed_vps_count > 0 ? 'notice' : 'normal',
     },
@@ -235,14 +228,14 @@ function assetRows(summary: DashboardAssetSummary): CommandRow[] {
     {
       label: '未关联 Node',
       value: summary.unlinked_vps_count,
-      detail: '需人工核对',
+      detail: '人工核对',
       to: DASHBOARD_LINKS.vps,
       tone: summary.unlinked_vps_count > 0 ? 'notice' : 'normal',
     },
     {
       label: '关联异常',
       value: summary.abnormal_linked_vps_count,
-      detail: 'VPS 关联异常 Node',
+      detail: '异常 Node',
       to: DASHBOARD_LINKS.nodesAbnormal,
       tone: summary.abnormal_linked_vps_count > 0 ? 'alert' : 'normal',
     },
@@ -296,20 +289,20 @@ function nextActions(
     return [
       {
         label: '创建第一个节点',
-        detail: '先登记服务器并生成 agent 接入指引',
+        detail: '登记 · 接入',
         to: DASHBOARD_LINKS.nodes,
         tone: 'notice',
         primary: true,
       },
       {
         label: '查看节点接入',
-        detail: '处理待接入或绑定待确认节点',
+        detail: '待接入 / 绑定',
         to: DASHBOARD_LINKS.nodesPendingOnboarding,
         tone: 'neutral',
       },
       {
         label: '创建第一个目标',
-        detail: '开始记录服务或端口的观测入口',
+        detail: '配置服务入口',
         to: DASHBOARD_LINKS.targets,
         tone: 'neutral',
       },
@@ -323,7 +316,7 @@ function nextActions(
   if (pressureTotal > 0) {
     actions.push({
       label: '进入资产决策队列',
-      detail: `待决策 ${summary.unreviewed_vps_count} · 30 天续费 ${summary.renewal_due_30d_vps_count} · 缺关联 ${summary.unlinked_vps_count}`,
+      detail: `决策 ${summary.unreviewed_vps_count} · 续费 ${summary.renewal_due_30d_vps_count} · 未关联 ${summary.unlinked_vps_count}`,
       to: DASHBOARD_LINKS.assetDecisions,
       tone: summary.renewal_due_30d_vps_count > 0 ? 'notice' : 'neutral',
       primary: true,
@@ -333,7 +326,7 @@ function nextActions(
   if (severeTotal > 0) {
     actions.push({
       label: '处理严重事件',
-      detail: `严重对象 ${severeTotal}，先查看事件证据`,
+      detail: `严重 ${severeTotal}`,
       to: DASHBOARD_LINKS.eventsSevere,
       tone: 'critical',
       primary: pressureTotal === 0,
@@ -343,7 +336,7 @@ function nextActions(
   if (abnormalTotal > 0) {
     actions.push({
       label: '处理观测异常',
-      detail: `异常节点 ${overview.abnormal_node_count} · 异常目标 ${overview.abnormal_target_count}`,
+      detail: `节点 ${overview.abnormal_node_count} · 目标 ${overview.abnormal_target_count}`,
       to: overview.abnormal_node_count > 0 ? DASHBOARD_LINKS.nodesAbnormal : DASHBOARD_LINKS.targetsAbnormal,
       tone: 'alert',
       primary: pressureTotal === 0 && severeTotal === 0,
@@ -353,7 +346,7 @@ function nextActions(
   if (summary.unlinked_vps_count > 0) {
     actions.push({
       label: '核对未关联 VPS',
-      detail: '补齐 VPS 与 Node 的证据链',
+      detail: 'VPS ↔ Node',
       to: DASHBOARD_LINKS.vps,
       tone: 'notice',
     })
@@ -362,7 +355,7 @@ function nextActions(
   if (maintenanceTotal > 0) {
     actions.push({
       label: '查看维护事件',
-      detail: `维护对象 ${maintenanceTotal}，确认观察窗口`,
+      detail: `维护 ${maintenanceTotal}`,
       to: DASHBOARD_LINKS.eventsMaintenance,
       tone: 'maintenance',
       primary: actions.length === 0,
@@ -373,20 +366,20 @@ function nextActions(
     return [
       {
         label: '核对 VPS 库存',
-        detail: '检查 provider、region、续费和关联 Node 是否完整',
+        detail: 'provider / 续费 / Node',
         to: DASHBOARD_LINKS.vps,
         tone: 'normal',
         primary: true,
       },
       {
         label: '查看 24h 事件流',
-        detail: '确认最近异常与恢复记录',
+        detail: '异常 / 恢复',
         to: DASHBOARD_LINKS.events24h,
         tone: 'neutral',
       },
       {
         label: '进入资产决策',
-        detail: '复核续费决策队列',
+        detail: '续费 / 决策',
         to: DASHBOARD_LINKS.assetDecisions,
         tone: 'neutral',
       },
@@ -553,7 +546,7 @@ export function DashboardCommandSurface({
           <div className="dashboard-command-lane__header">
             <div>
               <p className="dashboard-command-lane__eyebrow">资产决策队列</p>
-              <h2>续费、决策与缺信息</h2>
+              <h2>续费 / 决策 / 关联</h2>
             </div>
             <div className="dashboard-command-lane__tools">
               {pressureTotal > 0 ? <span className="dashboard-command-lane__signal">优先处理</span> : null}
@@ -589,7 +582,7 @@ export function DashboardCommandSurface({
           <div className="dashboard-command-lane__header">
             <div>
               <p className="dashboard-command-lane__eyebrow">观测异常队列</p>
-              <h2>事件、节点与目标证据</h2>
+              <h2>事件 / 节点 / 目标</h2>
             </div>
             <div className="dashboard-command-lane__tools">
               {severeTotal > 0 ? (
@@ -653,12 +646,9 @@ export function DashboardCommandSurface({
         <section className="dashboard-command-lane dashboard-command-lane--actions" aria-label="次级动作">
           <div className="dashboard-command-lane__header">
             <div>
-              <p className="dashboard-command-lane__eyebrow">次级动作</p>
-              <h2>完成第一步后再处理</h2>
+              <p className="dashboard-command-lane__eyebrow">次级</p>
+              <h2>后续</h2>
             </div>
-            <span className="dashboard-command-lane__signal dashboard-command-lane__signal--muted">
-              低优先级
-            </span>
           </div>
           <div className="dashboard-action-list">
             {actions.filter((action) => !action.primary).map((action, index) => (
@@ -675,12 +665,12 @@ export function DashboardCommandSurface({
                   <strong>{action.label}</strong>
                   <span>{action.detail}</span>
                 </span>
-                <span className="dashboard-action-row__cta">进入</span>
+                <span className="dashboard-action-row__cta">打开</span>
               </Link>
             ))}
           </div>
           <Link className="text-link dashboard-command-lane__footer-link" to={DASHBOARD_LINKS.events24h}>
-            查看 24h 事件趋势：{trendBalanceLabel(overview)}
+            24h：{trendBalanceLabel(overview)}
           </Link>
         </section>
       </div>

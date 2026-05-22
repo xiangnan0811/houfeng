@@ -43,10 +43,7 @@ export function NodesToolbar({
     <div className="nodes-toolbar list-command-band list-command-band--nodes" aria-label="节点列表工具栏">
       <div className="list-command-band__main">
         <p className="list-command-band__eyebrow">NODE QUICK VIEW</p>
-        <h3 className="list-command-band__title">节点证据扫描</h3>
-        <p className="list-command-band__description">
-          Quick view 决定当前扫描主线；字段筛选、批量操作、趋势与刷新进入次级控制区。
-        </p>
+        <h3 className="list-command-band__title">节点扫描</h3>
       </div>
       <div className="nodes-toolbar__primary list-command-band__controls">
         <Tabs<NodeQuickView>

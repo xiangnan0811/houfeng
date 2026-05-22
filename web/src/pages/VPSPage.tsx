@@ -390,9 +390,9 @@ function renderSubscriptionCell(row: InventoryRow) {
 }
 
 function subscriptionEvidenceLabel(status: SubscriptionEvidenceStatus, error: string | null): string {
-  if (status === 'loading') return '正在读取订阅证据'
-  if (status === 'error') return error ? `订阅证据不可用：${error}` : '订阅证据不可用'
-  return '订阅证据已读取'
+  if (status === 'loading') return '订阅读取中'
+  if (status === 'error') return error ? `订阅不可用：${error}` : '订阅不可用'
+  return '订阅已读取'
 }
 
 function subscriptionEvidenceShortLabel(status: SubscriptionEvidenceStatus): string {
@@ -402,9 +402,9 @@ function subscriptionEvidenceShortLabel(status: SubscriptionEvidenceStatus): str
 }
 
 function subscriptionEvidenceBoundaryText(status: SubscriptionEvidenceStatus): string {
-  if (status === 'ready') return '订阅 join 已完成；缺订阅视图可作为资料缺口入口。'
-  if (status === 'loading') return '订阅证据读取中；表格暂不判定缺订阅。'
-  return '订阅证据不可用；缺订阅视图暂不作为事实。'
+  if (status === 'ready') return '可判定缺订阅。'
+  if (status === 'loading') return '读取中，不判定。'
+  return '不可用，不判定。'
 }
 
 function providerName(providerID: string | null, providers: ProviderRecord[]): string {
@@ -560,8 +560,8 @@ export function VPSPage() {
       <strong>{active ? '当前筛选没有匹配 VPS' : '还没有录入 VPS 资产'}</strong>
       <span>
         {active
-          ? '先清空筛选回到完整库存；如果这是新资产，直接创建 VPS 后再补订阅和 Node 关联。'
-          : '先建立第一条 VPS 库存记录，再补齐订阅、Node 关联和续费判断。'}
+          ? '清空筛选或新建 VPS。'
+          : '先录入 VPS。'}
       </span>
       <div className="asset-empty-actions">
         {active ? (
@@ -699,9 +699,7 @@ export function VPSPage() {
         <div>
           <div className="page-panel__eyebrow">ASSET LEDGER</div>
           <h1 className="page-panel__title">VPS</h1>
-          <p className="page-panel__description">
-            面向 40+ VPS 核对的资产库存台账。首屏优先展示续费、订阅、Node 关联和资料质量，详细编辑留在详情页。
-          </p>
+          <p className="page-panel__description">库存核对：续费、订阅、Node、资料质量。</p>
         </div>
         <div className="page-panel__actions">
           <Button onClick={openCreateDrawer}>
@@ -725,7 +723,7 @@ export function VPSPage() {
             <span>当前 lens</span>
             <strong>{quickViewLabel(filters.view)}</strong>
             <small>
-              <MonoDigits>{filteredRows.length}</MonoDigits> 台匹配；来自 <MonoDigits>{inventoryRows.length}</MonoDigits> 台库存记录
+              <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台
             </small>
           </div>
           <Tabs
@@ -764,7 +762,7 @@ export function VPSPage() {
                 <span>字段筛选</span>
                 <strong>{fieldFilterCount > 0 ? `${fieldFilterCount} 项已应用` : '未应用字段筛选'}</strong>
               </div>
-              <small>URL 状态同步；Drawer 草稿仅在应用后生效。</small>
+              <small>应用后生效</small>
             </div>
             <FilterBar
               className="vps-filter-bar"
@@ -781,7 +779,7 @@ export function VPSPage() {
               }
             >
               <div className="vps-filter-bar__summary">
-                <span>Quick view 负责库存 lens；服务商、生命周期、用途和续费决策在高级筛选中调整。</span>
+                <span>字段条件</span>
               </div>
               <Button variant="secondary" onClick={openFilterDrawer}>高级筛选</Button>
             </FilterBar>
@@ -789,7 +787,7 @@ export function VPSPage() {
         </div>
         {subscriptionEvidence === 'error' && (
           <p className="asset-operation-feedback asset-operation-feedback--notice vps-evidence-notice" role="status">
-            订阅证据不可用，缺订阅视图暂不作为事实。{state.subscriptionsError}
+            订阅不可用，不判定。{state.subscriptionsError}
           </p>
         )}
       </section>
@@ -800,7 +798,7 @@ export function VPSPage() {
             <p className="section-heading__eyebrow">VPS ASSETS · WORK AREA</p>
             <h2>VPS 库存表</h2>
             <p className="section-heading__description">
-              表格承接当前 lens「{quickViewLabel(filters.view)}」、字段筛选和订阅证据状态；行点击进入单台 VPS 详情补齐证据。
+              Lens「{quickViewLabel(filters.view)}」
             </p>
           </div>
           <span className="section-heading__meta vps-inventory-table-panel__meta">
@@ -845,9 +843,6 @@ export function VPSPage() {
         ariaLabel="VPS 创建表单"
       >
         <div className="asset-create-drawer">
-          <p className="page-panel__description">
-            创建只记录资产库存基础事实；订阅、Node 关联和详细编辑继续在对应页面补齐。
-          </p>
           <form className="asset-create-form" onSubmit={handleCreateSubmit}>
             <fieldset className="asset-create-form__group">
               <legend>基础识别</legend>
@@ -864,8 +859,8 @@ export function VPSPage() {
                 </select>
                 <span className="input-field__hint">
                   {state.providers.length === 0
-                    ? '还没有服务商主数据，可先去创建服务商，或临时保留名称快照。'
-                    : '优先选择服务商主数据；名称快照用于导入兼容和展示。'}
+                    ? '无服务商主数据；可保留名称快照。'
+                    : '优先选择主数据；快照用于展示。'}
                   {' '}
                   <Link className="text-link" to="/providers">服务商列表</Link>
                 </span>
@@ -921,7 +916,7 @@ export function VPSPage() {
 
             {createError && <p className="create-form__error" role="alert">{createError}</p>}
             <div className="page-form-actions asset-create-form__actions">
-              <span className="asset-create-form__hint">创建后进入详情页补订阅、Node 关联和更多证据。</span>
+              <span className="asset-create-form__hint">创建后进入详情页。</span>
               <Button variant="secondary" type="button" onClick={closeCreateDrawer}>
                 取消
               </Button>
