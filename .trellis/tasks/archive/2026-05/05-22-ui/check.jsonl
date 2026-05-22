@@ -1,0 +1,8 @@
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Review CSS-only visual restraint against token/theme/className/styling constraints."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Check changed files remain in allowed frontend style locations."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Check no component layering, className, route, or interaction contracts were changed."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Run/record frontend verification and evidence policy checks."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Confirm no cross-layer/API/backend boundary changes are present."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Review remaining visuals against Houfeng v2 restrained dark-first identity."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Review shell/atom/page surface changes against active component contracts."}
+{"file":".trellis/tasks/05-22-ui/research/browser-sanity.md","reason":"Validate local browser sanity evidence and caveats."}

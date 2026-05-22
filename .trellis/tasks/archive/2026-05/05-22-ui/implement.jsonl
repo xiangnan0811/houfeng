@@ -1,0 +1,7 @@
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"CSS-only visual restraint task; token/theme/className/styling constraints."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Verify allowed web/src style locations and CSS import boundaries."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Preserve component layering, className contracts, and interaction surfaces."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Frontend verification and visual evidence requirements for UI changes."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Active Houfeng v2 visual authority for dark-first restrained engineering-tool identity."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Active component visual contracts for shell, atoms, Dashboard, and shared surfaces."}
+{"file":".trellis/tasks/05-22-ui/research/browser-sanity.md","reason":"Local browser sanity notes and evidence caveats for the visual pass."}
