@@ -38,9 +38,9 @@
   --border-w-strong: 2px;
 
   /* ---------- Shadow levels ---------- */
-  --shadow-glow:    0 0 16px rgba(201, 165, 111, 0.32);
-  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.20), 0 4px 10px rgba(0, 0, 0, 0.12);
-  --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-glow:    0 0 0 1px rgba(201, 165, 111, 0.18);
+  --shadow-soft:    0 1px 2px rgba(0, 0, 0, 0.18);
+  --shadow-overlay: 0 10px 24px rgba(0, 0, 0, 0.36), 0 2px 8px rgba(0, 0, 0, 0.22);
 
   /* ---------- Motion ---------- */
   --ease-calm: cubic-bezier(0.22, 1, 0.36, 1);
@@ -106,8 +106,8 @@
   --chart-6: #B6493A;
 
   --bg-aurora:
-    radial-gradient(ellipse at top right,    rgba(201, 165, 111, 0.10) 0%, transparent 55%),
-    radial-gradient(ellipse at bottom left,  rgba(92, 143, 168, 0.06) 0%, transparent 55%);
+    radial-gradient(ellipse at top right,    rgba(201, 165, 111, 0.025) 0%, transparent 46%),
+    radial-gradient(ellipse at bottom left,  rgba(92, 143, 168, 0.018) 0%, transparent 46%);
 }
 
 /* ---------- houfeng-light (宣纸白基底，独立打磨) ---------- */
@@ -154,12 +154,12 @@ html.theme-houfeng-light {
   --chart-6: #93362A;
 
   --bg-aurora:
-    radial-gradient(ellipse at top right, rgba(154, 122, 61, 0.08) 0%, transparent 55%),
-    radial-gradient(ellipse at bottom left, rgba(64, 109, 134, 0.05) 0%, transparent 55%);
+    radial-gradient(ellipse at top right, rgba(154, 122, 61, 0.024) 0%, transparent 46%),
+    radial-gradient(ellipse at bottom left, rgba(64, 109, 134, 0.016) 0%, transparent 46%);
 
-  --shadow-glow: 0 0 12px rgba(154, 122, 61, 0.22);
-  --shadow-soft: 0 1px 2px rgba(31, 28, 22, 0.10), 0 4px 10px rgba(31, 28, 22, 0.06);
-  --shadow-overlay: 0 12px 40px rgba(31, 28, 22, 0.20), 0 4px 12px rgba(31, 28, 22, 0.12);
+  --shadow-glow: 0 0 0 1px rgba(154, 122, 61, 0.16);
+  --shadow-soft: 0 1px 2px rgba(31, 28, 22, 0.08);
+  --shadow-overlay: 0 10px 24px rgba(31, 28, 22, 0.14), 0 2px 8px rgba(31, 28, 22, 0.08);
 }
 
 /* ---------- classic-dark (深蓝灰基底，供偏好 darker 的用户使用) ---------- */
@@ -198,8 +198,8 @@ html.theme-classic-dark {
   --chart-6: #B6493A;
 
   --bg-aurora:
-    radial-gradient(ellipse at top right,    rgba(201, 165, 111, 0.10) 0%, transparent 55%),
-    radial-gradient(ellipse at bottom left,  rgba(92, 143, 168, 0.06) 0%, transparent 55%);
+    radial-gradient(ellipse at top right,    rgba(201, 165, 111, 0.025) 0%, transparent 46%),
+    radial-gradient(ellipse at bottom left,  rgba(92, 143, 168, 0.018) 0%, transparent 46%);
 }
 
 /* ---------- classic-light (传统浅灰基底，供偏好 lighter 的用户使用) ---------- */
@@ -246,12 +246,12 @@ html.theme-classic-light {
   --chart-6: #93362A;
 
   --bg-aurora:
-    radial-gradient(ellipse at top right, rgba(154, 122, 61, 0.08) 0%, transparent 55%),
-    radial-gradient(ellipse at bottom left, rgba(64, 109, 134, 0.05) 0%, transparent 55%);
+    radial-gradient(ellipse at top right, rgba(154, 122, 61, 0.024) 0%, transparent 46%),
+    radial-gradient(ellipse at bottom left, rgba(64, 109, 134, 0.016) 0%, transparent 46%);
 
-  --shadow-glow: 0 0 12px rgba(154, 122, 61, 0.22);
-  --shadow-soft: 0 1px 2px rgba(31, 28, 22, 0.10), 0 4px 10px rgba(31, 28, 22, 0.06);
-  --shadow-overlay: 0 12px 40px rgba(31, 28, 22, 0.20), 0 4px 12px rgba(31, 28, 22, 0.12);
+  --shadow-glow: 0 0 0 1px rgba(154, 122, 61, 0.16);
+  --shadow-soft: 0 1px 2px rgba(31, 28, 22, 0.08);
+  --shadow-overlay: 0 10px 24px rgba(31, 28, 22, 0.14), 0 2px 8px rgba(31, 28, 22, 0.08);
 }
 
 /* ---------- Reduced motion ---------- */

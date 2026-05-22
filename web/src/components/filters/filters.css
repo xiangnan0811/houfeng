@@ -9,14 +9,10 @@
   gap: var(--space-3);
   min-width: 0;
   padding: var(--space-3) var(--space-4);
-  background:
-    linear-gradient(135deg, var(--panel-highlight-2) 0%, transparent 42%),
-    var(--panel-bg-elevated);
+  background: var(--panel-bg-elevated);
   border: var(--border-w) solid var(--panel-border);
   border-radius: var(--radius-3);
-  box-shadow:
-    0 var(--border-w) 0 color-mix(in srgb, var(--text-primary) 3%, transparent) inset,
-    var(--shadow-soft);
+  box-shadow: var(--shadow-soft);
 }
 .filter-bar__controls {
   display: flex;
@@ -99,7 +95,7 @@
 .filter-select__control:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .filter-select__control:disabled { opacity: 0.55; cursor: not-allowed; }
 
@@ -140,7 +136,7 @@
 }
 .filter-multiselect.is-open .filter-multiselect__trigger {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .filter-multiselect__trigger:disabled { opacity: 0.55; cursor: not-allowed; }
 .filter-multiselect__popover {
@@ -206,8 +202,7 @@
   font-family: var(--font-sans);
   font-size: 12px;
   color: var(--text-primary);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 78%, var(--surface-elevated)), var(--accent-soft));
+  background: var(--accent-soft);
   border: var(--border-w) solid var(--accent-border);
 }
 .filter-chip__label {
