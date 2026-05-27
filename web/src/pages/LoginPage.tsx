@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Input } from '../components/atoms'
 import { useAuth } from '../lib/auth-context'
-import './LoginPage.css'
 
 export function LoginPage() {
   const { login } = useAuth()

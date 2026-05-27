@@ -787,7 +787,7 @@ export function NodesPage() {
   }
 
   return (
-    <section className="page-stack nodes-page">
+    <div className="animate-in">
       <NodesHero
         totalNodeCount={nodes.length}
         abnormalNodeCount={abnormalNodeCount}
@@ -862,7 +862,7 @@ export function NodesPage() {
         </div>
       </Drawer>
 
-      <div className="observability-list-frame observability-list-frame--nodes">
+      <div className="animate-in d2">
         <NodesToolbar
           quickViewTabs={quickViewTabs}
           activeQuickView={activeQuickView}
@@ -938,6 +938,6 @@ export function NodesPage() {
           onCreateNode={toggleCreateDrawer}
         />
       </div>
-    </section>
+    </div>
   )
 }

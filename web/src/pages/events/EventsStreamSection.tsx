@@ -1,7 +1,4 @@
-import { Button, MonoDigits } from '../../components/atoms'
-import { DetailSection } from '../../components/DetailSection'
-import { EventList } from '../../components/EventList'
-import type { StateChangeEventRecord } from '../../lib/types'
+import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../../lib/types'
 
 type EventGroupKey = 'today' | 'yesterday' | 'this_week' | 'earlier'
 
@@ -23,6 +20,11 @@ const EVENT_GROUP_LABELS: Record<EventGroupKey, string> = {
 
 const EVENT_GROUP_ORDER: EventGroupKey[] = ['today', 'yesterday', 'this_week', 'earlier']
 
+const OBJECT_TYPE_LABELS: Record<string, string> = {
+  node: '节点',
+  target: '目标',
+}
+
 function startOfDay(date: Date): Date {
   const next = new Date(date)
   next.setHours(0, 0, 0, 0)
@@ -32,8 +34,7 @@ function startOfDay(date: Date): Date {
 function bucketKey(eventDate: Date, now: Date): EventGroupKey {
   const startToday = startOfDay(now)
   const startYesterday = new Date(startToday.getTime() - 24 * 60 * 60 * 1000)
-  // ISO week start: Monday. Use locale-independent logic.
-  const day = startToday.getDay() // 0 (Sun) .. 6 (Sat)
+  const day = startToday.getDay()
   const offsetToMonday = day === 0 ? 6 : day - 1
   const startWeek = new Date(startToday.getTime() - offsetToMonday * 24 * 60 * 60 * 1000)
 
@@ -67,6 +68,31 @@ function groupEventsByTime(
   }))
 }
 
+function eventIcon(evt: StateChangeEventRecord): { cls: string; char: string } {
+  if (evt.event_type === 'incident_recovered') return { cls: 'event-icon ei-ok', char: '✓' }
+  if (evt.event_type === 'incident_escalated') return { cls: 'event-icon ei-err', char: '!' }
+  return { cls: 'event-icon ei-warn', char: '!' }
+}
+
+function formatEventTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const now = new Date()
+  const startToday = startOfDay(now)
+  if (d >= startToday) {
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+  }
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${mm}-${dd} ${hh}:${min}`
+}
+
+function eventTypeLabel(value: StateChangeEventRecord['event_type']): string {
+  return STATE_CHANGE_EVENT_TYPE_LABELS[value] ?? value
+}
+
 export function EventsStreamSection({
   events,
   exhausted,
@@ -77,60 +103,68 @@ export function EventsStreamSection({
 }: EventsStreamSectionProps) {
   const groupedEvents = groupEventsByTime(events)
 
-  return (
-    <DetailSection
-      eyebrow="事件流"
-      title="事件流"
-      ribbon={hasActiveFilters ? 'notice' : 'accent-2'}
-      aside={<span><MonoDigits>{events.length}</MonoDigits> 条当前事件</span>}
-    >
-      <p className="events-stream-context">
-        {hasActiveFilters
-          ? '当前事件流只展示 URL 固定的筛选结果；加载更早事件会沿用同一组条件扩大数量上限。'
-          : '默认事件流未限定时间范围，按最近事件数量截取；需要精确窗口可使用高级筛选。'}
-      </p>
-      {events.length === 0 ? (
-        <EventList
-          events={events}
-          emptyTitle={hasActiveFilters ? '没有匹配的事件' : '最近没有状态变更事件'}
-          emptyDescription={
-            hasActiveFilters
-              ? '当前 URL 筛选没有返回事件。重置筛选后再继续核对诊断时间线。'
-              : '系统暂时没有新的状态变更事件。'
-          }
-          emptyAction={
-            hasActiveFilters ? (
-              <Button variant="ghost" size="md" onClick={onClearFilters}>
-                重置筛选
-              </Button>
-            ) : null
-          }
-        />
-      ) : (
-        <div className="probe-list">
-          {groupedEvents.map((group) => (
-            <div key={group.key} className="event-group">
-              <header className="section-heading">
-                <h3 className="section-heading__title">{EVENT_GROUP_LABELS[group.key]}</h3>
-                <span className="section-heading__eyebrow">
-                  <MonoDigits>{group.events.length}</MonoDigits>
-                </span>
-              </header>
-              <EventList events={group.events} />
-            </div>
-          ))}
-        </div>
-      )}
-      <div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onLoadMore}
-          disabled={exhausted || loadingMore}
-        >
-          {loadingMore ? '正在加载…' : exhausted ? '无更多事件' : '加载更早事件 ↓'}
-        </Button>
+  if (events.length === 0) {
+    return (
+      <div className="card" style={{ padding: '24px', textAlign: 'center' }}>
+        <p style={{ fontSize: '13px', color: 'var(--t3)' }}>
+          {hasActiveFilters ? '当前筛选没有匹配的事件' : '最近没有状态变更事件'}
+        </p>
+        {hasActiveFilters && (
+          <button
+            type="button"
+            className="btn sm secondary"
+            style={{ marginTop: '12px' }}
+            onClick={onClearFilters}
+          >
+            重置筛选
+          </button>
+        )}
       </div>
-    </DetailSection>
+    )
+  }
+
+  return (
+    <>
+      {groupedEvents.map((group, gi) => (
+        <div key={group.key} className={`card animate-in d${gi + 1}`} style={{ marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--t1)' }}>
+              {EVENT_GROUP_LABELS[group.key]} ({group.events.length} 条)
+            </h3>
+          </div>
+          {group.events.map((evt) => {
+            const icon = eventIcon(evt)
+            return (
+              <div
+                className="event-row"
+                key={evt.event_id ?? `${evt.created_at}-${evt.incident_id}-${evt.event_type}`}
+              >
+                <span className="event-time">{formatEventTime(evt.created_at)}</span>
+                <span className={icon.cls}>{icon.char}</span>
+                <div className="event-body">
+                  <div className="event-title">{eventTypeLabel(evt.event_type)}</div>
+                  <div className="event-detail">
+                    {evt.incident_class ? `${evt.incident_class} · ` : ''}
+                    {evt.summary || '暂无摘要'}
+                  </div>
+                </div>
+                <span className="event-target">
+                  {OBJECT_TYPE_LABELS[evt.object_type] ?? evt.object_type} · {evt.object_id}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+      <button
+        type="button"
+        className="btn md secondary"
+        style={{ width: '100%', justifyContent: 'center' }}
+        onClick={onLoadMore}
+        disabled={exhausted || loadingMore}
+      >
+        {loadingMore ? '正在加载…' : exhausted ? '无更多事件' : '加载更多'}
+      </button>
+    </>
   )
 }

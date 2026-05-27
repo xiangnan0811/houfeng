@@ -107,15 +107,11 @@ describe('NodesPage', () => {
     )
 
     expect(screen.getByRole('heading', { name: '节点观测' })).toBeInTheDocument()
-    expect(screen.getByText('观测 · 节点')).toBeInTheDocument()
-    expect(
-      screen.getByText('异常、接入、维护 / 暂停。'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('管理和监控所有节点')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '节点扫描' })).toBeInTheDocument()
-    expect(screen.getByText('NODE QUICK VIEW')).toBeInTheDocument()
-    expect(screen.getByLabelText('节点列表当前范围')).toHaveTextContent('完整 Node 库存')
-    expect(screen.getByLabelText('节点列表当前范围')).toHaveTextContent('0/0')
+    expect(screen.getByText('OBSERVABILITY SUPPORT')).toBeInTheDocument()
+    expect(screen.getByLabelText('当前节点筛选范围')).toHaveTextContent('完整库存')
+    expect(screen.getByLabelText('当前节点筛选范围')).toHaveTextContent('0/0')
     expect(screen.getByRole('tab', { name: /全部/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '高级筛选' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '批量操作' })).toBeInTheDocument()

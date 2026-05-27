@@ -1,18 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
+import { FilterChip } from '../components/filters'
 import { PageState } from '../components/PageState'
 import { ApiError, listEvents } from '../lib/api'
-import type { EventListFilter, StateChangeEventType } from '../lib/types'
+import { STATE_CHANGE_EVENT_TYPE_LABELS, type EventListFilter, type StateChangeEventType } from '../lib/types'
 import { EventsFilterDrawer } from './events/EventsFilterDrawer'
-import { EventsFilterOverview } from './events/EventsFilterOverview'
 import { EventsStreamSection } from './events/EventsStreamSection'
-import { EventsSupportSurface } from './events/EventsSupportSurface'
-import {
-  buildEventEvidenceLead,
-  describeEventFilterContext,
-  pickTopEventEvidence,
-} from './events/eventEvidenceHelpers'
 import {
   ALLOWED_EVENT_TYPES,
   ALLOWED_LIMITS,
@@ -20,6 +14,7 @@ import {
   DEFAULT_FILTERS,
   DEFAULT_LIMIT,
   TIME_RANGE_DURATIONS_MS,
+  TIME_RANGE_LABELS,
 } from './events/eventsPageConstants'
 import type { EventsPageState, FilterState, TimeRange } from './events/types'
 
@@ -192,6 +187,12 @@ function applyTimeRange(filters: FilterState, range: TimeRange): FilterState {
   }
 }
 
+function objectTypeLabel(value: string): string {
+  if (value === 'node') return '节点'
+  if (value === 'target') return '目标'
+  return value
+}
+
 export function EventsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const appliedFilterKey = useMemo(
@@ -208,10 +209,6 @@ export function EventsPage() {
   }))
   const filters =
     draftState.filterKey === appliedFilterKey ? draftState.filters : appliedFilters
-  // effectiveLimit drives the actual limit sent to backend. It starts at the
-  // user-selected limit; "加载更早事件" increments it by the user-selected
-  // limit and refetches so older rows append naturally (server returns the
-  // most-recent N for the current filter).
   const [limitState, setLimitState] = useState(() => ({
     filterKey: appliedFilterKey,
     effectiveLimit: filterLimit(appliedFilters),
@@ -228,6 +225,8 @@ export function EventsPage() {
   })
   const [loadingMore, setLoadingMore] = useState(false)
   const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false)
+
+  const activeFilters = hasActiveFilters(appliedFilters)
 
   useEffect(() => {
     const canonicalParams = searchParamsFromFilters(appliedFilters)
@@ -277,23 +276,6 @@ export function EventsPage() {
       cancelled = true
     }
   }, [appliedFilters, appliedFilterKey, effectiveLimit])
-
-  const activeFilters = hasActiveFilters(appliedFilters)
-  const filterContext = useMemo(
-    () => describeEventFilterContext(appliedFilters),
-    [appliedFilters],
-  )
-  const topEvidence = useMemo(() => pickTopEventEvidence(state.events), [state.events])
-  const evidenceLead = useMemo(
-    () =>
-      buildEventEvidenceLead({
-        events: state.events,
-        filters: appliedFilters,
-        hasActiveFilters: activeFilters,
-        topEvidence,
-      }),
-    [activeFilters, appliedFilters, state.events, topEvidence],
-  )
 
   function handleLoadMore() {
     if (state.exhausted || loadingMore) return
@@ -371,33 +353,74 @@ export function EventsPage() {
   }
 
   return (
-    <div className="page-stack events-page">
-      <section className="page-panel">
-        <p className="page-panel__eyebrow">观测 · 事件</p>
-        <h2 className="page-panel__title">审计与诊断时间线</h2>
-        <p className="page-panel__description">
-          承接工作台、VPS、Node 和 Target 深链，把严重度、对象、时间窗口与维护上下文呈现为可追溯的处理证据。
-        </p>
-      </section>
+    <div className="animate-in">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">事件流</h1>
+          <p className="page-sub">状态变更事件时间线</p>
+        </div>
+        <div className="header-actions">
+          <button type="button" className="btn sm secondary" onClick={openFiltersDrawer}>
+            筛选面板
+          </button>
+        </div>
+      </div>
 
-      <EventsSupportSurface
-        events={state.events}
-        filters={appliedFilters}
-        hasActiveFilters={activeFilters}
-        evidenceLead={evidenceLead}
-        topEvidence={topEvidence}
-        filterContext={filterContext}
-        onOpenFilters={openFiltersDrawer}
-        onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
-      />
-
-      <EventsFilterOverview
-        filters={appliedFilters}
-        hasActiveFilters={activeFilters}
-        onClearAll={() => commitFilters(DEFAULT_FILTERS)}
-        onOpenFilters={openFiltersDrawer}
-        onRemoveFilter={removeAppliedFilter}
-      />
+      {activeFilters && (
+        <div className="filter-bar animate-in d1">
+          {appliedFilters.time_range !== 'custom' && (
+            <FilterChip
+              label={`时间: ${TIME_RANGE_LABELS[appliedFilters.time_range]}`}
+              onRemove={() => removeAppliedFilter('time_range')}
+            />
+          )}
+          {appliedFilters.object_type && (
+            <FilterChip
+              label={`对象: ${objectTypeLabel(appliedFilters.object_type)}`}
+              onRemove={() => removeAppliedFilter('object_type')}
+            />
+          )}
+          {appliedFilters.severity && (
+            <FilterChip
+              label={`严重度: ${appliedFilters.severity}`}
+              onRemove={() => removeAppliedFilter('severity')}
+            />
+          )}
+          {appliedFilters.event_type && (
+            <FilterChip
+              label={`类型: ${STATE_CHANGE_EVENT_TYPE_LABELS[appliedFilters.event_type]}`}
+              onRemove={() => removeAppliedFilter('event_type')}
+            />
+          )}
+          {appliedFilters.limit !== String(DEFAULT_LIMIT) && (
+            <FilterChip
+              label={`数量: ${appliedFilters.limit}`}
+              onRemove={() => removeAppliedFilter('limit')}
+            />
+          )}
+          {appliedFilters.label && (
+            <FilterChip
+              label={`标签: ${appliedFilters.label}`}
+              onRemove={() => removeAppliedFilter('label')}
+            />
+          )}
+          {appliedFilters.notification_only && (
+            <FilterChip label="仅通知事件" onRemove={() => removeAppliedFilter('notification_only')} />
+          )}
+          {appliedFilters.recovery_only && (
+            <FilterChip label="仅恢复事件" onRemove={() => removeAppliedFilter('recovery_only')} />
+          )}
+          {appliedFilters.maintenance_only && (
+            <FilterChip label="仅维护事件" onRemove={() => removeAppliedFilter('maintenance_only')} />
+          )}
+          {appliedFilters.include_backfilled && (
+            <FilterChip label="含补传事件" onRemove={() => removeAppliedFilter('include_backfilled')} />
+          )}
+          <button type="button" className="filter-clear" onClick={() => commitFilters(DEFAULT_FILTERS)}>
+            清除全部
+          </button>
+        </div>
+      )}
 
       <EventsFilterDrawer
         open={filtersDrawerOpen}
@@ -409,14 +432,16 @@ export function EventsPage() {
         onFilterChange={updateDraftFilter}
       />
 
-      <EventsStreamSection
-        events={state.events}
-        exhausted={state.exhausted}
-        loadingMore={loadingMore}
-        hasActiveFilters={activeFilters}
-        onLoadMore={handleLoadMore}
-        onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
-      />
+      <div className="animate-in d2">
+        <EventsStreamSection
+          events={state.events}
+          exhausted={state.exhausted}
+          loadingMore={loadingMore}
+          hasActiveFilters={activeFilters}
+          onLoadMore={handleLoadMore}
+          onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
+        />
+      </div>
     </div>
   )
 }

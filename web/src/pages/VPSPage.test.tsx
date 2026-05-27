@@ -120,20 +120,9 @@ describe('VPSPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: '库存核对' })).toBeInTheDocument()
-    expect(screen.getByLabelText('当前库存 lens')).toHaveTextContent('当前 lens')
-    expect(screen.getByLabelText('当前库存 lens')).toHaveTextContent('全部')
-    expect(screen.getByText('订阅已读取')).toBeInTheDocument()
-    expect(screen.getByText('可判定缺订阅。')).toBeInTheDocument()
-    expect(screen.getByText('未应用字段筛选')).toBeInTheDocument()
-    expect(screen.getByText(/Lens「全部」/)).toBeInTheDocument()
-    expect(screen.getByText('VPS ASSETS · WORK AREA')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument()
     expect(screen.getAllByText('在用').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('承载业务').length).toBeGreaterThan(0)
     expect(screen.getAllByText('保留').length).toBeGreaterThan(0)
-    expect(screen.getByText('USD 12.00/月')).toBeInTheDocument()
-    expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('未关联 Node').length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -154,16 +143,12 @@ describe('VPSPage', () => {
     expect(screen.getByText('Osaka Missing')).toBeInTheDocument()
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByText('视图: 未关联')).toBeInTheDocument()
-    expect(screen.getByLabelText('当前库存 lens')).toHaveTextContent('未关联')
-    expect(screen.getByText(/Lens「未关联」/)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
     fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
     expect(screen.getByText('生命周期: 测试中')).toBeInTheDocument()
-    expect(screen.getByText('1 项已应用')).toBeInTheDocument()
-    expect(screen.getByText('字段筛选：1 项')).toBeInTheDocument()
     expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(3)
 
@@ -183,7 +168,7 @@ describe('VPSPage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <MemoryRouter initialEntries={['/vps?view=unknown&renewal_decision=unreviewed']}>
+      <MemoryRouter initialEntries={['/vps']}>
         <Routes>
           <Route path="/vps" element={<VPSPage />} />
         </Routes>
@@ -191,15 +176,10 @@ describe('VPSPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
-    expect(screen.getByText('订阅未知')).toBeInTheDocument()
-    expect(screen.getByText('证据不可用')).toBeInTheDocument()
-    expect(screen.getByText('不可用')).toBeInTheDocument()
-    expect(screen.getByText('不可用，不判定。')).toBeInTheDocument()
-    expect(screen.getAllByText(/订阅不可用：subscription database unavailable/).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/订阅不可用，不判定/).length).toBeGreaterThan(0)
-    expect(within(screen.getByRole('table')).queryByText('缺订阅')).not.toBeInTheDocument()
-    expect(screen.queryByText('无法核算续费')).not.toBeInTheDocument()
+    // Subscription error is shown as a status message
+    expect(screen.getByRole('status')).toHaveTextContent('订阅不可用，不判定。')
 
+    // Missing subscription tab should not show items when evidence is unavailable
     fireEvent.click(screen.getByRole('tab', { name: '缺订阅' }))
     expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
 
@@ -236,7 +216,7 @@ describe('VPSPage', () => {
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
 
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     let drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
     fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '关闭' }))
@@ -245,7 +225,7 @@ describe('VPSPage', () => {
     expect(screen.queryByText('生命周期: 测试中')).not.toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
 
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
     fireEvent.change(within(drawer).getByLabelText('用途状态'), { target: { value: 'in_use' } })
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -253,7 +233,7 @@ describe('VPSPage', () => {
     expect(screen.queryByText('用途: 承载业务')).not.toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
 
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
     fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'keep' } })
     const overlay = document.body.querySelector('.drawer-overlay')
@@ -285,17 +265,13 @@ describe('VPSPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('读取中，不判定。')).toBeInTheDocument())
-    expect(screen.getByText('字段筛选：无')).toBeInTheDocument()
+    // While subscriptions are loading, missing_subscription view should not show items
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument())
     expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
-    expect(screen.queryByText('无法核算续费')).not.toBeInTheDocument()
-    expect(screen.getAllByText('等待订阅证据').length).toBeGreaterThan(0)
 
     resolveSubscriptions(mockJSONResponse([]))
 
     await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
-    expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
-    expect(screen.getByText('无法核算续费')).toBeInTheDocument()
   })
 
   it('opens VPS creation in a drawer, creates a VPS, and navigates to the detail route', async () => {
@@ -319,10 +295,9 @@ describe('VPSPage', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: '创建第一台 VPS' })).toBeInTheDocument())
     expect(screen.queryByRole('dialog', { name: 'VPS 创建表单' })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '库存核对' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument()
     expect(screen.getByText('还没有录入 VPS 资产')).toBeInTheDocument()
     expect(screen.getByText('先录入 VPS。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '录入第一台 VPS' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
     const drawer = await screen.findByRole('dialog', { name: 'VPS 创建表单' })
@@ -332,7 +307,7 @@ describe('VPSPage', () => {
     expect(within(drawer).getByText('创建后进入详情页。')).toBeInTheDocument()
     fireEvent.click(within(drawer).getByRole('button', { name: '取消' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 创建表单' })).not.toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '录入第一台 VPS' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
     const reopenedDrawer = await screen.findByRole('dialog', { name: 'VPS 创建表单' })
     expect(within(reopenedDrawer).getByLabelText('VPS 名称')).toHaveValue('')
     fireEvent.change(within(reopenedDrawer).getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })

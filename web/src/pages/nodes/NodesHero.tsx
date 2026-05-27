@@ -1,6 +1,4 @@
-import { Link } from 'react-router-dom'
-
-import { Button, MonoDigits } from '../../components/atoms'
+import { MonoDigits } from '../../components/atoms'
 
 type NodesHeroProps = {
   totalNodeCount: number
@@ -24,62 +22,42 @@ export function NodesHero({
   onCreateClick,
 }: NodesHeroProps) {
   return (
-    <header className="section-heading section-heading--inline nodes-hero">
-      <div>
-        <p className="section-heading__eyebrow">观测 · 节点</p>
-        <h2 className="section-heading__title">节点观测</h2>
-        <p className="section-heading__description">异常、接入、维护 / 暂停。</p>
-      </div>
-      <div className="nodes-hero__aside" aria-label="节点库存摘要">
-        <div className="nodes-hero__stats">
-          <Link
-            className="nodes-hero-stat nodes-hero-stat--normal"
-            to="/nodes"
-            aria-label={`全部节点：${totalNodeCount}`}
-          >
-            <span>全部</span>
-            <strong>
-              <MonoDigits>{totalNodeCount}</MonoDigits>
-            </strong>
-          </Link>
-          <button
-            type="button"
-            className="nodes-hero-stat nodes-hero-stat--alert"
-            aria-label={`异常节点：${abnormalNodeCount}`}
-            onClick={onAbnormalClick}
-          >
-            <span>异常</span>
-            <strong>
-              <MonoDigits>{abnormalNodeCount}</MonoDigits>
-            </strong>
-          </button>
-          <button
-            type="button"
-            className="nodes-hero-stat nodes-hero-stat--notice"
-            aria-label={`待接入节点：${pendingOnboardingNodeCount}`}
-            onClick={onOnboardingClick}
-          >
-            <span>待接入</span>
-            <strong>
-              <MonoDigits>{pendingOnboardingNodeCount}</MonoDigits>
-            </strong>
-          </button>
-          <button
-            type="button"
-            className="nodes-hero-stat nodes-hero-stat--maintenance"
-            aria-label={`维护或暂停节点：${maintenanceOrPausedNodeCount}`}
-            onClick={onRuntimeAttentionClick}
-          >
-            <span>维护/暂停</span>
-            <strong>
-              <MonoDigits>{maintenanceOrPausedNodeCount}</MonoDigits>
-            </strong>
+    <>
+      <div className="page-header animate-in">
+        <div>
+          <h1 className="page-title">节点观测</h1>
+          <p className="page-sub">管理和监控所有节点</p>
+        </div>
+        <div className="header-actions">
+          <button type="button" className="btn md primary" onClick={onCreateClick}>
+            新建节点
           </button>
         </div>
-        <Button variant="primary" size="md" onClick={onCreateClick}>
-          新建节点
-        </Button>
       </div>
-    </header>
+      <div className="hero-stats animate-in">
+        <button type="button" className="hero-stat" onClick={onAbnormalClick}>
+          <div className="hs-label">全部节点</div>
+          <div className="hs-value"><MonoDigits>{totalNodeCount}</MonoDigits></div>
+        </button>
+        <button type="button" className="hero-stat" onClick={onAbnormalClick}>
+          <div className="hs-label">异常</div>
+          <div className={`hs-value${abnormalNodeCount > 0 ? ' danger' : ''}`}>
+            <MonoDigits>{abnormalNodeCount}</MonoDigits>
+          </div>
+        </button>
+        <button type="button" className="hero-stat" onClick={onOnboardingClick}>
+          <div className="hs-label">待接入</div>
+          <div className={`hs-value${pendingOnboardingNodeCount > 0 ? ' warn' : ''}`}>
+            <MonoDigits>{pendingOnboardingNodeCount}</MonoDigits>
+          </div>
+        </button>
+        <button type="button" className="hero-stat" onClick={onRuntimeAttentionClick}>
+          <div className="hs-label">维护/暂停</div>
+          <div className={`hs-value${maintenanceOrPausedNodeCount > 0 ? ' muted' : ''}`}>
+            <MonoDigits>{maintenanceOrPausedNodeCount}</MonoDigits>
+          </div>
+        </button>
+      </div>
+    </>
   )
 }

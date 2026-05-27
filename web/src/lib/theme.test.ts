@@ -26,7 +26,8 @@ describe('theme runtime', () => {
     expect(document.documentElement.classList.contains('theme-houfeng-dark')).toBe(true)
 
     applyTheme('classic', 'light')
-    expect(document.documentElement.classList.contains('theme-classic-light')).toBe(true)
+    // classic + light falls back to houfeng-light since we only have 3 themes
+    expect(document.documentElement.classList.contains('theme-houfeng-light')).toBe(true)
     expect(document.documentElement.classList.contains('theme-houfeng-dark')).toBe(false)
   })
 

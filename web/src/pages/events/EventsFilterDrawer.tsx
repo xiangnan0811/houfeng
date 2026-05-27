@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 
-import { Button, Drawer, Tabs } from '../../components/atoms'
+import { Drawer, Tabs } from '../../components/atoms'
 import { FilterSelect, FilterToggle } from '../../components/filters'
 import type { StateChangeEventType } from '../../lib/types'
 import {
@@ -149,28 +149,12 @@ export function EventsFilterDrawer({
               onChange={(event) => onFilterChange('label', event.target.value)}
             />
           </label>
-
-          <div className="events-filter-drawer__field">
-            <span className="events-filter-drawer__label">包含补传事件</span>
-            <span className="events-filter-drawer__value">
-              {filters.include_backfilled ? '已包含' : '未包含'}
-            </span>
-            <span className="events-filter-drawer__hint">
-              {filters.include_backfilled ? '补传相关事件会进入列表' : '默认隐藏补传相关事件'}
-            </span>
-          </div>
         </div>
 
         <div className="events-filter-drawer__actions">
-          <Button type="submit" size="sm">
-            应用筛选
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onReset}>
-            重置筛选
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            关闭
-          </Button>
+          <button type="submit" className="btn sm primary">应用筛选</button>
+          <button type="button" className="btn sm secondary" onClick={onReset}>重置筛选</button>
+          <button type="button" className="btn sm ghost" onClick={onClose}>关闭</button>
         </div>
       </form>
     </Drawer>

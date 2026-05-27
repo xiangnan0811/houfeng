@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, DataTable, Drawer, MonoDigits } from '../components/atoms'
+import { DataTable, Drawer, MonoDigits } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
@@ -567,25 +567,47 @@ export function TargetsPage() {
   }
 
   return (
-    <section className="page-stack targets-page">
-      <header className="page-panel page-panel--inline">
+    <div className="animate-in">
+      <div className="page-header">
         <div>
-          <p className="page-panel__eyebrow">观测 · 目标</p>
-          <h2 className="page-panel__title">入口观测</h2>
-          <p className="page-panel__description">
-            以 Target / ProbeItem 组织服务入口可达性证据，优先扫描异常、暂停、归档和执行覆盖，不抢占 VPS 与服务资产主体。
-          </p>
+          <h1 className="page-title">目标观测</h1>
+          <p className="page-sub">监控入口健康与延迟</p>
         </div>
-        <div className="page-panel__actions">
-          <Button
-            variant="primary"
-            size="md"
+        <div className="header-actions">
+          <button
+            type="button"
+            className="btn md primary"
             onClick={createOpen ? closeCreateDrawer : openCreateDrawer}
           >
             新建目标
-          </Button>
+          </button>
         </div>
-      </header>
+      </div>
+
+      <div className="hero-stats animate-in">
+        <div className="hero-stat">
+          <div className="hs-label">全部目标</div>
+          <div className="hs-value"><MonoDigits>{targets.length}</MonoDigits></div>
+        </div>
+        <div className="hero-stat">
+          <div className="hs-label">异常</div>
+          <div className={`hs-value${abnormalTargetCount > 0 ? ' danger' : ''}`}>
+            <MonoDigits>{abnormalTargetCount}</MonoDigits>
+          </div>
+        </div>
+        <div className="hero-stat">
+          <div className="hs-label">暂停</div>
+          <div className={`hs-value${pausedTargetCount > 0 ? ' muted' : ''}`}>
+            <MonoDigits>{pausedTargetCount}</MonoDigits>
+          </div>
+        </div>
+        <div className="hero-stat">
+          <div className="hs-label">归档</div>
+          <div className={`hs-value${archivedTargetCount > 0 ? ' muted' : ''}`}>
+            <MonoDigits>{archivedTargetCount}</MonoDigits>
+          </div>
+        </div>
+      </div>
 
       <Drawer
         open={createOpen}
@@ -626,30 +648,7 @@ export function TargetsPage() {
         onCreateClick={() => openCreateDrawer()}
       />
 
-      <div className="observability-list-frame observability-list-frame--targets">
-        <div className="list-command-band list-command-band--targets" aria-label="目标列表控制带">
-          <div className="list-command-band__main">
-            <p className="list-command-band__eyebrow">LIST SCAN</p>
-            <h3 className="list-command-band__title">目标列表扫描</h3>
-            <p className="list-command-band__description">
-              筛选在这里编辑，批量操作只作用于当前筛选范围；点击行进入 Target 详情继续核对 ProbeItem 证据。
-            </p>
-          </div>
-          <div className="list-command-band__meta" aria-label="目标列表当前范围">
-            <span>{hasActiveFilters ? '当前筛选范围' : '完整列表范围'}</span>
-            <strong>
-              <MonoDigits>{filteredTargets.length}</MonoDigits>
-              <small>/</small>
-              <MonoDigits>{targets.length}</MonoDigits>
-            </strong>
-          </div>
-          <div className="list-command-band__actions">
-            <Button variant="secondary" size="sm" onClick={() => openCreateDrawer()}>
-              创建 Target
-            </Button>
-          </div>
-        </div>
-
+      <div className="animate-in d2">
         {targets.length === 0 ? (
           <PageState
             kind="empty"
@@ -657,7 +656,7 @@ export function TargetsPage() {
             title="候风尚未配置任何观测目标"
             description="创建第一个目标后，可以继续为它配置 ProbeItem。"
             action={
-              <button type="button" className="btn btn--primary btn--md" onClick={() => openCreateDrawer()}>
+              <button type="button" className="btn md primary" onClick={() => openCreateDrawer()}>
                 新建第一个目标
               </button>
             }
@@ -694,25 +693,23 @@ export function TargetsPage() {
                 title="没有匹配当前筛选的目标"
                 description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
                 action={
-                  <button type="button" className="btn btn--ghost btn--md" onClick={clearAllFilters}>
+                  <button type="button" className="btn sm ghost" onClick={clearAllFilters}>
                     清空筛选
                   </button>
                 }
               />
             ) : (
-              <div className="page-panel page-panel--scroll-x targets-table-panel">
-                <DataTable<TargetRecord>
-                  columns={columns}
-                  rows={filteredTargets}
-                  rowKey={(target) => target.target_id}
-                  density="compact"
-                  className="targets-table"
-                  onRowClick={(target) => {
-                    if (!shouldNavigateOnRowClick(target)) return
-                    navigate(`/targets/${target.target_id}`)
-                  }}
-                />
-              </div>
+              <DataTable<TargetRecord>
+                columns={columns}
+                rows={filteredTargets}
+                rowKey={(target) => target.target_id}
+                density="compact"
+                className="table targets-table"
+                onRowClick={(target) => {
+                  if (!shouldNavigateOnRowClick(target)) return
+                  navigate(`/targets/${target.target_id}`)
+                }}
+              />
             )}
 
             <TargetsRuntimeOverlays
@@ -735,6 +732,6 @@ export function TargetsPage() {
           </>
         )}
       </div>
-    </section>
+    </div>
   )
 }

@@ -103,10 +103,8 @@ describe('TargetsPage', () => {
       expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('观测 · 目标')).toBeInTheDocument()
-    expect(
-      screen.getByText('以 Target / ProbeItem 组织服务入口可达性证据，优先扫描异常、暂停、归档和执行覆盖，不抢占 VPS 与服务资产主体。'),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '目标观测' })).toBeInTheDocument()
+    expect(screen.getByText('监控入口健康与延迟')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
@@ -257,7 +255,7 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(within(createDrawer).getByText('target already exists')).toBeInTheDocument())
     expect(screen.getByText('Existing API')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '入口观测' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '目标观测' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
     expect(
       screen.getByText('用服务入口可达性和探测覆盖确认暴露面是否可信，异常入口再回到 VPS 与服务资产补证据。'),
@@ -1250,9 +1248,9 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Group API 1')).toBeInTheDocument())
 
-    expect(screen.getByRole('heading', { name: '目标列表扫描' })).toBeInTheDocument()
-    expect(screen.getByLabelText('目标列表当前范围')).toHaveTextContent('当前筛选范围')
-    expect(screen.getByLabelText('目标列表当前范围')).toHaveTextContent('2/3')
+    expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
+    expect(screen.getByLabelText('当前目标筛选范围')).toHaveTextContent('当前筛选')
+    expect(screen.getByLabelText('当前目标筛选范围')).toHaveTextContent('2/3')
     expect(screen.getByText('Group API 2')).toBeInTheDocument()
     expect(screen.queryByText('Other API')).not.toBeInTheDocument()
     expect(screen.getByText('批量范围：当前筛选范围内的 2 个目标')).toBeInTheDocument()
@@ -1487,10 +1485,10 @@ describe('TargetsPage', () => {
       screen.getByRole('heading', { name: 'Target 入口证据当前稳定' }),
     ).toBeInTheDocument()
     expect(screen.getByText('完整 Target 库存')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '目标列表扫描' })).toBeInTheDocument()
-    expect(screen.getByLabelText('目标列表当前范围')).toHaveTextContent('完整列表范围')
-    expect(screen.getByLabelText('目标列表当前范围')).toHaveTextContent('1/1')
-    expect(screen.getByRole('button', { name: '创建 Target' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
+    expect(screen.getByLabelText('当前目标筛选范围')).toHaveTextContent('入口库存')
+    expect(screen.getByLabelText('当前目标筛选范围')).toHaveTextContent('1/1')
+    expect(screen.getByRole('button', { name: '新建目标' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '没有需要优先核对的 Target' })).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: '查看资产决策' })[0]).toHaveAttribute(
       'href',
