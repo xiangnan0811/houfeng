@@ -94,7 +94,7 @@ function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
         onChangePassword={() => setChangePwOpen(true)}
       />
       <div className="main-wrap">
-        <TopBar sync={sync} />
+        <TopBar sync={sync} user={user} />
         <main className="main" id="main-content">
           <Outlet />
         </main>

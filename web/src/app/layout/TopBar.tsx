@@ -1,6 +1,9 @@
+import { useState, useRef, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { GlobalSearch } from './GlobalSearch'
+import { useThemeOptional } from '../../lib/theme-context'
 import type { SyncStatusProps } from './SyncStatus'
+import type { User } from '../../lib/auth-client'
 
 const PAGE_TITLES: Record<string, string> = {
   '/': '工作台',
@@ -16,12 +19,12 @@ const PAGE_TITLES: Record<string, string> = {
 
 interface TopBarProps {
   sync: SyncStatusProps
+  user: User | null
 }
 
-export function TopBar({ sync }: TopBarProps) {
+export function TopBar({ sync, user }: TopBarProps) {
   const location = useLocation()
   const pageTitle = derivePageTitle(location.pathname)
-
   const syncTitle = sync.label
   const syncClass = `tp-sync tp-sync--${sync.state}`
 
@@ -31,8 +34,94 @@ export function TopBar({ sync }: TopBarProps) {
       <div className="tp-spacer" />
       <GlobalSearch />
       <div className="tp-divider" />
+      <ThemeSwitcher />
+      <NotificationBell />
       <span className={syncClass} title={syncTitle} />
+      {user && <UserAvatar user={user} />}
     </header>
+  )
+}
+
+/* --- Theme Switcher --- */
+
+const THEME_OPTIONS = [
+  { preset: 'houfeng' as const, mode: 'dark' as const, icon: '☾', label: '氛围暗色' },
+  { preset: 'classic' as const, mode: 'dark' as const, icon: '◐', label: '克制工程' },
+  { preset: 'houfeng' as const, mode: 'light' as const, icon: '☀', label: '精致亮色' },
+  { preset: 'houfeng' as const, mode: 'system' as const, icon: '⚙', label: '跟随系统' },
+] as const
+
+function ThemeSwitcher() {
+  const theme = useThemeOptional()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  if (!theme) return null
+
+  const { preset, mode, setPreset, setMode } = theme
+  const current = THEME_OPTIONS.find(
+    (o) => o.preset === preset && o.mode === mode
+  ) ?? THEME_OPTIONS[0]
+
+  return (
+    <div className="tp-theme" ref={ref}>
+      <button
+        className="tp-icon-btn"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="切换主题"
+      >
+        {current.icon}
+      </button>
+      {open && (
+        <div className="theme-menu open">
+          {THEME_OPTIONS.map((o) => (
+            <div
+              key={`${o.preset}-${o.mode}`}
+              className={`tm-item${o === current ? ' active' : ''}`}
+              onClick={() => {
+                setPreset(o.preset)
+                setMode(o.mode)
+                setOpen(false)
+              }}
+            >
+              <span className="tm-icon">{o.icon}</span>
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NotificationBell() {
+  return (
+    <button className="tp-icon-btn" title="通知">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+        <path d="M4 6a4 4 0 018 0c0 4 2 5 2 5H2s2-1 2-5" />
+        <path d="M6.5 13a1.5 1.5 0 003 0" />
+      </svg>
+      <span className="notif-count">0</span>
+    </button>
+  )
+}
+
+function UserAvatar({ user }: { user: User }) {
+  const display = user.display_name || user.username || ''
+  const initial = display.slice(0, 1).toUpperCase() || '·'
+  return (
+    <div className="tp-avatar" title={user.username}>
+      {initial}
+    </div>
   )
 }
 
