@@ -797,7 +797,24 @@ select.input--compact{width:auto;text-align:left;padding-right:18px}
 .modal-close{background:transparent;border:none;font-size:16px;color:var(--text-muted);cursor:pointer;padding:4px}
 .modal-close:hover{color:var(--text-primary)}
 .modal-body{padding:var(--space-4)}
-.modal-footer{padding:var(--space-3) var(--space-4);background:var(--surface);border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:var(--space-3)}
+.modal-footer{padding:var(--space-3) var(--space-4);background:var(--surface);border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:var(--space-3);align-items:center}
+.modal-footer__hint{margin-right:auto;color:var(--text-muted);font-size:var(--type-small-size)}
+.modal-content--sm{max-width:380px}
+.modal-content--lg{max-width:640px}
+.modal-content--lg .modal-body{max-height:calc(80vh - 120px);overflow-y:auto}
+.vps-create-form{display:flex;flex-direction:column;gap:var(--space-4)}
+.vps-create-form__section{display:flex;flex-direction:column;gap:var(--space-3)}
+.vps-create-form__section-title{font-size:var(--type-eyebrow-size);font-weight:500;letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase;color:var(--text-muted);padding-bottom:var(--space-2);border-bottom:1px solid var(--border-muted)}
+.vps-create-form__row{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
+.vps-create-form__row--3col{display:grid;grid-template-columns:2fr 1fr 1fr;gap:var(--space-3)}
+.vps-create-form__provider-row{display:flex;align-items:flex-end;gap:var(--space-3)}
+.vps-create-form__provider-row>.input-field{flex:1}
+.vps-create-form__provider-link{background:none;border:none;color:var(--accent);font-size:var(--type-small-size);cursor:pointer;padding:0 0 6px;white-space:nowrap}
+.vps-create-form__provider-link:hover{text-decoration:underline}
+.vps-create-form__inline-provider{padding:var(--space-3);background:var(--surface-1);border:1px solid var(--border-muted);border-radius:var(--radius-2);display:flex;flex-direction:column;gap:var(--space-3)}
+.vps-create-form__inline-provider-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
+.vps-create-form__inline-provider-actions{display:flex;gap:var(--space-2);justify-content:flex-end}
+.input-field__label--required::after{content:' *';color:var(--color-state-critical)}
 
 /* ===== ATOM COMPAT: Sparkline ===== */
 .sparkline{display:inline-block;vertical-align:middle}
