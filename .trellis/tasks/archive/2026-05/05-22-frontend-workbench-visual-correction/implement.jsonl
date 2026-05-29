@@ -1,0 +1,5 @@
+{"file":".trellis/spec/web/component-conventions.md","reason":"Follow existing React component layering, named exports, route-agnostic shared components, Drawer and DataTable interaction contracts."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Keep CSS changes in token/BEM/page-level style system; avoid hardcoded values, new CSS files, Tailwind, or CSS-in-JS."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Preserve Dashboard, Nodes, Asset Ledger, URL-state, API client, and evidence-boundary data contracts while moving layout and copy."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Continue feature-branch workflow and avoid direct main or worktree-based development for this repository."}
+{"file":".trellis/tasks/05-22-frontend-workbench-visual-correction/prd.md","reason":"Task-specific implementation scope, visual correction goals, out-of-scope boundaries, and acceptance criteria."}

@@ -1,0 +1,8 @@
+{"file":".trellis/spec/web/component-conventions.md","reason":"Check shared components remain route-agnostic, Drawer cleanup is preserved, and table/queue interaction semantics are safe."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Check new CSS uses tokens/BEM, lands in the right files, and does not introduce new page-local CSS or theme regressions."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Check Dashboard, Nodes, VPS, Targets, and Asset Decisions preserve data contracts, URL-state, and evidence boundaries."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Check required tests and verification commands have been run and documented."}
+{"file":"docs/design/v2-houfeng/design-language.md","reason":"Check the resulting pages retain Houfeng v2 dark-first, restrained, high-density workbench visual language."}
+{"file":"docs/design/v2-houfeng/component-spec.md","reason":"Check the refactor aligns with current component/page IA contracts."}
+{"file":".trellis/tasks/05-22-ui-workbench-ia-phase-3/prd.md","reason":"Check final implementation satisfies confirmed task requirements and acceptance criteria."}
+{"file":".trellis/tasks/05-22-ui-workbench-ia-phase-3/research/workbench-layout-codebase.md","reason":"Check implementation follows repo-local findings and mitigates identified risks."}
