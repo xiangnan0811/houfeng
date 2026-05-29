@@ -1045,3 +1045,37 @@ Migrated all pages to unified pure CSS design system. Fully refactored events pa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 149: VPS 创建流程 Drawer→Modal + 全局 select caret 统一
+
+**Date**: 2026-05-29
+**Task**: VPS 创建流程 Drawer→Modal + 全局 select caret 统一
+**Branch**: `feat/vps-create-modal-refactor`
+
+### Summary
+
+VPS 创建从 Drawer 改为居中 Modal，新增 Select 原子并重组表单分层。衍生交付：全局 select 箭头三主题 token 化（--select-caret），18 文件审计确认全覆盖，清除硬编码 #7B7F88 与死规则；TargetProbeForm 接入设计系统。build/lint/471 测试通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8145cc7` | (see git log) |
+| `fb92d65` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
