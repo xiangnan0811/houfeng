@@ -1,75 +1,96 @@
 import { Link } from 'react-router-dom'
 
-import { MonoDigits, Tabs, type TabItem } from '../../components/atoms'
-import { AUTO_REFRESH_OPTIONS, type AutoRefreshOption } from '../../lib/useAutoRefresh'
-import type { NodeQuickView } from './types'
+import type { NodeFilterState } from './types'
 
 type NodesToolbarProps = {
-  quickViewTabs: TabItem<NodeQuickView>[]
-  activeQuickView: NodeQuickView
-  displayedCount: number
-  baseCount: number
-  fieldFilterCount: number
-  hasActiveFilters: boolean
-  batchPanelOpen: boolean
-  showTrends: boolean
+  filterState: NodeFilterState
+  healthOptions: string[]
+  lifecycleOptions: string[]
+  runStatusOptions: string[]
+  regionOptions: { value: string; label: string }[]
+  providerOptions: { value: string; label: string }[]
   compareSet: Set<string>
-  autoRefresh: AutoRefreshOption
-  onQuickViewChange: (value: NodeQuickView) => void
-  onOpenFilters: () => void
-  onToggleBatchPanel: () => void
-  onShowTrendsChange: (value: boolean) => void
-  onAutoRefreshChange: (value: AutoRefreshOption) => void
+  onFilterChange: (key: string, value: string | null) => void
+  onAbnormalChange: (checked: boolean) => void
 }
 
 export function NodesToolbar({
-  quickViewTabs,
-  activeQuickView,
-  displayedCount,
-  baseCount,
-  fieldFilterCount,
-  hasActiveFilters,
-  batchPanelOpen,
-  showTrends,
+  filterState,
+  healthOptions,
+  lifecycleOptions,
+  runStatusOptions,
+  regionOptions,
+  providerOptions,
   compareSet,
-  autoRefresh,
-  onQuickViewChange,
-  onOpenFilters,
-  onToggleBatchPanel,
-  onShowTrendsChange,
-  onAutoRefreshChange,
+  onFilterChange,
+  onAbnormalChange,
 }: NodesToolbarProps) {
   return (
-    <div className="filter-panel animate-in d1" aria-label="节点列表工具栏">
-      <Tabs<NodeQuickView>
-        variant="pill"
-        items={quickViewTabs}
-        value={activeQuickView}
-        onChange={onQuickViewChange}
-      />
-      <div className="filter-bar">
-        <span className="filter-bar__scope">
-          {hasActiveFilters ? '当前范围' : '全部'}
-          {' '}
-          <MonoDigits>{displayedCount}</MonoDigits>/<MonoDigits>{baseCount}</MonoDigits>
-        </span>
-        <button type="button" className="btn sm secondary" onClick={onOpenFilters}>
-          高级筛选{fieldFilterCount > 0 ? ` · ${fieldFilterCount}` : ''}
-        </button>
-        <button
-          type="button"
-          className={`btn sm ${batchPanelOpen ? 'secondary' : 'ghost'}`}
-          onClick={onToggleBatchPanel}
-        >
-          批量操作
-        </button>
-        <button
-          type="button"
-          className={`btn sm ghost`}
-          onClick={() => onShowTrendsChange(!showTrends)}
-        >
-          {showTrends ? '隐藏趋势' : '显示趋势'}
-        </button>
+    <>
+      <div className="filter-panel animate-in d1">
+        <div className="filter-bar">
+          <span className="filter-bar__label">筛选</span>
+          <select
+            className="filter-select"
+            value={filterState.health ?? ''}
+            onChange={(e) => onFilterChange('health', e.target.value || null)}
+          >
+            <option value="">健康状态: 全部</option>
+            {healthOptions.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterState.lifecycle ?? ''}
+            onChange={(e) => onFilterChange('lifecycle', e.target.value || null)}
+          >
+            <option value="">生命周期: 全部</option>
+            {lifecycleOptions.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterState.runStatus ?? ''}
+            onChange={(e) => onFilterChange('run_status', e.target.value || null)}
+          >
+            <option value="">运行状态: 全部</option>
+            {runStatusOptions.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterState.region ?? ''}
+            onChange={(e) => onFilterChange('region', e.target.value || null)}
+          >
+            <option value="">地区: 全部</option>
+            {regionOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterState.provider ?? ''}
+            onChange={(e) => onFilterChange('provider', e.target.value || null)}
+          >
+            <option value="">供应商: 全部</option>
+            {providerOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <label>
+            <input
+              type="checkbox"
+              checked={filterState.abnormal}
+              onChange={(e) => onAbnormalChange(e.target.checked)}
+            />
+            仅看异常
+          </label>
+        </div>
+      </div>
+      <div className="mt-4 flex-row gap-2">
         {compareSet.size === 2 ? (
           <Link
             className="btn sm secondary"
@@ -78,27 +99,14 @@ export function NodesToolbar({
             对比选中节点
           </Link>
         ) : (
-          <span style={{ fontSize: '11px', color: 'var(--t4)' }}>选择 2 个节点可对比</span>
+          <button type="button" className="btn sm secondary" disabled>
+            对比选中 ({compareSet.size}/2)
+          </button>
         )}
-        <label style={{ fontSize: '11px', color: 'var(--t3)', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
-          <span>自动刷新</span>
-          <select
-            className="filter-select"
-            value={autoRefresh == null ? '' : String(autoRefresh)}
-            onChange={(event) => {
-              const value = event.target.value
-              onAutoRefreshChange(value === '' ? null : Number(value))
-            }}
-            aria-label="自动刷新间隔"
-          >
-            {AUTO_REFRESH_OPTIONS.map((option) => (
-              <option key={option.label} value={option.value == null ? '' : String(option.value)}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <span className="text-sm text-muted">
+          勾选 2 个节点可进入对比视图
+        </span>
       </div>
-    </div>
+    </>
   )
 }

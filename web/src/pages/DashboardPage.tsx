@@ -187,7 +187,7 @@ export function DashboardPage() {
           </div>
           <div className="wb-col-list">
             {overview.abnormal_nodes.length === 0 && overview.abnormal_targets.length === 0 && (
-              <div className="wb-att-item"><span className="wb-att-text" style={{ color: 'var(--t4)', fontSize: '11px' }}>暂无需关注项</span></div>
+              <div className="wb-att-item"><span className="wb-att-text text-muted text-sm">暂无需关注项</span></div>
             )}
             {overview.abnormal_nodes.slice(0, 2).map(n => (
               <div className="wb-att-item" key={n.node_id}>
@@ -218,7 +218,7 @@ export function DashboardPage() {
           </div>
           <div className="wb-col-list">
             {abnormalNodes.length === 0 && (
-              <div className="wb-row"><span className="dot dot-ok"></span><span className="wb-row-name" style={{ color: 'var(--t4)' }}>全部正常</span></div>
+              <div className="wb-row"><span className="dot dot-ok"></span><span className="wb-row-name text-muted">全部正常</span></div>
             )}
             {abnormalNodes.map(n => (
               <div className="wb-row" key={n.node_id} onClick={() => navigate(`/nodes/${n.node_id}`)}>
@@ -238,14 +238,14 @@ export function DashboardPage() {
           </div>
           <div className="wb-col-list">
             {recentEvents.length === 0 && (
-              <div className="wb-evt"><span className="wb-evt-text" style={{ color: 'var(--t4)' }}>暂无事件</span></div>
+              <div className="wb-evt"><span className="wb-evt-text text-muted">暂无事件</span></div>
             )}
             {recentEvents.map((evt, i) => {
               const icon = eventIcon(evt)
               return (
                 <div className="wb-evt" key={evt.event_id ?? i}>
                   <span className="wb-evt-time">{formatTime(evt.created_at)}</span>
-                  <span className={icon.cls} style={{ width: 18, height: 18, fontSize: 9 }}>{icon.char}</span>
+                  <span className={icon.cls + ' event-icon--sm'}>{icon.char}</span>
                   <span className="wb-evt-text">{evt.summary}</span>
                 </div>
               )
@@ -261,7 +261,7 @@ export function DashboardPage() {
           </div>
           <div className="wb-col-list">
             {costEntries.length === 0 && (
-              <div className="wb-kv"><span style={{ color: 'var(--t4)' }}>暂无订阅数据</span></div>
+              <div className="wb-kv"><span className="text-muted">暂无订阅数据</span></div>
             )}
             {costEntries.map((c, i) => (
               <div className="wb-kv" key={i}>
@@ -280,14 +280,14 @@ export function DashboardPage() {
           </div>
           <div className="wb-col-list">
             {/* TODO: wire to real experience log API when available */}
-            <div className="wb-note"><span className="wb-note-date">—</span><span className="wb-note-text" style={{ color: 'var(--t4)' }}>暂无经验记录</span></div>
+            <div className="wb-note"><span className="wb-note-date">—</span><span className="wb-note-text text-muted">暂无经验记录</span></div>
           </div>
         </div>
       </div>
 
       {/* Asset Table */}
       <div className="animate-in d3">
-        <div className="section-title" style={{ marginTop: 16 }}>
+        <div className="section-title mt-4">
           资产总览 <span className="section-count">{state.vpsAssets.length}</span>
         </div>
         {state.vpsAssets.length > 0 ? (
@@ -304,7 +304,7 @@ export function DashboardPage() {
             </thead>
             <tbody>
               {state.vpsAssets.slice(0, 8).map(vps => (
-                <tr key={vps.vps_id} onClick={() => navigate(`/vps/${vps.vps_id}`)} style={{ cursor: 'pointer' }}>
+                <tr key={vps.vps_id} onClick={() => navigate(`/vps/${vps.vps_id}`)} className="row-clickable">
                   <td className="name">{vps.display_name}</td>
                   <td>{vps.provider_name}</td>
                   <td className="mono">{vps.ipv4 || '—'}</td>
@@ -316,7 +316,7 @@ export function DashboardPage() {
             </tbody>
           </table>
         ) : (
-          <div style={{ fontSize: 12, color: 'var(--t4)', padding: '12px 0' }}>暂无 VPS 资产数据</div>
+          <div className="text-sm text-muted" style={{ padding: '12px 0' }}>暂无 VPS 资产数据</div>
         )}
       </div>
     </div>

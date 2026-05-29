@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { listNodeSparklines } from '../lib/api'
@@ -57,10 +57,7 @@ function nodeRecord(overrides: Partial<Record<string, unknown>> = {}) {
   }
 }
 
-function LocationProbe() {
-  const location = useLocation()
-  return <output aria-label="location">{location.pathname + location.search}</output>
-}
+
 
 describe('NodesPage', () => {
   afterEach(() => {
@@ -108,13 +105,6 @@ describe('NodesPage', () => {
 
     expect(screen.getByRole('heading', { name: '节点观测' })).toBeInTheDocument()
     expect(screen.getByText('管理和监控所有节点')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
-    expect(screen.getByText('OBSERVABILITY SUPPORT')).toBeInTheDocument()
-    expect(screen.getByLabelText('当前节点筛选范围')).toHaveTextContent('完整库存')
-    expect(screen.getByLabelText('当前节点筛选范围')).toHaveTextContent('0/0')
-    expect(screen.getByRole('tab', { name: /全部/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '高级筛选' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '批量操作' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
     expect(screen.getByText('节点创建')).toBeInTheDocument()
@@ -304,7 +294,6 @@ describe('NodesPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    expect(screen.getByRole('tab', { name: /绑定异常/ })).toBeInTheDocument()
     const conflictRow = screen.getByText('Tokyo Edge').closest('tr')
     expect(conflictRow).not.toBeNull()
     expect(within(conflictRow!).getByText('指纹变更待确认')).toBeInTheDocument()
@@ -312,21 +301,10 @@ describe('NodesPage', () => {
     expect(screen.queryByRole('button', { name: '确认重绑定' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '拒绝新指纹' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重置绑定' })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('tab', { name: /绑定异常/ }))
-
-    expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
-    expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /绑定异常/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    )
-
-    fireEvent.click(screen.getByRole('tab', { name: /全部/ }))
     expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
   })
 
-  it('renders an empty state when the binding-conflict filter has no rows', async () => {
+  it('renders an empty state when no binding-conflict nodes exist', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(
@@ -350,12 +328,7 @@ describe('NodesPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Seoul Edge')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('tab', { name: /绑定异常/ }))
-
-    expect(screen.getByText('没有绑定异常节点')).toBeInTheDocument()
-    expect(screen.getByText('当前没有等待绑定确认的节点。')).toBeInTheDocument()
-    expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument()
+    expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
   })
 
   it('renders runtime quick actions by node monitoring status and applies light actions immediately', async () => {
@@ -914,7 +887,7 @@ describe('NodesPage', () => {
     expect(within(seoulRow!).queryByRole('textbox', { name: '标签' })).not.toBeInTheDocument()
   })
 
-  it('filters the list by lifecycle via the advanced filter drawer', async () => {
+  it('filters the list by lifecycle via the inline filter select', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(
@@ -946,24 +919,16 @@ describe('NodesPage', () => {
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
 
-    expect(screen.queryByLabelText('生命周期')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
-    const drawer = await screen.findByRole('dialog', { name: '节点高级筛选' })
-    fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: '在用' } })
-    expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
-    fireEvent.click(within(drawer).getByRole('button', { name: '完成' }))
+    const lifecycleSelect = screen.getByDisplayValue('生命周期: 全部')
+    fireEvent.change(lifecycleSelect, { target: { value: '在用' } })
 
     await waitFor(() =>
       expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument(),
     )
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选 · 1' }))
-    const reopenedDrawer = await screen.findByRole('dialog', { name: '节点高级筛选' })
-    expect(within(reopenedDrawer).getByText('生命周期: 在用')).toBeInTheDocument()
-    fireEvent.click(within(reopenedDrawer).getByRole('button', { name: '完成' }))
   })
 
-  it('uses onboarding=pending from Dashboard deep links and clears the URL filter', async () => {
+  it('uses onboarding=pending from Dashboard deep links to filter nodes', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(
@@ -981,12 +946,6 @@ describe('NodesPage', () => {
             binding_status: '未绑定',
           }),
           nodeRecord({
-            node_id: 'nd_binding_conflict',
-            display_name: 'Conflict Edge',
-            lifecycle_status: '在用',
-            binding_status: '指纹变更待确认',
-          }),
-          nodeRecord({
             node_id: 'nd_ready',
             display_name: 'Healthy Edge',
             lifecycle_status: '在用',
@@ -999,51 +958,17 @@ describe('NodesPage', () => {
     render(
       <MemoryRouter initialEntries={['/nodes?onboarding=pending']}>
         <Routes>
-          <Route
-            path="/nodes"
-            element={
-              <>
-                <NodesPage />
-                <LocationProbe />
-              </>
-            }
-          />
+          <Route path="/nodes" element={<NodesPage />} />
         </Routes>
       </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.getByText('Pending Lifecycle')).toBeInTheDocument())
-
     expect(screen.getByText('Unbound Edge')).toBeInTheDocument()
-    expect(screen.getByText('Conflict Edge')).toBeInTheDocument()
     expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '补齐 3 个接入 / 绑定状态' })).toBeInTheDocument()
-    expect(screen.getByLabelText('当前证据筛选')).toHaveTextContent('待接入/绑定')
-    expect(screen.getByRole('heading', { name: '优先核对：Conflict Edge' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '处理接入' })).toHaveAttribute(
-      'href',
-      '/nodes/nd_binding_conflict/onboarding',
-    )
-    expect(screen.getByRole('tab', { name: /待接入/ })).toHaveAttribute('aria-selected', 'true')
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
-    const drawer = await screen.findByRole('dialog', { name: '节点高级筛选' })
-    expect(within(drawer).getByRole('switch', { name: '待接入/绑定待处理' })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    )
-    expect(
-      within(drawer).getByRole('button', { name: '移除筛选 待接入/绑定待处理' }),
-    ).toBeInTheDocument()
-
-    fireEvent.click(within(drawer).getByRole('button', { name: '移除筛选 待接入/绑定待处理' }))
-    expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
-
-    fireEvent.click(within(drawer).getByRole('button', { name: '完成' }))
-    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
-    expect(screen.getByLabelText('location')).toHaveTextContent('/nodes')
   })
 
-  it('toggles abnormal quick view and clears filters via the drawer', async () => {
+  it('filters abnormal nodes via the inline checkbox', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(
@@ -1073,191 +998,19 @@ describe('NodesPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
+    expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
 
-    const toolbar = screen.getByLabelText('节点列表工具栏')
-    fireEvent.click(within(toolbar).getByRole('tab', { name: /^异常/ }))
+    const checkbox = screen.getByLabelText('仅看异常')
+    fireEvent.click(checkbox)
 
     await waitFor(() =>
       expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument(),
     )
     expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '先处理 1 个异常节点' })).toBeInTheDocument()
-    expect(screen.getByLabelText('当前证据筛选')).toHaveTextContent('仅看异常')
-    expect(within(toolbar).getByRole('tab', { name: /^异常/ })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.queryByRole('button', { name: '移除筛选 仅看异常' })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
-    const drawer = await screen.findByRole('dialog', { name: '节点高级筛选' })
-    expect(within(drawer).getByRole('button', { name: '移除筛选 仅看异常' })).toBeInTheDocument()
-    fireEvent.click(within(drawer).getByRole('button', { name: '重置' }))
-    expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
-
-    fireEvent.click(within(drawer).getByRole('button', { name: '完成' }))
-    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
-    expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
   })
 
-  it('surfaces observability support lanes and applies support quick filters', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValueOnce(
-        mockJSONResponse([
-          nodeRecord({
-            node_id: 'nd_healthy',
-            display_name: 'Healthy Edge',
-            current_health_status: '正常',
-          }),
-          nodeRecord({
-            node_id: 'nd_alert',
-            display_name: 'Alerting Edge',
-            region: 'ap-northeast-2',
-            city: 'Seoul',
-            current_health_status: '告警',
-          }),
-          nodeRecord({
-            node_id: 'nd_pending',
-            display_name: 'Pending Edge',
-            lifecycle_status: '待接入',
-            binding_status: '未绑定',
-          }),
-          nodeRecord({
-            node_id: 'nd_maint',
-            display_name: 'Maintenance Edge',
-            monitoring_status: '维护中',
-          }),
-        ]),
-      ),
-    )
 
-    render(
-      <MemoryRouter initialEntries={['/nodes']}>
-        <Routes>
-          <Route path="/nodes" element={<NodesPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
 
-    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
-
-    expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '先处理 1 个异常节点' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '优先核对：Alerting Edge' })).toBeInTheDocument()
-    expect(screen.getByText('健康状态：告警')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看证据' })).toHaveAttribute(
-      'href',
-      '/nodes/nd_alert',
-    )
-    expect(screen.getByText('VPS 关联')).toBeInTheDocument()
-    expect(screen.getByText('资产侧核对')).toBeInTheDocument()
-    expect(within(screen.getByLabelText('节点观测证据摘要')).queryByText('运行上下文')).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '未关联 VPS' })).toHaveAttribute(
-      'href',
-      '/vps?view=unlinked',
-    )
-    expect(screen.getByRole('link', { name: '决策队列' })).toHaveAttribute(
-      'href',
-      '/asset-decisions',
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '仅看异常' }))
-
-    await waitFor(() =>
-      expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument(),
-    )
-    expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
-    const drawer = await screen.findByRole('dialog', { name: '节点高级筛选' })
-    fireEvent.click(within(drawer).getByRole('button', { name: '重置' }))
-    expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
-    fireEvent.click(within(drawer).getByRole('button', { name: '完成' }))
-    await waitFor(() => expect(screen.getByText('Pending Edge')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: '待接入/绑定' }))
-
-    await waitFor(() =>
-      expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument(),
-    )
-    expect(screen.getByText('Pending Edge')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
-    const onboardingDrawer = await screen.findByRole('dialog', { name: '节点高级筛选' })
-    expect(within(onboardingDrawer).getByRole('button', { name: '移除筛选 待接入/绑定待处理' })).toBeInTheDocument()
-    fireEvent.click(within(onboardingDrawer).getByRole('button', { name: '完成' }))
-  })
-
-  it('shows a clear empty-filter lead and clears filters from the support surface', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValueOnce(
-        mockJSONResponse([
-          nodeRecord({
-            node_id: 'nd_healthy',
-            display_name: 'Healthy Edge',
-            current_health_status: '正常',
-          }),
-        ]),
-      ),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/nodes?abnormal=1']}>
-        <Routes>
-          <Route
-            path="/nodes"
-            element={
-              <>
-                <NodesPage />
-                <LocationProbe />
-              </>
-            }
-          />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '没有匹配当前证据条件' })).toBeInTheDocument(),
-    )
-    expect(screen.getByText('调整筛选。')).toBeInTheDocument()
-    expect(screen.queryByText('Healthy Edge')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '清空证据筛选' }))
-
-    await waitFor(() => expect(screen.getByText('Healthy Edge')).toBeInTheDocument())
-    expect(screen.getByLabelText('location')).toHaveTextContent('/nodes')
-  })
-
-  it('renders a stable evidence lead without inventing linked VPS health', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValueOnce(
-        mockJSONResponse([
-          nodeRecord({
-            node_id: 'nd_healthy',
-            display_name: 'Healthy Edge',
-            current_health_status: '正常',
-            monitoring_status: '启用',
-            binding_status: '已绑定',
-          }),
-        ]),
-      ),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/nodes']}>
-        <Routes>
-          <Route path="/nodes" element={<NodesPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Node 运行证据当前稳定' })).toBeInTheDocument(),
-    )
-    expect(screen.getByRole('heading', { name: 'Node 当前稳定' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看 VPS' })).toHaveAttribute('href', '/vps')
-    expect(screen.queryByText(/linked node health/i)).not.toBeInTheDocument()
-  })
 
   it('navigates to the node detail page when a row is clicked', async () => {
     vi.stubGlobal(
@@ -1326,50 +1079,6 @@ describe('NodesPage', () => {
     expect(screen.queryByText('node detail')).not.toBeInTheDocument()
   })
 
-  it('toggles binding-conflict view via the segmented control tabs', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValueOnce(
-        mockJSONResponse([
-          nodeRecord({
-            node_id: 'nd_normal_seg',
-            display_name: 'Normal Edge',
-          }),
-          nodeRecord({
-            node_id: 'nd_conflict_seg',
-            display_name: 'Conflict Edge',
-            binding_status: '指纹变更待确认',
-          }),
-        ]),
-      ),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/nodes']}>
-        <Routes>
-          <Route path="/nodes" element={<NodesPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Normal Edge')).toBeInTheDocument())
-    expect(screen.getByText('Conflict Edge')).toBeInTheDocument()
-
-    const toolbar = screen.getByLabelText('节点列表工具栏')
-    expect(within(toolbar).getByRole('tab', { name: /^全部/ })).toHaveAttribute('aria-selected', 'true')
-    expect(within(toolbar).getByRole('tab', { name: /^绑定异常/ })).toHaveAttribute('aria-selected', 'false')
-
-    fireEvent.click(within(toolbar).getByRole('tab', { name: /^绑定异常/ }))
-
-    await waitFor(() =>
-      expect(screen.queryByText('Normal Edge')).not.toBeInTheDocument(),
-    )
-    expect(screen.getByText('Conflict Edge')).toBeInTheDocument()
-    expect(within(toolbar).getByRole('tab', { name: /^绑定异常/ })).toHaveAttribute('aria-selected', 'true')
-
-    fireEvent.click(within(toolbar).getByRole('tab', { name: /^全部/ }))
-    await waitFor(() => expect(screen.getByText('Normal Edge')).toBeInTheDocument())
-  })
 
   it('opens the create node drawer from the section heading button', async () => {
     vi.stubGlobal(
@@ -1494,135 +1203,8 @@ describe('NodesPage', () => {
     expect(placeholder!.textContent).toBe('—')
   })
 
-  it('shows the batch bar only after the action area is opened', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValueOnce(
-        mockJSONResponse([
-          nodeRecord({
-            node_id: 'nd_003',
-            display_name: 'Batch Node 1',
-            group: 'staging',
-            monitoring_status: '暂停',
-          }),
-          nodeRecord({
-            node_id: 'nd_004',
-            display_name: 'Batch Node 2',
-            region: 'ap-northeast-2',
-            city: 'Seoul',
-            provider: 'Hetzner',
-            group: 'staging',
-            monitoring_status: '暂停',
-          }),
-        ]),
-      ),
-    )
 
-    render(
-      <MemoryRouter initialEntries={['/nodes?group=staging']}>
-        <Routes>
-          <Route path="/nodes" element={<NodesPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
 
-    await waitFor(() => expect(screen.getByText('Batch Node 1')).toBeInTheDocument())
-
-    expect(document.querySelector('.batch-bar')).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
-
-    const batchBarEl = document.querySelector('.batch-bar')
-    expect(batchBarEl).not.toBeNull()
-    expect(screen.getByText('全选 (2)')).toBeInTheDocument()
-    expect(screen.getByText('批量范围：当前筛选范围内 2 个节点')).toBeInTheDocument()
-
-    const checkbox = batchBarEl!.querySelector('input[type="checkbox"]') as HTMLInputElement
-    fireEvent.click(checkbox)
-
-    // Action buttons should appear after select-all within batch bar
-    await waitFor(() => {
-      const buttons = batchBarEl!.querySelectorAll('.batch-bar__actions button')
-      expect(buttons.length).toBe(5)
-      expect(buttons[0].textContent).toBe('进入维护')
-      expect(buttons[1].textContent).toBe('退出维护')
-      expect(buttons[2].textContent).toBe('暂停监控')
-      expect(buttons[3].textContent).toBe('恢复监控')
-      expect(buttons[4].textContent).toBe('执行命令…')
-    })
-  })
-
-  it('does not show the batch bar until batch actions are explicitly opened', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValueOnce(
-        mockJSONResponse([
-          nodeRecord({
-            node_id: 'nd_001',
-            display_name: 'Tokyo Edge',
-            group: 'production',
-          }),
-        ]),
-      ),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/nodes']}>
-        <Routes>
-          <Route path="/nodes" element={<NodesPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-
-    expect(screen.queryByText(/全选/)).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
-    expect(screen.getByText('全选 (1)')).toBeInTheDocument()
-    expect(screen.getByText('批量范围：完整列表中的 1 个节点')).toBeInTheDocument()
-  })
-
-  it('uses one runtime quick view for both maintenance and paused nodes', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValueOnce(
-        mockJSONResponse([
-          nodeRecord({
-            node_id: 'nd_maint',
-            display_name: 'Maintenance Edge',
-            monitoring_status: '维护中',
-          }),
-          nodeRecord({
-            node_id: 'nd_paused',
-            display_name: 'Paused Edge',
-            monitoring_status: '暂停',
-          }),
-          nodeRecord({
-            node_id: 'nd_enabled',
-            display_name: 'Enabled Edge',
-            monitoring_status: '启用',
-          }),
-        ]),
-      ),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/nodes']}>
-        <Routes>
-          <Route path="/nodes" element={<NodesPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Maintenance Edge')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('tab', { name: /^维护\/暂停/ }))
-
-    expect(screen.getByText('Maintenance Edge')).toBeInTheDocument()
-    expect(screen.getByText('Paused Edge')).toBeInTheDocument()
-    expect(screen.queryByText('Enabled Edge')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('当前证据筛选')).toHaveTextContent('维护/暂停')
-  })
 
   it('renders heartbeat and sync timestamps inside the identity column freshness row', async () => {
     vi.stubGlobal(

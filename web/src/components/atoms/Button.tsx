@@ -15,7 +15,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
   type = 'button',
   ...rest
 }, ref) => {
-  const classes = ['btn', `btn--${variant}`, `btn--${size}`, className].filter(Boolean).join(' ')
+  const classes = ['btn', size, variant, className].filter(Boolean).join(' ')
   return <button ref={ref} type={type} className={classes} {...rest} />
 })
 Button.displayName = 'Button'

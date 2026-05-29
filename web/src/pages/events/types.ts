@@ -14,44 +14,14 @@ export type FilterState = {
   recovery_only: boolean
   maintenance_only: boolean
   include_backfilled: boolean
-  // Time range segmented control. 'custom' preserves the original behavior
-  // (user-controlled date inputs) — keep that as default so first load keeps
-  // the previous "all recent events" semantics.
   time_range: TimeRange
+  incident_class: string
+  keyword: string
 }
 
 export type EventsPageState = {
   loading: boolean
   error: string | null
   events: StateChangeEventRecord[]
-  // True after a load-more fetch returns fewer rows than requested — meaning
-  // backend has no more events to give for the current filter.
   exhausted: boolean
-}
-
-export type EventEvidenceLeadTone =
-  | 'normal'
-  | 'notice'
-  | 'alert'
-  | 'critical'
-  | 'maintenance'
-  | 'offline'
-
-export type EventEvidenceLead = {
-  eyebrow: string
-  title: string
-  description: string
-  actionKind: 'filters' | 'clear' | 'event' | 'timeRange'
-  actionLabel: string
-  actionHref?: string
-  tone: EventEvidenceLeadTone
-}
-
-export type EventEvidenceItem = {
-  event: StateChangeEventRecord
-  title: string
-  reason: string
-  meta: string
-  route: string
-  actionLabel: string
 }

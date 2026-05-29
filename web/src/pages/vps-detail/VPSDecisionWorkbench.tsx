@@ -102,7 +102,7 @@ export function VPSDecisionWorkbench({
           <span>{nextAction.summary}</span>
           <div className="vps-workbench-next__actions">
             {nextAction.to && nextAction.linkLabel ? (
-              <Link className="btn btn--primary btn--sm" to={nextAction.to}>
+              <Link className="btn sm primary" to={nextAction.to}>
                 {nextAction.linkLabel}
               </Link>
             ) : nextAction.onAction && nextAction.buttonLabel === '调整决策' ? (

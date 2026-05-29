@@ -76,7 +76,7 @@ export function VPSDetailHero({
           </div>
         </details>
         <Button variant="ghost" onClick={onBack}>返回</Button>
-        <Link className="btn btn--ghost btn--md" to="/vps">VPS 列表</Link>
+        <Link className="btn md ghost" to="/vps">VPS 列表</Link>
       </div>
     </section>
   )

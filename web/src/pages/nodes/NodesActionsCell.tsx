@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 
-import { Button } from '../../components/atoms'
 import type { NodeRecord } from '../../lib/types'
 import { actionButtonKey, nodeRuntimeActions } from './nodeHelpers'
 import type { NodeRuntimeAction } from './types'
@@ -38,27 +37,34 @@ export function NodesActionsCell({
       }}
     >
       {editingLabelNodeId === node.node_id ? null : (
-        <Button
-          size="sm"
-          variant="ghost"
+        <button
+          type="button"
+          className="btn sm secondary"
           disabled={metadataBusyNodeId !== null}
           onClick={() => onStartLabelEdit(node)}
         >
           快速编辑标签
-        </Button>
+        </button>
       )}
       <Link
-        className="btn btn--ghost btn--sm"
+        className="btn sm secondary"
         to={`/nodes/${node.node_id}/onboarding`}
         onClick={(event) => event.stopPropagation()}
       >
         接入工作台
       </Link>
-      {actions.map(({ action, label }) => (
+      <Link
+        className="btn sm secondary"
+        to={`/nodes/${node.node_id}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        详情
+      </Link>
+      {actions.map(({ action, label, variant }) => (
         <button
           key={action}
           type="button"
-          className="btn btn--ghost btn--sm"
+          className={`btn sm ${variant === 'danger' ? 'danger' : 'secondary'}`}
           ref={(element) => {
             actionButtonRefs.current[actionButtonKey(node.node_id, action)] = element
           }}

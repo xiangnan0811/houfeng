@@ -41,28 +41,28 @@ export function TargetsBatchPanel({
           {selectAll ? (
             <div className="batch-bar__actions">
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onBatchAction('enter-maintenance')}
               >
                 进入维护
               </button>
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onBatchAction('exit-maintenance')}
               >
                 退出维护
               </button>
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onBatchAction('pause')}
               >
                 暂停
               </button>
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onBatchAction('resume')}
               >

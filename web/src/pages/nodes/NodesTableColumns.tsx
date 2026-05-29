@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 import { StatusBadge } from '../../components/StatusBadge'
 import {
   type DataTableColumn,
-  Hostname,
   MonoDigits,
   StatusGlyph,
   Timestamp,
+  Badge,
 } from '../../components/atoms'
 import type { NodeRecord, NodeSparklinesResponse } from '../../lib/types'
 import {
@@ -100,16 +100,21 @@ export function buildNodesTableColumns({
       sortable: true,
       render: (node) => (
         <div className="nodes-table__identity">
-          <Hostname truncate maxChars={14} className="nodes-table__id">
-            {node.node_id}
-          </Hostname>
-          <Link
-            className="text-link nodes-table__name"
-            to={`/nodes/${node.node_id}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {node.display_name}
-          </Link>
+          <div className="nodes-table__name-row">
+            <Link
+              className="text-link nodes-table__name"
+              to={`/nodes/${node.node_id}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {node.display_name}
+            </Link>
+            {node.monitoring_status !== '启用' ? (
+              <Badge tone={node.monitoring_status === '维护中' ? 'maintenance' : 'offline'}>{node.monitoring_status}</Badge>
+            ) : null}
+            {node.lifecycle_status !== '在用' && node.lifecycle_status !== '待接入' ? (
+              <Badge tone={node.lifecycle_status === '已退役' ? 'offline' : 'notice'}>{node.lifecycle_status}</Badge>
+            ) : null}
+          </div>
           <span className="nodes-table__freshness">
             心跳 <Timestamp value={node.last_heartbeat_at} mode="relative" />
             {node.last_sync_at ? <> · 同步 <Timestamp value={node.last_sync_at} mode="relative" /></> : null}

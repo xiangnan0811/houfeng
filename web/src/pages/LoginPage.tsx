@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Button, Input } from '../components/atoms'
 import { useAuth } from '../lib/auth-context'
 
 export function LoginPage() {
@@ -29,41 +28,28 @@ export function LoginPage() {
 
   return (
     <div className="login-page">
-      <div className="login-page__seal" aria-hidden>
-        <span>候</span>
-      </div>
-      <form className="login-page__card" onSubmit={onSubmit}>
-        <header className="login-page__brand">
-          <div className="login-page__brand-zh">候风</div>
-          <div className="login-page__brand-en" aria-label="HOUFENG Fleet Control Plane">
-            <span>HOUFENG</span>
-            <span aria-hidden="true">·</span>
-            <span>Fleet Control Plane</span>
+      <form className="login-card" onSubmit={onSubmit}>
+        <div className="lc-logo">
+          <div className="logo-mark logo-mark--lg">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
           </div>
-          <div className="login-page__motto">察变 · 守望</div>
-        </header>
-        {error && (
-          <div role="alert" className="login-page__error">
-            {error}
-          </div>
-        )}
-        <Input
-          label="用户名"
-          autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-        <Input
-          label="密码"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        <Button type="submit" disabled={submitting} variant="primary" size="lg" className="login-page__submit">
-          登录
-        </Button>
-        <footer className="login-page__footer">中心会话认证 · Agent 仅出站同步</footer>
+        </div>
+        <div className="lc-title">候风控制面板</div>
+        <div className="lc-sub">Fleet Control Plane</div>
+        {error && <p className="login-page__error" role="alert">{error}</p>}
+        <div className="lc-field">
+          <label htmlFor="login-username">用户名</label>
+          <input id="login-username" type="text" autoComplete="username" placeholder="admin" value={username} onChange={(e) => setUsername(e.target.value)} />
+        </div>
+        <div className="lc-field">
+          <label htmlFor="login-password">密码</label>
+          <input id="login-password" type="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </div>
+        <button type="submit" className="lc-btn" disabled={submitting}>
+          {submitting ? '登录中…' : '登录'}
+        </button>
       </form>
     </div>
   )

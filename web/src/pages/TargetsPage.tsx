@@ -1,8 +1,9 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { DataTable, Drawer, MonoDigits } from '../components/atoms'
+import { Drawer, Hostname, MonoDigits, StatusGlyph, Timestamp } from '../components/atoms'
 import { PageState } from '../components/PageState'
+import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
   archiveTarget,
@@ -21,19 +22,16 @@ import { CreateTargetPanel } from './targets/CreateTargetPanel'
 import { TargetsBatchPanel } from './targets/TargetsBatchPanel'
 import { TargetsFilterPanel } from './targets/TargetsFilterPanel'
 import { TargetsRuntimeOverlays } from './targets/TargetsRuntimeOverlays'
-import { TargetsSupportSurface } from './targets/TargetsSupportSurface'
-import { buildTargetsTableColumns } from './targets/TargetsTableColumns'
+import { TargetsActionsCell } from './targets/TargetsActionsCell'
+import { TargetsTrendCell } from './targets/TargetsTrendCell'
 import {
   actionButtonKey,
   buildCreateTargetInput,
-  buildTargetEvidenceLead,
   countAbnormalTargets,
   countArchivedTargets,
-  countCoverageGapTargets,
   countPausedTargets,
   dedupeLabels,
   describeError,
-  describeTargetFilterContext,
   distinctSorted,
   focusRestoreActionAfterSuccess,
   initialCreateForm,
@@ -41,7 +39,7 @@ import {
   mergeRuntimeTargetRecord,
   parseLabels,
   parseMultiValue,
-  pickTopTargetEvidence,
+  targetGlyphState,
 } from './targets/targetHelpers'
 import type {
   CreateTargetFormState,
@@ -331,23 +329,6 @@ export function TargetsPage() {
     [targets],
   )
 
-  const labelOptions = useMemo(
-    () =>
-      distinctSorted(targets.flatMap((target) => target.labels)).map((value) => ({
-        value,
-        label: value,
-      })),
-    [targets],
-  )
-
-  const executionLabelOptions = useMemo(
-    () =>
-      distinctSorted(targets.flatMap((target) => target.execution_node_labels)).map(
-        (value) => ({ value, label: value }),
-      ),
-    [targets],
-  )
-
   const filteredTargets = useMemo(() => {
     return targets.filter((target) => {
       if (filterState.group && target.group !== filterState.group) return false
@@ -369,66 +350,10 @@ export function TargetsPage() {
     })
   }, [targets, filterState])
 
-  const hasActiveFilters =
-    filterState.group !== null ||
-    filterState.type !== null ||
-    filterState.runStatus !== null ||
-    filterState.health !== null ||
-    filterState.labels.length > 0 ||
-    filterState.executionLabels.length > 0 ||
-    filterState.abnormal
-
   const groupFilterActive = filterState.group !== null
-  const filterContext = useMemo(() => describeTargetFilterContext(filterState), [filterState])
-  const topEvidence = useMemo(
-    () => pickTopTargetEvidence(filteredTargets),
-    [filteredTargets],
-  )
   const abnormalTargetCount = useMemo(() => countAbnormalTargets(targets), [targets])
   const pausedTargetCount = useMemo(() => countPausedTargets(targets), [targets])
   const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
-  const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
-  const displayedAbnormalTargetCount = useMemo(
-    () => countAbnormalTargets(filteredTargets),
-    [filteredTargets],
-  )
-  const displayedPausedTargetCount = useMemo(
-    () => countPausedTargets(filteredTargets),
-    [filteredTargets],
-  )
-  const displayedArchivedTargetCount = useMemo(
-    () => countArchivedTargets(filteredTargets),
-    [filteredTargets],
-  )
-  const displayedCoverageGapTargetCount = useMemo(
-    () => countCoverageGapTargets(filteredTargets),
-    [filteredTargets],
-  )
-  const serviceTargetCount = useMemo(
-    () => targets.filter((target) => target.target_type === 'service').length,
-    [targets],
-  )
-  const evidenceLead = useMemo(
-    () =>
-      buildTargetEvidenceLead({
-        totalTargetCount: targets.length,
-        displayedTargetCount: filteredTargets.length,
-        abnormalTargetCount: displayedAbnormalTargetCount,
-        pausedTargetCount: displayedPausedTargetCount,
-        archivedTargetCount: displayedArchivedTargetCount,
-        coverageGapTargetCount: displayedCoverageGapTargetCount,
-        hasActiveFilters,
-      }),
-    [
-      targets.length,
-      filteredTargets.length,
-      displayedAbnormalTargetCount,
-      displayedPausedTargetCount,
-      displayedArchivedTargetCount,
-      displayedCoverageGapTargetCount,
-      hasActiveFilters,
-    ],
-  )
 
   async function executeBatchTargetAction(action: TargetRuntimeAction) {
     if (action === 'pause' || action === 'archive') {
@@ -515,14 +440,6 @@ export function TargetsPage() {
     updateSearchParam(key, value)
   }
 
-  function setMultiFilter(key: 'labels' | 'execution_labels', values: string[]) {
-    updateSearchParam(key, values.length === 0 ? null : values.join(','))
-  }
-
-  function setAbnormalFilter(checked: boolean) {
-    updateSearchParam('abnormal', checked ? '1' : null)
-  }
-
   function clearAllFilters() {
     setSearchParams(new URLSearchParams(), { replace: true })
   }
@@ -543,23 +460,6 @@ export function TargetsPage() {
     )
   }
 
-  const columns = buildTargetsTableColumns({
-    sparklines,
-    metadataEditingTargetId,
-    metadataLabelInput,
-    metadataGroupInput,
-    metadataSavingTargetId,
-    metadataErrors,
-    runtimeBusyTargetId,
-    actionButtonRefs,
-    onMetadataGroupInputChange: setMetadataGroupInput,
-    onMetadataLabelInputChange: setMetadataLabelInput,
-    onSaveMetadata: (target) => void saveMetadataLabels(target),
-    onCancelMetadata: cancelMetadataEdit,
-    onStartMetadataEdit: beginMetadataEdit,
-    onRuntimeAction: (target, action) => void handleRuntimeAction(target, action),
-  })
-
   function shouldNavigateOnRowClick(target: TargetRecord): boolean {
     if (metadataEditingTargetId === target.target_id) return false
     if (pendingConfirmation?.targetId === target.target_id) return false
@@ -567,8 +467,8 @@ export function TargetsPage() {
   }
 
   return (
-    <div className="animate-in">
-      <div className="page-header">
+    <div className="page-stack animate-in">
+      <div className="page-header animate-in">
         <div>
           <h1 className="page-title">目标观测</h1>
           <p className="page-sub">监控入口健康与延迟</p>
@@ -596,15 +496,15 @@ export function TargetsPage() {
           </div>
         </div>
         <div className="hero-stat">
-          <div className="hs-label">暂停</div>
-          <div className={`hs-value${pausedTargetCount > 0 ? ' muted' : ''}`}>
-            <MonoDigits>{pausedTargetCount}</MonoDigits>
+          <div className="hs-label">启用</div>
+          <div className="hs-value">
+            <MonoDigits>{targets.filter((t) => t.run_status === '启用').length}</MonoDigits>
           </div>
         </div>
         <div className="hero-stat">
-          <div className="hs-label">归档</div>
-          <div className={`hs-value${archivedTargetCount > 0 ? ' muted' : ''}`}>
-            <MonoDigits>{archivedTargetCount}</MonoDigits>
+          <div className="hs-label">暂停/归档</div>
+          <div className={`hs-value${(pausedTargetCount + archivedTargetCount) > 0 ? ' muted' : ''}`}>
+            <MonoDigits>{pausedTargetCount + archivedTargetCount}</MonoDigits>
           </div>
         </div>
       </div>
@@ -625,29 +525,6 @@ export function TargetsPage() {
         />
       </Drawer>
 
-      <TargetsSupportSurface
-        totalTargetCount={targets.length}
-        displayedTargetCount={filteredTargets.length}
-        abnormalTargetCount={abnormalTargetCount}
-        pausedTargetCount={pausedTargetCount}
-        archivedTargetCount={archivedTargetCount}
-        coverageGapTargetCount={coverageGapTargetCount}
-        executionLabelCount={executionLabelOptions.length}
-        serviceTargetCount={serviceTargetCount}
-        evidenceLead={evidenceLead}
-        topEvidence={topEvidence}
-        filterContext={filterContext}
-        hasActiveFilters={hasActiveFilters}
-        onAbnormalClick={() => setAbnormalFilter(abnormalTargetCount > 0)}
-        onPausedClick={() => setSingleFilter('run_status', pausedTargetCount > 0 ? '暂停' : null)}
-        onArchivedClick={() =>
-          setSingleFilter('run_status', archivedTargetCount > 0 ? '已归档' : null)
-        }
-        onCoverageClick={() => navigate('/nodes')}
-        onClearFilters={clearAllFilters}
-        onCreateClick={() => openCreateDrawer()}
-      />
-
       <div className="animate-in d2">
         {targets.length === 0 ? (
           <PageState
@@ -663,17 +540,13 @@ export function TargetsPage() {
           />
         ) : (
           <>
-            <TargetsFilterPanel
-              hasActiveFilters={hasActiveFilters}
-              filterState={filterState}
-              groupOptions={groupOptions}
-              labelOptions={labelOptions}
-              executionLabelOptions={executionLabelOptions}
-              onClearAll={clearAllFilters}
-              onSingleFilterChange={setSingleFilter}
-              onMultiFilterChange={setMultiFilter}
-              onAbnormalFilterChange={setAbnormalFilter}
-            />
+            <div className="filter-panel animate-in d1">
+              <TargetsFilterPanel
+                filterState={filterState}
+                groupOptions={groupOptions}
+                onSingleFilterChange={setSingleFilter}
+              />
+            </div>
             <TargetsBatchPanel
               show={groupFilterActive && filteredTargets.length > 0}
               filteredTargetCount={filteredTargets.length}
@@ -693,23 +566,167 @@ export function TargetsPage() {
                 title="没有匹配当前筛选的目标"
                 description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
                 action={
-                  <button type="button" className="btn sm ghost" onClick={clearAllFilters}>
+                  <button type="button" className="btn sm secondary" onClick={clearAllFilters}>
                     清空筛选
                   </button>
                 }
               />
             ) : (
-              <DataTable<TargetRecord>
-                columns={columns}
-                rows={filteredTargets}
-                rowKey={(target) => target.target_id}
-                density="compact"
-                className="table targets-table"
-                onRowClick={(target) => {
-                  if (!shouldNavigateOnRowClick(target)) return
-                  navigate(`/targets/${target.target_id}`)
-                }}
-              />
+              <table className="table targets-table animate-in d2">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>目标</th>
+                    <th>类型</th>
+                    <th>Host</th>
+                    <th>状态</th>
+                    <th>近 24h 延迟</th>
+                    <th>当前主问题</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTargets.map((target) => {
+                    const hostDisplay = target.base_port
+                      ? `${target.host}:${target.base_port}`
+                      : target.host
+                    return (
+                      <tr
+                        key={target.target_id}
+                        tabIndex={0}
+                        onClick={(e) => {
+                          if (
+                            e.target instanceof Element &&
+                            e.target.closest('a[href],button,input,select,textarea,[role="button"],[role="link"]')
+                          ) return
+                          if (!shouldNavigateOnRowClick(target)) return
+                          navigate(`/targets/${target.target_id}`)
+                        }}
+                        onKeyDown={(e) => {
+                          if (
+                            e.target instanceof Element &&
+                            e.target.closest('a[href],button,input,select,textarea,[role="button"],[role="link"]')
+                          ) return
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            if (shouldNavigateOnRowClick(target)) {
+                              navigate(`/targets/${target.target_id}`)
+                            }
+                          }
+                        }}
+                      >
+                        <td>
+                          <StatusGlyph
+                            state={targetGlyphState(target)}
+                            size="md"
+                            ariaLabel={`${target.name} 健康 ${target.current_health_status}`}
+                          />
+                        </td>
+                        <td>
+                          <div className="name">{target.name}</div>
+                          {metadataEditingTargetId === target.target_id ? (
+                            <div
+                              className="targets-table__label-editor"
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.stopPropagation()
+                                }
+                              }}
+                            >
+                              <label className="targets-table__label-editor-field">
+                                <span className="visually-hidden">Group</span>
+                                <input
+                                  name={`target-group-${target.target_id}`}
+                                  value={metadataGroupInput}
+                                  onChange={(event) => setMetadataGroupInput(event.target.value)}
+                                  aria-label="Group"
+                                  placeholder="Group"
+                                />
+                              </label>
+                              <label className="targets-table__label-editor-field">
+                                <span className="visually-hidden">标签</span>
+                                <input
+                                  name={`target-labels-${target.target_id}`}
+                                  value={metadataLabelInput}
+                                  onChange={(event) => setMetadataLabelInput(event.target.value)}
+                                  aria-label="标签"
+                                />
+                              </label>
+                              <div className="targets-table__label-editor-actions">
+                                <button
+                                  type="button"
+                                  className="btn sm primary"
+                                  disabled={metadataSavingTargetId === target.target_id}
+                                  onClick={() => void saveMetadataLabels(target)}
+                                >
+                                  {metadataSavingTargetId === target.target_id ? '正在保存…' : '保存标签'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn sm secondary"
+                                  disabled={metadataSavingTargetId === target.target_id}
+                                  onClick={() => cancelMetadataEdit(target.target_id)}
+                                >
+                                  取消
+                                </button>
+                              </div>
+                              {metadataErrors[target.target_id] ? (
+                                <p className="targets-table__inline-error" role="alert">
+                                  {metadataErrors[target.target_id]}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div className="sub">
+                              成功 <Timestamp value={target.last_success_at ?? null} mode="relative" />
+                              {' '}· 失败 <Timestamp value={target.last_failure_at ?? null} mode="relative" />
+                            </div>
+                          )}
+                        </td>
+                        <td><span className="probe-kind">{target.target_type}</span></td>
+                        <td className="mono">
+                          {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
+                          <Hostname>{hostDisplay}</Hostname>
+                        </td>
+                        <td>
+                          <span className="targets-table__status">
+                            <StatusBadge label={target.run_status} />
+                            <StatusBadge label={target.current_health_status} />
+                          </span>
+                          {target.execution_node_labels.length > 0 && (
+                            <div className="sub">执行: {target.execution_node_labels.join(', ')}</div>
+                          )}
+                        </td>
+                        <td className="targets-table__trends">
+                          <TargetsTrendCell target={target} sparklines={sparklines} />
+                        </td>
+                        <td>
+                          <div className="targets-table__issue">
+                            <MonoDigits className="targets-table__issue-count">
+                              {target.current_active_incident_count}
+                            </MonoDigits>
+                            <span className="targets-table__issue-summary">
+                              {target.current_primary_issue_summary || '暂无明显异常'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="targets-table__actions-cell">
+                          <TargetsActionsCell
+                            target={target}
+                            metadataEditingTargetId={metadataEditingTargetId}
+                            metadataSavingTargetId={metadataSavingTargetId}
+                            runtimeBusyTargetId={runtimeBusyTargetId}
+                            actionButtonRefs={actionButtonRefs}
+                            onStartMetadataEdit={beginMetadataEdit}
+                            onRuntimeAction={(t, action) => void handleRuntimeAction(t, action)}
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             )}
 
             <TargetsRuntimeOverlays

@@ -358,11 +358,11 @@ export function AssetDecisionsPage() {
         <div className="card">
           <div className="section-title">
             优先处理{' '}
-            <span className="section-count" style={priorityDecisionCount > 0 ? { background: 'var(--warn-bg)', color: 'var(--warn)' } : undefined}>
+            <span className={`section-count${priorityDecisionCount > 0 ? ' section-count--warn' : ''}`}>
               {priorityDecisionCount}
             </span>
           </div>
-          <p style={{ fontSize: 11, color: 'var(--t4)', margin: 0 }}>
+          <p className="text-sm text-muted">
             {renewalWindow} 天续费窗口 + 未评估
           </p>
         </div>
@@ -373,26 +373,25 @@ export function AssetDecisionsPage() {
               缺订阅 {missingSubscriptionCount} / 未关联 {unlinkedCount}
             </span>
           </div>
-          <p style={{ fontSize: 11, color: 'var(--t4)', margin: 0 }}>
+          <p className="text-sm text-muted">
             迁移 {state.migrate.length} / 取消 {state.cancel.length}
           </p>
         </div>
       </div>
 
-      <div className="card animate-in d2" style={{ marginBottom: 20 }}>
-        <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="card animate-in d2 mb-5">
+        <div className="section-title flex-row gap-2">
           续费窗口{' '}
           <select
-            className="input"
+            className="input filter-select--inline"
             value={String(renewalWindow)}
             onChange={(event) => changeRenewalWindow(event.target.value)}
-            style={{ width: 'auto', fontSize: 12 }}
           >
             {RENEWAL_WINDOWS.map((value) => (
               <option key={value} value={value}>未来 {value} 天</option>
             ))}
           </select>
-          <span className="section-count" style={state.renewals.length > 0 ? { background: 'var(--warn-bg)', color: 'var(--warn)' } : undefined}>
+          <span className={`section-count${state.renewals.length > 0 ? ' section-count--warn' : ''}`}>
             {state.renewalsLoading ? '...' : state.renewalsError ? '不可用' : `${state.renewals.length} 条`}
           </span>
         </div>
@@ -421,7 +420,7 @@ export function AssetDecisionsPage() {
             {state.vpsLoading ? '...' : `${visibleDecisionQueue.length} / ${totalDecisionQueue}`}
           </span>
         </div>
-        <div style={{ marginBottom: 12 }}>
+        <div className="mb-3">
           <Tabs items={queueTabs} value={queueView} onChange={setQueueView} variant="pill" />
         </div>
         {state.vpsLoading ? (
@@ -446,7 +445,7 @@ export function AssetDecisionsPage() {
             title="当前视图暂无待处理 VPS"
             description="可回到全部、库存或订阅。"
             action={
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="flex-row gap-2">
                 {queueView !== 'all' && (
                   <button className="btn sm secondary" onClick={() => setQueueView('all')}>查看全部</button>
                 )}
@@ -478,11 +477,11 @@ export function AssetDecisionsPage() {
                 return (
                   <tr
                     key={vps.vps_id}
-                    style={isUrgent ? { background: 'var(--warn-bg)' } : undefined}
+                    className={isUrgent ? 'row-urgent row-clickable' : 'row-clickable'}
                     onClick={() => navigateToVPS(vps)}
                   >
                     <td className="name">{vps.display_name}</td>
-                    <td style={{ fontSize: 11, color: 'var(--t3)' }}>
+                    <td className="text-sm text-secondary">
                       {formatOptional(vps.provider_name)}{' '}
                       {vpsLocationLabel(vps)}
                     </td>
@@ -492,7 +491,7 @@ export function AssetDecisionsPage() {
                         <span className="mono">
                           {formatMoney(sub.monthly_price, sub.currency)}/月
                           {daysLeft != null && (
-                            <span style={daysLeft <= 30 ? { color: 'var(--warn)', fontWeight: 600, marginLeft: 6 } : { color: 'var(--t3)', marginLeft: 6 }}>
+                            <span className={daysLeft <= 30 ? 'days-urgent' : 'days-normal'}>
                               {daysLeft}天
                             </span>
                           )}
@@ -505,7 +504,7 @@ export function AssetDecisionsPage() {
                       {vps.active_node_link_count > 0 ? (
                         <span><MonoDigits>{vps.active_node_link_count}</MonoDigits> 关联</span>
                       ) : (
-                        <span style={{ color: 'var(--t4)' }}>未关联</span>
+                        <span className="text-muted">未关联</span>
                       )}
                     </td>
                     <td>

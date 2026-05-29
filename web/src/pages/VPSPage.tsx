@@ -332,7 +332,7 @@ function renderRenewalDate(row: InventoryRow) {
   if (!row.subscription?.renew_at) return '—'
   const days = daysUntilDate(row.subscription.renew_at)
   if (days != null && days <= 30) {
-    return <span style={{ color: 'var(--warn)' }}>{formatDate(row.subscription.renew_at)}</span>
+    return <span className="text-warn">{formatDate(row.subscription.renew_at)}</span>
   }
   return formatDate(row.subscription.renew_at)
 }
@@ -539,7 +539,7 @@ export function VPSPage() {
       )}
 
       {subscriptionEvidence === 'error' && (
-        <p style={{ fontSize: '11px', color: 'var(--warn)', marginTop: '8px' }} role="status">
+        <p className="text-sm text-warn" role="status">
           订阅不可用，不判定。{state.subscriptionsError}
         </p>
       )}
@@ -569,7 +569,7 @@ export function VPSPage() {
             </thead>
             <tbody>
               {filteredRows.map((row) => (
-                <tr key={row.vps.vps_id} onClick={() => navigate(`/vps/${row.vps.vps_id}`)} style={{ cursor: 'pointer' }}>
+                <tr key={row.vps.vps_id} onClick={() => navigate(`/vps/${row.vps.vps_id}`)} className="row-clickable">
                   <td className="name">{row.vps.display_name}</td>
                   <td>{formatOptional(row.vps.provider_name)}</td>
                   <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>

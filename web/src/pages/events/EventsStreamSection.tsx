@@ -1,96 +1,51 @@
-import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../../lib/types'
+import { Link } from 'react-router-dom'
 
-type EventGroupKey = 'today' | 'yesterday' | 'this_week' | 'earlier'
+import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../../lib/types'
+import { PAGE_SIZE } from './eventsPageConstants'
 
 type EventsStreamSectionProps = {
   events: StateChangeEventRecord[]
   exhausted: boolean
   loadingMore: boolean
   hasActiveFilters: boolean
+  page: number
+  nameMap: Map<string, string>
+  onPageChange: (page: number) => void
   onLoadMore: () => void
   onClearFilters: () => void
-}
-
-const EVENT_GROUP_LABELS: Record<EventGroupKey, string> = {
-  today: '今天',
-  yesterday: '昨天',
-  this_week: '本周',
-  earlier: '更早',
-}
-
-const EVENT_GROUP_ORDER: EventGroupKey[] = ['today', 'yesterday', 'this_week', 'earlier']
-
-const OBJECT_TYPE_LABELS: Record<string, string> = {
-  node: '节点',
-  target: '目标',
-}
-
-function startOfDay(date: Date): Date {
-  const next = new Date(date)
-  next.setHours(0, 0, 0, 0)
-  return next
-}
-
-function bucketKey(eventDate: Date, now: Date): EventGroupKey {
-  const startToday = startOfDay(now)
-  const startYesterday = new Date(startToday.getTime() - 24 * 60 * 60 * 1000)
-  const day = startToday.getDay()
-  const offsetToMonday = day === 0 ? 6 : day - 1
-  const startWeek = new Date(startToday.getTime() - offsetToMonday * 24 * 60 * 60 * 1000)
-
-  if (eventDate >= startToday) return 'today'
-  if (eventDate >= startYesterday) return 'yesterday'
-  if (eventDate >= startWeek) return 'this_week'
-  return 'earlier'
-}
-
-function groupEventsByTime(
-  events: StateChangeEventRecord[],
-): Array<{ key: EventGroupKey; events: StateChangeEventRecord[] }> {
-  const buckets: Record<EventGroupKey, StateChangeEventRecord[]> = {
-    today: [],
-    yesterday: [],
-    this_week: [],
-    earlier: [],
-  }
-  const now = new Date()
-  for (const event of events) {
-    const eventDate = new Date(event.created_at)
-    if (Number.isNaN(eventDate.getTime())) {
-      buckets.earlier.push(event)
-      continue
-    }
-    buckets[bucketKey(eventDate, now)].push(event)
-  }
-  return EVENT_GROUP_ORDER.filter((key) => buckets[key].length > 0).map((key) => ({
-    key,
-    events: buckets[key],
-  }))
-}
-
-function eventIcon(evt: StateChangeEventRecord): { cls: string; char: string } {
-  if (evt.event_type === 'incident_recovered') return { cls: 'event-icon ei-ok', char: '✓' }
-  if (evt.event_type === 'incident_escalated') return { cls: 'event-icon ei-err', char: '!' }
-  return { cls: 'event-icon ei-warn', char: '!' }
 }
 
 function formatEventTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  const now = new Date()
-  const startToday = startOfDay(now)
-  if (d >= startToday) {
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
-  }
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const dd = String(d.getDate()).padStart(2, '0')
   const hh = String(d.getHours()).padStart(2, '0')
   const min = String(d.getMinutes()).padStart(2, '0')
-  return `${mm}-${dd} ${hh}:${min}`
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return `${mm}-${dd} ${hh}:${min}:${ss}`
+}
+
+function severityClass(severity: string): string {
+  if (severity === '严重') return 'badge alert'
+  if (severity === '告警') return 'badge notice'
+  if (severity === '关注') return 'badge warn'
+  return 'badge'
 }
 
 function eventTypeLabel(value: StateChangeEventRecord['event_type']): string {
   return STATE_CHANGE_EVENT_TYPE_LABELS[value] ?? value
+}
+
+function objectLink(
+  objectType: string,
+  objectId: string,
+  nameMap: Map<string, string>,
+): { to: string; label: string } {
+  const name = nameMap.get(objectId) || objectId
+  if (objectType === 'node') return { to: `/nodes/${objectId}`, label: `节点 · ${name}` }
+  if (objectType === 'target') return { to: `/targets/${objectId}`, label: `目标 · ${name}` }
+  return { to: '#', label: `${objectType} · ${name}` }
 }
 
 export function EventsStreamSection({
@@ -98,10 +53,17 @@ export function EventsStreamSection({
   exhausted,
   loadingMore,
   hasActiveFilters,
+  page,
+  nameMap,
+  onPageChange,
   onLoadMore,
   onClearFilters,
 }: EventsStreamSectionProps) {
-  const groupedEvents = groupEventsByTime(events)
+  const totalPages = Math.max(1, Math.ceil(events.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const startIdx = (currentPage - 1) * PAGE_SIZE
+  const displayEvents = events.slice(startIdx, startIdx + PAGE_SIZE)
+  const isLastPage = currentPage >= totalPages
 
   if (events.length === 0) {
     return (
@@ -110,12 +72,7 @@ export function EventsStreamSection({
           {hasActiveFilters ? '当前筛选没有匹配的事件' : '最近没有状态变更事件'}
         </p>
         {hasActiveFilters && (
-          <button
-            type="button"
-            className="btn sm secondary"
-            style={{ marginTop: '12px' }}
-            onClick={onClearFilters}
-          >
+          <button type="button" className="btn sm secondary" style={{ marginTop: '12px' }} onClick={onClearFilters}>
             重置筛选
           </button>
         )}
@@ -124,47 +81,65 @@ export function EventsStreamSection({
   }
 
   return (
-    <>
-      {groupedEvents.map((group, gi) => (
-        <div key={group.key} className={`card animate-in d${gi + 1}`} style={{ marginBottom: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--t1)' }}>
-              {EVENT_GROUP_LABELS[group.key]} ({group.events.length} 条)
-            </h3>
-          </div>
-          {group.events.map((evt) => {
-            const icon = eventIcon(evt)
+    <div className="card">
+      <table className="table">
+        <thead>
+          <tr>
+            <th className="time">时间</th>
+            <th>严重度</th>
+            <th>事件类型</th>
+            <th>异常类别</th>
+            <th>摘要</th>
+            <th>对象</th>
+          </tr>
+        </thead>
+        <tbody>
+          {displayEvents.map((evt) => {
+            const link = objectLink(evt.object_type, evt.object_id, nameMap)
             return (
-              <div
-                className="event-row"
-                key={evt.event_id ?? `${evt.created_at}-${evt.incident_id}-${evt.event_type}`}
-              >
-                <span className="event-time">{formatEventTime(evt.created_at)}</span>
-                <span className={icon.cls}>{icon.char}</span>
-                <div className="event-body">
-                  <div className="event-title">{eventTypeLabel(evt.event_type)}</div>
-                  <div className="event-detail">
-                    {evt.incident_class ? `${evt.incident_class} · ` : ''}
-                    {evt.summary || '暂无摘要'}
-                  </div>
-                </div>
-                <span className="event-target">
-                  {OBJECT_TYPE_LABELS[evt.object_type] ?? evt.object_type} · {evt.object_id}
-                </span>
-              </div>
+              <tr key={evt.event_id ?? `${evt.created_at}-${evt.incident_id}-${evt.event_type}`}>
+                <td className="time mono">{formatEventTime(evt.created_at)}</td>
+                <td><span className={severityClass(evt.severity)}>{evt.severity || '—'}</span></td>
+                <td>{eventTypeLabel(evt.event_type)}</td>
+                <td>{evt.incident_class || '—'}</td>
+                <td className="name">{evt.summary || '暂无摘要'}</td>
+                <td><Link to={link.to} className="mono">{link.label}</Link></td>
+              </tr>
             )
           })}
-        </div>
-      ))}
-      <button
-        type="button"
-        className="btn md secondary"
-        style={{ width: '100%', justifyContent: 'center' }}
-        onClick={onLoadMore}
-        disabled={exhausted || loadingMore}
-      >
-        {loadingMore ? '正在加载…' : exhausted ? '无更多事件' : '加载更多'}
-      </button>
-    </>
+        </tbody>
+      </table>
+
+      <div className="table-pagination">
+        <button
+          type="button"
+          className="btn sm ghost"
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(currentPage - 1)}
+        >
+          上一页
+        </button>
+        <span className="table-pagination__info">第 {currentPage}/{totalPages} 页</span>
+        {isLastPage && !exhausted ? (
+          <button
+            type="button"
+            className="btn sm secondary"
+            disabled={loadingMore}
+            onClick={onLoadMore}
+          >
+            {loadingMore ? '加载中…' : '加载更多'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn sm ghost"
+            disabled={currentPage >= totalPages}
+            onClick={() => onPageChange(currentPage + 1)}
+          >
+            下一页
+          </button>
+        )}
+      </div>
+    </div>
   )
 }

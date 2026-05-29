@@ -80,7 +80,7 @@ export function NodeComparePage() {
         eyebrow="节点对比"
         title="需要选择 2 个节点"
         description="请先在节点列表勾选两个节点，再进入 A / B 指标对比。"
-        action={<Link className="btn btn--secondary btn--md" to="/nodes">返回节点列表</Link>}
+        action={<Link className="btn md secondary" to="/nodes">返回节点列表</Link>}
       />
     )
   }
@@ -162,7 +162,7 @@ function CompareCommandPanel({ stateA, stateB }: { stateA: NodeState; stateB: No
           <CompareCommandPeer state={stateA} side="left" />
           <CompareCommandPeer state={stateB} side="right" />
         </div>
-        <Link className="btn btn--ghost btn--md" to="/nodes">返回节点列表</Link>
+        <Link className="btn md ghost" to="/nodes">返回节点列表</Link>
       </div>
     </section>
   )
@@ -397,7 +397,7 @@ function CompareColumnPlaceholder({ state }: { state: NodeState }) {
       technicalSummary={state.error ?? '指标不可用'}
       surface="empty"
       compact
-      action={<Link className="btn btn--ghost btn--sm" to="/nodes">返回节点列表重新选择</Link>}
+      action={<Link className="btn sm ghost" to="/nodes">返回节点列表重新选择</Link>}
     />
   )
 }

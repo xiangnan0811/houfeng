@@ -35,7 +35,7 @@ export function NodeCommandDrawer({
         {commands.map((command) => (
           <button
             key={command.id}
-            className="btn btn--secondary btn--md command-picker__item"
+            className="btn md secondary command-picker__item"
             disabled={submitting || node.last_action?.status === 'pending'}
             onClick={() => onExecute(command.id)}
           >

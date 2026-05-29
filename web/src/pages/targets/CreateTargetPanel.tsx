@@ -158,13 +158,13 @@ export function CreateTargetPanel({
         <div className="page-form-actions">
           <button
             type="button"
-            className="btn btn--secondary btn--md"
+            className="btn md secondary"
             disabled={submitting}
             onClick={onCancel}
           >
             取消
           </button>
-          <button type="submit" className="btn btn--primary btn--md" disabled={submitting}>
+          <button type="submit" className="btn md primary" disabled={submitting}>
             {submitting ? '正在创建…' : '创建目标'}
           </button>
         </div>

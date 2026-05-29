@@ -78,7 +78,7 @@ export function NodesSupportSurface({
         filterAriaLabel="当前证据筛选"
         action={
           evidenceLead.actionKind === 'asset' ? (
-            <Link className="btn btn--secondary btn--md" to="/vps">
+            <Link className="btn md secondary" to="/vps">
               {evidenceLead.actionLabel}
             </Link>
           ) : (
@@ -178,7 +178,7 @@ export function NodesSupportSurface({
               </>
             }
             action={
-              <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
+              <Link className="btn sm ghost" to={topEvidence.route}>
                 {topEvidence.actionLabel}
               </Link>
             }
@@ -192,7 +192,7 @@ export function NodesSupportSurface({
             description="无异常 / 接入缺口。"
             meta="VPS 库存 / 资产决策"
             action={
-              <Link className="btn btn--ghost btn--sm" to="/vps">
+              <Link className="btn sm ghost" to="/vps">
                 查看 VPS
               </Link>
             }

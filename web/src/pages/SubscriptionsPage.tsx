@@ -1,766 +1,350 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { Button, DataTable, Drawer, Input, MonoDigits, type DataTableColumn } from '../components/atoms'
-import { FilterBar, FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
+import { Drawer, Input } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createSubscription, listSubscriptions, listVPSAssets, updateSubscription } from '../lib/api'
-import { formatDate, formatMoney, formatOptional } from '../lib/format'
+import { formatDate, formatMoney } from '../lib/format'
 import {
   SUBSCRIPTION_STATUS_LABELS,
   type CreateSubscriptionInput,
   type SubscriptionListFilter,
   type SubscriptionRecord,
   type SubscriptionStatus,
-  type UpdateSubscriptionInput,
   type VPSAssetRecord,
 } from '../lib/types'
-import { SubscriptionStatusBadge } from './assetPageBadges'
-import { subscriptionStatusLabel } from './assetPageUtils'
 
-type PageState = {
-  loading: boolean
-  error: string | null
-  subscriptions: SubscriptionRecord[]
-  vps: VPSAssetRecord[]
+type PageState = { loading: boolean; error: string | null; subscriptions: SubscriptionRecord[]; vps: VPSAssetRecord[] }
+type FilterState = { vps_id: string | null; status: SubscriptionStatus | null; renew_window: string | null }
+type FormState = {
+  vpsID: string; price: string; currency: string; billingCycle: string; billingMonths: string
+  startedAt: string; renewAt: string; autoRenew: boolean; autoRenewCancelled: boolean
+  status: SubscriptionStatus; paymentMethod: string; note: string
 }
 
-type FilterState = {
-  vps_id: string | null
-  status: SubscriptionStatus | null
-  renew_window: string | null
+const INITIAL_PAGE: PageState = { loading: true, error: null, subscriptions: [], vps: [] }
+const INITIAL_FORM: FormState = {
+  vpsID: '', price: '', currency: 'USD', billingCycle: 'monthly', billingMonths: '1',
+  startedAt: '', renewAt: '', autoRenew: false, autoRenewCancelled: false,
+  status: 'active', paymentMethod: '', note: '',
 }
+const STATUS_OPTIONS = Object.entries(SUBSCRIPTION_STATUS_LABELS).map(([value, label]) => ({ value, label }))
 
-type CreateSubscriptionFormState = {
-  vpsID: string
-  price: string
-  currency: string
-  billingCycle: string
-  billingMonths: string
-  startedAt: string
-  renewAt: string
-  autoRenew: boolean
-  autoRenewCancelled: boolean
-  status: SubscriptionStatus
-  paymentMethod: string
-  note: string
-}
-
-const INITIAL_PAGE_STATE: PageState = {
-  loading: true,
-  error: null,
-  subscriptions: [],
-  vps: [],
-}
-
-const INITIAL_CREATE_FORM: CreateSubscriptionFormState = {
-  vpsID: '',
-  price: '',
-  currency: 'USD',
-  billingCycle: 'monthly',
-  billingMonths: '1',
-  startedAt: '',
-  renewAt: '',
-  autoRenew: false,
-  autoRenewCancelled: false,
-  status: 'active',
-  paymentMethod: '',
-  note: '',
-}
-
-const STATUS_OPTIONS = Object.entries(SUBSCRIPTION_STATUS_LABELS).map(([value, label]) => ({
-  value,
-  label,
-}))
-
-const RENEW_WINDOW_OPTIONS: FilterSelectOption[] = [
-  { value: '30', label: '未来 30 天' },
-  { value: '60', label: '未来 60 天' },
-  { value: '90', label: '未来 90 天' },
-]
-
-function describeError(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) return error.message
-  if (error instanceof Error) return error.message
+function describeError(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return err.message
+  if (err instanceof Error) return err.message
   return fallback
 }
 
-function parseFilters(searchParams: URLSearchParams): FilterState {
-  const status = searchParams.get('status') as SubscriptionStatus | null
-  const renewWindow = searchParams.get('renew_within_days')
+function parseFilters(sp: URLSearchParams): FilterState {
+  const status = sp.get('status') as SubscriptionStatus | null
+  const rw = sp.get('renew_within_days')
   return {
-    vps_id: searchParams.get('vps_id') || null,
+    vps_id: sp.get('vps_id') || null,
     status: status && status in SUBSCRIPTION_STATUS_LABELS ? status : null,
-    renew_window: renewWindow && ['30', '60', '90'].includes(renewWindow) ? renewWindow : null,
+    renew_window: rw && ['30', '60', '90'].includes(rw) ? rw : null,
   }
 }
-
-function filtersToParams(filters: FilterState): URLSearchParams {
-  const params = new URLSearchParams()
-  if (filters.vps_id) params.set('vps_id', filters.vps_id)
-  if (filters.status) params.set('status', filters.status)
-  if (filters.renew_window) params.set('renew_within_days', filters.renew_window)
-  return params
+function filtersToParams(f: FilterState): URLSearchParams {
+  const p = new URLSearchParams()
+  if (f.vps_id) p.set('vps_id', f.vps_id)
+  if (f.status) p.set('status', f.status)
+  if (f.renew_window) p.set('renew_within_days', f.renew_window)
+  return p
 }
 
-function filtersToAPI(filters: FilterState): SubscriptionListFilter {
+function filtersToAPI(f: FilterState): SubscriptionListFilter {
   return {
-    vps_id: filters.vps_id,
-    status: filters.status,
-    renew_within_days: filters.renew_window ? Number.parseInt(filters.renew_window, 10) : null,
-    sort: filters.renew_window ? 'renew_at' : '',
-    order: filters.renew_window ? 'asc' : '',
+    vps_id: f.vps_id, status: f.status,
+    renew_within_days: f.renew_window ? Number.parseInt(f.renew_window, 10) : null,
+    sort: f.renew_window ? 'renew_at' : '', order: f.renew_window ? 'asc' : '',
   }
 }
 
-function hasActiveFilters(filters: FilterState): boolean {
-  return Boolean(filters.vps_id || filters.status || filters.renew_window)
-}
-
-function buildCreateInput(form: CreateSubscriptionFormState): CreateSubscriptionInput {
-  if (form.vpsID.trim() === '') {
-    throw new Error('VPS 不能为空。')
-  }
-
+function buildCreateInput(form: FormState): CreateSubscriptionInput {
+  if (!form.vpsID.trim()) throw new Error('VPS 不能为空。')
   const price = Number.parseFloat(form.price.trim())
-  if (!Number.isFinite(price) || price < 0) {
-    throw new Error('价格必须为非负数字。')
-  }
-
+  if (!Number.isFinite(price) || price < 0) throw new Error('价格必须为非负数字。')
   const billingMonths = Number.parseInt(form.billingMonths.trim(), 10)
-  if (!Number.isInteger(billingMonths) || billingMonths <= 0) {
-    throw new Error('计费月数必须大于 0。')
-  }
-
+  if (!Number.isInteger(billingMonths) || billingMonths <= 0) throw new Error('计费月数必须大于 0。')
   const currency = form.currency.trim().toUpperCase()
-  if (!/^[A-Z]{3}$/.test(currency)) {
-    throw new Error('币种必须为 3 位大写代码。')
-  }
-
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error('币种必须为 3 位大写代码。')
   return {
-    vps_id: form.vpsID.trim(),
-    price,
-    currency,
-    billing_cycle: form.billingCycle.trim(),
-    billing_months: billingMonths,
-    started_at: form.startedAt || null,
-    renew_at: form.renewAt || null,
-    auto_renew: form.autoRenew,
-    auto_renew_cancelled: form.autoRenewCancelled,
-    status: form.status,
-    payment_method: form.paymentMethod.trim(),
-    note: form.note.trim(),
+    vps_id: form.vpsID.trim(), price, currency, billing_cycle: form.billingCycle.trim(),
+    billing_months: billingMonths, started_at: form.startedAt || null, renew_at: form.renewAt || null,
+    auto_renew: form.autoRenew, auto_renew_cancelled: form.autoRenewCancelled,
+    status: form.status, payment_method: form.paymentMethod.trim(), note: form.note.trim(),
   }
 }
 
-function subscriptionToForm(subscription: SubscriptionRecord): CreateSubscriptionFormState {
+function subToForm(s: SubscriptionRecord): FormState {
   return {
-    vpsID: subscription.vps_id,
-    price: String(subscription.price),
-    currency: subscription.currency,
-    billingCycle: subscription.billing_cycle,
-    billingMonths: String(subscription.billing_months),
-    startedAt: subscription.started_at ?? '',
-    renewAt: subscription.renew_at ?? '',
-    autoRenew: subscription.auto_renew,
-    autoRenewCancelled: subscription.auto_renew_cancelled,
-    status: subscription.status,
-    paymentMethod: subscription.payment_method,
-    note: subscription.note,
+    vpsID: s.vps_id, price: String(s.price), currency: s.currency,
+    billingCycle: s.billing_cycle, billingMonths: String(s.billing_months),
+    startedAt: s.started_at ?? '', renewAt: s.renew_at ?? '',
+    autoRenew: s.auto_renew, autoRenewCancelled: s.auto_renew_cancelled,
+    status: s.status, paymentMethod: s.payment_method, note: s.note,
   }
 }
 
-function buildUpdateInput(form: CreateSubscriptionFormState): UpdateSubscriptionInput {
-  return buildCreateInput(form)
-}
-
-function vpsOptions(vps: VPSAssetRecord[]): FilterSelectOption[] {
-  return vps.map((item) => ({
-    value: item.vps_id,
-    label: item.display_name,
-  }))
-}
-
-function renewTime(renewAt?: string | null): number | null {
-  if (!renewAt) return null
-  const time = new Date(`${renewAt}T00:00:00Z`).getTime()
-  return Number.isNaN(time) ? null : time
-}
-
-function describeUpcomingRenewal(subscriptions: SubscriptionRecord[]): string {
-  const upcoming = subscriptions
-    .filter((subscription) => subscription.status === 'active' || subscription.status === 'paused')
-    .map((subscription) => ({ subscription, time: renewTime(subscription.renew_at) }))
-    .filter((item): item is { subscription: SubscriptionRecord; time: number } => item.time != null)
-    .sort((left, right) => left.time - right.time)[0]
-
-  if (!upcoming) return '暂无可排序的续费日期'
-  return `${formatDate(upcoming.subscription.renew_at)} · ${formatMoney(upcoming.subscription.monthly_price, upcoming.subscription.currency)}/月`
+function statusBadgeClass(status: SubscriptionStatus): string {
+  switch (status) {
+    case 'active': return 'badge badge-ok'
+    case 'paused': return 'badge badge-warn'
+    case 'cancelled': case 'expired': return 'badge badge-muted'
+    default: return 'badge'
+  }
 }
 
 export function SubscriptionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
   const createRequested = searchParams.get('create') === '1'
-  const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
+  const [state, setState] = useState<PageState>(INITIAL_PAGE)
   const [reloadKey, setReloadKey] = useState(0)
   const [createOpen, setCreateOpen] = useState(false)
-  const [createForm, setCreateForm] = useState<CreateSubscriptionFormState>(INITIAL_CREATE_FORM)
+  const [createForm, setCreateForm] = useState<FormState>(INITIAL_FORM)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [editingSubscriptionId, setEditingSubscriptionId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState<CreateSubscriptionFormState>(INITIAL_CREATE_FORM)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<FormState>(INITIAL_FORM)
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
-  const createPanelOpen = createOpen || createRequested
-  const effectiveCreateForm =
-    createRequested && filters.vps_id && createForm.vpsID === ''
-      ? { ...createForm, vpsID: filters.vps_id }
-      : createForm
+  const panelOpen = createOpen || createRequested
+  const effectiveForm = createRequested && filters.vps_id && createForm.vpsID === ''
+    ? { ...createForm, vpsID: filters.vps_id } : createForm
 
   useEffect(() => {
     let cancelled = false
-    const apiFilters = filtersToAPI({
-      vps_id: filters.vps_id,
-      status: filters.status,
-      renew_window: filters.renew_window,
-    })
-
-    Promise.all([listSubscriptions(apiFilters), listVPSAssets()])
-      .then(([subscriptions, vps]) => {
-        if (cancelled) return
-        setState({ loading: false, error: null, subscriptions, vps })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setState({
-          loading: false,
-          error: describeError(error, '加载订阅失败'),
-          subscriptions: [],
-          vps: [],
-        })
-      })
-
-    return () => {
-      cancelled = true
-    }
+    Promise.all([listSubscriptions(filtersToAPI(filters)), listVPSAssets()])
+      .then(([subs, vps]) => { if (!cancelled) setState({ loading: false, error: null, subscriptions: subs, vps }) })
+      .catch((err: unknown) => { if (!cancelled) setState({ loading: false, error: describeError(err, '加载订阅失败'), subscriptions: [], vps: [] }) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.renew_window, filters.status, filters.vps_id, reloadKey])
 
-  function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
-    const next = { ...filters, [key]: value }
-    setSearchParams(filtersToParams(next), { replace: true })
+  function setFilter<K extends keyof FilterState>(key: K, val: FilterState[K]) {
+    setSearchParams(filtersToParams({ ...filters, [key]: val }), { replace: true })
   }
+  function clearFilters() { setSearchParams(new URLSearchParams(), { replace: true }) }
+  function clearCreateReq() { if (createRequested) setSearchParams(filtersToParams(filters), { replace: true }) }
 
-  function clearFilters() {
-    setSearchParams(new URLSearchParams(), { replace: true })
+  function openCreate() {
+    setCreateOpen(true); setCreateForm({ ...INITIAL_FORM, vpsID: filters.vps_id ?? '' })
+    setCreateError(null); setEditingId(null); setEditError(null)
   }
+  function closeCreate() { setCreateOpen(false); setCreateForm(INITIAL_FORM); setCreateError(null); clearCreateReq() }
 
-  function clearCreateRequest() {
-    if (!createRequested) return
-    const params = filtersToParams(filters)
-    setSearchParams(params, { replace: true })
-  }
-
-  function openCreatePanel() {
-    setCreateOpen(true)
-    setCreateForm({ ...INITIAL_CREATE_FORM, vpsID: filters.vps_id ?? '' })
-    setCreateError(null)
-    setEditingSubscriptionId(null)
-    setEditForm(INITIAL_CREATE_FORM)
-    setEditError(null)
-  }
-
-  function closeCreatePanel() {
-    setCreateOpen(false)
-    setCreateForm(INITIAL_CREATE_FORM)
-    setCreateError(null)
-    clearCreateRequest()
-  }
-
-  function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setCreateError(null)
-
+  function handleCreate(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setCreateError(null)
     let input: CreateSubscriptionInput
-    try {
-      input = buildCreateInput(effectiveCreateForm)
-    } catch (error: unknown) {
-      setCreateError(describeError(error, '订阅输入无效'))
-      return
-    }
-
+    try { input = buildCreateInput(effectiveForm) } catch (err: unknown) { setCreateError(describeError(err, '输入无效')); return }
     setCreateSubmitting(true)
     createSubscription(input)
-      .then((subscription) => {
-        setState((current) => ({
-          loading: false,
-          error: null,
-          subscriptions: [
-            subscription,
-            ...current.subscriptions.filter((item) => item.subscription_id !== subscription.subscription_id),
-          ],
-          vps: current.vps,
-        }))
-        closeCreatePanel()
-      })
-      .catch((error: unknown) => {
-        setCreateError(describeError(error, '创建订阅失败'))
-      })
+      .then((s) => { setState((c) => ({ ...c, loading: false, error: null, subscriptions: [s, ...c.subscriptions.filter((x) => x.subscription_id !== s.subscription_id)] })); closeCreate() })
+      .catch((err: unknown) => setCreateError(describeError(err, '创建失败')))
       .finally(() => setCreateSubmitting(false))
   }
 
-  function startEdit(subscription: SubscriptionRecord) {
-    setCreateOpen(false)
-    setCreateError(null)
-    clearCreateRequest()
-    setEditingSubscriptionId(subscription.subscription_id)
-    setEditForm(subscriptionToForm(subscription))
-    setEditError(null)
-  }
+  function startEdit(s: SubscriptionRecord) { closeCreate(); setEditingId(s.subscription_id); setEditForm(subToForm(s)); setEditError(null) }
+  function cancelEdit() { setEditingId(null); setEditForm(INITIAL_FORM); setEditError(null) }
 
-  function cancelEdit() {
-    setEditingSubscriptionId(null)
-    setEditForm(INITIAL_CREATE_FORM)
-    setEditError(null)
-  }
-
-  function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!editingSubscriptionId) return
-    setEditError(null)
-
-    let input: UpdateSubscriptionInput
-    try {
-      input = buildUpdateInput(editForm)
-    } catch (error: unknown) {
-      setEditError(describeError(error, '订阅输入无效'))
-      return
-    }
-
+  function handleEdit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); if (!editingId) return; setEditError(null)
+    let input: CreateSubscriptionInput
+    try { input = buildCreateInput(editForm) } catch (err: unknown) { setEditError(describeError(err, '输入无效')); return }
     setEditSubmitting(true)
-    updateSubscription(editingSubscriptionId, input)
-      .then((subscription) => {
-        setState((current) => ({
-          loading: false,
-          error: null,
-          subscriptions: current.subscriptions.map((item) =>
-            item.subscription_id === subscription.subscription_id ? subscription : item,
-          ),
-          vps: current.vps,
-        }))
-        cancelEdit()
-      })
-      .catch((error: unknown) => {
-        setEditError(describeError(error, '更新订阅失败'))
-      })
+    updateSubscription(editingId, input)
+      .then((s) => { setState((c) => ({ ...c, subscriptions: c.subscriptions.map((x) => x.subscription_id === s.subscription_id ? s : x) })); cancelEdit() })
+      .catch((err: unknown) => setEditError(describeError(err, '更新失败')))
       .finally(() => setEditSubmitting(false))
   }
 
-  function vpsName(vpsID: string | null): string {
-    if (!vpsID) return ''
-    return state.vps.find((item) => item.vps_id === vpsID)?.display_name ?? vpsID
+  function vpsName(id: string | null): string {
+    if (!id) return ''; return state.vps.find((v) => v.vps_id === id)?.display_name ?? id
   }
 
-  const selectedContextVPS = filters.vps_id ? state.vps.find((item) => item.vps_id === filters.vps_id) : null
-
-  const columns: DataTableColumn<SubscriptionRecord>[] = [
-    {
-      key: 'subscription',
-      label: '订阅',
-      render: (subscription) => (
-        <div className="asset-table__identity">
-          <strong>{vpsName(subscription.vps_id) || subscription.vps_id}</strong>
-          <span>{subscription.subscription_id}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'price',
-      label: '金额 / 月付折算',
-      render: (subscription) => (
-        <div className="asset-table__stack">
-          <strong>{formatMoney(subscription.price, subscription.currency)}</strong>
-          <span>月付 {formatMoney(subscription.monthly_price, subscription.currency)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'billing',
-      label: '周期',
-      render: (subscription) => (
-        <div className="asset-table__stack">
-          <strong>{subscription.billing_months} 个月</strong>
-          <span>{formatOptional(subscription.billing_cycle)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'renew',
-      label: '续费',
-      render: (subscription) => (
-        <div className="asset-table__stack">
-          <strong>{formatDate(subscription.renew_at)}</strong>
-          <span>{subscription.auto_renew ? '自动续费' : '手动续费'} · {subscription.auto_renew_cancelled ? '已取消自动续费' : '自动续费未取消'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'status',
-      label: '状态',
-      render: (subscription) => <SubscriptionStatusBadge value={subscription.status} />,
-    },
-    {
-      key: 'actions',
-      label: '操作',
-      align: 'right',
-      render: (subscription) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={`编辑 ${subscription.subscription_id}`}
-          onClick={() => startEdit(subscription)}
-        >
-          编辑
-        </Button>
-      ),
-    },
-  ]
-
-  const active = hasActiveFilters(filters)
-  const vpsSelectOptions = vpsOptions(state.vps)
-  const filteredCount = state.subscriptions.length
-  const activeCount = state.subscriptions.filter((subscription) => subscription.status === 'active').length
-  const manualRenewCount = state.subscriptions.filter(
-    (subscription) => subscription.status === 'active' && !subscription.auto_renew,
-  ).length
-  const autoRenewCount = state.subscriptions.filter(
-    (subscription) => subscription.status === 'active' && subscription.auto_renew && !subscription.auto_renew_cancelled,
-  ).length
-  const inactiveCount = state.subscriptions.filter(
-    (subscription) => subscription.status === 'cancelled' || subscription.status === 'expired',
-  ).length
-  const upcomingRenewal = describeUpcomingRenewal(state.subscriptions)
-  const hasWorkbenchContext = Boolean(
-    filters.vps_id || (!state.loading && !state.error && state.vps.length === 0),
-  )
+  const vpsOpts = state.vps.map((v) => ({ value: v.vps_id, label: v.display_name }))
+  const hasFilters = Boolean(filters.vps_id || filters.status || filters.renew_window)
+  const [now] = useState(Date.now)
 
   return (
-    <div className="page-stack asset-page subscriptions-page">
-      <section className="page-panel page-panel--inline">
+    <div className="page-stack">
+      <div className="page-header">
         <div>
-          <div className="page-panel__eyebrow">ASSET LEDGER</div>
-          <h1 className="page-panel__title">订阅</h1>
-          <p className="page-panel__description">
-            订阅页是 VPS 续费、成本和支付责任的证据表。这里记录原始价格、计费周期、续费日期与自动续费状态；月付折算由后端计算，前端只展示结果。
-          </p>
+          <h1 className="page-title">订阅管理</h1>
+          <p className="page-sub">VPS 付费周期跟踪</p>
         </div>
-        <div className="page-panel__actions">
-          <Button onClick={openCreatePanel}>
-            {state.subscriptions.length === 0 ? '创建第一条订阅' : '新建订阅'}
-          </Button>
+        <div className="header-actions">
+          <button className="btn md primary" onClick={openCreate}>
+            <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" /></svg>
+            新建订阅
+          </button>
         </div>
-      </section>
+      </div>
 
-      <section className="page-panel subscriptions-evidence-workbench">
-        <div className="section-heading section-heading--inline subscriptions-evidence-workbench__heading">
-          <div>
-            <p className="section-heading__eyebrow">SUBSCRIPTION EVIDENCE WORKBENCH</p>
-            <h2>订阅证据工作台</h2>
-            <p className="section-heading__description">
-              将筛选后的续费证据摘要、URL 请求真相、VPS 上下文和前置资产要求收束到同一条扫描路径；下方表格仍是主要证据表。
-            </p>
-          </div>
-          <span className="section-heading__meta">
-            {active ? 'URL 筛选已应用' : 'URL 显示全部订阅证据'}
-          </span>
-        </div>
-
-        <div className={hasWorkbenchContext ? 'subscriptions-evidence-workbench__grid subscriptions-evidence-workbench__grid--with-context' : 'subscriptions-evidence-workbench__grid'}>
-          <div className="subscriptions-evidence-workbench__main">
-            <dl className="asset-workbench-summary subscriptions-evidence-workbench__summary">
-              <div className="asset-workbench-summary__item">
-                <dt>当前筛选</dt>
-                <dd>{state.loading ? '正在读取' : state.error ? '不可用' : <><MonoDigits>{filteredCount}</MonoDigits> 条订阅</>}</dd>
-              </div>
-              <div className="asset-workbench-summary__item">
-                <dt>下一笔续费证据</dt>
-                <dd>{state.loading || state.error ? '—' : upcomingRenewal}</dd>
-              </div>
-              <div className="asset-workbench-summary__item">
-                <dt>自动续费责任</dt>
-                <dd>{state.loading || state.error ? '—' : <>生效 <MonoDigits>{activeCount}</MonoDigits> · 手动 <MonoDigits>{manualRenewCount}</MonoDigits> · 自动 <MonoDigits>{autoRenewCount}</MonoDigits></>}</dd>
-              </div>
-              <div className="asset-workbench-summary__item">
-                <dt>取消 / 过期</dt>
-                <dd>{state.loading || state.error ? '—' : <><MonoDigits>{inactiveCount}</MonoDigits> 条保留作历史证据</>}</dd>
-              </div>
-            </dl>
-
-            <div className="subscriptions-evidence-workbench__truth">
-              <p className="subscriptions-evidence-workbench__truth-title">URL / FILTER TRUTH</p>
-              <p>
-                筛选计数只代表当前 URL 返回的订阅证据，不等于全量台账；URL 是订阅证据表的请求真相。续费窗口会按 renew_at 升序读取（sort=renew_at&order=asc）。monthly_price 由后端计算，前端创建/编辑 payload 只提交原始价格、周期和续费状态。创建和编辑只在 Drawer 中补证据，关闭会丢弃未提交草稿和校验错误。
-              </p>
-            </div>
-
-            <FilterBar
-              hasActiveFilters={active}
-              onClearAll={clearFilters}
-              activeChips={
-                <>
-                  {filters.vps_id && <FilterChip label={`VPS: ${vpsName(filters.vps_id)}`} onRemove={() => setFilter('vps_id', null)} />}
-                  {filters.status && <FilterChip label={`状态: ${subscriptionStatusLabel(filters.status)}`} onRemove={() => setFilter('status', null)} />}
-                  {filters.renew_window && <FilterChip label={`续费窗口: 未来 ${filters.renew_window} 天`} onRemove={() => setFilter('renew_window', null)} />}
-                </>
-              }
-            >
-              <FilterSelect label="VPS" value={filters.vps_id} options={vpsSelectOptions} onChange={(value) => setFilter('vps_id', value)} />
-              <FilterSelect label="状态" value={filters.status} options={STATUS_OPTIONS} onChange={(value) => setFilter('status', value as SubscriptionStatus | null)} />
-              <FilterSelect label="续费窗口" value={filters.renew_window} options={RENEW_WINDOW_OPTIONS} onChange={(value) => setFilter('renew_window', value)} />
-            </FilterBar>
-          </div>
-
-          {hasWorkbenchContext ? (
-            <aside className="subscriptions-evidence-workbench__context" aria-label="订阅证据上下文">
-              {filters.vps_id ? (
-                <div className="subscriptions-evidence-workbench__context-card">
-                  <p className="subscriptions-evidence-workbench__context-eyebrow">VPS CONTEXT</p>
-                  <h3>VPS 筛选上下文</h3>
-                  <p>
-                    正在查看 {selectedContextVPS ? `${selectedContextVPS.display_name}（${selectedContextVPS.vps_id}）` : filters.vps_id} 的续费与成本证据；创建表单会默认带入该 VPS，关闭抽屉后仍保留当前 VPS 筛选上下文。
-                  </p>
-                  <div className="subscriptions-evidence-workbench__context-actions">
-                    <Link className="btn btn--ghost btn--sm" to={`/vps/${filters.vps_id}`}>返回 VPS 详情</Link>
-                    <Button size="sm" onClick={openCreatePanel}>
-                      为该 VPS 新建订阅
-                    </Button>
-                  </div>
+      {hasFilters && (
+        <div className="filter-panel animate-in">
+          <div className="filter-bar">
+            <div className="filter-bar__controls">
+              <div className="filter-bar__controls-row">
+                <div className="filter-select">
+                  <span className="filter-select__label">VPS</span>
+                  <select className="filter-select__control" value={filters.vps_id ?? ''} onChange={(e) => setFilter('vps_id', e.target.value || null)}>
+                    <option value="">全部</option>
+                    {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
                 </div>
-              ) : null}
-
-              {!state.loading && !state.error && state.vps.length === 0 ? (
-                <div className="subscriptions-evidence-workbench__context-card subscriptions-evidence-workbench__context-card--warning">
-                  <p className="subscriptions-evidence-workbench__context-eyebrow">PREREQUISITE</p>
-                  <h3>需要先录入 VPS</h3>
-                  <p>订阅必须通过选择器绑定到一台 VPS，不能手输内部 ID。当前没有 VPS 资产，请先建立资产记录再补续费证据。</p>
-                  <div className="subscriptions-evidence-workbench__context-actions">
-                    <Link className="btn btn--primary btn--sm" to="/vps">去创建 VPS</Link>
-                  </div>
+                <div className="filter-select">
+                  <span className="filter-select__label">状态</span>
+                  <select className="filter-select__control" value={filters.status ?? ''} onChange={(e) => setFilter('status', (e.target.value || null) as SubscriptionStatus | null)}>
+                    <option value="">全部</option>
+                    {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
                 </div>
-              ) : null}
-            </aside>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="page-panel">
-        <div className="section-heading">
-          <div>
-            <p className="section-heading__eyebrow">SUBSCRIPTION EVIDENCE TABLE</p>
-            <h2>订阅续费证据表</h2>
-            <p className="section-heading__description">
-              表格优先展示 VPS、原始金额、后端月付折算、续费日和自动续费状态；创建和编辑只在抽屉中补证据。
-            </p>
-          </div>
-          <span className="section-heading__meta">
-            <MonoDigits>{filteredCount}</MonoDigits> 条证据记录
-          </span>
-        </div>
-
-        {state.loading ? (
-          <PageStateView
-            kind="loading"
-            title="正在加载订阅…"
-            surface="empty"
-            compact
-          />
-        ) : state.error ? (
-          <PageStateView
-            kind="error"
-            title="订阅证据读取失败"
-            description="订阅续费与成本证据暂时不可用；不要把读取失败当作真实缺订阅。"
-            technicalSummary={state.error}
-            action={(
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setState((current) => ({ ...current, loading: true, error: null }))
-                  setReloadKey((current) => current + 1)
-                }}
-              >
-                重新读取订阅
-              </Button>
-            )}
-            surface="empty"
-            compact
-          />
-        ) : (
-          <DataTable
-            className="asset-table subscriptions-table"
-            columns={columns}
-            rows={state.subscriptions}
-            rowKey={(subscription) => subscription.subscription_id}
-            emptyContent={(
-              <PageStateView
-                kind="empty"
-                eyebrow="SUBSCRIPTION EVIDENCE"
-                title={filters.vps_id ? '当前 VPS 尚无订阅证据' : '尚未记录订阅续费证据'}
-                description={filters.vps_id
-                  ? '可从当前 VPS 上下文创建订阅，表单会预填该 VPS，也允许切换到其他 VPS。'
-                  : '先选择一台 VPS 并创建订阅记录，用原始价格、周期和续费日期支撑资产成本判断。'}
-                action={(
-                  <Button variant="secondary" size="sm" onClick={openCreatePanel}>
-                    {filters.vps_id ? '补当前 VPS 订阅证据' : '补第一条订阅证据'}
-                  </Button>
-                )}
-                surface="empty"
-                compact
-              />
-            )}
-          />
-        )}
-      </section>
-
-      <Drawer
-        open={createPanelOpen}
-        onClose={closeCreatePanel}
-        title="订阅创建"
-        ariaLabel="订阅创建表单"
-      >
-        <div className="asset-create-drawer subscriptions-drawer">
-          <div className="asset-drawer-context">
-            <p className="asset-drawer-context__eyebrow">RENEWAL / COST EVIDENCE</p>
-            <p>
-              创建订阅只提交原始价格、周期和续费状态；月付折算继续以后端返回值为准。VPS 绑定通过选择器完成，不需要输入内部 ID。
-            </p>
-          </div>
-          <form className="asset-create-form" onSubmit={handleCreateSubmit}>
-            <fieldset className="asset-create-form__group">
-              <legend>绑定与价格</legend>
-              <div className="input-field">
-                <label className="input-field__label" htmlFor="subscription-create-vps">订阅 VPS</label>
-                <select id="subscription-create-vps" className="input" value={effectiveCreateForm.vpsID} disabled={state.vps.length === 0} onChange={(event) => setCreateForm({ ...createForm, vpsID: event.target.value })}>
-                  <option value="">选择 VPS</option>
-                  {vpsSelectOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                {state.vps.length === 0 ? (
-                  <span className="input-field__hint">还没有 VPS 可选。<Link className="text-link" to="/vps">去创建 VPS</Link></span>
-                ) : filters.vps_id ? (
-                  <span className="input-field__hint">已从 URL 上下文预填当前 VPS，可切换为其他 VPS。</span>
-                ) : null}
+                <div className="filter-select">
+                  <span className="filter-select__label">续费窗口</span>
+                  <select className="filter-select__control" value={filters.renew_window ?? ''} onChange={(e) => setFilter('renew_window', e.target.value || null)}>
+                    <option value="">全部</option>
+                    <option value="30">未来 30 天</option>
+                    <option value="60">未来 60 天</option>
+                    <option value="90">未来 90 天</option>
+                  </select>
+                </div>
               </div>
-              <Input label="价格" type="number" min="0" step="0.01" value={createForm.price} onChange={(event) => setCreateForm({ ...createForm, price: event.target.value })} />
-              <Input label="币种" value={createForm.currency} onChange={(event) => setCreateForm({ ...createForm, currency: event.target.value })} />
-              <Input label="计费周期" value={createForm.billingCycle} onChange={(event) => setCreateForm({ ...createForm, billingCycle: event.target.value })} />
-              <Input label="计费月数" type="number" min="1" value={createForm.billingMonths} onChange={(event) => setCreateForm({ ...createForm, billingMonths: event.target.value })} />
-            </fieldset>
-            <fieldset className="asset-create-form__group">
-              <legend>续费状态</legend>
-              <Input label="开始日期" type="date" value={createForm.startedAt} onChange={(event) => setCreateForm({ ...createForm, startedAt: event.target.value })} />
-              <Input label="续费日期" type="date" value={createForm.renewAt} onChange={(event) => setCreateForm({ ...createForm, renewAt: event.target.value })} />
-              <label className="input-field">
-                <span className="input-field__label">订阅状态</span>
-                <select className="input" value={createForm.status} onChange={(event) => setCreateForm({ ...createForm, status: event.target.value as SubscriptionStatus })}>
-                  {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-              <Input label="支付方式" value={createForm.paymentMethod} onChange={(event) => setCreateForm({ ...createForm, paymentMethod: event.target.value })} />
-              <label className="asset-checkbox">
-                <input type="checkbox" checked={createForm.autoRenew} onChange={(event) => setCreateForm({ ...createForm, autoRenew: event.target.checked })} />
-                <span>自动续费</span>
-              </label>
-              <label className="asset-checkbox">
-                <input type="checkbox" checked={createForm.autoRenewCancelled} onChange={(event) => setCreateForm({ ...createForm, autoRenewCancelled: event.target.checked })} />
-                <span>已取消自动续费</span>
-              </label>
-            </fieldset>
-            <fieldset className="asset-create-form__group asset-create-form__group--wide">
-              <legend>备注</legend>
-              <Input name="note" label="备注" value={createForm.note} onChange={(event) => setCreateForm({ ...createForm, note: event.target.value })} />
-            </fieldset>
-            {createError && <p className="create-form__error" role="alert">{createError}</p>}
-            <div className="page-form-actions asset-create-form__actions">
-              <span className="asset-create-form__hint">关闭抽屉会移除 create=1 并丢弃未提交草稿。</span>
-              <Button type="button" variant="secondary" onClick={closeCreatePanel} disabled={createSubmitting}>
-                取消
-              </Button>
-              <Button type="submit" disabled={createSubmitting}>
-                {createSubmitting ? '创建中…' : '创建订阅'}
-              </Button>
+              <button className="filter-bar__clear" onClick={clearFilters}>清除</button>
             </div>
-          </form>
+          </div>
         </div>
+      )}
+
+      {state.loading ? (
+        <PageStateView kind="loading" title="正在加载…" surface="empty" compact />
+      ) : state.error ? (
+        <PageStateView
+          kind="error" title="加载失败" description={state.error}
+          action={<button className="btn sm secondary" onClick={() => { setState(INITIAL_PAGE); setReloadKey((k) => k + 1) }}>重试</button>}
+          surface="empty" compact
+        />
+      ) : state.subscriptions.length === 0 ? (
+        <PageStateView
+          kind="empty"
+          title={filters.vps_id ? '当前 VPS 尚无订阅' : '尚未记录订阅'}
+          description={filters.vps_id ? '可为当前 VPS 创建订阅记录' : '创建订阅记录以跟踪续费周期'}
+          action={state.vps.length > 0
+            ? <button className="btn sm primary" onClick={openCreate}>创建订阅</button>
+            : <Link className="btn sm primary" to="/vps">先创建 VPS</Link>}
+          surface="empty" compact
+        />
+      ) : (
+        <table className="table animate-in">
+          <thead>
+            <tr>
+              <th>VPS</th>
+              <th>服务商</th>
+              <th>付费周期</th>
+              <th>金额</th>
+              <th>下次续费</th>
+              <th>状态</th>
+              <th className="cell-end">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {state.subscriptions.map((s) => {
+              const isUrgent = s.renew_at && (new Date(s.renew_at).getTime() - now) < 30 * 86400000
+              return (
+                <tr key={s.subscription_id}>
+                  <td className="name">{vpsName(s.vps_id)}</td>
+                  <td className="sub">{s.billing_cycle}</td>
+                  <td>{s.billing_months > 1 ? `${s.billing_months} 个月` : '月付'}</td>
+                  <td className="mono">{formatMoney(s.price, s.currency)}</td>
+                  <td className={`time${isUrgent ? ' text-warn' : ''}`}>{formatDate(s.renew_at)}</td>
+                  <td><span className={statusBadgeClass(s.status)}>{SUBSCRIPTION_STATUS_LABELS[s.status]}</span></td>
+                  <td className="cell-end"><button className="btn-text sm secondary" onClick={() => startEdit(s)}>编辑</button></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+
+      <Drawer open={panelOpen} onClose={closeCreate} title="新建订阅" ariaLabel="新建订阅表单">
+        <form className="drawer-form" onSubmit={handleCreate}>
+          <div className="input-field">
+            <label className="input-field__label" htmlFor="sub-create-vps">VPS</label>
+            <select id="sub-create-vps" className="input" value={effectiveForm.vpsID} disabled={state.vps.length === 0} onChange={(e) => setCreateForm({ ...createForm, vpsID: e.target.value })}>
+              <option value="">选择 VPS</option>
+              {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {state.vps.length === 0 && <span className="input-field__hint">无可选 VPS，<Link to="/vps">去创建</Link></span>}
+          </div>
+          <Input label="价格" type="number" min="0" step="0.01" value={createForm.price} onChange={(e) => setCreateForm({ ...createForm, price: e.target.value })} />
+          <Input label="币种" value={createForm.currency} onChange={(e) => setCreateForm({ ...createForm, currency: e.target.value })} />
+          <Input label="计费周期" value={createForm.billingCycle} onChange={(e) => setCreateForm({ ...createForm, billingCycle: e.target.value })} />
+          <Input label="计费月数" type="number" min="1" value={createForm.billingMonths} onChange={(e) => setCreateForm({ ...createForm, billingMonths: e.target.value })} />
+          <Input label="开始日期" type="date" value={createForm.startedAt} onChange={(e) => setCreateForm({ ...createForm, startedAt: e.target.value })} />
+          <Input label="续费日期" type="date" value={createForm.renewAt} onChange={(e) => setCreateForm({ ...createForm, renewAt: e.target.value })} />
+          <div className="input-field">
+            <label className="input-field__label" htmlFor="sub-create-status">状态</label>
+            <select id="sub-create-status" className="input" value={createForm.status} onChange={(e) => setCreateForm({ ...createForm, status: e.target.value as SubscriptionStatus })}>
+              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <Input label="支付方式" value={createForm.paymentMethod} onChange={(e) => setCreateForm({ ...createForm, paymentMethod: e.target.value })} />
+          <label className="ck">
+            <input type="checkbox" checked={createForm.autoRenew} onChange={(e) => setCreateForm({ ...createForm, autoRenew: e.target.checked })} />
+            <span className="ck-box" /> 自动续费
+          </label>
+          <label className="ck">
+            <input type="checkbox" checked={createForm.autoRenewCancelled} onChange={(e) => setCreateForm({ ...createForm, autoRenewCancelled: e.target.checked })} />
+            <span className="ck-box" /> 已取消自动续费
+          </label>
+          <Input label="备注" value={createForm.note} onChange={(e) => setCreateForm({ ...createForm, note: e.target.value })} />
+          {createError && <p className="create-form__error" role="alert">{createError}</p>}
+          <div className="page-form-actions">
+            <button type="button" className="btn md secondary" onClick={closeCreate} disabled={createSubmitting}>取消</button>
+            <button type="submit" className="btn md primary" disabled={createSubmitting}>{createSubmitting ? '创建中…' : '创建'}</button>
+          </div>
+        </form>
       </Drawer>
 
-      <Drawer
-        open={editingSubscriptionId != null}
-        onClose={cancelEdit}
-        title="订阅编辑"
-        ariaLabel="订阅编辑表单"
-      >
-        <div className="asset-create-drawer subscriptions-drawer">
-          <div className="asset-drawer-context">
-            <p className="asset-drawer-context__eyebrow">EDIT RENEWAL EVIDENCE</p>
-            <p>
-              编辑保持原始订阅字段语义不变；保存后列表展示后端重新计算的月付折算，前端不会提交 monthly_price。
-            </p>
+      <Drawer open={editingId != null} onClose={cancelEdit} title="编辑订阅" ariaLabel="编辑订阅表单">
+        <form className="drawer-form" onSubmit={handleEdit}>
+          <div className="input-field">
+            <label className="input-field__label" htmlFor="sub-edit-vps">VPS</label>
+            <select id="sub-edit-vps" className="input" value={editForm.vpsID} onChange={(e) => setEditForm({ ...editForm, vpsID: e.target.value })}>
+              <option value="">选择 VPS</option>
+              {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
           </div>
-          <form className="asset-create-form" onSubmit={handleEditSubmit}>
-            <fieldset className="asset-create-form__group">
-              <legend>绑定与价格</legend>
-              <div className="input-field">
-                <label className="input-field__label" htmlFor="subscription-edit-vps">订阅 VPS</label>
-                <select id="subscription-edit-vps" className="input" value={editForm.vpsID} onChange={(event) => setEditForm({ ...editForm, vpsID: event.target.value })}>
-                  <option value="">选择 VPS</option>
-                  {vpsSelectOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </div>
-              <Input label="价格" type="number" min="0" step="0.01" value={editForm.price} onChange={(event) => setEditForm({ ...editForm, price: event.target.value })} />
-              <Input label="币种" value={editForm.currency} onChange={(event) => setEditForm({ ...editForm, currency: event.target.value })} />
-              <Input label="计费周期" value={editForm.billingCycle} onChange={(event) => setEditForm({ ...editForm, billingCycle: event.target.value })} />
-              <Input label="计费月数" type="number" min="1" value={editForm.billingMonths} onChange={(event) => setEditForm({ ...editForm, billingMonths: event.target.value })} />
-            </fieldset>
-            <fieldset className="asset-create-form__group">
-              <legend>续费状态</legend>
-              <Input label="开始日期" type="date" value={editForm.startedAt} onChange={(event) => setEditForm({ ...editForm, startedAt: event.target.value })} />
-              <Input label="续费日期" type="date" value={editForm.renewAt} onChange={(event) => setEditForm({ ...editForm, renewAt: event.target.value })} />
-              <label className="input-field">
-                <span className="input-field__label">订阅状态</span>
-                <select className="input" value={editForm.status} onChange={(event) => setEditForm({ ...editForm, status: event.target.value as SubscriptionStatus })}>
-                  {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-              <Input label="支付方式" value={editForm.paymentMethod} onChange={(event) => setEditForm({ ...editForm, paymentMethod: event.target.value })} />
-              <label className="asset-checkbox">
-                <input type="checkbox" checked={editForm.autoRenew} onChange={(event) => setEditForm({ ...editForm, autoRenew: event.target.checked })} />
-                <span>自动续费</span>
-              </label>
-              <label className="asset-checkbox">
-                <input type="checkbox" checked={editForm.autoRenewCancelled} onChange={(event) => setEditForm({ ...editForm, autoRenewCancelled: event.target.checked })} />
-                <span>已取消自动续费</span>
-              </label>
-            </fieldset>
-            <fieldset className="asset-create-form__group asset-create-form__group--wide">
-              <legend>备注</legend>
-              <Input name="note" label="备注" value={editForm.note} onChange={(event) => setEditForm({ ...editForm, note: event.target.value })} />
-            </fieldset>
-            {editError && <p className="create-form__error" role="alert">{editError}</p>}
-            <div className="page-form-actions asset-create-form__actions">
-              <span className="asset-create-form__hint">取消会恢复为当前已保存的订阅资料。</span>
-              <Button type="button" variant="secondary" onClick={cancelEdit} disabled={editSubmitting}>
-                取消编辑
-              </Button>
-              <Button type="submit" disabled={editSubmitting}>
-                {editSubmitting ? '保存中…' : '保存订阅'}
-              </Button>
-            </div>
-          </form>
-        </div>
+          <Input label="价格" type="number" min="0" step="0.01" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} />
+          <Input label="币种" value={editForm.currency} onChange={(e) => setEditForm({ ...editForm, currency: e.target.value })} />
+          <Input label="计费周期" value={editForm.billingCycle} onChange={(e) => setEditForm({ ...editForm, billingCycle: e.target.value })} />
+          <Input label="计费月数" type="number" min="1" value={editForm.billingMonths} onChange={(e) => setEditForm({ ...editForm, billingMonths: e.target.value })} />
+          <Input label="开始日期" type="date" value={editForm.startedAt} onChange={(e) => setEditForm({ ...editForm, startedAt: e.target.value })} />
+          <Input label="续费日期" type="date" value={editForm.renewAt} onChange={(e) => setEditForm({ ...editForm, renewAt: e.target.value })} />
+          <div className="input-field">
+            <label className="input-field__label" htmlFor="sub-edit-status">状态</label>
+            <select id="sub-edit-status" className="input" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value as SubscriptionStatus })}>
+              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <Input label="支付方式" value={editForm.paymentMethod} onChange={(e) => setEditForm({ ...editForm, paymentMethod: e.target.value })} />
+          <label className="ck">
+            <input type="checkbox" checked={editForm.autoRenew} onChange={(e) => setEditForm({ ...editForm, autoRenew: e.target.checked })} />
+            <span className="ck-box" /> 自动续费
+          </label>
+          <label className="ck">
+            <input type="checkbox" checked={editForm.autoRenewCancelled} onChange={(e) => setEditForm({ ...editForm, autoRenewCancelled: e.target.checked })} />
+            <span className="ck-box" /> 已取消自动续费
+          </label>
+          <Input label="备注" value={editForm.note} onChange={(e) => setEditForm({ ...editForm, note: e.target.value })} />
+          {editError && <p className="create-form__error" role="alert">{editError}</p>}
+          <div className="page-form-actions">
+            <button type="button" className="btn md secondary" onClick={cancelEdit} disabled={editSubmitting}>取消</button>
+            <button type="submit" className="btn md primary" disabled={editSubmitting}>{editSubmitting ? '保存中…' : '保存'}</button>
+          </div>
+        </form>
       </Drawer>
     </div>
   )
