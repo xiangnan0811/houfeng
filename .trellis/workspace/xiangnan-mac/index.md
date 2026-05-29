@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 147
-- **Last Active**: 2026-05-22
+- **Total Sessions**: 148
+- **Last Active**: 2026-05-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~973 | Active |
+| `journal-3.md` | ~1047 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 148 | 2026-05-29 | Complete page IA migration and events page refactoring | `b37413c` | `feat/ui-workbench-ia-phase-3` |
 | 147 | 2026-05-22 | Frontend phase 2 IA | `4ff1e02` | `feat/ui-ia-phase-2` |
 | 146 | 2026-05-22 | 前端第一阶段 UI 视觉优化收口 | `6d77cef` | `ui-workbench-visual-pass` |
 | 145 | 2026-05-18 | 修复资产联动割裂体验 | `9273667` | `fix/integration-linkage-ux` |
