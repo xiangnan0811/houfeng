@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.0](https://github.com/xiangnan0811/houfeng/compare/v0.21.0...v0.22.0) (2026-05-29)
+
+
+### Features
+
+* **web:** convert VPS create flow to centered modal with Select atom ([8145cc7](https://github.com/xiangnan0811/houfeng/commit/8145cc7f6c9b0fc5a1b4d919836e6ea71919d291))
+* **web:** VPS 创建流程 Drawer→Modal + 全局 select caret 统一 ([4617439](https://github.com/xiangnan0811/houfeng/commit/4617439d7bccb090abb7735add6354320fe1c4d2))
+
 ## [0.21.0](https://github.com/xiangnan0811/houfeng/compare/v0.20.0...v0.21.0) (2026-05-29)
 
 
