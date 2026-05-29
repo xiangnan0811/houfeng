@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.0](https://github.com/xiangnan0811/houfeng/compare/v0.20.0...v0.21.0) (2026-05-29)
+
+
+### Features
+
+* **web:** complete page IA migration and events page refactoring ([b37413c](https://github.com/xiangnan0811/houfeng/commit/b37413c3d4341006f95cdac89cc3f6fa02fed51d))
+* **web:** migrate to pure CSS design system with 3-theme token layer ([eaae2a6](https://github.com/xiangnan0811/houfeng/commit/eaae2a67e58ddf8a7ceff5228212996ae5f6a629))
+* **web:** page IA migration and events page refactoring ([d281656](https://github.com/xiangnan0811/houfeng/commit/d281656ae9a57b8bd625ec50706e13d346734eaa))
+
+
+### Bug Fixes
+
+* **web:** consolidate design system into single index.css and complete TopBar ([6d74540](https://github.com/xiangnan0811/houfeng/commit/6d74540075e53f5855742166d4f2f8433743a868))
+
 ## [0.20.0](https://github.com/xiangnan0811/houfeng/compare/v0.19.0...v0.20.0) (2026-05-22)
 
 
