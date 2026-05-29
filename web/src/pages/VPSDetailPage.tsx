@@ -32,7 +32,7 @@ import type {
   VPSAssetDetail,
   VPSNodeSummary,
 } from '../lib/types'
-import { VPSDecisionWorkbench } from './vps-detail/VPSDecisionWorkbench'
+import { VPSDecisionBoard } from './vps-detail/VPSDecisionBoard'
 import { VPSDetailErrorPanel } from './vps-detail/VPSDetailErrorPanel'
 import { VPSDetailHero } from './vps-detail/VPSDetailHero'
 import { VPSDetailLoading } from './vps-detail/VPSDetailLoading'
@@ -45,7 +45,6 @@ import { VPSFactsSection } from './vps-detail/VPSFactsSection'
 import { VPSLifecycleCard } from './vps-detail/VPSLifecycleCard'
 import { VPSNodeLinkForm } from './vps-detail/VPSNodeLinkForm'
 import { VPSNodeLinksSection } from './vps-detail/VPSNodeLinksSection'
-import { VPSOperationsSummary } from './vps-detail/VPSOperationsSummary'
 import { VPSRenewalDecisionForm } from './vps-detail/VPSRenewalDecisionForm'
 import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
@@ -893,20 +892,6 @@ export function VPSDetailPage() {
         onRestoreStart={() => openLifecycleConfirmation('restore')}
       />
 
-      <VPSDecisionWorkbench
-        detail={detail}
-        timeline={timeline}
-        primarySubscription={primarySubscription}
-        subscriptionLoadFailed={subscriptionLoadFailed}
-        subscriptionError={state.subscriptionsError}
-        servicesCount={state.services.length}
-        domainsCount={state.domains.length}
-        onDecisionEdit={() => openDrawer('decision')}
-        onFactEdit={() => openFactEdit(detail)}
-        onExperienceLog={() => openDrawer('experience')}
-        onNodeLink={() => openDrawer('node-link')}
-      />
-
       {state.subscriptionsError ? (
         <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
           {state.subscriptionsError}
@@ -924,7 +909,7 @@ export function VPSDetailPage() {
         </p>
       ) : null}
 
-      <VPSOperationsSummary
+      <VPSDecisionBoard
         detail={detail}
         timeline={timeline}
         primarySubscription={primarySubscription}
@@ -943,6 +928,10 @@ export function VPSDetailPage() {
         experienceNotice={experienceNotice}
         lifecycleNotice={lifecycleNotice}
         lifecycleError={lifecycleConfirmingAction ? null : lifecycleError}
+        onDecisionEdit={() => openDrawer('decision')}
+        onFactEdit={() => openFactEdit(detail)}
+        onExperienceLog={() => openDrawer('experience')}
+        onNodeLink={() => openDrawer('node-link')}
         onOpenFacts={() => openDrawer('facts-detail')}
         onOpenNodeEvidence={() => openDrawer('node-evidence')}
         onOpenServices={() => openDrawer('services-detail')}
