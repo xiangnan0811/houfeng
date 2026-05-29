@@ -135,6 +135,42 @@
 
 ---
 
+## Select 下拉箭头（caret）约定
+
+**What**：所有 form `<select>` 必须用 `appearance:none` 关掉原生 OS 箭头，并用 `background-image:var(--select-caret)` 画候风自定义箭头。
+
+**Why**：原生箭头在暗色主题下突兀，且颜色不随主题切换。`background-image:url(data:svg)` 无法引用 CSS 变量，所以箭头颜色不能写死（曾硬编码 `#7B7F88`，三主题皆不匹配）——改为每个主题块各定义一个 `--select-caret`（stroke = 该主题 `--text-muted`）。
+
+**约定**：
+- `--select-caret` 在 `web/src/index.css` 三个主题块各定义一次：`:root, .theme-houfeng-dark`（stroke `%2394a3b8`）/ `.theme-houfeng-light`（`%23475569`）/ `.theme-classic-dark`（`%23a1a1aa`）。运行时只有这 3 个主题（`theme.ts` 的 `applyTheme` 把 `classic-light` 回退到 `houfeng-light`），漏一个主题会让该主题 select 只有 `appearance:none` 而无箭头（空白指示符）。
+- 新增 form select 时**复用现有带 caret 的规则**（`select.input` / `.filter-select__control` / `.page-stack select` / `.asset-operation-field select` / `.target-create-drawer__form select` / `.filter-panel select.filter-select` 等），优先走 `Select` 原子（`web/src/components/atoms/Select.tsx`）或 `FilterSelect`，不要新造裸 select。
+- 紧凑型 select：`padding-right` ≈ 24-26px、`background-position:right 8px center`；标准型：`padding-right` ≈ 30px、`right 12px center`。padding-right 必须够大,否则箭头压字。
+
+**Wrong**：
+```tsx
+<select className="input">  // 若该 select 经 Drawer portal 逃逸 .page-stack 链，或裸 select 无 className，
+                            // 会落到无 caret 规则 → 原生 OS 箭头
+```
+```css
+select.input{appearance:none;background-image:url("...stroke='%237B7F88'...")}  /* 硬编码色,不随主题 */
+```
+
+**Correct**：
+```tsx
+import { Select } from '../components/atoms'
+<Select label="服务商" required value={v} onChange={...}>{options}</Select>
+```
+```css
+:root, .theme-houfeng-dark{ --select-caret:url("...stroke='%2394a3b8'..."); }
+.theme-houfeng-light{ --select-caret:url("...stroke='%23475569'..."); }
+.theme-classic-dark{ --select-caret:url("...stroke='%23a1a1aa'..."); }
+select.input{appearance:none;-webkit-appearance:none;background-image:var(--select-caret);padding-right:36px;background-position:right 14px center}
+```
+
+**Related**：`Select` 原子对标 `Input` 原子（forwardRef + `input-field` 包裹 + label/error/hint/required）。
+
+---
+
 ## 反模式
 
 > 这些是当前代码已经回避（或承认偿还）的写法，**新代码不要做**。

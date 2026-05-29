@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { Drawer, Input } from '../components/atoms'
+import { Drawer, Input, Select } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createSubscription, listSubscriptions, listVPSAssets, updateSubscription } from '../lib/api'
 import { formatDate, formatMoney } from '../lib/format'
@@ -270,26 +270,17 @@ export function SubscriptionsPage() {
 
       <Drawer open={panelOpen} onClose={closeCreate} title="新建订阅" ariaLabel="新建订阅表单">
         <form className="drawer-form" onSubmit={handleCreate}>
-          <div className="input-field">
-            <label className="input-field__label" htmlFor="sub-create-vps">VPS</label>
-            <select id="sub-create-vps" className="input" value={effectiveForm.vpsID} disabled={state.vps.length === 0} onChange={(e) => setCreateForm({ ...createForm, vpsID: e.target.value })}>
-              <option value="">选择 VPS</option>
-              {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            {state.vps.length === 0 && <span className="input-field__hint">无可选 VPS，<Link to="/vps">去创建</Link></span>}
-          </div>
+          <Select label="VPS" id="sub-create-vps" value={effectiveForm.vpsID} disabled={state.vps.length === 0} onChange={(e) => setCreateForm({ ...createForm, vpsID: e.target.value })} hint={state.vps.length === 0 ? <>无可选 VPS，<Link to="/vps">去创建</Link></> : undefined}>
+            <option value="">选择 VPS</option>
+            {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
           <Input label="价格" type="number" min="0" step="0.01" value={createForm.price} onChange={(e) => setCreateForm({ ...createForm, price: e.target.value })} />
           <Input label="币种" value={createForm.currency} onChange={(e) => setCreateForm({ ...createForm, currency: e.target.value })} />
           <Input label="计费周期" value={createForm.billingCycle} onChange={(e) => setCreateForm({ ...createForm, billingCycle: e.target.value })} />
           <Input label="计费月数" type="number" min="1" value={createForm.billingMonths} onChange={(e) => setCreateForm({ ...createForm, billingMonths: e.target.value })} />
           <Input label="开始日期" type="date" value={createForm.startedAt} onChange={(e) => setCreateForm({ ...createForm, startedAt: e.target.value })} />
           <Input label="续费日期" type="date" value={createForm.renewAt} onChange={(e) => setCreateForm({ ...createForm, renewAt: e.target.value })} />
-          <div className="input-field">
-            <label className="input-field__label" htmlFor="sub-create-status">状态</label>
-            <select id="sub-create-status" className="input" value={createForm.status} onChange={(e) => setCreateForm({ ...createForm, status: e.target.value as SubscriptionStatus })}>
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
+          <Select label="状态" id="sub-create-status" options={STATUS_OPTIONS} value={createForm.status} onChange={(e) => setCreateForm({ ...createForm, status: e.target.value as SubscriptionStatus })} />
           <Input label="支付方式" value={createForm.paymentMethod} onChange={(e) => setCreateForm({ ...createForm, paymentMethod: e.target.value })} />
           <label className="ck">
             <input type="checkbox" checked={createForm.autoRenew} onChange={(e) => setCreateForm({ ...createForm, autoRenew: e.target.checked })} />
@@ -310,25 +301,17 @@ export function SubscriptionsPage() {
 
       <Drawer open={editingId != null} onClose={cancelEdit} title="编辑订阅" ariaLabel="编辑订阅表单">
         <form className="drawer-form" onSubmit={handleEdit}>
-          <div className="input-field">
-            <label className="input-field__label" htmlFor="sub-edit-vps">VPS</label>
-            <select id="sub-edit-vps" className="input" value={editForm.vpsID} onChange={(e) => setEditForm({ ...editForm, vpsID: e.target.value })}>
-              <option value="">选择 VPS</option>
-              {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
+          <Select label="VPS" id="sub-edit-vps" value={editForm.vpsID} onChange={(e) => setEditForm({ ...editForm, vpsID: e.target.value })}>
+            <option value="">选择 VPS</option>
+            {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
           <Input label="价格" type="number" min="0" step="0.01" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} />
           <Input label="币种" value={editForm.currency} onChange={(e) => setEditForm({ ...editForm, currency: e.target.value })} />
           <Input label="计费周期" value={editForm.billingCycle} onChange={(e) => setEditForm({ ...editForm, billingCycle: e.target.value })} />
           <Input label="计费月数" type="number" min="1" value={editForm.billingMonths} onChange={(e) => setEditForm({ ...editForm, billingMonths: e.target.value })} />
           <Input label="开始日期" type="date" value={editForm.startedAt} onChange={(e) => setEditForm({ ...editForm, startedAt: e.target.value })} />
           <Input label="续费日期" type="date" value={editForm.renewAt} onChange={(e) => setEditForm({ ...editForm, renewAt: e.target.value })} />
-          <div className="input-field">
-            <label className="input-field__label" htmlFor="sub-edit-status">状态</label>
-            <select id="sub-edit-status" className="input" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value as SubscriptionStatus })}>
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
+          <Select label="状态" id="sub-edit-status" options={STATUS_OPTIONS} value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value as SubscriptionStatus })} />
           <Input label="支付方式" value={editForm.paymentMethod} onChange={(e) => setEditForm({ ...editForm, paymentMethod: e.target.value })} />
           <label className="ck">
             <input type="checkbox" checked={editForm.autoRenew} onChange={(e) => setEditForm({ ...editForm, autoRenew: e.target.checked })} />

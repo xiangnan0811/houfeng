@@ -62,157 +62,135 @@ export function TargetProbeForm({
       <h3 className="page-panel__title">
         {mode.kind === 'edit' ? '编辑 ProbeItem' : '创建 ProbeItem'}
       </h3>
-      <form onSubmit={onSubmit}>
-        <p>
-          <label>
-            Probe 类型
-            <select
-              name="probeKind"
-              value={form.probeKind}
-              onChange={(event) => onProbeKindChange(event.target.value as ProbeKind)}
-            >
-              {PROBE_KIND_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </p>
-        <p>
-          <label>
-            <input
-              name="enabled"
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(event) => onFieldChange('enabled', event.target.checked)}
-            />
-            启用 ProbeItem
-          </label>
-        </p>
-        <p>
-          <label>
-            频率档位
-            <select
-              name="frequencyTier"
-              value={form.frequencyTier}
-              onChange={(event) =>
-                onFieldChange('frequencyTier', event.target.value as FrequencyTier)
-              }
-            >
-              {FREQUENCY_TIER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </p>
-        <p>
-          <label>
-            超时秒数
-            <input
-              name="timeoutSeconds"
-              inputMode="numeric"
-              value={form.timeoutSeconds}
-              onChange={(event) => onFieldChange('timeoutSeconds', event.target.value)}
-            />
-          </label>
-        </p>
+      <form className="target-probe-drawer__form" onSubmit={onSubmit}>
+        <label>
+          <span>Probe 类型</span>
+          <select
+            name="probeKind"
+            value={form.probeKind}
+            onChange={(event) => onProbeKindChange(event.target.value as ProbeKind)}
+          >
+            {PROBE_KIND_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="target-probe-drawer__check">
+          <input
+            name="enabled"
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(event) => onFieldChange('enabled', event.target.checked)}
+          />
+          <span>启用 ProbeItem</span>
+        </label>
+        <label>
+          <span>频率档位</span>
+          <select
+            name="frequencyTier"
+            value={form.frequencyTier}
+            onChange={(event) =>
+              onFieldChange('frequencyTier', event.target.value as FrequencyTier)
+            }
+          >
+            {FREQUENCY_TIER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>超时秒数</span>
+          <input
+            name="timeoutSeconds"
+            inputMode="numeric"
+            value={form.timeoutSeconds}
+            onChange={(event) => onFieldChange('timeoutSeconds', event.target.value)}
+          />
+        </label>
         {form.probeKind !== 'http' ? (
-          <p>
-            <label>
-              端口
-              <input
-                name="port"
-                inputMode="numeric"
-                value={form.port}
-                onChange={(event) => onFieldChange('port', event.target.value)}
-              />
-            </label>
-          </p>
+          <label>
+            <span>端口</span>
+            <input
+              name="port"
+              inputMode="numeric"
+              value={form.port}
+              onChange={(event) => onFieldChange('port', event.target.value)}
+            />
+          </label>
         ) : null}
         {form.probeKind === 'http' ? (
           <>
-            <p>
-              <label>
-                HTTP 协议
-                <select
-                  name="httpScheme"
-                  value={form.httpScheme}
-                  onChange={(event) => onFieldChange('httpScheme', event.target.value)}
-                >
-                  <option value="http">http</option>
-                  <option value="https">https</option>
-                </select>
-              </label>
-            </p>
-            <p>
-              <label>
-                HTTP 路径
-                <input
-                  name="httpPath"
-                  value={form.httpPath}
-                  onChange={(event) => onFieldChange('httpPath', event.target.value)}
-                />
-              </label>
-            </p>
-            <p>
-              <label>
-                HTTP 方法
-                <select
-                  name="httpMethod"
-                  value={form.httpMethod}
-                  onChange={(event) =>
-                    onFieldChange(
-                      'httpMethod',
-                      event.target.value as ProbeCreateFormState['httpMethod'],
-                    )
-                  }
-                >
-                  <option value="GET">GET</option>
-                  <option value="HEAD">HEAD</option>
-                </select>
-              </label>
-            </p>
-            <p>
-              <label>
-                期望状态码起点
-                <input
-                  name="expectedStatusStart"
-                  inputMode="numeric"
-                  value={form.expectedStatusStart}
-                  onChange={(event) => onFieldChange('expectedStatusStart', event.target.value)}
-                />
-              </label>
-            </p>
-            <p>
-              <label>
-                期望状态码终点
-                <input
-                  name="expectedStatusEnd"
-                  inputMode="numeric"
-                  value={form.expectedStatusEnd}
-                  onChange={(event) => onFieldChange('expectedStatusEnd', event.target.value)}
-                />
-              </label>
-            </p>
+            <label>
+              <span>HTTP 协议</span>
+              <select
+                name="httpScheme"
+                value={form.httpScheme}
+                onChange={(event) => onFieldChange('httpScheme', event.target.value)}
+              >
+                <option value="http">http</option>
+                <option value="https">https</option>
+              </select>
+            </label>
+            <label>
+              <span>HTTP 路径</span>
+              <input
+                name="httpPath"
+                value={form.httpPath}
+                onChange={(event) => onFieldChange('httpPath', event.target.value)}
+              />
+            </label>
+            <label>
+              <span>HTTP 方法</span>
+              <select
+                name="httpMethod"
+                value={form.httpMethod}
+                onChange={(event) =>
+                  onFieldChange(
+                    'httpMethod',
+                    event.target.value as ProbeCreateFormState['httpMethod'],
+                  )
+                }
+              >
+                <option value="GET">GET</option>
+                <option value="HEAD">HEAD</option>
+              </select>
+            </label>
+            <label>
+              <span>期望状态码起点</span>
+              <input
+                name="expectedStatusStart"
+                inputMode="numeric"
+                value={form.expectedStatusStart}
+                onChange={(event) => onFieldChange('expectedStatusStart', event.target.value)}
+              />
+            </label>
+            <label>
+              <span>期望状态码终点</span>
+              <input
+                name="expectedStatusEnd"
+                inputMode="numeric"
+                value={form.expectedStatusEnd}
+                onChange={(event) => onFieldChange('expectedStatusEnd', event.target.value)}
+              />
+            </label>
           </>
         ) : null}
         {form.probeKind === 'tls' ? (
-          <p>
-            <label>
-              证书预警天数
-              <input
-                name="tlsExpiryWarningDays"
-                inputMode="numeric"
-                value={form.tlsExpiryWarningDays}
-                onChange={(event) => onFieldChange('tlsExpiryWarningDays', event.target.value)}
-              />
-            </label>
-          </p>
+          <label>
+            <span>证书预警天数</span>
+            <input
+              name="tlsExpiryWarningDays"
+              inputMode="numeric"
+              value={form.tlsExpiryWarningDays}
+              onChange={(event) => onFieldChange('tlsExpiryWarningDays', event.target.value)}
+            />
+          </label>
         ) : null}
-        {error ? <p>{error}</p> : null}
+        {error ? <p className="create-form__error">{error}</p> : null}
         <div className="page-form-actions">
           <button type="submit" className="btn md primary" disabled={submitting}>
             {submitting

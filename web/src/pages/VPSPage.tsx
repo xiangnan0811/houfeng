@@ -1,22 +1,21 @@
-import { type FormEvent, useEffect, useId, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
   Button,
   Drawer,
-  Input,
   MonoDigits,
   Tabs,
 } from '../components/atoms'
 import { FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
 import { PageState as PageStateView } from '../components/PageState'
-import { ApiError, createVPSAsset, listProviders, listSubscriptions, listVPSAssets } from '../lib/api'
+import { VPSCreateModal } from '../components/VPSCreateModal'
+import { ApiError, listProviders, listSubscriptions, listVPSAssets } from '../lib/api'
 import { formatDate, formatOptional } from '../lib/format'
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
   VPS_USAGE_STATUS_LABELS,
-  type CreateVPSAssetInput,
   type ProviderRecord,
   type SubscriptionRecord,
   type VPSAssetRecord,
@@ -35,7 +34,6 @@ import {
   hasMissingVPSFacts,
   isSubscriptionInRenewalWindow,
   lifecycleLabel,
-  parseLabels,
   renewalLabel,
   selectPrimarySubscription,
   usageLabel,
@@ -71,31 +69,6 @@ type PageState = {
   subscriptions: SubscriptionRecord[]
 }
 
-type CreateVPSFormState = {
-  displayName: string
-  providerID: string
-  providerName: string
-  productName: string
-  orderRef: string
-  country: string
-  region: string
-  city: string
-  datacenter: string
-  ipv4: string
-  ipv6: string
-  sshHost: string
-  sshPort: string
-  sshUser: string
-  osName: string
-  virtualization: string
-  lifecycleStatus: VPSLifecycleStatus
-  usageStatus: VPSUsageStatus
-  renewalDecision: VPSRenewalDecision
-  importance: string
-  labels: string
-  note: string
-}
-
 type FilterState = {
   view: VPSQuickView
   provider_id: string | null
@@ -112,31 +85,6 @@ const INITIAL_PAGE_STATE: PageState = {
   vps: [],
   providers: [],
   subscriptions: [],
-}
-
-const INITIAL_CREATE_FORM: CreateVPSFormState = {
-  displayName: '',
-  providerID: '',
-  providerName: '',
-  productName: '',
-  orderRef: '',
-  country: '',
-  region: '',
-  city: '',
-  datacenter: '',
-  ipv4: '',
-  ipv6: '',
-  sshHost: '',
-  sshPort: '22',
-  sshUser: 'root',
-  osName: '',
-  virtualization: '',
-  lifecycleStatus: 'active',
-  usageStatus: 'unknown',
-  renewalDecision: 'unreviewed',
-  importance: 'normal',
-  labels: '',
-  note: '',
 }
 
 const INITIAL_FILTER_STATE: FilterState = {
@@ -209,43 +157,7 @@ function hasActiveFilters(filters: FilterState): boolean {
   )
 }
 
-function buildCreateInput(form: CreateVPSFormState, providers: ProviderRecord[]): CreateVPSAssetInput {
-  if (form.displayName.trim() === '') {
-    throw new Error('VPS 名称不能为空。')
-  }
-  const selectedProvider = providers.find((provider) => provider.provider_id === form.providerID)
-  const sshPort = form.sshPort.trim() === '' ? undefined : Number.parseInt(form.sshPort.trim(), 10)
-  if (sshPort != null && (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535)) {
-    throw new Error('SSH 端口必须为 1 到 65535。')
-  }
-
-  return {
-    display_name: form.displayName.trim(),
-    provider_id: form.providerID || null,
-    provider_name: selectedProvider?.name ?? form.providerName.trim(),
-    product_name: form.productName.trim(),
-    order_ref: form.orderRef.trim(),
-    country: form.country.trim(),
-    region: form.region.trim(),
-    city: form.city.trim(),
-    datacenter: form.datacenter.trim(),
-    ipv4: form.ipv4.trim(),
-    ipv6: form.ipv6.trim(),
-    ssh_host: form.sshHost.trim(),
-    ...(sshPort == null ? {} : { ssh_port: sshPort }),
-    ssh_user: form.sshUser.trim(),
-    os_name: form.osName.trim(),
-    virtualization: form.virtualization.trim(),
-    lifecycle_status: form.lifecycleStatus,
-    usage_status: form.usageStatus,
-    renewal_decision: form.renewalDecision,
-    importance: form.importance.trim() || 'normal',
-    labels: parseLabels(form.labels),
-    note: form.note.trim(),
-  }
-}
-
-function providerOptions(providers: ProviderRecord[]): FilterSelectOption[] {
+function providerFilterOptions(providers: ProviderRecord[]): FilterSelectOption[] {
   return providers.map((provider) => ({
     value: provider.provider_id,
     label: provider.name,
@@ -344,19 +256,12 @@ function providerName(providerID: string | null, providers: ProviderRecord[]): s
 
 export function VPSPage() {
   const navigate = useNavigate()
-  const createProviderSelectId = useId()
-  const createLifecycleSelectId = useId()
-  const createUsageSelectId = useId()
-  const createRenewalSelectId = useId()
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
   const [draftFilters, setDraftFilters] = useState<FilterState>(filters)
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false)
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
   const [createOpen, setCreateOpen] = useState(false)
-  const [createForm, setCreateForm] = useState<CreateVPSFormState>(INITIAL_CREATE_FORM)
-  const [createSubmitting, setCreateSubmitting] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -433,7 +338,7 @@ export function VPSPage() {
     () => applyInventoryFilters(inventoryRows, filters),
     [inventoryRows, filters],
   )
-  const providerSelectOptions = providerOptions(state.providers)
+  const providerSelectOptions = providerFilterOptions(state.providers)
   const active = hasActiveFilters(filters)
   const missingSubscriptionCount = subscriptionEvidence === 'ready'
     ? inventoryRows.filter((row) => !row.subscription).length
@@ -471,39 +376,6 @@ export function VPSPage() {
     setFilterDrawerOpen(false)
   }
 
-  function openCreateDrawer() {
-    setCreateOpen(true)
-  }
-
-  function closeCreateDrawer() {
-    setCreateOpen(false)
-    setCreateForm(INITIAL_CREATE_FORM)
-    setCreateError(null)
-  }
-
-  function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setCreateError(null)
-
-    let input: CreateVPSAssetInput
-    try {
-      input = buildCreateInput(createForm, state.providers)
-    } catch (error: unknown) {
-      setCreateError(describeError(error, 'VPS 输入无效'))
-      return
-    }
-
-    setCreateSubmitting(true)
-    createVPSAsset(input)
-      .then((vps) => {
-        navigate(`/vps/${vps.vps_id}`)
-      })
-      .catch((error: unknown) => {
-        setCreateError(describeError(error, '创建 VPS 失败'))
-      })
-      .finally(() => setCreateSubmitting(false))
-  }
-
   return (
     <div className="animate-in">
       <div className="page-header">
@@ -512,8 +384,8 @@ export function VPSPage() {
         </div>
         <div className="header-actions">
           <button type="button" className="btn sm secondary" onClick={openFilterDrawer}>筛选</button>
-          <button type="button" className="btn sm primary" onClick={openCreateDrawer}>
-            {state.vps.length === 0 ? '创建第一台 VPS' : '导入'}
+          <button type="button" className="btn sm primary" onClick={() => setCreateOpen(true)}>
+            {state.vps.length === 0 ? '创建第一台 VPS' : '添加 VPS'}
           </button>
         </div>
       </div>
@@ -584,97 +456,13 @@ export function VPSPage() {
         )}
       </div>
 
-      <Drawer
+      <VPSCreateModal
         open={createOpen}
-        onClose={closeCreateDrawer}
-        title="VPS 创建"
-        ariaLabel="VPS 创建表单"
-      >
-        <div className="asset-create-drawer">
-          <form className="asset-create-form" onSubmit={handleCreateSubmit}>
-            <fieldset className="asset-create-form__group">
-              <legend>基础识别</legend>
-              <Input label="VPS 名称" value={createForm.displayName} onChange={(event) => setCreateForm({ ...createForm, displayName: event.target.value })} />
-              <label className="input-field" htmlFor={createProviderSelectId}>
-                <span className="input-field__label">资产服务商</span>
-                <select id={createProviderSelectId} aria-label="资产服务商" className="input" value={createForm.providerID} onChange={(event) => setCreateForm({ ...createForm, providerID: event.target.value })}>
-                  <option value="">未关联服务商</option>
-                  {providerSelectOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="input-field__hint">
-                  {state.providers.length === 0
-                    ? '无服务商主数据；可保留名称快照。'
-                    : '优先选择主数据；快照用于展示。'}
-                  {' '}
-                  <Link className="text-link" to="/providers">服务商列表</Link>
-                </span>
-              </label>
-              <Input label="服务商名称快照" value={createForm.providerName} onChange={(event) => setCreateForm({ ...createForm, providerName: event.target.value })} />
-              <Input label="产品名" value={createForm.productName} onChange={(event) => setCreateForm({ ...createForm, productName: event.target.value })} />
-              <Input label="订单号" value={createForm.orderRef} onChange={(event) => setCreateForm({ ...createForm, orderRef: event.target.value })} />
-            </fieldset>
-
-            <fieldset className="asset-create-form__group">
-              <legend>访问入口</legend>
-              <Input label="国家" value={createForm.country} onChange={(event) => setCreateForm({ ...createForm, country: event.target.value })} />
-              <Input label="区域" value={createForm.region} onChange={(event) => setCreateForm({ ...createForm, region: event.target.value })} />
-              <Input label="城市" value={createForm.city} onChange={(event) => setCreateForm({ ...createForm, city: event.target.value })} />
-              <Input label="数据中心" value={createForm.datacenter} onChange={(event) => setCreateForm({ ...createForm, datacenter: event.target.value })} />
-              <Input label="IPv4" value={createForm.ipv4} onChange={(event) => setCreateForm({ ...createForm, ipv4: event.target.value })} />
-              <Input label="IPv6" value={createForm.ipv6} onChange={(event) => setCreateForm({ ...createForm, ipv6: event.target.value })} />
-              <Input label="SSH Host" value={createForm.sshHost} onChange={(event) => setCreateForm({ ...createForm, sshHost: event.target.value })} />
-              <Input label="SSH 端口" type="number" value={createForm.sshPort} onChange={(event) => setCreateForm({ ...createForm, sshPort: event.target.value })} />
-              <Input label="SSH 用户" value={createForm.sshUser} onChange={(event) => setCreateForm({ ...createForm, sshUser: event.target.value })} />
-            </fieldset>
-
-            <fieldset className="asset-create-form__group">
-              <legend>运行与决策</legend>
-              <Input label="操作系统" value={createForm.osName} onChange={(event) => setCreateForm({ ...createForm, osName: event.target.value })} />
-              <Input label="虚拟化" value={createForm.virtualization} onChange={(event) => setCreateForm({ ...createForm, virtualization: event.target.value })} />
-              <label className="input-field" htmlFor={createLifecycleSelectId}>
-                <span className="input-field__label">生命周期</span>
-                <select id={createLifecycleSelectId} aria-label="生命周期" className="input" value={createForm.lifecycleStatus} onChange={(event) => setCreateForm({ ...createForm, lifecycleStatus: event.target.value as VPSLifecycleStatus })}>
-                  {LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-              <label className="input-field" htmlFor={createUsageSelectId}>
-                <span className="input-field__label">用途状态</span>
-                <select id={createUsageSelectId} aria-label="用途状态" className="input" value={createForm.usageStatus} onChange={(event) => setCreateForm({ ...createForm, usageStatus: event.target.value as VPSUsageStatus })}>
-                  {USAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-              <label className="input-field" htmlFor={createRenewalSelectId}>
-                <span className="input-field__label">续费决策</span>
-                <select id={createRenewalSelectId} aria-label="续费决策" className="input" value={createForm.renewalDecision} onChange={(event) => setCreateForm({ ...createForm, renewalDecision: event.target.value as VPSRenewalDecision })}>
-                  {RENEWAL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-              <Input label="重要性" value={createForm.importance} onChange={(event) => setCreateForm({ ...createForm, importance: event.target.value })} />
-            </fieldset>
-
-            <fieldset className="asset-create-form__group asset-create-form__group--wide">
-              <legend>备注标签</legend>
-              <Input label="标签" hint="用逗号分隔" value={createForm.labels} onChange={(event) => setCreateForm({ ...createForm, labels: event.target.value })} />
-              <Input name="note" label="备注" value={createForm.note} onChange={(event) => setCreateForm({ ...createForm, note: event.target.value })} />
-            </fieldset>
-
-            {createError && <p className="create-form__error" role="alert">{createError}</p>}
-            <div className="page-form-actions asset-create-form__actions">
-              <span className="asset-create-form__hint">创建后进入详情页。</span>
-              <Button variant="secondary" type="button" onClick={closeCreateDrawer}>
-                取消
-              </Button>
-              <Button type="submit" disabled={createSubmitting}>
-                {createSubmitting ? '创建中…' : '创建 VPS'}
-              </Button>
-            </div>
-          </form>
-        </div>
-      </Drawer>
+        onClose={() => setCreateOpen(false)}
+        providers={state.providers}
+        onCreated={(vps) => navigate(`/vps/${vps.vps_id}`)}
+        onProviderCreated={(p) => setState((s) => ({ ...s, providers: [...s.providers, p] }))}
+      />
 
       <Drawer
         open={filterDrawerOpen}

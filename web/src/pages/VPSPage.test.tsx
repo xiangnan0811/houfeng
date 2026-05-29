@@ -274,7 +274,7 @@ describe('VPSPage', () => {
     await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
   })
 
-  it('opens VPS creation in a drawer, creates a VPS, and navigates to the detail route', async () => {
+  it('opens VPS creation modal, creates a VPS, and navigates to the detail route', async () => {
     const created = { ...vps, vps_id: 'vps_new', display_name: 'Osaka Standby' }
     const fetchMock = vi
       .fn()
@@ -294,29 +294,29 @@ describe('VPSPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('button', { name: '创建第一台 VPS' })).toBeInTheDocument())
-    expect(screen.queryByRole('dialog', { name: 'VPS 创建表单' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '添加 VPS' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument()
     expect(screen.getByText('还没有录入 VPS 资产')).toBeInTheDocument()
     expect(screen.getByText('先录入 VPS。')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
-    const drawer = await screen.findByRole('dialog', { name: 'VPS 创建表单' })
-    expect(within(drawer).getByText('基础识别')).toBeInTheDocument()
-    expect(within(drawer).getByText('访问入口')).toBeInTheDocument()
-    expect(within(drawer).getByText('运行与决策')).toBeInTheDocument()
-    expect(within(drawer).getByText('创建后进入详情页。')).toBeInTheDocument()
-    fireEvent.click(within(drawer).getByRole('button', { name: '取消' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 创建表单' })).not.toBeInTheDocument())
+    const modal = await screen.findByRole('dialog', { name: '添加 VPS' })
+    expect(within(modal).getByText('核心信息')).toBeInTheDocument()
+    expect(within(modal).getByText('网络入口')).toBeInTheDocument()
+    expect(within(modal).getByText('创建后进入详情页。')).toBeInTheDocument()
+    fireEvent.click(within(modal).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加 VPS' })).not.toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
-    const reopenedDrawer = await screen.findByRole('dialog', { name: 'VPS 创建表单' })
-    expect(within(reopenedDrawer).getByLabelText('VPS 名称')).toHaveValue('')
-    fireEvent.change(within(reopenedDrawer).getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })
-    fireEvent.change(within(reopenedDrawer).getByLabelText('资产服务商'), { target: { value: 'pv_001' } })
-    fireEvent.change(within(reopenedDrawer).getByLabelText('国家'), { target: { value: 'JP' } })
-    fireEvent.change(within(reopenedDrawer).getByLabelText('区域'), { target: { value: 'Kansai' } })
-    fireEvent.change(within(reopenedDrawer).getByLabelText('城市'), { target: { value: 'Osaka' } })
-    fireEvent.change(within(reopenedDrawer).getByLabelText('标签'), { target: { value: 'standby, standby' } })
-    fireEvent.click(within(reopenedDrawer).getByRole('button', { name: '创建 VPS' }))
+    const reopenedModal = await screen.findByRole('dialog', { name: '添加 VPS' })
+    expect(within(reopenedModal).getByLabelText('VPS 名称')).toHaveValue('')
+    fireEvent.change(within(reopenedModal).getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })
+    fireEvent.change(within(reopenedModal).getByLabelText('服务商'), { target: { value: 'pv_001' } })
+    fireEvent.change(within(reopenedModal).getByLabelText('国家'), { target: { value: 'JP' } })
+    fireEvent.click(within(reopenedModal).getByRole('button', { name: /补充信息/ }))
+    fireEvent.change(within(reopenedModal).getByLabelText('区域'), { target: { value: 'Kansai' } })
+    fireEvent.change(within(reopenedModal).getByLabelText('城市'), { target: { value: 'Osaka' } })
+    fireEvent.change(within(reopenedModal).getByLabelText('标签'), { target: { value: 'standby, standby' } })
+    fireEvent.click(within(reopenedModal).getByRole('button', { name: '创建 VPS' }))
 
     await waitFor(() => expect(screen.getByText('created vps detail')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps', {

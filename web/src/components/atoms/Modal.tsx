@@ -8,9 +8,11 @@ export interface ModalProps {
   title: string
   children: ReactNode
   footer?: ReactNode
+  persistent?: boolean
+  size?: 'sm' | 'md' | 'lg'
 }
 
-export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, persistent, size }: ModalProps) {
   const modalRef = useModalFocus<HTMLDivElement>(open, onClose)
 
   useEffect(() => {
@@ -27,9 +29,8 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
   if (!open) return null
 
   const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      onClose()
-    }
+    if (persistent || e.target !== e.currentTarget) return
+    onClose()
   }
 
   return createPortal(
@@ -43,7 +44,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
     >
       <div
         ref={modalRef}
-        className="modal-content"
+        className={`modal-content${size ? ` modal-content--${size}` : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
