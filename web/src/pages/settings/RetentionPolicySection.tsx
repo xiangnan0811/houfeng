@@ -1,57 +1,63 @@
-import { DetailSection } from '../../components/DetailSection'
-import { Input } from '../../components/atoms'
 import type { SettingsRetentionPolicyForm } from './types'
-import { SectionIntro } from './SectionIntro'
 
 type RetentionPolicySectionProps = {
   value: SettingsRetentionPolicyForm
   onChange: (patch: Partial<SettingsRetentionPolicyForm>) => void
 }
 
-type RetentionInputProps = {
-  ariaLabel: string
-  value: string
-  onChange: (value: string) => void
-}
-
-function RetentionInput({ ariaLabel, value, onChange }: RetentionInputProps) {
-  return (
-    <Input
-      label={ariaLabel}
-      inputMode="numeric"
-      value={value}
-      trailingIcon="天"
-      onChange={(event) => onChange(event.target.value)}
-    />
-  )
-}
-
 export function RetentionPolicySection({ value, onChange }: RetentionPolicySectionProps) {
   return (
-    <DetailSection eyebrow="保留策略" title="数据保留策略" ribbon="notice">
-      <div className="settings-form-grid settings-form-grid--tight">
-        <RetentionInput
-          ariaLabel="原始层保留天数"
-          value={value.rawLayerDays}
-          onChange={(nextValue) => onChange({ rawLayerDays: nextValue })}
-        />
-        <RetentionInput
-          ariaLabel="聚合层保留天数"
-          value={value.aggregateLayerDays}
-          onChange={(nextValue) => onChange({ aggregateLayerDays: nextValue })}
-        />
-        <RetentionInput
-          ariaLabel="事件层保留天数"
-          value={value.eventLayerDays}
-          onChange={(nextValue) => onChange({ eventLayerDays: nextValue })}
-        />
-        <RetentionInput
-          ariaLabel="通知层保留天数"
-          value={value.notificationLayerDays}
-          onChange={(nextValue) => onChange({ notificationLayerDays: nextValue })}
-        />
+    <>
+      <div className="ss-title">数据保留策略</div>
+      <div className="ss-desc">历史数据自动清理周期</div>
+      <div className="settings-row">
+        <span className="sr-label">原始层保留</span>
+        <span className="sr-value">
+          <input
+            className="input input--compact"
+            aria-label="原始层保留天数"
+            inputMode="numeric"
+            value={value.rawLayerDays}
+            onChange={(e) => onChange({ rawLayerDays: e.target.value })}
+          /> 天
+        </span>
       </div>
-      <SectionIntro>中心后台会按这些窗口自动清理原始观测、事件和通知记录，并维护日级聚合数据作为后续趋势与摘要基础；窗口变更只在保存后进入持久化策略。</SectionIntro>
-    </DetailSection>
+      <div className="settings-row">
+        <span className="sr-label">聚合层保留</span>
+        <span className="sr-value">
+          <input
+            className="input input--compact"
+            aria-label="聚合层保留天数"
+            inputMode="numeric"
+            value={value.aggregateLayerDays}
+            onChange={(e) => onChange({ aggregateLayerDays: e.target.value })}
+          /> 天
+        </span>
+      </div>
+      <div className="settings-row">
+        <span className="sr-label">事件保留</span>
+        <span className="sr-value">
+          <input
+            className="input input--compact"
+            aria-label="事件层保留天数"
+            inputMode="numeric"
+            value={value.eventLayerDays}
+            onChange={(e) => onChange({ eventLayerDays: e.target.value })}
+          /> 天
+        </span>
+      </div>
+      <div className="settings-row">
+        <span className="sr-label">通知保留</span>
+        <span className="sr-value">
+          <input
+            className="input input--compact"
+            aria-label="通知层保留天数"
+            inputMode="numeric"
+            value={value.notificationLayerDays}
+            onChange={(e) => onChange({ notificationLayerDays: e.target.value })}
+          /> 天
+        </span>
+      </div>
+    </>
   )
 }

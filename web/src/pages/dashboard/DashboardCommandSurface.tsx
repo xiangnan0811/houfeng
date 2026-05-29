@@ -501,7 +501,7 @@ export function DashboardCommandSurface({
             <article className={`dashboard-command-primary dashboard-command-primary--${primaryAction.tone}`}>
               <span className="dashboard-command-primary__eyebrow">今日第一步</span>
               <p className="dashboard-command-primary__detail">{primaryAction.detail}</p>
-              <Link className="btn btn--primary btn--md dashboard-command-primary__action" to={primaryAction.to}>
+              <Link className="btn md primary dashboard-command-primary__action" to={primaryAction.to}>
                 {primaryAction.label}
               </Link>
             </article>
@@ -510,7 +510,7 @@ export function DashboardCommandSurface({
             {onRefresh ? (
               <button
                 type="button"
-                className="btn btn--ghost btn--sm dashboard-command-surface__quiet-action"
+                className="btn sm ghost dashboard-command-surface__quiet-action"
                 disabled={refreshing}
                 onClick={onRefresh}
               >

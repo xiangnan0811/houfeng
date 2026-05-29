@@ -1,0 +1,4 @@
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Run required frontend lint/test/build/verify-web gates and report visual evidence limitations honestly."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Review CSS changes for BEM scoping, token usage, dark-first theme compatibility, and no one-off page CSS files."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Check that API calls, URL-state, Drawer applied/draft behavior, batch visibility, and evidence boundary contracts are unchanged."}
+{"file":".trellis/tasks/05-22-frontend-workbench-visual-correction/prd.md","reason":"Validate the correction against screenshot-first visual acceptance criteria and task constraints."}

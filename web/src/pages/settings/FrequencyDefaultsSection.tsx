@@ -1,6 +1,4 @@
-import { DetailSection } from '../../components/DetailSection'
 import type { ProbeFrequencyDefaults } from '../../lib/types'
-import { SectionIntro } from './SectionIntro'
 
 const FREQUENCY_TIER_OPTIONS = [
   { value: '5s', label: '5 秒' },
@@ -17,29 +15,6 @@ type FrequencyDefaultsSectionProps = {
   onProbeFrequencyDefaultsChange: (patch: Partial<ProbeFrequencyDefaults>) => void
 }
 
-type FrequencySelectProps = {
-  ariaLabel: string
-  value: string
-  onChange: (value: string) => void
-}
-
-function FrequencySelect({ ariaLabel, value, onChange }: FrequencySelectProps) {
-  return (
-    <div className="input-field">
-      <label className="input-field__label">{ariaLabel}</label>
-      <div className="input-field__shell">
-        <select className="input" aria-label={ariaLabel} value={value} onChange={(event) => onChange(event.target.value)}>
-          {FREQUENCY_TIER_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    </div>
-  )
-}
-
 export function FrequencyDefaultsSection({
   hostSampleFrequencyTier,
   probeFrequencyDefaults,
@@ -47,30 +22,69 @@ export function FrequencyDefaultsSection({
   onProbeFrequencyDefaultsChange,
 }: FrequencyDefaultsSectionProps) {
   return (
-    <DetailSection eyebrow="频率档位" title="默认频率档位" ribbon="normal">
-      <SectionIntro>当前节点主机样本默认频率已接入实时规划链；Probe 默认频率仍仅作为持久化策略保存。</SectionIntro>
-      <div className="settings-form-grid">
-        <FrequencySelect
-          ariaLabel="当前节点主机样本频率"
-          value={hostSampleFrequencyTier}
-          onChange={onHostSampleFrequencyChange}
-        />
-        <FrequencySelect
-          ariaLabel="TCP 默认频率"
-          value={probeFrequencyDefaults.tcp}
-          onChange={(value) => onProbeFrequencyDefaultsChange({ tcp: value })}
-        />
-        <FrequencySelect
-          ariaLabel="HTTP 默认频率"
-          value={probeFrequencyDefaults.http}
-          onChange={(value) => onProbeFrequencyDefaultsChange({ http: value })}
-        />
-        <FrequencySelect
-          ariaLabel="TLS 默认频率"
-          value={probeFrequencyDefaults.tls}
-          onChange={(value) => onProbeFrequencyDefaultsChange({ tls: value })}
-        />
+    <>
+      <div className="ss-title">采样频率</div>
+      <div className="ss-desc">Agent 主机采样与探测默认间隔</div>
+      <div className="settings-row">
+        <span className="sr-label">主机采样间隔</span>
+        <span className="sr-value">
+          <select
+            className="input input--compact"
+            aria-label="当前节点主机样本频率"
+            value={hostSampleFrequencyTier}
+            onChange={(e) => onHostSampleFrequencyChange(e.target.value)}
+          >
+            {FREQUENCY_TIER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </span>
       </div>
-    </DetailSection>
+      <div className="settings-row">
+        <span className="sr-label">TCP 默认频率</span>
+        <span className="sr-value">
+          <select
+            className="input input--compact"
+            aria-label="TCP 默认频率"
+            value={probeFrequencyDefaults.tcp}
+            onChange={(e) => onProbeFrequencyDefaultsChange({ tcp: e.target.value })}
+          >
+            {FREQUENCY_TIER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </span>
+      </div>
+      <div className="settings-row">
+        <span className="sr-label">HTTP 默认频率</span>
+        <span className="sr-value">
+          <select
+            className="input input--compact"
+            aria-label="HTTP 默认频率"
+            value={probeFrequencyDefaults.http}
+            onChange={(e) => onProbeFrequencyDefaultsChange({ http: e.target.value })}
+          >
+            {FREQUENCY_TIER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </span>
+      </div>
+      <div className="settings-row">
+        <span className="sr-label">TLS 默认频率</span>
+        <span className="sr-value">
+          <select
+            className="input input--compact"
+            aria-label="TLS 默认频率"
+            value={probeFrequencyDefaults.tls}
+            onChange={(e) => onProbeFrequencyDefaultsChange({ tls: e.target.value })}
+          >
+            {FREQUENCY_TIER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </span>
+      </div>
+    </>
   )
 }

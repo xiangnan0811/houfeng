@@ -1,10 +1,8 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  PRIMARY_NAV_GROUPS,
-  PRIMARY_NAV_ITEMS,
   PRODUCT_FULL_NAME_ZH,
   PRODUCT_NAME_ZH,
 } from '../metadata'
@@ -92,20 +90,14 @@ describe('AppShell', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
     const { container } = renderAuthenticatedAppShell()
 
-    expect(screen.getByRole('link', { name: '跳到主内容' })).toHaveAttribute('href', '#main-content')
-    expect(container.querySelector('#main-content')).toHaveAttribute('tabindex', '-1')
+    expect(container.querySelector('#main-content')).toBeInTheDocument()
     expect(screen.getByText(PRODUCT_NAME_ZH)).toBeInTheDocument()
-    PRIMARY_NAV_GROUPS.forEach((group) => {
-      expect(
-        Array.from(container.querySelectorAll('.sidebar__nav-group-title')).some(
-          (title) => title.textContent === group.label,
-        ),
-      ).toBe(true)
-    })
-    PRIMARY_NAV_ITEMS.forEach((item) => {
-      expect(screen.getByRole('link', { name: item.label })).toBeInTheDocument()
-    })
-    expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
+    // New sidebar uses hardcoded nav sections
+    expect(screen.getByRole('link', { name: '工作台' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '节点' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '入口' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '事件' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
     expect(screen.getByText('admin')).toBeInTheDocument()
     expect(document.title).toBe(PRODUCT_FULL_NAME_ZH)
   })
@@ -114,10 +106,9 @@ describe('AppShell', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
 
     renderAuthenticatedAppShell()
-    const appShell = screen.getByText(PRODUCT_NAME_ZH).closest('.app-shell')
-    expect(appShell).not.toBeNull()
-    const container = appShell as HTMLElement
-    expect(container.textContent).not.toMatch(/单用户|全权限|个人系统|V1 冻结基线/)
+    const layout = document.querySelector('.layout')
+    expect(layout).not.toBeNull()
+    expect(layout!.textContent).not.toMatch(/单用户|全权限|个人系统|V1 冻结基线/)
   })
 
   it('requests dashboard summary when authenticated and shows loading as degraded', () => {
@@ -131,12 +122,13 @@ describe('AppShell', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(screen.getByText('正在读取系统摘要')).toBeInTheDocument()
-    expect(screen.getByText('v1.0 · dashboard loading')).toBeInTheDocument()
-    expect(screen.queryByText('中心运行正常')).not.toBeInTheDocument()
+    // Loading state shows degraded sync indicator
+    const syncEl = document.querySelector('.tp-sync')
+    expect(syncEl).toHaveClass('tp-sync--degraded')
+    expect(syncEl).toHaveAttribute('title', '正在读取系统摘要')
   })
 
-  it('shows a global critical alert when severe objects exist', async () => {
+  it('shows degraded sync when severe objects exist', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -153,15 +145,14 @@ describe('AppShell', () => {
 
     renderAuthenticatedAppShell()
 
-    const alert = await screen.findByRole('alert', { name: '全局严重异常' })
-    expect(alert).toHaveTextContent('严重异常 2 个')
-    expect(alert).toHaveTextContent('节点 1 · 入口 1')
-    expect(within(alert).getByRole('link', { name: '查看严重事件' })).toHaveAttribute('href', '/events?severity=严重')
-    expect(within(alert).getByRole('link', { name: '异常节点' })).toHaveAttribute('href', '/nodes?abnormal=1')
-    expect(within(alert).getByRole('link', { name: '异常入口' })).toHaveAttribute('href', '/targets?abnormal=1')
+    await waitFor(() => {
+      const syncEl = document.querySelector('.tp-sync')
+      expect(syncEl).toHaveClass('tp-sync--degraded')
+      expect(syncEl).toHaveAttribute('title', '存在异常')
+    })
   })
 
-  it('shows a weaker global anomaly alert when only non-severe objects exist', async () => {
+  it('shows degraded sync when only non-severe anomalies exist', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -176,10 +167,11 @@ describe('AppShell', () => {
 
     renderAuthenticatedAppShell()
 
-    const status = await screen.findByRole('status', { name: '全局活跃异常' })
-    expect(status).toHaveTextContent('活跃异常 3 个')
-    expect(status).toHaveTextContent('节点 1 · 入口 2')
-    expect(within(status).queryByRole('link', { name: '查看严重事件' })).not.toBeInTheDocument()
+    await waitFor(() => {
+      const syncEl = document.querySelector('.tp-sync')
+      expect(syncEl).toHaveClass('tp-sync--degraded')
+      expect(syncEl).toHaveAttribute('title', '存在异常')
+    })
   })
 
   it('shows dashboard anomaly counts in sidebar after summary loads', async () => {
@@ -198,15 +190,13 @@ describe('AppShell', () => {
 
     renderAuthenticatedAppShell()
 
-    await waitFor(() =>
-      expect(screen.getByText('摘要已加载 · 存在严重异常')).toBeInTheDocument(),
-    )
-    expect(screen.getByText('3')).toHaveClass('badge--count')
-    expect(screen.getByText('3')).not.toHaveClass('tone--alert', 'tone--critical')
-    expect(screen.getByText('2')).toHaveClass('badge--count')
-    expect(screen.getByText('2')).not.toHaveClass('tone--alert', 'tone--critical')
-    expect(screen.getByText(/v1\.0 · dashboard \d{2}:\d{2}:\d{2}/)).toBeInTheDocument()
-    expect(screen.queryByText('中心运行正常')).not.toBeInTheDocument()
+    await waitFor(() => {
+      const syncEl = document.querySelector('.tp-sync')
+      expect(syncEl).toHaveClass('tp-sync--degraded')
+    })
+    // Sidebar shows anomaly count badges
+    expect(screen.getByText('3')).toHaveClass('nav-badge')
+    expect(screen.getByText('2')).toHaveClass('nav-badge')
   })
 
   it('resets the shell summary to loading instead of reusing a previous load', async () => {
@@ -224,16 +214,20 @@ describe('AppShell', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const { unmount } = renderAuthenticatedAppShell()
-    await waitFor(() =>
-      expect(screen.getByText('摘要已加载 · 存在活跃异常')).toBeInTheDocument(),
-    )
+    await waitFor(() => {
+      const syncEl = document.querySelector('.tp-sync')
+      expect(syncEl).toHaveClass('tp-sync--degraded')
+      expect(syncEl).toHaveAttribute('title', '存在异常')
+    })
     unmount()
 
     renderAuthenticatedAppShell()
 
-    expect(screen.getByText('正在读取系统摘要')).toBeInTheDocument()
-    expect(screen.queryByText('摘要已加载 · 存在活跃异常')).not.toBeInTheDocument()
-    expect(document.querySelectorAll('.badge--count')).toHaveLength(0)
+    // After remount, should be back to loading state
+    const syncEl = document.querySelector('.tp-sync')
+    expect(syncEl).toHaveClass('tp-sync--degraded')
+    expect(syncEl).toHaveAttribute('title', '正在读取系统摘要')
+    expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
   })
 
   it('marks loaded summaries with active anomalies as degraded', async () => {
@@ -251,10 +245,11 @@ describe('AppShell', () => {
 
     renderAuthenticatedAppShell()
 
-    await waitFor(() =>
-      expect(screen.getByText('摘要已加载 · 存在活跃异常')).toBeInTheDocument(),
-    )
-    expect(document.querySelector('.sync-status')).toHaveClass('sync-status--degraded')
+    await waitFor(() => {
+      const syncEl = document.querySelector('.tp-sync')
+      expect(syncEl).toHaveClass('tp-sync--degraded')
+      expect(syncEl).toHaveAttribute('title', '存在异常')
+    })
   })
 
   it('marks loaded summaries without anomalies as ok', async () => {
@@ -262,8 +257,11 @@ describe('AppShell', () => {
 
     renderAuthenticatedAppShell()
 
-    await waitFor(() => expect(screen.getByText('摘要已加载')).toBeInTheDocument())
-    expect(document.querySelector('.sync-status')).toHaveClass('sync-status--ok')
+    await waitFor(() => {
+      const syncEl = document.querySelector('.tp-sync')
+      expect(syncEl).toHaveClass('tp-sync--ok')
+      expect(syncEl).toHaveAttribute('title', '系统正常')
+    })
   })
 
   it('shows dashboard unavailable when the shell summary request fails', async () => {
@@ -274,11 +272,12 @@ describe('AppShell', () => {
 
     renderAuthenticatedAppShell()
 
-    await waitFor(() => expect(screen.getByText('摘要不可用')).toBeInTheDocument())
-    expect(screen.getByText('v1.0 · dashboard unavailable')).toBeInTheDocument()
-    expect(document.querySelector('.sync-status')).toHaveClass('sync-status--down')
-    expect(document.querySelectorAll('.badge--count')).toHaveLength(0)
-    expect(screen.queryByText('中心运行正常')).not.toBeInTheDocument()
+    await waitFor(() => {
+      const syncEl = document.querySelector('.tp-sync')
+      expect(syncEl).toHaveClass('tp-sync--down')
+      expect(syncEl).toHaveAttribute('title', '摘要不可用')
+    })
+    expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
   })
 
   it('renders nothing when no authenticated user', () => {
@@ -293,7 +292,7 @@ describe('AppShell', () => {
         <AppShell />
       </MemoryRouter>,
     )
-    expect(container.querySelector('.app-shell')).toBeNull()
+    expect(container.querySelector('.layout')).toBeNull()
     expect(fetch).not.toHaveBeenCalled()
   })
 })

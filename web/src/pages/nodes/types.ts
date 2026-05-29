@@ -13,7 +13,7 @@ export type NodeFilterState = {
   onboardingPending: boolean
 }
 
-export type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
+export type NodeRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume' | 'retire' | 'restore-to-observing'
 
 export type NodeListView = 'all' | 'runtime-attention' | 'binding-conflict'
 

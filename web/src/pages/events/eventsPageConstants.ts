@@ -6,8 +6,9 @@ import {
 } from '../../lib/types'
 import type { FilterState, TimeRange } from './types'
 
-export const DEFAULT_LIMIT = 50
-export const LIMIT_OPTIONS = ['10', '25', '50', '100'] as const
+export const DEFAULT_LIMIT = 200
+export const PAGE_SIZE = 20
+
 export const OBJECT_TYPE_OPTIONS: FilterSelectOption[] = [
   { value: 'node', label: '节点' },
   { value: 'target', label: '目标' },
@@ -17,10 +18,13 @@ export const SEVERITY_OPTIONS: FilterSelectOption[] = [
   { value: '告警', label: '告警' },
   { value: '严重', label: '严重' },
 ]
-export const LIMIT_SELECT_OPTIONS: FilterSelectOption[] = LIMIT_OPTIONS.map((value) => ({
-  value,
-  label: value,
-}))
+
+export const INCIDENT_CLASS_OPTIONS: FilterSelectOption[] = [
+  { value: 'connectivity', label: '连通性' },
+  { value: 'certificate', label: '证书' },
+  { value: 'performance', label: '性能' },
+  { value: 'availability', label: '可用性' },
+]
 
 export const DEFAULT_FILTERS: FilterState = {
   object_type: '',
@@ -35,6 +39,8 @@ export const DEFAULT_FILTERS: FilterState = {
   maintenance_only: false,
   include_backfilled: false,
   time_range: 'custom',
+  incident_class: '',
+  keyword: '',
 }
 
 export const EVENT_TYPE_OPTIONS = Object.entries(STATE_CHANGE_EVENT_TYPE_LABELS) as Array<
@@ -67,5 +73,4 @@ export const TIME_RANGE_LABELS: Record<TimeRange, string> = {
 export const ALLOWED_EVENT_TYPES = new Set<StateChangeEventType>(
   EVENT_TYPE_OPTIONS.map(([value]) => value),
 )
-export const ALLOWED_LIMITS = new Set<string>(LIMIT_OPTIONS)
 export const ALLOWED_TIME_RANGES = new Set<TimeRange>(['24h', '7d', '30d', 'custom'])

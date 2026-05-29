@@ -1,4 +1,4 @@
-import { DataTable, type DataTableColumn, type DataTableSortState } from '../../components/atoms'
+import type { DataTableColumn, DataTableSortState } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
 import type { NodeRecord } from '../../lib/types'
 import { NodesBatchPanel } from './NodesBatchPanel'
@@ -7,6 +7,20 @@ import type {
   NodeListView,
   PendingNodeConfirmation,
 } from './types'
+
+const INTERACTIVE_SELECTOR = [
+  'a[href]',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="link"]',
+].join(',')
+
+function isInteractive(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(INTERACTIVE_SELECTOR) != null
+}
 
 type NodesListSectionProps = {
   nodeListView: NodeListView
@@ -112,7 +126,7 @@ export function NodesListSection({
           title="候风尚未接入任何节点"
           description="请先创建第一个节点，完成接入后再用它支撑 VPS 运行事实。"
           action={(
-            <button type="button" className="btn btn--primary btn--md" onClick={onCreateNode}>
+            <button type="button" className="btn md primary" onClick={onCreateNode}>
               新建第一个节点
             </button>
           )}
@@ -138,23 +152,86 @@ export function NodesListSection({
           title="没有匹配当前筛选的节点"
           description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
           action={
-            <button type="button" className="btn btn--ghost btn--md" onClick={onClearAllFilters}>
+            <button type="button" className="btn md ghost" onClick={onClearAllFilters}>
               清空筛选
             </button>
           }
         />
       ) : (
         <div className="page-panel page-panel--scroll-x nodes-table-panel">
-          <DataTable<NodeRecord>
-            columns={visibleColumns}
-            rows={nodes}
-            rowKey={(node) => node.node_id}
-            density="compact"
-            className="nodes-table"
-            sortState={sortState}
-            onSortChange={onSortChange}
-            onRowClick={onRowClick}
-          />
+          <table className="table animate-in d2 nodes-table" role="table">
+            <colgroup>
+              {visibleColumns.map((col) => (
+                <col
+                  key={col.key}
+                  style={col.width ? { width: typeof col.width === 'number' ? `${col.width}px` : col.width } : undefined}
+                />
+              ))}
+            </colgroup>
+            <thead>
+              <tr role="row">
+                {visibleColumns.map((col) => {
+                  const isSortable = col.sortable && onSortChange
+                  const sortKey = col.sortKey ?? col.key
+                  const isActive = sortState?.key === sortKey
+                  const dir = isActive ? sortState?.direction : null
+                  return (
+                    <th
+                      key={col.key}
+                      role="columnheader"
+                      scope="col"
+                      aria-sort={isActive ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                    >
+                      {isSortable ? (
+                        <button
+                          type="button"
+                          className="data-table__sort-btn"
+                          onClick={() => onSortChange(sortKey)}
+                        >
+                          {col.label}
+                          <span className="data-table__sort-indicator" aria-hidden="true">
+                            {isActive && dir === 'asc' ? ' ↑' : isActive && dir === 'desc' ? ' ↓' : ' ↕'}
+                          </span>
+                        </button>
+                      ) : (
+                        col.label
+                      )}
+                    </th>
+                  )
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {nodes.map((node, ri) => (
+                <tr
+                  key={node.node_id}
+                  role="row"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    if (isInteractive(e.target)) return
+                    onRowClick(node)
+                  }}
+                  onKeyDown={(e) => {
+                    if (isInteractive(e.target)) return
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onRowClick(node)
+                    }
+                  }}
+                >
+                  {visibleColumns.map((col) => (
+                    <td
+                      key={col.key}
+                      role="cell"
+                      className={col.cellClassName || undefined}
+                    >
+                      {col.render(node, ri)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

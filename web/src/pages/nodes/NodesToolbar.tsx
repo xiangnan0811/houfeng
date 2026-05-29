@@ -1,113 +1,112 @@
 import { Link } from 'react-router-dom'
 
-import { Button, MonoDigits, Tabs, type TabItem } from '../../components/atoms'
-import { AUTO_REFRESH_OPTIONS, type AutoRefreshOption } from '../../lib/useAutoRefresh'
-import type { NodeQuickView } from './types'
+import type { NodeFilterState } from './types'
 
 type NodesToolbarProps = {
-  quickViewTabs: TabItem<NodeQuickView>[]
-  activeQuickView: NodeQuickView
-  displayedCount: number
-  baseCount: number
-  fieldFilterCount: number
-  hasActiveFilters: boolean
-  batchPanelOpen: boolean
-  showTrends: boolean
+  filterState: NodeFilterState
+  healthOptions: string[]
+  lifecycleOptions: string[]
+  runStatusOptions: string[]
+  regionOptions: { value: string; label: string }[]
+  providerOptions: { value: string; label: string }[]
   compareSet: Set<string>
-  autoRefresh: AutoRefreshOption
-  onQuickViewChange: (value: NodeQuickView) => void
-  onOpenFilters: () => void
-  onToggleBatchPanel: () => void
-  onShowTrendsChange: (value: boolean) => void
-  onAutoRefreshChange: (value: AutoRefreshOption) => void
+  onFilterChange: (key: string, value: string | null) => void
+  onAbnormalChange: (checked: boolean) => void
 }
 
 export function NodesToolbar({
-  quickViewTabs,
-  activeQuickView,
-  displayedCount,
-  baseCount,
-  fieldFilterCount,
-  hasActiveFilters,
-  batchPanelOpen,
-  showTrends,
+  filterState,
+  healthOptions,
+  lifecycleOptions,
+  runStatusOptions,
+  regionOptions,
+  providerOptions,
   compareSet,
-  autoRefresh,
-  onQuickViewChange,
-  onOpenFilters,
-  onToggleBatchPanel,
-  onShowTrendsChange,
-  onAutoRefreshChange,
+  onFilterChange,
+  onAbnormalChange,
 }: NodesToolbarProps) {
   return (
-    <div className="nodes-toolbar list-command-band list-command-band--nodes" aria-label="节点列表工具栏">
-      <div className="list-command-band__main">
-        <p className="list-command-band__eyebrow">NODE QUICK VIEW</p>
-        <h3 className="list-command-band__title">节点扫描</h3>
-      </div>
-      <div className="nodes-toolbar__primary list-command-band__controls">
-        <Tabs<NodeQuickView>
-          variant="pill"
-          items={quickViewTabs}
-          value={activeQuickView}
-          onChange={onQuickViewChange}
-        />
-        <div className="list-command-band__meta" aria-label="节点列表当前范围">
-          <span>{hasActiveFilters ? '当前扫描范围' : '完整 Node 库存'}</span>
-          <strong>
-            <MonoDigits>{displayedCount}</MonoDigits>
-            <small>/</small>
-            <MonoDigits>{baseCount}</MonoDigits>
-          </strong>
+    <>
+      <div className="filter-panel animate-in d1">
+        <div className="filter-bar">
+          <span className="filter-bar__label">筛选</span>
+          <select
+            className="filter-select"
+            value={filterState.health ?? ''}
+            onChange={(e) => onFilterChange('health', e.target.value || null)}
+          >
+            <option value="">健康状态: 全部</option>
+            {healthOptions.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterState.lifecycle ?? ''}
+            onChange={(e) => onFilterChange('lifecycle', e.target.value || null)}
+          >
+            <option value="">生命周期: 全部</option>
+            {lifecycleOptions.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterState.runStatus ?? ''}
+            onChange={(e) => onFilterChange('run_status', e.target.value || null)}
+          >
+            <option value="">运行状态: 全部</option>
+            {runStatusOptions.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterState.region ?? ''}
+            onChange={(e) => onFilterChange('region', e.target.value || null)}
+          >
+            <option value="">地区: 全部</option>
+            {regionOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={filterState.provider ?? ''}
+            onChange={(e) => onFilterChange('provider', e.target.value || null)}
+          >
+            <option value="">供应商: 全部</option>
+            {providerOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <label>
+            <input
+              type="checkbox"
+              checked={filterState.abnormal}
+              onChange={(e) => onAbnormalChange(e.target.checked)}
+            />
+            仅看异常
+          </label>
         </div>
       </div>
-      <div className="nodes-toolbar__actions list-command-band__actions" aria-label="节点次级动作">
-        <Button variant="secondary" size="sm" onClick={onOpenFilters}>
-          高级筛选{fieldFilterCount > 0 ? ` · ${fieldFilterCount}` : ''}
-        </Button>
-        <Button
-          variant={batchPanelOpen ? 'secondary' : 'ghost'}
-          size="sm"
-          onClick={onToggleBatchPanel}
-        >
-          批量操作
-        </Button>
-        <button
-          type="button"
-          className={`btn btn--ghost btn--sm ${!showTrends ? 'btn--active' : ''}`}
-          onClick={() => onShowTrendsChange(!showTrends)}
-        >
-          {showTrends ? '隐藏趋势' : '显示趋势'}
-        </button>
+      <div className="mt-4 flex-row gap-2">
         {compareSet.size === 2 ? (
           <Link
-            className="btn btn--secondary btn--sm"
+            className="btn sm secondary"
             to={`/nodes/compare?id=${[...compareSet].join('&id=')}`}
           >
             对比选中节点
           </Link>
         ) : (
-          <span className="nodes-toolbar__hint">选择 2 个节点可对比</span>
+          <button type="button" className="btn sm secondary" disabled>
+            对比选中 ({compareSet.size}/2)
+          </button>
         )}
-        <label className="nodes-toolbar__refresh">
-          <span>自动刷新</span>
-          <select
-            className="auto-refresh-select"
-            value={autoRefresh == null ? '' : String(autoRefresh)}
-            onChange={(event) => {
-              const value = event.target.value
-              onAutoRefreshChange(value === '' ? null : Number(value))
-            }}
-            aria-label="自动刷新间隔"
-          >
-            {AUTO_REFRESH_OPTIONS.map((option) => (
-              <option key={option.label} value={option.value == null ? '' : String(option.value)}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <span className="text-sm text-muted">
+          勾选 2 个节点可进入对比视图
+        </span>
       </div>
-    </div>
+    </>
   )
 }

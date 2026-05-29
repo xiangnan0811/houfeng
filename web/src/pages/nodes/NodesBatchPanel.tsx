@@ -53,35 +53,35 @@ export function NodesBatchPanel({
           {selectAll ? (
             <div className="batch-bar__actions">
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onBatchAction('enter-maintenance')}
               >
                 进入维护
               </button>
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onBatchAction('exit-maintenance')}
               >
                 退出维护
               </button>
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onBatchAction('pause')}
               >
                 暂停监控
               </button>
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onBatchAction('resume')}
               >
                 恢复监控
               </button>
               <button
-                className="btn btn--secondary btn--sm"
+                className="btn sm secondary"
                 disabled={batchSubmitting}
                 onClick={() => onCommandOpenChange(true)}
               >
@@ -113,14 +113,14 @@ export function NodesBatchPanel({
           </p>
           <div className="batch-command__actions">
             <button
-              className="btn btn--primary btn--md"
+              className="btn md primary"
               disabled={!commandID.trim() || batchSubmitting}
               onClick={onExecuteBatchCommand}
             >
               下发命令
             </button>
             <button
-              className="btn btn--ghost btn--md"
+              className="btn md ghost"
               onClick={() => {
                 onCommandOpenChange(false)
                 onCommandIDChange('')

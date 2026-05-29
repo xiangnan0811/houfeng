@@ -1,8 +1,7 @@
 import { DetailSection } from '../../components/DetailSection'
-import { MonoDigits, Input, Toggle } from '../../components/atoms'
+import { MonoDigits, Toggle } from '../../components/atoms'
 import type { SettingsRecord } from '../../lib/types'
 import type { SettingsFormState } from './types'
-import { SectionIntro } from './SectionIntro'
 
 type TelegramSettingsForm = Pick<
   SettingsFormState,
@@ -26,63 +25,49 @@ export function TelegramSettingsSection({
   isExpanded = true,
   onToggleExpand,
 }: TelegramSettingsSectionProps) {
-  const innerContentClass = [
-    'settings-section-body',
-    wrapper === 'none' && 'settings-section-body--modal',
-  ].filter(Boolean).join(' ')
   const innerContent = (
-    <div className={innerContentClass}>
-      <div className="settings-form-grid">
-        <Input
-          label="新的 Telegram Bot Token"
-          type="password"
-          autoComplete="off"
-          value={form.telegramBotToken}
-          onChange={(event) => onChange({ telegramBotToken: event.target.value })}
+    <>
+      <div className="settings-row">
+        <span className="sr-label">运行时接管</span>
+        <Toggle
+          label="运行时接管"
+          checked={form.telegramRuntimeManaged}
+          onChange={(checked) => onChange({ telegramRuntimeManaged: checked })}
         />
-
-        <Input
-          label="Telegram Chat ID"
-          value={form.telegramChatId}
-          onChange={(event) => onChange({ telegramChatId: event.target.value })}
-        />
-
-        <article className="summary-card settings-summary-card--wide">
-          <span className="summary-card__label">当前持久化状态</span>
-          <strong className="summary-card__value summary-card__value--text">
-            {settings.token_present && settings.token_masked_summary ? (
-              <>
-                已配置 Telegram Bot Token：
-                <MonoDigits>{settings.token_masked_summary}</MonoDigits>
-              </>
-            ) : (
-              '当前未保存 Telegram Bot Token'
-            )}
-          </strong>
-        </article>
-
-        <div className="settings-fieldset settings-fieldset--wide">
-          <Toggle
-            label="运行时接管"
-            checked={form.telegramRuntimeManaged}
-            onChange={(checked) => onChange({ telegramRuntimeManaged: checked })}
+      </div>
+      <div className="settings-row">
+        <span className="sr-label">Bot Token</span>
+        <span className="sr-value">
+          <input
+            className="input input--compact"
+            aria-label="新的 Telegram Bot Token"
+            type="password"
+            autoComplete="off"
+            value={form.telegramBotToken}
+            onChange={(e) => onChange({ telegramBotToken: e.target.value })}
           />
-          <SectionIntro>使用持久化 Telegram 配置接管运行中的通知器</SectionIntro>
-        </div>
+        </span>
       </div>
-      <div className="settings-section-notes">
-        <SectionIntro>
-          {!settings.runtime_managed
-            ? '当前仅保存 Telegram 持久化配置，尚未驱动正在运行的通知器。'
-            : settings.runtime_apply_active
-              ? '当前持久化配置已接入正在运行的通知路径。'
-              : '当前持久化配置正在接管通知路径，并已显式停用 Telegram 投递。'}
-        </SectionIntro>
-        <SectionIntro>
-          接口不会回显明文 Token；页面只展示 masked token summary。留空会继续保留当前已保存的 Token，并在保存 payload 中省略 bot_token；只有在需要替换时才输入新的 Token。
-        </SectionIntro>
+      <div className="settings-row">
+        <span className="sr-label">Chat ID</span>
+        <span className="sr-value">
+          <input
+            className="input input--compact"
+            aria-label="Telegram Chat ID"
+            value={form.telegramChatId}
+            onChange={(e) => onChange({ telegramChatId: e.target.value })}
+          />
+        </span>
       </div>
-    </div>
+      <div className="settings-row">
+        <span className="sr-label">当前持久化状态</span>
+        <span className="sr-value">
+          {settings.token_present && settings.token_masked_summary ? (
+            <>已配置 Telegram Bot Token：<MonoDigits>{settings.token_masked_summary}</MonoDigits></>
+          ) : '未配置'}
+        </span>
+      </div>
+    </>
   )
 
   if (wrapper === 'none') {
@@ -96,11 +81,11 @@ export function TelegramSettingsSection({
       ribbon="accent-2"
       aside={
         <div className="settings-section-aside">
-          <span className={`badge ${settings.token_present ? 'badge--success' : ''}`}>
+          <span className={`badge ${settings.token_present ? 'badge-ok' : ''}`}>
             {settings.token_present ? '已配置持久化 Token' : '未配置'}
           </span>
           {onToggleExpand && (
-            <button type="button" className="btn btn--secondary btn--sm" onClick={onToggleExpand}>
+            <button type="button" className="btn sm secondary" onClick={onToggleExpand}>
               {isExpanded ? '收起' : '编辑'}
             </button>
           )}

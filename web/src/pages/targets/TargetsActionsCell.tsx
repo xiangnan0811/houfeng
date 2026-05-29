@@ -1,4 +1,5 @@
-import { Button } from '../../components/atoms'
+import { Link } from 'react-router-dom'
+
 import type { TargetRecord } from '../../lib/types'
 import {
   actionButtonKey,
@@ -38,15 +39,22 @@ export function TargetsActionsCell({
       }}
     >
       {metadataEditingTargetId === target.target_id ? null : (
-        <Button
-          size="sm"
-          variant="ghost"
+        <button
+          type="button"
+          className="btn sm secondary"
           disabled={metadataSavingTargetId !== null}
           onClick={() => onStartMetadataEdit(target)}
         >
           快速编辑标签
-        </Button>
+        </button>
       )}
+      <Link
+        className="btn-text sm primary"
+        to={`/targets/${target.target_id}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        详情
+      </Link>
       {actions.map(({ action, label }) => (
         <button
           key={action}
@@ -54,7 +62,7 @@ export function TargetsActionsCell({
             actionButtonRefs.current[actionButtonKey(target.target_id, action)] = element
           }}
           type="button"
-          className="btn btn--ghost btn--sm"
+          className={`btn sm ${action === 'archive' ? 'danger' : 'secondary'}`}
           disabled={runtimeBusyTargetId === target.target_id}
           onClick={() => onRuntimeAction(target, action)}
         >

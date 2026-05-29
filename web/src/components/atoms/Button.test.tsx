@@ -10,19 +10,19 @@ describe('Button', () => {
 
   it('applies variant class', () => {
     render(<Button variant="danger">清空</Button>)
-    expect(screen.getByRole('button')).toHaveClass('btn--danger')
+    expect(screen.getByRole('button')).toHaveClass('danger')
   })
 
   it('applies size class', () => {
     render(<Button size="sm">小</Button>)
-    expect(screen.getByRole('button')).toHaveClass('btn--sm')
+    expect(screen.getByRole('button')).toHaveClass('sm')
   })
 
   it('default variant is primary, default size is md', () => {
     render(<Button>X</Button>)
     const b = screen.getByRole('button')
-    expect(b).toHaveClass('btn--primary')
-    expect(b).toHaveClass('btn--md')
+    expect(b).toHaveClass('primary')
+    expect(b).toHaveClass('md')
   })
 
   it('disabled passes through', () => {

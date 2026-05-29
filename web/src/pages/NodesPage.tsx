@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, Drawer, MonoDigits, type DataTableSortState } from '../components/atoms'
+import { type DataTableSortState } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
@@ -14,24 +14,21 @@ import {
   postNodeAction,
   postNodeBatch,
   resumeNodeMonitoring,
+  retireNode,
+  restoreRetiredNodeToObserving,
   updateNodeMetadata,
 } from '../lib/api'
 import type { CreateNodeInput, NodeRecord, NodeSparklinesResponse } from '../lib/types'
-import { type AutoRefreshOption, useAutoRefresh } from '../lib/useAutoRefresh'
 import { CreateNodeDrawer } from './nodes/CreateNodeDrawer'
-import { NodesFilterPanel } from './nodes/NodesFilterPanel'
 import { NodesHero } from './nodes/NodesHero'
 import { NodesListSection } from './nodes/NodesListSection'
-import { NodesSupportSurface } from './nodes/NodesSupportSurface'
 import { buildNodesTableColumns } from './nodes/NodesTableColumns'
 import { NodesToolbar } from './nodes/NodesToolbar'
 import {
   actionButtonKey,
-  buildNodeEvidenceLead,
   countAbnormalNodes,
   countMaintenanceOrPausedNodes,
   countPendingOnboardingNodes,
-  describeNodeFilterContext,
   distinctSorted,
   initialCreateForm,
   isBindingConflictNode,
@@ -40,13 +37,11 @@ import {
   mergeNonMetadataNodeRecord,
   parseLabels,
   parseMultiValue,
-  pickTopNodeEvidence,
 } from './nodes/nodeHelpers'
 import type {
   FocusRestoreRequest,
   NodeFilterState,
   NodeListView,
-  NodeQuickView,
   NodeRuntimeAction,
   PendingNodeConfirmation,
 } from './nodes/types'
@@ -87,27 +82,12 @@ export function NodesPage() {
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandID, setCommandID] = useState('')
   const [sortState, setSortState] = useState<DataTableSortState | null>(null)
-  const [showTrends, setShowTrends] = useState(true)
-  const [autoRefresh, setAutoRefresh] = useState<AutoRefreshOption>(null)
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set())
-  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false)
-  const [draftFilterState, setDraftFilterState] = useState<NodeFilterState | null>(null)
-  const [batchPanelOpen, setBatchPanelOpen] = useState(false)
 
   function resetCreateFlow() {
     setCreateError(null)
     setLabelInput('')
     setCreateForm(initialCreateForm)
-  }
-
-  function refreshNodes() {
-    listNodes()
-      .then((result) => {
-        setNodes(result)
-      })
-      .catch(() => {
-        // silent refresh — keep old data on error
-      })
   }
 
   useEffect(() => {
@@ -128,8 +108,6 @@ export function NodesPage() {
       cancelled = true
     }
   }, [])
-
-  useAutoRefresh(autoRefresh, refreshNodes)
 
   useEffect(() => {
     let cancelled = false
@@ -194,7 +172,11 @@ export function NodesPage() {
             ? await exitNodeMaintenance(node.node_id)
             : action === 'pause'
               ? await pauseNodeMonitoring(node.node_id)
-              : await resumeNodeMonitoring(node.node_id)
+              : action === 'resume'
+                ? await resumeNodeMonitoring(node.node_id)
+                : action === 'retire'
+                  ? await retireNode(node.node_id)
+                  : await restoreRetiredNodeToObserving(node.node_id)
       setNodes((current) =>
         current.map((item) =>
           item.node_id === updated.node_id ? mergeNonMetadataNodeRecord(item, updated) : item,
@@ -335,36 +317,9 @@ export function NodesPage() {
     [nodes],
   )
 
-  const cityOptions = useMemo(
-    () =>
-      distinctSorted(nodes.map((node) => node.city)).map((value) => ({
-        value,
-        label: value,
-      })),
-    [nodes],
-  )
-
   const providerOptions = useMemo(
     () =>
       distinctSorted(nodes.map((node) => node.provider)).map((value) => ({
-        value,
-        label: value,
-      })),
-    [nodes],
-  )
-
-  const groupOptions = useMemo(
-    () =>
-      distinctSorted(nodes.map((node) => node.group).filter(Boolean)).map((value) => ({
-        value,
-        label: value,
-      })),
-    [nodes],
-  )
-
-  const labelOptions = useMemo(
-    () =>
-      distinctSorted(nodes.flatMap((node) => node.labels)).map((value) => ({
         value,
         label: value,
       })),
@@ -432,48 +387,9 @@ export function NodesPage() {
     filterState.abnormal ||
     filterState.onboardingPending
 
-  const filterContext = useMemo(
-    () => [
-      ...describeNodeFilterContext(filterState),
-      ...(nodeListView === 'runtime-attention' ? ['维护/暂停'] : []),
-    ],
-    [filterState, nodeListView],
-  )
-  const topEvidence = useMemo(
-    () => pickTopNodeEvidence(sortedFilteredNodes),
-    [sortedFilteredNodes],
-  )
-  const displayedAbnormalNodeCount = useMemo(
-    () => countAbnormalNodes(sortedFilteredNodes),
-    [sortedFilteredNodes],
-  )
-  const displayedPendingOnboardingNodeCount = useMemo(
-    () => countPendingOnboardingNodes(sortedFilteredNodes),
-    [sortedFilteredNodes],
-  )
-  const displayedMaintenanceOrPausedNodeCount = useMemo(
-    () => countMaintenanceOrPausedNodes(sortedFilteredNodes),
-    [sortedFilteredNodes],
-  )
-  const evidenceLead = useMemo(
-    () =>
-      buildNodeEvidenceLead({
-        totalNodeCount: nodes.length,
-        displayedNodeCount: sortedFilteredNodes.length,
-        abnormalNodeCount: displayedAbnormalNodeCount,
-        pendingOnboardingNodeCount: displayedPendingOnboardingNodeCount,
-        maintenanceOrPausedNodeCount: displayedMaintenanceOrPausedNodeCount,
-        hasActiveFilters,
-      }),
-    [
-      nodes.length,
-      sortedFilteredNodes.length,
-      displayedAbnormalNodeCount,
-      displayedPendingOnboardingNodeCount,
-      displayedMaintenanceOrPausedNodeCount,
-      hasActiveFilters,
-    ],
-  )
+  const healthOptions = ['正常', '关注', '告警', '严重']
+  const lifecycleOptions = ['待接入', '在用', '观察中', '不续费', '已退役']
+  const runStatusOptions = ['monitoring', 'paused', 'maintenance']
 
   async function executeBatchAction(action: string) {
     if (action === 'pause') {
@@ -581,86 +497,7 @@ export function NodesPage() {
     setSearchParams(new URLSearchParams(), { replace: true })
   }
 
-  function filterStateToSearchParams(state: NodeFilterState) {
-    const next = new URLSearchParams()
-    if (state.group) next.set('group', state.group)
-    if (state.region) next.set('region', state.region)
-    if (state.city) next.set('city', state.city)
-    if (state.provider) next.set('provider', state.provider)
-    if (state.lifecycle) next.set('lifecycle', state.lifecycle)
-    if (state.runStatus) next.set('run_status', state.runStatus)
-    if (state.health) next.set('health', state.health)
-    if (state.labels.length > 0) next.set('labels', state.labels.join(','))
-    if (state.abnormal) next.set('abnormal', '1')
-    if (state.onboardingPending) next.set('onboarding', 'pending')
-    return next
-  }
-
-  function updateDraftSingleFilter(
-    key: 'group' | 'region' | 'city' | 'provider' | 'lifecycle' | 'run_status' | 'health',
-    value: string | null,
-  ) {
-    setDraftFilterState((current) => ({
-      ...(current ?? filterState),
-      [key === 'run_status' ? 'runStatus' : key]: value,
-    }))
-  }
-
-  function updateDraftMultiFilter(key: 'labels', values: string[]) {
-    setDraftFilterState((current) => ({
-      ...(current ?? filterState),
-      [key]: values,
-    }))
-  }
-
-  function updateDraftAbnormalFilter(checked: boolean) {
-    setDraftFilterState((current) => ({
-      ...(current ?? filterState),
-      abnormal: checked,
-    }))
-  }
-
-  function updateDraftOnboardingFilter(checked: boolean) {
-    setDraftFilterState((current) => ({
-      ...(current ?? filterState),
-      onboardingPending: checked,
-    }))
-  }
-
-  function resetDraftFilters() {
-    const empty: NodeFilterState = {
-      group: null,
-      region: null,
-      city: null,
-      provider: null,
-      lifecycle: null,
-      runStatus: null,
-      health: null,
-      labels: [],
-      abnormal: false,
-      onboardingPending: false,
-    }
-    setDraftFilterState(empty)
-  }
-
-  function openFilterDrawer() {
-    setDraftFilterState(filterState)
-    setFilterDrawerOpen(true)
-  }
-
-  function closeFilterDrawer() {
-    setFilterDrawerOpen(false)
-    setDraftFilterState(null)
-  }
-
-  function applyDraftFilters() {
-    if (draftFilterState) {
-      setSearchParams(filterStateToSearchParams(draftFilterState), { replace: true })
-    }
-    closeFilterDrawer()
-  }
-
-  function applyQuickView(view: NodeQuickView) {
+  function applyQuickView(view: string) {
     setNodeListView(
       view === 'binding-conflict'
         ? 'binding-conflict'
@@ -678,36 +515,7 @@ export function NodesPage() {
     }, { replace: true })
   }
 
-  const activeQuickView: NodeQuickView = nodeListView === 'binding-conflict'
-    ? 'binding-conflict'
-    : nodeListView === 'runtime-attention'
-      ? 'runtime-attention'
-      : filterState.abnormal
-        ? 'abnormal'
-        : filterState.onboardingPending
-          ? 'onboarding'
-          : 'all'
-
-  const quickViewTabs = [
-    { value: 'all' as const, label: '全部', count: nodes.length },
-    { value: 'abnormal' as const, label: '异常', count: abnormalNodeCount },
-    { value: 'onboarding' as const, label: '待接入', count: pendingOnboardingNodeCount },
-    { value: 'runtime-attention' as const, label: '维护/暂停', count: maintenanceOrPausedNodeCount },
-    { value: 'binding-conflict' as const, label: '绑定异常', count: bindingConflictNodes.length },
-  ] satisfies Array<{ value: NodeQuickView; label: string; count: number }>
-
-  const fieldFilterCount = [
-    filterState.group,
-    filterState.region,
-    filterState.city,
-    filterState.provider,
-    filterState.lifecycle,
-    filterState.runStatus,
-    filterState.health,
-    filterState.labels.length > 0 ? 'labels' : null,
-  ].filter(Boolean).length
-
-  const batchPanelVisible = selectAll || batchPanelOpen || commandOpen || pendingBatchAction !== null || batchError !== null || batchSubmitting
+  const batchPanelVisible = selectAll || commandOpen || pendingBatchAction !== null || batchError !== null || batchSubmitting
 
   function toggleCompare(nodeId: string) {
     setCompareSet((current) => {
@@ -787,7 +595,7 @@ export function NodesPage() {
   }
 
   return (
-    <section className="page-stack nodes-page">
+    <div className="page-stack animate-in">
       <NodesHero
         totalNodeCount={nodes.length}
         abnormalNodeCount={abnormalNodeCount}
@@ -814,87 +622,17 @@ export function NodesPage() {
         onLabelInputChange={setLabelInput}
       />
 
-      <Drawer
-        open={filterDrawerOpen}
-        onClose={closeFilterDrawer}
-        title="节点高级筛选"
-        ariaLabel="节点高级筛选"
-      >
-        <div className="asset-filter-drawer nodes-filter-drawer">
-          <div className="nodes-filter-drawer__summary" aria-label="节点筛选上下文">
-            <span>当前 quick view</span>
-            <strong>
-              <MonoDigits>{sortedFilteredNodes.length}</MonoDigits> / <MonoDigits>{baseNodes.length}</MonoDigits> 个节点
-            </strong>
-            <small>完成后同步 URL。</small>
-          </div>
-          {draftFilterState ? (
-            <NodesFilterPanel
-              hasActiveFilters={Boolean(
-                draftFilterState.group ||
-                  draftFilterState.region ||
-                  draftFilterState.city ||
-                  draftFilterState.provider ||
-                  draftFilterState.lifecycle ||
-                  draftFilterState.runStatus ||
-                  draftFilterState.health ||
-                  draftFilterState.labels.length > 0 ||
-                  draftFilterState.abnormal ||
-                  draftFilterState.onboardingPending,
-              )}
-              filterState={draftFilterState}
-              groupOptions={groupOptions}
-              regionOptions={regionOptions}
-              cityOptions={cityOptions}
-              providerOptions={providerOptions}
-              labelOptions={labelOptions}
-              onClearAll={resetDraftFilters}
-              onSingleFilterChange={updateDraftSingleFilter}
-              onMultiFilterChange={updateDraftMultiFilter}
-              onAbnormalFilterChange={updateDraftAbnormalFilter}
-              onOnboardingFilterChange={updateDraftOnboardingFilter}
-            />
-          ) : null}
-          <div className="asset-filter-drawer__actions">
-            <Button variant="secondary" onClick={resetDraftFilters}>重置</Button>
-            <Button onClick={applyDraftFilters}>完成</Button>
-          </div>
-        </div>
-      </Drawer>
-
-      <div className="observability-list-frame observability-list-frame--nodes">
+      <div className="animate-in d2">
         <NodesToolbar
-          quickViewTabs={quickViewTabs}
-          activeQuickView={activeQuickView}
-          displayedCount={sortedFilteredNodes.length}
-          baseCount={baseNodes.length}
-          fieldFilterCount={fieldFilterCount}
-          hasActiveFilters={hasActiveFilters}
-          batchPanelOpen={batchPanelOpen}
-          showTrends={showTrends}
+          filterState={filterState}
+          healthOptions={healthOptions}
+          lifecycleOptions={lifecycleOptions}
+          runStatusOptions={runStatusOptions}
+          regionOptions={regionOptions}
+          providerOptions={providerOptions}
           compareSet={compareSet}
-          autoRefresh={autoRefresh}
-          onQuickViewChange={applyQuickView}
-          onOpenFilters={openFilterDrawer}
-          onToggleBatchPanel={() => setBatchPanelOpen((current) => !current)}
-          onShowTrendsChange={setShowTrends}
-          onAutoRefreshChange={setAutoRefresh}
-        />
-
-        <NodesSupportSurface
-          totalNodeCount={nodes.length}
-          displayedNodeCount={sortedFilteredNodes.length}
-          abnormalNodeCount={abnormalNodeCount}
-          pendingOnboardingNodeCount={pendingOnboardingNodeCount}
-          evidenceLead={evidenceLead}
-          topEvidence={topEvidence}
-          filterContext={filterContext}
-          hasActiveFilters={hasActiveFilters}
-          onAbnormalClick={() => setAbnormalFilter(abnormalNodeCount > 0)}
-          onOnboardingClick={() => setOnboardingFilter(pendingOnboardingNodeCount > 0)}
-          onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
-          onClearFilters={clearAllFilters}
-          onCreateClick={toggleCreateDrawer}
+          onFilterChange={updateSearchParam}
+          onAbnormalChange={(checked) => setAbnormalFilter(checked)}
         />
 
         <NodesListSection
@@ -902,7 +640,7 @@ export function NodesPage() {
           baseNodes={baseNodes}
           nodes={sortedFilteredNodes}
           columns={columns}
-          showTrends={showTrends}
+          showTrends={true}
           sortState={sortState}
           hasActiveFilters={hasActiveFilters}
           batchPanelVisible={batchPanelVisible}
@@ -938,6 +676,6 @@ export function NodesPage() {
           onCreateNode={toggleCreateDrawer}
         />
       </div>
-    </section>
+    </div>
   )
 }

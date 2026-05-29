@@ -102,26 +102,30 @@ export function parseLabels(value: string) {
 
 export function nodeRuntimeActions(
   node: NodeRecord,
-): Array<{ action: NodeRuntimeAction; label: string }> {
+): Array<{ action: NodeRuntimeAction; label: string; variant?: 'danger' }> {
+  const actions: Array<{ action: NodeRuntimeAction; label: string; variant?: 'danger' }> = []
+
   if (node.monitoring_status === '启用') {
-    return [
+    actions.push(
       { action: 'enter-maintenance', label: '进入维护' },
       { action: 'pause', label: '暂停监控' },
-    ]
-  }
-
-  if (node.monitoring_status === '维护中') {
-    return [
+    )
+  } else if (node.monitoring_status === '维护中') {
+    actions.push(
       { action: 'exit-maintenance', label: '退出维护' },
       { action: 'pause', label: '暂停监控' },
-    ]
+    )
+  } else if (node.monitoring_status === '暂停') {
+    actions.push({ action: 'resume', label: '恢复监控' })
   }
 
-  if (node.monitoring_status === '暂停') {
-    return [{ action: 'resume', label: '恢复监控' }]
+  if (node.lifecycle_status === '在用' || node.lifecycle_status === '观察中' || node.lifecycle_status === '不续费') {
+    actions.push({ action: 'retire', label: '退役', variant: 'danger' })
+  } else if (node.lifecycle_status === '已退役') {
+    actions.push({ action: 'restore-to-observing', label: '恢复观察' })
   }
 
-  return []
+  return actions
 }
 
 export function isBindingConflictNode(node: NodeRecord) {

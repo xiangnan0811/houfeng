@@ -1,14 +1,12 @@
 import type { FormEvent } from 'react'
 
-import { Button, Drawer, Tabs } from '../../components/atoms'
+import { Drawer, Tabs } from '../../components/atoms'
 import { FilterSelect, FilterToggle } from '../../components/filters'
 import type { StateChangeEventType } from '../../lib/types'
 import {
   ALLOWED_EVENT_TYPES,
-  ALLOWED_LIMITS,
-  DEFAULT_LIMIT,
   EVENT_TYPE_SELECT_OPTIONS,
-  LIMIT_SELECT_OPTIONS,
+  INCIDENT_CLASS_OPTIONS,
   OBJECT_TYPE_OPTIONS,
   SEVERITY_OPTIONS,
   TIME_RANGE_TABS,
@@ -85,15 +83,10 @@ export function EventsFilterDrawer({
             onChange={(value) => onFilterChange('event_type', isEventTypeValue(value) ? value : '')}
           />
           <FilterSelect
-            label="数量"
-            value={filters.limit}
-            options={LIMIT_SELECT_OPTIONS}
-            onChange={(value) =>
-              onFilterChange(
-                'limit',
-                value !== null && ALLOWED_LIMITS.has(value) ? value : String(DEFAULT_LIMIT),
-              )
-            }
+            label="异常类别"
+            value={filters.incident_class || null}
+            options={INCIDENT_CLASS_OPTIONS}
+            onChange={(value) => onFilterChange('incident_class', value ?? '')}
           />
           <FilterToggle
             label="仅看通知事件"
@@ -119,13 +112,33 @@ export function EventsFilterDrawer({
 
         <div className="events-filter-drawer__fields">
           <label className="events-filter-drawer__field">
+            <span className="events-filter-drawer__label">关键词</span>
+            <input
+              aria-label="关键词"
+              placeholder="搜索摘要或异常类别…"
+              value={filters.keyword}
+              onChange={(e) => onFilterChange('keyword', e.target.value)}
+            />
+          </label>
+
+          <label className="events-filter-drawer__field">
+            <span className="events-filter-drawer__label">标签</span>
+            <input
+              aria-label="标签"
+              placeholder="edge"
+              value={filters.label}
+              onChange={(e) => onFilterChange('label', e.target.value)}
+            />
+          </label>
+
+          <label className="events-filter-drawer__field">
             <span className="events-filter-drawer__label">开始时间</span>
             <input
               aria-label="开始时间"
               placeholder="2026-04-25T00:00:00Z"
               value={filters.created_from}
               disabled={!customRange}
-              onChange={(event) => onFilterChange('created_from', event.target.value)}
+              onChange={(e) => onFilterChange('created_from', e.target.value)}
             />
           </label>
 
@@ -136,41 +149,15 @@ export function EventsFilterDrawer({
               placeholder="2026-04-26T00:00:00Z"
               value={filters.created_to}
               disabled={!customRange}
-              onChange={(event) => onFilterChange('created_to', event.target.value)}
+              onChange={(e) => onFilterChange('created_to', e.target.value)}
             />
           </label>
-
-          <label className="events-filter-drawer__field">
-            <span className="events-filter-drawer__label">标签</span>
-            <input
-              aria-label="标签"
-              placeholder="edge"
-              value={filters.label}
-              onChange={(event) => onFilterChange('label', event.target.value)}
-            />
-          </label>
-
-          <div className="events-filter-drawer__field">
-            <span className="events-filter-drawer__label">包含补传事件</span>
-            <span className="events-filter-drawer__value">
-              {filters.include_backfilled ? '已包含' : '未包含'}
-            </span>
-            <span className="events-filter-drawer__hint">
-              {filters.include_backfilled ? '补传相关事件会进入列表' : '默认隐藏补传相关事件'}
-            </span>
-          </div>
         </div>
 
         <div className="events-filter-drawer__actions">
-          <Button type="submit" size="sm">
-            应用筛选
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onReset}>
-            重置筛选
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            关闭
-          </Button>
+          <button type="submit" className="btn sm primary">应用筛选</button>
+          <button type="button" className="btn sm secondary" onClick={onReset}>重置筛选</button>
+          <button type="button" className="btn sm ghost" onClick={onClose}>关闭</button>
         </div>
       </form>
     </Drawer>

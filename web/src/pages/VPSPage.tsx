@@ -2,20 +2,16 @@ import { type FormEvent, useEffect, useId, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
-  Badge,
   Button,
-  DataTable,
   Drawer,
   Input,
-  Hostname,
   MonoDigits,
   Tabs,
-  type DataTableColumn,
 } from '../components/atoms'
-import { FilterBar, FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
+import { FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createVPSAsset, listProviders, listSubscriptions, listVPSAssets } from '../lib/api'
-import { formatDate, formatMoney, formatOptional } from '../lib/format'
+import { formatDate, formatOptional } from '../lib/format'
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
@@ -29,10 +25,8 @@ import {
   type VPSUsageStatus,
 } from '../lib/types'
 import {
-  AssetLabels,
   LifecycleBadge,
   RenewalBadge,
-  UsageBadge,
 } from './assetPageBadges'
 import {
   buildVPSQualityIssues,
@@ -43,11 +37,8 @@ import {
   lifecycleLabel,
   parseLabels,
   renewalLabel,
-  renewalTimingLabel,
   selectPrimarySubscription,
   usageLabel,
-  vpsAccessLabel,
-  vpsLocationLabel,
   type AssetQualityIssue,
 } from './assetPageUtils'
 
@@ -336,75 +327,14 @@ function quickViewLabel(value: VPSQuickView): string {
   return '已归档'
 }
 
-function renderQualityIssues(issues: AssetQualityIssue[]) {
-  if (issues.length === 0) return <Badge tone="normal">资料完整</Badge>
-  return issues.map((issue) => (
-    <Badge key={issue.key} tone={issue.tone}>
-      {issue.label}
-    </Badge>
-  ))
-}
-
-function renderSubscriptionCell(row: InventoryRow) {
-  if (row.subscriptionEvidence === 'loading') {
-    return (
-      <div className="asset-subscription-cell asset-subscription-cell--unknown">
-        <strong>订阅读取中</strong>
-        <span>暂不判定缺订阅</span>
-      </div>
-    )
-  }
-
-  if (row.subscriptionEvidence === 'error') {
-    return (
-      <div className="asset-subscription-cell asset-subscription-cell--unknown">
-        <strong>订阅未知</strong>
-        <span>证据不可用</span>
-      </div>
-    )
-  }
-
-  if (!row.subscription) {
-    return (
-      <div className="asset-subscription-cell asset-subscription-cell--missing">
-        <strong>缺订阅</strong>
-        <span>无法核算续费</span>
-      </div>
-    )
-  }
-
+function renderRenewalDate(row: InventoryRow) {
+  if (row.subscriptionEvidence !== 'ready') return '—'
+  if (!row.subscription?.renew_at) return '—'
   const days = daysUntilDate(row.subscription.renew_at)
-  const autoRenewLabel = row.subscription.auto_renew_cancelled
-    ? '已取消自动续费'
-    : row.subscription.auto_renew
-      ? '自动续费'
-      : '手动续费'
-
-  return (
-    <div className="asset-subscription-cell">
-      <strong>{formatMoney(row.subscription.monthly_price, row.subscription.currency)}/月</strong>
-      <span>{row.subscription.renew_at ? `${formatDate(row.subscription.renew_at)} · ${renewalTimingLabel(days)}` : '续费日缺失'}</span>
-      <small>{autoRenewLabel}</small>
-    </div>
-  )
-}
-
-function subscriptionEvidenceLabel(status: SubscriptionEvidenceStatus, error: string | null): string {
-  if (status === 'loading') return '订阅读取中'
-  if (status === 'error') return error ? `订阅不可用：${error}` : '订阅不可用'
-  return '订阅已读取'
-}
-
-function subscriptionEvidenceShortLabel(status: SubscriptionEvidenceStatus): string {
-  if (status === 'loading') return '读取中'
-  if (status === 'error') return '不可用'
-  return '已读取'
-}
-
-function subscriptionEvidenceBoundaryText(status: SubscriptionEvidenceStatus): string {
-  if (status === 'ready') return '可判定缺订阅。'
-  if (status === 'loading') return '读取中，不判定。'
-  return '不可用，不判定。'
+  if (days != null && days <= 30) {
+    return <span className="text-warn">{formatDate(row.subscription.renew_at)}</span>
+  }
+  return formatDate(row.subscription.renew_at)
 }
 
 function providerName(providerID: string | null, providers: ProviderRecord[]): string {
@@ -512,16 +442,6 @@ export function VPSPage() {
   const unlinkedCount = inventoryRows.filter((row) => row.vps.active_node_link_count <= 0).length
   const missingFactsCount = inventoryRows.filter((row) => hasMissingVPSFacts(row.vps)).length
   const renewalDueCount = inventoryRows.filter((row) => row.renewalDue).length
-  const fieldFilterCount = [filters.provider_id, filters.lifecycle_status, filters.usage_status, filters.renewal_decision]
-    .filter(Boolean).length
-  const evidenceLabel = subscriptionEvidenceLabel(subscriptionEvidence, state.subscriptionsError)
-  const evidenceShortLabel = subscriptionEvidenceShortLabel(subscriptionEvidence)
-  const evidenceBoundaryText = subscriptionEvidenceBoundaryText(subscriptionEvidence)
-  const subscriptionQualityMeta = subscriptionEvidence === 'ready'
-    ? `缺订阅 ${missingSubscriptionCount}`
-    : subscriptionEvidence === 'loading'
-      ? '等待订阅证据'
-      : evidenceLabel
   const quickViews = [
     { value: 'all', label: '全部', count: inventoryRows.length },
     { value: 'renewal', label: '30天续费', count: renewalDueCount },
@@ -531,50 +451,6 @@ export function VPSPage() {
     { value: 'missing_facts', label: '缺信息', count: missingFactsCount },
     { value: 'archived', label: '已归档', count: inventoryRows.filter((row) => row.vps.lifecycle_status === 'archived').length },
   ] satisfies Array<{ value: VPSQuickView; label: string; count: number }>
-  const inventorySignals = [
-    {
-      label: '当前表格',
-      value: `${filteredRows.length} / ${inventoryRows.length}`,
-      meta: active ? '已应用筛选' : '全量库存',
-      tone: 'normal',
-    },
-    {
-      label: '续费 / 未评估',
-      value: `${renewalDueCount} / ${unreviewedCount}`,
-      meta: subscriptionEvidence === 'ready' ? '30 天续费与待判断' : '等待订阅证据',
-      tone: renewalDueCount + unreviewedCount > 0 ? 'alert' : 'normal',
-    },
-    {
-      label: '质量 / Node',
-      value: `${missingFactsCount} / ${unlinkedCount}`,
-      meta: subscriptionQualityMeta,
-      tone: subscriptionEvidence !== 'ready'
-        ? 'notice'
-        : missingFactsCount + unlinkedCount + missingSubscriptionCount > 0
-          ? 'alert'
-          : 'normal',
-    },
-  ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'notice' | 'alert' }>
-  const inventoryEmptyContent = (
-    <div className="asset-table-empty-state">
-      <strong>{active ? '当前筛选没有匹配 VPS' : '还没有录入 VPS 资产'}</strong>
-      <span>
-        {active
-          ? '清空筛选或新建 VPS。'
-          : '先录入 VPS。'}
-      </span>
-      <div className="asset-empty-actions">
-        {active ? (
-          <Button variant="secondary" size="sm" onClick={clearFilters}>
-            清空筛选
-          </Button>
-        ) : null}
-        <Button variant={active ? 'ghost' : 'secondary'} size="sm" onClick={openCreateDrawer}>
-          {state.vps.length === 0 ? '录入第一台 VPS' : '录入新 VPS'}
-        </Button>
-      </div>
-    </div>
-  )
 
   function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     const next = { ...filters, [key]: value }
@@ -628,213 +504,85 @@ export function VPSPage() {
       .finally(() => setCreateSubmitting(false))
   }
 
-  const columns: DataTableColumn<InventoryRow>[] = [
-    {
-      key: 'identity',
-      label: 'VPS',
-      width: '24%',
-      render: ({ vps }) => (
-        <div className="asset-table__identity">
-          <strong>{vps.display_name}</strong>
-          <Hostname truncate maxChars={28}>{vps.vps_id}</Hostname>
-          <small>{vpsAccessLabel(vps)}</small>
-        </div>
-      ),
-    },
-    {
-      key: 'provider',
-      label: '服务商 / 区域',
-      render: ({ vps }) => (
-        <div className="asset-table__stack">
-          <strong>{formatOptional(vps.provider_name)}</strong>
-          <span>{vpsLocationLabel(vps)}</span>
-          <small>{formatOptional(vps.product_name)}</small>
-        </div>
-      ),
-    },
-    {
-      key: 'subscription',
-      label: '订阅 / 续费',
-      render: (row) => renderSubscriptionCell(row),
-    },
-    {
-      key: 'decision',
-      label: '决策',
-      render: ({ vps }) => (
-        <span className="asset-status-stack">
-          <LifecycleBadge value={vps.lifecycle_status} />
-          <UsageBadge value={vps.usage_status} />
-          <RenewalBadge value={vps.renewal_decision} />
-        </span>
-      ),
-    },
-    {
-      key: 'observation',
-      label: '关联 / 质量',
-      render: ({ vps, qualityIssues }) => (
-        <div className="asset-quality-list">
-          <span className={['asset-quality-pill', vps.active_node_link_count <= 0 && 'asset-quality-pill--alert'].filter(Boolean).join(' ')}>
-            {vps.active_node_link_count > 0 ? (
-              <>
-                <MonoDigits>{vps.active_node_link_count}</MonoDigits> Node
-              </>
-            ) : (
-              '未关联 Node'
-            )}
-          </span>
-          <span className="asset-quality-list__badges">{renderQualityIssues(qualityIssues)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'labels',
-      label: '标签',
-      render: ({ vps }) => <AssetLabels labels={vps.labels} />,
-    },
-  ]
-
   return (
-    <div className="page-stack asset-page vps-page">
-      <section className="page-panel page-panel--inline">
+    <div className="animate-in">
+      <div className="page-header">
         <div>
-          <div className="page-panel__eyebrow">ASSET LEDGER</div>
-          <h1 className="page-panel__title">VPS</h1>
-          <p className="page-panel__description">库存核对：续费、订阅、Node、资料质量。</p>
+          <h1 className="page-title">VPS 资产</h1>
         </div>
-        <div className="page-panel__actions">
-          <Button onClick={openCreateDrawer}>
-            {state.vps.length === 0 ? '创建第一台 VPS' : '新建 VPS'}
-          </Button>
+        <div className="header-actions">
+          <button type="button" className="btn sm secondary" onClick={openFilterDrawer}>筛选</button>
+          <button type="button" className="btn sm primary" onClick={openCreateDrawer}>
+            {state.vps.length === 0 ? '创建第一台 VPS' : '导入'}
+          </button>
         </div>
-      </section>
+      </div>
 
-      <section className="page-panel vps-inventory-command">
-        <div className="section-heading">
-          <div>
-            <p className="section-heading__eyebrow">INVENTORY VIEWS</p>
-            <h2>库存核对</h2>
-          </div>
-          <span className="section-heading__meta">
-            <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台 VPS
-          </span>
-        </div>
-        <div className="vps-inventory-lens" aria-label="当前库存 lens">
-          <div className="vps-inventory-lens__summary">
-            <span>当前 lens</span>
-            <strong>{quickViewLabel(filters.view)}</strong>
-            <small>
-              <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台
-            </small>
-          </div>
-          <Tabs
-            items={quickViews}
-            value={filters.view}
-            onChange={(view) => setFilter('view', view)}
-            variant="pill"
-          />
-        </div>
-        <div className="vps-inventory-command__body">
-          <div className="vps-inventory-command__evidence" aria-label="库存证据状态">
-            <div className="vps-evidence-card" role="status">
-              <div className="vps-evidence-card__header">
-                <span>订阅证据</span>
-                <Badge tone={subscriptionEvidence === 'ready' ? 'normal' : 'notice'}>{evidenceShortLabel}</Badge>
-              </div>
-              <strong>{evidenceLabel}</strong>
-              <small>{evidenceBoundaryText}</small>
-            </div>
-            <div className="vps-inventory-focus" aria-label="VPS 盘点焦点">
-              {inventorySignals.map((item) => (
-                <article
-                  key={item.label}
-                  className={['vps-inventory-focus__item', `vps-inventory-focus__item--${item.tone}`].join(' ')}
-                >
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                  <small>{item.meta}</small>
-                </article>
-              ))}
-            </div>
-          </div>
-          <div className="vps-filter-context" aria-label="筛选状态">
-            <div className="vps-filter-context__header">
-              <div>
-                <span>字段筛选</span>
-                <strong>{fieldFilterCount > 0 ? `${fieldFilterCount} 项已应用` : '未应用字段筛选'}</strong>
-              </div>
-              <small>应用后生效</small>
-            </div>
-            <FilterBar
-              className="vps-filter-bar"
-              hasActiveFilters={active}
-              onClearAll={clearFilters}
-              activeChips={
-                <>
-                  {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
-                  {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
-                  {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
-                  {filters.usage_status && <FilterChip label={`用途: ${usageLabel(filters.usage_status)}`} onRemove={() => setFilter('usage_status', null)} />}
-                  {filters.renewal_decision && <FilterChip label={`续费: ${renewalLabel(filters.renewal_decision)}`} onRemove={() => setFilter('renewal_decision', null)} />}
-                </>
-              }
-            >
-              <div className="vps-filter-bar__summary">
-                <span>字段条件</span>
-              </div>
-              <Button variant="secondary" onClick={openFilterDrawer}>高级筛选</Button>
-            </FilterBar>
-          </div>
-        </div>
-        {subscriptionEvidence === 'error' && (
-          <p className="asset-operation-feedback asset-operation-feedback--notice vps-evidence-notice" role="status">
-            订阅不可用，不判定。{state.subscriptionsError}
-          </p>
-        )}
-      </section>
+      <div className="tabs animate-in">
+        <Tabs
+          items={quickViews}
+          value={filters.view}
+          onChange={(view) => setFilter('view', view)}
+          variant="pill"
+        />
+      </div>
 
-      <section className="page-panel page-panel--scroll-x vps-inventory-table-panel">
-        <div className="section-heading vps-inventory-table-panel__heading">
-          <div>
-            <p className="section-heading__eyebrow">VPS ASSETS · WORK AREA</p>
-            <h2>VPS 库存表</h2>
-            <p className="section-heading__description">
-              Lens「{quickViewLabel(filters.view)}」
-            </p>
-          </div>
-          <span className="section-heading__meta vps-inventory-table-panel__meta">
-            <span>显示 <MonoDigits>{filteredRows.length}</MonoDigits> / <MonoDigits>{inventoryRows.length}</MonoDigits> 台</span>
-            <span>订阅证据：{evidenceShortLabel}</span>
-            <span>字段筛选：{fieldFilterCount > 0 ? `${fieldFilterCount} 项` : '无'}</span>
-          </span>
+      {active && (
+        <div className="filter-bar animate-in d1">
+          {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
+          {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
+          {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
+          {filters.usage_status && <FilterChip label={`用途: ${usageLabel(filters.usage_status)}`} onRemove={() => setFilter('usage_status', null)} />}
+          {filters.renewal_decision && <FilterChip label={`续费: ${renewalLabel(filters.renewal_decision)}`} onRemove={() => setFilter('renewal_decision', null)} />}
+          <button type="button" className="filter-clear" onClick={clearFilters}>清除全部</button>
         </div>
+      )}
 
+      {subscriptionEvidence === 'error' && (
+        <p className="text-sm text-warn" role="status">
+          订阅不可用，不判定。{state.subscriptionsError}
+        </p>
+      )}
+
+      <div className="animate-in d2">
         {state.inventoryLoading ? (
-          <PageStateView
-            kind="loading"
-            title="正在加载 VPS…"
-            surface="empty"
-            compact
-          />
+          <PageStateView kind="loading" title="正在加载 VPS…" surface="empty" compact />
         ) : state.inventoryError ? (
-          <PageStateView
-            kind="error"
-            title="VPS 库存不可用"
-            description={state.inventoryError}
-            technicalSummary={state.inventoryError}
-            surface="empty"
-            compact
-          />
+          <PageStateView kind="error" title="VPS 库存不可用" description={state.inventoryError} technicalSummary={state.inventoryError} surface="empty" compact />
+        ) : filteredRows.length === 0 ? (
+          <div className="empty-state">
+            <strong>{active ? '当前筛选没有匹配 VPS' : '还没有录入 VPS 资产'}</strong>
+            <span>{active ? '清空筛选或新建 VPS。' : '先录入 VPS。'}</span>
+          </div>
         ) : (
-          <DataTable
-            className="asset-table vps-table vps-inventory-table"
-            columns={columns}
-            rows={filteredRows}
-            rowKey={(row) => row.vps.vps_id}
-            onRowClick={(row) => navigate(`/vps/${row.vps.vps_id}`)}
-            emptyContent={inventoryEmptyContent}
-          />
+          <table className="table">
+            <thead>
+              <tr>
+                <th>VPS</th>
+                <th>服务商</th>
+                <th>IP</th>
+                <th>生命周期</th>
+                <th>续费决策</th>
+                <th>到期</th>
+                <th>关联节点</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRows.map((row) => (
+                <tr key={row.vps.vps_id} onClick={() => navigate(`/vps/${row.vps.vps_id}`)} className="row-clickable">
+                  <td className="name">{row.vps.display_name}</td>
+                  <td>{formatOptional(row.vps.provider_name)}</td>
+                  <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>
+                  <td><LifecycleBadge value={row.vps.lifecycle_status} /></td>
+                  <td><RenewalBadge value={row.vps.renewal_decision} /></td>
+                  <td className="time">{renderRenewalDate(row)}</td>
+                  <td>{row.vps.active_node_link_count > 0 ? <MonoDigits>{row.vps.active_node_link_count}</MonoDigits> : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
-      </section>
+      </div>
 
       <Drawer
         open={createOpen}

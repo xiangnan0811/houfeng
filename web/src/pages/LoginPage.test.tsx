@@ -50,14 +50,11 @@ describe('LoginPage', () => {
 
     renderLogin()
 
-    expect(screen.getByText('候风')).toBeInTheDocument()
-    expect(screen.getByLabelText('HOUFENG Fleet Control Plane')).toBeInTheDocument()
-    expect(screen.getByText('察变 · 守望')).toBeInTheDocument()
-    expect(screen.getByText('中心会话认证 · Agent 仅出站同步')).toBeInTheDocument()
+    expect(screen.getByText('候风控制面板')).toBeInTheDocument()
+    expect(screen.getByText('Fleet Control Plane')).toBeInTheDocument()
 
     const submitButton = screen.getByRole('button', { name: '登录' })
-    expect(submitButton).toHaveClass('btn--primary')
-    expect(submitButton).toHaveClass('btn--lg')
+    expect(submitButton).toHaveClass('lc-btn')
 
     expect(screen.queryByText(/v1\.0|单用户|全权限|个人系统|SaaS|企业级|生产就绪|Docker|Kubernetes|真实库存验证完成/)).toBeNull()
   })

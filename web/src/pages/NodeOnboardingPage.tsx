@@ -11,6 +11,7 @@ import {
 } from '../components/atoms'
 import { ActionConfirmationCard } from '../components/ActionConfirmationCard'
 import { DetailSection } from '../components/DetailSection'
+import { PageState } from '../components/PageState'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   ApiError,
@@ -204,7 +205,7 @@ function CopyButton({
   return (
     <button
       type="button"
-      className={`btn btn--ghost btn--${size}`}
+      className={`btn ${size} ghost`}
       onClick={() => {
         void copy(value)
       }}
@@ -249,7 +250,7 @@ function OnboardingPriorityCard({ work }: { work: OnboardingPrimaryWork }) {
         <h2>{work.title}</h2>
         <p>{work.description}</p>
       </div>
-      <Link className="btn btn--primary btn--md" to={work.actionTo}>
+      <Link className="btn md primary" to={work.actionTo}>
         {work.actionLabel}
       </Link>
     </section>
@@ -298,14 +299,14 @@ function InstallCommandPanel({
         <div className="onboarding-token__actions">
           <button
             type="button"
-            className="btn btn--primary btn--md"
+            className="btn md primary"
             disabled={busy}
             onClick={onGenerate}
           >
             {busy ? '正在生成…' : primaryLabel}
           </button>
           {issue && hidden ? (
-            <button type="button" className="btn btn--ghost btn--md" onClick={onReveal}>
+            <button type="button" className="btn md ghost" onClick={onReveal}>
               重新展开命令
             </button>
           ) : null}
@@ -362,7 +363,7 @@ function InstallCommandPanel({
           <div className="onboarding-token__actions">
             <button
               type="button"
-              className="btn btn--secondary btn--sm"
+              className="btn sm secondary"
               onClick={onHide}
               aria-label="隐藏安装命令"
             >
@@ -464,19 +465,17 @@ export function NodeOnboardingPage() {
   const error = state.requestedNodeId === nodeId ? state.error : null
 
   if (nodeId && state.requestedNodeId !== nodeId) {
-    return <section className="page-panel">正在加载节点接入状态…</section>
+    return <PageState kind="loading" title="正在加载节点接入状态…" />
   }
 
   if (!nodeId || error || !onboarding) {
     return (
-      <section className="page-panel">
-        <p className="page-panel__eyebrow">节点接入</p>
-        <h2 className="page-panel__title">节点接入工作台不可用</h2>
-        <p className="page-panel__description">{error ?? '未找到节点'}</p>
-        <Link className="text-link" to="/nodes">
-          返回节点列表
-        </Link>
-      </section>
+      <PageState
+        kind="error"
+        title="节点接入工作台不可用"
+        description={error ?? '未找到节点'}
+        action={<Link className="btn sm secondary" to="/nodes">返回节点列表</Link>}
+      />
     )
   }
 
@@ -681,7 +680,7 @@ export function NodeOnboardingPage() {
               <div className="badge-row">
                 <button
                   type="button"
-                  className="btn btn--secondary btn--sm"
+                  className="btn sm secondary"
                   disabled={conflictState.action !== null}
                   onClick={() => setPendingConflictChoice('confirm')}
                 >
@@ -689,7 +688,7 @@ export function NodeOnboardingPage() {
                 </button>
                 <button
                   type="button"
-                  className="btn btn--secondary btn--sm"
+                  className="btn sm secondary"
                   disabled={conflictState.action !== null}
                   onClick={() => setPendingConflictChoice('reject')}
                 >
@@ -697,7 +696,7 @@ export function NodeOnboardingPage() {
                 </button>
                 <button
                   type="button"
-                  className="btn btn--secondary btn--sm"
+                  className="btn sm secondary"
                   disabled={conflictState.action !== null}
                   onClick={() => setPendingConflictChoice('reset')}
                 >

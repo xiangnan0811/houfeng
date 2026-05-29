@@ -35,7 +35,10 @@ export function resolveScheme(mode: Mode): Scheme {
 
 export function applyTheme(preset: Preset, mode: Mode | Scheme): void {
   const scheme: Scheme = mode === 'system' ? preferredScheme() : (mode as Scheme)
-  const cls = `theme-${preset}-${scheme}`
+  // classic-light falls back to houfeng-light since we only have 3 themes
+  const cls = preset === 'classic' && scheme === 'light'
+    ? 'theme-houfeng-light'
+    : `theme-${preset}-${scheme}`
   const html = document.documentElement
   for (const c of Array.from(html.classList)) {
     if (c.startsWith('theme-')) html.classList.remove(c)

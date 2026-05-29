@@ -1,11 +1,6 @@
-import { DetailSection } from '../../components/DetailSection'
-import type { SettingsFormState } from './types'
-import { SectionIntro } from './SectionIntro'
+import { useState } from 'react'
 
-const TARGET_TYPE_OPTIONS = [
-  { value: 'service', label: 'service' },
-  { value: 'china_reference', label: 'china_reference' },
-] as const
+import type { SettingsFormState } from './types'
 
 type OverrideRulesForm = Pick<
   SettingsFormState,
@@ -24,68 +19,74 @@ type OverrideTextareaProps = {
 }
 
 function OverrideTextarea({ ariaLabel, value, onChange }: OverrideTextareaProps) {
-  let previewContent: string | null = null
-  if (value.trim()) {
+  const [error, setError] = useState<string | null>(null)
+
+  function handleChange(newValue: string) {
+    onChange(newValue)
+    if (newValue.trim() === '' || newValue.trim() === '[]') {
+      setError(null)
+      return
+    }
     try {
-      previewContent = JSON.stringify(JSON.parse(value), null, 2)
+      const parsed = JSON.parse(newValue)
+      if (!Array.isArray(parsed)) {
+        setError('必须是 JSON 数组')
+      } else {
+        setError(null)
+      }
     } catch {
-      previewContent = null
+      setError('JSON 格式无效')
+    }
+  }
+
+  function handleFormat() {
+    try {
+      const parsed = JSON.parse(value)
+      onChange(JSON.stringify(parsed, null, 2))
+      setError(null)
+    } catch {
+      setError('无法格式化：JSON 格式无效')
     }
   }
 
   return (
-    <div className="input-field override-rule-field">
-      <label className="input-field__label">{ariaLabel}</label>
-      <div className="input-field__shell">
-        <textarea
-          aria-label={ariaLabel}
-          className="input mono override-rule-field__textarea"
-          rows={10}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
+    <div className="settings-row settings-row--block">
+      <div className="sr-label-row">
+        <span className="sr-label">{ariaLabel}</span>
+        <button type="button" className="btn sm ghost" onClick={handleFormat}>格式化</button>
       </div>
-      {previewContent ? (
-        <details className="override-rule-preview">
-          <summary>预览</summary>
-          <pre><code>{previewContent}</code></pre>
-        </details>
-      ) : null}
+      <textarea
+        aria-label={ariaLabel}
+        className={`input mono input--compact override-textarea${error ? ' input--error' : ''}`}
+        rows={6}
+        value={value}
+        onChange={(event) => handleChange(event.target.value)}
+      />
+      {error && <p className="override-error">{error}</p>}
     </div>
-  )
-}
-
-function TargetTypeSummary() {
-  return (
-    <p className="empty-inline">
-      允许的目标类型选择器：{TARGET_TYPE_OPTIONS.map((option) => option.value).join('、')}。
-    </p>
   )
 }
 
 export function OverrideRulesSection({ form, onChange }: OverrideRulesSectionProps) {
   return (
-    <DetailSection eyebrow="覆盖规则" title="少量覆盖规则" ribbon="notice" aside={<TargetTypeSummary />}>
-      <SectionIntro>
-        仅保留节点标签、目标类型、目标标签三类结构化覆盖，不扩展为通用规则引擎。当前频率相关覆盖已接入实时规划链；异常默认覆盖仍仅作为持久化策略保存，并在页尾统一提交前校验 JSON 数组。
-      </SectionIntro>
-      <div className="settings-cluster">
-        <OverrideTextarea
-          ariaLabel="节点标签覆盖规则 JSON"
-          value={form.nodeLabelOverridesText}
-          onChange={(value) => onChange({ nodeLabelOverridesText: value })}
-        />
-        <OverrideTextarea
-          ariaLabel="目标类型覆盖规则 JSON"
-          value={form.targetTypeOverridesText}
-          onChange={(value) => onChange({ targetTypeOverridesText: value })}
-        />
-        <OverrideTextarea
-          ariaLabel="目标标签覆盖规则 JSON"
-          value={form.targetLabelOverridesText}
-          onChange={(value) => onChange({ targetLabelOverridesText: value })}
-        />
-      </div>
-    </DetailSection>
+    <>
+      <div className="ss-title">覆盖规则</div>
+      <div className="ss-desc">节点标签、目标类型、目标标签结构化覆盖</div>
+      <OverrideTextarea
+        ariaLabel="节点标签覆盖规则 JSON"
+        value={form.nodeLabelOverridesText}
+        onChange={(value) => onChange({ nodeLabelOverridesText: value })}
+      />
+      <OverrideTextarea
+        ariaLabel="目标类型覆盖规则 JSON"
+        value={form.targetTypeOverridesText}
+        onChange={(value) => onChange({ targetTypeOverridesText: value })}
+      />
+      <OverrideTextarea
+        ariaLabel="目标标签覆盖规则 JSON"
+        value={form.targetLabelOverridesText}
+        onChange={(value) => onChange({ targetLabelOverridesText: value })}
+      />
+    </>
   )
 }

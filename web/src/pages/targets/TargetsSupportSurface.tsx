@@ -95,7 +95,7 @@ export function TargetsSupportSurface({
         filterAriaLabel="当前入口证据筛选"
         action={
           evidenceLead.actionKind === 'asset' ? (
-            <Link className="btn btn--secondary btn--md" to="/asset-decisions">
+            <Link className="btn md secondary" to="/asset-decisions">
               {evidenceLead.actionLabel}
             </Link>
           ) : (
@@ -222,7 +222,7 @@ export function TargetsSupportSurface({
               </>
             }
             action={
-              <Link className="btn btn--ghost btn--sm" to={topEvidence.route}>
+              <Link className="btn sm ghost" to={topEvidence.route}>
                 {topEvidence.actionLabel}
               </Link>
             }
@@ -236,7 +236,7 @@ export function TargetsSupportSurface({
             description="当前列表没有异常入口、暂停归档对象或执行覆盖缺口。"
             meta="继续从 VPS 台账和资产决策队列核对资产侧事实。"
             action={
-              <Link className="btn btn--ghost btn--sm" to="/asset-decisions">
+              <Link className="btn sm ghost" to="/asset-decisions">
                 查看资产决策
               </Link>
             }

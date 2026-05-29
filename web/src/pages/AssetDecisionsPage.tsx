@@ -6,25 +6,23 @@ import {
   AssetDecisionWorkPanel,
   type AssetDecisionDraft,
 } from '../components/AssetDecisionWorkPanel'
-import { Badge, Button, Drawer, Hostname, MonoDigits, Tabs } from '../components/atoms'
+import { Drawer, MonoDigits, Tabs } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, listSubscriptions, listVPSAssets, updateVPSAsset } from '../lib/api'
-import { formatDate, formatMoney, formatOptional } from '../lib/format'
+import { formatMoney, formatOptional } from '../lib/format'
 import {
   type VPSAssetRecord,
   type VPSRenewalDecision,
   type SubscriptionRecord,
 } from '../lib/types'
-import { LifecycleBadge, RenewalBadge, UsageBadge } from './assetPageBadges'
+import { RenewalBadge } from './assetPageBadges'
 import {
   buildVPSQualityIssues,
   daysUntilDate,
   groupSubscriptionsByVPS,
   isSubscriptionInRenewalWindow,
   renewalLabel,
-  renewalTimingLabel,
   selectPrimarySubscription,
-  vpsAccessLabel,
   vpsLocationLabel,
   type AssetQualityIssue,
 } from './assetPageUtils'
@@ -76,12 +74,6 @@ const INITIAL_PAGE_STATE: PageState = {
   migrate: [],
   cancel: [],
 }
-const QUEUE_CONTEXT_ITEMS = [
-  '续费 / 未评估 / 迁移取消 / Node / 订阅排序',
-  '订阅读取失败 ≠ 缺订阅',
-  'Node 只显示数量',
-  'Drawer 处理',
-]
 
 function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message
@@ -114,7 +106,6 @@ function updateDecisionQueues(
 function renewalQueueLabel(value: VPSRenewalDecision): string {
   return DECISION_QUEUE_VALUES.includes(value) ? renewalLabel(value) : '已处理'
 }
-
 function buildDecisionQueue(
   vpsRows: VPSAssetRecord[],
   subscriptionsByVPS: Map<string, SubscriptionRecord[]>,
@@ -170,153 +161,6 @@ function filterDecisionQueue(
   if (view === 'missing_subscription') return rows.filter((row) => !row.subscription)
   return rows.filter((row) => row.vps.renewal_decision === view)
 }
-
-function queueRowClass(item: DecisionQueueItem): string {
-  if (!item.subscription || (item.renewalDue && item.vps.renewal_decision === 'unreviewed')) {
-    return 'asset-decision-row--critical'
-  }
-  if (
-    item.renewalDue ||
-    item.vps.renewal_decision === 'migrate' ||
-    item.vps.renewal_decision === 'cancel' ||
-    item.vps.active_node_link_count <= 0
-  ) {
-    return 'asset-decision-row--alert'
-  }
-  return 'asset-decision-row--notice'
-}
-
-function queueReasonLabel(item: DecisionQueueItem): string {
-  if (item.vps.renewal_decision === 'unreviewed' && item.renewalDue) return '续费待评估'
-  if (item.vps.renewal_decision === 'unreviewed') return '待评估'
-  if (item.vps.renewal_decision === 'migrate') return '待迁移'
-  if (item.vps.renewal_decision === 'cancel') return '待取消'
-  if (item.renewalDue) return '续费窗口'
-  return '核对'
-}
-
-function renderQualityIssues(issues: AssetQualityIssue[]) {
-  if (issues.length === 0) {
-    return <Badge tone="normal">资料完整</Badge>
-  }
-
-  return issues.map((issue) => (
-    <Badge key={issue.key} tone={issue.tone}>
-      {issue.label}
-    </Badge>
-  ))
-}
-
-function renderSubscriptionSignal(subscription: SubscriptionRecord | null) {
-  if (!subscription) {
-    return (
-      <div className="asset-decision-signal asset-decision-signal--critical">
-        <span>订阅</span>
-        <strong>缺订阅</strong>
-        <small>成本未知</small>
-      </div>
-    )
-  }
-
-  const days = daysUntilDate(subscription.renew_at)
-  const renewalMeta = subscription.renew_at
-    ? `${formatDate(subscription.renew_at)} · ${renewalTimingLabel(days)}`
-    : '续费日缺失'
-  const autoRenewLabel = subscription.auto_renew_cancelled
-    ? '已取消自动续费'
-    : subscription.auto_renew
-      ? '自动续费'
-      : '手动续费'
-
-  return (
-    <div className="asset-decision-signal">
-      <span>订阅</span>
-      <strong>{formatMoney(subscription.monthly_price, subscription.currency)}/月</strong>
-      <small>{renewalMeta}</small>
-      <Badge tone={subscription.auto_renew_cancelled ? 'alert' : 'neutral'}>{autoRenewLabel}</Badge>
-    </div>
-  )
-}
-
-function renderDecisionQueueItem(
-  item: DecisionQueueItem,
-  index: number,
-  onSelect: (vps: VPSAssetRecord) => void,
-  onNavigate: (vps: VPSAssetRecord) => void,
-) {
-  const vps = item.vps
-  return (
-    <li
-      className={['asset-decision-row', 'asset-decision-row--clickable', queueRowClass(item)].join(' ')}
-      key={vps.vps_id}
-      onClick={() => onNavigate(vps)}
-      aria-label={`查看 ${vps.display_name} 详情`}
-    >
-      <div className="asset-decision-row__rank">
-        <strong>P{index + 1}</strong>
-        <span>{queueReasonLabel(item)}</span>
-        <small>P{index + 1}</small>
-      </div>
-      <div className="asset-decision-row__main">
-        <div className="asset-decision-row__title">
-          <strong>{vps.display_name}</strong>
-          <Hostname truncate maxChars={28}>{vps.vps_id}</Hostname>
-        </div>
-        <div className="asset-decision-row__meta">
-          <span>{formatOptional(vps.provider_name)}</span>
-          <span>{vpsLocationLabel(vps)}</span>
-          <span>{vpsAccessLabel(vps)}</span>
-        </div>
-        <div className="asset-status-stack">
-          <LifecycleBadge value={vps.lifecycle_status} />
-          <UsageBadge value={vps.usage_status} />
-          <RenewalBadge value={vps.renewal_decision} />
-        </div>
-      </div>
-      <div className="asset-decision-row__signals">
-        {renderSubscriptionSignal(item.subscription)}
-        <div className={['asset-decision-signal', vps.active_node_link_count <= 0 && 'asset-decision-signal--alert'].filter(Boolean).join(' ')}>
-          <span>Node</span>
-          <strong>
-            {vps.active_node_link_count > 0 ? (
-              <>
-                <MonoDigits>{vps.active_node_link_count}</MonoDigits> 已关联
-              </>
-            ) : (
-              '未关联'
-            )}
-          </strong>
-          <small>数量</small>
-        </div>
-        <div className="asset-decision-quality" aria-label={`${vps.display_name} 数据质量`}>
-          {renderQualityIssues(item.qualityIssues)}
-        </div>
-      </div>
-      <div className="asset-decision-actions">
-        <Link
-          className="text-link"
-          to={`/vps/${vps.vps_id}`}
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          详情
-        </Link>
-        <Button
-          size="sm"
-          variant="primary"
-          aria-label={`处理 ${vps.vps_id}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onSelect(vps)
-          }}
-        >
-          处理
-        </Button>
-      </div>
-    </li>
-  )
-}
-
 export function AssetDecisionsPage() {
   const navigate = useNavigate()
   const [renewalWindow, setRenewalWindow] = useState<RenewalWindow>(30)
@@ -330,7 +174,6 @@ export function AssetDecisionsPage() {
 
   useEffect(() => {
     let cancelled = false
-
     listSubscriptions({
       renew_within_days: renewalWindow,
       sort: 'renew_at',
@@ -354,10 +197,7 @@ export function AssetDecisionsPage() {
           renewals: [],
         }))
       })
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [renewalWindow])
 
   useEffect(() => {
@@ -392,12 +232,8 @@ export function AssetDecisionsPage() {
           cancel: [],
         }))
       })
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
-
   const subscriptionsByVPS = useMemo(
     () => groupSubscriptionsByVPS(state.subscriptions),
     [state.subscriptions],
@@ -426,18 +262,8 @@ export function AssetDecisionsPage() {
   const priorityDecisionCount = decisionQueue.filter(
     (item) => item.renewalDue && item.vps.renewal_decision === 'unreviewed',
   ).length
-  const qualityGapCount = decisionQueue.filter((item) => item.qualityIssues.length > 0).length
-  const lifecycleActionCount = state.migrate.length + state.cancel.length
   const totalDecisionQueue = decisionQueue.length
-  const evidenceUnavailable = state.vpsError != null
-  const queueCountLabel = state.vpsLoading ? '读取中' : evidenceUnavailable ? '不可用' : (
-    <><MonoDigits>{visibleDecisionQueue.length}</MonoDigits> / <MonoDigits>{totalDecisionQueue}</MonoDigits> 台 VPS</>
-  )
-  const renewalEvidenceLabel = state.renewalsLoading
-    ? '读取中'
-    : state.renewalsError
-      ? '不可用'
-      : <><MonoDigits>{state.renewals.length}</MonoDigits> 条订阅进入 {renewalWindow} 天窗口</>
+
   const queueTabs = [
     { value: 'all', label: '全部', count: totalDecisionQueue },
     { value: 'unreviewed', label: '待评估', count: state.unreviewed.length },
@@ -447,29 +273,6 @@ export function AssetDecisionsPage() {
     { value: 'unlinked', label: '未关联', count: unlinkedCount },
     { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
   ] satisfies Array<{ value: DecisionQueueView; label: string; count: number }>
-  const focusItems = [
-    {
-      label: '优先处理',
-      value: `${priorityDecisionCount}`,
-      meta: `${renewalWindow} 天 + 未评估`,
-      tone: priorityDecisionCount > 0 ? 'critical' : 'normal',
-    },
-    {
-      label: '证据缺口',
-      value: evidenceUnavailable ? '—' : `${qualityGapCount}`,
-      meta: evidenceUnavailable
-        ? '证据失败，缺口未评估'
-        : `缺订阅 ${missingSubscriptionCount} / 未关联 ${unlinkedCount}`,
-      tone: qualityGapCount > 0 ? 'alert' : 'normal',
-    },
-    {
-      label: 'Drawer 处理',
-      value: `${lifecycleActionCount}`,
-      meta: `迁移 ${state.migrate.length} / 取消 ${state.cancel.length}`,
-      tone: lifecycleActionCount > 0 ? 'alert' : 'normal',
-    },
-  ] satisfies Array<{ label: string; value: string; meta: string; tone: 'normal' | 'alert' | 'critical' }>
-
   function selectVPS(vps: VPSAssetRecord) {
     setSelectedVPS(vps)
     setDecisionDraft({ renewalDecision: vps.renewal_decision, reason: '' })
@@ -534,158 +337,62 @@ export function AssetDecisionsPage() {
       })
       .finally(() => setDecisionSubmitting(false))
   }
-
-  const queueEmptyAction = (
-    <div className="asset-empty-actions">
-      {queueView !== 'all' ? (
-        <Button variant="secondary" size="sm" onClick={() => setQueueView('all')}>
-          查看全部队列
-        </Button>
-      ) : null}
-      <Link className="btn btn--ghost btn--sm" to="/vps">
-        核对 VPS 库存
-      </Link>
-      <Link className="btn btn--ghost btn--sm" to="/subscriptions">
-        补充订阅证据
-      </Link>
-    </div>
-  )
-
   return (
-    <div className="page-stack asset-page asset-decisions-page">
-      <section className="page-panel page-panel--inline">
+    <div className="animate-in">
+      <div className="page-header">
         <div>
-          <div className="page-panel__eyebrow">ASSET LEDGER</div>
-          <h1 className="page-panel__title">资产决策</h1>
-          <p className="page-panel__description">续费 / 迁移 / 取消 / 缺口。</p>
+          <h1 className="page-title">资产决策</h1>
+          <p className="page-sub">续费窗口与待评估资产</p>
         </div>
-        <div className="page-panel__actions">
-          <Link className="btn btn--ghost btn--md" to="/vps">VPS 库存</Link>
-          <Link className="btn btn--ghost btn--md" to="/subscriptions">订阅列表</Link>
+        <div className="header-actions">
+          <Link className="btn md secondary" to="/vps">VPS 库存</Link>
+          <Link className="btn md secondary" to="/subscriptions">订阅列表</Link>
         </div>
-      </section>
+      </div>
 
-      <section className="page-panel asset-decision-board" aria-label="资产决策工作队列">
-        <div className="asset-decision-board__header">
-          <div>
-            <p className="section-heading__eyebrow">DECISION QUEUE</p>
-            <h2>资产决策工作队列</h2>
-            <p>证据排序。</p>
-            <details className="asset-decision-board__context" aria-label="队列证据边界">
-              <summary>证据边界</summary>
-              <ul>
-                {QUEUE_CONTEXT_ITEMS.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </details>
-            <dl className="asset-decision-board__summary" aria-label="资产决策指标">
-              <div>
-                <dt>当前视图 / 全部</dt>
-                <dd>{queueCountLabel}</dd>
-              </div>
-              <div>
-                <dt>续费窗口证据</dt>
-                <dd>{renewalEvidenceLabel}</dd>
-              </div>
-              <div>
-                <dt>证据缺口</dt>
-                <dd>
-                  {evidenceUnavailable ? (
-                    '证据失败，缺口未评估'
-                  ) : (
-                    <>缺订阅 <MonoDigits>{missingSubscriptionCount}</MonoDigits> / 未关联 <MonoDigits>{unlinkedCount}</MonoDigits></>
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt>迁移 / 取消</dt>
-                <dd><MonoDigits>{state.migrate.length}</MonoDigits> / <MonoDigits>{state.cancel.length}</MonoDigits></dd>
-              </div>
-            </dl>
-          </div>
-          <div className="asset-decision-board__tools">
-            <label className="asset-decision-window">
-              <span>续费窗口</span>
-              <select
-                className="input"
-                value={String(renewalWindow)}
-                onChange={(event) => changeRenewalWindow(event.target.value)}
-              >
-                {RENEWAL_WINDOWS.map((value) => (
-                  <option key={value} value={value}>未来 {value} 天</option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-        <div className="asset-decision-tabs" aria-label="队列筛选上下文">
-          <Tabs items={queueTabs} value={queueView} onChange={setQueueView} variant="pill" />
-        </div>
-        <div className="asset-decision-focus" aria-label="资产决策处理焦点">
-          {focusItems.map((item) => (
-            <article
-              key={item.label}
-              className={['asset-decision-focus__item', `asset-decision-focus__item--${item.tone}`].join(' ')}
-            >
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-              <small>{item.meta}</small>
-            </article>
-          ))}
-        </div>
-        {decisionNotice && <p className="asset-operation-feedback" role="status">{decisionNotice}</p>}
-        {state.vpsLoading ? (
-          <PageStateView
-            kind="loading"
-            title="正在加载 VPS 决策队列…"
-            surface="empty"
-            compact
-          />
-        ) : state.vpsError ? (
-          <PageStateView
-            kind="error"
-            title="资产决策队列不可用"
-            description={(
-              <>
-                {state.vpsError}。缺口未评估，请重试。
-              </>
-            )}
-            technicalSummary={state.vpsError}
-            action={(
-              <Link className="btn btn--ghost btn--sm" to="/subscriptions">
-                查看订阅列表
-              </Link>
-            )}
-            surface="empty"
-            compact
-          />
-        ) : visibleDecisionQueue.length === 0 ? (
-          <PageStateView
-            kind="empty"
-            title="当前视图暂无待处理 VPS"
-            description="这组队列暂无待处理资产。可回到全部、库存或订阅。"
-            action={queueEmptyAction}
-            surface="empty"
-            compact
-          />
-        ) : (
-          <ol className="asset-decision-queue" aria-label="资产决策队列列表">
-            {visibleDecisionQueue.map((item, index) =>
-              renderDecisionQueueItem(item, index, selectVPS, navigateToVPS),
-            )}
-          </ol>
-        )}
-      </section>
+      {decisionNotice && (
+        <div className="inline-alert ok" role="status">{decisionNotice}</div>
+      )}
 
-      <section className="page-panel page-panel--scroll-x asset-renewal-evidence">
-        <div className="section-heading">
-          <div>
-            <p className="section-heading__eyebrow">RENEWAL EVIDENCE</p>
-            <h2>续费候选证据</h2>
+      <div className="section-grid animate-in d1">
+        <div className="card">
+          <div className="section-title">
+            优先处理{' '}
+            <span className={`section-count${priorityDecisionCount > 0 ? ' section-count--warn' : ''}`}>
+              {priorityDecisionCount}
+            </span>
           </div>
-          <span className="section-heading__meta">
-            {renewalEvidenceLabel}
+          <p className="text-sm text-muted">
+            {renewalWindow} 天续费窗口 + 未评估
+          </p>
+        </div>
+        <div className="card">
+          <div className="section-title">
+            缺口{' '}
+            <span className="section-count">
+              缺订阅 {missingSubscriptionCount} / 未关联 {unlinkedCount}
+            </span>
+          </div>
+          <p className="text-sm text-muted">
+            迁移 {state.migrate.length} / 取消 {state.cancel.length}
+          </p>
+        </div>
+      </div>
+
+      <div className="card animate-in d2 mb-5">
+        <div className="section-title flex-row gap-2">
+          续费窗口{' '}
+          <select
+            className="input filter-select--inline"
+            value={String(renewalWindow)}
+            onChange={(event) => changeRenewalWindow(event.target.value)}
+          >
+            {RENEWAL_WINDOWS.map((value) => (
+              <option key={value} value={value}>未来 {value} 天</option>
+            ))}
+          </select>
+          <span className={`section-count${state.renewals.length > 0 ? ' section-count--warn' : ''}`}>
+            {state.renewalsLoading ? '...' : state.renewalsError ? '不可用' : `${state.renewals.length} 条`}
           </span>
         </div>
         <AssetDecisionRenewalTable
@@ -694,18 +401,127 @@ export function AssetDecisionsPage() {
           renewals={state.renewals}
           vpsByID={vpsByID}
           renderVPSReference={(subscription, vps) => (
-            <Link className="text-link" to={`/vps/${subscription.vps_id}`}>
+            <Link className="name" to={`/vps/${subscription.vps_id}`}>
               {vps?.display_name ?? subscription.vps_id}
             </Link>
           )}
           renderActions={(subscription) => (
-            <span className="asset-decision-actions">
-              <Link className="text-link" to={`/vps/${subscription.vps_id}`}>VPS</Link>
-              <Link className="text-link" to={`/subscriptions?vps_id=${subscription.vps_id}&renew_within_days=${renewalWindow}`}>订阅</Link>
-            </span>
+            <>
+              <Link className="btn-text sm secondary" to={`/vps/${subscription.vps_id}`}>VPS</Link>
+              <Link className="btn-text sm secondary" to={`/subscriptions?vps_id=${subscription.vps_id}&renew_within_days=${renewalWindow}`}>订阅</Link>
+            </>
           )}
         />
-      </section>
+      </div>
+      <div className="card animate-in d3">
+        <div className="section-title">
+          决策队列{' '}
+          <span className="section-count">
+            {state.vpsLoading ? '...' : `${visibleDecisionQueue.length} / ${totalDecisionQueue}`}
+          </span>
+        </div>
+        <div className="mb-3">
+          <Tabs items={queueTabs} value={queueView} onChange={setQueueView} variant="pill" />
+        </div>
+        {state.vpsLoading ? (
+          <PageStateView
+            kind="loading"
+            title="正在加载决策队列…"
+            surface="empty"
+            compact
+          />
+        ) : state.vpsError ? (
+          <PageStateView
+            kind="error"
+            title="决策队列不可用"
+            description={<>{state.vpsError}</>}
+            technicalSummary={state.vpsError}
+            surface="empty"
+            compact
+          />
+        ) : visibleDecisionQueue.length === 0 ? (
+          <PageStateView
+            kind="empty"
+            title="当前视图暂无待处理 VPS"
+            description="可回到全部、库存或订阅。"
+            action={
+              <div className="flex-row gap-2">
+                {queueView !== 'all' && (
+                  <button className="btn sm secondary" onClick={() => setQueueView('all')}>查看全部</button>
+                )}
+                <Link className="btn sm ghost" to="/vps">VPS 库存</Link>
+                <Link className="btn sm ghost" to="/subscriptions">补充订阅</Link>
+              </div>
+            }
+            surface="empty"
+            compact
+          />
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>VPS</th>
+                <th>供应商</th>
+                <th>决策</th>
+                <th>订阅</th>
+                <th>Node</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleDecisionQueue.map((item) => {
+                const vps = item.vps
+                const sub = item.subscription
+                const daysLeft = sub ? daysUntilDate(sub.renew_at) : null
+                const isUrgent = item.renewalDue && vps.renewal_decision === 'unreviewed'
+                return (
+                  <tr
+                    key={vps.vps_id}
+                    className={isUrgent ? 'row-urgent row-clickable' : 'row-clickable'}
+                    onClick={() => navigateToVPS(vps)}
+                  >
+                    <td className="name">{vps.display_name}</td>
+                    <td className="text-sm text-secondary">
+                      {formatOptional(vps.provider_name)}{' '}
+                      {vpsLocationLabel(vps)}
+                    </td>
+                    <td><RenewalBadge value={vps.renewal_decision} /></td>
+                    <td>
+                      {sub ? (
+                        <span className="mono">
+                          {formatMoney(sub.monthly_price, sub.currency)}/月
+                          {daysLeft != null && (
+                            <span className={daysLeft <= 30 ? 'days-urgent' : 'days-normal'}>
+                              {daysLeft}天
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="badge badge-warn">缺订阅</span>
+                      )}
+                    </td>
+                    <td>
+                      {vps.active_node_link_count > 0 ? (
+                        <span><MonoDigits>{vps.active_node_link_count}</MonoDigits> 关联</span>
+                      ) : (
+                        <span className="text-muted">未关联</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="btn sm primary"
+                        onClick={(e) => { e.stopPropagation(); selectVPS(vps) }}
+                      >
+                        处理
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <Drawer
         open={selectedVPS != null}
