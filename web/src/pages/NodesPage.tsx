@@ -267,7 +267,7 @@ export function NodesPage() {
       })
       setCreateOpen(false)
       resetCreateFlow()
-      navigate(`/nodes/${node.node_id}/onboarding`)
+      navigate(`/nodes/${node.node_id}?onboarding=1`)
     } catch (submitError) {
       setCreateError(describeError(submitError, '创建节点失败'))
     } finally {

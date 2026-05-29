@@ -834,10 +834,7 @@ describe('NodeDetailPage', () => {
     expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
     expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
     openRuntimeMenu()
-    expect(screen.getByRole('link', { name: '打开接入工作台' })).toHaveAttribute(
-      'href',
-      '/nodes/nd_conflict/onboarding',
-    )
+    expect(screen.getByRole('button', { name: '接入 agent…' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_conflict/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -2731,10 +2728,7 @@ describe('NodeDetailPage', () => {
 
     openRuntimeMenu()
 
-    expect(screen.getByRole('link', { name: '打开接入工作台' })).toHaveAttribute(
-      'href',
-      '/nodes/nd_cmd/onboarding',
-    )
+    expect(screen.getByRole('button', { name: '接入 agent…' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '执行命令…' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '退役节点' })).toBeInTheDocument()
   })

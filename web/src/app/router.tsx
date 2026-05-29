@@ -23,9 +23,6 @@ const nodeComparePage = lazy(() =>
 const nodeDetailPage = lazy(() =>
   import('../pages/NodeDetailPage').then((module) => ({ default: module.NodeDetailPage })),
 )
-const nodeOnboardingPage = lazy(() =>
-  import('../pages/NodeOnboardingPage').then((module) => ({ default: module.NodeOnboardingPage })),
-)
 const nodesPage = lazy(() =>
   import('../pages/NodesPage').then((module) => ({ default: module.NodesPage })),
 )
@@ -80,10 +77,6 @@ export const appRoutes: RouteObject[] = [
           { path: 'nodes', element: routeElement(nodesPage, '正在加载节点观测') },
           { path: 'nodes/compare', element: routeElement(nodeComparePage, '正在加载节点对比') },
           { path: 'nodes/:nodeId', element: routeElement(nodeDetailPage, '正在加载节点详情') },
-          {
-            path: 'nodes/:nodeId/onboarding',
-            element: routeElement(nodeOnboardingPage, '正在加载接入工作台'),
-          },
           { path: 'targets', element: routeElement(targetsPage, '正在加载入口观测') },
           {
             path: 'targets/:targetId',

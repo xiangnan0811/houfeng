@@ -48,10 +48,10 @@ export function NodesActionsCell({
       )}
       <Link
         className="btn sm secondary"
-        to={`/nodes/${node.node_id}/onboarding`}
+        to={`/nodes/${node.node_id}?onboarding=1`}
         onClick={(event) => event.stopPropagation()}
       >
-        接入工作台
+        接入 agent
       </Link>
       <Link
         className="btn sm secondary"
