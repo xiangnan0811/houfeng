@@ -1112,3 +1112,36 @@ VPS 创建从 Drawer 改为居中 Modal，新增 Select 原子并重组表单分
 ### Next Steps
 
 - None - task complete
+
+
+## Session 151: Update Trellis beta workflow
+
+**Date**: 2026-05-30
+**Task**: Update Trellis beta workflow
+**Branch**: `worktree/archive-trellis-update-task`
+
+### Summary
+
+Upgraded Houfeng Trellis project files to 0.6.0-beta.21, updated branch/worktree governance to allow context-sensitive .worktree usage while preserving main protections, delivered PR #164 through CI/merge, and confirmed post-merge CI plus Release Please completed without a release PR.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `692976b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
