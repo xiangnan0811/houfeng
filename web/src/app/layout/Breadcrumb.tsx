@@ -17,10 +17,6 @@ const SECTION_LABELS: Record<string, string> = {
   settings: '设置',
 }
 
-const TAIL_LABELS: Record<string, string> = {
-  onboarding: '接入工作台',
-}
-
 /**
  * Build a breadcrumb trail from the current location.
  *
@@ -30,9 +26,8 @@ const TAIL_LABELS: Record<string, string> = {
  * would create duplicate links and break test contracts that assume a single
  * `getByRole('link', { name: '节点' })` etc.
  *
- * On detail / nested routes (`/nodes/:id`, `/nodes/:id/onboarding`,
- * `/targets/:id`, `/vps/:id`) the trail looks like:
- * `节点 / nd_abcd... / 接入工作台` or `VPS / vps_abcd...`.
+ * On detail routes (`/nodes/:id`, `/targets/:id`, `/vps/:id`) the trail looks
+ * like: `节点 / nd_abcd...` or `VPS / vps_abcd...`.
  * The IDs are not display names — the breadcrumb stays page-rendering-free
  * (no extra fetch). Page hero panels remain the canonical place for the
  * full display_name.
@@ -58,12 +53,6 @@ export function Breadcrumb() {
       label: truncateId(detailId),
       to: isCurrent ? undefined : `/${sectionKey}/${detailId}`,
     })
-  }
-
-  // segments[2] = tail like "onboarding"
-  if (segments[2]) {
-    const tailLabel = TAIL_LABELS[segments[2]] ?? segments[2]
-    crumbs.push({ label: tailLabel })
   }
 
   // Touch params so React keeps this re-rendering on route change.

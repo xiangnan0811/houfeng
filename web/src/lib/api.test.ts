@@ -1729,9 +1729,9 @@ describe('router onboarding route', () => {
     expect(matches?.at(-1)?.route.path).toBe('asset-decisions')
   })
 
-  it('matches /nodes/:nodeId/onboarding', () => {
+  it('no longer matches the removed onboarding route (falls through to catch-all)', () => {
     const matches = matchRoutes(appRoutes, '/nodes/nd_001/onboarding')
 
-    expect(matches?.at(-1)?.route.path).toBe('nodes/:nodeId/onboarding')
+    expect(matches?.at(-1)?.route.path).toBe('*')
   })
 })

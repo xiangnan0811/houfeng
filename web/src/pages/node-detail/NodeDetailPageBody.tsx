@@ -21,6 +21,7 @@ import { NodeContainersSection } from './NodeContainersSection'
 import { NodeDangerCard } from './NodeDangerCard'
 import { NodeHistoryDrawer } from './NodeHistoryDrawer'
 import { NodeLinkedVPSSection } from './NodeLinkedVPSSection'
+import { NodeOnboardingDrawer } from './NodeOnboardingDrawer'
 import { NodeRuntimePauseConfirmation } from './NodeRuntimePauseConfirmation'
 import { NodeSnapshotMeta } from './NodeSnapshotMeta'
 import { NodeTimeWindowTabs } from './NodeTimeWindowTabs'
@@ -87,6 +88,9 @@ type NodeDetailPageBodyProps = {
   onOpenCommands: () => void
   onCloseCommand: () => void
   onExecuteCommand: (commandId: string) => void
+  onboardingOpen: boolean
+  onOpenOnboarding: () => void
+  onCloseOnboarding: () => void
 }
 
 export function NodeDetailPageBody({
@@ -137,6 +141,9 @@ export function NodeDetailPageBody({
   onOpenCommands,
   onCloseCommand,
   onExecuteCommand,
+  onboardingOpen,
+  onOpenOnboarding,
+  onCloseOnboarding,
 }: NodeDetailPageBodyProps) {
   const sample = runtimeFacts?.latest_host_sample ?? null
   const recentSamples = runtimeFacts?.recent_host_samples ?? []
@@ -164,6 +171,7 @@ export function NodeDetailPageBody({
         registerActionRef={registerActionRef}
         onOpenHistory={() => onOpenHistory('events')}
         onOpenCommands={onOpenCommands}
+        onOpenOnboarding={onOpenOnboarding}
         isRetiredNode={isRetiredNode}
         lifecycleSubmitting={lifecycleSubmitting !== null}
         onRestoreLifecycle={onLifecycleRestore}
@@ -270,6 +278,8 @@ export function NodeDetailPageBody({
         onClose={onCloseCommand}
         onExecute={onExecuteCommand}
       />
+
+      <NodeOnboardingDrawer node={node} open={onboardingOpen} onClose={onCloseOnboarding} />
     </div>
   )
 }

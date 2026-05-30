@@ -94,7 +94,7 @@ describe('NodesPage', () => {
       <MemoryRouter initialEntries={['/nodes']}>
         <Routes>
           <Route path="/nodes" element={<NodesPage />} />
-          <Route path="/nodes/:nodeId/onboarding" element={<div>onboarding workspace</div>} />
+          <Route path="/nodes/:nodeId" element={<div>onboarding workspace</div>} />
         </Routes>
       </MemoryRouter>,
     )
@@ -108,14 +108,14 @@ describe('NodesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
     expect(screen.getByText('节点创建')).toBeInTheDocument()
-    expect(screen.getByText('创建完成后将跳转到节点接入工作台，在那里生成一键安装命令。')).toBeInTheDocument()
+    expect(screen.getByText('创建完成后将进入节点详情页，并自动打开接入抽屉生成一键安装命令。')).toBeInTheDocument()
     expect(screen.queryByLabelText('生命周期状态')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
     fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })
     fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
     fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'Vultr' } })
 
-    fireEvent.click(screen.getByRole('button', { name: '创建并进入接入工作台' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建并接入' }))
 
     await waitFor(() => expect(screen.getByText('onboarding workspace')).toBeInTheDocument())
 
@@ -160,7 +160,7 @@ describe('NodesPage', () => {
       <MemoryRouter initialEntries={['/nodes']}>
         <Routes>
           <Route path="/nodes" element={<NodesPage />} />
-          <Route path="/nodes/:nodeId/onboarding" element={<div>onboarding workspace</div>} />
+          <Route path="/nodes/:nodeId" element={<div>onboarding workspace</div>} />
         </Routes>
       </MemoryRouter>,
     )
@@ -175,7 +175,7 @@ describe('NodesPage', () => {
     fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
     fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'Vultr' } })
 
-    fireEvent.click(screen.getByRole('button', { name: '创建并进入接入工作台' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建并接入' }))
 
     await waitFor(() =>
       expect(screen.getByText('display name already exists')).toBeInTheDocument(),
@@ -197,7 +197,7 @@ describe('NodesPage', () => {
       <MemoryRouter initialEntries={['/nodes']}>
         <Routes>
           <Route path="/nodes" element={<NodesPage />} />
-          <Route path="/nodes/:nodeId/onboarding" element={<div>onboarding workspace</div>} />
+          <Route path="/nodes/:nodeId" element={<div>onboarding workspace</div>} />
         </Routes>
       </MemoryRouter>,
     )
@@ -212,7 +212,7 @@ describe('NodesPage', () => {
     fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
     fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'Vultr' } })
 
-    fireEvent.click(screen.getByRole('button', { name: '创建并进入接入工作台' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建并接入' }))
 
     await waitFor(() => expect(screen.getByText('Request failed: 500')).toBeInTheDocument())
     expect(screen.queryByText('请求失败：状态码 500')).not.toBeInTheDocument()
@@ -254,12 +254,12 @@ describe('NodesPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('link', { name: '接入工作台' })).toBeInTheDocument(),
+      expect(screen.getByRole('link', { name: '接入 agent' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByRole('link', { name: '接入工作台' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '接入 agent' })).toHaveAttribute(
       'href',
-      '/nodes/nd_001/onboarding',
+      '/nodes/nd_001?onboarding=1',
     )
   })
 

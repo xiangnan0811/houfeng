@@ -1,5 +1,3 @@
-import { Link } from 'react-router-dom'
-
 import { StatusBadge } from '../StatusBadge'
 import { Hostname, MonoDigits, Timestamp } from '../atoms'
 import { Button } from '../atoms/Button'
@@ -17,6 +15,7 @@ type Props = {
   registerActionRef: (action: NodeRuntimeAction, element: HTMLButtonElement | null) => void
   onOpenHistory: () => void
   onOpenCommands: () => void
+  onOpenOnboarding: () => void
   isRetiredNode: boolean
   lifecycleSubmitting: boolean
   onRestoreLifecycle: () => void
@@ -37,6 +36,7 @@ export function NodeWatchtowerHeader({
   registerActionRef,
   onOpenHistory,
   onOpenCommands,
+  onOpenOnboarding,
   isRetiredNode,
   lifecycleSubmitting,
   onRestoreLifecycle,
@@ -82,9 +82,16 @@ export function NodeWatchtowerHeader({
                     {label}
                   </button>
                 ))}
-                <Link className="watchtower-actions-menu__item" to={`/nodes/${node.node_id}/onboarding`}>
-                  打开接入工作台
-                </Link>
+                <button
+                  type="button"
+                  className="watchtower-actions-menu__item"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onOpenOnboarding()
+                  }}
+                >
+                  接入 agent…
+                </button>
                 <button
                   type="button"
                   onClick={(e) => {

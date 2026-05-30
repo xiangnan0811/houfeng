@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 
-import { Button, Drawer, Input } from '../../components/atoms'
+import { Button, Modal, Input } from '../../components/atoms'
 import type { CreateNodeInput } from '../../lib/types'
 
 type CreateNodeDrawerProps = {
@@ -27,12 +27,12 @@ export function CreateNodeDrawer({
   onLabelInputChange,
 }: CreateNodeDrawerProps) {
   return (
-    <Drawer open={open} onClose={onClose} title="节点创建" ariaLabel="创建节点表单">
+    <Modal open={open} onClose={onClose} title="节点创建" ariaLabel="创建节点表单">
       <section className="node-create-drawer">
         <div className="node-create-drawer__intro">
           <p className="node-create-drawer__eyebrow">Agent onboarding</p>
           <h3>先登记服务器，再生成一键安装命令</h3>
-          <p>创建完成后将跳转到节点接入工作台，在那里生成一键安装命令。</p>
+          <p>创建完成后将进入节点详情页，并自动打开接入抽屉生成一键安装命令。</p>
         </div>
 
         <form className="node-create-drawer__form" onSubmit={onSubmit}>
@@ -89,7 +89,7 @@ export function CreateNodeDrawer({
             <div className="node-create-drawer__status-card" aria-label="生命周期状态固定为待接入">
               <span>生命周期状态</span>
               <strong>待接入</strong>
-              <p>候风会先登记 Node，随后在接入工作台发放短时一次性 enrollment token。</p>
+              <p>候风会先登记 Node，随后在节点详情页的接入抽屉里发放短时一次性 enrollment token。</p>
             </div>
             <Input
               label="标签"
@@ -119,11 +119,11 @@ export function CreateNodeDrawer({
               取消
             </Button>
             <Button type="submit" disabled={submitting}>
-              {submitting ? '正在创建…' : '创建并进入接入工作台'}
+              {submitting ? '正在创建…' : '创建并接入'}
             </Button>
           </div>
         </form>
       </section>
-    </Drawer>
+    </Modal>
   )
 }

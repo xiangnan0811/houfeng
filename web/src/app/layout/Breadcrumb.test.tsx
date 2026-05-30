@@ -50,16 +50,6 @@ describe('Breadcrumb', () => {
     expect(container.querySelector('.breadcrumb')).toBeNull()
   })
 
-  it('renders three segments on /nodes/:id/onboarding', () => {
-    renderAt('/nodes/nd_001/onboarding', '/nodes/:nodeId/onboarding')
-    expect(screen.getByRole('link', { name: '节点' })).toHaveAttribute('href', '/nodes')
-    expect(screen.getByRole('link', { name: 'nd_001' })).toHaveAttribute(
-      'href',
-      '/nodes/nd_001',
-    )
-    expect(screen.getByText('接入工作台')).toBeInTheDocument()
-  })
-
   it('truncates long detail ids in the current segment', () => {
     renderAt('/nodes/nd_8901234567890123456', '/nodes/:nodeId')
     expect(screen.getByText(/^nd_8901234567…$/)).toBeInTheDocument()

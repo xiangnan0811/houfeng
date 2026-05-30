@@ -2,7 +2,7 @@ import { EventList } from '../../components/EventList'
 import { IncidentList } from '../../components/IncidentList'
 import { Card } from '../../components/atoms/Card'
 import { Button } from '../../components/atoms/Button'
-import { Drawer, MonoDigits, Tabs } from '../../components/atoms'
+import { Modal, MonoDigits, Tabs } from '../../components/atoms'
 import type { ActiveIncidentRecord, NodeRecord, StateChangeEventRecord } from '../../lib/types'
 import { HISTORY_TAB_ITEMS } from './nodeDetailConstants'
 import type { HistoryTab } from './types'
@@ -35,7 +35,7 @@ export function NodeHistoryDrawer({
   onRetryHistoryIncidents,
 }: NodeHistoryDrawerProps) {
   return (
-    <Drawer
+    <Modal
       open={open}
       onClose={onClose}
       title={`${node.display_name} · 历史`}
@@ -84,6 +84,6 @@ export function NodeHistoryDrawer({
           <p>该节点近期没有触发过被记录的异常。</p>
         </div>
       )}
-    </Drawer>
+    </Modal>
   )
 }

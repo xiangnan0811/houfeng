@@ -1,4 +1,4 @@
-import { Drawer } from '../../components/atoms'
+import { Modal } from '../../components/atoms'
 import type { NodeRecord } from '../../lib/types'
 import type { NodeCommand } from './types'
 import { NodeCommandResult } from './NodeCommandResult'
@@ -25,7 +25,7 @@ export function NodeCommandDrawer({
   onExecute,
 }: NodeCommandDrawerProps) {
   return (
-    <Drawer
+    <Modal
       open={open}
       onClose={onClose}
       title="执行命令"
@@ -54,6 +54,6 @@ export function NodeCommandDrawer({
       {node.last_action ? (
         <NodeCommandResult action={node.last_action} labels={commandLabels} />
       ) : null}
-    </Drawer>
+    </Modal>
   )
 }

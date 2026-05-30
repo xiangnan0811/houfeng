@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 149
-- **Last Active**: 2026-05-29
+- **Total Sessions**: 150
+- **Last Active**: 2026-05-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1081 | Active |
+| `journal-3.md` | ~1114 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 150 | 2026-05-30 | 入口详情页 IA 重构:决策板 + 维护 modal + drawer 扫荡 | `efd9716` | `feat/ui-detail-pages-ia` |
 | 149 | 2026-05-29 | VPS 创建流程 Drawer→Modal + 全局 select caret 统一 | `8145cc7`, `fb92d65` | `feat/vps-create-modal-refactor` |
 | 148 | 2026-05-29 | Complete page IA migration and events page refactoring | `b37413c` | `feat/ui-workbench-ia-phase-3` |
 | 147 | 2026-05-22 | Frontend phase 2 IA | `4ff1e02` | `feat/ui-ia-phase-2` |

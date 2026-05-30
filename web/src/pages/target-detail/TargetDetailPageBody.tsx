@@ -1,4 +1,4 @@
-import type { FormEvent, RefObject, ReactNode } from 'react'
+import type { FormEvent, RefObject } from 'react'
 
 import {
   TargetActiveIncidents,
@@ -12,9 +12,8 @@ import {
 } from '../../components/target-detail'
 import { DetailSection } from '../../components/DetailSection'
 import { Button } from '../../components/atoms/Button'
-import { MonoDigits, Timestamp } from '../../components/atoms/Mono'
-import { StatusBadge } from '../../components/StatusBadge'
-import { formatLabelList } from '../../lib/format'
+import { Modal } from '../../components/atoms/Modal'
+import { MonoDigits } from '../../components/atoms/Mono'
 import type {
   ActiveIncidentRecord,
   ProbeItemRecord,
@@ -23,41 +22,17 @@ import type {
   StateChangeEventRecord,
   TargetRecord,
 } from '../../lib/types'
+import { TargetDecisionBoard } from './TargetDecisionBoard'
 import { TargetDangerCard } from './TargetDangerCard'
 import { TargetHistoryDrawer } from './TargetHistoryDrawer'
 import { TargetLifecycleSection } from './TargetLifecycleSection'
 import { TargetMetadataSection } from './TargetMetadataSection'
 import { TargetProbeFormDrawer } from './TargetProbeFormDrawer'
 import { TargetProbeListSection } from './TargetProbeListSection'
-import { TargetProbeManagementSection } from './TargetProbeManagementSection'
 import { TargetRuntimePauseConfirmation } from './TargetRuntimePauseConfirmation'
 import { TargetSnapshotMeta } from './TargetSnapshotMeta'
 import { TargetTimeWindowTabs } from './TargetTimeWindowTabs'
 import type { HistoryTab, MetadataFormState, PendingRuntimeConfirmation, TimeWindow } from './types'
-
-type TargetHealthTone = 'normal' | 'notice' | 'alert' | 'critical' | 'maintenance' | 'offline'
-
-type OverviewStat = {
-  label: string
-  value: ReactNode
-  description: ReactNode
-}
-
-function targetHealthTone(target: TargetRecord): TargetHealthTone {
-  if (target.run_status === '维护中') return 'maintenance'
-  if (target.run_status === '暂停' || target.run_status === '已归档') return 'offline'
-  if (target.current_health_status === '严重') return 'critical'
-  if (target.current_health_status === '告警') return 'alert'
-  if (target.current_health_status === '关注') return 'notice'
-  return 'normal'
-}
-
-function targetIssueText(target: TargetRecord) {
-  if (target.current_active_incident_count > 0) {
-    return target.current_primary_issue_summary || '存在活跃异常'
-  }
-  return '当前没有活跃异常'
-}
 
 function latestObservationAt(observations: ProbeObservation[]) {
   if (observations.length === 0) return null
@@ -148,6 +123,9 @@ type TargetDetailPageBodyProps = {
   onCloseHistory: () => void
   onHistoryTabChange: (tab: HistoryTab) => void
   onRetryHistoryIncidents: () => void
+  maintenanceOpen: boolean
+  onOpenMaintenance: () => void
+  onCloseMaintenance: () => void
 }
 
 export function TargetDetailPageBody({
@@ -212,6 +190,9 @@ export function TargetDetailPageBody({
   onCloseHistory,
   onHistoryTabChange,
   onRetryHistoryIncidents,
+  maintenanceOpen,
+  onOpenMaintenance,
+  onCloseMaintenance,
 }: TargetDetailPageBodyProps) {
   const showDangerZone = target.current_active_incident_count > 0
   const firstIncident =
@@ -233,67 +214,10 @@ export function TargetDetailPageBody({
     ...recentObservations,
     ...Array.from(observationsByProbe.values()).flat(),
   ])
-  const healthTone = targetHealthTone(target)
-  const overviewStats: OverviewStat[] = [
-    {
-      label: '健康状态',
-      value: <StatusBadge label={target.current_health_status} />,
-      description:
-        target.run_status === '维护中'
-          ? '目标处于维护中，健康状态仍按后端当前判定展示。'
-          : `运行状态：${target.run_status}`,
-    },
-    {
-      label: 'ProbeItem 覆盖',
-      value: (
-        <>
-          <MonoDigits>{enabledProbeCount}</MonoDigits>
-          <span className="target-overview__stat-total"> / {probeItems.length}</span>
-        </>
-      ),
-      description:
-        probeItems.length === 0
-          ? '尚未配置观测方式。'
-          : `启用 ${enabledProbeCount} 条，停用 ${probeItems.length - enabledProbeCount} 条。`,
-    },
-    {
-      label: '当前主问题',
-      value:
-        target.current_active_incident_count > 0 ? (
-          <>
-            <MonoDigits>{target.current_active_incident_count}</MonoDigits> 个活跃异常
-          </>
-        ) : (
-          '无活跃异常'
-        ),
-      description: targetIssueText(target),
-    },
-    {
-      label: '最近观测证据',
-      value: latestRuntimeObservationAt ? (
-        <Timestamp value={latestRuntimeObservationAt} mode="relative" />
-      ) : (
-        '暂无观测'
-      ),
-      description:
-        latencySampleCount > 0 ? (
-          <>
-            {timeWindow} latency 样本 <MonoDigits>{latencySampleCount}</MonoDigits>
-          </>
-        ) : (
-          `${timeWindow} 暂无 latency_ms 样本`
-        ),
-    },
-  ]
   const observationWorkspaceAside = (
     <span className="detail-section__aside-meta">
       {timeWindow} · latency 样本 <MonoDigits>{latencySampleCount}</MonoDigits> · ProbeItem{' '}
       <MonoDigits>{enabledProbeCount}</MonoDigits>/<MonoDigits>{probeItems.length}</MonoDigits>
-    </span>
-  )
-  const maintenanceAside = (
-    <span className="detail-section__aside-meta">
-      更新 <Timestamp value={target.updated_at} mode="absolute" />
     </span>
   )
   const eventAside = (
@@ -316,6 +240,7 @@ export function TargetDetailPageBody({
         onRuntimeAction={(action) => onRuntimeAction(action)}
         registerActionRef={registerActionRef}
         onOpenHistory={() => onOpenHistory('events')}
+        onOpenMaintenance={onOpenMaintenance}
       />
 
       {pendingRuntimeConfirmation?.action === 'pause' ? (
@@ -332,25 +257,14 @@ export function TargetDetailPageBody({
         </p>
       ) : null}
 
-      <section className={`target-overview target-overview--${healthTone}`} aria-label="目标判断摘要">
-        <div className="target-overview__lead">
-          <p className="target-overview__eyebrow">目标判断</p>
-          <h2>{targetIssueText(target)}</h2>
-          <p>
-            入口 <strong>{target.host}</strong> · 标签 {formatLabelList(target.labels)} · 执行节点标签{' '}
-            {formatLabelList(target.execution_node_labels)}
-          </p>
-        </div>
-        <dl className="target-overview__stats">
-          {overviewStats.map((stat) => (
-            <div key={stat.label} className="target-overview__stat">
-              <dt>{stat.label}</dt>
-              <dd>{stat.value}</dd>
-              <span>{stat.description}</span>
-            </div>
-          ))}
-        </dl>
-      </section>
+      <TargetDecisionBoard
+        target={target}
+        probeItems={probeItems}
+        recentObservations={recentObservations}
+        latestObservationAt={latestRuntimeObservationAt}
+        latencySampleCount={latencySampleCount}
+        onOpenHistory={() => onOpenHistory('events')}
+      />
 
       {showDangerZone ? (
         <TargetDangerCard
@@ -402,23 +316,20 @@ export function TargetDetailPageBody({
         onDelete={onDeleteProbe}
         onConfirmDelete={onConfirmDeleteProbe}
         onCancelDeleteConfirmation={onCancelDeleteConfirmation}
+        addProbeButtonRef={addProbeButtonRef}
+        probeFormOpen={probeCreateOpen}
+        probeMutationError={probeMutationError}
+        addDisabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
+        onOpenCreate={onOpenProbeCreate}
       />
 
-      <DetailSection
-        eyebrow="资料维护"
+      <Modal
+        open={maintenanceOpen}
+        onClose={onCloseMaintenance}
         title="标签、备注与生命周期"
-        ribbon={isArchived ? 'offline' : 'notice'}
-        aside={maintenanceAside}
+        ariaLabel="标签、备注与生命周期"
       >
         <div className="watchtower-property-list target-maintenance-list">
-          <TargetProbeManagementSection
-            addProbeButtonRef={addProbeButtonRef}
-            probeFormOpen={probeCreateOpen}
-            probeMutationError={probeMutationError}
-            addDisabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
-            onOpenCreate={onOpenProbeCreate}
-          />
-
           <TargetMetadataSection
             target={target}
             editing={metadataEditing}
@@ -448,7 +359,7 @@ export function TargetDetailPageBody({
             registerActionRef={registerActionRef}
           />
         </div>
-      </DetailSection>
+      </Modal>
 
       <div className="target-activity-grid" aria-label="当前异常与事件证据">
         <TargetActiveIncidents

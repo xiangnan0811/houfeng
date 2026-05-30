@@ -37,7 +37,7 @@ export function VPSLifecycleCard({
           <p>
             {isRestore
               ? '恢复是独立生命周期操作，确认后会把已归档 VPS 重新放回闲置资产工作集。'
-              : '归档是独立危险操作，不进入常规编辑 Drawer；它会让 VPS 退出当前工作集，但保留基础信息、历史与 Node 关联。'}
+              : '归档是独立危险操作，不进入常规编辑弹窗；它会让 VPS 退出当前工作集，但保留基础信息、历史与 Node 关联。'}
           </p>
         </div>
         <LifecycleBadge value={detail.lifecycle_status} />

@@ -210,7 +210,7 @@ export function pickTopNodeEvidence(nodes: NodeRecord[]): NodeEvidenceItem | nul
     title: node.display_name || node.node_id,
     reason: nodeEvidenceReason(node),
     meta: nodeEvidenceMeta(node),
-    route: isPendingOnboardingNode(node) ? `/nodes/${node.node_id}/onboarding` : `/nodes/${node.node_id}`,
+    route: isPendingOnboardingNode(node) ? `/nodes/${node.node_id}?onboarding=1` : `/nodes/${node.node_id}`,
     actionLabel: isPendingOnboardingNode(node) ? '处理接入' : '查看证据',
   }
 }

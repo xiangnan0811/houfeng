@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 
 import type { NodeRuntimeAction } from '../components/node-detail'
 import {
@@ -55,6 +55,7 @@ export function NodeDetailPage() {
 }
 
 function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [state, setState] = useState<NodeDetailPageState>(INITIAL_NODE_DETAIL_STATE)
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
@@ -78,6 +79,7 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandSubmitting, setCommandSubmitting] = useState(false)
   const [commandError, setCommandError] = useState<string | null>(null)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('24h')
   const [linkedVPSState, setLinkedVPSState] = useState<LinkedVPSState>({
     requestedNodeId: null,
@@ -108,6 +110,16 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
   useEffect(() => {
     currentRouteNodeIdRef.current = nodeId ?? null
   }, [nodeId])
+
+  // Deep-link: create/list redirects land here with ?onboarding=1 to open the
+  // onboarding drawer directly. Consume the param so a refresh/back doesn't reopen it.
+  useEffect(() => {
+    if (searchParams.get('onboarding') !== '1') return
+    setOnboardingOpen(true)
+    const next = new URLSearchParams(searchParams)
+    next.delete('onboarding')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   useEffect(() => {
     currentRequestedNodeIdRef.current = state.requestedNodeId
@@ -732,6 +744,14 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
     setCommandError(null)
   }
 
+  function openOnboardingDrawer() {
+    setOnboardingOpen(true)
+  }
+
+  function closeOnboardingDrawer() {
+    setOnboardingOpen(false)
+  }
+
   function closeHistoryDrawer() {
     setHistoryOpen(false)
   }
@@ -837,6 +857,9 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       onOpenCommands={openCommandDrawer}
       onCloseCommand={closeCommandDrawer}
       onExecuteCommand={(commandId) => void handleCommandExecute(commandId)}
+      onboardingOpen={onboardingOpen}
+      onOpenOnboarding={openOnboardingDrawer}
+      onCloseOnboarding={closeOnboardingDrawer}
     />
   )
 }

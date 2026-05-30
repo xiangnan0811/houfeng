@@ -73,6 +73,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] =
     useState<PendingRuntimeConfirmation | null>(null)
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyTab, setHistoryTab] = useState<HistoryTab>('events')
   const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(
@@ -924,6 +925,9 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       onCloseHistory={() => setHistoryOpen(false)}
       onHistoryTabChange={setHistoryTab}
       onRetryHistoryIncidents={retryHistoryIncidents}
+      maintenanceOpen={maintenanceOpen}
+      onOpenMaintenance={() => setMaintenanceOpen(true)}
+      onCloseMaintenance={() => setMaintenanceOpen(false)}
     />
   )
 }

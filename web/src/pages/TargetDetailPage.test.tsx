@@ -154,9 +154,9 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
     expect(screen.getByRole('region', { name: '目标判断摘要' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '当前没有活跃异常' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '保持观察' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '运行控制与近期延迟' })).toBeInTheDocument()
-    expect(screen.getAllByText('标签与备注')[0]).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument()
     expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前异常' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument()
@@ -1163,9 +1163,9 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
-    const overlay = document.body.querySelector('.drawer-overlay')
+    const overlay = document.body.querySelector('.modal-overlay')
     expect(overlay).not.toBeNull()
-    fireEvent.mouseDown(overlay!)
+    fireEvent.click(overlay!)
     expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
 
     saveResponse.resolve(
@@ -1689,6 +1689,7 @@ describe('TargetDetailPage', () => {
 
     expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '暂停' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     expect(screen.getByRole('button', { name: '归档' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '暂停' }))
     expect(screen.queryByRole('alertdialog', { name: '确认暂停目标监控' })).not.toBeInTheDocument()
@@ -2227,6 +2228,7 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Legacy API' })).toBeInTheDocument(),
     )
 
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     fireEvent.click(screen.getByRole('button', { name: '恢复到暂停' }))
 
     await waitFor(() =>
@@ -2456,6 +2458,7 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
 
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     fireEvent.click(screen.getByRole('button', { name: '归档' }))
 
     expect(screen.getByRole('alertdialog', { name: '确认归档目标' })).toBeInTheDocument()
@@ -2526,6 +2529,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     fireEvent.click(screen.getByRole('button', { name: '归档' }))
     fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
 
@@ -2627,6 +2631,7 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByText('pause failed')).not.toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '确认暂停目标监控' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
   })
 
@@ -2705,6 +2710,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument())
 
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     fireEvent.click(screen.getByRole('button', { name: '归档' }))
     fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
     fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
@@ -2717,6 +2723,7 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByText('archive failed')).not.toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '确认归档目标' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
   })
 
@@ -2811,6 +2818,7 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByText('delete failed')).not.toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '确认删除 ProbeItem' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
     expect(screen.getByRole('button', { name: '添加 ProbeItem' })).not.toHaveFocus()
   })
@@ -2956,6 +2964,12 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
+      expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
+
+    await waitFor(() =>
       expect(screen.getByRole('heading', { name: '标签与备注' })).toBeInTheDocument(),
     )
 
@@ -3027,6 +3041,8 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
 
     expect(screen.getByRole('heading', { name: '标签与备注' })).toBeInTheDocument()
     expect(screen.getByText('Group：prod')).toBeInTheDocument()
@@ -3108,6 +3124,9 @@ describe('TargetDetailPage', () => {
       </MemoryRouter>,
     )
 
+    await waitFor(() => expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
@@ -3172,6 +3191,9 @@ describe('TargetDetailPage', () => {
       </MemoryRouter>,
     )
 
+    await waitFor(() => expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
@@ -3225,6 +3247,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
     expect(screen.queryByText('备注：新的备注')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     expect(screen.getByText('备注：缓存入口')).toBeInTheDocument()
   })
 
@@ -3274,6 +3297,9 @@ describe('TargetDetailPage', () => {
       </MemoryRouter>,
     )
 
+    await waitFor(() => expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
@@ -3386,6 +3412,9 @@ describe('TargetDetailPage', () => {
       </MemoryRouter>,
     )
 
+    await waitFor(() => expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '编辑标签与备注' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
@@ -3649,6 +3678,10 @@ describe('TargetDetailPage', () => {
     expect(within(probeSection as HTMLElement).getByText('10 ms')).toBeInTheDocument()
     expect(within(probeSection as HTMLElement).getByText('nd_col')).toBeInTheDocument()
 
+    expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '标签、备注与生命周期' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     expect(screen.getByRole('heading', { name: '标签、备注与生命周期' })).toBeInTheDocument()
 
     const secondaryDetails = document.querySelectorAll('details.watchtower-secondary')

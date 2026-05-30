@@ -99,7 +99,7 @@ export function NodeBindingConflictSection({
           </button>
         </div>
         <p>
-          如需重新生成一次性接入命令，请从右上角运行控制菜单打开接入工作台。
+          如需重新生成一次性接入命令，请从右上角运行控制菜单选择「接入 agent…」。
         </p>
       </article>
     </DetailSection>

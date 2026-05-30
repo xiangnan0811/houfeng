@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "v2 样式权威：design tokens、BEM、select caret、overflow 裁剪防范；详情页重构必须遵守"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "atoms/composite 组件约定；接入引导与详情页 section 复用既有组件需对齐"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "page/colocated-component 目录约定；删除 NodeOnboardingPage、迁移接入能力时定位文件"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "数据获取/状态约定；重构需保持数据获取与 API 行为零回归"}

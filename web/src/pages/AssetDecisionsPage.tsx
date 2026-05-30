@@ -6,7 +6,7 @@ import {
   AssetDecisionWorkPanel,
   type AssetDecisionDraft,
 } from '../components/AssetDecisionWorkPanel'
-import { Drawer, MonoDigits, Tabs } from '../components/atoms'
+import { Modal, MonoDigits, Tabs } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, listSubscriptions, listVPSAssets, updateVPSAsset } from '../lib/api'
 import { formatMoney, formatOptional } from '../lib/format'
@@ -523,7 +523,7 @@ export function AssetDecisionsPage() {
         )}
       </div>
 
-      <Drawer
+      <Modal
         open={selectedVPS != null}
         onClose={closeDecisionDrawer}
         title={selectedVPS ? `处理 ${selectedVPS.display_name}` : '处理续费决策'}
@@ -540,7 +540,7 @@ export function AssetDecisionsPage() {
           onSubmit={handleDecisionSubmit}
           onCancel={closeDecisionDrawer}
         />
-      </Drawer>
+      </Modal>
     </div>
   )
 }
