@@ -20,6 +20,7 @@ docs/deploy/compose.env
 .superpowers/
 
 # git worktrees
+.worktree/
 .worktrees/
 
 # temp
