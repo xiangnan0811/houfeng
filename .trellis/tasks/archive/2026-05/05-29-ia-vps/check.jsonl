@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "检查详情页是否符合 design tokens/BEM/无裁剪等样式约定"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "前端质量门槛：build/lint/test、组件测试、可访问性，验收依据"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "检查接入引导与详情页 section 是否正确复用既有组件约定"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "检查重构后数据获取/API 行为是否零回归"}
