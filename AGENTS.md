@@ -16,42 +16,6 @@ If you're using Codex or another agent-capable tool, additional project-scoped h
 - `.agents/skills/` — reusable Trellis skills
 - `.codex/agents/` — optional custom subagents
 
-## Subagents
-
-- ALWAYS wait for every spawned subagent to reach a terminal status before yielding, acting on partial results, or spawning followups.
-  - On Codex, this means calling the `wait` tool with the subagent's thread id (requires `multi_agent_v2`). Do NOT infer completion from elapsed time.
-  - On Claude Code / OpenCode, this means awaiting the Task/agent tool result before continuing.
-- NEVER cancel or re-spawn a subagent that hasn't finished. If a subagent appears stuck, raise the wait timeout (Codex default 30s, max 1h) before judging it broken.
-- Spawn subagents automatically when:
-  - Parallelizable work (e.g., install + verify, npm test + typecheck, multiple tasks from plan)
-  - Long-running or blocking tasks where a worker can run independently
-  - Isolation for risky changes or checks
-
-### Codex-only — `spawn_agent` parameters
-
-When calling `spawn_agent`, ALWAYS pass `fork_turns="none"`. Without it the child inherits the parent transcript and sees your prior `spawn_agent(...)` records, then applies the "wait for spawned subagents" rule to itself — causing `wait_agent` self-deadlock.
-
-```text
-spawn_agent(agent_type="trellis-implement", message="...", fork_turns="none")
-```
-
-### Codex-only — multi-subagent close-loop
-
-When `wait` returns a `completed` notification, treat it as an event signal — not as "all done". Run this loop:
-
-1. Maintain an `expected_agents` set of dispatched sub-agent thread IDs.
-2. After each `wait` update:
-   1. Call `list_agents` to inspect ALL live agents' status.
-   2. For each agent now in a terminal state:
-      - Verify its promised deliverable exists (e.g. `{task_dir}/research/*.md`).
-      - Read or summarize as needed.
-      - `close_agent` to release the slot.
-      - Remove from `expected_agents`.
-   3. If `expected_agents` still contains running agents → keep waiting.
-   4. If `expected_agents` is empty → continue main flow.
-3. Never `wait` on an agent that has already reported `completed`.
-4. If a `completed` agent is missing its deliverable, treat it as failed — surface that in your report instead of re-waiting.
-
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
@@ -59,7 +23,10 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 ## Repository Branch Governance
 
 - Do not commit, merge, amend, squash, reset, or otherwise directly modify local `main` or `master`.
-- All feature work, bug fixes, documentation changes, and agent implementation work must happen on a new non-main branch.
-- Do not use `git worktree` for this repository workflow; keep work in the single checkout unless the human owner explicitly changes this policy.
-- Enable the versioned local hooks with `sh scripts/setup-git-hooks.sh` before making changes. The hooks block commits on local `main` / `master` and pushes to remote `main` / `master`.
+- All feature work, bug fixes, documentation changes, and agent implementation work must happen on a non-main branch, either in the primary checkout or in a dedicated git worktree.
+- `git worktree` is allowed and encouraged when it reduces branch-switching risk, enables parallel work, keeps unrelated dirty states isolated, or supports long-running verification. Do not use it reflexively for tiny edits, clean single-threaded work, or when a normal feature branch in the current checkout is simpler and safer.
+- The default local worktree parent directory is `<project-root>/.worktree/`. Name worktrees after the task or branch, and keep each worktree on its own non-main branch.
+- The agent may choose between a normal new branch and a worktree based on task risk, duration, current dirty state, and whether parallel work is active. The choice does not relax main-branch protections.
+- Enable the versioned local hooks with `sh scripts/setup-git-hooks.sh` before making changes in the checkout or worktree where commits will be made. The hooks block commits on local `main` / `master` and pushes to remote `main` / `master`.
 - Remote `main` / `master` must be protected in the Git host to reject direct pushes and force pushes by everyone. Use pull requests from feature branches instead of pushing to protected branches directly.
+- When the task continues through PR delivery, push the selected feature branch, open a pull request, monitor required CI, fix failures on that same branch or worktree, merge only after required checks pass, then monitor post-merge automation such as main CI or release jobs when relevant. Sync or clean up the chosen working location after merge without directly modifying local or remote `main` outside the protected update path.
