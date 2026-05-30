@@ -1079,3 +1079,36 @@ VPS 创建从 Drawer 改为居中 Modal，新增 Select 原子并重组表单分
 ### Next Steps
 
 - None - task complete
+
+
+## Session 150: 入口详情页 IA 重构:决策板 + 维护 modal + drawer 扫荡
+
+**Date**: 2026-05-30
+**Task**: 入口详情页 IA 重构:决策板 + 维护 modal + drawer 扫荡
+**Branch**: `feat/ui-detail-pages-ia`
+
+### Summary
+
+镜像 VPS 决策板重构入口/Target 详情页:顶部新增 TargetDecisionBoard(下一步动作 CTA + tone 着色证据条),标签备注编辑与归档生命周期 demote 进右上角操作菜单触发的资料维护 modal,ProbeItem 添加按钮就近留在列表区。完成全项目 drawer→modal 扫荡并删除 Drawer atom。新增详情页 IA 合同到 component-conventions spec。全量 439 用例绿。浏览器核验通过(situation B)。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `efd9716` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
