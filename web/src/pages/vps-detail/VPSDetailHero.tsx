@@ -9,7 +9,6 @@ type VPSDetailHeroProps = {
   detail: VPSAssetDetail
   isArchived: boolean
   lifecycleSubmitting: boolean
-  onBack: () => void
   onDecisionEdit: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
@@ -24,7 +23,6 @@ export function VPSDetailHero({
   detail,
   isArchived,
   lifecycleSubmitting,
-  onBack,
   onDecisionEdit,
   onFactEdit,
   onExperienceLog,
@@ -75,7 +73,6 @@ export function VPSDetailHero({
                 )}
               </div>
             </details>
-            <Button variant="ghost" size="sm" onClick={onBack}>返回</Button>
             <Link className="btn sm ghost" to="/vps">VPS 列表</Link>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
   Button,
-  Drawer,
+  Modal,
   MonoDigits,
   Tabs,
 } from '../components/atoms'
@@ -464,7 +464,7 @@ export function VPSPage() {
         onProviderCreated={(p) => setState((s) => ({ ...s, providers: [...s.providers, p] }))}
       />
 
-      <Drawer
+      <Modal
         open={filterDrawerOpen}
         onClose={() => setFilterDrawerOpen(false)}
         title="高级筛选"
@@ -507,7 +507,7 @@ export function VPSPage() {
             <Button onClick={applyDrawerFilters}>应用筛选</Button>
           </div>
         </div>
-      </Drawer>
+      </Modal>
     </div>
   )
 }

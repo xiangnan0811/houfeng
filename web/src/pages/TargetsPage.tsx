@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Drawer, Hostname, MonoDigits, StatusGlyph, Timestamp } from '../components/atoms'
+import { Modal, Hostname, MonoDigits, StatusGlyph, Timestamp } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { StatusBadge } from '../components/StatusBadge'
 import {
@@ -509,11 +509,12 @@ export function TargetsPage() {
         </div>
       </div>
 
-      <Drawer
+      <Modal
         open={createOpen}
         onClose={closeCreateDrawer}
         title="创建目标"
         ariaLabel="创建目标"
+        persistent
       >
         <CreateTargetPanel
           form={createForm}
@@ -523,7 +524,7 @@ export function TargetsPage() {
           onSubmit={handleCreate}
           onFieldChange={updateCreateField}
         />
-      </Drawer>
+      </Modal>
 
       <div className="animate-in d2">
         {targets.length === 0 ? (

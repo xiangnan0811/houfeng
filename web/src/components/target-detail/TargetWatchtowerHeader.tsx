@@ -37,6 +37,7 @@ type Props = {
     element: HTMLButtonElement | null,
   ) => void
   onOpenHistory: () => void
+  onOpenMaintenance: () => void
 }
 
 export function TargetWatchtowerHeader({
@@ -46,6 +47,7 @@ export function TargetWatchtowerHeader({
   onRuntimeAction,
   registerActionRef,
   onOpenHistory,
+  onOpenMaintenance,
 }: Props) {
   const hostDisplay = target.base_port
     ? `${target.host}:${target.base_port}`
@@ -76,24 +78,25 @@ export function TargetWatchtowerHeader({
             <Button variant="ghost" size="sm" onClick={onOpenHistory}>
               查看历史
             </Button>
-            {runtimeActions.length > 0 ? (
-              <details className="watchtower-actions-menu">
-                <summary aria-label="运行控制操作">…</summary>
-                <div className="watchtower-actions-menu__panel">
-                  {runtimeActions.map(({ action, label }) => (
-                    <button
-                      key={action}
-                      ref={(element) => registerActionRef(action, element)}
-                      type="button"
-                      disabled={runtimeSubmitting || disabled}
-                      onClick={() => onRuntimeAction(action)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </details>
-            ) : null}
+            <details className="watchtower-actions-menu">
+              <summary aria-label="运行控制操作">…</summary>
+              <div className="watchtower-actions-menu__panel">
+                {runtimeActions.map(({ action, label }) => (
+                  <button
+                    key={action}
+                    ref={(element) => registerActionRef(action, element)}
+                    type="button"
+                    disabled={runtimeSubmitting || disabled}
+                    onClick={() => onRuntimeAction(action)}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button type="button" onClick={onOpenMaintenance}>
+                  资料维护
+                </button>
+              </div>
+            </details>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { Drawer, Input, Select } from '../components/atoms'
+import { Modal, Input, Select } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createSubscription, listSubscriptions, listVPSAssets, updateSubscription } from '../lib/api'
 import { formatDate, formatMoney } from '../lib/format'
@@ -268,7 +268,7 @@ export function SubscriptionsPage() {
         </table>
       )}
 
-      <Drawer open={panelOpen} onClose={closeCreate} title="新建订阅" ariaLabel="新建订阅表单">
+      <Modal open={panelOpen} onClose={closeCreate} title="新建订阅" ariaLabel="新建订阅表单">
         <form className="drawer-form" onSubmit={handleCreate}>
           <Select label="VPS" id="sub-create-vps" value={effectiveForm.vpsID} disabled={state.vps.length === 0} onChange={(e) => setCreateForm({ ...createForm, vpsID: e.target.value })} hint={state.vps.length === 0 ? <>无可选 VPS，<Link to="/vps">去创建</Link></> : undefined}>
             <option value="">选择 VPS</option>
@@ -297,9 +297,9 @@ export function SubscriptionsPage() {
             <button type="submit" className="btn md primary" disabled={createSubmitting}>{createSubmitting ? '创建中…' : '创建'}</button>
           </div>
         </form>
-      </Drawer>
+      </Modal>
 
-      <Drawer open={editingId != null} onClose={cancelEdit} title="编辑订阅" ariaLabel="编辑订阅表单">
+      <Modal open={editingId != null} onClose={cancelEdit} title="编辑订阅" ariaLabel="编辑订阅表单">
         <form className="drawer-form" onSubmit={handleEdit}>
           <Select label="VPS" id="sub-edit-vps" value={editForm.vpsID} onChange={(e) => setEditForm({ ...editForm, vpsID: e.target.value })}>
             <option value="">选择 VPS</option>
@@ -328,7 +328,7 @@ export function SubscriptionsPage() {
             <button type="submit" className="btn md primary" disabled={editSubmitting}>{editSubmitting ? '保存中…' : '保存'}</button>
           </div>
         </form>
-      </Drawer>
+      </Modal>
     </div>
   )
 }

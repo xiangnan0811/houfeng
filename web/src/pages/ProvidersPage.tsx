@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
-import { Drawer, Input } from '../components/atoms'
+import { Modal, Input } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createProvider, listProviders, updateProvider } from '../lib/api'
 import { formatOptional } from '../lib/format'
@@ -168,7 +168,7 @@ export function ProvidersPage() {
         </table>
       )}
 
-      <Drawer open={createOpen} onClose={closeCreate} title="新建服务商" ariaLabel="新建服务商表单">
+      <Modal open={createOpen} onClose={closeCreate} title="新建服务商" ariaLabel="新建服务商表单">
         <form className="drawer-form" onSubmit={handleCreate}>
           <Input label="服务商名称" value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} />
           <Input label="网站" value={createForm.website} onChange={(e) => setCreateForm({ ...createForm, website: e.target.value })} />
@@ -184,9 +184,9 @@ export function ProvidersPage() {
             <button type="submit" className="btn md primary" disabled={createSubmitting}>{createSubmitting ? '创建中…' : '创建'}</button>
           </div>
         </form>
-      </Drawer>
+      </Modal>
 
-      <Drawer open={editingId != null} onClose={cancelEdit} title="编辑服务商" ariaLabel="编辑服务商表单">
+      <Modal open={editingId != null} onClose={cancelEdit} title="编辑服务商" ariaLabel="编辑服务商表单">
         <form className="drawer-form" onSubmit={handleEdit}>
           <Input label="服务商名称" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
           <Input label="网站" value={editForm.website} onChange={(e) => setEditForm({ ...editForm, website: e.target.value })} />
@@ -202,7 +202,7 @@ export function ProvidersPage() {
             <button type="submit" className="btn md primary" disabled={editSubmitting}>{editSubmitting ? '保存中…' : '保存'}</button>
           </div>
         </form>
-      </Drawer>
+      </Modal>
     </div>
   )
 }

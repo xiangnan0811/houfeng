@@ -33,6 +33,7 @@ export function VPSFactsEditForm({
 }: VPSFactsEditFormProps) {
   const providerSelectId = useId()
   const usageSelectId = useId()
+  const noteId = useId()
 
   function handleProviderChange(providerID: string) {
     const provider = providers.find((item) => item.provider_id === providerID)
@@ -46,7 +47,7 @@ export function VPSFactsEditForm({
   return (
     <form className="asset-facts-edit-form" onSubmit={onSubmit}>
       <Input label="VPS 名称" value={draft.displayName} onChange={(event) => onDraftChange({ ...draft, displayName: event.target.value })} />
-      <label className="input-field" htmlFor={providerSelectId}>
+      <label className="input-field asset-facts-edit-form__wide" htmlFor={providerSelectId}>
         <span className="input-field__label">资产服务商</span>
         <select
           id={providerSelectId}
@@ -108,7 +109,17 @@ export function VPSFactsEditForm({
       </label>
       <Input label="重要性" value={draft.importance} onChange={(event) => onDraftChange({ ...draft, importance: event.target.value })} />
       <Input label="标签" hint="用逗号分隔" value={draft.labels} onChange={(event) => onDraftChange({ ...draft, labels: event.target.value })} />
-      <Input label="备注" value={draft.note} onChange={(event) => onDraftChange({ ...draft, note: event.target.value })} />
+      <label className="input-field asset-facts-edit-form__wide" htmlFor={noteId}>
+        <span className="input-field__label">备注</span>
+        <div className="input-field__shell">
+          <input
+            id={noteId}
+            className="input"
+            value={draft.note}
+            onChange={(event) => onDraftChange({ ...draft, note: event.target.value })}
+          />
+        </div>
+      </label>
       {error ? (
         <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
           {error}

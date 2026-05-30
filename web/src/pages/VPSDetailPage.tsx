@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { Drawer } from '../components/atoms'
+import { Modal } from '../components/atoms'
 import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
 import {
   ApiError,
@@ -881,7 +881,6 @@ export function VPSDetailPage() {
         detail={detail}
         isArchived={isArchived}
         lifecycleSubmitting={lifecycleSubmitting}
-        onBack={() => navigate(-1)}
         onDecisionEdit={() => openDrawer('decision')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
@@ -952,16 +951,18 @@ export function VPSDetailPage() {
         />
       ) : null}
 
-      <Drawer
+      <Modal
         open={activeDrawer !== null}
         onClose={closeDrawer}
         title={drawerTitle()}
         ariaLabel={drawerTitle()}
+        persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'node-evidence'}
+        size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'node-evidence' || activeDrawer === 'facts') ? 'lg' : undefined}
       >
         <div className="vps-detail-drawer">
           {renderDrawerContent()}
         </div>
-      </Drawer>
+      </Modal>
     </div>
   )
 }

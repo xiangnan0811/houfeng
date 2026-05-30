@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { Card, Drawer, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
+import { Card, Modal, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
 import { ApiError, issueNodeInstallCommand } from '../../lib/api'
 import { useCopyToClipboard } from '../../lib/useCopyToClipboard'
 import type { NodeInstallCommandIssue, NodeRecord } from '../../lib/types'
@@ -91,7 +91,7 @@ export function NodeOnboardingDrawer({ node, open, onClose }: Props) {
   const canShowCommand = issue !== null && !hidden
 
   return (
-    <Drawer open={open} onClose={onClose} title="接入 agent" ariaLabel="节点接入抽屉">
+    <Modal open={open} onClose={onClose} title="接入 agent" ariaLabel="节点接入抽屉">
       <div className="onboarding-drawer">
         <Card cardRole="warning" className="onboarding-drawer__brief">
           <p className="onboarding-token__hint onboarding-token__hint--critical">
@@ -204,6 +204,6 @@ export function NodeOnboardingDrawer({ node, open, onClose }: Props) {
           </Card>
         </section>
       </div>
-    </Drawer>
+    </Modal>
   )
 }

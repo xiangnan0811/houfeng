@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 
-import { Button, Drawer, Input } from '../../components/atoms'
+import { Button, Modal, Input } from '../../components/atoms'
 import type { CreateNodeInput } from '../../lib/types'
 
 type CreateNodeDrawerProps = {
@@ -27,7 +27,7 @@ export function CreateNodeDrawer({
   onLabelInputChange,
 }: CreateNodeDrawerProps) {
   return (
-    <Drawer open={open} onClose={onClose} title="节点创建" ariaLabel="创建节点表单">
+    <Modal open={open} onClose={onClose} title="节点创建" ariaLabel="创建节点表单">
       <section className="node-create-drawer">
         <div className="node-create-drawer__intro">
           <p className="node-create-drawer__eyebrow">Agent onboarding</p>
@@ -124,6 +124,6 @@ export function CreateNodeDrawer({
           </div>
         </form>
       </section>
-    </Drawer>
+    </Modal>
   )
 }

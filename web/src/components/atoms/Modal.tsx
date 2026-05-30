@@ -10,9 +10,10 @@ export interface ModalProps {
   footer?: ReactNode
   persistent?: boolean
   size?: 'sm' | 'md' | 'lg'
+  ariaLabel?: string
 }
 
-export function Modal({ open, onClose, title, children, footer, persistent, size }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, persistent, size, ariaLabel }: ModalProps) {
   const modalRef = useModalFocus<HTMLDivElement>(open, onClose)
 
   useEffect(() => {
@@ -47,7 +48,7 @@ export function Modal({ open, onClose, title, children, footer, persistent, size
         className={`modal-content${size ? ` modal-content--${size}` : ''}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        {...(ariaLabel ? { 'aria-label': ariaLabel } : { 'aria-labelledby': 'modal-title' })}
         tabIndex={-1}
       >
         <div className="modal-header">

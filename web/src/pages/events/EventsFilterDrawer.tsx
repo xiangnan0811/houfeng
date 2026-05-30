@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 
-import { Drawer, Tabs } from '../../components/atoms'
+import { Modal, Tabs } from '../../components/atoms'
 import { FilterSelect, FilterToggle } from '../../components/filters'
 import type { StateChangeEventType } from '../../lib/types'
 import {
@@ -44,7 +44,7 @@ export function EventsFilterDrawer({
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title="事件筛选" ariaLabel="事件高级筛选">
+    <Modal open={open} onClose={onClose} title="事件筛选" ariaLabel="事件高级筛选">
       <form className="events-filter-drawer" onSubmit={handleSubmit}>
         <div className="events-filter-drawer__group">
           <span className="events-filter-drawer__label">时间范围</span>
@@ -160,6 +160,6 @@ export function EventsFilterDrawer({
           <button type="button" className="btn sm ghost" onClick={onClose}>关闭</button>
         </div>
       </form>
-    </Drawer>
+    </Modal>
   )
 }

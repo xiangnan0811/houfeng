@@ -1,6 +1,7 @@
 import type { ReactNode, RefObject } from 'react'
 
 import { DetailSection } from '../../components/DetailSection'
+import { Button } from '../../components/atoms/Button'
 import { MonoDigits } from '../../components/atoms/Mono'
 import {
   TargetProbeList,
@@ -23,6 +24,11 @@ type TargetProbeListSectionProps = {
   onDelete: (probeItem: ProbeItemRecord) => void
   onConfirmDelete: (probeItem: ProbeItemRecord) => void
   onCancelDeleteConfirmation: (probeItem: ProbeItemRecord) => void
+  addProbeButtonRef: RefObject<HTMLButtonElement | null>
+  probeFormOpen: boolean
+  probeMutationError: string | null
+  addDisabled: boolean
+  onOpenCreate: () => void
 }
 
 export function TargetProbeListSection({
@@ -40,6 +46,11 @@ export function TargetProbeListSection({
   onDelete,
   onConfirmDelete,
   onCancelDeleteConfirmation,
+  addProbeButtonRef,
+  probeFormOpen,
+  probeMutationError,
+  addDisabled,
+  onOpenCreate,
 }: TargetProbeListSectionProps) {
   const enabledProbeCount = probeItems.filter((item) => item.enabled).length
   const latestObservationCount = Array.from(observationsByProbe.values()).reduce(
@@ -47,10 +58,21 @@ export function TargetProbeListSection({
     0,
   )
   const defaultAside = (
-    <span className="detail-section__aside-meta">
-      启用 <MonoDigits>{enabledProbeCount}</MonoDigits> / <MonoDigits>{probeItems.length}</MonoDigits> · 最新观测{' '}
-      <MonoDigits>{latestObservationCount}</MonoDigits>
-    </span>
+    <div className="detail-section__aside-actions">
+      <span className="detail-section__aside-meta">
+        启用 <MonoDigits>{enabledProbeCount}</MonoDigits> / <MonoDigits>{probeItems.length}</MonoDigits> · 最新观测{' '}
+        <MonoDigits>{latestObservationCount}</MonoDigits>
+      </span>
+      <Button
+        ref={addProbeButtonRef}
+        variant="secondary"
+        size="sm"
+        disabled={addDisabled || probeFormOpen}
+        onClick={onOpenCreate}
+      >
+        添加 ProbeItem
+      </Button>
+    </div>
   )
 
   return (
@@ -60,6 +82,11 @@ export function TargetProbeListSection({
       ribbon="accent"
       aside={aside ?? defaultAside}
     >
+      {probeMutationError ? (
+        <p className="watchtower-runtime-error" role="alert">
+          {probeMutationError}
+        </p>
+      ) : null}
       <TargetProbeList
         probeItems={probeItems}
         observationsByProbe={observationsByProbe}

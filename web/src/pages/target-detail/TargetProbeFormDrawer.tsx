@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 
-import { Drawer } from '../../components/atoms'
+import { Modal } from '../../components/atoms'
 import {
   TargetProbeForm,
   type ProbeCreateFormState,
@@ -46,7 +46,7 @@ export function TargetProbeFormDrawer({
   }
 
   return (
-    <Drawer open={open} onClose={handleClose} title={title} ariaLabel="ProbeItem 表单抽屉">
+    <Modal open={open} onClose={handleClose} title={title} ariaLabel="ProbeItem 表单抽屉">
       <div className="target-probe-drawer">
         <div className="target-probe-drawer__intro">
           <div>
@@ -67,6 +67,6 @@ export function TargetProbeFormDrawer({
           onFieldChange={onFieldChange}
         />
       </div>
-    </Drawer>
+    </Modal>
   )
 }

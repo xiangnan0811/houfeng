@@ -56,6 +56,15 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **Search result 只能指向已注册 / 可落地的前端路由**：有详情页的对象链接详情，如 VPS `/vps/:id`、节点 `/nodes/:id`、入口 `/targets/:id`；没有详情页的对象链接列表页或列表筛选，如服务商 `/providers`、订阅 `/subscriptions?vps_id=<vps_id>`。不要生成不存在的 `/providers/:id` 或 `/subscriptions/:id`。
 - **列表主扫描路径上的创建/编辑表单优先放 Drawer**：如果创建表单会挤占库存表 / 队列主视图，应使用 `Drawer` 承载，并保留页面主列表可见。关闭 Drawer 时重置草稿/错误；提交成功后的跳转和 payload 合同仍由 page 测试断言。
 
+### 详情页 IA 合同（决策板 + 操作菜单 + 维护 modal）
+
+资产详情页（VPS `/vps/:id`、入口 `/targets/:id`）统一采用「判断在顶、证据居中、配置进弹层」的三段式信息架构。新详情页应对齐：
+
+- **顶部放决策板**：页面第一屏是 DecisionBoard——一张「下一步动作」卡（按运行/健康状态优先级选出单条 CTA）+ 一条 tone 着色的证据条。参考 `web/src/pages/vps-detail/VPSDecisionBoard.tsx` + `vpsDecisionModel.ts` 与镜像它的 `web/src/pages/target-detail/TargetDecisionBoard.tsx` + `targetDecisionModel.ts`。决策模型（`build<X>DecisionModel`）是纯函数，只消费已有 contract 字段算出 `nextAction` 与 `evidenceItems`，不发请求、不发明字段。
+- **tone 系统统一四档**：`'normal' | 'notice' | 'alert' | 'critical'`，经 `toneToGlyphState` 映射到 `StatusGlyph` 的 state；CSS 类前缀按页面命名但结构对齐（`target-decision-*` 镜像 `vps-decision-*`），着色走 `var(--color-state-*)` / `color-mix`，不写 hex。新增详情页复制这套 tone→glyph→CSS 约定，不要另造一套色彩语义。
+- **二级 / 编辑操作收进右上角 `…` 菜单**：非主 CTA 的操作（查看历史、运行控制、编辑基础信息、资料维护）放进 `watchtower-header` 的 `details.watchtower-actions-menu`，不要散落成页面底部的独立按钮。参考 VPS hero「编辑基础信息」(`web/src/pages/vps-detail/VPSDetailHero.tsx`) 与 Target「资料维护」(`web/src/components/target-detail/TargetWatchtowerHeader.tsx`)。该菜单**始终渲染**——即使某状态（如已归档）下运行控制动作为空，菜单仍要在，否则会丢失维护入口；运行控制按钮列表按状态条件渲染，查看历史/维护项常驻。
+- **非实时配置 / 维护 demote 进 modal**：标签备注编辑、归档生命周期这类低频配置从页面主体移入 modal（`web/src/components/atoms/Modal.tsx`），页面主体只保留实时观测证据（决策板、运行控制、ProbeItem 列表与观测、当前异常、事件）。**例外**：本身会再开一个表单 modal 的入口（如 ProbeItem 表单）不要嵌进维护 modal，避免 modal 套 modal——让它贴着对应的实时列表区就近呈现。
+
 ---
 
 ## 命名约定
