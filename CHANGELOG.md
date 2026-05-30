@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/xiangnan0811/houfeng/compare/v0.22.0...v0.23.0) (2026-05-30)
+
+
+### Features
+
+* **web:** detail-page IA — decision boards, drawer→modal sweep ([#162](https://github.com/xiangnan0811/houfeng/issues/162)) ([fd1d8a3](https://github.com/xiangnan0811/houfeng/commit/fd1d8a3e4180bba6672a074172fd399421d19f2d))
+
 ## [0.22.0](https://github.com/xiangnan0811/houfeng/compare/v0.21.0...v0.22.0) (2026-05-29)
 
 
