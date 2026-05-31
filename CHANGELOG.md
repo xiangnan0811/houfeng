@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/xiangnan0811/houfeng/compare/v0.24.0...v0.24.1) (2026-05-31)
+
+
+### CI
+
+* use node24 artifact actions ([3252b8f](https://github.com/xiangnan0811/houfeng/commit/3252b8f14aa034eca223f2e771f835d174c479b1))
+
 ## [0.24.0](https://github.com/xiangnan0811/houfeng/compare/v0.23.0...v0.24.0) (2026-05-31)
 
 
