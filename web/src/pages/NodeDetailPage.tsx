@@ -822,11 +822,11 @@ function NodeDetailPageContent({ nodeId }: { nodeId?: string }) {
       events={events}
       eventsError={eventsError}
       linkedVPSSectionRef={linkedVPSSectionRef}
-      linkedVPS={linkedVPS}
-      linkedVPSLoading={linkedVPSLoading}
-      linkedVPSLoaded={linkedVPSLoaded}
-      linkedVPSError={linkedVPSError}
-      bindingConflict={bindingConflict}
+        linkedVPS={linkedVPS}
+        linkedVPSLoading={linkedVPSLoading}
+        linkedVPSLoaded={linkedVPSLoaded}
+        linkedVPSError={linkedVPSError}
+        bindingConflict={bindingConflict}
       bindingConflictLoading={bindingConflictLoading}
       bindingConflictError={bindingConflictError}
       bindingAction={bindingAction}

@@ -8,7 +8,14 @@ import {
   Timestamp,
   Badge,
 } from '../../components/atoms'
-import type { NodeRecord, NodeSparklinesResponse } from '../../lib/types'
+import type { AssetContextForNode, NodeRecord, NodeSparklinesResponse } from '../../lib/types'
+import {
+  assetContextHasAttention,
+  assetContextMessage,
+  assetContextPrimarySummary,
+  subscriptionStateLabel,
+  vpsLifecycleLabel,
+} from '../assetContextSummary'
 import {
   isBindingConflictNode,
   NODE_BINDING_CONFLICT_STATUS,
@@ -23,6 +30,7 @@ import type { NodeRuntimeAction } from './types'
 type BuildNodesTableColumnsArgs = {
   compareSet: Set<string>
   sparklines: NodeSparklinesResponse | null
+  assetContexts: Map<string, AssetContextForNode>
   editingLabelNodeId: string | null
   labelDraft: string
   groupDraft: string
@@ -43,6 +51,7 @@ type BuildNodesTableColumnsArgs = {
 export function buildNodesTableColumns({
   compareSet,
   sparklines,
+  assetContexts,
   editingLabelNodeId,
   labelDraft,
   groupDraft,
@@ -131,6 +140,27 @@ export function buildNodesTableColumns({
           {[node.group, node.region, node.city, node.provider].filter(Boolean).join(' · ') || '—'}
         </span>
       ),
+    },
+    {
+      key: 'asset_context',
+      label: '资产上下文',
+      render: (node) => {
+        const context = assetContexts.get(node.node_id)
+        const primary = assetContextPrimarySummary(context)
+        if (!context || !primary) {
+          return <span className="asset-context-pill">未关联 VPS</span>
+        }
+        return (
+          <div className="asset-context-cell">
+            <span className={assetContextHasAttention(context) ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
+              {assetContextMessage(context)}
+            </span>
+            <small>
+              {vpsLifecycleLabel(primary.lifecycle_status)} · {subscriptionStateLabel(primary.subscription_state)}
+            </small>
+          </div>
+        )
+      },
     },
     {
       key: 'labels',

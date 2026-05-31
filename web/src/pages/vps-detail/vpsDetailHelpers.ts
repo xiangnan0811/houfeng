@@ -24,6 +24,9 @@ export const INITIAL_STATE: VPSDetailPageState = {
   domains: [],
   subscriptions: [],
   subscriptionsError: null,
+  cancellationPreview: null,
+  cancellationPreviewError: null,
+  cancellationResult: null,
 }
 
 export const INITIAL_SELECTOR_STATE: VPSDetailSelectorState = {

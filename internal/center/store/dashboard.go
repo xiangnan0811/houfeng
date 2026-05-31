@@ -411,15 +411,59 @@ func loadDashboardNotificationStatus(ctx context.Context, queryer dashboardQuery
 func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardAssetSummary, error) {
 	var summary incidents.DashboardAssetSummary
 	if err := queryer.QueryRow(ctx, `
-		with active_vps as (
-			select vps_id
+		with inventory_vps as (
+			select vps_id, lifecycle_status, renewal_decision
 			from vps_assets
-			where lifecycle_status not in ('cancelled', 'archived')
+			where lifecycle_status <> 'archived'
+		),
+		active_vps as (
+			select vps_id, lifecycle_status, renewal_decision
+			from inventory_vps
+			where lifecycle_status <> 'cancelled'
 		),
 		active_links as (
 			select distinct vps_id, node_id
 			from vps_node_links
 			where unlinked_at is null
+		),
+		subscription_rollup as (
+			select
+				v.vps_id,
+				count(*) filter (where s.status = 'active') as active_subscription_count,
+				count(*) filter (where s.status in ('expired', 'cancelled', 'paused')) as inactive_subscription_count
+			from inventory_vps v
+			left join subscriptions s on s.vps_id = v.vps_id
+			group by v.vps_id
+		),
+		cancelled_asset_runtime as (
+			select v.vps_id, l.node_id::text as object_id
+			from inventory_vps v
+			join vps_node_links l on l.vps_id = v.vps_id and l.unlinked_at is null
+			join nodes n on n.node_id = l.node_id
+			where v.lifecycle_status in ('to_cancel', 'cancelled')
+			  and n.lifecycle_status not in ('不续费', '已退役')
+			union
+			select distinct v.vps_id, t.target_id::text as object_id
+			from inventory_vps v
+			join (
+				select vps_id, target_id from asset_services where target_id is not null
+				union all
+				select vps_id, target_id from asset_domains where target_id is not null
+			) a on a.vps_id = v.vps_id
+			join targets t on t.target_id = a.target_id
+			where v.lifecycle_status in ('to_cancel', 'cancelled')
+			  and t.run_status not in ('已归档', '暂停')
+		),
+		cancellation_attention as (
+			select v.vps_id
+			from inventory_vps v
+			join subscription_rollup sr on sr.vps_id = v.vps_id
+			where
+				(sr.inactive_subscription_count > 0 and v.lifecycle_status not in ('to_cancel', 'cancelled'))
+				or (sr.active_subscription_count > 0 and v.lifecycle_status in ('to_cancel', 'cancelled'))
+				or (v.renewal_decision in ('cancel', 'auto_renew_cancelled') and v.lifecycle_status not in ('to_cancel', 'cancelled'))
+			union
+			select distinct vps_id from cancelled_asset_runtime
 		),
 		renewal_due as (
 			select distinct s.subscription_id, s.vps_id
@@ -434,6 +478,9 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 			(select count(distinct vps_id)::int from renewal_due),
 			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.renewal_decision = 'unreviewed'),
 			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.lifecycle_status = 'to_cancel'),
+			(select count(*)::int from inventory_vps where lifecycle_status = 'cancelled'),
+			(select count(distinct vps_id)::int from cancellation_attention),
+			(select count(*)::int from cancelled_asset_runtime),
 			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.lifecycle_status = 'to_migrate'),
 			(select count(*)::int from active_vps v where not exists (
 				select 1 from active_links l where l.vps_id = v.vps_id
@@ -448,6 +495,9 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 		&summary.RenewalDue30dVPSCount,
 		&summary.UnreviewedVPSCount,
 		&summary.ToCancelVPSCount,
+		&summary.CancelledVPSCount,
+		&summary.CancellationAttentionVPSCount,
+		&summary.RunningCancelledAssetCount,
 		&summary.ToMigrateVPSCount,
 		&summary.UnlinkedVPSCount,
 		&summary.AbnormalLinkedVPSCount,

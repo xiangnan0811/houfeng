@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { matchRoutes } from 'react-router-dom'
 
+import type { ApplyCancellationInput } from './types'
 import {
+  applyVPSCancellation,
   archiveTarget,
   createAssetDomain,
   confirmNodeRebind,
@@ -24,6 +26,7 @@ import {
   getSettings,
   getSubscription,
   getVPSAsset,
+  getVPSCancellationPreview,
   getVPSTimeline,
   issueNodeInstallCommand,
   linkVPSNode,
@@ -36,6 +39,8 @@ import {
   listEvents,
   listIncidents,
   listSubscriptions,
+  listNodeAssetContexts,
+  listTargetAssetContexts,
   pauseNodeMonitoring,
   pauseTarget,
   rejectPendingNodeBinding,
@@ -324,6 +329,9 @@ describe('api helpers', () => {
         renewal_due_30d_vps_count: 2,
         unreviewed_vps_count: 4,
         to_cancel_vps_count: 1,
+        cancelled_vps_count: 2,
+        cancellation_attention_vps_count: 3,
+        running_cancelled_asset_count: 4,
         to_migrate_vps_count: 2,
         unlinked_vps_count: 5,
         abnormal_linked_vps_count: 1,
@@ -628,7 +636,7 @@ describe('api helpers', () => {
       port: null,
       labels: ['jobs'],
       note: 'queue',
-    }
+    } satisfies Omit<CreateAssetServiceInput, 'vps_id'>
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([service])))
@@ -746,7 +754,7 @@ describe('api helpers', () => {
       https_enabled: true,
       labels: ['api'],
       note: 'gateway',
-    }
+    } satisfies Omit<CreateAssetDomainInput, 'vps_id'>
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([domain])))
@@ -812,6 +820,110 @@ describe('api helpers', () => {
       credentials: 'include',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/vps', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('serializes VPS cancellation preview, confirmed action, and asset contexts', async () => {
+    const preview = {
+      vps: {
+        vps_id: 'vps_001',
+        display_name: 'Tokyo Edge',
+        provider_name: 'Hetzner',
+        lifecycle_status: 'active',
+        usage_status: 'in_use',
+        renewal_decision: 'cancel',
+        active_node_link_count: 1,
+        ssh_port: 22,
+        labels: [],
+        created_at: '2026-05-30T08:00:00Z',
+        updated_at: '2026-05-30T08:00:00Z',
+      },
+      subscriptions: [],
+      node_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      recommended_steps: [],
+      warnings: ['订阅已非活跃，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
+      blockers: [],
+    }
+    const actionResult = {
+      action: {
+        action_id: 'ala_001',
+        vps_id: 'vps_001',
+        action_type: 'cancel_vps',
+        status: 'completed',
+        reason: 'expired',
+        created_at: '2026-05-30T08:01:00Z',
+      },
+      steps: [],
+    }
+    const nodeContexts = [{
+      node_id: 'nd_001',
+      linked_vps_count: 1,
+      cancellation_attention: true,
+      summaries: [{
+        vps_id: 'vps_001',
+        display_name: 'Tokyo Edge',
+        lifecycle_status: 'cancelled',
+        renewal_decision: 'cancel',
+        subscription_state: 'expired',
+        message: '关联 VPS 已取消，Node 仍需确认状态。',
+      }],
+    }]
+    const targetContexts = [{
+      target_id: 'tg_001',
+      linked_vps_count: 1,
+      cancellation_attention: true,
+      summaries: nodeContexts[0].summaries,
+      service_ids: ['svc_001'],
+      domain_ids: ['dom_001'],
+    }]
+    const input = {
+      reason: 'expired',
+      effective_date: '2026-05-30',
+      subscription_ids: ['sub_001'],
+      vps_lifecycle_status: 'cancelled',
+      node_actions: [{ node_id: 'nd_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
+      target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
+    } satisfies ApplyCancellationInput
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(preview)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(actionResult)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(nodeContexts)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(targetContexts)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getVPSCancellationPreview('vps_001')).resolves.toEqual(preview)
+    await expect(applyVPSCancellation('vps_001', input)).resolves.toEqual(actionResult)
+    await expect(listNodeAssetContexts()).resolves.toEqual(nodeContexts)
+    await expect(listTargetAssetContexts()).resolves.toEqual(targetContexts)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/cancellation-preview', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001/cancellation', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(input),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-context/nodes', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/asset-context/targets', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',

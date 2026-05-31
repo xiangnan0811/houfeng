@@ -257,6 +257,7 @@ _, err := tx.Exec(ctx, `
 - `ssh_port` 默认为 `22`，数据库约束为 `1..65535`；领域 create 中 `0` 表示省略并默认，patch 中显式 `0` 必须拒绝。
 - `archived_at` 是派生字段：生命周期切到 `archived` 时补时间，从 `archived` 切出时清空；API 输入不得任意写入 `archived_at`。
 - VPS 资产 CRUD 不得改写 `nodes.provider`，也不得改变 Node / Target / Agent 的既有语义。
+- 普通 VPS CRUD 只维护 VPS 自身账本；跨订阅、Node、Target 的取消 / 退役协调必须通过 `assetlifecycle` 显式 preview + confirm + audit action 完成。
 - subscription summary 属于 subscriptions 查询；active node link count / node summary 由 `assetlinks.Repository` 在 HTTP 展示层补充，不得让 `store/vps_assets.go` 直接耦合 Node 表或 link 表细节。
 
 ### Asset Ledger subscriptions
@@ -271,8 +272,26 @@ _, err := tx.Exec(ctx, `
 - `started_at` 与 `renew_at` 是 nullable `date`：未知日期用 `null`，不要写假日期。
 - `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。
 - 订阅 CRUD 不得创建 `vps_node_links`、不得改写 `nodes.provider`、不得增加 Dashboard / import / currency exchange 行为。
+- 订阅 CRUD 仍不得反向改写 VPS、Node 或 Target；订阅取消 / 过期后如资产状态不一致，前端必须暴露 lifecycle action 入口，而不是在订阅 PATCH 中隐式停机或退役。
 - 受控例外：用户显式在 `PATCH /api/vps/{vps_id}` 将 VPS `renewal_decision` 改成取消类决策（当前为 `cancel` 或 `auto_renew_cancelled`）时，VPS patch 事务可以同步处理该 VPS 的明确订阅事实。只有恰好一条 `status='active'` 的订阅候选时，才能在同一事务里把该订阅 `auto_renew=false`、`auto_renew_cancelled=true`，并按既有 `price_histories` 机制记录自动续费字段变化；无 active 订阅或多 active 订阅时只返回 linkage status/message，不批量写订阅。
 - 上述例外仍属于 Asset Ledger 内部 VPS↔Subscription 用户决策流：不得创建或修改 `vps_node_links`、Provider、Node、Target、ProbeItem、Agent 计划或运行时控制；subscription 自己的 CRUD 仍不得反向改写 VPS renewal decision。
+
+### Asset lifecycle actions
+
+`assetlifecycle` 是唯一允许跨 Subscription、VPS、Node、Target/实例做取消或退役联动的领域服务。它不是普通 CRUD 的旁路，而是一个显式的 lifecycle action 工作流：先预览影响范围，再由用户确认要执行的步骤，最后以审计记录落库。
+
+- 后端 API：
+  - `GET /api/vps/{vps_id}/cancellation-preview` 从 VPS 出发返回 VPS 当前生命周期、所有关联订阅候选（包括 active、expired、cancelled、paused、unknown/latest）、活跃 `vps_node_links`、通过 asset service / domain 关联的 Target、推荐步骤、风险提示和阻塞项。
+  - `POST /api/vps/{vps_id}/cancellation` 接受用户显式选择的 `subscription_ids`、`vps_lifecycle_status`、`node_actions`、`target_actions`、`reason`、`effective_date`，在一个事务内写入状态变化与审计步骤。
+  - `GET /api/asset-context/nodes` 与 `GET /api/asset-context/targets` 是批量上下文接口，供列表页显示关联 VPS 的取消 / 过期 / 不一致状态，避免前端逐行请求。
+- 审计表：`asset_lifecycle_actions` 保存一次操作的发起对象、确认时间、原因、执行摘要和最终状态；`asset_lifecycle_action_steps` 保存每个 subscription / VPS / Node / Target 步骤的前后状态、状态码、错误和摘要。
+- 普通 CRUD 不得静默调用 lifecycle action；只有工作台或等价的显式确认入口可以调用 `POST /api/vps/{vps_id}/cancellation`。
+- 如果 VPS 没有 active subscription，但存在 expired/cancelled/paused/unknown subscription，preview 和旧续费联动提示必须说明“订阅已处于非活跃状态，仍需处理 VPS、Node 与实例状态”，不得误导为“没有关联订阅，需要创建订阅”。
+- 默认语义：已过期且不续费的 VPS 写 `renewal_decision=cancel`、`lifecycle_status=cancelled`；未来到期但已决定不续费的 VPS 写 `renewal_decision=cancel`、`lifecycle_status=to_cancel`；未来取消但仍观察的 Node 用 `lifecycle_status='不续费'` 且监控保持启用；实际退役 Node 用 `lifecycle_status='已退役'` 并可按确认步骤暂停监控；随 VPS 下线的 Target/实例确认后用 `run_status='已归档'`，临时停用才用 `暂停`。
+- `vps_node_links` 默认保留为历史证据；取消 / 退役 action 不自动 unlink，除非未来新增单独的“解除错误关联”显式动作。
+- 执行事务必须先锁定 VPS，再写 action 与各步骤；任何一步失败时业务状态与步骤写入整体回滚，避免部分取消造成新割裂。失败审计是例外：必须先显式回滚业务事务，再用独立事务写入 `status='failed'` 的 action 和 failed step，避免失败记录随业务回滚消失，也避免复用同一 `action_id` 时被未回滚事务锁住。
+- preview 的 blocker 必须在 POST 执行路径重新校验；例如 `lifecycle_status='archived'` 的 VPS 不允许通过 cancellation POST 改回 cancelled/to_cancel，handler 应返回冲突而不是清空 `archived_at`。
+- Dashboard asset summary 只返回聚合计数；成本只统计 active subscriptions，取消待处理 / 已取消 VPS、状态割裂 VPS、仍运行的关联 Node/Target 进入告警计数。
 
 #### Scenario: VPS renewal decision links subscription auto-renew
 
@@ -651,6 +670,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - active link 口径：`vps_node_links.unlinked_at is null`。
 - 异常关联 VPS 口径：active link 关联到 `nodes.current_health_status <> '正常'` 的 Node；只读 Node 派生状态，不改写 Node。
 - 成本口径：`sum(active subscriptions monthly_price)` 按 `currency` 分组，`yearly_total = monthly_total * 12`；第一阶段不做汇率换算。
+- 取消联动口径：`cancelled_vps_count` 统计 `lifecycle_status='cancelled'`；`cancellation_attention_vps_count` 统计订阅非活跃但 VPS 未取消、VPS 取消/待取消但订阅仍 active、VPS 取消/待取消但 Node/Target 仍运行、或取消类续费决策与 lifecycle 未对齐的 VPS；`running_cancelled_asset_count` 统计取消/待取消 VPS 下仍运行的 active Node link 与未归档/未暂停 Target。
 - 该查询不得改变 `nodes.provider`、Node lifecycle / monitoring / health、Target、Agent、VPS、subscription 或 link 记录。
 - `limit` 只限制异常队列和 recent events；不得限制 `asset_summary`。
 

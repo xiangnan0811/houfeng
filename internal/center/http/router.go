@@ -28,6 +28,10 @@ type RouterOptions struct {
 	VPSExperienceLogsHandler        stdhttp.Handler
 	VPSDomainsHandler               stdhttp.Handler
 	VPSServicesHandler              stdhttp.Handler
+	VPSCancellationPreviewHandler   stdhttp.Handler
+	VPSCancellationHandler          stdhttp.Handler
+	AssetContextNodesHandler        stdhttp.Handler
+	AssetContextTargetsHandler      stdhttp.Handler
 	SubscriptionsCollectionHandler  stdhttp.Handler
 	SubscriptionItemHandler         stdhttp.Handler
 	NodesCollectionHandler          stdhttp.Handler
@@ -108,6 +112,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.AssetServicesCollectionHandler != nil {
 		mux.Handle("/api/services", protect(opts.AssetServicesCollectionHandler))
 	}
+	if opts.AssetContextNodesHandler != nil {
+		mux.Handle("/api/asset-context/nodes", protect(opts.AssetContextNodesHandler))
+	}
+	if opts.AssetContextTargetsHandler != nil {
+		mux.Handle("/api/asset-context/targets", protect(opts.AssetContextTargetsHandler))
+	}
 	if opts.ProvidersCollectionHandler != nil {
 		mux.Handle("/api/providers", protect(opts.ProvidersCollectionHandler))
 	}
@@ -117,7 +127,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil {
+	if opts.VPSItemHandler != nil || opts.VPSNodesHandler != nil || opts.VPSLinkNodeHandler != nil || opts.VPSUnlinkNodeHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -174,6 +184,18 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSServicesHandler.ServeHTTP(w, r)
+			case vpsSubtreeCancellationPreview:
+				if opts.VPSCancellationPreviewHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSCancellationPreviewHandler.ServeHTTP(w, r)
+			case vpsSubtreeCancellation:
+				if opts.VPSCancellationHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSCancellationHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -348,15 +370,17 @@ func New(opts RouterOptions) stdhttp.Handler {
 type vpsSubtree string
 
 const (
-	vpsSubtreeUnknown        vpsSubtree = ""
-	vpsSubtreeItem           vpsSubtree = "item"
-	vpsSubtreeNodes          vpsSubtree = "nodes"
-	vpsSubtreeLinkNode       vpsSubtree = "link-node"
-	vpsSubtreeUnlinkNode     vpsSubtree = "unlink-node"
-	vpsSubtreeTimeline       vpsSubtree = "timeline"
-	vpsSubtreeExperienceLogs vpsSubtree = "experience-logs"
-	vpsSubtreeDomains        vpsSubtree = "domains"
-	vpsSubtreeServices       vpsSubtree = "services"
+	vpsSubtreeUnknown             vpsSubtree = ""
+	vpsSubtreeItem                vpsSubtree = "item"
+	vpsSubtreeNodes               vpsSubtree = "nodes"
+	vpsSubtreeLinkNode            vpsSubtree = "link-node"
+	vpsSubtreeUnlinkNode          vpsSubtree = "unlink-node"
+	vpsSubtreeTimeline            vpsSubtree = "timeline"
+	vpsSubtreeExperienceLogs      vpsSubtree = "experience-logs"
+	vpsSubtreeDomains             vpsSubtree = "domains"
+	vpsSubtreeServices            vpsSubtree = "services"
+	vpsSubtreeCancellationPreview vpsSubtree = "cancellation-preview"
+	vpsSubtreeCancellation        vpsSubtree = "cancellation"
 )
 
 func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
@@ -390,6 +414,10 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeDomains
 	case "services":
 		return segments[0], vpsSubtreeServices
+	case "cancellation-preview":
+		return segments[0], vpsSubtreeCancellationPreview
+	case "cancellation":
+		return segments[0], vpsSubtreeCancellation
 	default:
 		return segments[0], vpsSubtreeUnknown
 	}

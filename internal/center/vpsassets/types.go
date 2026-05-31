@@ -86,6 +86,8 @@ type Record struct {
 	Labels              []string        `json:"labels"`
 	Note                string          `json:"note"`
 	ActiveNodeLinkCount int             `json:"active_node_link_count"`
+	RunningNodeCount    int             `json:"running_node_count"`
+	RunningTargetCount  int             `json:"running_target_count"`
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
 	ArchivedAt          *time.Time      `json:"archived_at"`

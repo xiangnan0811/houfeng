@@ -285,6 +285,29 @@ describe('SubscriptionsPage', () => {
     })
   })
 
+  it('shows asset lifecycle follow-up when subscription becomes inactive but VPS is still active', async () => {
+    const expired = {
+      ...subscription,
+      status: 'expired' as const,
+      auto_renew: false,
+      auto_renew_cancelled: true,
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([expired]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('需要处理资产联动')).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: '打开工作台' })).toHaveAttribute('href', '/vps/vps_001?workbench=cancellation')
+  })
+
   it('shows subscription error state with retry', async () => {
     const fetchMock = vi
       .fn()

@@ -70,6 +70,8 @@ function assetPressureCount(summary: DashboardAssetSummary) {
     summary.renewal_due_30d_vps_count +
     summary.unreviewed_vps_count +
     summary.to_cancel_vps_count +
+    (summary.cancellation_attention_vps_count ?? 0) +
+    (summary.running_cancelled_asset_count ?? 0) +
     summary.to_migrate_vps_count +
     summary.unlinked_vps_count +
     summary.abnormal_linked_vps_count
@@ -120,7 +122,7 @@ function assetFocusDetail(summary: DashboardAssetSummary, pressureTotal: number)
   const lifecycleReviewCount = summary.to_cancel_vps_count + summary.to_migrate_vps_count
   return `续费 ${summary.renewal_due_30d_vps_count} · 决策 ${
     summary.unreviewed_vps_count + lifecycleReviewCount
-  } · 未关联 ${summary.unlinked_vps_count}`
+  } · 取消联动 ${summary.cancellation_attention_vps_count ?? 0}`
 }
 
 function observabilityFocus(
@@ -205,6 +207,13 @@ function assetRows(summary: DashboardAssetSummary): CommandRow[] {
   const lifecycleReviewCount = summary.to_cancel_vps_count + summary.to_migrate_vps_count
   return [
     {
+      label: '取消联动',
+      value: summary.cancellation_attention_vps_count ?? 0,
+      detail: `已取消 ${summary.cancelled_vps_count ?? 0} · 仍运行 ${summary.running_cancelled_asset_count ?? 0}`,
+      to: DASHBOARD_LINKS.vpsCancellationAttention,
+      tone: (summary.cancellation_attention_vps_count ?? 0) > 0 ? 'alert' : 'normal',
+    },
+    {
       label: '30 天续费',
       value: summary.renewal_due_30d_vps_count,
       detail: `订阅 ${summary.renewal_due_30d_subscription_count}`,
@@ -221,7 +230,7 @@ function assetRows(summary: DashboardAssetSummary): CommandRow[] {
     {
       label: '取消 / 迁移',
       value: lifecycleReviewCount,
-      detail: `取消 ${summary.to_cancel_vps_count} · 迁移 ${summary.to_migrate_vps_count}`,
+      detail: `待取消 ${summary.to_cancel_vps_count} · 迁移 ${summary.to_migrate_vps_count}`,
       to: DASHBOARD_LINKS.assetDecisions,
       tone: lifecycleReviewCount > 0 ? 'alert' : 'normal',
     },
@@ -314,11 +323,15 @@ function nextActions(
   const pressureTotal = assetPressureCount(summary)
 
   if (pressureTotal > 0) {
+    const cancellationAttentionCount = summary.cancellation_attention_vps_count ?? 0
+    const actionTarget = cancellationAttentionCount > 0
+      ? DASHBOARD_LINKS.vpsCancellationAttention
+      : DASHBOARD_LINKS.assetDecisions
     actions.push({
-      label: '进入资产决策队列',
-      detail: `决策 ${summary.unreviewed_vps_count} · 续费 ${summary.renewal_due_30d_vps_count} · 未关联 ${summary.unlinked_vps_count}`,
-      to: DASHBOARD_LINKS.assetDecisions,
-      tone: summary.renewal_due_30d_vps_count > 0 ? 'notice' : 'neutral',
+      label: cancellationAttentionCount > 0 ? '处理取消联动' : '进入资产决策队列',
+      detail: `取消联动 ${cancellationAttentionCount} · 决策 ${summary.unreviewed_vps_count} · 续费 ${summary.renewal_due_30d_vps_count}`,
+      to: actionTarget,
+      tone: cancellationAttentionCount > 0 ? 'alert' : summary.renewal_due_30d_vps_count > 0 ? 'notice' : 'neutral',
       primary: true,
     })
   }

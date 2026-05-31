@@ -5,6 +5,7 @@ import { formatDate, formatMoney, formatOptional } from '../../lib/format'
 import type {
   AssetDomainRecord,
   AssetServiceRecord,
+  CancellationPreview,
   SubscriptionRecord,
   VPSAssetDetail,
   VPSNodeSummary,
@@ -33,7 +34,10 @@ type VPSDecisionBoardProps = {
   experienceNotice: string | null
   lifecycleNotice: string | null
   lifecycleError: string | null
+  cancellationPreview: CancellationPreview | null
+  cancellationPreviewError: string | null
   onDecisionEdit: () => void
+  onCancellationOpen: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
   onNodeLink: () => void
@@ -94,6 +98,38 @@ function latestHistorySummary(timeline: VPSTimeline): string {
   return '尚无资产历史记录'
 }
 
+function isCancellationRelevant(detail: VPSAssetDetail, preview: CancellationPreview | null): boolean {
+  return detail.renewal_decision === 'cancel' ||
+    detail.renewal_decision === 'auto_renew_cancelled' ||
+    detail.lifecycle_status === 'to_cancel' ||
+    detail.lifecycle_status === 'cancelled' ||
+    Boolean(preview && ((preview.warnings ?? []).length > 0 || (preview.blockers ?? []).length > 0))
+}
+
+function lifecycleCoordinationTitle(detail: VPSAssetDetail, preview: CancellationPreview | null, error: string | null): string {
+  if (error && !preview) return '取消上下文暂不可用'
+  if (!preview) return '正在读取取消上下文'
+  if ((preview.blockers ?? []).length > 0) return '取消动作存在阻塞'
+  if ((preview.warnings ?? []).length > 0) return '需要处理资产联动'
+  if (isCancellationRelevant(detail, preview)) return '取消状态已纳入工作台'
+  return '资产联动状态正常'
+}
+
+function lifecycleCoordinationSummary(detail: VPSAssetDetail, preview: CancellationPreview | null, error: string | null): string {
+  void detail
+  if (error && !preview) return error
+  if (!preview) return '取消/退役工作台会统一展示订阅、VPS、Node、服务、域名与 Target 影响范围。'
+  const blockers = preview.blockers ?? []
+  const warnings = preview.warnings ?? []
+  const subscriptions = preview.subscriptions ?? []
+  const nodeLinks = preview.node_links ?? []
+  const targetLinks = preview.target_links ?? []
+  if (blockers.length > 0) return blockers[0]
+  if (warnings.length > 0) return warnings[0]
+  const activeSubscriptions = subscriptions.filter((impact) => impact.record.status === 'active').length
+  return `订阅 ${activeSubscriptions}/${subscriptions.length} active · Node ${nodeLinks.length} · Target ${targetLinks.length}，普通 CRUD 不会隐式联动。`
+}
+
 export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
   const {
     detail,
@@ -103,7 +139,10 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
     subscriptionError,
     services,
     domains,
+    cancellationPreview,
+    cancellationPreviewError,
     onDecisionEdit,
+    onCancellationOpen,
     onFactEdit,
     onExperienceLog,
     onNodeLink,
@@ -128,6 +167,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
   })
   const feedbackItems = buildFeedback(props)
   const accessHost = detail.ssh_host || detail.ipv4 || detail.ipv6 || detail.display_name
+  const lifecycleAttention = isCancellationRelevant(detail, cancellationPreview)
 
   return (
     <section className="page-panel vps-decision-board" aria-labelledby="vps-decision-board-title">
@@ -187,7 +227,29 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
         </div>
       </div>
 
-      {/* PLACEHOLDER_CONTEXT */}
+      <div className="vps-decision-board__coordination">
+        <div className="vps-decision-board__coordination-head">
+          <div>
+            <p className="asset-cancel-workbench__eyebrow">LIFECYCLE COORDINATION</p>
+            <h3>{lifecycleCoordinationTitle(detail, cancellationPreview, cancellationPreviewError)}</h3>
+            <span>{lifecycleCoordinationSummary(detail, cancellationPreview, cancellationPreviewError)}</span>
+          </div>
+          <Badge variant="state" tone={lifecycleAttention ? 'notice' : 'normal'}>
+            {lifecycleAttention ? '需核对' : '已同步'}
+          </Badge>
+        </div>
+        <div className="vps-decision-board__coordination-metrics" aria-label="生命周期影响范围">
+          <span>订阅 <MonoDigits>{cancellationPreview?.subscriptions?.length ?? 0}</MonoDigits></span>
+          <span>Node <MonoDigits>{cancellationPreview?.node_links?.length ?? detail.active_node_link_count}</MonoDigits></span>
+          <span>Target <MonoDigits>{cancellationPreview?.target_links?.length ?? 0}</MonoDigits></span>
+        </div>
+        <div className="vps-decision-board__coordination-actions">
+          <Button variant={lifecycleAttention ? 'danger' : 'secondary'} size="sm" onClick={onCancellationOpen}>
+            打开取消/退役工作台
+          </Button>
+        </div>
+      </div>
+
       <div className="vps-decision-board__grid">
         <article className={`vps-decision-card vps-decision-card--${subscriptionTone}`}>
           <div className="vps-decision-card__header">

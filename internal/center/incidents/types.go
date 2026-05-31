@@ -103,6 +103,9 @@ type DashboardAssetSummary struct {
 	RenewalDue30dVPSCount          int                            `json:"renewal_due_30d_vps_count"`
 	UnreviewedVPSCount             int                            `json:"unreviewed_vps_count"`
 	ToCancelVPSCount               int                            `json:"to_cancel_vps_count"`
+	CancelledVPSCount              int                            `json:"cancelled_vps_count"`
+	CancellationAttentionVPSCount  int                            `json:"cancellation_attention_vps_count"`
+	RunningCancelledAssetCount     int                            `json:"running_cancelled_asset_count"`
 	ToMigrateVPSCount              int                            `json:"to_migrate_vps_count"`
 	UnlinkedVPSCount               int                            `json:"unlinked_vps_count"`
 	AbnormalLinkedVPSCount         int                            `json:"abnormal_linked_vps_count"`
@@ -241,6 +244,7 @@ const (
 	EventNodeMonitoringMaintenanceExited  EventType = "node_monitoring_maintenance_exited"
 	EventNodeMonitoringPaused             EventType = "node_monitoring_paused"
 	EventNodeMonitoringResumed            EventType = "node_monitoring_resumed"
+	EventNodeLifecycleUpdated             EventType = "node_lifecycle_updated"
 	EventNodeRetired                      EventType = "node_retired"
 	EventNodeRestoredToObserving          EventType = "node_restored_to_observing"
 	EventTargetMaintenanceEntered         EventType = "target_maintenance_entered"

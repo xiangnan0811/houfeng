@@ -121,7 +121,9 @@ export function DashboardPage() {
   const totalNodes = overview.total_node_count
   const onlineNodes = totalNodes - abnormalNodeCount
   const renewal30d = overview.asset_summary.renewal_due_30d_vps_count
-  const cancelledVps = overview.asset_summary.to_cancel_vps_count
+  const cancelledVps = overview.asset_summary.cancelled_vps_count ?? 0
+  const cancellationAttention = overview.asset_summary.cancellation_attention_vps_count ?? 0
+  const runningCancelledAssets = overview.asset_summary.running_cancelled_asset_count ?? 0
 
   // Cost: aggregate from cost_by_currency
   const costEntries = overview.asset_summary.cost_by_currency
@@ -160,7 +162,7 @@ export function DashboardPage() {
             <span className={`wb-card-num ${renewal30d > 0 ? 'warn' : ''}`}>{renewal30d}</span>
             <span className="wb-card-label">30天内续费</span>
           </div>
-          <div className="wb-card-secondary">未评估 {overview.asset_summary.unreviewed_vps_count} 个 · 已取消 {cancelledVps}</div>
+          <div className="wb-card-secondary">联动待处理 {cancellationAttention} 个 · 已取消 {cancelledVps}</div>
         </div>
         <div className="wb-card">
           <div className="wb-card-primary">
@@ -186,9 +188,18 @@ export function DashboardPage() {
             <span className="wb-col-title">关注</span>
           </div>
           <div className="wb-col-list">
-            {overview.abnormal_nodes.length === 0 && overview.abnormal_targets.length === 0 && (
+            {overview.abnormal_nodes.length === 0 && overview.abnormal_targets.length === 0 && cancellationAttention === 0 && (
               <div className="wb-att-item"><span className="wb-att-text text-muted text-sm">暂无需关注项</span></div>
             )}
+            {cancellationAttention > 0 ? (
+              <div className="wb-att-item" onClick={() => navigate('/vps?view=cancellation_attention')}>
+                <span className="alert-dot warn"></span>
+                <div className="wb-att-body">
+                  <span className="wb-att-text">取消/过期资产状态不一致</span>
+                  <span className="wb-att-meta">VPS {cancellationAttention} · 仍运行 {runningCancelledAssets}</span>
+                </div>
+              </div>
+            ) : null}
             {overview.abnormal_nodes.slice(0, 2).map(n => (
               <div className="wb-att-item" key={n.node_id}>
                 <span className={`alert-dot ${n.current_health_status === '严重' ? 'err' : 'warn'}`}></span>

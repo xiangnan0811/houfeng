@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/nodes"
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
@@ -16,15 +17,25 @@ type renewalSubscriptionLinker interface {
 	PatchVPSAssetWithSubscriptionRenewalLinkage(context.Context, string, vpsassets.PatchInput) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error)
 }
 
+type vpsRunningTargetCounter interface {
+	CountRunningTargetsForVPS(context.Context, string) (int, error)
+}
+
 type vpsPatchResponse struct {
 	vpsassets.Record
 	RenewalSubscriptionLinkage *vpsassets.RenewalSubscriptionLinkage `json:"renewal_subscription_linkage,omitempty"`
 }
 
-func VPSCollection(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http.Handler {
+func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 	var linkRepo assetlinks.Repository
-	if len(linkRepos) > 0 {
-		linkRepo = linkRepos[0]
+	var targetCounter vpsRunningTargetCounter
+	for _, dep := range optionalDeps {
+		switch typed := dep.(type) {
+		case assetlinks.Repository:
+			linkRepo = typed
+		case vpsRunningTargetCounter:
+			targetCounter = typed
+		}
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,12 +63,10 @@ func VPSCollection(repo vpsassets.Repository, linkRepos ...assetlinks.Repository
 			}
 			if linkRepo != nil {
 				for i := range records {
-					count, err := linkRepo.CountActiveLinksForVPS(r.Context(), records[i].VPSID)
-					if err != nil {
+					if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, &records[i]); err != nil {
 						writeError(w, http.StatusInternalServerError, "internal server error")
 						return
 					}
-					records[i].ActiveNodeLinkCount = count
 				}
 			}
 			writeJSON(w, http.StatusOK, records)
@@ -84,12 +93,10 @@ func VPSCollection(repo vpsassets.Repository, linkRepos ...assetlinks.Repository
 				return
 			}
 			if linkRepo != nil {
-				count, err := linkRepo.CountActiveLinksForVPS(r.Context(), record.VPSID)
-				if err != nil {
+				if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, &record); err != nil {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
-				record.ActiveNodeLinkCount = count
 			}
 			writeJSON(w, http.StatusCreated, record)
 		default:
@@ -98,10 +105,16 @@ func VPSCollection(repo vpsassets.Repository, linkRepos ...assetlinks.Repository
 	})
 }
 
-func VPSItem(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http.Handler {
+func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 	var linkRepo assetlinks.Repository
-	if len(linkRepos) > 0 {
-		linkRepo = linkRepos[0]
+	var targetCounter vpsRunningTargetCounter
+	for _, dep := range optionalDeps {
+		switch typed := dep.(type) {
+		case assetlinks.Repository:
+			linkRepo = typed
+		case vpsRunningTargetCounter:
+			targetCounter = typed
+		}
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +143,13 @@ func VPSItem(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http
 					return
 				}
 				record.ActiveNodeLinkCount = len(nodeLinks)
+				record.RunningNodeCount = countRunningVPSNodes(record.LifecycleStatus, nodeLinks)
+				runningTargetCount, countErr := countRunningVPSTargets(r.Context(), targetCounter, record.LifecycleStatus, record.VPSID)
+				if countErr != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				record.RunningTargetCount = runningTargetCount
 				writeJSON(w, http.StatusOK, vpsDetailResponse{Record: record, NodeLinks: nodeLinks})
 				return
 			}
@@ -178,12 +198,10 @@ func VPSItem(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http
 				return
 			}
 			if linkRepo != nil {
-				count, err := linkRepo.CountActiveLinksForVPS(r.Context(), record.VPSID)
-				if err != nil {
+				if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, &record); err != nil {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
-				record.ActiveNodeLinkCount = count
 			}
 			if linkage != nil {
 				writeJSON(w, http.StatusOK, vpsPatchResponse{Record: record, RenewalSubscriptionLinkage: linkage})
@@ -194,6 +212,43 @@ func VPSItem(repo vpsassets.Repository, linkRepos ...assetlinks.Repository) http
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+func enrichVPSAssetRuntimeSummary(ctx context.Context, linkRepo assetlinks.Repository, targetCounter vpsRunningTargetCounter, record *vpsassets.Record) error {
+	nodeLinks, err := linkRepo.ListNodesForVPS(ctx, record.VPSID)
+	if err != nil {
+		return err
+	}
+	record.ActiveNodeLinkCount = len(nodeLinks)
+	record.RunningNodeCount = countRunningVPSNodes(record.LifecycleStatus, nodeLinks)
+	record.RunningTargetCount, err = countRunningVPSTargets(ctx, targetCounter, record.LifecycleStatus, record.VPSID)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func countRunningVPSNodes(lifecycle vpsassets.LifecycleStatus, nodeLinks []assetlinks.NodeSummary) int {
+	if lifecycle != vpsassets.LifecycleToCancel && lifecycle != vpsassets.LifecycleCancelled {
+		return 0
+	}
+	running := 0
+	for _, link := range nodeLinks {
+		if link.LifecycleStatus != nodes.LifecycleNoRenewal && link.LifecycleStatus != nodes.LifecycleRetired {
+			running++
+		}
+	}
+	return running
+}
+
+func countRunningVPSTargets(ctx context.Context, targetCounter vpsRunningTargetCounter, lifecycle vpsassets.LifecycleStatus, vpsID string) (int, error) {
+	if lifecycle != vpsassets.LifecycleToCancel && lifecycle != vpsassets.LifecycleCancelled {
+		return 0, nil
+	}
+	if targetCounter == nil {
+		return 0, nil
+	}
+	return targetCounter.CountRunningTargetsForVPS(ctx, vpsID)
 }
 
 type vpsDetailResponse struct {

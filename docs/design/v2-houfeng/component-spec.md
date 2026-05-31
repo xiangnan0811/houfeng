@@ -219,30 +219,31 @@ parent: docs/design/v2-houfeng/design-language.md
 8. 首次接入态只渲染 onboarding 主工作台和必要入口，不渲染摘要指标、运行上下文、空 Group、空最近事件、API facts 或其它暗示系统已有数据的大区块。四步入口分别为 `/nodes`、`/nodes?onboarding=pending`、`/targets`、`/targets`。
 
 ### AssetDecisionsPage
-1. 资产决策页是 Asset Ledger 的主工作队列，不是三张 VPS 状态表的拼接。首屏必须出现一个统一 `资产决策工作队列` surface，按未评估、续费窗口、迁移/取消、未关联 Node、缺订阅等人工处理优先级排序。
-2. 顶部 summary 只保留能指导处理顺序的少量数字：续费窗口订阅数、统一队列数量、缺订阅/未关联数量、迁移/取消数量。不要恢复同权 KPI 卡片墙。
+1. 资产决策页是 Asset Ledger 的主工作队列，不是三张 VPS 状态表的拼接。首屏必须出现一个统一 `资产决策工作队列` surface，按未评估、续费窗口、迁移/取消、取消联动待处理、未关联 Node、缺订阅等人工处理优先级排序。
+2. 顶部 summary 只保留能指导处理顺序的少量数字：续费窗口订阅数、统一队列数量、缺订阅/未关联数量、迁移/取消数量、取消联动待处理数量。不要恢复同权 KPI 卡片墙。
 3. 队列行必须服务扫描和判断：rank、VPS identity、provider/region/access、生命周期/用途/续费决策、订阅/月化成本/续费日/自动续费、Node 关联数量、数据质量 badge、详情与处理 action。当前 `VPSAssetRecord` 只有 `active_node_link_count`，不得展示或暗示 linked node health。
 4. 决策编辑使用 `Drawer` 中的 `AssetDecisionWorkPanel`。Drawer 打开时处理单台 VPS；关闭后队列保持可扫描。保存成功的 notice 留在工作队列 surface 内，而不是只出现在已关闭 drawer 内。
 5. 续费候选表是 `RENEWAL EVIDENCE` 次级证据区。它保留续费窗口切换和订阅入口，但视觉权重低于统一工作队列。
 
 ### VPSPage
 1. VPS 页是高密度资产库存表，用于 40+ VPS 核对、比较和补录，不是普通后台资源表。首屏结构：页面标题 → quick views / chips / 高级筛选入口 → `VPS 库存表`。
-2. Quick views 使用 `Tabs variant="pill"`，至少覆盖全部、30 天续费、未评估、未关联、缺订阅、缺信息、已归档。URL-state 支持 `view`，同时继续承接 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
+2. Quick views 使用 `Tabs variant="pill"`，至少覆盖全部、30 天续费、未评估、取消待处理/状态不一致、未关联、缺订阅、缺信息、已归档。URL-state 支持 `view`，同时继续承接 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
 3. 主屏不常驻完整筛选控件。字段筛选进入右侧 `Drawer`，应用后以 `FilterChip` 反馈并同步 URL；清空和移除 chip 必须回写 URL。
 4. 库存表列必须优先展示真实核对信号：VPS identity/access、provider/region/product、订阅/月化成本/续费日/自动续费、生命周期/用途/续费决策、Node 关联数量、数据质量 badge、labels。创建 VPS 仍可折叠展开，但不抢首屏主视觉。
-5. 页面可以通过 `listVPSAssets()` + `listSubscriptions({ sort: 'renew_at', order: 'asc' })` 在前端做轻量 join，标出缺订阅、未关联 Node、缺 provider、缺访问入口等资料缺口。不得新增未存在的后端健康语义；linked node health 只能等后端 contract 明确后再展示。
+5. 页面可以通过 `listVPSAssets()` + `listSubscriptions({ sort: 'renew_at', order: 'asc' })` 在前端做轻量 join，标出缺订阅、取消联动状态割裂、未关联 Node、缺 provider、缺访问入口等资料缺口。不得新增未存在的后端健康语义；linked node health 只能等后端 contract 明确后再展示。
 
 ### VPSDetailPage
 1. VPS 详情页是单台 VPS 的资产判断工作台，不是操作表单集合。首屏顺序为 identity hero → `资产判断` workbench → 续费/成本证据 → 决策/经验依据 → Node 证据 → 基础信息 → 服务/域名上下文 → timeline → access summary → lifecycle danger zone。
-2. `资产判断` workbench 必须同时展示当前续费决策、当前订阅/月化成本/续费日、linked Node health evidence、服务/域名数量和资料质量缺口。它可以消费 `VPSAssetDetail.node_links` 中已有 health/heartbeat/incident summary，因为 Detail contract 明确返回 Node summary；这条权限不外推到 VPS 列表。
+2. `资产判断` workbench 必须同时展示当前续费决策、当前订阅/月化成本/续费日、取消 / 过期 preview、linked Node health evidence、服务/域名数量和资料质量缺口。它可以消费 `VPSAssetDetail.node_links` 中已有 health/heartbeat/incident summary，因为 Detail contract 明确返回 Node summary；这条权限不外推到 VPS 列表。
 3. Detail 页通过 `listSubscriptions({ vps_id, sort: 'renew_at', order: 'asc' })` 读取 VPS scoped subscription。订阅读取失败时显示错误和未知状态，不得把请求失败渲染成真实 `缺订阅`。
-4. 决策、基础信息、Node 关联、经验记录、服务创建、域名创建都使用 `Drawer`。主页面只保留 action button、表格、证据和保存后的 notice；不要让创建/编辑表单常驻主扫描路径。
-5. 生命周期 archive/restore 是独立危险区，保留 alertdialog 确认；它不放进 routine action grid，也不进入基础信息 Drawer，不和服务/域名创建同权。
-6. 服务/域名在 Detail 页是 VPS scoped manual records，只展示和创建当前 VPS 的上下文记录；不要在这里扩成完整服务注册表、域名管理或 DNS 记录管理。
+4. 决策、基础信息、Node 关联、经验记录、服务创建、域名创建、取消 / 退役工作台都使用 `Drawer`。主页面只保留 action button、表格、证据和保存后的 notice；不要让创建/编辑表单常驻主扫描路径。
+5. 生命周期 archive/restore 是独立危险区，保留 alertdialog 确认；取消 / 退役 action 是独立的可预览、可确认、可审计工作台，不进入基础信息 Drawer，也不和服务/域名创建同权。
+6. 取消 / 退役工作台必须是高密度决策表单，而不是纵向卡片墙：顶部影响摘要在桌面四项同排、中等视口 2×2、手机单列；主体在桌面拆为左侧 VPS state + audit 决策栏、右侧订阅 / Node / Target 确认栏，小桌面以下降为紧凑单列；单值状态如 `取消` / `已取消` 只能作为 badge 或 select value，不得渲染成整行宽条。
+7. 服务/域名在 Detail 页是 VPS scoped manual records，只展示和创建当前 VPS 的上下文记录；不要在这里扩成完整服务注册表、域名管理或 DNS 记录管理。
 
 ### NodesPage
 1. Section heading「节点观测」+ 「新建节点」按钮。文案必须把 Node 定位为 VPS 资产判断的运行证据，而不是独立的资源中心。
-2. 观测支撑面「资产判断支撑」放在 hero 之后、创建 drawer/列表控制之前，展示四个证据 lane：异常证据、接入/绑定、维护/暂停、VPS 关联。支撑面只能使用当前 Node 列表已加载状态派生数字和入口，不做逐行 VPS 查询，也不展示列表 contract 中不存在的 linked VPS health。
+2. 观测支撑面「资产判断支撑」放在 hero 之后、创建 drawer/列表控制之前，展示四个证据 lane：异常证据、接入/绑定、维护/暂停、VPS 关联。列表可以使用批量 `asset-context/nodes` 显示关联 VPS 的取消 / 过期 / 状态割裂上下文，但不得逐行请求，也不得展示 contract 中不存在的 linked VPS health。
 3. （可选）创建节点表单/Drawer；创建入口不抢占首屏扫描路径。
 4. 视图切换：segmented control 「全部节点 N」/「绑定异常 M」
 5. 筛选栏：URL-state 承接 Dashboard 深链；`onboarding=pending` 显示 `待接入/绑定待处理` chip/toggle，匹配生命周期待接入、未绑定或指纹变更待确认节点。支撑面快捷按钮可复用 `abnormal=1`、`onboarding=pending`、运行状态筛选，但必须保持清空和 chip 移除回写 URL。
@@ -301,7 +302,7 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
 ### TargetsPage
 1. Section heading「入口观测」+ 「新建目标」按钮（右对齐，primary）。文案必须把 Target 定位为服务入口和探测覆盖证据，而不是完整服务注册表。
 2. （可选）创建目标表单（page-panel，可折叠）
-3. 入口观测支撑面「服务入口支撑」放在创建面板之后、列表空态/筛选栏之前，展示四个证据 lane：异常入口、暂停/归档、执行覆盖、资产服务上下文。支撑面只能从当前 Target 列表派生数字，链接到 VPS 台账和资产决策，不扩展跨页 service registry。
+3. 入口观测支撑面「服务入口支撑」放在创建面板之后、列表空态/筛选栏之前，展示四个证据 lane：异常入口、暂停/归档、执行覆盖、资产服务上下文。列表可以使用批量 `asset-context/targets` 显示 Target/实例挂载的服务、域名和 VPS 取消上下文；支撑面只能从当前 Target 列表派生数字，链接到 VPS 台账和资产决策，不扩展跨页 service registry。
 4. 筛选栏：6 项（type / run_status / health / labels / execution_node_labels / abnormal toggle），URL-state 承接 Dashboard 深链（`abnormal=1`、`run_status=暂停`、`run_status=已归档`）并显示对应 chip/toggle。支撑面快捷按钮可复用这些筛选，但必须保持清空和 chip 移除回写 URL。
 5. **DataTable**（density compact）：列 `[StatusGlyph, 目标(名字 + Hostname target_id), 类型, Host(Hostname host[:base_port]), 标签(截断+overflow+inline 编辑), 状态(StatusBadge run_status + health + 执行节点标签), 最近成功/失败(Timestamp relative), 当前主问题(MonoDigits incident_count + 摘要), 操作]`
 6. 行 hover：操作列显示「快速编辑标签 / 进入维护 / 暂停 / 归档 / 恢复」等条件性 ghost 按钮（hover-only opacity 模式）
