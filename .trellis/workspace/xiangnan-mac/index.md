@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 151
-- **Last Active**: 2026-05-30
+- **Total Sessions**: 152
+- **Last Active**: 2026-05-31
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1147 | Active |
+| `journal-3.md` | ~1189 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 152 | 2026-05-31 | Asset lifecycle release and Node 24 workflow follow-up | `5d6539c`, `3252b8f`, `b8ca918` | `worktree/archive-node24-main-drift` |
 | 151 | 2026-05-30 | Update Trellis beta workflow | `692976b` | `worktree/archive-trellis-update-task` |
 | 150 | 2026-05-30 | 入口详情页 IA 重构:决策板 + 维护 modal + drawer 扫荡 | `efd9716` | `feat/ui-detail-pages-ia` |
 | 149 | 2026-05-29 | VPS 创建流程 Drawer→Modal + 全局 select caret 统一 | `8145cc7`, `fb92d65` | `feat/vps-create-modal-refactor` |
