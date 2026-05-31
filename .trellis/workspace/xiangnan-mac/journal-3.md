@@ -1145,3 +1145,45 @@ Upgraded Houfeng Trellis project files to 0.6.0-beta.21, updated branch/worktree
 ### Next Steps
 
 - None - task complete
+
+
+## Session 152: Asset lifecycle release and Node 24 workflow follow-up
+
+**Date**: 2026-05-31
+**Task**: Asset lifecycle release and Node 24 workflow follow-up
+**Branch**: `worktree/archive-node24-main-drift`
+
+### Summary
+
+Completed the asset lifecycle release chain, fixed publish-images artifact actions for Node 24 compatibility, audited local main drift, and archived the completed Trellis tasks.
+
+### Main Changes
+
+- Released asset lifecycle coordination in v0.24.0 before this follow-up.
+- Audited local primary checkout `main`: it is behind origin/main and still has six dirty files from the asset lifecycle work. Those files are stale released-work residue and were not merged into the Node 24 branch.
+- Updated `publish-images` artifact actions from v4 to v7 in PR #168 and kept project runtime on Node 22.
+- Merged PR #168 after PR CI passed, then monitored main CI and Release Please.
+- Release Please created and merged v0.24.1 PR #169.
+- Verified GitHub Release v0.24.1 and `publish-images` run 26704225960 completed successfully with `actions/upload-artifact@v7` and `actions/download-artifact@v7`.
+- Archived both completed Trellis tasks: asset lifecycle coordination and Node 24/main drift follow-up.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5d6539c` | (see git log) |
+| `3252b8f` | (see git log) |
+| `b8ca918` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
