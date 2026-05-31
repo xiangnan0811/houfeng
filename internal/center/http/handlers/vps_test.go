@@ -79,6 +79,17 @@ func (f *fakeVPSAssetRenewalLinkageRepository) PatchVPSAssetWithSubscriptionRene
 	return f.patchVPSAssetResult, f.linkageResult, nil
 }
 
+type fakeVPSTargetCounter struct {
+	countRunningTargetsForVPSResult int
+	countRunningTargetsForVPSErr    error
+	countRunningTargetsForVPSID     string
+}
+
+func (f *fakeVPSTargetCounter) CountRunningTargetsForVPS(_ context.Context, vpsID string) (int, error) {
+	f.countRunningTargetsForVPSID = vpsID
+	return f.countRunningTargetsForVPSResult, f.countRunningTargetsForVPSErr
+}
+
 type fakeRenewalTimelineRepository struct {
 	timeline             renewals.VPSTimeline
 	err                  error
@@ -166,7 +177,15 @@ func TestVPSCollectionAddsActiveNodeLinkCountsWhenAvailable(t *testing.T) {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}}}
-	linkRepo := &fakeAssetLinkRepository{countActiveLinksForVPSVal: 2}
+	linkRepo := &fakeAssetLinkRepository{listNodesForVPSResult: []assetlinks.NodeSummary{{
+		NodeID:          "nd_001",
+		LifecycleStatus: "在用",
+		LinkedAt:        now,
+	}, {
+		NodeID:          "nd_002",
+		LifecycleStatus: "已退役",
+		LinkedAt:        now,
+	}}}
 
 	handler := handlers.VPSCollection(repo, linkRepo)
 	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
@@ -177,8 +196,8 @@ func TestVPSCollectionAddsActiveNodeLinkCountsWhenAvailable(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
 	}
-	if linkRepo.countActiveLinksForVPSID != "vps_001" {
-		t.Fatalf("count vps id = %q, want vps_001", linkRepo.countActiveLinksForVPSID)
+	if linkRepo.listNodesForVPSID != "vps_001" {
+		t.Fatalf("list nodes vps id = %q, want vps_001", linkRepo.listNodesForVPSID)
 	}
 	var body []vpsassets.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
@@ -186,6 +205,60 @@ func TestVPSCollectionAddsActiveNodeLinkCountsWhenAvailable(t *testing.T) {
 	}
 	if len(body) != 1 || body[0].ActiveNodeLinkCount != 2 {
 		t.Fatalf("body = %#v, want active_node_link_count 2", body)
+	}
+	if body[0].RunningNodeCount != 0 {
+		t.Fatalf("running_node_count = %d, want 0 for active VPS", body[0].RunningNodeCount)
+	}
+}
+
+func TestVPSCollectionCountsOnlyRunningNodesForCancelledAssets(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleCancelled,
+		UsageStatus:     vpsassets.UsageInUse,
+		RenewalDecision: vpsassets.RenewalCancel,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}}}
+	linkRepo := &fakeAssetLinkRepository{listNodesForVPSResult: []assetlinks.NodeSummary{{
+		NodeID:          "nd_running",
+		LifecycleStatus: "在用",
+		LinkedAt:        now,
+	}, {
+		NodeID:          "nd_no_renewal",
+		LifecycleStatus: "不续费",
+		LinkedAt:        now,
+	}, {
+		NodeID:          "nd_retired",
+		LifecycleStatus: "已退役",
+		LinkedAt:        now,
+	}}}
+	targetCounter := &fakeVPSTargetCounter{countRunningTargetsForVPSResult: 2}
+
+	handler := handlers.VPSCollection(repo, linkRepo, targetCounter)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var body []vpsassets.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if len(body) != 1 || body[0].ActiveNodeLinkCount != 3 || body[0].RunningNodeCount != 1 {
+		t.Fatalf("body = %#v, want 3 historical active links and 1 running node", body)
+	}
+	if targetCounter.countRunningTargetsForVPSID != "vps_001" {
+		t.Fatalf("target counter vps id = %q, want vps_001", targetCounter.countRunningTargetsForVPSID)
+	}
+	if body[0].RunningTargetCount != 2 {
+		t.Fatalf("running_target_count = %d, want 2", body[0].RunningTargetCount)
 	}
 }
 
@@ -331,8 +404,9 @@ func TestVPSItemReturnsNodeLinksWhenAvailable(t *testing.T) {
 		CurrentHealthStatus: "正常",
 		LinkedAt:            now,
 	}}}
+	targetCounter := &fakeVPSTargetCounter{countRunningTargetsForVPSResult: 3}
 
-	handler := handlers.VPSItem(repo, linkRepo)
+	handler := handlers.VPSItem(repo, linkRepo, targetCounter)
 	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001", nil)
 	recorder := httptest.NewRecorder()
 
@@ -347,13 +421,18 @@ func TestVPSItemReturnsNodeLinksWhenAvailable(t *testing.T) {
 	var body struct {
 		VPSID               string                   `json:"vps_id"`
 		ActiveNodeLinkCount int                      `json:"active_node_link_count"`
+		RunningNodeCount    int                      `json:"running_node_count"`
+		RunningTargetCount  int                      `json:"running_target_count"`
 		NodeLinks           []assetlinks.NodeSummary `json:"node_links"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body.VPSID != "vps_001" || body.ActiveNodeLinkCount != 1 || len(body.NodeLinks) != 1 || body.NodeLinks[0].NodeID != "nd_001" {
+	if body.VPSID != "vps_001" || body.ActiveNodeLinkCount != 1 || body.RunningNodeCount != 0 || body.RunningTargetCount != 0 || len(body.NodeLinks) != 1 || body.NodeLinks[0].NodeID != "nd_001" {
 		t.Fatalf("body = %#v, want vps detail with node link summary", body)
+	}
+	if targetCounter.countRunningTargetsForVPSID != "" {
+		t.Fatalf("target counter vps id = %q, want no target count for active VPS", targetCounter.countRunningTargetsForVPSID)
 	}
 }
 
@@ -909,7 +988,7 @@ func TestVPSMapsLinkRepositoryFailures(t *testing.T) {
 				RenewalDecision: vpsassets.RenewalKeep,
 				CreatedAt:       now,
 				UpdatedAt:       now,
-			}}}, &fakeAssetLinkRepository{countActiveLinksForVPSErr: errors.New("count failed")}),
+			}}}, &fakeAssetLinkRepository{listNodesForVPSErr: errors.New("links failed")}),
 			method: http.MethodGet,
 			path:   "/api/vps",
 		},
@@ -927,6 +1006,21 @@ func TestVPSMapsLinkRepositoryFailures(t *testing.T) {
 			}}, &fakeAssetLinkRepository{listNodesForVPSErr: errors.New("links failed")}),
 			method: http.MethodGet,
 			path:   "/api/vps/vps_001",
+		},
+		{
+			name: "list target count failure",
+			handler: handlers.VPSCollection(&fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{{
+				VPSID:           "vps_001",
+				DisplayName:     "Tokyo Edge",
+				SSHPort:         22,
+				LifecycleStatus: vpsassets.LifecycleCancelled,
+				UsageStatus:     vpsassets.UsageInUse,
+				RenewalDecision: vpsassets.RenewalCancel,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}}}, &fakeAssetLinkRepository{}, &fakeVPSTargetCounter{countRunningTargetsForVPSErr: errors.New("targets failed")}),
+			method: http.MethodGet,
+			path:   "/api/vps",
 		},
 	}
 

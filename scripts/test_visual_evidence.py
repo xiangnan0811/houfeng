@@ -164,7 +164,25 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertTrue(assets)
         self.assertTrue(all(asset["renewal_decision"] == "unreviewed" for asset in assets))
 
-        status, body = call_asset_workflow_api("/api/nodes")
+        status, detail = call_asset_workflow_api("/api/vps/vps_fra_legacy")
+        self.assertEqual(status, 200)
+        self.assertEqual(detail["vps_id"], "vps_fra_legacy")
+        self.assertTrue(detail["node_links"])
+
+        status, preview = call_asset_workflow_api("/api/vps/vps_fra_legacy/cancellation-preview")
+        self.assertEqual(status, 200)
+        self.assertEqual(preview["vps"]["vps_id"], "vps_fra_legacy")
+        self.assertTrue(preview["target_links"])
+
+        status, nodes = call_asset_workflow_api("/api/nodes")
+        self.assertEqual(status, 200)
+        self.assertIn("node_hkg_edge_01", {node["node_id"] for node in nodes})
+
+        status, targets = call_asset_workflow_api("/api/targets")
+        self.assertEqual(status, 200)
+        self.assertIn("target_api_core", {target["target_id"] for target in targets})
+
+        status, body = call_asset_workflow_api("/api/settings")
         self.assertEqual(status, 404)
         self.assertEqual(
             body["error"],

@@ -23,7 +23,7 @@ type Props = {
 }
 
 function locationLine(node: NodeRecord): string {
-  const parts = [node.region, node.city, node.provider].map((p) => p.trim()).filter(Boolean)
+  const parts = [node.region, node.city, node.provider].map((p) => (p ?? '').trim()).filter(Boolean)
   return parts.join(' · ')
 }
 

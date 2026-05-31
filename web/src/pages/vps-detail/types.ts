@@ -4,6 +4,8 @@ import type {
   AssetServiceRecord,
   AssetServiceStatus,
   AssetServiceType,
+  CancellationPreview,
+  LifecycleActionResult,
   NodeRecord,
   ProviderRecord,
   SubscriptionRecord,
@@ -25,6 +27,9 @@ export type VPSDetailPageState = {
   domains: AssetDomainRecord[]
   subscriptions: SubscriptionRecord[]
   subscriptionsError: string | null
+  cancellationPreview: CancellationPreview | null
+  cancellationPreviewError: string | null
+  cancellationResult: LifecycleActionResult | null
 }
 
 export type VPSDetailSelectorState = {
@@ -41,6 +46,7 @@ export type VPSDetailSelectorState = {
 
 export type VPSDetailDrawerMode =
   | 'decision'
+  | 'cancellation'
   | 'facts'
   | 'node-link'
   | 'experience'

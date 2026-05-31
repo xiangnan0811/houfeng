@@ -228,6 +228,7 @@ export type StateChangeEventType =
   | 'node_binding_rebind_confirmed'
   | 'node_binding_pending_rejected'
   | 'node_binding_reset'
+  | 'node_lifecycle_updated'
   | 'node_retired'
   | 'node_restored_to_observing'
   | 'node_monitoring_maintenance_entered'
@@ -248,6 +249,7 @@ export const STATE_CHANGE_EVENT_TYPE_LABELS: Record<StateChangeEventType, string
   node_binding_rebind_confirmed: '确认重新绑定',
   node_binding_pending_rejected: '拒绝待确认指纹',
   node_binding_reset: '绑定已重置',
+  node_lifecycle_updated: '节点生命周期已更新',
   node_retired: '节点已退役',
   node_restored_to_observing: '节点恢复到观察中',
   node_monitoring_maintenance_entered: '节点进入维护',
@@ -339,6 +341,9 @@ export type DashboardAssetSummary = {
   renewal_due_30d_vps_count: number
   unreviewed_vps_count: number
   to_cancel_vps_count: number
+  cancelled_vps_count: number
+  cancellation_attention_vps_count: number
+  running_cancelled_asset_count: number
   to_migrate_vps_count: number
   unlinked_vps_count: number
   abnormal_linked_vps_count: number
@@ -725,6 +730,8 @@ export type VPSAssetRecord = {
   labels: string[]
   note: string
   active_node_link_count: number
+  running_node_count?: number
+  running_target_count?: number
   created_at: string
   updated_at: string
   archived_at?: string | null
@@ -740,6 +747,123 @@ export type RenewalSubscriptionLinkage = {
 
 export type VPSAssetUpdateResult = VPSAssetRecord & {
   renewal_subscription_linkage?: RenewalSubscriptionLinkage | null
+}
+
+export type LifecycleActionStepStatus = 'completed' | 'skipped' | 'failed'
+
+export type LifecycleActionStep = {
+  step_id: string
+  action_id: string
+  object_type: 'vps' | 'subscription' | 'node' | 'target' | string
+  object_id: string
+  step_type: 'vps_lifecycle' | 'subscription_status' | 'node_lifecycle' | 'node_monitoring' | 'target_run_status' | string
+  status: LifecycleActionStepStatus
+  before_state: Record<string, unknown>
+  after_state: Record<string, unknown>
+  message: string
+  executed_at?: string | null
+  created_at: string
+}
+
+export type LifecycleActionRecord = {
+  action_id: string
+  vps_id: string
+  action_type: 'cancel_vps' | string
+  status: 'completed' | 'failed' | string
+  reason: string
+  effective_date?: string | null
+  created_at: string
+  confirmed_at?: string | null
+  completed_at?: string | null
+  summary?: Record<string, unknown>
+}
+
+export type LifecycleActionResult = {
+  action: LifecycleActionRecord
+  steps: LifecycleActionStep[]
+}
+
+export type SubscriptionImpact = {
+  record: SubscriptionRecord
+  role: 'active' | 'inactive' | 'attention' | string
+  recommended_action: string
+  message: string
+}
+
+export type TargetImpact = {
+  target_id: string
+  name: string
+  run_status: TargetRunStatus | string
+  service_ids: string[]
+  domain_ids: string[]
+  last_linked_at?: string | null
+}
+
+export type RecommendedLifecycleStep = {
+  object_type: 'vps' | 'subscription' | 'node' | 'target' | string
+  object_id: string
+  step_type: 'vps_lifecycle' | 'subscription_status' | 'node_lifecycle' | 'node_monitoring' | 'target_run_status' | string
+  from_state: string
+  to_state: string
+  required: boolean
+  message: string
+}
+
+export type CancellationPreview = {
+  vps: VPSAssetRecord
+  subscriptions: SubscriptionImpact[]
+  node_links: VPSNodeSummary[]
+  services: AssetServiceRecord[]
+  domains: AssetDomainRecord[]
+  target_links: TargetImpact[]
+  recommended_steps: RecommendedLifecycleStep[]
+  warnings: string[]
+  blockers: string[]
+}
+
+export type NodeLifecycleActionInput = {
+  node_id: string
+  lifecycle_status?: string
+  monitoring_status?: string
+}
+
+export type TargetLifecycleActionInput = {
+  target_id: string
+  run_status: TargetRunStatus | string
+}
+
+export type ApplyCancellationInput = {
+  reason: string
+  effective_date?: string | null
+  subscription_ids: string[]
+  vps_lifecycle_status: Extract<VPSLifecycleStatus, 'to_cancel' | 'cancelled'>
+  node_actions: NodeLifecycleActionInput[]
+  target_actions: TargetLifecycleActionInput[]
+}
+
+export type LinkedVPSContext = {
+  vps_id: string
+  display_name: string
+  lifecycle_status: VPSLifecycleStatus
+  renewal_decision: VPSRenewalDecision
+  subscription_state: SubscriptionStatus | 'missing' | string
+  message: string
+}
+
+export type AssetContextForNode = {
+  node_id: string
+  linked_vps_count: number
+  cancellation_attention: boolean
+  summaries: LinkedVPSContext[]
+}
+
+export type AssetContextForTarget = {
+  target_id: string
+  linked_vps_count: number
+  cancellation_attention: boolean
+  summaries: LinkedVPSContext[]
+  service_ids: string[]
+  domain_ids: string[]
 }
 
 export type CreateVPSAssetInput = {

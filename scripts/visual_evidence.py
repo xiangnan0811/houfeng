@@ -190,6 +190,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "labels": ["prod", "web"],
             "note": "Primary asset workflow fixture with complete facts.",
             "active_node_link_count": 2,
+            "running_node_count": 0,
+            "running_target_count": 0,
             "created_at": iso_timestamp(-100),
             "updated_at": iso_timestamp(-1),
             "archived_at": None,
@@ -219,6 +221,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "labels": ["edge", "migration"],
             "note": "Migration candidate with active subscription evidence.",
             "active_node_link_count": 1,
+            "running_node_count": 0,
+            "running_target_count": 0,
             "created_at": iso_timestamp(-80),
             "updated_at": iso_timestamp(-1),
             "archived_at": None,
@@ -248,6 +252,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "labels": ["needs-facts"],
             "note": "Fixture row intentionally missing subscription, provider, location, and access facts.",
             "active_node_link_count": 0,
+            "running_node_count": 0,
+            "running_target_count": 0,
             "created_at": iso_timestamp(-20),
             "updated_at": iso_timestamp(-1),
             "archived_at": None,
@@ -276,7 +282,9 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "importance": "low",
             "labels": ["legacy", "cost-review"],
             "note": "Cancel queue fixture with auto-renew cancelled.",
-            "active_node_link_count": 0,
+            "active_node_link_count": 1,
+            "running_node_count": 1,
+            "running_target_count": 1,
             "created_at": iso_timestamp(-240),
             "updated_at": iso_timestamp(-4),
             "archived_at": None,
@@ -306,6 +314,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "labels": ["archived"],
             "note": "Archived fixture row for quick-view coverage.",
             "active_node_link_count": 0,
+            "running_node_count": 0,
+            "running_target_count": 0,
             "created_at": iso_timestamp(-900),
             "updated_at": iso_timestamp(-60),
             "archived_at": iso_timestamp(-30),
@@ -390,6 +400,348 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
     ]
 
 
+def lifecycle_context_for(
+    vps_id: str,
+    subscription_state: str,
+    message: str,
+) -> dict[str, object]:
+    vps = next(row for row in asset_workflow_vps_assets() if row["vps_id"] == vps_id)
+    return {
+        "vps_id": vps["vps_id"],
+        "display_name": vps["display_name"],
+        "lifecycle_status": vps["lifecycle_status"],
+        "renewal_decision": vps["renewal_decision"],
+        "subscription_state": subscription_state,
+        "message": message,
+    }
+
+
+def asset_workflow_node_contexts() -> list[dict[str, object]]:
+    return [
+        {
+            "node_id": "node_hkg_edge_01",
+            "linked_vps_count": 1,
+            "cancellation_attention": True,
+            "summaries": [
+                lifecycle_context_for(
+                    "vps_fra_legacy",
+                    "expired",
+                    "关联 VPS 已待取消，节点仍在运行，需确认监控和退役动作。",
+                )
+            ],
+        },
+        {
+            "node_id": "node_ams_conflict_03",
+            "linked_vps_count": 1,
+            "cancellation_attention": False,
+            "summaries": [
+                lifecycle_context_for(
+                    "vps_ams_core",
+                    "active",
+                    "关联 VPS 仍在用，订阅保持生效。",
+                )
+            ],
+        },
+    ]
+
+
+def asset_workflow_target_contexts() -> list[dict[str, object]]:
+    return [
+        {
+            "target_id": "target_api_core",
+            "linked_vps_count": 1,
+            "cancellation_attention": True,
+            "summaries": [
+                lifecycle_context_for(
+                    "vps_fra_legacy",
+                    "expired",
+                    "服务挂载的 VPS 已待取消，Target 仍启用，需确认归档或迁移。",
+                )
+            ],
+            "service_ids": ["svc_fra_api"],
+            "domain_ids": ["dom_fra_api"],
+        },
+        {
+            "target_id": "target_www_maint",
+            "linked_vps_count": 1,
+            "cancellation_attention": False,
+            "summaries": [
+                lifecycle_context_for(
+                    "vps_ams_core",
+                    "active",
+                    "服务挂载的 VPS 仍在用。",
+                )
+            ],
+            "service_ids": ["svc_ams_www"],
+            "domain_ids": ["dom_ams_www"],
+        },
+    ]
+
+
+def asset_workflow_nodes() -> list[dict[str, object]]:
+    return [
+        {
+            "node_id": "node_hkg_edge_01",
+            "display_name": "fra legacy runtime",
+            "group": "asset-fixture",
+            "region": "EU-Central",
+            "city": "Frankfurt",
+            "provider": "Netcup",
+            "lifecycle_status": "在用",
+            "monitoring_status": "启用",
+            "binding_status": "已绑定",
+            "labels": ["legacy", "vps-linked"],
+            "note": "Node intentionally still running for lifecycle workbench evidence.",
+            "current_health_status": "关注",
+            "last_heartbeat_at": iso_timestamp(0),
+            "last_sync_at": iso_timestamp(0),
+            "current_active_incident_count": 1,
+            "current_primary_issue_summary": "legacy service still responds on cancelled host",
+            "created_at": iso_timestamp(-120),
+            "updated_at": iso_timestamp(0),
+        },
+        {
+            "node_id": "node_ams_conflict_03",
+            "display_name": "ams-core-runtime",
+            "group": "asset-fixture",
+            "region": "EU-West",
+            "city": "Amsterdam",
+            "provider": "Hetzner",
+            "lifecycle_status": "在用",
+            "monitoring_status": "启用",
+            "binding_status": "已绑定",
+            "labels": ["prod", "vps-linked"],
+            "note": "Healthy linked node fixture.",
+            "current_health_status": "正常",
+            "last_heartbeat_at": iso_timestamp(0),
+            "last_sync_at": iso_timestamp(0),
+            "current_active_incident_count": 0,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-100),
+            "updated_at": iso_timestamp(0),
+        },
+    ]
+
+
+def asset_workflow_targets() -> list[dict[str, object]]:
+    return [
+        {
+            "target_id": "target_api_core",
+            "name": "legacy-api.example.test",
+            "target_type": "service",
+            "host": "legacy-api.example.test",
+            "base_port": 443,
+            "execution_node_labels": ["legacy"],
+            "run_status": "启用",
+            "group": "asset-fixture",
+            "labels": ["legacy", "api"],
+            "note": "Target remains enabled until lifecycle action is confirmed.",
+            "current_health_status": "关注",
+            "current_active_incident_count": 1,
+            "current_primary_issue_summary": "Host is linked to a VPS marked to_cancel.",
+            "created_at": iso_timestamp(-90),
+            "updated_at": iso_timestamp(-2),
+        },
+        {
+            "target_id": "target_www_maint",
+            "name": "www-core.example.test",
+            "target_type": "service",
+            "host": "www-core.example.test",
+            "base_port": 443,
+            "execution_node_labels": ["prod"],
+            "run_status": "启用",
+            "group": "asset-fixture",
+            "labels": ["prod"],
+            "note": "Healthy active VPS context fixture.",
+            "current_health_status": "正常",
+            "current_active_incident_count": 0,
+            "current_primary_issue_summary": "",
+            "created_at": iso_timestamp(-100),
+            "updated_at": iso_timestamp(-1),
+        },
+    ]
+
+
+def asset_workflow_node_sparklines() -> dict[str, object]:
+    return {
+        "nodes": {
+            row["node_id"]: {
+                "cpu_usage_pct": [24, 31, 42, 45, 36, 30],
+                "mem_used_pct": [40, 43, 47, 50, 49, 46],
+                "disk_used_pct": [55, 55, 56, 56, 57, 57],
+            }
+            for row in asset_workflow_nodes()
+        }
+    }
+
+
+def asset_workflow_target_sparklines() -> dict[str, object]:
+    return {
+        "targets": {
+            row["target_id"]: {
+                "latency": [120, 140, 165, 190, 170, 150],
+            }
+            for row in asset_workflow_targets()
+        }
+    }
+
+
+def asset_workflow_vps_node_links(vps_id: str) -> list[dict[str, object]]:
+    if vps_id != "vps_fra_legacy":
+        return []
+    return [
+        {
+            "node_id": "node_hkg_edge_01",
+            "display_name": "fra legacy runtime",
+            "group": "asset-fixture",
+            "region": "EU-Central",
+            "city": "Frankfurt",
+            "provider": "Netcup",
+            "lifecycle_status": "在用",
+            "monitoring_status": "启用",
+            "binding_status": "已绑定",
+            "current_health_status": "关注",
+            "last_heartbeat_at": iso_timestamp(0),
+            "last_sync_at": iso_timestamp(0),
+            "current_active_incident_count": 1,
+            "current_primary_issue_summary": "legacy service still responds on cancelled host",
+            "linked_at": iso_timestamp(-120),
+            "note": "Node intentionally still running for lifecycle workbench evidence.",
+        }
+    ]
+
+
+def asset_workflow_services(vps_id: str) -> list[dict[str, object]]:
+    if vps_id != "vps_fra_legacy":
+        return []
+    return [
+        {
+            "service_id": "svc_fra_api",
+            "vps_id": "vps_fra_legacy",
+            "target_id": "target_api_core",
+            "name": "Legacy API",
+            "service_type": "api",
+            "status": "active",
+            "url": "https://legacy-api.example.test",
+            "port": 443,
+            "labels": ["legacy", "api"],
+            "note": "Target remains enabled until lifecycle action is confirmed.",
+            "created_at": iso_timestamp(-90),
+            "updated_at": iso_timestamp(-2),
+        }
+    ]
+
+
+def asset_workflow_domains(vps_id: str) -> list[dict[str, object]]:
+    if vps_id != "vps_fra_legacy":
+        return []
+    return [
+        {
+            "domain_id": "dom_fra_api",
+            "vps_id": "vps_fra_legacy",
+            "service_id": "svc_fra_api",
+            "target_id": "target_api_core",
+            "domain_name": "legacy-api.example.test",
+            "purpose": "legacy api",
+            "status": "active",
+            "registrar": "NameSilo",
+            "expires_at": iso_date(25),
+            "auto_renew": False,
+            "https_enabled": True,
+            "labels": ["legacy"],
+            "note": "Domain should be reviewed with the retiring VPS.",
+            "created_at": iso_timestamp(-90),
+            "updated_at": iso_timestamp(-2),
+        }
+    ]
+
+
+def asset_workflow_vps_detail(vps_id: str) -> dict[str, object] | None:
+    vps = next((row for row in asset_workflow_vps_assets() if row["vps_id"] == vps_id), None)
+    if vps is None:
+        return None
+    detail = dict(vps)
+    detail["node_links"] = asset_workflow_vps_node_links(vps_id)
+    return detail
+
+
+def asset_workflow_vps_timeline(vps_id: str) -> dict[str, object] | None:
+    if not any(row["vps_id"] == vps_id for row in asset_workflow_vps_assets()):
+        return None
+    return {
+        "vps_id": vps_id,
+        "renewal_decisions": [],
+        "price_histories": [],
+        "ip_histories": [],
+        "spec_snapshots": [],
+        "experience_logs": [],
+    }
+
+
+def asset_workflow_cancellation_preview(vps_id: str) -> dict[str, object] | None:
+    detail = asset_workflow_vps_detail(vps_id)
+    if detail is None:
+        return None
+    subscriptions = [
+        {
+            "record": row,
+            "role": "active" if row["status"] == "active" else "inactive",
+            "recommended_action": (
+                "cancel_auto_renew_and_mark_cancelled"
+                if row["status"] == "active"
+                else "keep_inactive"
+            ),
+            "message": (
+                "订阅仍处于 active，需要显式确认取消订阅自动续费并标记为 cancelled。"
+                if row["status"] == "active"
+                else "订阅已处于非活跃状态，仍需处理 VPS、Node 与实例状态。"
+            ),
+        }
+        for row in asset_workflow_subscriptions()
+        if row["vps_id"] == vps_id
+    ]
+    services = asset_workflow_services(vps_id)
+    domains = asset_workflow_domains(vps_id)
+    target_links = []
+    if vps_id == "vps_fra_legacy":
+        target_links.append(
+            {
+                "target_id": "target_api_core",
+                "name": "legacy-api.example.test",
+                "run_status": "启用",
+                "service_ids": ["svc_fra_api"],
+                "domain_ids": ["dom_fra_api"],
+                "last_linked_at": iso_timestamp(-2),
+            }
+        )
+    return {
+        "vps": detail,
+        "subscriptions": subscriptions,
+        "node_links": detail["node_links"],
+        "services": services,
+        "domains": domains,
+        "target_links": target_links,
+        "recommended_steps": [
+            {
+                "object_type": "vps",
+                "object_id": vps_id,
+                "step_type": "vps_lifecycle",
+                "from_state": f"{detail['lifecycle_status']}/{detail['renewal_decision']}",
+                "to_state": "cancelled/cancel",
+                "required": True,
+                "message": "将 VPS 续费决策设为 cancel，并根据订阅到期情况设置生命周期。",
+            }
+        ],
+        "warnings": [
+            "仍有 1 个关联 Node 未标记不续费或已退役。",
+            "仍有 1 个关联 Target/实例处于运行或维护状态。",
+        ]
+        if vps_id == "vps_fra_legacy"
+        else [],
+        "blockers": [],
+    }
+
+
 def asset_workflow_dashboard() -> dict[str, object]:
     return {
         "snapshot_generated_at": iso_timestamp(0),
@@ -432,6 +784,9 @@ def asset_workflow_dashboard() -> dict[str, object]:
             "renewal_due_30d_vps_count": 3,
             "unreviewed_vps_count": 2,
             "to_cancel_vps_count": 1,
+            "cancelled_vps_count": 0,
+            "cancellation_attention_vps_count": 2,
+            "running_cancelled_asset_count": 2,
             "to_migrate_vps_count": 1,
             "unlinked_vps_count": 3,
             "abnormal_linked_vps_count": 1,
@@ -1169,8 +1524,58 @@ def fulfill_asset_workflow_api(route: object) -> None:
         fulfill_json(route, 200, filter_asset_workflow_vps(query))
         return
 
+    if method == "GET" and path.startswith("/api/vps/"):
+        parts = [part for part in path.split("/") if part]
+        if len(parts) >= 3:
+            vps_id = parts[2]
+            if len(parts) == 3:
+                detail = asset_workflow_vps_detail(vps_id)
+                if detail is not None:
+                    fulfill_json(route, 200, detail)
+                    return
+            if len(parts) == 4 and parts[3] == "timeline":
+                timeline = asset_workflow_vps_timeline(vps_id)
+                if timeline is not None:
+                    fulfill_json(route, 200, timeline)
+                    return
+            if len(parts) == 4 and parts[3] == "services":
+                fulfill_json(route, 200, asset_workflow_services(vps_id))
+                return
+            if len(parts) == 4 and parts[3] == "domains":
+                fulfill_json(route, 200, asset_workflow_domains(vps_id))
+                return
+            if len(parts) == 4 and parts[3] == "cancellation-preview":
+                preview = asset_workflow_cancellation_preview(vps_id)
+                if preview is not None:
+                    fulfill_json(route, 200, preview)
+                    return
+
     if method == "GET" and path == "/api/subscriptions":
         fulfill_json(route, 200, filter_asset_workflow_subscriptions(query))
+        return
+
+    if method == "GET" and path == "/api/asset-context/nodes":
+        fulfill_json(route, 200, asset_workflow_node_contexts())
+        return
+
+    if method == "GET" and path == "/api/asset-context/targets":
+        fulfill_json(route, 200, asset_workflow_target_contexts())
+        return
+
+    if method == "GET" and path == "/api/nodes":
+        fulfill_json(route, 200, asset_workflow_nodes())
+        return
+
+    if method == "GET" and path == "/api/nodes/sparklines":
+        fulfill_json(route, 200, asset_workflow_node_sparklines())
+        return
+
+    if method == "GET" and path == "/api/targets":
+        fulfill_json(route, 200, asset_workflow_targets())
+        return
+
+    if method == "GET" and path == "/api/targets/sparklines":
+        fulfill_json(route, 200, asset_workflow_target_sparklines())
         return
 
     fulfill_json(
@@ -1222,6 +1627,14 @@ def fulfill_observability_support_api(route: object) -> None:
 
     if method == "GET" and path == "/api/targets/sparklines":
         fulfill_json(route, 200, observability_target_sparklines())
+        return
+
+    if method == "GET" and path == "/api/asset-context/nodes":
+        fulfill_json(route, 200, asset_workflow_node_contexts())
+        return
+
+    if method == "GET" and path == "/api/asset-context/targets":
+        fulfill_json(route, 200, asset_workflow_target_contexts())
         return
 
     if method == "GET" and path == "/api/events":
@@ -1385,6 +1798,7 @@ def run_browser_sanity(
                           return {
                             currentUrl: window.location.href,
                             title: document.title,
+                            bodyText,
                             bodyTextLength: bodyText.length,
                             bodyTextSample: bodyText.slice(0, 100),
                             docScrollWidth: doc.scrollWidth,
@@ -1403,6 +1817,17 @@ def run_browser_sanity(
                     route_failures = list(pre_navigation_failures)
                     if result["bodyTextLength"] < 20:
                         route_failures.append("blank-or-nearly-blank body text")
+                    for marker in [
+                        "mock asset workflow API has no fixture for this request",
+                        "mock observability support API has no fixture for this request",
+                        "页面不可用",
+                        "列表不可用",
+                        "详情不可用",
+                        "VPS 库存不可用",
+                        "取消/退役预览失败",
+                    ]:
+                        if marker in result["bodyText"]:
+                            route_failures.append(f"visible error marker {marker!r}")
                     if result["docScrollWidth"] > viewport.width + 2:
                         route_failures.append(
                             f"document horizontal overflow {result['docScrollWidth']} > {viewport.width}"

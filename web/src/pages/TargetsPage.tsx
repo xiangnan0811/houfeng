@@ -10,6 +10,7 @@ import {
   createTarget,
   enterTargetMaintenance,
   exitTargetMaintenance,
+  listTargetAssetContexts,
   listTargetSparklines,
   listTargets,
   pauseTarget,
@@ -17,7 +18,14 @@ import {
   resumeTarget,
   updateTargetMetadata,
 } from '../lib/api'
-import type { CreateTargetInput, TargetRecord, TargetSparklinesResponse } from '../lib/types'
+import type { AssetContextForTarget, CreateTargetInput, TargetRecord, TargetSparklinesResponse } from '../lib/types'
+import {
+  assetContextHasAttention,
+  assetContextMessage,
+  assetContextPrimarySummary,
+  subscriptionStateLabel,
+  vpsLifecycleLabel,
+} from './assetContextSummary'
 import { CreateTargetPanel } from './targets/CreateTargetPanel'
 import { TargetsBatchPanel } from './targets/TargetsBatchPanel'
 import { TargetsFilterPanel } from './targets/TargetsFilterPanel'
@@ -76,6 +84,8 @@ export function TargetsPage() {
   const [batchSubmitting, setBatchSubmitting] = useState(false)
   const [pendingBatchAction, setPendingBatchAction] = useState<string | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
+  const [targetAssetContexts, setTargetAssetContexts] = useState<Map<string, AssetContextForTarget>>(new Map())
+  const [targetAssetContextError, setTargetAssetContextError] = useState<string | null>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -110,6 +120,25 @@ export function TargetsPage() {
         if (!cancelled) setSparklines(data)
       })
       .catch(() => {}) // silent fail
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    if (typeof IntersectionObserver === 'undefined') return
+    listTargetAssetContexts()
+      .then((contexts) => {
+        if (cancelled) return
+        setTargetAssetContexts(new Map(contexts.map((context) => [context.target_id, context])))
+        setTargetAssetContextError(null)
+      })
+      .catch((value: unknown) => {
+        if (cancelled) return
+        setTargetAssetContexts(new Map())
+        setTargetAssetContextError(describeError(value, '加载 Target 资产上下文失败'))
+      })
     return () => {
       cancelled = true
     }
@@ -560,6 +589,11 @@ export function TargetsPage() {
               onConfirmBatchPause={() => void executeBatchTargetPauseConfirmed()}
               onCancelBatchPause={() => setPendingBatchAction(null)}
             />
+            {targetAssetContextError ? (
+              <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+                {targetAssetContextError}
+              </p>
+            ) : null}
             {filteredTargets.length === 0 ? (
               <PageState
                 kind="empty"
@@ -581,6 +615,7 @@ export function TargetsPage() {
                     <th>类型</th>
                     <th>Host</th>
                     <th>状态</th>
+                    <th>资产上下文</th>
                     <th>近 24h 延迟</th>
                     <th>当前主问题</th>
                     <th>操作</th>
@@ -591,6 +626,8 @@ export function TargetsPage() {
                     const hostDisplay = target.base_port
                       ? `${target.host}:${target.base_port}`
                       : target.host
+                    const assetContext = targetAssetContexts.get(target.target_id)
+                    const primaryContext = assetContextPrimarySummary(assetContext)
                     return (
                       <tr
                         key={target.target_id}
@@ -697,6 +734,20 @@ export function TargetsPage() {
                           </span>
                           {target.execution_node_labels.length > 0 && (
                             <div className="sub">执行: {target.execution_node_labels.join(', ')}</div>
+                          )}
+                        </td>
+                        <td>
+                          {primaryContext ? (
+                            <div className="asset-context-cell">
+                              <span className={assetContextHasAttention(assetContext) ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
+                                {assetContextMessage(assetContext)}
+                              </span>
+                              <small>
+                                {vpsLifecycleLabel(primaryContext.lifecycle_status)} · {subscriptionStateLabel(primaryContext.subscription_state)}
+                              </small>
+                            </div>
+                          ) : (
+                            <span className="asset-context-pill">未关联 VPS</span>
                           )}
                         </td>
                         <td className="targets-table__trends">

@@ -2,8 +2,12 @@ import type {
   ActiveIncidentRecord,
   AssetDomainListFilter,
   AssetDomainRecord,
+  AssetContextForNode,
+  AssetContextForTarget,
   AssetServiceListFilter,
   AssetServiceRecord,
+  ApplyCancellationInput,
+  CancellationPreview,
   CreateAssetDomainInput,
   CreateProviderInput,
   CreateAssetServiceInput,
@@ -14,6 +18,7 @@ import type {
   CreateVPSAssetInput,
   CreateVPSExperienceLogInput,
   LinkVPSNodeInput,
+  LifecycleActionResult,
   UpdateProbeItemInput,
   DashboardOverview,
   EventListFilter,
@@ -486,6 +491,14 @@ export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promi
   return patchJSONBody<VPSAssetUpdateResult>(`/api/vps/${vpsId}`, input)
 }
 
+export function getVPSCancellationPreview(vpsId: string) {
+  return requestJSON<CancellationPreview>(`/api/vps/${vpsId}/cancellation-preview`)
+}
+
+export function applyVPSCancellation(vpsId: string, input: ApplyCancellationInput): Promise<LifecycleActionResult> {
+  return postJSONBody<LifecycleActionResult>(`/api/vps/${vpsId}/cancellation`, input)
+}
+
 export function getVPSTimeline(vpsId: string) {
   return requestJSON<VPSTimeline>(`/api/vps/${vpsId}/timeline`)
 }
@@ -551,6 +564,18 @@ export function unlinkVPSNode(vpsId: string, input: UnlinkVPSNodeInput): Promise
 
 export function listVPSForNode(nodeId: string) {
   return requestJSON<VPSSummary[]>(`/api/nodes/${nodeId}/vps`)
+}
+
+export function listNodeAssetContexts() {
+  return requestJSON<AssetContextForNode[]>('/api/asset-context/nodes').then((contexts) =>
+    Array.isArray(contexts) ? contexts : [],
+  )
+}
+
+export function listTargetAssetContexts() {
+  return requestJSON<AssetContextForTarget[]>('/api/asset-context/targets').then((contexts) =>
+    Array.isArray(contexts) ? contexts : [],
+  )
 }
 
 export function listSubscriptions(filter?: SubscriptionListFilter) {

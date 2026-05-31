@@ -35,6 +35,91 @@ const subscriptionBody = {
   updated_at: '2026-05-10T08:00:00Z',
 }
 
+const vpsDetailBody = {
+  vps_id: 'vps_001',
+  display_name: 'Tokyo Edge',
+  provider_id: 'pv_001',
+  provider_name: 'Hetzner',
+  product_name: 'cx22',
+  order_ref: 'ord-1',
+  country: 'JP',
+  region: 'Kanto',
+  city: 'Tokyo',
+  datacenter: 'nrt',
+  ipv4: '192.0.2.1',
+  ipv6: '',
+  ssh_host: '192.0.2.1',
+  ssh_port: 22,
+  ssh_user: 'root',
+  os_name: 'Debian',
+  virtualization: 'kvm',
+  lifecycle_status: 'active',
+  usage_status: 'in_use',
+  renewal_decision: 'cancel',
+  importance: 'normal',
+  labels: ['edge'],
+  note: 'primary',
+  active_node_link_count: 1,
+  running_node_count: 1,
+  running_target_count: 1,
+  created_at: '2026-05-09T08:00:00Z',
+  updated_at: '2026-05-09T08:00:00Z',
+  archived_at: null,
+  node_links: [{
+    node_id: 'nd_001',
+    display_name: 'Tokyo Node',
+    group: 'edge',
+    region: 'JP',
+    city: 'Tokyo',
+    provider: 'Node Hint',
+    lifecycle_status: '在用',
+    monitoring_status: '启用',
+    binding_status: '已绑定',
+    current_health_status: '正常',
+    last_heartbeat_at: '2026-05-09T08:10:00Z',
+    last_sync_at: '2026-05-09T08:11:00Z',
+    current_active_incident_count: 0,
+    current_primary_issue_summary: '',
+    linked_at: '2026-05-09T08:00:00Z',
+    note: 'primary',
+  }],
+}
+
+function cancellationPreviewBody(overrides: Record<string, unknown> = {}) {
+  return {
+    vps: vpsDetailBody,
+    subscriptions: [{
+      record: subscriptionBody,
+      role: 'active',
+      recommended_action: 'cancel_auto_renew_and_mark_cancelled',
+      message: '订阅仍处于 active，需要显式确认取消订阅自动续费并标记为 cancelled。',
+    }],
+    node_links: vpsDetailBody.node_links,
+    services: [serviceBody],
+    domains: [domainBody],
+    target_links: [{
+      target_id: 'tg_001',
+      name: 'Blog Target',
+      run_status: '启用',
+      service_ids: ['svc_001'],
+      domain_ids: ['dom_001'],
+      last_linked_at: '2026-05-10T08:00:00Z',
+    }],
+    recommended_steps: [{
+      object_type: 'vps',
+      object_id: 'vps_001',
+      step_type: 'vps_lifecycle',
+      from_state: 'active/cancel',
+      to_state: 'cancelled/cancel',
+      required: true,
+      message: '将 VPS 续费决策设为 cancel，并根据订阅到期情况设置生命周期。',
+    }],
+    warnings: ['仍有 1 个关联 Node 未标记不续费或已退役。'],
+    blockers: [],
+    ...overrides,
+  }
+}
+
 const serviceBody = {
   service_id: 'svc_001',
   vps_id: 'vps_001',
@@ -1930,5 +2015,114 @@ describe('VPSDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '域名详情' }))
     const domainsDrawer = screen.getByRole('dialog', { name: '域名资产详情' })
     expect(within(domainsDrawer).getByText('尚未记录域名')).toBeInTheDocument()
+  })
+
+  it('refreshes cancellation preview after applying lifecycle actions', async () => {
+    const refreshedDetail = {
+      ...vpsDetailBody,
+      lifecycle_status: 'cancelled',
+      running_node_count: 0,
+      running_target_count: 0,
+      node_links: [{
+        ...vpsDetailBody.node_links[0],
+        lifecycle_status: '已退役',
+        monitoring_status: '暂停',
+      }],
+    }
+    const applyResult = {
+      action: {
+        action_id: 'alca_001',
+        vps_id: 'vps_001',
+        action_type: 'cancel_vps',
+        status: 'completed',
+        reason: '已过期且不准备续费',
+        effective_date: '2026-05-30',
+        created_at: '2026-05-30T08:00:00Z',
+        confirmed_at: '2026-05-30T08:00:00Z',
+        completed_at: '2026-05-30T08:00:00Z',
+        summary: {},
+      },
+      steps: [{
+        step_id: 'alcs_001',
+        action_id: 'alca_001',
+        object_type: 'vps',
+        object_id: 'vps_001',
+        step_type: 'vps_lifecycle',
+        status: 'completed',
+        before_state: { lifecycle_status: 'active' },
+        after_state: { lifecycle_status: 'cancelled' },
+        message: 'VPS 生命周期已确认。',
+        executed_at: '2026-05-30T08:00:00Z',
+        created_at: '2026-05-30T08:00:00Z',
+      }],
+    }
+    const refreshedPreview = cancellationPreviewBody({
+      vps: refreshedDetail,
+      subscriptions: [{
+        record: {
+          ...subscriptionBody,
+          auto_renew: false,
+          auto_renew_cancelled: true,
+          status: 'cancelled',
+        },
+        role: 'inactive',
+        recommended_action: 'keep_inactive',
+        message: '订阅已处于非活跃状态，仍需处理 VPS、Node 与实例状态。',
+      }],
+      node_links: refreshedDetail.node_links,
+      target_links: [{
+        target_id: 'tg_001',
+        name: 'Blog Target',
+        run_status: '已归档',
+        service_ids: ['svc_001'],
+        domain_ids: ['dom_001'],
+        last_linked_at: '2026-05-10T08:00:00Z',
+      }],
+      warnings: [],
+      recommended_steps: [],
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(vpsDetailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([serviceBody]))
+      .mockResolvedValueOnce(mockJSONResponse([domainBody]))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+      .mockResolvedValueOnce(mockJSONResponse(cancellationPreviewBody()))
+      .mockResolvedValueOnce(mockJSONResponse(applyResult))
+      .mockResolvedValueOnce(mockJSONResponse(refreshedDetail))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([serviceBody]))
+      .mockResolvedValueOnce(mockJSONResponse([domainBody]))
+      .mockResolvedValueOnce(mockJSONResponse([{ ...subscriptionBody, status: 'cancelled' }]))
+      .mockResolvedValueOnce(mockJSONResponse(refreshedPreview))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001?workbench=cancellation']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const workbench = await screen.findByRole('dialog', { name: '取消/退役工作台' })
+    fireEvent.change(within(workbench).getByLabelText('原因'), {
+      target: { value: '已过期且不准备续费' },
+    })
+    fireEvent.click(within(within(workbench).getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('checkbox'))
+    fireEvent.click(within(within(workbench).getByText('Tokyo Node').closest('.asset-checkbox-line')!).getByRole('checkbox'))
+    fireEvent.click(within(within(workbench).getByText('Blog Target').closest('.asset-checkbox-line')!).getByRole('checkbox'))
+    fireEvent.click(within(workbench).getByRole('button', { name: '确认取消/退役' }))
+
+    await waitFor(() => expect(screen.getByText('取消/退役动作已完成，写入 1 个审计步骤')).toBeInTheDocument())
+    expect(screen.getByText('已完成生命周期动作 alca_001，写入 1 个步骤。')).toBeInTheDocument()
+    expect(screen.getByText('active 0 · 非活跃 1')).toBeInTheDocument()
+    expect(screen.queryByText('仍有 1 个关联 Node 未标记不续费或已退役。')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(13, '/api/vps/vps_001/cancellation-preview', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
   })
 })

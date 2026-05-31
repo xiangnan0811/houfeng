@@ -1,14 +1,17 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-import { Modal } from '../components/atoms'
+import { Button, Modal } from '../components/atoms'
+import { VPSCancellationWorkbench } from '../components/VPSCancellationWorkbench'
 import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
 import {
   ApiError,
+  applyVPSCancellation,
   createVPSDomain,
   createVPSService,
   createVPSExperienceLog,
   getVPSAsset,
+  getVPSCancellationPreview,
   getVPSTimeline,
   linkVPSNode,
   listNodes,
@@ -23,6 +26,9 @@ import {
 import type {
   AssetDomainRecord,
   AssetServiceRecord,
+  ApplyCancellationInput,
+  CancellationPreview,
+  LifecycleActionResult,
   CreateAssetDomainInput,
   CreateAssetServiceInput,
   CreateVPSExperienceLogInput,
@@ -95,6 +101,21 @@ async function loadSubscriptions(targetVPSId: string): Promise<{
   }
 }
 
+async function loadCancellationPreview(targetVPSId: string): Promise<{
+  cancellationPreview: CancellationPreview | null
+  cancellationPreviewError: string | null
+}> {
+  try {
+    const cancellationPreview = await getVPSCancellationPreview(targetVPSId)
+    return { cancellationPreview, cancellationPreviewError: null }
+  } catch (error: unknown) {
+    return {
+      cancellationPreview: null,
+      cancellationPreviewError: describeError(error, '加载取消/退役预览失败'),
+    }
+  }
+}
+
 function selectPrimarySubscription(subscriptions: SubscriptionRecord[]): SubscriptionRecord | null {
   return subscriptions[0] ?? null
 }
@@ -116,6 +137,9 @@ function subscriptionLinkageNotice(linkage?: RenewalSubscriptionLinkage | null):
 function subscriptionLinkageAction(linkage: RenewalSubscriptionLinkage | null | undefined, vpsID: string): { to: string; label: string } | null {
   if (!linkage) return null
   if (linkage.status === 'no_active_subscription') {
+    if (linkage.candidate_count > 0) {
+      return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=cancellation`, label: '打开取消/退役工作台' }
+    }
     return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}&create=1`, label: '创建该 VPS 订阅' }
   }
   if (linkage.status === 'multiple_active_subscriptions') {
@@ -130,6 +154,8 @@ function subscriptionLinkageAction(linkage: RenewalSubscriptionLinkage | null | 
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const openCancellationFromQuery = searchParams.get('workbench') === 'cancellation'
   const [state, setState] = useState(INITIAL_STATE)
   const [selectors, setSelectors] = useState(INITIAL_SELECTOR_STATE)
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraftState>({
@@ -155,6 +181,8 @@ export function VPSDetailPage() {
   const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [lifecycleNotice, setLifecycleNotice] = useState<string | null>(null)
+  const [cancellationSubmitting, setCancellationSubmitting] = useState(false)
+  const [cancellationError, setCancellationError] = useState<string | null>(null)
   const [experienceDraft, setExperienceDraft] = useState<ExperienceDraftState>(INITIAL_EXPERIENCE_DRAFT)
   const [experienceSubmitting, setExperienceSubmitting] = useState(false)
   const [experienceError, setExperienceError] = useState<string | null>(null)
@@ -181,8 +209,9 @@ export function VPSDetailPage() {
       listVPSServices(vpsId),
       listVPSDomains(vpsId),
       loadSubscriptions(vpsId),
+      openCancellationFromQuery ? loadCancellationPreview(vpsId) : Promise.resolve({ cancellationPreview: null, cancellationPreviewError: null }),
     ])
-      .then(([detail, timeline, services, domains, subscriptionState]) => {
+      .then(([detail, timeline, services, domains, subscriptionState, cancellationState]) => {
         if (cancelled) return
         const normalizedDetail = normalizeVPSDetail(detail)
         setState({
@@ -194,12 +223,14 @@ export function VPSDetailPage() {
           domains,
           subscriptions: subscriptionState.subscriptions,
           subscriptionsError: subscriptionState.subscriptionsError,
+          cancellationPreview: cancellationState.cancellationPreview,
+          cancellationPreviewError: cancellationState.cancellationPreviewError,
+          cancellationResult: null,
         })
         setDecisionDraft({ renewalDecision: normalizedDetail.renewal_decision, reason: '' })
         setDecisionError(null)
         setDecisionNotice(null)
         setDecisionAction(null)
-        setActiveDrawer(null)
         setFactDraft(detailToFactEditForm(normalizedDetail))
         setFactError(null)
         setFactNotice(null)
@@ -210,6 +241,7 @@ export function VPSDetailPage() {
         setLifecycleConfirmingAction(null)
         setLifecycleError(null)
         setLifecycleNotice(null)
+        setCancellationError(null)
         setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
         setExperienceError(null)
         setExperienceNotice(null)
@@ -219,6 +251,7 @@ export function VPSDetailPage() {
         setDomainDraft(INITIAL_DOMAIN_DRAFT)
         setDomainError(null)
         setDomainNotice(null)
+        setActiveDrawer(openCancellationFromQuery ? 'cancellation' : null)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -231,13 +264,28 @@ export function VPSDetailPage() {
           domains: [],
           subscriptions: [],
           subscriptionsError: null,
+          cancellationPreview: null,
+          cancellationPreviewError: null,
+          cancellationResult: null,
         })
       })
 
     return () => {
       cancelled = true
     }
-  }, [vpsId])
+  }, [openCancellationFromQuery, vpsId])
+
+  const refreshCancellationPreview = useCallback(async (targetVPSId: string) => {
+    const cancellationState = await loadCancellationPreview(targetVPSId)
+    setState((current) => {
+      if (current.vpsId !== targetVPSId) return current
+      return {
+        ...current,
+        cancellationPreview: cancellationState.cancellationPreview,
+        cancellationPreviewError: cancellationState.cancellationPreviewError,
+      }
+    })
+  }, [])
 
   async function refreshDetail(targetVPSId: string): Promise<VPSAssetDetail> {
     const detail = normalizeVPSDetail(await getVPSAsset(targetVPSId))
@@ -257,15 +305,23 @@ export function VPSDetailPage() {
       loadSubscriptions(targetVPSId),
     ])
     const detail = normalizeVPSDetail(detailResult)
-    setState({
-      vpsId: targetVPSId,
-      error: null,
-      detail,
-      timeline,
-      services,
-      domains,
-      subscriptions: subscriptionState.subscriptions,
-      subscriptionsError: subscriptionState.subscriptionsError,
+    setState((current) => {
+      const keepCancellationResult = current.vpsId === targetVPSId ? current.cancellationResult : null
+      const keepCancellationPreview = current.vpsId === targetVPSId ? current.cancellationPreview : null
+      const keepCancellationPreviewError = current.vpsId === targetVPSId ? current.cancellationPreviewError : null
+      return {
+        vpsId: targetVPSId,
+        error: null,
+        detail,
+        timeline,
+        services,
+        domains,
+        subscriptions: subscriptionState.subscriptions,
+        subscriptionsError: subscriptionState.subscriptionsError,
+        cancellationPreview: keepCancellationPreview,
+        cancellationPreviewError: keepCancellationPreviewError,
+        cancellationResult: keepCancellationResult,
+      }
     })
     return detail
   }
@@ -387,6 +443,13 @@ export function VPSDetailPage() {
       clearDomainFeedback()
       ensureTargetsLoaded()
     }
+    if (mode === 'cancellation') {
+      setCancellationError(null)
+      setState((current) => ({ ...current, cancellationResult: null }))
+      if (state.detail && !state.cancellationPreview && !state.cancellationPreviewError) {
+        void refreshCancellationPreview(state.detail.vps_id)
+      }
+    }
     setActiveDrawer(mode)
   }
 
@@ -422,6 +485,9 @@ export function VPSDetailPage() {
     }
     if (activeDrawer === 'node-evidence') {
       setUnlinkError(null)
+    }
+    if (activeDrawer === 'cancellation') {
+      setCancellationError(null)
     }
     setActiveDrawer(null)
   }
@@ -599,6 +665,40 @@ export function VPSDetailPage() {
     }
   }
 
+  async function handleCancellationSubmit(input: ApplyCancellationInput) {
+    const detail = state.detail
+    if (!detail) return
+
+    setCancellationSubmitting(true)
+    setCancellationError(null)
+    setLifecycleNotice(null)
+    setLifecycleError(null)
+
+    try {
+      const result: LifecycleActionResult = await applyVPSCancellation(detail.vps_id, input)
+      setState((current) => {
+        if (current.vpsId !== detail.vps_id) return current
+        return { ...current, cancellationResult: result }
+      })
+      await refreshDetailAndTimeline(detail.vps_id)
+      const cancellationState = await loadCancellationPreview(detail.vps_id)
+      setState((current) => {
+        if (current.vpsId !== detail.vps_id) return current
+        return {
+          ...current,
+          cancellationPreview: cancellationState.cancellationPreview,
+          cancellationPreviewError: cancellationState.cancellationPreviewError,
+          cancellationResult: result,
+        }
+      })
+      setLifecycleNotice(`取消/退役动作已完成，写入 ${result.steps.length} 个审计步骤`)
+    } catch (error: unknown) {
+      setCancellationError(describeError(error, '执行取消/退役失败'))
+    } finally {
+      setCancellationSubmitting(false)
+    }
+  }
+
   async function handleExperienceSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const detail = state.detail
@@ -712,6 +812,7 @@ export function VPSDetailPage() {
 
   function drawerTitle(): string {
     if (activeDrawer === 'decision') return '续费决策'
+    if (activeDrawer === 'cancellation') return '取消/退役工作台'
     if (activeDrawer === 'facts') return '编辑基础信息'
     if (activeDrawer === 'node-link') return '关联 Node'
     if (activeDrawer === 'experience') return '经验记录'
@@ -739,6 +840,37 @@ export function VPSDetailPage() {
           onDraftChange={handleDecisionDraftChange}
           onFeedbackClear={clearDecisionFeedback}
           onSubmit={(event) => void handleDecisionSubmit(event)}
+        />
+      )
+    }
+    if (activeDrawer === 'cancellation') {
+      if (!state.cancellationPreview) {
+        return (
+          <div className="asset-cancel-workbench asset-cancel-workbench--loading">
+            {state.cancellationPreviewError ? (
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+                {state.cancellationPreviewError}
+              </p>
+            ) : (
+              <p className="asset-cancel-workbench__empty">正在加载取消/退役影响范围…</p>
+            )}
+            <div className="page-form-actions">
+              <Button variant="secondary" onClick={closeDrawer}>关闭</Button>
+              <Button variant="primary" onClick={() => void refreshCancellationPreview(detail.vps_id)}>
+                重新加载
+              </Button>
+            </div>
+          </div>
+        )
+      }
+      return (
+        <VPSCancellationWorkbench
+          preview={state.cancellationPreview}
+          submitting={cancellationSubmitting}
+          error={cancellationError ?? state.cancellationPreviewError}
+          result={state.cancellationResult}
+          onCancel={closeDrawer}
+          onSubmit={(input) => handleCancellationSubmit(input)}
         />
       )
     }
@@ -882,6 +1014,7 @@ export function VPSDetailPage() {
         isArchived={isArchived}
         lifecycleSubmitting={lifecycleSubmitting}
         onDecisionEdit={() => openDrawer('decision')}
+        onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
         onNodeLink={() => openDrawer('node-link')}
@@ -927,7 +1060,10 @@ export function VPSDetailPage() {
         experienceNotice={experienceNotice}
         lifecycleNotice={lifecycleNotice}
         lifecycleError={lifecycleConfirmingAction ? null : lifecycleError}
+        cancellationPreview={state.cancellationPreview}
+        cancellationPreviewError={state.cancellationPreviewError}
         onDecisionEdit={() => openDrawer('decision')}
+        onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
         onNodeLink={() => openDrawer('node-link')}
@@ -957,7 +1093,8 @@ export function VPSDetailPage() {
         title={drawerTitle()}
         ariaLabel={drawerTitle()}
         persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'node-evidence'}
-        size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'node-evidence' || activeDrawer === 'facts') ? 'lg' : undefined}
+        size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'node-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation') ? 'lg' : undefined}
+        contentClassName={activeDrawer === 'cancellation' ? 'modal-content--asset-cancel' : undefined}
       >
         <div className="vps-detail-drawer">
           {renderDrawerContent()}

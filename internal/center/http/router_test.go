@@ -231,6 +231,14 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 			called = "unlink-node"
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSCancellationPreviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "cancellation-preview"
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSCancellationHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "cancellation"
+			w.WriteHeader(http.StatusOK)
+		}),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
@@ -262,6 +270,8 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 		{method: http.MethodGet, path: "/api/vps/vps_001/nodes", want: http.StatusOK, called: "nodes"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/link-node", want: http.StatusCreated, called: "link-node"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-node", want: http.StatusOK, called: "unlink-node"},
+		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusOK, called: "cancellation-preview"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/cancellation", want: http.StatusOK, called: "cancellation"},
 	} {
 		req = httptest.NewRequest(tt.method, tt.path, nil)
 		recorder = httptest.NewRecorder()
@@ -278,6 +288,8 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 func TestRouterProtectsVPSRoutes(t *testing.T) {
 	collectionCalled := false
 	itemCalled := false
+	cancellationPreviewCalled := false
+	cancellationCalled := false
 	middlewareCalls := 0
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
@@ -289,6 +301,14 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 			itemCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSCancellationPreviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cancellationPreviewCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSCancellationHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cancellationCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
 		AuthMiddleware: func(_ http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				middlewareCalls++
@@ -297,7 +317,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/nodes", "/api/vps/vps_001/link-node", "/api/vps/vps_001/unlink-node"} {
+	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/nodes", "/api/vps/vps_001/link-node", "/api/vps/vps_001/unlink-node", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 
@@ -313,8 +333,49 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	if itemCalled {
 		t.Fatal("vps item handler was called despite auth middleware blocking")
 	}
-	if middlewareCalls != 5 {
-		t.Fatalf("middleware calls = %d, want 5", middlewareCalls)
+	if cancellationPreviewCalled {
+		t.Fatal("vps cancellation preview handler was called despite auth middleware blocking")
+	}
+	if cancellationCalled {
+		t.Fatal("vps cancellation handler was called despite auth middleware blocking")
+	}
+	if middlewareCalls != 7 {
+		t.Fatalf("middleware calls = %d, want 7", middlewareCalls)
+	}
+}
+
+func TestRouterDispatchesAssetContextAPIs(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		AssetContextNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "nodes"
+			w.WriteHeader(http.StatusOK)
+		}),
+		AssetContextTargetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "targets"
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/nodes", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("node context status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "nodes" {
+		t.Fatalf("called = %q, want nodes", called)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/asset-context/targets", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("target context status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "targets" {
+		t.Fatalf("called = %q, want targets", called)
 	}
 }
 

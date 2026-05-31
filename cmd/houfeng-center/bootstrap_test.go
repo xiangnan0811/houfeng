@@ -225,6 +225,18 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSServicesHandler == nil {
 		t.Fatal("router vps services handler = nil, want non-nil")
 	}
+	if gotOpts.VPSCancellationPreviewHandler == nil {
+		t.Fatal("router vps cancellation preview handler = nil, want non-nil")
+	}
+	if gotOpts.VPSCancellationHandler == nil {
+		t.Fatal("router vps cancellation handler = nil, want non-nil")
+	}
+	if gotOpts.AssetContextNodesHandler == nil {
+		t.Fatal("router asset context nodes handler = nil, want non-nil")
+	}
+	if gotOpts.AssetContextTargetsHandler == nil {
+		t.Fatal("router asset context targets handler = nil, want non-nil")
+	}
 	if gotOpts.SubscriptionsCollectionHandler == nil {
 		t.Fatal("router subscriptions collection handler = nil, want non-nil")
 	}

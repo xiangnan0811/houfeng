@@ -176,15 +176,18 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 2. Signatures
 
-- Frontend API: `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。
+- Frontend API: `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listNodeAssetContexts()`、`listTargetAssetContexts()`，不得在页面里直接 `fetch()`。
 - Decision queue data: `AssetDecisionsPage` 拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
 - VPS inventory data: `VPSPage` 拉取全量 `listVPSAssets()`、`listProviders()` 和 `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views。
-- URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|archived`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
+- URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|archived|cancellation_attention`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
 
 #### 3. Contracts
 
 - Asset Decisions 首屏主 surface 必须是一个统一工作队列；不得恢复三张同权 VPS queue table。
 - 决策编辑必须在 drawer 或同等次级 surface 中完成；保存成功 notice 应在队列 surface 可见。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
+- 当订阅为 `expired` / `cancelled` / `paused` 而 VPS、Node 或 Target 仍表现为 active/running，页面必须把它归入 `cancellation_attention` 或等价的联动处理入口；入口应打开 `/vps/{id}?workbench=cancellation`，由统一工作台提交用户确认的步骤。
+- 统一取消 / 退役工作台必须展示 preview 返回的 subscription、VPS、Node、Target 影响范围；Node/Target 默认只展示为待确认项，只有用户在工作台勾选并提交的 `node_actions` / `target_actions` 才能修改运行状态。
+- Node 列表 / 详情、Target 列表 / 详情必须消费批量 asset-context API 显示关联 VPS 的取消 / 过期 / 状态割裂上下文；不得只显示自身运行状态而隐藏宿主 VPS 已取消或待取消的事实。
 - `VPSAssetRecord.active_node_link_count` 只能展示 Node 关联数量或未关联状态，**不得**展示 linked node health、最近心跳或异常，除非后端 contract 新增并同步类型/测试。
 - 资料质量提示只能来自已有字段：缺订阅、`active_node_link_count <= 0`、缺 provider、缺 location、缺 SSH/IP access。不要从 provider 名称、region 文案或标签推断风险。
 - VPS inventory quick views 中 derived filters 在前端执行即可；40+ VPS 量级不引入新缓存/状态库，不新增 API 字段。
@@ -351,8 +354,10 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 
 - `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。Provider/Node/Target selector 数据可在对应 Drawer 打开时懒加载，避免主详情首屏为选择器阻塞。
 - VPS scoped subscription 只作为续费/成本 evidence。订阅请求失败时显示请求错误和未知状态，不得把 failure 当成真实 `缺订阅`。
+- VPS 详情页必须可加载 `getVPSCancellationPreview(vpsId)` 并在资产判断 workbench 显示取消 / 过期影响范围；URL `?workbench=cancellation` 应直接打开统一取消 / 退役工作台。
+- 如果 preview 显示 subscription 已非活跃但 VPS 仍未取消，页面不得引导“创建订阅”作为主路径，而应引导用户处理 VPS、Node 与 Target/实例的 lifecycle action。
 - `VPSAssetDetail.node_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_node_link_count` 在列表页只能代表数量的限制。
-- 决策、facts、Node link、experience log、service create、domain create 的复杂输入使用 Drawer。关闭 Drawer 后，保存成功 notice 必须留在主页面可见 surface 内。
+- 决策、facts、Node link、experience log、service create、domain create、取消 / 退役 action 的复杂输入使用 Drawer。关闭 Drawer 后，保存成功 notice 必须留在主页面可见 surface 内。
 - Facts Drawer 只编辑基础事实和用途状态；不得包含 lifecycle status，也不得在 facts PATCH payload 中发送 `lifecycle_status`。
 - Archive/restore 仍是 lifecycle 危险操作，使用独立 confirmation，不放入 routine edit Drawer。
 

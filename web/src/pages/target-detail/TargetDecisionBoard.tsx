@@ -1,5 +1,15 @@
-import { Button, StatusGlyph, Timestamp } from '../../components/atoms'
-import type { ProbeItemRecord, ProbeObservation, TargetRecord } from '../../lib/types'
+import { Link } from 'react-router-dom'
+
+import { Badge, Button, StatusGlyph, Timestamp } from '../../components/atoms'
+import type { AssetContextForTarget, ProbeItemRecord, ProbeObservation, TargetRecord } from '../../lib/types'
+import {
+  assetContextHasAttention,
+  assetContextMessage,
+  assetContextPrimarySummary,
+  subscriptionStateLabel,
+  vpsLifecycleLabel,
+  vpsRenewalDecisionLabel,
+} from '../assetContextSummary'
 import { buildTargetDecisionModel, toneToGlyphState } from './targetDecisionModel'
 
 type TargetDecisionBoardProps = {
@@ -8,6 +18,8 @@ type TargetDecisionBoardProps = {
   recentObservations: ProbeObservation[]
   latestObservationAt: string | null
   latencySampleCount: number
+  assetContext: AssetContextForTarget | null
+  assetContextError: string | null
   onOpenHistory: () => void
 }
 
@@ -17,6 +29,8 @@ export function TargetDecisionBoard({
   recentObservations,
   latestObservationAt,
   latencySampleCount,
+  assetContext,
+  assetContextError,
   onOpenHistory,
 }: TargetDecisionBoardProps) {
   const { nextAction, evidenceItems } = buildTargetDecisionModel({
@@ -27,6 +41,7 @@ export function TargetDecisionBoard({
     latencySampleCount,
     onOpenHistory,
   })
+  const primaryContext = assetContextPrimarySummary(assetContext)
 
   return (
     <section className="target-decision-board page-panel" aria-label="目标判断摘要">
@@ -76,6 +91,35 @@ export function TargetDecisionBoard({
             </article>
           ))}
         </div>
+      </div>
+
+      <div className="asset-context-panel">
+        <div>
+          <span className="asset-context-panel__label">资产上下文</span>
+          {primaryContext ? (
+            <>
+              <strong>{assetContextMessage(assetContext)}</strong>
+              <small>
+                {primaryContext.display_name} · {vpsLifecycleLabel(primaryContext.lifecycle_status)} ·
+                续费 {vpsRenewalDecisionLabel(primaryContext.renewal_decision)} ·
+                订阅 {subscriptionStateLabel(primaryContext.subscription_state)}
+              </small>
+            </>
+          ) : (
+            <>
+              <strong>{assetContextError ? '资产上下文暂不可用' : '未关联 VPS'}</strong>
+              <small>{assetContextError ?? '当前 Target 没有通过服务或域名挂载到 VPS。'}</small>
+            </>
+          )}
+        </div>
+        <Badge variant="state" tone={assetContextHasAttention(assetContext) ? 'notice' : 'normal'}>
+          {assetContextHasAttention(assetContext) ? '需联动处理' : '已同步'}
+        </Badge>
+        {primaryContext ? (
+          <Link className="btn sm secondary" to={`/vps/${primaryContext.vps_id}?workbench=cancellation`}>
+            打开工作台
+          </Link>
+        ) : null}
       </div>
     </section>
   )

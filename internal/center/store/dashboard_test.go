@@ -35,8 +35,11 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					*(dest[2].(*int)) = 4
 					*(dest[3].(*int)) = 1
 					*(dest[4].(*int)) = 2
-					*(dest[5].(*int)) = 5
-					*(dest[6].(*int)) = 1
+					*(dest[5].(*int)) = 3
+					*(dest[6].(*int)) = 4
+					*(dest[7].(*int)) = 2
+					*(dest[8].(*int)) = 5
+					*(dest[9].(*int)) = 1
 					return nil
 				}}
 			}
@@ -184,6 +187,9 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if overview.AssetSummary.UnreviewedVPSCount != 4 || overview.AssetSummary.UnlinkedVPSCount != 5 || overview.AssetSummary.AbnormalLinkedVPSCount != 1 {
 		t.Fatalf("AssetSummary counts = %#v, want decision/link counts", overview.AssetSummary)
 	}
+	if overview.AssetSummary.CancelledVPSCount != 2 || overview.AssetSummary.CancellationAttentionVPSCount != 3 || overview.AssetSummary.RunningCancelledAssetCount != 4 {
+		t.Fatalf("AssetSummary cancellation counts = %#v, want cancelled/attention/runtime counts", overview.AssetSummary)
+	}
 	if len(overview.AssetSummary.CostByCurrency) != 1 || overview.AssetSummary.CostByCurrency[0].Currency != "USD" {
 		t.Fatalf("AssetSummary costs = %#v, want USD cost row", overview.AssetSummary.CostByCurrency)
 	}
@@ -296,6 +302,9 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 				*(dest[4].(*int)) = 1
 				*(dest[5].(*int)) = 3
 				*(dest[6].(*int)) = 2
+				*(dest[7].(*int)) = 7
+				*(dest[8].(*int)) = 8
+				*(dest[9].(*int)) = 9
 				return nil
 			}}
 		},
@@ -323,7 +332,7 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 	if summary.RenewalDue30dSubscriptionCount != 6 || summary.RenewalDue30dVPSCount != 4 {
 		t.Fatalf("summary renewal = %#v, want 6 subscriptions / 4 VPS", summary)
 	}
-	if summary.ToCancelVPSCount != 2 || summary.ToMigrateVPSCount != 1 || summary.AbnormalLinkedVPSCount != 2 {
+	if summary.ToCancelVPSCount != 2 || summary.CancelledVPSCount != 1 || summary.CancellationAttentionVPSCount != 3 || summary.RunningCancelledAssetCount != 2 || summary.ToMigrateVPSCount != 7 || summary.AbnormalLinkedVPSCount != 9 {
 		t.Fatalf("summary decisions = %#v, want cancel/migrate/abnormal counts", summary)
 	}
 	if len(summary.CostByCurrency) != 2 || summary.CostByCurrency[0].Currency != "EUR" || summary.CostByCurrency[1].Currency != "USD" {
@@ -336,7 +345,9 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 	}
 	for _, want := range []string{
 		"from vps_assets",
-		"lifecycle_status not in ('cancelled', 'archived')",
+		"lifecycle_status <> 'archived'",
+		"cancellation_attention",
+		"cancelled_asset_runtime",
 		"from vps_node_links",
 		"unlinked_at is null",
 		"from subscriptions",
@@ -344,6 +355,7 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 		"renew_at <= current_date + 30",
 		"renewal_decision = 'unreviewed'",
 		"lifecycle_status = 'to_cancel'",
+		"lifecycle_status = 'cancelled'",
 		"lifecycle_status = 'to_migrate'",
 		"current_health_status <> '正常'",
 	} {

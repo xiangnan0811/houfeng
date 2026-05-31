@@ -25,6 +25,7 @@ type vpsAssetDB interface {
 
 type vpsAssetQueryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
 type PostgresVPSAssetRepository struct {
@@ -61,11 +62,14 @@ const vpsAssetSelectColumns = `
 	usage_status,
 	renewal_decision,
 	importance,
-	labels,
-	note,
-	created_at,
-	updated_at,
-	archived_at`
+		labels,
+		note,
+		0::int as active_node_link_count,
+		0::int as running_node_count,
+		0::int as running_target_count,
+		created_at,
+		updated_at,
+		archived_at`
 
 type vpsAssetScanner interface {
 	Scan(dest ...any) error
@@ -97,6 +101,9 @@ func scanVPSAsset(row vpsAssetScanner) (vpsassets.Record, error) {
 		&record.Importance,
 		&record.Labels,
 		&record.Note,
+		&record.ActiveNodeLinkCount,
+		&record.RunningNodeCount,
+		&record.RunningTargetCount,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 		&record.ArchivedAt,
@@ -427,26 +434,36 @@ func noRenewalSubscriptionLinkage() vpsassets.RenewalSubscriptionLinkage {
 }
 
 func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vpsID string) (vpsassets.RenewalSubscriptionLinkage, error) {
-	records, err := listActiveSubscriptionsForVPSForUpdate(ctx, tx, vpsID)
+	records, err := listSubscriptionsForVPSForUpdate(ctx, tx, vpsID)
 	if err != nil {
 		return vpsassets.RenewalSubscriptionLinkage{}, err
 	}
-	if len(records) == 0 {
+	activeRecords := make([]subscriptions.Record, 0, len(records))
+	for _, record := range records {
+		if record.Status == subscriptions.StatusActive {
+			activeRecords = append(activeRecords, record)
+		}
+	}
+	if len(activeRecords) == 0 {
+		message := "缺少生效中的订阅记录，续费决策已保存但没有自动取消订阅自动续费。"
+		if len(records) > 0 {
+			message = "关联订阅已处于非活跃状态，续费决策已保存；仍需通过取消/退役工作台处理 VPS、节点与实例状态。"
+		}
 		return vpsassets.RenewalSubscriptionLinkage{
 			Status:         vpsassets.RenewalSubscriptionLinkageNoActiveSubscription,
-			CandidateCount: 0,
-			Message:        "缺少生效中的订阅记录，续费决策已保存但没有自动取消订阅自动续费。",
+			CandidateCount: len(records),
+			Message:        message,
 		}, nil
 	}
-	if len(records) > 1 {
+	if len(activeRecords) > 1 {
 		return vpsassets.RenewalSubscriptionLinkage{
 			Status:         vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription,
-			CandidateCount: len(records),
+			CandidateCount: len(activeRecords),
 			Message:        "存在多条生效中的订阅记录，续费决策已保存但未自动批量修改订阅；请到订阅页选择要取消自动续费的记录。",
 		}, nil
 	}
 
-	current := records[0]
+	current := activeRecords[0]
 	input := subscriptions.NormalizePatchInput(subscriptions.PatchInput{
 		AutoRenew:          subscriptions.PatchBool(false),
 		AutoRenewCancelled: subscriptions.PatchBool(true),
@@ -494,15 +511,24 @@ func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vps
 	}, nil
 }
 
-func listActiveSubscriptionsForVPSForUpdate(ctx context.Context, tx pgx.Tx, vpsID string) ([]subscriptions.Record, error) {
+func listSubscriptionsForVPSForUpdate(ctx context.Context, tx pgx.Tx, vpsID string) ([]subscriptions.Record, error) {
 	rows, err := tx.Query(ctx, `
 		select `+subscriptionSelectColumns+`
 		from subscriptions
-		where vps_id = $1 and status = $2
-		order by renew_at asc nulls last, subscription_id
-		for update`, vpsID, string(subscriptions.StatusActive))
+		where vps_id = $1
+		order by
+			case status
+				when 'active' then 0
+				when 'expired' then 1
+				when 'cancelled' then 2
+				when 'paused' then 3
+				else 4
+			end,
+			renew_at asc nulls last,
+			subscription_id
+		for update`, vpsID)
 	if err != nil {
-		return nil, fmt.Errorf("query active subscriptions for vps %q: %w", vpsID, err)
+		return nil, fmt.Errorf("query subscriptions for vps %q: %w", vpsID, err)
 	}
 	defer rows.Close()
 
@@ -510,12 +536,12 @@ func listActiveSubscriptionsForVPSForUpdate(ctx context.Context, tx pgx.Tx, vpsI
 	for rows.Next() {
 		record, err := scanSubscription(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan active subscription for vps %q: %w", vpsID, err)
+			return nil, fmt.Errorf("scan subscription for vps %q: %w", vpsID, err)
 		}
 		records = append(records, record)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate active subscriptions for vps %q: %w", vpsID, err)
+		return nil, fmt.Errorf("iterate subscriptions for vps %q: %w", vpsID, err)
 	}
 	return records, nil
 }

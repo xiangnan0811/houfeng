@@ -75,6 +75,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	vpsAssetRepo := store.NewPostgresVPSAssetRepository(db.Pool())
 	assetDomainRepo := store.NewPostgresAssetDomainRepository(db.Pool())
 	assetServiceRepo := store.NewPostgresAssetServiceRepository(db.Pool())
+	assetLifecycleRepo := store.NewPostgresAssetLifecycleRepository(db.Pool())
 	subscriptionRepo := store.NewPostgresSubscriptionRepository(db.Pool())
 	vpsNodeLinkRepo := store.NewPostgresVPSNodeLinkRepository(db.Pool())
 	renewalDecisionRepo := store.NewPostgresRenewalDecisionRepository(db.Pool())
@@ -133,8 +134,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AssetServicesCollectionHandler: handlers.AssetServicesCollection(assetServiceRepo),
 		ProvidersCollectionHandler:     handlers.ProvidersCollection(providerRepo),
 		ProviderItemHandler:            handlers.ProviderItem(providerRepo),
-		VPSCollectionHandler:           handlers.VPSCollection(vpsAssetRepo, vpsNodeLinkRepo),
-		VPSItemHandler:                 handlers.VPSItem(vpsAssetRepo, vpsNodeLinkRepo),
+		VPSCollectionHandler:           handlers.VPSCollection(vpsAssetRepo, vpsNodeLinkRepo, assetLifecycleRepo),
+		VPSItemHandler:                 handlers.VPSItem(vpsAssetRepo, vpsNodeLinkRepo, assetLifecycleRepo),
 		VPSNodesHandler:                handlers.VPSNodes(vpsNodeLinkRepo),
 		VPSLinkNodeHandler:             handlers.VPSLinkNode(vpsNodeLinkRepo),
 		VPSUnlinkNodeHandler:           handlers.VPSUnlinkNode(vpsNodeLinkRepo),
@@ -142,6 +143,10 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSExperienceLogsHandler:       handlers.VPSExperienceLogs(renewalDecisionRepo),
 		VPSDomainsHandler:              handlers.VPSDomains(assetDomainRepo),
 		VPSServicesHandler:             handlers.VPSServices(assetServiceRepo),
+		VPSCancellationPreviewHandler:  handlers.VPSCancellationPreview(assetLifecycleRepo),
+		VPSCancellationHandler:         handlers.VPSCancellation(assetLifecycleRepo),
+		AssetContextNodesHandler:       handlers.AssetContextNodes(assetLifecycleRepo),
+		AssetContextTargetsHandler:     handlers.AssetContextTargets(assetLifecycleRepo),
 		SubscriptionsCollectionHandler: handlers.SubscriptionsCollection(subscriptionRepo),
 		SubscriptionItemHandler:        handlers.SubscriptionItem(subscriptionRepo),
 		NodesCollectionHandler:         handlers.NodesCollection(nodeRepo),

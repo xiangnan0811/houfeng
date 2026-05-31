@@ -14,6 +14,7 @@ export const DASHBOARD_LINKS = {
   settings: '/settings',
   assetDecisions: '/asset-decisions',
   vps: '/vps',
+  vpsCancellationAttention: '/vps?view=cancellation_attention',
   vpsUnreviewed: '/vps?renewal_decision=unreviewed',
   vpsToCancel: '/vps?lifecycle_status=to_cancel',
   vpsToMigrate: '/vps?lifecycle_status=to_migrate',

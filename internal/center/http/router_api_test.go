@@ -256,6 +256,18 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"domain_id":"dom_001"}]`))
 		}),
+		VPSServicesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"service_id":"svc_001"}]`))
+		}),
+		VPSCancellationPreviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"vps":{"vps_id":"vps_001"},"warnings":[],"blockers":[]}`))
+		}),
+		VPSCancellationHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"action":{"action_id":"ala_001"},"steps":[]}`))
+		}),
 	})
 
 	tests := []struct {
@@ -272,6 +284,9 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 		{name: "timeline", path: "/api/vps/vps_001/timeline", wantStatus: http.StatusOK, wantBodySnippet: `"price_history_id":"ph_001"`},
 		{name: "experience logs", path: "/api/vps/vps_001/experience-logs", wantStatus: http.StatusOK, wantBodySnippet: `"experience_log_id":"elog_001"`},
 		{name: "domains", path: "/api/vps/vps_001/domains", wantStatus: http.StatusOK, wantBodySnippet: `"domain_id":"dom_001"`},
+		{name: "services", path: "/api/vps/vps_001/services", wantStatus: http.StatusOK, wantBodySnippet: `"service_id":"svc_001"`},
+		{name: "cancellation preview", path: "/api/vps/vps_001/cancellation-preview", wantStatus: http.StatusOK, wantBodySnippet: `"warnings":[]`},
+		{name: "cancellation", path: "/api/vps/vps_001/cancellation", wantStatus: http.StatusOK, wantBodySnippet: `"action_id":"ala_001"`},
 	}
 
 	for _, tt := range tests {
@@ -325,6 +340,53 @@ func TestRouterKeepsNodeVPSOutOfSPAFallback(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"vps_id":"vps_001"`) {
 		t.Fatalf("expected node vps payload, got %q", string(body))
+	}
+}
+
+func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		AssetContextNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"node_id":"nd_001","cancellation_attention":true}]`))
+		}),
+		AssetContextTargetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"target_id":"tg_001","cancellation_attention":true}]`))
+		}),
+	})
+
+	tests := []struct {
+		name            string
+		path            string
+		wantBodySnippet string
+	}{
+		{name: "nodes", path: "/api/asset-context/nodes", wantBodySnippet: `"node_id":"nd_001"`},
+		{name: "targets", path: "/api/asset-context/targets", wantBodySnippet: `"target_id":"tg_001"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			}
+			body, err := io.ReadAll(recorder.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+			if strings.TrimSpace(string(body)) == spaShell {
+				t.Fatalf("expected asset context API response, got SPA fallback body %q", string(body))
+			}
+			if !strings.Contains(string(body), tt.wantBodySnippet) {
+				t.Fatalf("expected asset context payload, got %q", string(body))
+			}
+		})
 	}
 }
 

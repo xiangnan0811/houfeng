@@ -8,6 +8,7 @@ import {
   createNode,
   enterNodeMaintenance,
   exitNodeMaintenance,
+  listNodeAssetContexts,
   listNodes,
   listNodeSparklines,
   pauseNodeMonitoring,
@@ -18,7 +19,7 @@ import {
   restoreRetiredNodeToObserving,
   updateNodeMetadata,
 } from '../lib/api'
-import type { CreateNodeInput, NodeRecord, NodeSparklinesResponse } from '../lib/types'
+import type { AssetContextForNode, CreateNodeInput, NodeRecord, NodeSparklinesResponse } from '../lib/types'
 import { CreateNodeDrawer } from './nodes/CreateNodeDrawer'
 import { NodesHero } from './nodes/NodesHero'
 import { NodesListSection } from './nodes/NodesListSection'
@@ -83,6 +84,8 @@ export function NodesPage() {
   const [commandID, setCommandID] = useState('')
   const [sortState, setSortState] = useState<DataTableSortState | null>(null)
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set())
+  const [nodeAssetContexts, setNodeAssetContexts] = useState<Map<string, AssetContextForNode>>(new Map())
+  const [nodeAssetContextError, setNodeAssetContextError] = useState<string | null>(null)
 
   function resetCreateFlow() {
     setCreateError(null)
@@ -116,6 +119,25 @@ export function NodesPage() {
         if (!cancelled) setSparklines(data)
       })
       .catch(() => {}) // silent fail
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    if (typeof IntersectionObserver === 'undefined') return
+    listNodeAssetContexts()
+      .then((contexts) => {
+        if (cancelled) return
+        setNodeAssetContexts(new Map(contexts.map((context) => [context.node_id, context])))
+        setNodeAssetContextError(null)
+      })
+      .catch((value: unknown) => {
+        if (cancelled) return
+        setNodeAssetContexts(new Map())
+        setNodeAssetContextError(describeError(value, '加载 Node 资产上下文失败'))
+      })
     return () => {
       cancelled = true
     }
@@ -561,6 +583,7 @@ export function NodesPage() {
   const columns = buildNodesTableColumns({
     compareSet,
     sparklines,
+    assetContexts: nodeAssetContexts,
     editingLabelNodeId,
     labelDraft,
     groupDraft,
@@ -634,6 +657,11 @@ export function NodesPage() {
           onFilterChange={updateSearchParam}
           onAbnormalChange={(checked) => setAbnormalFilter(checked)}
         />
+        {nodeAssetContextError ? (
+          <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+            {nodeAssetContextError}
+          </p>
+        ) : null}
 
         <NodesListSection
           nodeListView={nodeListView}

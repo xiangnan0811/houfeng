@@ -2,8 +2,9 @@ import type { RefObject } from 'react'
 import { Link } from 'react-router-dom'
 
 import { DetailSection } from '../../components/DetailSection'
-import { DataTable, Timestamp, type DataTableColumn } from '../../components/atoms'
+import { Badge, DataTable, Timestamp, type DataTableColumn } from '../../components/atoms'
 import type { VPSSummary } from '../../lib/types'
+import { vpsLifecycleLabel, vpsRenewalDecisionLabel } from '../assetContextSummary'
 import { AssetLabels, LifecycleBadge, RenewalBadge, UsageBadge } from '../assetPageBadges'
 import { formatAssetLocation } from './nodeDetailHelpers'
 
@@ -22,6 +23,12 @@ export function NodeLinkedVPSSection({
   loaded,
   error,
 }: NodeLinkedVPSSectionProps) {
+  const lifecycleContext = records.find((vps) =>
+    vps.lifecycle_status === 'to_cancel' ||
+    vps.lifecycle_status === 'cancelled' ||
+    vps.renewal_decision === 'cancel' ||
+    vps.renewal_decision === 'auto_renew_cancelled',
+  )
   const linkedVPSColumns: DataTableColumn<VPSSummary>[] = [
     {
       key: 'vps',
@@ -90,6 +97,24 @@ export function NodeLinkedVPSSection({
           ) : null}
         </p>
         {error ? <p className="empty-inline" role="alert">{error}</p> : null}
+        {lifecycleContext ? (
+          <div className="asset-context-panel">
+            <div>
+              <span className="asset-context-panel__label">取消/过期上下文</span>
+              <strong>关联 VPS 已进入取消/退役流程</strong>
+              <small>
+                {lifecycleContext.display_name} · {vpsLifecycleLabel(lifecycleContext.lifecycle_status)} ·
+                续费 {vpsRenewalDecisionLabel(lifecycleContext.renewal_decision)}
+              </small>
+            </div>
+            <Badge variant="state" tone="notice">
+              需联动处理
+            </Badge>
+            <Link className="btn sm secondary" to={`/vps/${lifecycleContext.vps_id}?workbench=cancellation`}>
+              打开工作台
+            </Link>
+          </div>
+        ) : null}
         <DataTable
           className="asset-table node-vps-table"
           columns={linkedVPSColumns}

@@ -16,6 +16,7 @@ import { Modal } from '../../components/atoms/Modal'
 import { MonoDigits } from '../../components/atoms/Mono'
 import type {
   ActiveIncidentRecord,
+  AssetContextForTarget,
   ProbeItemRecord,
   ProbeKind,
   ProbeObservation,
@@ -70,6 +71,8 @@ type TargetDetailPageBodyProps = {
   pendingRuntimeConfirmation: PendingRuntimeConfirmation | null
   runtimeConfirmationActive: boolean
   probeConfirmationActive: boolean
+  assetContext: AssetContextForTarget | null
+  assetContextError: string | null
   onRuntimeAction: (action: TargetRuntimeAction, confirmed?: boolean) => void
   onCancelPauseConfirmation: () => void
   onCancelArchiveConfirmation: () => void
@@ -143,6 +146,8 @@ export function TargetDetailPageBody({
   pendingRuntimeConfirmation,
   runtimeConfirmationActive,
   probeConfirmationActive,
+  assetContext,
+  assetContextError,
   onRuntimeAction,
   onCancelPauseConfirmation,
   onCancelArchiveConfirmation,
@@ -263,6 +268,8 @@ export function TargetDetailPageBody({
         recentObservations={recentObservations}
         latestObservationAt={latestRuntimeObservationAt}
         latencySampleCount={latencySampleCount}
+        assetContext={assetContext}
+        assetContextError={assetContextError}
         onOpenHistory={() => onOpenHistory('events')}
       />
 

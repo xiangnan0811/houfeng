@@ -19,6 +19,7 @@ import {
   listEvents,
   listHistoricalIncidents,
   listIncidents,
+  listTargetAssetContexts,
   listTargetProbeItems,
   pauseTarget,
   restoreTargetToPaused,
@@ -29,6 +30,7 @@ import {
 import { formatConfigSummary } from '../lib/format'
 import type {
   ActiveIncidentRecord,
+  AssetContextForTarget,
   CreateProbeItemInput,
   ProbeItemRecord,
   ProbeObservation,
@@ -117,6 +119,12 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const pendingProbeFocusRestoreRef = useRef<ProbeFocusRestoreRequest | null>(null)
   const pendingProbeConfirmationCardRef = useRef<HTMLDivElement | null>(null)
   const metadataRequestRef = useRef(0)
+  const [assetContextState, setAssetContextState] = useState<{
+    requestedTargetId: string | null
+    context: AssetContextForTarget | null
+    error: string | null
+  }>({ requestedTargetId: null, context: null, error: null })
+  const assetContextLoadedForRef = useRef<string | null>(null)
 
   useEffect(() => {
     currentRouteTargetIdRef.current = targetId ?? null
@@ -274,6 +282,40 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
 
   useEffect(() => {
     let cancelled = false
+    if (
+      typeof IntersectionObserver === 'undefined' ||
+      !targetId ||
+      !state.target ||
+      state.requestedTargetId !== targetId ||
+      assetContextLoadedForRef.current === targetId
+    ) {
+      return
+    }
+    assetContextLoadedForRef.current = targetId
+    listTargetAssetContexts()
+      .then((contexts) => {
+        if (cancelled) return
+        setAssetContextState({
+          requestedTargetId: targetId,
+          context: Array.isArray(contexts) ? contexts.find((context) => context.target_id === targetId) ?? null : null,
+          error: null,
+        })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setAssetContextState({
+          requestedTargetId: targetId,
+          context: null,
+          error: describeError(error, '加载 Target 资产上下文失败'),
+        })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [state.requestedTargetId, state.target, targetId])
+
+  useEffect(() => {
+    let cancelled = false
     if (!targetId) return
 
     Promise.allSettled([
@@ -387,6 +429,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const eventsError = hasCurrentActivity ? state.eventsError : null
   const runtimeConfirmationActive = pendingRuntimeConfirmation !== null
   const probeConfirmationActive = pendingProbeConfirmation !== null
+  const assetContext = assetContextState.requestedTargetId === targetId ? assetContextState.context : null
+  const assetContextError = assetContextState.requestedTargetId === targetId ? assetContextState.error : null
 
   function openHistory(tab: 'events' | 'incidents' = 'events') {
     setHistoryTab(tab)
@@ -841,6 +885,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       pendingRuntimeConfirmation={pendingRuntimeConfirmation}
       runtimeConfirmationActive={runtimeConfirmationActive}
       probeConfirmationActive={probeConfirmationActive}
+      assetContext={assetContext}
+      assetContextError={assetContextError}
       onRuntimeAction={(action, confirmed) => void handleRuntimeAction(action, confirmed)}
       onCancelPauseConfirmation={() => {
         pendingRuntimeFocusRestoreRef.current = 'pause'

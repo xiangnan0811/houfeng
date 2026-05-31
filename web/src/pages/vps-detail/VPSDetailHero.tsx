@@ -10,6 +10,7 @@ type VPSDetailHeroProps = {
   isArchived: boolean
   lifecycleSubmitting: boolean
   onDecisionEdit: () => void
+  onCancellationOpen: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
   onNodeLink: () => void
@@ -24,6 +25,7 @@ export function VPSDetailHero({
   isArchived,
   lifecycleSubmitting,
   onDecisionEdit,
+  onCancellationOpen,
   onFactEdit,
   onExperienceLog,
   onNodeLink,
@@ -49,9 +51,11 @@ export function VPSDetailHero({
         <div className="watchtower-header__actions-block">
           <div className="watchtower-header__actions">
             <Button variant="primary" size="sm" onClick={onDecisionEdit}>处理决策</Button>
+            <Button variant="danger" size="sm" onClick={onCancellationOpen}>取消/退役</Button>
             <details className="watchtower-actions-menu vps-detail-actions-menu">
               <summary aria-label="VPS 详情操作">…</summary>
               <div className="watchtower-actions-menu__panel">
+                <button type="button" onClick={onCancellationOpen}>取消/退役工作台</button>
                 <button type="button" onClick={onFactEdit}>编辑基础信息</button>
                 <button type="button" onClick={onExperienceLog}>记录经验</button>
                 <button type="button" onClick={onNodeLink}>关联 Node</button>

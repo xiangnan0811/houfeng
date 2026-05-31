@@ -96,6 +96,11 @@ function statusBadgeClass(status: SubscriptionStatus): string {
   }
 }
 
+function vpsNeedsLifecycleAction(subscription: SubscriptionRecord, vps: VPSAssetRecord | undefined): boolean {
+  if (!vps || subscription.status === 'active') return false
+  return vps.lifecycle_status !== 'to_cancel' && vps.lifecycle_status !== 'cancelled'
+}
+
 export function SubscriptionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
@@ -164,6 +169,10 @@ export function SubscriptionsPage() {
     if (!id) return ''; return state.vps.find((v) => v.vps_id === id)?.display_name ?? id
   }
 
+  const vpsByID = useMemo(
+    () => new Map(state.vps.map((vps) => [vps.vps_id, vps])),
+    [state.vps],
+  )
   const vpsOpts = state.vps.map((v) => ({ value: v.vps_id, label: v.display_name }))
   const hasFilters = Boolean(filters.vps_id || filters.status || filters.renew_window)
   const [now] = useState(Date.now)
@@ -252,6 +261,8 @@ export function SubscriptionsPage() {
           <tbody>
             {state.subscriptions.map((s) => {
               const isUrgent = s.renew_at && (new Date(s.renew_at).getTime() - now) < 30 * 86400000
+              const linkedVPS = vpsByID.get(s.vps_id)
+              const needsLifecycleAction = vpsNeedsLifecycleAction(s, linkedVPS)
               return (
                 <tr key={s.subscription_id}>
                   <td className="name">{vpsName(s.vps_id)}</td>
@@ -259,7 +270,16 @@ export function SubscriptionsPage() {
                   <td>{s.billing_months > 1 ? `${s.billing_months} 个月` : '月付'}</td>
                   <td className="mono">{formatMoney(s.price, s.currency)}</td>
                   <td className={`time${isUrgent ? ' text-warn' : ''}`}>{formatDate(s.renew_at)}</td>
-                  <td><span className={statusBadgeClass(s.status)}>{SUBSCRIPTION_STATUS_LABELS[s.status]}</span></td>
+                  <td>
+                    <span className={statusBadgeClass(s.status)}>{SUBSCRIPTION_STATUS_LABELS[s.status]}</span>
+                    {needsLifecycleAction ? (
+                      <span className="asset-context-inline">
+                        <span>需要处理资产联动</span>
+                        <span aria-hidden="true">·</span>
+                        <Link className="text-link" to={`/vps/${s.vps_id}?workbench=cancellation`}>打开工作台</Link>
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="cell-end"><button className="btn-text sm secondary" onClick={() => startEdit(s)}>编辑</button></td>
                 </tr>
               )

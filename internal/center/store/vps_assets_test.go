@@ -470,8 +470,8 @@ func TestPostgresVPSAssetPatchCancellationDecisionCancelsSingleActiveSubscriptio
 		if !strings.Contains(sql, "from subscriptions") || !strings.Contains(sql, "for update") {
 			t.Fatalf("unexpected Query SQL %q", sql)
 		}
-		if len(args) != 2 || args[0] != "vps_001" || args[1] != "active" {
-			t.Fatalf("active subscription args = %#v, want vps_001 active", args)
+		if len(args) != 1 || args[0] != "vps_001" {
+			t.Fatalf("subscription args = %#v, want vps_001", args)
 		}
 		return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{{scan: func(dest ...any) error {
 			scanSubscriptionRecordDestinations(dest, subscriptions.Record{
@@ -611,9 +611,12 @@ func TestPostgresVPSAssetPatchCancellationDecisionDoesNotBulkUpdateAmbiguousSubs
 		name          string
 		subscriptions []subscriptions.Record
 		wantStatus    vpsassets.RenewalSubscriptionLinkageStatus
+		wantCount     int
+		wantMessage   string
 	}{
-		{name: "none", subscriptions: nil, wantStatus: vpsassets.RenewalSubscriptionLinkageNoActiveSubscription},
-		{name: "multiple", subscriptions: []subscriptions.Record{{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusActive}, {SubscriptionID: "sub_002", VPSID: "vps_001", Status: subscriptions.StatusActive}}, wantStatus: vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription},
+		{name: "none", subscriptions: nil, wantStatus: vpsassets.RenewalSubscriptionLinkageNoActiveSubscription, wantCount: 0, wantMessage: "缺少生效中的订阅"},
+		{name: "inactive", subscriptions: []subscriptions.Record{{SubscriptionID: "sub_expired", VPSID: "vps_001", Status: subscriptions.StatusExpired}}, wantStatus: vpsassets.RenewalSubscriptionLinkageNoActiveSubscription, wantCount: 1, wantMessage: "非活跃状态"},
+		{name: "multiple", subscriptions: []subscriptions.Record{{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusActive}, {SubscriptionID: "sub_002", VPSID: "vps_001", Status: subscriptions.StatusActive}, {SubscriptionID: "sub_expired", VPSID: "vps_001", Status: subscriptions.StatusExpired}}, wantStatus: vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription, wantCount: 2, wantMessage: "多条生效中的订阅"},
 	}
 
 	for _, tt := range tests {
@@ -677,6 +680,9 @@ func TestPostgresVPSAssetPatchCancellationDecisionDoesNotBulkUpdateAmbiguousSubs
 			}
 			if linkage.Status != tt.wantStatus || linkage.Updated {
 				t.Fatalf("linkage = %#v, want status %q without update", linkage, tt.wantStatus)
+			}
+			if linkage.CandidateCount != tt.wantCount || !strings.Contains(linkage.Message, tt.wantMessage) {
+				t.Fatalf("linkage = %#v, want candidate_count %d and message containing %q", linkage, tt.wantCount, tt.wantMessage)
 			}
 		})
 	}
@@ -1094,9 +1100,12 @@ func scanVPSAssetRecordDestinations(dest []any, record vpsassets.Record) {
 	*(dest[20].(*string)) = record.Importance
 	*(dest[21].(*[]string)) = append([]string(nil), record.Labels...)
 	*(dest[22].(*string)) = record.Note
-	*(dest[23].(*time.Time)) = record.CreatedAt
-	*(dest[24].(*time.Time)) = record.UpdatedAt
-	*(dest[25].(**time.Time)) = cloneTimePtr(record.ArchivedAt)
+	*(dest[23].(*int)) = record.ActiveNodeLinkCount
+	*(dest[24].(*int)) = record.RunningNodeCount
+	*(dest[25].(*int)) = record.RunningTargetCount
+	*(dest[26].(*time.Time)) = record.CreatedAt
+	*(dest[27].(*time.Time)) = record.UpdatedAt
+	*(dest[28].(**time.Time)) = cloneTimePtr(record.ArchivedAt)
 }
 
 func scanIPHistoryRecordDestinations(dest []any, id string, now time.Time) {

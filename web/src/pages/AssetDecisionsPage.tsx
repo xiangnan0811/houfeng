@@ -34,6 +34,7 @@ type DecisionQueueView =
   | 'renewal'
   | 'migrate'
   | 'cancel'
+  | 'cancellation_attention'
   | 'unlinked'
   | 'missing_subscription'
 
@@ -159,7 +160,18 @@ function filterDecisionQueue(
   if (view === 'renewal') return rows.filter((row) => row.renewalDue)
   if (view === 'unlinked') return rows.filter((row) => row.vps.active_node_link_count <= 0)
   if (view === 'missing_subscription') return rows.filter((row) => !row.subscription)
+  if (view === 'cancellation_attention') return rows.filter((row) => hasCancellationAttention(row))
   return rows.filter((row) => row.vps.renewal_decision === view)
+}
+
+function hasCancellationAttention(row: DecisionQueueItem): boolean {
+  if (row.vps.renewal_decision === 'cancel' && row.vps.lifecycle_status !== 'to_cancel' && row.vps.lifecycle_status !== 'cancelled') {
+    return true
+  }
+  if (!row.subscription) return false
+  const inactiveSubscription = row.subscription.status !== 'active'
+  const vpsCancelled = row.vps.lifecycle_status === 'to_cancel' || row.vps.lifecycle_status === 'cancelled'
+  return inactiveSubscription && !vpsCancelled
 }
 export function AssetDecisionsPage() {
   const navigate = useNavigate()
@@ -259,6 +271,7 @@ export function AssetDecisionsPage() {
   const renewalDueQueueCount = decisionQueue.filter((item) => item.renewalDue).length
   const missingSubscriptionCount = decisionQueue.filter((item) => !item.subscription).length
   const unlinkedCount = decisionQueue.filter((item) => item.vps.active_node_link_count <= 0).length
+  const cancellationAttentionCount = decisionQueue.filter(hasCancellationAttention).length
   const priorityDecisionCount = decisionQueue.filter(
     (item) => item.renewalDue && item.vps.renewal_decision === 'unreviewed',
   ).length
@@ -270,6 +283,7 @@ export function AssetDecisionsPage() {
     { value: 'renewal', label: `${renewalWindow}天续费`, count: renewalDueQueueCount },
     { value: 'migrate', label: '迁移', count: state.migrate.length },
     { value: 'cancel', label: '取消', count: state.cancel.length },
+    { value: 'cancellation_attention', label: '取消联动', count: cancellationAttentionCount },
     { value: 'unlinked', label: '未关联', count: unlinkedCount },
     { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
   ] satisfies Array<{ value: DecisionQueueView; label: string; count: number }>
@@ -514,6 +528,15 @@ export function AssetDecisionsPage() {
                       >
                         处理
                       </button>
+                      {vps.renewal_decision === 'cancel' || hasCancellationAttention(item) ? (
+                        <Link
+                          className="btn sm secondary"
+                          to={`/vps/${vps.vps_id}?workbench=cancellation`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          取消/退役
+                        </Link>
+                      ) : null}
                     </td>
                   </tr>
                 )

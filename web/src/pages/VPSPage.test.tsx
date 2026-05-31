@@ -56,6 +56,8 @@ const vps = {
   labels: ['edge'],
   note: '',
   active_node_link_count: 1,
+  running_node_count: 0,
+  running_target_count: 0,
   created_at: '2026-05-09T08:00:00Z',
   updated_at: '2026-05-09T08:00:00Z',
   archived_at: null,
@@ -76,6 +78,8 @@ const missingFactsVPS = {
   usage_status: 'unknown',
   renewal_decision: 'unreviewed',
   active_node_link_count: 0,
+  running_node_count: 0,
+  running_target_count: 0,
 }
 
 const subscription = {
@@ -186,6 +190,100 @@ describe('VPSPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
     await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
     expect(screen.queryByText('视图: 缺订阅')).not.toBeInTheDocument()
+  })
+
+  it('shows cancellation attention view for inactive subscription and active VPS split', async () => {
+    const expiredSubscription = {
+      ...subscription,
+      status: 'expired',
+      auto_renew: false,
+      auto_renew_cancelled: true,
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
+      .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse([expiredSubscription]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps?view=cancellation_attention']}>
+        <Routes>
+          <Route path="/vps" element={<VPSPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+    expect(screen.getByText('订阅非活跃，VPS 尚未取消')).toBeInTheDocument()
+    expect(screen.getByText('视图: 取消待处理')).toBeInTheDocument()
+  })
+
+  it('uses running linked assets rather than historical links for cancellation attention', async () => {
+    const toCancelWithRetiredLinks = {
+      ...vps,
+      lifecycle_status: 'to_cancel',
+      renewal_decision: 'cancel',
+      active_node_link_count: 2,
+      running_node_count: 0,
+      running_target_count: 0,
+    }
+    const toCancelWithRunningTarget = {
+      ...toCancelWithRetiredLinks,
+      vps_id: 'vps_running_target',
+      display_name: 'Frankfurt Legacy',
+      running_target_count: 1,
+    }
+    const cancelledWithRunningTarget = {
+      ...toCancelWithRunningTarget,
+      vps_id: 'vps_cancelled_running_target',
+      display_name: 'Cancelled Legacy',
+      lifecycle_status: 'cancelled',
+    }
+    const cancelledSubscription = {
+      ...subscription,
+      status: 'cancelled',
+      auto_renew: false,
+      auto_renew_cancelled: true,
+    }
+    const runningTargetSubscription = {
+      ...cancelledSubscription,
+      subscription_id: 'sub_running_target',
+      vps_id: 'vps_running_target',
+    }
+    const cancelledRunningTargetSubscription = {
+      ...cancelledSubscription,
+      subscription_id: 'sub_cancelled_running_target',
+      vps_id: 'vps_cancelled_running_target',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([
+        toCancelWithRetiredLinks,
+        toCancelWithRunningTarget,
+        cancelledWithRunningTarget,
+      ]))
+      .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse([
+        cancelledSubscription,
+        runningTargetSubscription,
+        cancelledRunningTargetSubscription,
+      ]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps?view=cancellation_attention']}>
+        <Routes>
+          <Route path="/vps" element={<VPSPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Frankfurt Legacy')).toBeInTheDocument())
+    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
+    expect(screen.getByText('Cancelled Legacy')).toBeInTheDocument()
+    expect(screen.getByText('VPS 待取消，仍有 1 个 Node/Target 运行')).toBeInTheDocument()
+    expect(screen.getByText('VPS 已取消，仍有 1 个 Node/Target 运行')).toBeInTheDocument()
   })
 
   it('does not apply draft drawer filters when closed by button, Escape, or overlay', async () => {

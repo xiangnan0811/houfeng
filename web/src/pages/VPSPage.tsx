@@ -45,6 +45,7 @@ type VPSQuickView =
   | 'renewal'
   | 'unreviewed'
   | 'unlinked'
+  | 'cancellation_attention'
   | 'missing_subscription'
   | 'missing_facts'
   | 'archived'
@@ -112,6 +113,7 @@ const QUICK_VIEW_VALUES: VPSQuickView[] = [
   'renewal',
   'unreviewed',
   'unlinked',
+  'cancellation_attention',
   'missing_subscription',
   'missing_facts',
   'archived',
@@ -213,14 +215,40 @@ function matchesQuickView(row: InventoryRow, view: VPSQuickView): boolean {
   if (view === 'renewal') return row.renewalDue
   if (view === 'unreviewed') return row.vps.renewal_decision === 'unreviewed'
   if (view === 'unlinked') return row.vps.active_node_link_count <= 0
+  if (view === 'cancellation_attention') return hasCancellationAttention(row)
   if (view === 'missing_subscription') return row.subscriptionEvidence === 'ready' && !row.subscription
   if (view === 'missing_facts') return hasMissingVPSFacts(row.vps)
   if (view === 'archived') return row.vps.lifecycle_status === 'archived'
   return true
 }
 
+function cancellationAttentionReason(row: InventoryRow): string | null {
+  const vpsToCancel = row.vps.lifecycle_status === 'to_cancel'
+  const vpsCancelled = row.vps.lifecycle_status === 'cancelled'
+  const vpsCancellationPending = vpsToCancel || vpsCancelled
+  const vpsCancellationLabel = vpsCancelled ? 'VPS 已取消' : 'VPS 待取消'
+  const vpsCancelDecision = row.vps.renewal_decision === 'cancel' || row.vps.renewal_decision === 'auto_renew_cancelled'
+  const runningLinkedAssetCount = (row.vps.running_node_count ?? 0) + (row.vps.running_target_count ?? 0)
+  const subscriptionInactive = row.subscriptionEvidence === 'ready' &&
+    row.subscription != null &&
+    row.subscription.status !== 'active'
+  const subscriptionActive = row.subscriptionEvidence === 'ready' &&
+    row.subscription?.status === 'active'
+
+  if (subscriptionInactive && !vpsCancellationPending) return '订阅非活跃，VPS 尚未取消'
+  if (vpsCancellationPending && subscriptionActive) return `${vpsCancellationLabel}，订阅仍 active`
+  if (vpsCancellationPending && runningLinkedAssetCount > 0) return `${vpsCancellationLabel}，仍有 ${runningLinkedAssetCount} 个 Node/Target 运行`
+  if (vpsCancelDecision && !vpsCancellationPending) return '已决定不续费，生命周期未同步'
+  return null
+}
+
+function hasCancellationAttention(row: InventoryRow): boolean {
+  return cancellationAttentionReason(row) !== null
+}
+
 function inventoryRank(row: InventoryRow): number {
   let rank = 0
+  if (hasCancellationAttention(row)) rank += 160
   if (row.vps.renewal_decision === 'unreviewed') rank += 120
   if (row.renewalDue) rank += 100
   if (row.subscriptionEvidence === 'ready' && !row.subscription) rank += 80
@@ -234,6 +262,7 @@ function quickViewLabel(value: VPSQuickView): string {
   if (value === 'renewal') return '30天续费'
   if (value === 'unreviewed') return '未评估'
   if (value === 'unlinked') return '未关联'
+  if (value === 'cancellation_attention') return '取消待处理'
   if (value === 'missing_subscription') return '缺订阅'
   if (value === 'missing_facts') return '缺基础信息'
   return '已归档'
@@ -345,6 +374,7 @@ export function VPSPage() {
     : 0
   const unreviewedCount = inventoryRows.filter((row) => row.vps.renewal_decision === 'unreviewed').length
   const unlinkedCount = inventoryRows.filter((row) => row.vps.active_node_link_count <= 0).length
+  const cancellationAttentionCount = inventoryRows.filter(hasCancellationAttention).length
   const missingFactsCount = inventoryRows.filter((row) => hasMissingVPSFacts(row.vps)).length
   const renewalDueCount = inventoryRows.filter((row) => row.renewalDue).length
   const quickViews = [
@@ -352,6 +382,7 @@ export function VPSPage() {
     { value: 'renewal', label: '30天续费', count: renewalDueCount },
     { value: 'unreviewed', label: '未评估', count: unreviewedCount },
     { value: 'unlinked', label: '未关联', count: unlinkedCount },
+    { value: 'cancellation_attention', label: '取消待处理', count: cancellationAttentionCount },
     { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
     { value: 'missing_facts', label: '缺信息', count: missingFactsCount },
     { value: 'archived', label: '已归档', count: inventoryRows.filter((row) => row.vps.lifecycle_status === 'archived').length },
@@ -437,20 +468,31 @@ export function VPSPage() {
                 <th>续费决策</th>
                 <th>到期</th>
                 <th>关联节点</th>
+                <th>资产联动</th>
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((row) => (
-                <tr key={row.vps.vps_id} onClick={() => navigate(`/vps/${row.vps.vps_id}`)} className="row-clickable">
-                  <td className="name">{row.vps.display_name}</td>
-                  <td>{formatOptional(row.vps.provider_name)}</td>
-                  <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>
-                  <td><LifecycleBadge value={row.vps.lifecycle_status} /></td>
-                  <td><RenewalBadge value={row.vps.renewal_decision} /></td>
-                  <td className="time">{renderRenewalDate(row)}</td>
-                  <td>{row.vps.active_node_link_count > 0 ? <MonoDigits>{row.vps.active_node_link_count}</MonoDigits> : '—'}</td>
-                </tr>
-              ))}
+              {filteredRows.map((row) => {
+                const cancellationReason = cancellationAttentionReason(row)
+                return (
+                  <tr key={row.vps.vps_id} onClick={() => navigate(`/vps/${row.vps.vps_id}`)} className="row-clickable">
+                    <td className="name">{row.vps.display_name}</td>
+                    <td>{formatOptional(row.vps.provider_name)}</td>
+                    <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>
+                    <td><LifecycleBadge value={row.vps.lifecycle_status} /></td>
+                    <td><RenewalBadge value={row.vps.renewal_decision} /></td>
+                    <td className="time">{renderRenewalDate(row)}</td>
+                    <td>{row.vps.active_node_link_count > 0 ? <MonoDigits>{row.vps.active_node_link_count}</MonoDigits> : '—'}</td>
+                    <td>
+                      {cancellationReason ? (
+                        <span className="asset-context-pill asset-context-pill--attention">{cancellationReason}</span>
+                      ) : (
+                        <span className="asset-context-pill">已同步</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
