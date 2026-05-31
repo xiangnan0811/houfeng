@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/xiangnan0811/houfeng/compare/v0.23.0...v0.24.0) (2026-05-31)
+
+
+### Features
+
+* coordinate asset lifecycle cancellation ([5d6539c](https://github.com/xiangnan0811/houfeng/commit/5d6539cb16d5d1d11c79e21f1a182c06e0213377))
+
 ## [0.23.0](https://github.com/xiangnan0811/houfeng/compare/v0.22.0...v0.23.0) (2026-05-30)
 
 
