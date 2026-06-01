@@ -78,7 +78,7 @@ function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
 
   const sync = deriveSyncStatus(dashboardSummary)
   const anomalyCounts = {
-    nodes: dashboardSummary.overview?.abnormal_node_count ?? 0,
+    monitoring: dashboardSummary.overview?.abnormal_monitoring_instance_count ?? 0,
     targets: dashboardSummary.overview?.abnormal_target_count ?? 0,
   }
 
@@ -115,8 +115,8 @@ function deriveSyncStatus(summary: DashboardSummaryState): SyncStatusProps {
   if (!overview) {
     return { state: 'down', label: '摘要不可用' }
   }
-  const severeCount = overview.severe_node_count + overview.severe_target_count
-  const abnormalCount = overview.abnormal_node_count + overview.abnormal_target_count
+  const severeCount = overview.severe_monitoring_instance_count + overview.severe_target_count
+  const abnormalCount = overview.abnormal_monitoring_instance_count + overview.abnormal_target_count
   if (severeCount > 0 || abnormalCount > 0) {
     return { state: 'degraded', label: '存在异常' }
   }

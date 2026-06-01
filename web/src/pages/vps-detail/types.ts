@@ -6,7 +6,7 @@ import type {
   AssetServiceType,
   CancellationPreview,
   LifecycleActionResult,
-  NodeRecord,
+  MonitoringInstanceRecord,
   ProviderRecord,
   SubscriptionRecord,
   TargetRecord,
@@ -33,9 +33,9 @@ export type VPSDetailPageState = {
 }
 
 export type VPSDetailSelectorState = {
-  nodesLoading: boolean
-  nodesError: string | null
-  nodes: NodeRecord[]
+  monitoringInstancesLoading: boolean
+  monitoringInstancesError: string | null
+  monitoring: MonitoringInstanceRecord[]
   providersLoading: boolean
   providersError: string | null
   providers: ProviderRecord[]
@@ -48,11 +48,11 @@ export type VPSDetailDrawerMode =
   | 'decision'
   | 'cancellation'
   | 'facts'
-  | 'node-link'
+  | 'monitoring-instance-link'
   | 'experience'
   | 'service'
   | 'domain'
-  | 'node-evidence'
+  | 'monitoring-instance-evidence'
   | 'services-detail'
   | 'domains-detail'
   | 'timeline-detail'
@@ -88,7 +88,7 @@ export type DecisionDraftState = {
 }
 
 export type LinkDraftState = {
-  nodeId: string
+  monitoringInstanceId: string
   note: string
 }
 

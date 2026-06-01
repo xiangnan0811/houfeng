@@ -49,8 +49,8 @@ describe('Stepper', () => {
 
   it('uses the provided aria-label when supplied', () => {
     const steps: StepperStep[] = [{ label: 'A', state: 'current' }]
-    render(<Stepper steps={steps} ariaLabel="节点接入进度" />)
-    expect(screen.getByRole('list', { name: '节点接入进度' })).toBeInTheDocument()
+    render(<Stepper steps={steps} ariaLabel="监控实例接入进度" />)
+    expect(screen.getByRole('list', { name: '监控实例接入进度' })).toBeInTheDocument()
   })
 
   it('renders a connector for every step except the last', () => {

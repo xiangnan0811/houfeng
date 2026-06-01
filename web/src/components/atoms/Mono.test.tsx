@@ -14,27 +14,27 @@ describe('MonoDigits', () => {
 
 describe('Hostname', () => {
   it('renders full text by default', () => {
-    render(<Hostname>{'nd_89b816442244efb4'}</Hostname>)
-    expect(screen.getByText('nd_89b816442244efb4')).toBeInTheDocument()
+    render(<Hostname>{'mi_89b816442244efb4'}</Hostname>)
+    expect(screen.getByText('mi_89b816442244efb4')).toBeInTheDocument()
   })
 
   it('truncates with ellipsis when truncate + maxChars set', () => {
     render(
       <Hostname truncate maxChars={6}>
-        {'nd_89b816442244efb4'}
+        {'mi_89b816442244efb4'}
       </Hostname>,
     )
-    expect(screen.getByText('nd_89b…')).toBeInTheDocument()
+    expect(screen.getByText('mi_89b…')).toBeInTheDocument()
   })
 
   it('keeps full id in title attribute', () => {
     render(
       <Hostname truncate maxChars={6}>
-        {'nd_89b816442244efb4'}
+        {'mi_89b816442244efb4'}
       </Hostname>,
     )
-    const span = screen.getByText('nd_89b…')
-    expect(span.getAttribute('title')).toBe('nd_89b816442244efb4')
+    const span = screen.getByText('mi_89b…')
+    expect(span.getAttribute('title')).toBe('mi_89b816442244efb4')
   })
 })
 

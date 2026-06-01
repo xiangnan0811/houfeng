@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { listNodes, listProviders, listSubscriptions, listTargets, listVPSAssets } from '../../lib/api'
+import { listMonitoringInstances, listProviders, listSubscriptions, listTargets, listVPSAssets } from '../../lib/api'
 import { formatDate, formatMoney } from '../../lib/format'
-import type { NodeRecord, ProviderRecord, SubscriptionRecord, TargetRecord, VPSAssetRecord } from '../../lib/types'
+import type { MonitoringInstanceRecord, ProviderRecord, SubscriptionRecord, TargetRecord, VPSAssetRecord } from '../../lib/types'
 
 interface SearchResult {
-  kind: 'vps' | 'node' | 'target' | 'provider' | 'subscription'
+  kind: 'vps' | 'monitoring_instance' | 'target' | 'provider' | 'subscription'
   id: string
   label: string
   hint: string
@@ -23,13 +23,13 @@ const MAX_RESULTS = 10
 
 const SEARCH_GROUP_LABELS: Record<SearchResult['kind'], string> = {
   vps: 'VPS',
-  node: '节点',
+  monitoring_instance: '监控实例',
   target: '入口探测',
   provider: '服务商',
   subscription: '订阅',
 }
 
-const SEARCH_GROUP_ORDER: SearchResult['kind'][] = ['vps', 'node', 'target', 'provider', 'subscription']
+const SEARCH_GROUP_ORDER: SearchResult['kind'][] = ['vps', 'monitoring_instance', 'target', 'provider', 'subscription']
 
 /** Global command search with ⌘K / Ctrl+K shortcut. */
 export function GlobalSearch() {
@@ -84,14 +84,14 @@ export function GlobalSearch() {
     setLoading(true)
     setError(null)
     try {
-      const [vpsAssets, nodes, targets, providers, subscriptions] = await Promise.all([
+      const [vpsAssets, monitoring, targets, providers, subscriptions] = await Promise.all([
         listVPSAssets(),
-        listNodes(),
+        listMonitoringInstances(),
         listTargets(),
         listProviders(),
         listSubscriptions({ sort: 'renew_at', order: 'asc' }),
       ])
-      const matches = combine(vpsAssets, nodes, targets, providers, subscriptions, q).slice(0, MAX_RESULTS)
+      const matches = combine(vpsAssets, monitoring, targets, providers, subscriptions, q).slice(0, MAX_RESULTS)
       setResults(matches)
       setOpen(true)
       setFocusIndex(matches.length > 0 ? 0 : -1)
@@ -141,7 +141,7 @@ export function GlobalSearch() {
           ref={inputRef}
           type="search"
           className="global-search__input"
-          placeholder="搜索 VPS / 节点 / 入口… (⌘ K)"
+          placeholder="搜索 VPS / 监控实例 / 入口… (⌘ K)"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -192,7 +192,7 @@ export function GlobalSearch() {
 
 function combine(
   vpsAssets: VPSAssetRecord[],
-  nodes: NodeRecord[],
+  monitoring: MonitoringInstanceRecord[],
   targets: TargetRecord[],
   providers: ProviderRecord[],
   subscriptions: SubscriptionRecord[],
@@ -210,14 +210,14 @@ function combine(
       })
     }
   }
-  for (const node of nodes) {
-    if (matchesNode(node, q)) {
+  for (const monitoringInstance of monitoring) {
+    if (matchesMonitoringInstance(monitoringInstance, q)) {
       out.push({
-        kind: 'node',
-        id: node.node_id,
-        label: node.display_name || node.node_id,
-        hint: compactHint([node.region, node.city, node.provider]) || node.node_id,
-        to: `/nodes/${node.node_id}`,
+        kind: 'monitoring_instance',
+        id: monitoringInstance.monitoring_instance_id,
+        label: monitoringInstance.display_name || monitoringInstance.monitoring_instance_id,
+        hint: compactHint([monitoringInstance.region, monitoringInstance.city, monitoringInstance.provider]) || monitoringInstance.monitoring_instance_id,
+        to: `/monitoring/${monitoringInstance.monitoring_instance_id}`,
       })
     }
   }
@@ -287,14 +287,14 @@ function matchesVPS(vps: VPSAssetRecord, q: string): boolean {
   )
 }
 
-function matchesNode(node: NodeRecord, q: string): boolean {
+function matchesMonitoringInstance(monitoringInstance: MonitoringInstanceRecord, q: string): boolean {
   return (
-    includesLower(node.display_name, q) ||
-    includesLower(node.node_id, q) ||
-    includesLower(node.region, q) ||
-    includesLower(node.city, q) ||
-    includesLower(node.provider, q) ||
-    (node.labels ?? []).some((label) => includesLower(label, q))
+    includesLower(monitoringInstance.display_name, q) ||
+    includesLower(monitoringInstance.monitoring_instance_id, q) ||
+    includesLower(monitoringInstance.region, q) ||
+    includesLower(monitoringInstance.city, q) ||
+    includesLower(monitoringInstance.provider, q) ||
+    (monitoringInstance.labels ?? []).some((label) => includesLower(label, q))
   )
 }
 

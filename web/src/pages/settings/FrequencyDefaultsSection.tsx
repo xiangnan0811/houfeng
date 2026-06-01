@@ -30,7 +30,7 @@ export function FrequencyDefaultsSection({
         <span className="sr-value">
           <select
             className="input input--compact"
-            aria-label="当前节点主机样本频率"
+            aria-label="当前监控实例主机样本频率"
             value={hostSampleFrequencyTier}
             onChange={(e) => onHostSampleFrequencyChange(e.target.value)}
           >

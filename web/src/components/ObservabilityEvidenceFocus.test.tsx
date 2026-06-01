@@ -9,17 +9,17 @@ describe('ObservabilityEvidenceFocus', () => {
     render(
       <ObservabilityEvidenceFocus
         glyph={<StatusGlyph state="alert" ariaLabel="异常证据状态" />}
-        eyebrow="优先核对节点"
+        eyebrow="优先核对监控实例"
         title="优先核对：Alerting Edge"
         description="健康状态：告警"
         meta={
           <>
-            <Hostname truncate maxChars={18}>nd_alert</Hostname>
+            <Hostname truncate maxChars={18}>mi_alert</Hostname>
             {' · '}
             2 个活跃异常
           </>
         }
-        action={<a href="/nodes/nd_alert">查看证据</a>}
+        action={<a href="/monitoring/mi_alert">查看证据</a>}
       />,
     )
 
@@ -29,7 +29,7 @@ describe('ObservabilityEvidenceFocus', () => {
     expect(screen.getByText(/2 个活跃异常/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看证据' })).toHaveAttribute(
       'href',
-      '/nodes/nd_alert',
+      '/monitoring/mi_alert',
     )
   })
 
@@ -39,7 +39,7 @@ describe('ObservabilityEvidenceFocus', () => {
         stable
         glyph={<StatusGlyph state="normal" ariaLabel="证据稳定" />}
         eyebrow="运行证据"
-        title="没有需要优先核对的 Node"
+        title="没有需要优先核对的监控实例"
         description="当前列表没有异常对象。"
         meta="继续从 VPS 库存核对资产侧事实。"
         action={<a href="/vps">查看 VPS</a>}
@@ -49,6 +49,6 @@ describe('ObservabilityEvidenceFocus', () => {
     expect(container.querySelector('.observability-evidence-focus')).toHaveClass(
       'observability-evidence-focus--stable',
     )
-    expect(screen.getByRole('heading', { name: '没有需要优先核对的 Node' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '没有需要优先核对的监控实例' })).toBeInTheDocument()
   })
 })

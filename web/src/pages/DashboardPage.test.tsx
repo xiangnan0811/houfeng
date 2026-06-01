@@ -16,17 +16,17 @@ function mockJSONResponse(body: unknown, status = 200) {
 function baseOverview(overrides: Record<string, unknown> = {}) {
   return {
     snapshot_generated_at: '2026-04-25T08:30:00Z',
-    total_node_count: 5,
+    total_monitoring_instance_count: 5,
     total_target_count: 4,
-    abnormal_node_count: 0,
+    abnormal_monitoring_instance_count: 0,
     abnormal_target_count: 0,
-    severe_node_count: 0,
+    severe_monitoring_instance_count: 0,
     severe_target_count: 0,
-    maintenance_node_count: 0,
+    maintenance_monitoring_instance_count: 0,
     maintenance_target_count: 0,
-    pending_onboarding_node_count: 0,
-    paused_node_count: 0,
-    retired_node_count: 0,
+    pending_onboarding_monitoring_instance_count: 0,
+    paused_monitoring_instance_count: 0,
+    retired_monitoring_instance_count: 0,
     paused_target_count: 0,
     archived_target_count: 0,
     recent_new_incident_count: 0,
@@ -34,13 +34,13 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
     group_summaries: [
       {
         group: 'edge',
-        node_count: 5,
+        monitoring_instance_count: 5,
         target_count: 4,
-        abnormal_node_count: 0,
+        abnormal_monitoring_instance_count: 0,
         abnormal_target_count: 0,
-        severe_node_count: 0,
+        severe_monitoring_instance_count: 0,
         severe_target_count: 0,
-        maintenance_node_count: 0,
+        maintenance_monitoring_instance_count: 0,
         maintenance_target_count: 0,
       },
     ],
@@ -64,7 +64,7 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
       cost_by_currency: [],
     },
     recent_events: [],
-    abnormal_nodes: [],
+    abnormal_monitoring_instances: [],
     abnormal_targets: [],
     ...overrides,
   }
@@ -91,15 +91,15 @@ describe('DashboardPage', () => {
   it('renders an asset-decision-first command surface for severe abnormal state', async () => {
     renderWithDashboard(
       baseOverview({
-        abnormal_node_count: 1,
+        abnormal_monitoring_instance_count: 1,
         abnormal_target_count: 1,
-        severe_node_count: 0,
+        severe_monitoring_instance_count: 0,
         severe_target_count: 1,
-        maintenance_node_count: 1,
+        maintenance_monitoring_instance_count: 1,
         maintenance_target_count: 0,
-        pending_onboarding_node_count: 2,
-        paused_node_count: 1,
-        retired_node_count: 1,
+        pending_onboarding_monitoring_instance_count: 2,
+        paused_monitoring_instance_count: 1,
+        retired_monitoring_instance_count: 1,
         paused_target_count: 1,
         archived_target_count: 1,
         recent_new_incident_count: 4,
@@ -107,13 +107,13 @@ describe('DashboardPage', () => {
         group_summaries: [
           {
             group: 'production',
-            node_count: 3,
+            monitoring_instance_count: 3,
             target_count: 2,
-            abnormal_node_count: 1,
+            abnormal_monitoring_instance_count: 1,
             abnormal_target_count: 1,
-            severe_node_count: 0,
+            severe_monitoring_instance_count: 0,
             severe_target_count: 1,
-            maintenance_node_count: 1,
+            maintenance_monitoring_instance_count: 1,
             maintenance_target_count: 0,
           },
         ],
@@ -149,9 +149,9 @@ describe('DashboardPage', () => {
             created_at: '2026-04-25T08:10:00Z',
           },
         ],
-        abnormal_nodes: [
+        abnormal_monitoring_instances: [
           {
-            node_id: 'nd_001',
+            monitoring_instance_id: 'mi_001',
             display_name: 'Tokyo Edge',
             group: 'edge',
             region: 'ap-northeast-1',
@@ -187,14 +187,14 @@ describe('DashboardPage', () => {
     expect(screen.getByText('正在加载工作台…')).toBeInTheDocument()
 
     // Wait for dashboard to load and show metric cards
-    await waitFor(() => expect(screen.getByText('异常节点')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
 
     // Metric cards show correct counts
     expect(screen.getByText('30天内续费')).toBeInTheDocument()
     expect(screen.getByText('月均成本')).toBeInTheDocument()
     expect(screen.getByText('近期异常')).toBeInTheDocument()
 
-    // Attention column shows abnormal nodes and targets
+    // Attention column shows abnormal monitoring and targets
     expect(screen.getByText('关注')).toBeInTheDocument()
     expect(screen.getAllByText(/Tokyo Edge/).length).toBeGreaterThan(0)
     expect(screen.getByText(/磁盘使用率 92.0%/)).toBeInTheDocument()
@@ -210,11 +210,11 @@ describe('DashboardPage', () => {
   it('prioritizes observability when there is no asset pressure', async () => {
     renderWithDashboard(
       baseOverview({
-        abnormal_node_count: 1,
+        abnormal_monitoring_instance_count: 1,
         recent_new_incident_count: 1,
-        abnormal_nodes: [
+        abnormal_monitoring_instances: [
           {
-            node_id: 'nd_042',
+            monitoring_instance_id: 'mi_042',
             display_name: 'Osaka Edge',
             group: 'edge',
             region: 'ap-northeast-3',
@@ -231,22 +231,22 @@ describe('DashboardPage', () => {
       }),
     )
 
-    // Shows attention column with abnormal node
+    // Shows attention column with abnormal monitoring instance
     await waitFor(() => expect(screen.getAllByText('Osaka Edge').length).toBeGreaterThan(0))
     expect(screen.getByText(/CPU 使用率 95%/)).toBeInTheDocument()
-    expect(screen.getByText('异常节点')).toBeInTheDocument()
+    expect(screen.getByText('异常监控实例')).toBeInTheDocument()
   })
 
   it('routes maintenance state through the command surface and compact overview', async () => {
     renderWithDashboard(
       baseOverview({
-        maintenance_node_count: 1,
+        maintenance_monitoring_instance_count: 1,
         maintenance_target_count: 1,
       }),
     )
 
     // Normal state with no abnormal items shows calm dashboard
-    await waitFor(() => expect(screen.getByText('异常节点')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
     expect(screen.getByText('暂无需关注项')).toBeInTheDocument()
   })
 
@@ -257,9 +257,9 @@ describe('DashboardPage', () => {
           {
             event_id: 'evt_002',
             incident_id: 'inc_002',
-            incident_class: 'node_resource_pressure',
-            object_type: 'node',
-            object_id: 'nd_001',
+            incident_class: 'monitoring_instance_resource_pressure',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_001',
             event_type: 'incident_recovered',
             severity: '正常',
             summary: 'CPU 使用率恢复',
@@ -270,7 +270,7 @@ describe('DashboardPage', () => {
     )
 
     // Shows greeting and metric cards
-    await waitFor(() => expect(screen.getByText('异常节点')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
     expect(screen.getByText('30天内续费')).toBeInTheDocument()
     expect(screen.getByText('月均成本')).toBeInTheDocument()
     expect(screen.getByText('近期异常')).toBeInTheDocument()
@@ -280,23 +280,23 @@ describe('DashboardPage', () => {
 
     // No abnormal items in attention column
     expect(screen.getByText('暂无需关注项')).toBeInTheDocument()
-    // All nodes normal
+    // All monitoring normal
     expect(screen.getByText('全部正常')).toBeInTheDocument()
   })
 
-  it('renders first-run onboarding with zero nodes and targets', async () => {
+  it('renders first-run onboarding with zero monitoring and targets', async () => {
     renderWithDashboard(
       baseOverview({
-        total_node_count: 0,
+        total_monitoring_instance_count: 0,
         total_target_count: 0,
         group_summaries: [],
         recent_events: [
           {
             event_id: 'evt_003',
             incident_id: 'inc_003',
-            incident_class: 'node_resource_pressure',
-            object_type: 'node',
-            object_id: 'nd_003',
+            incident_class: 'monitoring_instance_resource_pressure',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_003',
             event_type: 'incident_started',
             severity: '关注',
             summary: '首次接入不应显示最近事件',
@@ -307,7 +307,7 @@ describe('DashboardPage', () => {
     )
 
     // Shows metric cards with zero counts
-    await waitFor(() => expect(screen.getByText('异常节点')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
     expect(screen.getByText('暂无需关注项')).toBeInTheDocument()
     expect(screen.getByText('全部正常')).toBeInTheDocument()
   })
@@ -317,13 +317,13 @@ describe('DashboardPage', () => {
     // Verify the dashboard renders correctly with various states
     renderWithDashboard(
       baseOverview({
-        pending_onboarding_node_count: 1,
-        paused_node_count: 1,
-        retired_node_count: 1,
+        pending_onboarding_monitoring_instance_count: 1,
+        paused_monitoring_instance_count: 1,
+        retired_monitoring_instance_count: 1,
       }),
     )
 
-    await waitFor(() => expect(screen.getByText('异常节点')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
     // Metric cards are present
     expect(screen.getByText('30天内续费')).toBeInTheDocument()
     expect(screen.getByText('月均成本')).toBeInTheDocument()
@@ -343,11 +343,11 @@ describe('DashboardPage', () => {
   it('keeps attention queue action links as direct detail links', async () => {
     renderWithDashboard(
       baseOverview({
-        abnormal_node_count: 1,
+        abnormal_monitoring_instance_count: 1,
         abnormal_target_count: 1,
-        abnormal_nodes: [
+        abnormal_monitoring_instances: [
           {
-            node_id: 'nd_077',
+            monitoring_instance_id: 'mi_077',
             display_name: 'Singapore Edge',
             group: 'edge',
             region: 'ap-southeast-1',

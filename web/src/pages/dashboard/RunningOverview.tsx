@@ -42,14 +42,14 @@ export function RunningOverview({ overview, maintenanceTotal, contextItems }: Ru
         </Link>
       </div>
       <div className="dashboard-overview-metrics" aria-label={isMaintenance ? '维护观察指标' : '运行概览指标'}>
-        <Link className="dashboard-overview-metric" to={DASHBOARD_LINKS.nodes}>
-          <span>节点库存</span>
+        <Link className="dashboard-overview-metric" to={DASHBOARD_LINKS.monitoring}>
+          <span>监控实例库存</span>
           <strong>
-            <MonoDigits>{overview.total_node_count}</MonoDigits>
+            <MonoDigits>{overview.total_monitoring_instance_count}</MonoDigits>
           </strong>
           <small>
-            待接入 <MonoDigits>{overview.pending_onboarding_node_count}</MonoDigits> · 暂停{' '}
-            <MonoDigits>{overview.paused_node_count}</MonoDigits>
+            待接入 <MonoDigits>{overview.pending_onboarding_monitoring_instance_count}</MonoDigits> · 暂停{' '}
+            <MonoDigits>{overview.paused_monitoring_instance_count}</MonoDigits>
           </small>
         </Link>
         <Link className="dashboard-overview-metric" to={DASHBOARD_LINKS.targets}>

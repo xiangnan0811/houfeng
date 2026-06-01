@@ -59,19 +59,19 @@ const vpsDetailBody = {
   importance: 'normal',
   labels: ['edge'],
   note: 'primary',
-  active_node_link_count: 1,
-  running_node_count: 1,
+  active_monitoring_instance_link_count: 1,
+  running_monitoring_instance_count: 1,
   running_target_count: 1,
   created_at: '2026-05-09T08:00:00Z',
   updated_at: '2026-05-09T08:00:00Z',
   archived_at: null,
-  node_links: [{
-    node_id: 'nd_001',
-    display_name: 'Tokyo Node',
+  monitoring_instance_links: [{
+    monitoring_instance_id: 'mi_001',
+    display_name: 'Tokyo Monitoring Instance',
     group: 'edge',
     region: 'JP',
     city: 'Tokyo',
-    provider: 'Node Hint',
+    provider: 'Monitoring Hint',
     lifecycle_status: '在用',
     monitoring_status: '启用',
     binding_status: '已绑定',
@@ -94,7 +94,7 @@ function cancellationPreviewBody(overrides: Record<string, unknown> = {}) {
       recommended_action: 'cancel_auto_renew_and_mark_cancelled',
       message: '订阅仍处于 active，需要显式确认取消订阅自动续费并标记为 cancelled。',
     }],
-    node_links: vpsDetailBody.node_links,
+    monitoring_instance_links: vpsDetailBody.monitoring_instance_links,
     services: [serviceBody],
     domains: [domainBody],
     target_links: [{
@@ -114,7 +114,7 @@ function cancellationPreviewBody(overrides: Record<string, unknown> = {}) {
       required: true,
       message: '将 VPS 续费决策设为 cancel，并根据订阅到期情况设置生命周期。',
     }],
-    warnings: ['仍有 1 个关联 Node 未标记不续费或已退役。'],
+    warnings: ['仍有 1 个关联监控实例 未标记不续费或已退役。'],
     blockers: [],
     ...overrides,
   }
@@ -141,7 +141,7 @@ const targetBody = {
   target_type: 'service',
   host: 'blog.example.com',
   base_port: 443,
-  execution_node_labels: ['edge'],
+  execution_monitoring_instance_labels: ['edge'],
   run_status: '启用',
   group: 'edge',
   labels: ['prod'],
@@ -197,7 +197,7 @@ describe('VPSDetailPage', () => {
     vi.restoreAllMocks()
   })
 
-  it('renders VPS facts and linked Node monitoring summaries', async () => {
+  it('renders VPS facts and linked monitoring instance summaries', async () => {
     const responseBody = {
       vps_id: 'vps_001',
       display_name: 'Tokyo Edge',
@@ -222,18 +222,18 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 1,
+      active_monitoring_instance_link_count: 1,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [
+      monitoring_instance_links: [
         {
-          node_id: 'nd_001',
-          display_name: 'Tokyo Node',
+          monitoring_instance_id: 'mi_001',
+          display_name: 'Tokyo Monitoring Instance',
           group: 'edge',
           region: 'JP',
           city: 'Tokyo',
-          provider: 'Node Hint',
+          provider: 'Monitoring Hint',
           lifecycle_status: '在用',
           monitoring_status: '启用',
           binding_status: '已绑定',
@@ -374,14 +374,14 @@ describe('VPSDetailPage', () => {
     openVPSActionsMenu()
     expect(screen.getByRole('button', { name: '编辑基础信息' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '记录经验' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '关联 Node' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关联监控实例' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增服务' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增域名' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '归档 VPS' })).toBeInTheDocument()
     expect(screen.getByText('资产判断')).toBeInTheDocument()
     expect(screen.getByText('下一步动作')).toBeInTheDocument()
     expect(screen.getByText('先核对运行异常')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看 Node' })).toHaveAttribute('href', '/nodes/nd_001')
+    expect(screen.getByRole('link', { name: '查看监控实例' })).toHaveAttribute('href', '/monitoring/mi_001')
     expect(screen.getByLabelText('资产判断证据状态')).toBeInTheDocument()
     expect(screen.getByText('续费与成本')).toBeInTheDocument()
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
@@ -389,12 +389,12 @@ describe('VPSDetailPage', () => {
     expect(screen.getByText('续费与成本')).toBeInTheDocument()
     expect(screen.getByText('USD 12.00')).toBeInTheDocument()
     expect(screen.getByText(/续费日 2026-06-01/)).toBeInTheDocument()
-    expect(screen.getAllByText('Node 证据').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('监控实例证据').length).toBeGreaterThan(0)
     expect(screen.getByText('服务与域名')).toBeInTheDocument()
     expect(screen.getByText('最近历史')).toBeInTheDocument()
     expect(screen.getByText('资料摘要')).toBeInTheDocument()
     expect(screen.getByText(/1 服务 · 1 域名/)).toBeInTheDocument()
-    expect(screen.getAllByText('Tokyo Node').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Tokyo Monitoring Instance').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/latency high/).length).toBeGreaterThan(0)
     expect(screen.getByText(/晚高峰丢包/)).toBeInTheDocument()
     expect(screen.getByText('Blog；www.example.com')).toBeInTheDocument()
@@ -402,18 +402,18 @@ describe('VPSDetailPage', () => {
     expect(screen.getAllByText('192.0.2.1').length).toBeGreaterThan(0)
     expect(screen.queryByRole('heading', { name: '续费与成本证据' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '决策依据与经验记录' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Node 观测证据' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '监控实例证据' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '基础信息' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '资产历史' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '服务资产' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '域名资产' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '访问摘要' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '查看 Node 详情' }))
-    const nodeDrawer = screen.getByRole('dialog', { name: 'Node 观测证据' })
-    expect(within(nodeDrawer).getAllByRole('heading', { name: 'Node 观测证据' }).length).toBeGreaterThan(0)
-    expect(within(nodeDrawer).getByText(/关联 Node 监控用于解释续费决策/)).toBeInTheDocument()
-    expect(within(nodeDrawer).getAllByText('Tokyo Node').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
+    const nodeDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
+    expect(within(nodeDrawer).getAllByRole('heading', { name: '监控实例证据' }).length).toBeGreaterThan(0)
+    expect(within(nodeDrawer).getByText(/关联监控实例用于解释续费决策/)).toBeInTheDocument()
+    expect(within(nodeDrawer).getAllByText('Tokyo Monitoring Instance').length).toBeGreaterThan(0)
     fireEvent.click(within(nodeDrawer).getByLabelText('关闭'))
 
     fireEvent.click(screen.getByRole('button', { name: '服务详情' }))
@@ -473,18 +473,18 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 1,
+      active_monitoring_instance_link_count: 1,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [
+      monitoring_instance_links: [
         {
-          node_id: 'nd_001',
-          display_name: 'Tokyo Node',
+          monitoring_instance_id: 'mi_001',
+          display_name: 'Tokyo Monitoring Instance',
           group: 'edge',
           region: 'JP',
           city: 'Tokyo',
-          provider: 'Node Hint',
+          provider: 'Monitoring Hint',
           lifecycle_status: '在用',
           monitoring_status: '启用',
           binding_status: '已绑定',
@@ -550,18 +550,18 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 1,
+      active_monitoring_instance_link_count: 1,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [
+      monitoring_instance_links: [
         {
-          node_id: 'nd_001',
-          display_name: 'Tokyo Node',
+          monitoring_instance_id: 'mi_001',
+          display_name: 'Tokyo Monitoring Instance',
           group: 'edge',
           region: 'JP',
           city: 'Tokyo',
-          provider: 'Node Hint',
+          provider: 'Monitoring Hint',
           lifecycle_status: '在用',
           monitoring_status: '启用',
           binding_status: '已绑定',
@@ -624,21 +624,21 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const updatedRecord = {
       ...detailBody,
       renewal_decision: 'cancel',
       updated_at: '2026-05-09T09:00:00Z',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
     }
     const refreshedDetail = {
       ...updatedRecord,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const refreshedTimeline = {
       vps_id: 'vps_001',
@@ -755,11 +755,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const fetchMock = vi
       .fn()
@@ -804,16 +804,16 @@ describe('VPSDetailPage', () => {
     expect(within(factsDialog).getByLabelText('VPS 名称')).toHaveValue('Tokyo Edge')
     fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
 
-    clickVPSAction('关联 Node')
-    let nodeDialog = screen.getByRole('dialog', { name: '关联 Node' })
-    expect(within(nodeDialog).getByLabelText('选择 Node')).toBeDisabled()
+    clickVPSAction('关联监控实例')
+    let nodeDialog = screen.getByRole('dialog', { name: '关联监控实例' })
+    expect(within(nodeDialog).getByLabelText('选择监控实例')).toBeDisabled()
     fireEvent.change(within(nodeDialog).getByLabelText('关联备注'), { target: { value: 'stale note' } })
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('dialog', { name: '关联 Node' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '关联监控实例' })).not.toBeInTheDocument()
 
-    clickVPSAction('关联 Node')
-    nodeDialog = screen.getByRole('dialog', { name: '关联 Node' })
-    expect(within(nodeDialog).getByLabelText('选择 Node')).toHaveValue('')
+    clickVPSAction('关联监控实例')
+    nodeDialog = screen.getByRole('dialog', { name: '关联监控实例' })
+    expect(within(nodeDialog).getByLabelText('选择监控实例')).toHaveValue('')
     expect(within(nodeDialog).getByLabelText('关联备注')).toHaveValue('')
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
 
@@ -878,11 +878,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const updatedRecord = {
       ...detailBody,
@@ -897,11 +897,11 @@ describe('VPSDetailPage', () => {
       labels: ['edge', 'backup'],
       note: 'updated',
       updated_at: '2026-05-09T09:00:00Z',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
     }
     const refreshedDetail = {
       ...updatedRecord,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const refreshedTimeline = {
       vps_id: 'vps_001',
@@ -1042,7 +1042,7 @@ describe('VPSDetailPage', () => {
     })
   })
 
-  it('links and unlinks Node monitoring from a VPS asset', async () => {
+  it('links and unlinks monitoring instance evidence from a VPS asset', async () => {
     const detailBody = {
       vps_id: 'vps_001',
       display_name: 'Tokyo Edge',
@@ -1067,23 +1067,23 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const linkedDetail = {
       ...detailBody,
-      active_node_link_count: 1,
-      node_links: [
+      active_monitoring_instance_link_count: 1,
+      monitoring_instance_links: [
         {
-          node_id: 'nd_002',
-          display_name: 'Seoul Node',
+          monitoring_instance_id: 'mi_002',
+          display_name: 'Seoul Monitoring Instance',
           group: 'edge',
           region: 'KR',
           city: 'Seoul',
-          provider: 'Node Hint',
+          provider: 'Monitoring Hint',
           lifecycle_status: '在用',
           monitoring_status: '启用',
           binding_status: '已绑定',
@@ -1098,12 +1098,12 @@ describe('VPSDetailPage', () => {
       ],
     }
     const nodeOption = {
-      node_id: 'nd_002',
-      display_name: 'Seoul Node',
+      monitoring_instance_id: 'mi_002',
+      display_name: 'Seoul Monitoring Instance',
       group: 'edge',
       region: 'KR',
       city: 'Seoul',
-      provider: 'Node Hint',
+      provider: 'Monitoring Hint',
       lifecycle_status: '在用',
       monitoring_status: '启用',
       binding_status: '已绑定',
@@ -1126,7 +1126,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse({
         link_id: 'vpn_001',
         vps_id: 'vps_001',
-        node_id: 'nd_002',
+        monitoring_instance_id: 'mi_002',
         linked_at: '2026-05-09T09:02:00Z',
         unlinked_at: null,
         note: 'secondary',
@@ -1135,7 +1135,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse({
         link_id: 'vpn_001',
         vps_id: 'vps_001',
-        node_id: 'nd_002',
+        monitoring_instance_id: 'mi_002',
         linked_at: '2026-05-09T09:02:00Z',
         unlinked_at: '2026-05-09T09:04:00Z',
         note: 'secondary',
@@ -1153,19 +1153,19 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    clickVPSAction('关联 Node')
-    await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/nodes', {
+    clickVPSAction('关联监控实例')
+    await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     }))
-    fireEvent.change(within(screen.getByRole('dialog', { name: '关联 Node' })).getByLabelText('选择 Node'), { target: { value: 'nd_002' } })
-    fireEvent.change(within(screen.getByRole('dialog', { name: '关联 Node' })).getByLabelText('关联备注'), { target: { value: 'secondary' } })
-    fireEvent.click(within(screen.getByRole('dialog', { name: '关联 Node' })).getByRole('button', { name: '关联 Node' }))
+    fireEvent.change(within(screen.getByRole('dialog', { name: '关联监控实例' })).getByLabelText('选择监控实例'), { target: { value: 'mi_002' } })
+    fireEvent.change(within(screen.getByRole('dialog', { name: '关联监控实例' })).getByLabelText('关联备注'), { target: { value: 'secondary' } })
+    fireEvent.click(within(screen.getByRole('dialog', { name: '关联监控实例' })).getByRole('button', { name: '关联监控实例' }))
 
-    await waitFor(() => expect(screen.getAllByText('Seoul Node').length).toBeGreaterThan(0))
-    expect(screen.getByText('Node 关联已更新')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/link-node', {
+    await waitFor(() => expect(screen.getAllByText('Seoul Monitoring Instance').length).toBeGreaterThan(0))
+    expect(screen.getByText('监控实例关联已更新')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/link-monitoring-instance', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1173,15 +1173,15 @@ describe('VPSDetailPage', () => {
       },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({ node_id: 'nd_002', note: 'secondary' }),
+      body: JSON.stringify({ monitoring_instance_id: 'mi_002', note: 'secondary' }),
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '查看 Node 详情' }))
-    const nodeEvidenceDrawer = screen.getByRole('dialog', { name: 'Node 观测证据' })
+    fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
+    const nodeEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
     fireEvent.click(within(nodeEvidenceDrawer).getByRole('button', { name: '解除关联' }))
-    await waitFor(() => expect(screen.queryByText('Seoul Node')).not.toBeInTheDocument())
-    expect(screen.getByText('Node 关联已解除')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/unlink-node', {
+    await waitFor(() => expect(screen.queryByText('Seoul Monitoring Instance')).not.toBeInTheDocument())
+    expect(screen.getByText('监控实例关联已解除')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/unlink-monitoring-instance', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1189,7 +1189,7 @@ describe('VPSDetailPage', () => {
       },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({ node_id: 'nd_002', note: 'secondary' }),
+      body: JSON.stringify({ monitoring_instance_id: 'mi_002', note: 'secondary' }),
     })
   })
 
@@ -1218,11 +1218,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const experienceLog = {
       experience_log_id: 'elog_001',
@@ -1345,11 +1345,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const archivedRecord = {
       ...detailBody,
@@ -1373,7 +1373,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse(archivedRecord))
-      .mockResolvedValueOnce(mockJSONResponse({ ...archivedRecord, node_links: [] }))
+      .mockResolvedValueOnce(mockJSONResponse({ ...archivedRecord, monitoring_instance_links: [] }))
       .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
@@ -1393,7 +1393,7 @@ describe('VPSDetailPage', () => {
     clickVPSAction('归档 VPS')
 
     expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
-    expect(screen.getByText('不会删除 VPS、订阅、Node 关联或资产历史。后续可恢复为闲置。')).toBeInTheDocument()
+    expect(screen.getByText('不会删除 VPS、订阅、监控实例关联或资产历史。后续可恢复为闲置。')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
 
@@ -1458,11 +1458,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: [],
       note: '',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const fetchMock = vi
       .fn()
@@ -1526,11 +1526,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['legacy'],
       note: 'archived',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: '2026-05-09T08:30:00Z',
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const restoredRecord = {
       ...archivedDetail,
@@ -1546,7 +1546,7 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse(restoredRecord))
-      .mockResolvedValueOnce(mockJSONResponse({ ...restoredRecord, node_links: [] }))
+      .mockResolvedValueOnce(mockJSONResponse({ ...restoredRecord, monitoring_instance_links: [] }))
       .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
@@ -1568,7 +1568,7 @@ describe('VPSDetailPage', () => {
     clickVPSAction('恢复为闲置')
 
     expect(screen.getByRole('alertdialog', { name: '确认恢复 VPS' })).toBeInTheDocument()
-    expect(screen.getByText('不会删除或重建 VPS、订阅、Node 关联或资产历史。')).toBeInTheDocument()
+    expect(screen.getByText('不会删除或重建 VPS、订阅、监控实例关联或资产历史。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认恢复' }))
 
     await waitFor(() => expect(screen.getByText('VPS 已恢复为闲置，资产历史已刷新')).toBeInTheDocument())
@@ -1612,11 +1612,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const createdService = {
       ...serviceBody,
@@ -1720,11 +1720,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: [],
       note: '',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const fetchMock = vi
       .fn()
@@ -1778,11 +1778,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: ['edge'],
       note: 'primary',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const createdDomain = {
       ...domainBody,
@@ -1897,11 +1897,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: [],
       note: '',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const fetchMock = vi
       .fn()
@@ -1956,11 +1956,11 @@ describe('VPSDetailPage', () => {
       importance: 'normal',
       labels: [],
       note: '',
-      active_node_link_count: 0,
+      active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
-      node_links: [],
+      monitoring_instance_links: [],
     }
     const timelineBody = {
       vps_id: 'vps_empty',
@@ -2021,10 +2021,10 @@ describe('VPSDetailPage', () => {
     const refreshedDetail = {
       ...vpsDetailBody,
       lifecycle_status: 'cancelled',
-      running_node_count: 0,
+      running_monitoring_instance_count: 0,
       running_target_count: 0,
-      node_links: [{
-        ...vpsDetailBody.node_links[0],
+      monitoring_instance_links: [{
+        ...vpsDetailBody.monitoring_instance_links[0],
         lifecycle_status: '已退役',
         monitoring_status: '暂停',
       }],
@@ -2067,9 +2067,9 @@ describe('VPSDetailPage', () => {
         },
         role: 'inactive',
         recommended_action: 'keep_inactive',
-        message: '订阅已处于非活跃状态，仍需处理 VPS、Node 与实例状态。',
+        message: '订阅已处于非活跃状态，仍需处理 VPS、监控实例与入口探测状态。',
       }],
-      node_links: refreshedDetail.node_links,
+      monitoring_instance_links: refreshedDetail.monitoring_instance_links,
       target_links: [{
         target_id: 'tg_001',
         name: 'Blog Target',
@@ -2111,14 +2111,14 @@ describe('VPSDetailPage', () => {
       target: { value: '已过期且不准备续费' },
     })
     fireEvent.click(within(within(workbench).getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('checkbox'))
-    fireEvent.click(within(within(workbench).getByText('Tokyo Node').closest('.asset-checkbox-line')!).getByRole('checkbox'))
+    fireEvent.click(within(within(workbench).getByText('Tokyo Monitoring Instance').closest('.asset-checkbox-line')!).getByRole('checkbox'))
     fireEvent.click(within(within(workbench).getByText('Blog Target').closest('.asset-checkbox-line')!).getByRole('checkbox'))
     fireEvent.click(within(workbench).getByRole('button', { name: '确认取消/退役' }))
 
     await waitFor(() => expect(screen.getByText('取消/退役动作已完成，写入 1 个审计步骤')).toBeInTheDocument())
     expect(screen.getByText('已完成生命周期动作 alca_001，写入 1 个步骤。')).toBeInTheDocument()
     expect(screen.getByText('active 0 · 非活跃 1')).toBeInTheDocument()
-    expect(screen.queryByText('仍有 1 个关联 Node 未标记不续费或已退役。')).not.toBeInTheDocument()
+    expect(screen.queryByText('仍有 1 个关联监控实例 未标记不续费或已退役。')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(13, '/api/vps/vps_001/cancellation-preview', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',

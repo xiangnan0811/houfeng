@@ -59,8 +59,8 @@ export function DashboardWorkbench({
       aside={
         hasAbnormal ? (
           <div className="dashboard-section-actions">
-            <Link className="text-link" to={DASHBOARD_LINKS.nodesAbnormal}>
-              查看全部异常节点
+            <Link className="text-link" to={DASHBOARD_LINKS.monitoringAbnormal}>
+              查看全部异常监控实例
             </Link>
             <Link className="text-link" to={DASHBOARD_LINKS.targetsAbnormal}>
               查看全部异常目标

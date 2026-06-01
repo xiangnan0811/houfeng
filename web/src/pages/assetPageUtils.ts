@@ -131,8 +131,8 @@ export function buildVPSQualityIssues(
   if (includeMissingSubscription && !subscription) {
     issues.push({ key: 'missing-subscription', label: '缺订阅', tone: 'critical' })
   }
-  if (vps.active_node_link_count <= 0) {
-    issues.push({ key: 'unlinked-node', label: '未关联 Node', tone: 'alert' })
+  if (vps.active_monitoring_instance_link_count <= 0) {
+    issues.push({ key: 'unlinked-monitoring-instance', label: '未关联监控实例', tone: 'alert' })
   }
   if (!vps.provider_id && !(vps.provider_name ?? '').trim()) {
     issues.push({ key: 'missing-provider', label: '缺服务商', tone: 'notice' })

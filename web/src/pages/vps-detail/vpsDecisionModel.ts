@@ -1,5 +1,5 @@
 import { formatMoney } from '../../lib/format'
-import type { SubscriptionRecord, VPSAssetDetail, VPSNodeSummary, VPSTimeline } from '../../lib/types'
+import type { SubscriptionRecord, VPSAssetDetail, VPSMonitoringInstanceSummary, VPSTimeline } from '../../lib/types'
 import {
   buildVPSQualityIssues,
   daysUntilDate,
@@ -38,7 +38,7 @@ type BuildDecisionModelInput = {
   onDecisionEdit: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
-  onNodeLink: () => void
+  onMonitoringInstanceLink: () => void
 }
 
 export function countDecisionRecords(timeline: VPSTimeline): number {
@@ -61,8 +61,8 @@ export function renewalTone(
   return 'normal'
 }
 
-export function primaryNode(detail: VPSAssetDetail): VPSNodeSummary | null {
-  return detail.node_links?.[0] ?? null
+export function primaryMonitoringInstance(detail: VPSAssetDetail): VPSMonitoringInstanceSummary | null {
+  return detail.monitoring_instance_links?.[0] ?? null
 }
 
 export function toneToGlyphState(tone: Exclude<WorkbenchTone, 'neutral'>) {
@@ -82,19 +82,19 @@ export function buildVPSDecisionModel(input: BuildDecisionModelInput) {
         ...knownQualityIssues,
       ]
     : knownQualityIssues
-  const node = primaryNode(input.detail)
+  const monitoringInstance = primaryMonitoringInstance(input.detail)
   const renewalDays = daysUntilDate(input.primarySubscription?.renew_at)
   const subscriptionTone = renewalTone(input.primarySubscription, input.subscriptionLoadFailed)
   const nextAction = buildNextAction(
     input.detail,
-    node,
+    monitoringInstance,
     input.primarySubscription,
     input.subscriptionLoadFailed,
     qualityIssues.length,
     input.onDecisionEdit,
     input.onFactEdit,
     input.onExperienceLog,
-    input.onNodeLink,
+    input.onMonitoringInstanceLink,
   )
   const evidenceItems: WorkbenchEvidence[] = [
     {
@@ -105,12 +105,12 @@ export function buildVPSDecisionModel(input: BuildDecisionModelInput) {
     },
     buildSubscriptionEvidence(input.primarySubscription, input.subscriptionLoadFailed, input.subscriptionError),
     {
-      label: 'Node 证据',
-      value: node ? node.display_name : '尚未关联',
-      meta: node
-        ? `${node.current_health_status} · ${node.current_active_incident_count} 个活跃异常`
+      label: '监控实例证据',
+      value: monitoringInstance ? monitoringInstance.display_name : '尚未关联',
+      meta: monitoringInstance
+        ? `${monitoringInstance.current_health_status} · ${monitoringInstance.current_active_incident_count} 个活跃异常`
         : '缺少运行侧证据',
-      tone: nodeTone(node),
+      tone: monitoringInstanceTone(monitoringInstance),
     },
     {
       label: '资料质量',
@@ -128,7 +128,7 @@ export function buildVPSDecisionModel(input: BuildDecisionModelInput) {
 
   return {
     qualityIssues,
-    node,
+    monitoringInstance,
     renewalDays,
     subscriptionTone,
     nextAction,
@@ -144,11 +144,11 @@ function decisionTone(detail: VPSAssetDetail): Exclude<WorkbenchTone, 'neutral'>
   return 'normal'
 }
 
-function nodeTone(node: VPSNodeSummary | null): Exclude<WorkbenchTone, 'neutral'> {
-  if (!node) return 'alert'
-  if (node.current_health_status === '严重') return 'critical'
-  if (node.current_health_status === '告警') return 'alert'
-  if (node.current_health_status === '关注' || node.current_active_incident_count > 0) return 'notice'
+function monitoringInstanceTone(monitoringInstance: VPSMonitoringInstanceSummary | null): Exclude<WorkbenchTone, 'neutral'> {
+  if (!monitoringInstance) return 'alert'
+  if (monitoringInstance.current_health_status === '严重') return 'critical'
+  if (monitoringInstance.current_health_status === '告警') return 'alert'
+  if (monitoringInstance.current_health_status === '关注' || monitoringInstance.current_active_incident_count > 0) return 'notice'
   return 'normal'
 }
 
@@ -190,19 +190,19 @@ function buildSubscriptionEvidence(
 
 function buildNextAction(
   detail: VPSAssetDetail,
-  node: VPSNodeSummary | null,
+  monitoringInstance: VPSMonitoringInstanceSummary | null,
   primarySubscription: SubscriptionRecord | null,
   subscriptionLoadFailed: boolean,
   qualityIssuesCount: number,
   onDecisionEdit: () => void,
   onFactEdit: () => void,
   onExperienceLog: () => void,
-  onNodeLink: () => void,
+  onMonitoringInstanceLink: () => void,
 ): NextAction {
   if (detail.renewal_decision === 'unreviewed') {
     return {
       title: '先完成续费判断',
-      summary: '当前仍是未评估。先根据成本、Node 证据和上下文决定保留、观察、迁移或取消。',
+      summary: '当前仍是未评估。先根据成本、监控实例证据和上下文决定保留、观察、迁移或取消。',
       tone: 'alert',
       buttonLabel: '调整决策',
       onAction: onDecisionEdit,
@@ -226,22 +226,22 @@ function buildNextAction(
       to: `/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}&create=1`,
     }
   }
-  if (!node) {
+  if (!monitoringInstance) {
     return {
-      title: '补 Node 运行证据',
-      summary: '这台 VPS 尚未关联 Node，资产判断缺少心跳、健康和异常证据。',
+      title: '补监控实例运行证据',
+      summary: '这台 VPS 尚未关联监控实例，资产判断缺少心跳、健康和异常证据。',
       tone: 'alert',
-      buttonLabel: '关联 Node',
-      onAction: onNodeLink,
+      buttonLabel: '关联监控实例',
+      onAction: onMonitoringInstanceLink,
     }
   }
-  if (node.current_active_incident_count > 0 || node.current_health_status === '告警' || node.current_health_status === '严重') {
+  if (monitoringInstance.current_active_incident_count > 0 || monitoringInstance.current_health_status === '告警' || monitoringInstance.current_health_status === '严重') {
     return {
       title: '先核对运行异常',
-      summary: `${node.display_name} 当前有 ${node.current_active_incident_count} 个活跃异常，先确认是否影响保留或迁移判断。`,
-      tone: nodeTone(node),
-      linkLabel: '查看 Node',
-      to: `/nodes/${node.node_id}`,
+      summary: `${monitoringInstance.display_name} 当前有 ${monitoringInstance.current_active_incident_count} 个活跃异常，先确认是否影响保留或迁移判断。`,
+      tone: monitoringInstanceTone(monitoringInstance),
+      linkLabel: '查看监控实例',
+      to: `/monitoring/${monitoringInstance.monitoring_instance_id}`,
     }
   }
   if (qualityIssuesCount > 0) {
@@ -273,7 +273,7 @@ function buildNextAction(
   }
   return {
     title: '保持当前决策',
-    summary: '续费、Node 和资料证据都可读。可继续补充经验记录，方便下一次续费复盘。',
+    summary: '续费、监控实例和资料证据都可读。可继续补充经验记录，方便下一次续费复盘。',
     tone: 'normal',
     buttonLabel: '补充经验',
     onAction: onExperienceLog,

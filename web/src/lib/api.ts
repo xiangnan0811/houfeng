@@ -2,7 +2,7 @@ import type {
   ActiveIncidentRecord,
   AssetDomainListFilter,
   AssetDomainRecord,
-  AssetContextForNode,
+  AssetContextForMonitoringInstance,
   AssetContextForTarget,
   AssetServiceListFilter,
   AssetServiceRecord,
@@ -11,24 +11,24 @@ import type {
   CreateAssetDomainInput,
   CreateProviderInput,
   CreateAssetServiceInput,
-  CreateNodeInput,
+  CreateMonitoringInstanceInput,
   CreateProbeItemInput,
   CreateSubscriptionInput,
   CreateTargetInput,
   CreateVPSAssetInput,
   CreateVPSExperienceLogInput,
-  LinkVPSNodeInput,
+  LinkVPSMonitoringInstanceInput,
   LifecycleActionResult,
   UpdateProbeItemInput,
   DashboardOverview,
   EventListFilter,
   EventListResponse,
   IncidentListFilter,
-  NodeInstallCommandIssue,
-  NodeOnboardingState,
-  NodeRecord,
-  NodeRuntimeFacts,
-  NodeSparklinesResponse,
+  MonitoringInstanceInstallCommandIssue,
+  MonitoringInstanceOnboardingState,
+  MonitoringInstanceRecord,
+  MonitoringInstanceRuntimeFacts,
+  MonitoringInstanceSparklinesResponse,
   ProbeItemRecord,
   ProviderRecord,
   SettingsRecord,
@@ -39,8 +39,8 @@ import type {
   TargetRecord,
   TargetRuntimeFacts,
   TargetSparklinesResponse,
-  UnlinkVPSNodeInput,
-  UpdateNodeMetadataInput,
+  UnlinkVPSMonitoringInstanceInput,
+  UpdateMonitoringInstanceMetadataInput,
   UpdateProviderInput,
   UpdateSubscriptionInput,
   UpdateTargetMetadataInput,
@@ -50,8 +50,8 @@ import type {
   VPSAssetRecord,
   VPSAssetUpdateResult,
   VPSExperienceLogRecord,
-  VPSNodeLinkRecord,
-  VPSNodeSummary,
+  VPSMonitoringInstanceLinkRecord,
+  VPSMonitoringInstanceSummary,
   VPSSummary,
   VPSTimeline,
 } from './types'
@@ -166,90 +166,110 @@ function withQuery(
   return suffix ? `${path}?${suffix}` : path
 }
 
-export function listNodes() {
-  return requestJSON<NodeRecord[]>('/api/nodes')
+export function listMonitoringInstances() {
+  return requestJSON<MonitoringInstanceRecord[]>('/api/monitoring-instances')
 }
 
-export function createNode(input: CreateNodeInput): Promise<NodeRecord> {
-  return postJSONBody<NodeRecord>('/api/nodes', {
+export function createMonitoringInstance(input: CreateMonitoringInstanceInput): Promise<MonitoringInstanceRecord> {
+  return postJSONBody<MonitoringInstanceRecord>('/api/monitoring-instances', {
     ...input,
     lifecycle_status: '待接入',
   })
 }
 
-export function getNode(nodeId: string) {
-  return requestJSON<NodeRecord>(`/api/nodes/${nodeId}`)
+export function getMonitoringInstance(monitoringInstanceId: string) {
+  return requestJSON<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}`)
 }
 
 type MetadataUpdateOptions = {
   expectedUpdatedAt?: string
 }
 
-export function updateNodeMetadata(
-  nodeId: string,
-  input: UpdateNodeMetadataInput,
+export function updateMonitoringInstanceMetadata(
+  monitoringInstanceId: string,
+  input: UpdateMonitoringInstanceMetadataInput,
   options: MetadataUpdateOptions = {},
 ) {
-  return patchJSONBody<NodeRecord>(`/api/nodes/${nodeId}`, input, {
+  return patchJSONBody<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}`, input, {
     ifMatch: options.expectedUpdatedAt,
   })
 }
 
-export function getNodeRuntimeFacts(nodeId: string, timeWindow = '24h') {
-  return requestJSON<NodeRuntimeFacts>(`/api/nodes/${nodeId}/runtime-facts?window=${timeWindow}`)
+export function getMonitoringInstanceRuntimeFacts(monitoringInstanceId: string, timeWindow = '24h') {
+  return requestJSON<MonitoringInstanceRuntimeFacts>(
+    `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=${timeWindow}`,
+  )
 }
 
-export function listNodeSparklines(metrics: string[]) {
+export function listMonitoringInstanceSparklines(metrics: string[]) {
   const qs = new URLSearchParams({
     metrics: metrics.join(','),
     window: '24h',
     downsample: '24',
   })
-  return requestJSON<NodeSparklinesResponse>(`/api/nodes/sparklines?${qs}`)
+  return requestJSON<MonitoringInstanceSparklinesResponse>(`/api/monitoring-instances/sparklines?${qs}`)
 }
 
-export function enterNodeMaintenance(nodeId: string) {
-  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/enter-maintenance`)
+export function enterMonitoringInstanceMaintenance(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}/runtime/enter-maintenance`,
+  )
 }
 
-export function exitNodeMaintenance(nodeId: string) {
-  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/exit-maintenance`)
+export function exitMonitoringInstanceMaintenance(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}/runtime/exit-maintenance`,
+  )
 }
 
-export function pauseNodeMonitoring(nodeId: string) {
-  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/pause`)
+export function pauseMonitoringInstanceMonitoring(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/runtime/pause`)
 }
 
-export function resumeNodeMonitoring(nodeId: string) {
-  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/runtime/resume`)
+export function resumeMonitoringInstanceMonitoring(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/runtime/resume`)
 }
 
-export function retireNode(nodeId: string) {
-  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/lifecycle/retire`)
+export function retireMonitoringInstance(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/retire`,
+  )
 }
 
-export function restoreRetiredNodeToObserving(nodeId: string) {
-  return postJSON<NodeRecord>(`/api/nodes/${nodeId}/lifecycle/restore-to-observing`)
+export function restoreRetiredMonitoringInstanceToObserving(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/restore-to-observing`,
+  )
 }
 
-export function getNodeOnboarding(nodeId: string) {
-  return requestJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/onboarding`)
+export function getMonitoringInstanceOnboarding(monitoringInstanceId: string) {
+  return requestJSON<MonitoringInstanceOnboardingState>(
+    `/api/monitoring-instances/${monitoringInstanceId}/onboarding`,
+  )
 }
 
-export function issueNodeInstallCommand(nodeId: string) {
-  return postJSON<NodeInstallCommandIssue>(`/api/nodes/${nodeId}/install-command`)
+export function issueMonitoringInstanceInstallCommand(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceInstallCommandIssue>(
+    `/api/monitoring-instances/${monitoringInstanceId}/install-command`,
+  )
 }
 
-export function confirmNodeRebind(nodeId: string) {
-  return postJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/binding/confirm-rebind`)
+export function confirmMonitoringInstanceRebind(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceOnboardingState>(
+    `/api/monitoring-instances/${monitoringInstanceId}/binding/confirm-rebind`,
+  )
 }
 
-export function rejectPendingNodeBinding(nodeId: string) {
-  return postJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/binding/reject-pending`)
+export function rejectPendingMonitoringInstanceBinding(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceOnboardingState>(
+    `/api/monitoring-instances/${monitoringInstanceId}/binding/reject-pending`,
+  )
 }
 
-export function resetNodeBinding(nodeId: string) {
-  return postJSON<NodeOnboardingState>(`/api/nodes/${nodeId}/binding/reset`)
+export function resetMonitoringInstanceBinding(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceOnboardingState>(
+    `/api/monitoring-instances/${monitoringInstanceId}/binding/reset`,
+  )
 }
 
 export function listTargets() {
@@ -390,26 +410,24 @@ export function listIncidents(filter?: IncidentListFilter) {
   return requestJSON<ActiveIncidentRecord[]>(withQuery('/api/incidents', filter))
 }
 
-/**
- * Used by the node detail history drawer. Returns both active and resolved
- * incidents (the backend currently only retains active rows in
- * `active_incidents`, so the resolved set is forward-compatible).
- */
-export function postNodeAction(nodeId: string, commandId: string) {
-  return postJSONBody<{ action_id: string; command_id: string; status: 'pending' }>(`/api/nodes/${nodeId}/actions`, {
-    command_id: commandId,
-  })
+export function postMonitoringInstanceAction(monitoringInstanceId: string, commandId: string) {
+  return postJSONBody<{ action_id: string; command_id: string; status: 'pending' }>(
+    `/api/monitoring-instances/${monitoringInstanceId}/actions`,
+    {
+      command_id: commandId,
+    },
+  )
 }
 
 export type BatchActionResult = {
-  node_id: string
+  monitoring_instance_id: string
   ok: boolean
   error?: string
 }
 
-export function postNodeBatch(nodeIDs: string[], action: string) {
-  return postJSONBody<{ results: BatchActionResult[] }>('/api/nodes/batch', {
-    node_ids: nodeIDs,
+export function postMonitoringInstanceBatch(monitoringInstanceIDs: string[], action: string) {
+  return postJSONBody<{ results: BatchActionResult[] }>('/api/monitoring-instances/batch', {
+    monitoring_instance_ids: monitoringInstanceIDs,
     action,
   })
 }
@@ -550,24 +568,24 @@ export function createVPSDomain(vpsId: string, input: CreateAssetDomainInput): P
   return postJSONBody<AssetDomainRecord>(`/api/vps/${vpsId}/domains`, body)
 }
 
-export function listVPSNodes(vpsId: string) {
-  return requestJSON<VPSNodeSummary[]>(`/api/vps/${vpsId}/nodes`)
+export function listVPSMonitoringInstances(vpsId: string) {
+  return requestJSON<VPSMonitoringInstanceSummary[]>(`/api/vps/${vpsId}/monitoring-instances`)
 }
 
-export function linkVPSNode(vpsId: string, input: LinkVPSNodeInput): Promise<VPSNodeLinkRecord> {
-  return postJSONBody<VPSNodeLinkRecord>(`/api/vps/${vpsId}/link-node`, input)
+export function linkVPSMonitoringInstance(vpsId: string, input: LinkVPSMonitoringInstanceInput): Promise<VPSMonitoringInstanceLinkRecord> {
+  return postJSONBody<VPSMonitoringInstanceLinkRecord>(`/api/vps/${vpsId}/link-monitoring-instance`, input)
 }
 
-export function unlinkVPSNode(vpsId: string, input: UnlinkVPSNodeInput): Promise<VPSNodeLinkRecord> {
-  return postJSONBody<VPSNodeLinkRecord>(`/api/vps/${vpsId}/unlink-node`, input)
+export function unlinkVPSMonitoringInstance(vpsId: string, input: UnlinkVPSMonitoringInstanceInput): Promise<VPSMonitoringInstanceLinkRecord> {
+  return postJSONBody<VPSMonitoringInstanceLinkRecord>(`/api/vps/${vpsId}/unlink-monitoring-instance`, input)
 }
 
-export function listVPSForNode(nodeId: string) {
-  return requestJSON<VPSSummary[]>(`/api/nodes/${nodeId}/vps`)
+export function listVPSForMonitoringInstance(monitoringInstanceId: string) {
+  return requestJSON<VPSSummary[]>(`/api/monitoring-instances/${monitoringInstanceId}/vps`)
 }
 
-export function listNodeAssetContexts() {
-  return requestJSON<AssetContextForNode[]>('/api/asset-context/nodes').then((contexts) =>
+export function listMonitoringInstanceAssetContexts() {
+  return requestJSON<AssetContextForMonitoringInstance[]>('/api/asset-context/monitoring-instances').then((contexts) =>
     Array.isArray(contexts) ? contexts : [],
   )
 }

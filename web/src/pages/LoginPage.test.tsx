@@ -21,7 +21,7 @@ function renderLogin(initialEntry = '/login') {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/nodes" element={<NavigationProbe />} />
+        <Route path="/monitoring" element={<NavigationProbe />} />
         <Route path="/" element={<NavigationProbe />} />
       </Routes>
     </MemoryRouter>,
@@ -62,14 +62,14 @@ describe('LoginPage', () => {
   it('submits credentials and replaces navigation with next target', async () => {
     const login = mockAuth()
 
-    renderLogin('/login?next=/nodes')
+    renderLogin('/login?next=/monitoring')
 
     fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'admin' } })
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'pw1234567' } })
     fireEvent.click(screen.getByRole('button', { name: '登录' }))
 
     await waitFor(() => expect(login).toHaveBeenCalledWith('admin', 'pw1234567'))
-    await waitFor(() => expect(screen.getByText('当前位置 /nodes')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('当前位置 /monitoring')).toBeInTheDocument())
     expect(screen.getByText('导航方式 REPLACE')).toBeInTheDocument()
   })
 

@@ -13,7 +13,7 @@ function incident(overrides: Partial<ActiveIncidentRecord> = {}): ActiveIncident
     severity: '严重',
     started_at: '2026-04-24T08:58:00Z',
     last_evaluated_at: '2026-04-24T09:05:00Z',
-    source_summary: 'HTTP 探测在多个节点上失败',
+    source_summary: 'HTTP 探测在多个监控实例上失败',
     ...overrides,
   }
 }
@@ -37,6 +37,6 @@ describe('TargetActiveIncidents', () => {
   it('renders incident summaries when loaded', () => {
     render(<TargetActiveIncidents loaded={true} incidents={[incident()]} error={null} />)
 
-    expect(screen.getByText('HTTP 探测在多个节点上失败')).toBeInTheDocument()
+    expect(screen.getByText('HTTP 探测在多个监控实例上失败')).toBeInTheDocument()
   })
 })

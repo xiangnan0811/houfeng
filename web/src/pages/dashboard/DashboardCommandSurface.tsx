@@ -102,7 +102,7 @@ function commandDescription(
   maintenanceTotal: number,
   isFreshInstall: boolean,
 ) {
-  if (isFreshInstall) return '接入 Node → 补 VPS → 配目标。'
+  if (isFreshInstall) return '接入监控实例 → 补 VPS → 配目标。'
 
   const summary = overview.asset_summary
   const pressureTotal = assetPressureCount(summary)
@@ -146,8 +146,8 @@ function observabilityFocus(
     return {
       label: '观测异常',
       value: abnormalTotal,
-      detail: `节点 ${overview.abnormal_node_count} · 目标 ${overview.abnormal_target_count}`,
-      to: overview.abnormal_node_count > 0 ? DASHBOARD_LINKS.nodesAbnormal : DASHBOARD_LINKS.targetsAbnormal,
+      detail: `监控实例 ${overview.abnormal_monitoring_instance_count} · 目标 ${overview.abnormal_target_count}`,
+      to: overview.abnormal_monitoring_instance_count > 0 ? DASHBOARD_LINKS.monitoringAbnormal : DASHBOARD_LINKS.targetsAbnormal,
       tone: 'alert',
       emphasis: true,
     }
@@ -157,7 +157,7 @@ function observabilityFocus(
     return {
       label: '维护观察',
       value: maintenanceTotal,
-      detail: `节点 ${overview.maintenance_node_count} · 目标 ${overview.maintenance_target_count}`,
+      detail: `监控实例 ${overview.maintenance_monitoring_instance_count} · 目标 ${overview.maintenance_target_count}`,
       to: DASHBOARD_LINKS.eventsMaintenance,
       tone: 'maintenance',
       emphasis: true,
@@ -235,7 +235,7 @@ function assetRows(summary: DashboardAssetSummary): CommandRow[] {
       tone: lifecycleReviewCount > 0 ? 'alert' : 'normal',
     },
     {
-      label: '未关联 Node',
+      label: '未关联监控实例',
       value: summary.unlinked_vps_count,
       detail: '人工核对',
       to: DASHBOARD_LINKS.vps,
@@ -244,8 +244,8 @@ function assetRows(summary: DashboardAssetSummary): CommandRow[] {
     {
       label: '关联异常',
       value: summary.abnormal_linked_vps_count,
-      detail: '异常 Node',
-      to: DASHBOARD_LINKS.nodesAbnormal,
+      detail: '异常监控实例',
+      to: DASHBOARD_LINKS.monitoringAbnormal,
       tone: summary.abnormal_linked_vps_count > 0 ? 'alert' : 'normal',
     },
     {
@@ -262,10 +262,10 @@ function observabilityRows(metrics: DashboardMetric[], overview: DashboardOvervi
   if (metrics.length === 0) {
     return [
       {
-        label: '节点',
-        value: overview.total_node_count,
-        detail: '尚未接入观测节点',
-        to: DASHBOARD_LINKS.nodes,
+        label: '监控实例',
+        value: overview.total_monitoring_instance_count,
+        detail: '尚未接入观测监控实例',
+        to: DASHBOARD_LINKS.monitoring,
         tone: 'notice',
       },
       {
@@ -297,16 +297,16 @@ function nextActions(
   if (isFreshInstall) {
     return [
       {
-        label: '创建第一个节点',
+        label: '接入第一个监控实例',
         detail: '登记 · 接入',
-        to: DASHBOARD_LINKS.nodes,
+        to: DASHBOARD_LINKS.monitoring,
         tone: 'notice',
         primary: true,
       },
       {
-        label: '查看节点接入',
+        label: '查看监控实例接入',
         detail: '待接入 / 绑定',
-        to: DASHBOARD_LINKS.nodesPendingOnboarding,
+        to: DASHBOARD_LINKS.monitoringPendingOnboarding,
         tone: 'neutral',
       },
       {
@@ -349,8 +349,8 @@ function nextActions(
   if (abnormalTotal > 0) {
     actions.push({
       label: '处理观测异常',
-      detail: `节点 ${overview.abnormal_node_count} · 目标 ${overview.abnormal_target_count}`,
-      to: overview.abnormal_node_count > 0 ? DASHBOARD_LINKS.nodesAbnormal : DASHBOARD_LINKS.targetsAbnormal,
+      detail: `监控实例 ${overview.abnormal_monitoring_instance_count} · 目标 ${overview.abnormal_target_count}`,
+      to: overview.abnormal_monitoring_instance_count > 0 ? DASHBOARD_LINKS.monitoringAbnormal : DASHBOARD_LINKS.targetsAbnormal,
       tone: 'alert',
       primary: pressureTotal === 0 && severeTotal === 0,
     })
@@ -359,7 +359,7 @@ function nextActions(
   if (summary.unlinked_vps_count > 0) {
     actions.push({
       label: '核对未关联 VPS',
-      detail: 'VPS ↔ Node',
+      detail: 'VPS ↔ 监控实例',
       to: DASHBOARD_LINKS.vps,
       tone: 'notice',
     })
@@ -379,7 +379,7 @@ function nextActions(
     return [
       {
         label: '核对 VPS 库存',
-        detail: 'provider / 续费 / Node',
+        detail: 'provider / 续费 / 监控实例',
         to: DASHBOARD_LINKS.vps,
         tone: 'normal',
         primary: true,
@@ -595,7 +595,7 @@ export function DashboardCommandSurface({
           <div className="dashboard-command-lane__header">
             <div>
               <p className="dashboard-command-lane__eyebrow">观测异常队列</p>
-              <h2>事件 / 节点 / 目标</h2>
+              <h2>事件 / 监控实例 / 目标</h2>
             </div>
             <div className="dashboard-command-lane__tools">
               {severeTotal > 0 ? (
@@ -636,7 +636,7 @@ export function DashboardCommandSurface({
                   className={`dashboard-command-attention__item dashboard-command-attention__item--${statusTone(item.health)}`}
                   to={item.route}
                   key={`${item.kind}-${item.id}`}
-                  aria-label={`处理${item.kind === 'node' ? '节点' : '目标'} ${item.name}`}
+                  aria-label={`处理${item.kind === 'monitoring_instance' ? '监控实例' : '目标'} ${item.name}`}
                 >
                   <span className="dashboard-command-attention__rank">
                     P<MonoDigits>{index + 1}</MonoDigits>

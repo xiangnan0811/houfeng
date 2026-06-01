@@ -21,7 +21,7 @@ function probeItem(overrides: Partial<ProbeItemRecord> = {}): ProbeItemRecord {
 
 function observation(overrides: Partial<ProbeObservation> = {}): ProbeObservation {
   return {
-    node_id: 'nd_001',
+    monitoring_instance_id: 'mi_001',
     target_id: 'tg_001',
     probe_item_id: 'pb_http',
     probe_kind: 'http',
@@ -58,7 +58,7 @@ describe('TargetLatencyTrends', () => {
       observation({
         probe_item_id: 'pb_tcp',
         probe_kind: 'tcp',
-        node_id: 'nd_002',
+        monitoring_instance_id: 'mi_002',
         latency_ms: 45,
         observed_at: '2026-04-24T09:05:00Z',
       }),

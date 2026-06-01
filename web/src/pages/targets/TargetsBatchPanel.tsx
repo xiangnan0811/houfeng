@@ -79,7 +79,7 @@ export function TargetsBatchPanel({
           title="确认批量暂停目标"
           current={`将对当前筛选范围内的 ${filteredTargetCount} 个目标执行暂停操作。`}
           result="操作后：所有已选目标运行状态变为暂停。"
-          impact="会停止这些目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。"
+          impact="会停止这些目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。"
           unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。"
           confirmLabel="确认批量暂停"
           disabled={batchSubmitting}

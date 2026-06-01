@@ -41,7 +41,7 @@ export type SettingsFormState = {
   hostSampleFrequencyTier: string
   probeFrequencyDefaults: ProbeFrequencyDefaults
   incidentDefaults: SettingsIncidentDefaultsForm
-  nodeLabelOverridesText: string
+  monitoringInstanceLabelOverridesText: string
   targetTypeOverridesText: string
   targetLabelOverridesText: string
   retentionPolicy: SettingsRetentionPolicyForm

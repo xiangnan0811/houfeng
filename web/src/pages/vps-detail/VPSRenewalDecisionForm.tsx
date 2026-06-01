@@ -65,7 +65,7 @@ export function VPSRenewalDecisionForm({
             onDraftChange({ ...draft, reason: event.target.value })
             onFeedbackClear()
           }}
-          placeholder="例如：价格上涨，迁移到首尔节点"
+          placeholder="例如：价格上涨，迁移到首尔监控实例"
         />
       </label>
       {error ? (

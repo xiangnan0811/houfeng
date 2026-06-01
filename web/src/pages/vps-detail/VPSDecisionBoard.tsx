@@ -8,7 +8,7 @@ import type {
   CancellationPreview,
   SubscriptionRecord,
   VPSAssetDetail,
-  VPSNodeSummary,
+  VPSMonitoringInstanceSummary,
   VPSTimeline,
 } from '../../lib/types'
 import { renewalTimingLabel, subscriptionStatusLabel } from '../assetPageUtils'
@@ -40,9 +40,9 @@ type VPSDecisionBoardProps = {
   onCancellationOpen: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
-  onNodeLink: () => void
+  onMonitoringInstanceLink: () => void
   onOpenFacts: () => void
-  onOpenNodeEvidence: () => void
+  onOpenMonitoringInstanceEvidence: () => void
   onOpenServices: () => void
   onOpenDomains: () => void
   onOpenTimeline: () => void
@@ -83,9 +83,9 @@ function serviceDomainSummary(services: AssetServiceRecord[], domains: AssetDoma
   return `${svc}；${dom}`
 }
 
-function nodeEvidenceSummary(node: VPSNodeSummary | null): string {
-  if (!node) return '尚未关联 Node，缺少心跳、健康与异常证据。'
-  return `${node.current_active_incident_count} 个活跃异常 · ${formatOptional(node.current_primary_issue_summary)}`
+function monitoringInstanceEvidenceSummary(monitoringInstance: VPSMonitoringInstanceSummary | null): string {
+  if (!monitoringInstance) return '尚未关联监控实例，缺少心跳、健康与异常证据。'
+  return `${monitoringInstance.current_active_incident_count} 个活跃异常 · ${formatOptional(monitoringInstance.current_primary_issue_summary)}`
 }
 
 function latestHistorySummary(timeline: VPSTimeline): string {
@@ -118,16 +118,16 @@ function lifecycleCoordinationTitle(detail: VPSAssetDetail, preview: Cancellatio
 function lifecycleCoordinationSummary(detail: VPSAssetDetail, preview: CancellationPreview | null, error: string | null): string {
   void detail
   if (error && !preview) return error
-  if (!preview) return '取消/退役工作台会统一展示订阅、VPS、Node、服务、域名与 Target 影响范围。'
+  if (!preview) return '取消/退役工作台会统一展示订阅、VPS、监控实例、服务、域名与 Target 影响范围。'
   const blockers = preview.blockers ?? []
   const warnings = preview.warnings ?? []
   const subscriptions = preview.subscriptions ?? []
-  const nodeLinks = preview.node_links ?? []
+  const monitoringInstanceLinks = preview.monitoring_instance_links ?? []
   const targetLinks = preview.target_links ?? []
   if (blockers.length > 0) return blockers[0]
   if (warnings.length > 0) return warnings[0]
   const activeSubscriptions = subscriptions.filter((impact) => impact.record.status === 'active').length
-  return `订阅 ${activeSubscriptions}/${subscriptions.length} active · Node ${nodeLinks.length} · Target ${targetLinks.length}，普通 CRUD 不会隐式联动。`
+  return `订阅 ${activeSubscriptions}/${subscriptions.length} active · 监控实例 ${monitoringInstanceLinks.length} · Target ${targetLinks.length}，普通 CRUD 不会隐式联动。`
 }
 
 export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
@@ -145,14 +145,14 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
     onCancellationOpen,
     onFactEdit,
     onExperienceLog,
-    onNodeLink,
+    onMonitoringInstanceLink,
     onOpenFacts,
-    onOpenNodeEvidence,
+    onOpenMonitoringInstanceEvidence,
     onOpenServices,
     onOpenDomains,
     onOpenTimeline,
   } = props
-  const { node, renewalDays, subscriptionTone, nextAction, evidenceItems } = buildVPSDecisionModel({
+  const { monitoringInstance, renewalDays, subscriptionTone, nextAction, evidenceItems } = buildVPSDecisionModel({
     detail,
     timeline,
     primarySubscription,
@@ -163,7 +163,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
     onDecisionEdit,
     onFactEdit,
     onExperienceLog,
-    onNodeLink,
+    onMonitoringInstanceLink,
   })
   const feedbackItems = buildFeedback(props)
   const accessHost = detail.ssh_host || detail.ipv4 || detail.ipv6 || detail.display_name
@@ -175,7 +175,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
         <div>
           <p className="section-heading__eyebrow">ASSET DECISION</p>
           <h2 id="vps-decision-board-title">资产判断</h2>
-          <p className="section-heading__description">先看下一步动作，再核对续费、Node、服务域名与历史证据。</p>
+          <p className="section-heading__description">先看下一步动作，再核对续费、监控实例、服务域名与历史证据。</p>
         </div>
         <div className="section-heading__actions">
           <Button variant="primary" size="sm" onClick={onDecisionEdit}>调整决策</Button>
@@ -240,7 +240,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
         </div>
         <div className="vps-decision-board__coordination-metrics" aria-label="生命周期影响范围">
           <span>订阅 <MonoDigits>{cancellationPreview?.subscriptions?.length ?? 0}</MonoDigits></span>
-          <span>Node <MonoDigits>{cancellationPreview?.node_links?.length ?? detail.active_node_link_count}</MonoDigits></span>
+          <span>监控实例 <MonoDigits>{cancellationPreview?.monitoring_instance_links?.length ?? detail.active_monitoring_instance_link_count}</MonoDigits></span>
           <span>Target <MonoDigits>{cancellationPreview?.target_links?.length ?? 0}</MonoDigits></span>
         </div>
         <div className="vps-decision-board__coordination-actions">
@@ -285,19 +285,19 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
         <article className="vps-decision-card">
           <div className="vps-decision-card__header">
             <div>
-              <p>Node 证据</p>
-              <h3>{node ? node.display_name : '尚未关联'}</h3>
+              <p>监控实例证据</p>
+              <h3>{monitoringInstance ? monitoringInstance.display_name : '尚未关联'}</h3>
             </div>
-            {node ? <HealthBadge value={node.current_health_status} /> : <Badge variant="state" tone="alert">缺证据</Badge>}
+            {monitoringInstance ? <HealthBadge value={monitoringInstance.current_health_status} /> : <Badge variant="state" tone="alert">缺证据</Badge>}
           </div>
-          <p className="vps-decision-card__summary">{nodeEvidenceSummary(node)}</p>
+          <p className="vps-decision-card__summary">{monitoringInstanceEvidenceSummary(monitoringInstance)}</p>
           <div className="vps-decision-card__footer">
-            {node ? (
-              <span>心跳 <Timestamp value={node.last_heartbeat_at} mode="relative" /></span>
+            {monitoringInstance ? (
+              <span>心跳 <Timestamp value={monitoringInstance.last_heartbeat_at} mode="relative" /></span>
             ) : (
-              <span>需要关联 Node</span>
+              <span>需要关联监控实例</span>
             )}
-            <Button variant="ghost" size="sm" onClick={onOpenNodeEvidence}>查看 Node 详情</Button>
+            <Button variant="ghost" size="sm" onClick={onOpenMonitoringInstanceEvidence}>查看监控实例详情</Button>
           </div>
         </article>
 

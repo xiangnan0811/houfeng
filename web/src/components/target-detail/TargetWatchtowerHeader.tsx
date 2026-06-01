@@ -53,7 +53,7 @@ export function TargetWatchtowerHeader({
     ? `${target.host}:${target.base_port}`
     : target.host
   const labelText = formatLabelList(target.labels)
-  const execLabelText = formatLabelList(target.execution_node_labels)
+  const execLabelText = formatLabelList(target.execution_monitoring_instance_labels)
   const runtimeActions = targetRuntimeActions(target)
 
   return (
@@ -128,7 +128,7 @@ export function TargetWatchtowerHeader({
             </span>
           </>
         ) : null}
-        {target.execution_node_labels.length > 0 ? (
+        {target.execution_monitoring_instance_labels.length > 0 ? (
           <>
             <span className="watchtower-header__meta-sep" aria-hidden>
               ·

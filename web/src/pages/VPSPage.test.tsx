@@ -55,8 +55,8 @@ const vps = {
   importance: 'normal',
   labels: ['edge'],
   note: '',
-  active_node_link_count: 1,
-  running_node_count: 0,
+  active_monitoring_instance_link_count: 1,
+  running_monitoring_instance_count: 0,
   running_target_count: 0,
   created_at: '2026-05-09T08:00:00Z',
   updated_at: '2026-05-09T08:00:00Z',
@@ -77,8 +77,8 @@ const missingFactsVPS = {
   ssh_host: '',
   usage_status: 'unknown',
   renewal_decision: 'unreviewed',
-  active_node_link_count: 0,
-  running_node_count: 0,
+  active_monitoring_instance_link_count: 0,
+  running_monitoring_instance_count: 0,
   running_target_count: 0,
 }
 
@@ -224,8 +224,8 @@ describe('VPSPage', () => {
       ...vps,
       lifecycle_status: 'to_cancel',
       renewal_decision: 'cancel',
-      active_node_link_count: 2,
-      running_node_count: 0,
+      active_monitoring_instance_link_count: 2,
+      running_monitoring_instance_count: 0,
       running_target_count: 0,
     }
     const toCancelWithRunningTarget = {
@@ -282,8 +282,8 @@ describe('VPSPage', () => {
     await waitFor(() => expect(screen.getByText('Frankfurt Legacy')).toBeInTheDocument())
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByText('Cancelled Legacy')).toBeInTheDocument()
-    expect(screen.getByText('VPS 待取消，仍有 1 个 Node/Target 运行')).toBeInTheDocument()
-    expect(screen.getByText('VPS 已取消，仍有 1 个 Node/Target 运行')).toBeInTheDocument()
+    expect(screen.getByText('VPS 待取消，仍有 1 个监控实例/入口探测运行')).toBeInTheDocument()
+    expect(screen.getByText('VPS 已取消，仍有 1 个监控实例/入口探测运行')).toBeInTheDocument()
   })
 
   it('does not apply draft drawer filters when closed by button, Escape, or overlay', async () => {

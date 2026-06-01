@@ -107,7 +107,7 @@ export function TargetRuntimeControls({
             }
             impact={
               pendingConfirmation.action === 'pause'
-                ? '会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。'
+                ? '会停止该目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。'
                 : '归档后不会继续作为活跃目标参与观测、异常判定或通知。'
             }
             unchanged={

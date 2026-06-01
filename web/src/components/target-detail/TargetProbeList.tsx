@@ -38,11 +38,11 @@ const observationColumns: DataTableColumn<ProbeObservation>[] = [
     ),
   },
   {
-    key: 'node',
-    label: '执行节点',
+    key: 'monitoring-instance',
+    label: '执行监控实例',
     render: (obs) => (
       <Hostname truncate maxChars={14}>
-        {obs.node_id}
+        {obs.monitoring_instance_id}
       </Hostname>
     ),
   },
@@ -233,7 +233,7 @@ export function TargetProbeList({
                 density="compact"
                 columns={observationColumns}
                 rows={observations}
-                rowKey={(obs) => `${obs.probe_item_id}-${obs.node_id}-${obs.observed_at}`}
+                rowKey={(obs) => `${obs.probe_item_id}-${obs.monitoring_instance_id}-${obs.observed_at}`}
               />
             ) : (
               <div className="probe-card__observations-empty">尚未收到观测</div>

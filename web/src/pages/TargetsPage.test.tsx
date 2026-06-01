@@ -30,7 +30,7 @@ function targetRecord(overrides: Record<string, unknown> = {}) {
     target_type: 'service',
     host: 'api.example.com',
     base_port: 443,
-    execution_node_labels: ['edge'],
+    execution_monitoring_instance_labels: ['edge'],
     run_status: '启用',
     labels: ['public'],
     note: '',
@@ -72,7 +72,7 @@ describe('TargetsPage', () => {
             target_type: 'service',
             host: 'blog.example.com',
             base_port: 443,
-            execution_node_labels: ['edge', 'core'],
+            execution_monitoring_instance_labels: ['edge', 'core'],
             run_status: '启用',
             labels: ['public'],
             note: 'primary blog',
@@ -100,7 +100,7 @@ describe('TargetsPage', () => {
       expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByRole('heading', { name: '目标观测' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '入口探测' })).toBeInTheDocument()
     expect(screen.getByText('监控入口健康与延迟')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
@@ -110,7 +110,7 @@ describe('TargetsPage', () => {
     fireEvent.change(within(createDrawer).getByLabelText('目标类型'), { target: { value: 'service' } })
     fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.change(within(createDrawer).getByLabelText('基础端口'), { target: { value: '443' } })
-    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge, core' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行监控实例标签'), { target: { value: 'edge, core' } })
     fireEvent.change(within(createDrawer).getByLabelText('运行状态'), { target: { value: '启用' } })
     fireEvent.change(within(createDrawer).getByLabelText('目标标签'), { target: { value: 'public' } })
     fireEvent.change(within(createDrawer).getByLabelText('备注'), { target: { value: 'primary blog' } })
@@ -130,7 +130,7 @@ describe('TargetsPage', () => {
         target_type: 'service',
         host: 'blog.example.com',
         base_port: 443,
-        execution_node_labels: ['edge', 'core'],
+        execution_monitoring_instance_labels: ['edge', 'core'],
         run_status: '启用',
         group: '',
         labels: ['public'],
@@ -161,7 +161,7 @@ describe('TargetsPage', () => {
     fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
-    expect(within(createDrawer).getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
+    expect(within(createDrawer).getByText('执行监控实例标签至少需要填写一个。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -186,7 +186,7 @@ describe('TargetsPage', () => {
     fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
     fireEvent.change(within(createDrawer).getByLabelText('基础端口'), { target: { value: 'abc' } })
-    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行监控实例标签'), { target: { value: 'edge' } })
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     expect(within(createDrawer).getByText('基础端口必须为正整数。')).toBeInTheDocument()
@@ -213,7 +213,7 @@ describe('TargetsPage', () => {
     fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'stale.example.com' } })
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
-    expect(within(createDrawer).getByText('执行节点标签至少需要填写一个。')).toBeInTheDocument()
+    expect(within(createDrawer).getByText('执行监控实例标签至少需要填写一个。')).toBeInTheDocument()
 
     fireEvent.click(within(createDrawer).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument()
@@ -221,7 +221,7 @@ describe('TargetsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
     createDrawer = screen.getByRole('dialog', { name: '创建目标' })
 
-    expect(within(createDrawer).queryByText('执行节点标签至少需要填写一个。')).not.toBeInTheDocument()
+    expect(within(createDrawer).queryByText('执行监控实例标签至少需要填写一个。')).not.toBeInTheDocument()
     expect(within(createDrawer).getByLabelText('目标名称')).toHaveValue('')
     expect(within(createDrawer).getByLabelText('主机地址')).toHaveValue('')
   })
@@ -247,12 +247,12 @@ describe('TargetsPage', () => {
     const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
     fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行监控实例标签'), { target: { value: 'edge' } })
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     await waitFor(() => expect(within(createDrawer).getByText('target already exists')).toBeInTheDocument())
     expect(screen.getByText('Existing API')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '目标观测' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '入口探测' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -283,7 +283,7 @@ describe('TargetsPage', () => {
     const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
     fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行监控实例标签'), { target: { value: 'edge' } })
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
@@ -299,7 +299,7 @@ describe('TargetsPage', () => {
             name: 'Blog',
             target_type: 'service',
             host: 'blog.example.com',
-            execution_node_labels: ['edge'],
+            execution_monitoring_instance_labels: ['edge'],
             run_status: '启用',
             labels: [],
             note: '',
@@ -345,7 +345,7 @@ describe('TargetsPage', () => {
     let createDrawer = screen.getByRole('dialog', { name: '创建目标' })
     fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
-    fireEvent.change(within(createDrawer).getByLabelText('执行节点标签'), { target: { value: 'edge' } })
+    fireEvent.change(within(createDrawer).getByLabelText('执行监控实例标签'), { target: { value: 'edge' } })
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
@@ -362,7 +362,7 @@ describe('TargetsPage', () => {
             name: 'Late Blog',
             target_type: 'service',
             host: 'late.example.com',
-            execution_node_labels: ['edge'],
+            execution_monitoring_instance_labels: ['edge'],
             run_status: '启用',
             labels: [],
             note: '',
@@ -387,7 +387,7 @@ describe('TargetsPage', () => {
 
     expect(within(createDrawer).queryByText('Late Blog')).not.toBeInTheDocument()
     expect(screen.queryByText('target detail route')).not.toBeInTheDocument()
-    expect(within(createDrawer).queryByText('执行节点标签至少需要填写一个。')).not.toBeInTheDocument()
+    expect(within(createDrawer).queryByText('执行监控实例标签至少需要填写一个。')).not.toBeInTheDocument()
     expect(within(createDrawer).getByLabelText('目标名称')).toHaveValue('')
     expect(within(createDrawer).getByRole('button', { name: '创建目标' })).toBeEnabled()
   })
@@ -403,7 +403,7 @@ describe('TargetsPage', () => {
             target_type: 'service',
             host: 'blog.example.com',
             base_port: 443,
-            execution_node_labels: ['edge'],
+            execution_monitoring_instance_labels: ['edge'],
             run_status: '启用',
             labels: ['public'],
             note: '',
@@ -420,7 +420,7 @@ describe('TargetsPage', () => {
             name: 'Legacy API',
             target_type: 'service',
             host: 'legacy.example.com',
-            execution_node_labels: ['edge'],
+            execution_monitoring_instance_labels: ['edge'],
             run_status: '已归档',
             labels: [],
             note: '',
@@ -440,7 +440,7 @@ describe('TargetsPage', () => {
           name: 'Legacy API',
           target_type: 'service',
           host: 'legacy.example.com',
-          execution_node_labels: ['edge'],
+          execution_monitoring_instance_labels: ['edge'],
           run_status: '暂停',
           labels: [],
           note: '',
@@ -657,7 +657,7 @@ describe('TargetsPage', () => {
     expect(screen.getByText('当前：目标运行状态为启用或维护中。')).toBeInTheDocument()
     expect(screen.getByText('操作后：目标运行状态变为暂停。')).toBeInTheDocument()
     expect(
-      screen.getByText('会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。'),
+      screen.getByText('会停止该目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。'),
     ).toBeInTheDocument()
     expect(screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))

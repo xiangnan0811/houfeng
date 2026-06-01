@@ -17,14 +17,14 @@ const eventsPage = lazy(() =>
 const loginPage = lazy(() =>
   import('../pages/LoginPage').then((module) => ({ default: module.LoginPage })),
 )
-const nodeComparePage = lazy(() =>
-  import('../pages/NodeComparePage').then((module) => ({ default: module.NodeComparePage })),
+const monitoringComparePage = lazy(() =>
+  import('../pages/MonitoringComparePage').then((module) => ({ default: module.MonitoringComparePage })),
 )
-const nodeDetailPage = lazy(() =>
-  import('../pages/NodeDetailPage').then((module) => ({ default: module.NodeDetailPage })),
+const monitoringDetailPage = lazy(() =>
+  import('../pages/MonitoringDetailPage').then((module) => ({ default: module.MonitoringDetailPage })),
 )
-const nodesPage = lazy(() =>
-  import('../pages/NodesPage').then((module) => ({ default: module.NodesPage })),
+const monitoringPage = lazy(() =>
+  import('../pages/MonitoringPage').then((module) => ({ default: module.MonitoringPage })),
 )
 const providersPage = lazy(() =>
   import('../pages/ProvidersPage').then((module) => ({ default: module.ProvidersPage })),
@@ -74,10 +74,16 @@ export const appRoutes: RouteObject[] = [
             path: 'asset-decisions',
             element: routeElement(assetDecisionsPage, '正在加载资产决策'),
           },
-          { path: 'nodes', element: routeElement(nodesPage, '正在加载节点观测') },
-          { path: 'nodes/compare', element: routeElement(nodeComparePage, '正在加载节点对比') },
-          { path: 'nodes/:nodeId', element: routeElement(nodeDetailPage, '正在加载节点详情') },
-          { path: 'targets', element: routeElement(targetsPage, '正在加载入口观测') },
+          { path: 'monitoring', element: routeElement(monitoringPage, '正在加载监控') },
+          {
+            path: 'monitoring/compare',
+            element: routeElement(monitoringComparePage, '正在加载监控实例对比'),
+          },
+          {
+            path: 'monitoring/:monitoringInstanceId',
+            element: routeElement(monitoringDetailPage, '正在加载监控实例详情'),
+          },
+          { path: 'targets', element: routeElement(targetsPage, '正在加载入口探测') },
           {
             path: 'targets/:targetId',
             element: routeElement(targetDetailPage, '正在加载目标详情'),

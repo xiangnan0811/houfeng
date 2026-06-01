@@ -6,7 +6,7 @@ import { PageState } from '../components/PageState'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
 import type {
   FeishuSettingsInput,
-  NodeLabelOverrideRule,
+  MonitoringInstanceLabelOverrideRule,
   SettingsRecord,
   SettingsUpdateInput,
   TargetLabelOverrideRule,
@@ -81,7 +81,7 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
       load5Warning: String(settings.incident_defaults.load5_warning),
       load5Critical: String(settings.incident_defaults.load5_critical),
     },
-    nodeLabelOverridesText: formatJSON(settings.override_rules.node_labels),
+    monitoringInstanceLabelOverridesText: formatJSON(settings.override_rules.monitoring_instance_labels),
     targetTypeOverridesText: formatJSON(settings.override_rules.target_types),
     targetLabelOverridesText: formatJSON(settings.override_rules.target_labels),
     retentionPolicy: {
@@ -160,7 +160,7 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
     probe_frequency_defaults: { tcp: form.probeFrequencyDefaults.tcp, http: form.probeFrequencyDefaults.http, tls: form.probeFrequencyDefaults.tls },
     incident_defaults: buildIncidentDefaults(form),
     override_rules: {
-      node_labels: parseOverrideRuleArray<NodeLabelOverrideRule>(form.nodeLabelOverridesText, '节点标签覆盖'),
+      monitoring_instance_labels: parseOverrideRuleArray<MonitoringInstanceLabelOverrideRule>(form.monitoringInstanceLabelOverridesText, '监控实例标签覆盖'),
       target_types: parseOverrideRuleArray<TargetTypeOverrideRule>(form.targetTypeOverridesText, '目标类型覆盖'),
       target_labels: parseOverrideRuleArray<TargetLabelOverrideRule>(form.targetLabelOverridesText, '目标标签覆盖'),
     },
