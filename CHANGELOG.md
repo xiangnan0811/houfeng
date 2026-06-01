@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/xiangnan0811/houfeng/compare/v0.26.0...v0.26.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **auth:** preserve upgrade login diagnostics ([de224c3](https://github.com/xiangnan0811/houfeng/commit/de224c3c31fdf72028af7d487f426ae4f67fb935))
+
 ## [0.26.0](https://github.com/xiangnan0811/houfeng/compare/v0.25.1...v0.26.0) (2026-06-01)
 
 
