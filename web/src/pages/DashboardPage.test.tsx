@@ -202,7 +202,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText(/HTTPS 探测连续失败/)).toBeInTheDocument()
 
     // Cost column shows currency data
-    expect(screen.getByText('成本')).toBeInTheDocument()
+    expect(screen.getByText('账单事实')).toBeInTheDocument()
     expect(screen.getByText('USD')).toBeInTheDocument()
     expect(screen.getByText('EUR')).toBeInTheDocument()
   })
@@ -281,7 +281,7 @@ describe('DashboardPage', () => {
     // No abnormal items in attention column
     expect(screen.getByText('暂无需关注项')).toBeInTheDocument()
     // All monitoring normal
-    expect(screen.getByText('全部正常')).toBeInTheDocument()
+    expect(screen.getByText('暂无异常观测')).toBeInTheDocument()
   })
 
   it('renders first-run onboarding with zero monitoring and targets', async () => {
@@ -308,8 +308,8 @@ describe('DashboardPage', () => {
 
     // Shows metric cards with zero counts
     await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
-    expect(screen.getByText('暂无需关注项')).toBeInTheDocument()
-    expect(screen.getByText('全部正常')).toBeInTheDocument()
+    expect(screen.getByText('先创建第一台 VPS')).toBeInTheDocument()
+    expect(screen.getByText('订阅和 agent 接入都在 VPS 详情页完成')).toBeInTheDocument()
   })
 
   it('uses compact management entry priority to route inventory states to filtered lists', async () => {

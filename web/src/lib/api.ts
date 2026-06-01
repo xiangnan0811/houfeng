@@ -14,9 +14,12 @@ import type {
   CreateMonitoringInstanceInput,
   CreateProbeItemInput,
   CreateSubscriptionInput,
+  CreateVPSMonitoringInstanceInput,
+  CreateVPSMonitoringInstanceResponse,
   CreateTargetInput,
   CreateVPSAssetInput,
   CreateVPSExperienceLogInput,
+  CreateVPSSubscriptionInput,
   LinkVPSMonitoringInstanceInput,
   LifecycleActionResult,
   UpdateProbeItemInput,
@@ -228,18 +231,6 @@ export function pauseMonitoringInstanceMonitoring(monitoringInstanceId: string) 
 
 export function resumeMonitoringInstanceMonitoring(monitoringInstanceId: string) {
   return postJSON<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/runtime/resume`)
-}
-
-export function retireMonitoringInstance(monitoringInstanceId: string) {
-  return postJSON<MonitoringInstanceRecord>(
-    `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/retire`,
-  )
-}
-
-export function restoreRetiredMonitoringInstanceToObserving(monitoringInstanceId: string) {
-  return postJSON<MonitoringInstanceRecord>(
-    `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/restore-to-observing`,
-  )
 }
 
 export function getMonitoringInstanceOnboarding(monitoringInstanceId: string) {
@@ -572,6 +563,13 @@ export function listVPSMonitoringInstances(vpsId: string) {
   return requestJSON<VPSMonitoringInstanceSummary[]>(`/api/vps/${vpsId}/monitoring-instances`)
 }
 
+export function createVPSMonitoringInstance(
+  vpsId: string,
+  input: CreateVPSMonitoringInstanceInput = {},
+): Promise<CreateVPSMonitoringInstanceResponse> {
+  return postJSONBody<CreateVPSMonitoringInstanceResponse>(`/api/vps/${vpsId}/monitoring-instances`, input)
+}
+
 export function linkVPSMonitoringInstance(vpsId: string, input: LinkVPSMonitoringInstanceInput): Promise<VPSMonitoringInstanceLinkRecord> {
   return postJSONBody<VPSMonitoringInstanceLinkRecord>(`/api/vps/${vpsId}/link-monitoring-instance`, input)
 }
@@ -612,6 +610,10 @@ export function listSubscriptions(filter?: SubscriptionListFilter) {
 
 export function createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionRecord> {
   return postJSONBody<SubscriptionRecord>('/api/subscriptions', input)
+}
+
+export function createVPSSubscription(vpsId: string, input: CreateVPSSubscriptionInput): Promise<SubscriptionRecord> {
+  return postJSONBody<SubscriptionRecord>(`/api/vps/${vpsId}/subscriptions`, input)
 }
 
 export function getSubscription(subscriptionId: string) {

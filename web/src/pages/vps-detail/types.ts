@@ -48,6 +48,8 @@ export type VPSDetailDrawerMode =
   | 'decision'
   | 'cancellation'
   | 'facts'
+  | 'subscription'
+  | 'monitoring-instance-create'
   | 'monitoring-instance-link'
   | 'experience'
   | 'service'
@@ -89,6 +91,19 @@ export type DecisionDraftState = {
 
 export type LinkDraftState = {
   monitoringInstanceId: string
+  note: string
+}
+
+export type SubscriptionDraftState = {
+  price: string
+  currency: string
+  billingCycle: string
+  billingMonths: string
+  startedAt: string
+  renewAt: string
+  autoRenew: boolean
+  autoRenewCancelled: boolean
+  paymentMethod: string
   note: string
 }
 

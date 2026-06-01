@@ -9,6 +9,19 @@ import (
 	"houfeng/internal/center/subscriptions"
 )
 
+type vpsSubscriptionCreateRequest struct {
+	Price              float64             `json:"price"`
+	Currency           string              `json:"currency"`
+	BillingCycle       string              `json:"billing_cycle"`
+	BillingMonths      int                 `json:"billing_months"`
+	StartedAt          *subscriptions.Date `json:"started_at"`
+	RenewAt            *subscriptions.Date `json:"renew_at"`
+	AutoRenew          bool                `json:"auto_renew"`
+	AutoRenewCancelled bool                `json:"auto_renew_cancelled"`
+	PaymentMethod      string              `json:"payment_method"`
+	Note               string              `json:"note"`
+}
+
 func SubscriptionsCollection(repo subscriptions.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -36,6 +49,76 @@ func SubscriptionsCollection(repo subscriptions.Repository) http.Handler {
 				return
 			}
 
+			input = subscriptions.NormalizeCreateInput(input)
+			if err := subscriptions.ValidateCreateInput(input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+
+			record, err := repo.CreateSubscription(r.Context(), input)
+			if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusCreated, record)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})
+}
+
+func VPSSubscriptions(repo subscriptions.Repository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "subscriptions")
+		if !ok {
+			writeError(w, http.StatusNotFound, "vps asset not found")
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			filters, err := subscriptionFiltersFromQuery(r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			filters.VPSID = vpsID
+
+			records, err := repo.ListSubscriptions(r.Context(), filters)
+			if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusOK, records)
+		case http.MethodPost:
+			var request vpsSubscriptionCreateRequest
+			if err := decodeJSON(r, &request); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+
+			input := subscriptions.CreateInput{
+				VPSID:              vpsID,
+				Price:              request.Price,
+				Currency:           request.Currency,
+				BillingCycle:       request.BillingCycle,
+				BillingMonths:      request.BillingMonths,
+				StartedAt:          request.StartedAt,
+				RenewAt:            request.RenewAt,
+				AutoRenew:          request.AutoRenew,
+				AutoRenewCancelled: request.AutoRenewCancelled,
+				Status:             subscriptions.DefaultStatus,
+				PaymentMethod:      request.PaymentMethod,
+				Note:               request.Note,
+			}
 			input = subscriptions.NormalizeCreateInput(input)
 			if err := subscriptions.ValidateCreateInput(input); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid input")

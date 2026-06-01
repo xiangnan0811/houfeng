@@ -3,22 +3,17 @@ import { type FormEvent, useState } from 'react'
 import { Button, Input, Modal, Select } from './atoms'
 import { CollapsibleSection } from './CollapsibleSection'
 import { createProvider, createVPSAsset } from '../lib/api'
+import {
+  type CreateVPSAssetInput,
+  type ProviderRecord,
+  type VPSAssetRecord,
+} from '../lib/types'
+
 function describeError(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
   return fallback
 }
-import {
-  VPS_LIFECYCLE_STATUS_LABELS,
-  VPS_RENEWAL_DECISION_LABELS,
-  VPS_USAGE_STATUS_LABELS,
-  type CreateVPSAssetInput,
-  type ProviderRecord,
-  type VPSAssetRecord,
-  type VPSLifecycleStatus,
-  type VPSRenewalDecision,
-  type VPSUsageStatus,
-} from '../lib/types'
 
 interface VPSCreateModalProps {
   open: boolean
@@ -44,9 +39,6 @@ type FormState = {
   sshUser: string
   osName: string
   virtualization: string
-  lifecycleStatus: VPSLifecycleStatus
-  usageStatus: VPSUsageStatus
-  renewalDecision: VPSRenewalDecision
   importance: string
   labels: string
   note: string
@@ -68,17 +60,10 @@ const INITIAL_FORM: FormState = {
   sshUser: 'root',
   osName: '',
   virtualization: '',
-  lifecycleStatus: 'active',
-  usageStatus: 'unknown',
-  renewalDecision: 'unreviewed',
   importance: 'normal',
   labels: '',
   note: '',
 }
-
-const LIFECYCLE_OPTIONS = Object.entries(VPS_LIFECYCLE_STATUS_LABELS).map(([value, label]) => ({ value, label }))
-const USAGE_OPTIONS = Object.entries(VPS_USAGE_STATUS_LABELS).map(([value, label]) => ({ value, label }))
-const RENEWAL_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABELS).map(([value, label]) => ({ value, label }))
 
 function parseLabels(raw: string): string[] {
   return [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))]
@@ -110,9 +95,9 @@ function buildCreateInput(form: FormState, providers: ProviderRecord[]): CreateV
     ssh_user: form.sshUser.trim(),
     os_name: form.osName.trim(),
     virtualization: form.virtualization.trim(),
-    lifecycle_status: form.lifecycleStatus,
-    usage_status: form.usageStatus,
-    renewal_decision: form.renewalDecision,
+    lifecycle_status: 'active',
+    usage_status: 'unknown',
+    renewal_decision: 'unreviewed',
     importance: form.importance.trim() || 'normal',
     labels: parseLabels(form.labels),
     note: form.note.trim(),
@@ -231,14 +216,7 @@ export function VPSCreateModal({ open, onClose, providers, onCreated, onProvider
               </div>
             </div>
           )}
-
-          <div className="vps-create-form__row">
-            <Select label="生命周期" required options={LIFECYCLE_OPTIONS} value={form.lifecycleStatus} onChange={(e) => setForm((f) => ({ ...f, lifecycleStatus: e.target.value as VPSLifecycleStatus }))} />
-            <Select label="用途状态" required options={USAGE_OPTIONS} value={form.usageStatus} onChange={(e) => setForm((f) => ({ ...f, usageStatus: e.target.value as VPSUsageStatus }))} />
-          </div>
         </div>
-
-        {/* PLACEHOLDER_TIER2 */}
 
         <div className="vps-create-form__section">
           <div className="vps-create-form__section-title">网络入口</div>
@@ -271,10 +249,7 @@ export function VPSCreateModal({ open, onClose, providers, onCreated, onProvider
               <Input label="操作系统" value={form.osName} onChange={(e) => setForm((f) => ({ ...f, osName: e.target.value }))} />
               <Input label="虚拟化" value={form.virtualization} onChange={(e) => setForm((f) => ({ ...f, virtualization: e.target.value }))} />
             </div>
-            <div className="vps-create-form__row">
-              <Select label="续费决策" options={RENEWAL_OPTIONS} value={form.renewalDecision} onChange={(e) => setForm((f) => ({ ...f, renewalDecision: e.target.value as VPSRenewalDecision }))} />
-              <Input label="重要性" value={form.importance} onChange={(e) => setForm((f) => ({ ...f, importance: e.target.value }))} placeholder="normal" />
-            </div>
+            <Input label="重要性" value={form.importance} onChange={(e) => setForm((f) => ({ ...f, importance: e.target.value }))} placeholder="normal" />
             <Input label="标签" hint="用逗号分隔" value={form.labels} onChange={(e) => setForm((f) => ({ ...f, labels: e.target.value }))} />
             <Input label="备注" value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} />
           </div>
@@ -285,4 +260,3 @@ export function VPSCreateModal({ open, onClose, providers, onCreated, onProvider
     </Modal>
   )
 }
-

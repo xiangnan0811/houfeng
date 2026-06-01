@@ -231,11 +231,11 @@ describe('AssetDecisionsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('tab', { name: /未关联/ }))
     await waitFor(() => expect(screen.getByRole('heading', { name: '当前视图暂无待处理 VPS' })).toBeInTheDocument())
-    expect(screen.getByText('可回到全部、库存或订阅。')).toBeInTheDocument()
+    expect(screen.getByText('可回到全部或 VPS 库存；订阅和接入都从 VPS 详情页补齐。')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'VPS 库存' }).some(
       (link) => link.getAttribute('href') === '/vps',
     )).toBe(true)
-    expect(screen.getByRole('link', { name: '补充订阅' })).toHaveAttribute('href', '/subscriptions')
+    expect(screen.getByRole('link', { name: '缺订阅 VPS' })).toHaveAttribute('href', '/vps?view=missing_subscription')
     fireEvent.click(screen.getByRole('button', { name: '查看全部' }))
     await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
   })

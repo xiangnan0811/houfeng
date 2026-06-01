@@ -60,11 +60,11 @@ export function MonitoringInstancesActionsCell({
       >
         详情
       </Link>
-      {actions.map(({ action, label, variant }) => (
+      {actions.map(({ action, label }) => (
         <button
           key={action}
           type="button"
-          className={`btn sm ${variant === 'danger' ? 'danger' : 'secondary'}`}
+          className="btn sm secondary"
           ref={(element) => {
             actionButtonRefs.current[actionButtonKey(monitoringInstance.monitoring_instance_id, action)] = element
           }}

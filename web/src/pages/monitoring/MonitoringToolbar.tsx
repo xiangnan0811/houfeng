@@ -40,16 +40,18 @@ export function MonitoringToolbar({
               <option key={v} value={v}>{v}</option>
             ))}
           </select>
-          <select
-            className="filter-select"
-            value={filterState.lifecycle ?? ''}
-            onChange={(e) => onFilterChange('lifecycle', e.target.value || null)}
-          >
-            <option value="">生命周期: 全部</option>
-            {lifecycleOptions.map((v) => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
+          {lifecycleOptions.length > 0 ? (
+            <select
+              className="filter-select"
+              value={filterState.lifecycle ?? ''}
+              onChange={(e) => onFilterChange('lifecycle', e.target.value || null)}
+            >
+              <option value="">接入阶段: 全部</option>
+              {lifecycleOptions.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          ) : null}
           <select
             className="filter-select"
             value={filterState.runStatus ?? ''}

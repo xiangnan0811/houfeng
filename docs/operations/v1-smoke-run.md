@@ -6,15 +6,16 @@ This smoke run verifies the current first operating path for `候风 / Houfeng F
 
 1. build and start the center against PostgreSQL;
 2. log in with the initial admin user;
-3. create a MonitoringInstance;
-4. generate a center-owned one-command agent install command;
-5. enroll/sync an agent;
-6. create a Target and ProbeItem;
-7. receive observations;
-8. trigger and recover an incident;
-9. verify events and notification records.
+3. create a VPS as the business subject;
+4. create the VPS-scoped MonitoringInstance from the VPS detail page;
+5. generate a center-owned one-command agent install command;
+6. enroll/sync an agent;
+7. create a Target and ProbeItem;
+8. receive observations;
+9. trigger and recover an incident;
+10. verify events and notification records.
 
-The primary onboarding path is the generated install command from the MonitoringInstance onboarding page or `POST /api/monitoring-instances/{monitoring_instance_id}/install-command`. Manual enrollment-token issuance is kept only as an API/troubleshooting fallback.
+The primary onboarding path starts at the VPS detail page: create or open the VPS, create the VPS-scoped MonitoringInstance there, then use the generated install command from the MonitoringInstance onboarding page or `POST /api/monitoring-instances/{monitoring_instance_id}/install-command`. Manual enrollment-token issuance is kept only as an API/troubleshooting fallback.
 
 ## Evidence levels
 
@@ -99,23 +100,32 @@ curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
 
 Expected: HTTP 200 JSON response with the current user and a `houfeng_session` cookie in `$COOKIE_JAR`.
 
-## Step 1: Create a MonitoringInstance
+## Step 1: Create a VPS and its scoped MonitoringInstance
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/monitoring-instances \
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/vps \
   -H 'Content-Type: application/json' \
   -d '{
-    "display_name": "smoke-monitoring-instance-01",
-    "group": "smoke",
-    "provider": "local",
+    "display_name": "smoke-vps-01",
+    "provider_name": "local",
     "region": "local",
     "city": "local",
+    "ipv4": "127.0.0.1",
+    "ssh_host": "127.0.0.1",
     "labels": ["smoke", "v1"],
-    "note": "fresh-install smoke monitoring instance"
+    "note": "fresh-install smoke VPS"
   }'
 ```
 
-Record the returned `monitoring_instance_id`.
+Record the returned `vps_id`, then create the monitoring instance through the VPS-scoped contract:
+
+```bash
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/vps/<vps_id>/monitoring-instances \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+Record the returned `monitoring_instance_id`. The old independent `/api/monitoring-instances` creation path remains an advanced/no-VPS observability path; it is not the normal server onboarding smoke path.
 
 ## Step 2: Generate the one-command install command
 
@@ -123,8 +133,8 @@ Preferred UI path:
 
 1. Open `http://127.0.0.1:8080/`.
 2. Log in.
-3. Open the MonitoringInstance onboarding workspace for the smoke monitoring instance from `/monitoring`.
-4. Click **生成一键安装命令** and copy the command shown by the center.
+3. Open `/vps`, create or open the smoke VPS, then click **创建并接入 agent** from the VPS detail page.
+4. After the scoped MonitoringInstance is created, click **生成一键安装命令** and copy the command shown by the center.
 
 API equivalent:
 
@@ -278,7 +288,8 @@ Expected:
 Open `http://127.0.0.1:8080/` and check the current UI surfaces that are relevant to the smoke:
 
 - Dashboard shows the current workbench and abnormal/asset decision summaries without pretending the smoke proves production health.
-- Monitoring page shows the smoke monitoring instance and visible onboarding/binding status.
+- VPS detail shows the smoke VPS identity, billing/observability evidence, and the scoped MonitoringInstance relationship.
+- Monitoring page shows the smoke monitoring instance as observation evidence and visible onboarding/binding status.
 - MonitoringInstance onboarding page shows generated-command metadata, token expiry, and bound/conflict state truthfully.
 - MonitoringInstance detail shows latest host sample and runtime evidence once the agent has synced.
 - Targets page shows the smoke target.

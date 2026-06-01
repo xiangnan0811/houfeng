@@ -2,14 +2,10 @@ import type { HistoryTab, MonitoringInstanceCommand, TimeWindow } from './types'
 
 export const MONITORING_INSTANCE_BINDING_CONFLICT_LOAD_ERROR = '绑定冲突详情暂不可用'
 export const MONITORING_INSTANCE_BINDING_ACTION_ERROR = '更新绑定冲突状态失败'
-export const MONITORING_INSTANCE_LIFECYCLE_ACTION_ERROR = '监控实例生命周期操作失败'
 export const MONITORING_INSTANCE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
 export const MONITORING_INSTANCE_BINDING_CONFIRM_REBIND_LABEL = '确认重绑定'
 export const MONITORING_INSTANCE_BINDING_REJECT_PENDING_LABEL = '拒绝新指纹'
 export const MONITORING_INSTANCE_BINDING_RESET_LABEL = '重置绑定'
-export const MONITORING_INSTANCE_LIFECYCLE_RETIRED = '已退役'
-export const MONITORING_INSTANCE_LIFECYCLE_V1_LIMITATION_COPY =
-  '已退役监控实例在 V1 中只能先恢复到观察中，不能直接恢复为在用。'
 
 export const COMMAND_LIST: MonitoringInstanceCommand[] = [
   { id: 'df_h', name: 'df -h', description: '磁盘使用概览' },

@@ -19,7 +19,6 @@ type MonitoringSupportSurfaceProps = {
   onOnboardingClick: () => void
   onRuntimeAttentionClick: () => void
   onClearFilters: () => void
-  onCreateClick: () => void
 }
 
 export function MonitoringSupportSurface({
@@ -35,7 +34,6 @@ export function MonitoringSupportSurface({
   onOnboardingClick,
   onRuntimeAttentionClick,
   onClearFilters,
-  onCreateClick,
 }: MonitoringSupportSurfaceProps) {
   function handleLeadAction() {
     if (evidenceLead.actionKind === 'abnormal') {
@@ -46,8 +44,6 @@ export function MonitoringSupportSurface({
       onRuntimeAttentionClick()
     } else if (evidenceLead.actionKind === 'clear') {
       onClearFilters()
-    } else if (evidenceLead.actionKind === 'create') {
-      onCreateClick()
     }
   }
 

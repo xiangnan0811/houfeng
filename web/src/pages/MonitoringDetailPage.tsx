@@ -18,8 +18,6 @@ import {
   postMonitoringInstanceAction,
   rejectPendingMonitoringInstanceBinding,
   resetMonitoringInstanceBinding,
-  restoreRetiredMonitoringInstanceToObserving,
-  retireMonitoringInstance,
   resumeMonitoringInstanceMonitoring,
 } from '../lib/api'
 import type { ActiveIncidentRecord, MonitoringInstanceOnboardingState } from '../lib/types'
@@ -30,7 +28,6 @@ import {
   MONITORING_INSTANCE_BINDING_ACTION_ERROR,
   MONITORING_INSTANCE_BINDING_CONFLICT_LOAD_ERROR,
   MONITORING_INSTANCE_BINDING_CONFLICT_STATUS,
-  MONITORING_INSTANCE_LIFECYCLE_ACTION_ERROR,
 } from './monitoring-detail/monitoringDetailConstants'
 import {
   INITIAL_MONITORING_DETAIL_STATE,
@@ -44,7 +41,6 @@ import type {
   HistoryTab,
   LinkedVPSState,
   MonitoringDetailPageState,
-  MonitoringInstanceLifecycleAction,
   PendingRuntimeConfirmation,
   TimeWindow,
 } from './monitoring-detail/types'
@@ -66,9 +62,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] =
     useState<PendingRuntimeConfirmation | null>(null)
-  const [lifecycleSubmitting, setLifecycleSubmitting] = useState<MonitoringInstanceLifecycleAction | null>(null)
-  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
-  const [showRetireConfirmation, setShowRetireConfirmation] = useState(false)
   const [bindingConflictState, setBindingConflictState] = useState<BindingConflictState>({
     requestedMonitoringInstanceId: null,
     onboarding: null,
@@ -583,52 +576,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     }
   }
 
-  async function handleLifecycleAction(action: MonitoringInstanceLifecycleAction) {
-    if (!monitoringInstance) return
-    const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
-    setLifecycleSubmitting(action)
-    setLifecycleError(null)
-
-    try {
-      const updated =
-        action === 'retire'
-          ? await retireMonitoringInstance(actionMonitoringInstanceId)
-          : await restoreRetiredMonitoringInstanceToObserving(actionMonitoringInstanceId)
-      if (
-        !isMountedRef.current ||
-        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
-      ) {
-        return
-      }
-      setState((current) => ({
-        ...current,
-        monitoringInstance:
-          current.requestedMonitoringInstanceId === actionMonitoringInstanceId && current.monitoringInstance
-            ? mergeNonMetadataMonitoringInstanceRecord(current.monitoringInstance, updated)
-            : current.monitoringInstance,
-      }))
-      setShowRetireConfirmation(false)
-    } catch (error: unknown) {
-      if (
-        !isMountedRef.current ||
-        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
-      ) {
-        return
-      }
-      setLifecycleError(describeError(error, MONITORING_INSTANCE_LIFECYCLE_ACTION_ERROR))
-    } finally {
-      if (
-        isMountedRef.current &&
-        currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
-        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId
-      ) {
-        setLifecycleSubmitting(null)
-      }
-    }
-  }
-
   function applyOnboardingToMonitoringInstance(actionMonitoringInstanceId: string, onboarding: MonitoringInstanceOnboardingState) {
     setState((current) => {
       if (current.requestedMonitoringInstanceId !== actionMonitoringInstanceId) return current
@@ -727,16 +674,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
 
   function handleTimeWindowChange(nextTimeWindow: TimeWindow) {
     setTimeWindow(nextTimeWindow)
-  }
-
-  function startRetireConfirmation() {
-    setShowRetireConfirmation(true)
-    setLifecycleError(null)
-  }
-
-  function cancelRetireConfirmation() {
-    setShowRetireConfirmation(false)
-    setLifecycleError(null)
   }
 
   function openCommandDrawer() {
@@ -840,13 +777,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onBindingReset={() => void handleBindingAction('reset', resetMonitoringInstanceBinding)}
       timeWindow={timeWindow}
       onTimeWindowChange={handleTimeWindowChange}
-      showRetireConfirmation={showRetireConfirmation}
-      lifecycleSubmitting={lifecycleSubmitting}
-      lifecycleError={lifecycleError}
-      onLifecycleRestore={() => void handleLifecycleAction('restore-to-observing')}
-      onStartRetire={startRetireConfirmation}
-      onConfirmRetire={() => void handleLifecycleAction('retire')}
-      onCancelRetire={cancelRetireConfirmation}
       historyOpen={historyOpen}
       historyTab={historyTab}
       historyIncidents={historyIncidents}

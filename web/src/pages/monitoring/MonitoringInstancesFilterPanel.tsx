@@ -95,7 +95,7 @@ export function MonitoringInstancesFilterPanel({
             </select>
           </label>
           <label className="filter-select">
-            <span className="filter-select__label">生命周期</span>
+            <span className="filter-select__label">接入阶段</span>
             <select
               className="filter-select__control"
               value={filterState.lifecycle ?? ''}
@@ -193,8 +193,8 @@ export function MonitoringInstancesFilterPanel({
           ) : null}
           {filterState.lifecycle ? (
             <span className="filter-chip">
-              <span className="filter-chip__label">生命周期: {filterState.lifecycle}</span>
-              <button type="button" className="filter-chip__remove" aria-label="移除筛选 生命周期" onClick={() => onSingleFilterChange('lifecycle', null)}>×</button>
+              <span className="filter-chip__label">接入阶段: {filterState.lifecycle}</span>
+              <button type="button" className="filter-chip__remove" aria-label="移除筛选 接入阶段" onClick={() => onSingleFilterChange('lifecycle', null)}>×</button>
             </span>
           ) : null}
           {filterState.runStatus ? (

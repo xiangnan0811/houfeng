@@ -119,11 +119,14 @@ export function DashboardPage() {
   // Metric card data
   const abnormalMonitoringInstanceCount = overview.abnormal_monitoring_instance_count + overview.severe_monitoring_instance_count
   const totalMonitoringInstances = overview.total_monitoring_instance_count
-  const onlineMonitoringInstances = totalMonitoringInstances - abnormalMonitoringInstanceCount
   const renewal30d = overview.asset_summary.renewal_due_30d_vps_count
-  const cancelledVps = overview.asset_summary.cancelled_vps_count ?? 0
   const cancellationAttention = overview.asset_summary.cancellation_attention_vps_count ?? 0
   const runningCancelledAssets = overview.asset_summary.running_cancelled_asset_count ?? 0
+
+  const assetOnboardingNeeded =
+    state.vpsAssets.length === 0 &&
+    totalMonitoringInstances === 0 &&
+    overview.total_target_count === 0
 
   // Cost: aggregate from cost_by_currency
   const costEntries = overview.asset_summary.cost_by_currency
@@ -155,14 +158,14 @@ export function DashboardPage() {
             <span className={`wb-card-num ${abnormalMonitoringInstanceCount === 0 ? 'ok' : 'err'}`}>{abnormalMonitoringInstanceCount}</span>
             <span className="wb-card-label">异常监控实例</span>
           </div>
-          <div className="wb-card-secondary">共 {totalMonitoringInstances} 个 · 在线 {onlineMonitoringInstances}</div>
+          <div className="wb-card-secondary">观测列表 · 从 VPS 详情页接入</div>
         </div>
         <div className="wb-card">
           <div className="wb-card-primary">
             <span className={`wb-card-num ${renewal30d > 0 ? 'warn' : ''}`}>{renewal30d}</span>
             <span className="wb-card-label">30天内续费</span>
           </div>
-          <div className="wb-card-secondary">联动待处理 {cancellationAttention} 个 · 已取消 {cancelledVps}</div>
+          <div className="wb-card-secondary">VPS 到期 · 联动待处理 {cancellationAttention}</div>
         </div>
         <div className="wb-card">
           <div className="wb-card-primary">
@@ -188,7 +191,16 @@ export function DashboardPage() {
             <span className="wb-col-title">关注</span>
           </div>
           <div className="wb-col-list">
-            {overview.abnormal_monitoring_instances.length === 0 && overview.abnormal_targets.length === 0 && cancellationAttention === 0 && (
+            {assetOnboardingNeeded ? (
+              <div className="wb-att-item" onClick={() => navigate('/vps')}>
+                <span className="alert-dot warn"></span>
+                <div className="wb-att-body">
+                  <span className="wb-att-text">先创建第一台 VPS</span>
+                  <span className="wb-att-meta">订阅和 agent 接入都在 VPS 详情页完成</span>
+                </div>
+              </div>
+            ) : null}
+            {!assetOnboardingNeeded && overview.abnormal_monitoring_instances.length === 0 && overview.abnormal_targets.length === 0 && cancellationAttention === 0 && (
               <div className="wb-att-item"><span className="wb-att-text text-muted text-sm">暂无需关注项</span></div>
             )}
             {cancellationAttention > 0 ? (
@@ -205,7 +217,7 @@ export function DashboardPage() {
                 <span className={`alert-dot ${n.current_health_status === '严重' ? 'err' : 'warn'}`}></span>
                 <div className="wb-att-body">
                   <span className="wb-att-text">{n.display_name} {n.current_primary_issue_summary}</span>
-                  <span className="wb-att-meta">{n.current_health_status}</span>
+                  <span className="wb-att-meta">观测异常 · 回到所属 VPS 判断影响</span>
                 </div>
               </div>
             ))}
@@ -224,12 +236,12 @@ export function DashboardPage() {
         {/* Column 2: Monitoring instances */}
         <div className="wb-col">
           <div className="wb-col-header">
-            <span className="wb-col-title">监控实例</span>
-            <span className="wb-col-link" onClick={() => navigate('/monitoring')}>全部 →</span>
+            <span className="wb-col-title">观测事实</span>
+            <span className="wb-col-link" onClick={() => navigate('/monitoring')}>列表 →</span>
           </div>
           <div className="wb-col-list">
             {abnormalMonitoringInstances.length === 0 && (
-              <div className="wb-row"><span className="dot dot-ok"></span><span className="wb-row-name text-muted">全部正常</span></div>
+              <div className="wb-row"><span className="dot dot-ok"></span><span className="wb-row-name text-muted">暂无异常观测</span></div>
             )}
             {abnormalMonitoringInstances.map(n => (
               <div className="wb-row" key={n.monitoring_instance_id} onClick={() => navigate(`/monitoring/${n.monitoring_instance_id}`)}>
@@ -267,12 +279,12 @@ export function DashboardPage() {
         {/* Column 4: Cost */}
         <div className="wb-col">
           <div className="wb-col-header">
-            <span className="wb-col-title">成本</span>
-            <span className="wb-col-link" onClick={() => navigate('/subscriptions')}>详情 →</span>
+            <span className="wb-col-title">账单事实</span>
+            <span className="wb-col-link" onClick={() => navigate('/vps?view=missing_subscription')}>缺口 →</span>
           </div>
           <div className="wb-col-list">
             {costEntries.length === 0 && (
-              <div className="wb-kv"><span className="text-muted">暂无订阅数据</span></div>
+              <div className="wb-kv"><span className="text-muted">暂无账单事实</span></div>
             )}
             {costEntries.map((c, i) => (
               <div className="wb-kv" key={i}>

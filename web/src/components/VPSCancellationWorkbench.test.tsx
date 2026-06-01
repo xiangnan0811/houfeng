@@ -56,7 +56,7 @@ function previewFixture(): CancellationPreview {
       },
       role: 'active',
       recommended_action: 'cancel_auto_renew_and_mark_cancelled',
-      message: '订阅仍处于 active，需要显式确认取消订阅自动续费并标记为 cancelled。',
+      message: '订阅账单记录仍显示自动续费有效，需要显式确认取消自动续费。',
     }],
     monitoring_instance_links: [{
       monitoring_instance_id: 'mi_001',
@@ -93,7 +93,7 @@ function previewFixture(): CancellationPreview {
       required: true,
       message: '将 VPS 续费决策设为 cancel，并根据订阅到期情况设置生命周期。',
     }],
-    warnings: ['订阅已非活跃，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
+    warnings: ['订阅账单记录已无续费动作，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
     blockers: [],
   }
 }

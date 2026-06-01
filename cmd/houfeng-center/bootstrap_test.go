@@ -207,6 +207,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSMonitoringInstancesHandler == nil {
 		t.Fatal("router vps monitoringInstances handler = nil, want non-nil")
 	}
+	if gotOpts.VPSSubscriptionsHandler == nil {
+		t.Fatal("router vps subscriptions handler = nil, want non-nil")
+	}
 	if gotOpts.VPSLinkMonitoringInstanceHandler == nil {
 		t.Fatal("router vps link monitoringInstance handler = nil, want non-nil")
 	}
@@ -257,9 +260,6 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	}
 	if gotOpts.MonitoringInstanceRuntimeControlHandler == nil {
 		t.Fatal("router monitoringInstance runtime control handler = nil, want non-nil")
-	}
-	if gotOpts.MonitoringInstanceLifecycleControlHandler == nil {
-		t.Fatal("router monitoringInstance lifecycle control handler = nil, want non-nil")
 	}
 	if gotOpts.MonitoringInstanceOnboardingHandler == nil {
 		t.Fatal("router monitoringInstance onboarding handler = nil, want non-nil")

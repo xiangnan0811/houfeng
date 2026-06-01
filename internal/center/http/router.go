@@ -22,6 +22,7 @@ type RouterOptions struct {
 	VPSCollectionHandler                          stdhttp.Handler
 	VPSItemHandler                                stdhttp.Handler
 	VPSMonitoringInstancesHandler                 stdhttp.Handler
+	VPSSubscriptionsHandler                       stdhttp.Handler
 	VPSLinkMonitoringInstanceHandler              stdhttp.Handler
 	VPSUnlinkMonitoringInstanceHandler            stdhttp.Handler
 	VPSTimelineHandler                            stdhttp.Handler
@@ -39,7 +40,6 @@ type RouterOptions struct {
 	MonitoringInstanceVPSHandler                  stdhttp.Handler
 	MonitoringInstanceRuntimeFactsHandler         stdhttp.Handler
 	MonitoringInstanceRuntimeControlHandler       stdhttp.Handler
-	MonitoringInstanceLifecycleControlHandler     stdhttp.Handler
 	MonitoringInstanceOnboardingHandler           stdhttp.Handler
 	MonitoringInstanceEnrollmentTokenHandler      stdhttp.Handler
 	MonitoringInstanceInstallCommandHandler       stdhttp.Handler
@@ -127,7 +127,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil {
+	if opts.VPSItemHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -148,6 +148,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSMonitoringInstancesHandler.ServeHTTP(w, r)
+			case vpsSubtreeSubscriptions:
+				if opts.VPSSubscriptionsHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSSubscriptionsHandler.ServeHTTP(w, r)
 			case vpsSubtreeLinkMonitoringInstance:
 				if opts.VPSLinkMonitoringInstanceHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -213,7 +219,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.MonitoringInstanceBatchHandler != nil {
 		mux.Handle("/api/monitoring-instances/batch", protect(opts.MonitoringInstanceBatchHandler))
 	}
-	if opts.MonitoringInstanceItemHandler != nil || opts.MonitoringInstanceVPSHandler != nil || opts.MonitoringInstanceRuntimeFactsHandler != nil || opts.MonitoringInstanceRuntimeControlHandler != nil || opts.MonitoringInstanceLifecycleControlHandler != nil || opts.MonitoringInstanceOnboardingHandler != nil || opts.MonitoringInstanceEnrollmentTokenHandler != nil || opts.MonitoringInstanceInstallCommandHandler != nil || opts.MonitoringInstanceBindingConfirmRebindHandler != nil || opts.MonitoringInstanceBindingRejectPendingHandler != nil || opts.MonitoringInstanceBindingResetHandler != nil || opts.MonitoringInstanceSparklinesHandler != nil || opts.MonitoringInstanceActionsHandler != nil {
+	if opts.MonitoringInstanceItemHandler != nil || opts.MonitoringInstanceVPSHandler != nil || opts.MonitoringInstanceRuntimeFactsHandler != nil || opts.MonitoringInstanceRuntimeControlHandler != nil || opts.MonitoringInstanceOnboardingHandler != nil || opts.MonitoringInstanceEnrollmentTokenHandler != nil || opts.MonitoringInstanceInstallCommandHandler != nil || opts.MonitoringInstanceBindingConfirmRebindHandler != nil || opts.MonitoringInstanceBindingRejectPendingHandler != nil || opts.MonitoringInstanceBindingResetHandler != nil || opts.MonitoringInstanceSparklinesHandler != nil || opts.MonitoringInstanceActionsHandler != nil {
 		mux.Handle("/api/monitoring-instances/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			monitoringInstanceID, subtree := monitoringInstanceSubtreePath(r.URL.Path)
 			if monitoringInstanceID == "" && subtree != monitoringInstanceSubtreeSparklines {
@@ -246,12 +252,6 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.MonitoringInstanceRuntimeControlHandler.ServeHTTP(w, r)
-			case monitoringInstanceSubtreeLifecycleControl:
-				if opts.MonitoringInstanceLifecycleControlHandler == nil {
-					stdhttp.NotFound(w, r)
-					return
-				}
-				opts.MonitoringInstanceLifecycleControlHandler.ServeHTTP(w, r)
 			case monitoringInstanceSubtreeOnboarding:
 				if opts.MonitoringInstanceOnboardingHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -373,6 +373,7 @@ const (
 	vpsSubtreeUnknown                  vpsSubtree = ""
 	vpsSubtreeItem                     vpsSubtree = "item"
 	vpsSubtreeMonitoringInstances      vpsSubtree = "monitoring-instances"
+	vpsSubtreeSubscriptions            vpsSubtree = "subscriptions"
 	vpsSubtreeLinkMonitoringInstance   vpsSubtree = "link-monitoring-instance"
 	vpsSubtreeUnlinkMonitoringInstance vpsSubtree = "unlink-monitoring-instance"
 	vpsSubtreeTimeline                 vpsSubtree = "timeline"
@@ -402,6 +403,8 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 	switch segments[1] {
 	case "monitoring-instances":
 		return segments[0], vpsSubtreeMonitoringInstances
+	case "subscriptions":
+		return segments[0], vpsSubtreeSubscriptions
 	case "link-monitoring-instance":
 		return segments[0], vpsSubtreeLinkMonitoringInstance
 	case "unlink-monitoring-instance":
@@ -431,7 +434,6 @@ const (
 	monitoringInstanceSubtreeVPS                  monitoringInstanceSubtree = "vps"
 	monitoringInstanceSubtreeRuntimeFacts         monitoringInstanceSubtree = "runtime-facts"
 	monitoringInstanceSubtreeRuntimeControl       monitoringInstanceSubtree = "runtime-control"
-	monitoringInstanceSubtreeLifecycleControl     monitoringInstanceSubtree = "lifecycle-control"
 	monitoringInstanceSubtreeOnboarding           monitoringInstanceSubtree = "onboarding"
 	monitoringInstanceSubtreeEnrollmentToken      monitoringInstanceSubtree = "enrollment-token"
 	monitoringInstanceSubtreeInstallCommand       monitoringInstanceSubtree = "install-command"
@@ -466,9 +468,6 @@ func monitoringInstanceSubtreePath(path string) (monitoringInstanceID string, su
 	}
 	if segments[1] == "runtime" && len(segments) == 3 {
 		return segments[0], monitoringInstanceSubtreeRuntimeControl
-	}
-	if segments[1] == "lifecycle" && len(segments) == 3 {
-		return segments[0], monitoringInstanceSubtreeLifecycleControl
 	}
 	if segments[1] == "onboarding" && len(segments) == 2 {
 		return segments[0], monitoringInstanceSubtreeOnboarding

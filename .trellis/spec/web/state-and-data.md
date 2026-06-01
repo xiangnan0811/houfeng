@@ -185,6 +185,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 - Asset Decisions 首屏主 surface 必须是一个统一工作队列；不得恢复三张同权 VPS queue table。
 - 决策编辑必须在 drawer 或同等次级 surface 中完成；保存成功 notice 应在队列 surface 可见。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
+- Asset Decisions、Dashboard 和 VPS 列表只能把 Subscription / MonitoringInstance 作为 VPS 的证据和缺口展示；主处理入口必须回到 `/vps/{id}` 或 VPS 筛选视图。不要把订阅或监控实例作为与 VPS 同级的“待处理主体”。
 - 当订阅为 `expired` / `cancelled` / `paused` 而 VPS、MonitoringInstance 或 Target 仍表现为 active/running，页面必须把它归入 `cancellation_attention` 或等价的联动处理入口；入口应打开 `/vps/{id}?workbench=cancellation`，由统一工作台提交用户确认的步骤。
 - 统一取消 / 退役工作台必须展示 preview 返回的 subscription、VPS、MonitoringInstance、Target 影响范围；MonitoringInstance/Target 默认只展示为待确认项，只有用户在工作台勾选并提交的 `monitoring_instance_actions` / `target_actions` 才能修改运行状态。
 - MonitoringInstance 列表 / 详情、Target 列表 / 详情必须消费批量 asset-context API 显示关联 VPS 的取消 / 过期 / 状态割裂上下文；不得只显示自身运行状态而隐藏宿主 VPS 已取消或待取消的事实。
@@ -193,7 +194,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - VPS inventory quick views 中 derived filters 在前端执行即可；40+ VPS 量级不引入新缓存/状态库，不新增 API 字段。
 - Dashboard 深链进入 VPS 页时，query 必须被页面首屏可见的 tab/chip/drawer 状态承接；不能静默丢弃。
 - 常规业务对象关联输入不得要求用户复制内部 ID：VPS facts 的 Provider、VPS↔MonitoringInstance link 的 MonitoringInstance、VPS service/domain 的 Target、domain 的 Service 都应使用页面加载的数据选择器，并保留“未关联/不关联”选项。选择器为空或加载失败时必须给出明确说明和到对应列表/创建流程的入口；选择监控实例/Target 只创建资产引用或链接，不隐式修改 MonitoringInstance/Target/Agent/ProbeItem 语义。
-- `/subscriptions?vps_id=<id>&create=1` 是可落地上下文：订阅页必须显示当前 VPS 筛选/上下文，创建表单预填该 VPS，用户仍可切换或清除筛选。
+- `/subscriptions?vps_id=<id>&create=1` 只作为次级账单事实入口保留；普通补录从 VPS 详情页的 `createVPSSubscription(vpsId, input)` 发起，且不要求用户选择订阅状态。
 
 #### 4. Validation & Error Matrix
 
@@ -215,10 +216,13 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: 资产决策保存 `migrate` 后，VPS 从 `待评估` tab 消失并出现在 `迁移` tab，notice 留在队列 surface。
 - Good: 资产决策保存 `cancel` 后，notice 继续展示 `VPS -> 取消`，并追加 API 返回的订阅联动消息 / 订阅页 action。
 - Good: VPS 详情打开 MonitoringInstance link Drawer 时懒加载 `listMonitoringInstances()`，用 `选择监控实例` selector 展示名称、ID、provider、生命周期和健康状态。
+- Good: VPS 详情无订阅时显示“快速创建订阅”，调用 `/api/vps/{vps_id}/subscriptions`，表单只收账单事实，不出现订阅状态。
+- Good: VPS 详情无监控实例时显示“创建并接入 agent”，调用 `/api/vps/{vps_id}/monitoring-instances`，后端从 VPS 派生身份字段，成功后跳转 MonitoringInstance onboarding。
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
 - Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked monitoring instance health。
 - Bad: Page 直接 `fetch('/api/vps')` 或在组件层调 API；业务请求必须走 `lib/api.ts`。
 - Bad: 在 VPS 详情表单里让用户输入 `mi_...`、`tg_...`、`svc_...` 作为常规路径，且不给候选列表或落地入口。
+- Bad: 让用户先去 Monitoring 列表创建监控实例、重复填写名称 / 地区 / 服务商，再回 VPS 详情关联，作为普通接入路径。
 
 #### 6. Tests Required
 
@@ -358,6 +362,7 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 
 - `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。Provider/MonitoringInstance/Target selector 数据可在对应 Drawer 打开时懒加载，避免主详情首屏为选择器阻塞。
 - VPS scoped subscription 只作为续费/成本 evidence。订阅请求失败时显示请求错误和未知状态，不得把 failure 当成真实 `缺订阅`。
+- VPS Detail 是普通补录的主入口：`createVPSSubscription(vpsId, input)` 只提交账单事实且不含 status；`createVPSMonitoringInstance(vpsId, input?)` 默认空 body，让后端从 VPS 派生 MonitoringInstance 身份并自动 link。
 - VPS 详情页必须可加载 `getVPSCancellationPreview(vpsId)` 并在资产判断 workbench 显示取消 / 过期影响范围；URL `?workbench=cancellation` 应直接打开统一取消 / 退役工作台。
 - 如果 preview 显示 subscription 已非活跃但 VPS 仍未取消，页面不得引导“创建订阅”作为主路径，而应引导用户处理 VPS、MonitoringInstance 与 Target/实例的 lifecycle action。
 - `VPSAssetDetail.monitoring_instance_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_monitoring_instance_link_count` 在列表页只能代表数量的限制。

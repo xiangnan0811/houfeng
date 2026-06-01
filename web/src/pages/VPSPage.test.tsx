@@ -402,6 +402,8 @@ describe('VPSPage', () => {
     expect(within(modal).getByText('核心信息')).toBeInTheDocument()
     expect(within(modal).getByText('网络入口')).toBeInTheDocument()
     expect(within(modal).getByText('创建后进入详情页。')).toBeInTheDocument()
+    expect(within(modal).queryByLabelText('生命周期')).not.toBeInTheDocument()
+    expect(within(modal).queryByLabelText('用途状态')).not.toBeInTheDocument()
     fireEvent.click(within(modal).getByRole('button', { name: '取消' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加 VPS' })).not.toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))

@@ -16,10 +16,6 @@ type Props = {
   onOpenHistory: () => void
   onOpenCommands: () => void
   onOpenOnboarding: () => void
-  isRetiredMonitoringInstance: boolean
-  lifecycleSubmitting: boolean
-  onRestoreLifecycle: () => void
-  onStartRetire: () => void
 }
 
 function locationLine(monitoringInstance: MonitoringInstanceRecord): string {
@@ -37,10 +33,6 @@ export function MonitoringInstanceWatchtowerHeader({
   onOpenHistory,
   onOpenCommands,
   onOpenOnboarding,
-  isRetiredMonitoringInstance,
-  lifecycleSubmitting,
-  onRestoreLifecycle,
-  onStartRetire,
 }: Props) {
   const labelText = formatLabelList(monitoringInstance.labels)
   const agentVersion = latestSample?.agent_version || '—'
@@ -101,23 +93,6 @@ export function MonitoringInstanceWatchtowerHeader({
                 >
                   执行命令…
                 </button>
-                {isRetiredMonitoringInstance ? (
-                  <button
-                    type="button"
-                    disabled={lifecycleSubmitting}
-                    onClick={() => onRestoreLifecycle()}
-                  >
-                    {lifecycleSubmitting ? '正在恢复…' : '恢复到观察中'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={lifecycleSubmitting}
-                    onClick={() => onStartRetire()}
-                  >
-                    退役监控实例
-                  </button>
-                )}
               </div>
             </details>
           </div>

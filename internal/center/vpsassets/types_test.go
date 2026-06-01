@@ -56,6 +56,11 @@ func TestNormalizeCreateInputTrimsDefaultsAndLabels(t *testing.T) {
 	if input.ProviderName != "Hetzner" || input.City != "Tokyo" || input.Note != "production" {
 		t.Fatalf("string fields were not trimmed: %#v", input)
 	}
+
+	defaulted := NormalizeCreateInput(CreateInput{DisplayName: "Defaulted Edge"})
+	if defaulted.LifecycleStatus != DefaultLifecycleStatus || defaulted.UsageStatus != DefaultUsageStatus {
+		t.Fatalf("defaulted statuses = %q/%q, want %q/%q", defaulted.LifecycleStatus, defaulted.UsageStatus, DefaultLifecycleStatus, DefaultUsageStatus)
+	}
 }
 
 func TestValidateCreateInput(t *testing.T) {
@@ -65,9 +70,9 @@ func TestValidateCreateInput(t *testing.T) {
 		want  error
 	}{
 		{name: "valid", input: CreateInput{DisplayName: "Tokyo Edge", LifecycleStatus: LifecycleActive, UsageStatus: UsageInUse}},
+		{name: "missing statuses default", input: CreateInput{DisplayName: "Tokyo Edge"}},
 		{name: "zero ssh port defaults", input: CreateInput{DisplayName: "Tokyo Edge", LifecycleStatus: LifecycleActive, UsageStatus: UsageInUse, SSHPort: 0}},
 		{name: "blank display name", input: CreateInput{DisplayName: " ", LifecycleStatus: LifecycleActive, UsageStatus: UsageInUse}, want: ErrInvalidVPSAssetInput},
-		{name: "missing lifecycle status", input: CreateInput{DisplayName: "Tokyo Edge", UsageStatus: UsageInUse}, want: ErrInvalidVPSAssetInput},
 		{name: "invalid lifecycle status", input: CreateInput{DisplayName: "Tokyo Edge", LifecycleStatus: "online", UsageStatus: UsageInUse}, want: ErrInvalidVPSAssetInput},
 		{name: "invalid usage status", input: CreateInput{DisplayName: "Tokyo Edge", LifecycleStatus: LifecycleActive, UsageStatus: "busy"}, want: ErrInvalidVPSAssetInput},
 		{name: "invalid renewal decision", input: CreateInput{DisplayName: "Tokyo Edge", LifecycleStatus: LifecycleActive, UsageStatus: UsageInUse, RenewalDecision: "later"}, want: ErrInvalidVPSAssetInput},

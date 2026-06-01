@@ -167,6 +167,93 @@ func TestSubscriptionsCollectionCreatesSubscription(t *testing.T) {
 	}
 }
 
+func TestVPSSubscriptionsCreatesBillingFactWithoutUserStatus(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	renewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC))
+	repo := &fakeSubscriptionRepository{createSubscriptionResult: subscriptions.Record{
+		SubscriptionID: "sub_001",
+		VPSID:          "vps_001",
+		Price:          12,
+		Currency:       "USD",
+		BillingCycle:   "monthly",
+		BillingMonths:  1,
+		MonthlyPrice:   12,
+		RenewAt:        &renewAt,
+		AutoRenew:      true,
+		Status:         subscriptions.StatusActive,
+		PaymentMethod:  "card",
+		Note:           "billing fact",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}}
+
+	handler := handlers.VPSSubscriptions(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(`{
+		"price":12,
+		"currency":" usd ",
+		"billing_cycle":" monthly ",
+		"billing_months":1,
+		"renew_at":"2026-06-01",
+		"auto_renew":true,
+		"payment_method":" card ",
+		"note":" billing fact "
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+	if repo.createSubscriptionInput.VPSID != "vps_001" {
+		t.Fatalf("create vps id = %q, want scoped vps_001", repo.createSubscriptionInput.VPSID)
+	}
+	if repo.createSubscriptionInput.Status != subscriptions.StatusActive {
+		t.Fatalf("create status = %q, want internal default active", repo.createSubscriptionInput.Status)
+	}
+	if repo.createSubscriptionInput.Currency != "USD" || repo.createSubscriptionInput.PaymentMethod != "card" || repo.createSubscriptionInput.Note != "billing fact" {
+		t.Fatalf("create input = %#v, want normalized billing fact", repo.createSubscriptionInput)
+	}
+	var body subscriptions.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.SubscriptionID != "sub_001" || body.VPSID != "vps_001" {
+		t.Fatalf("body = %#v, want created scoped subscription", body)
+	}
+}
+
+func TestVPSSubscriptionsRejectsStatusField(t *testing.T) {
+	handler := handlers.VPSSubscriptions(&fakeSubscriptionRepository{})
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(`{"price":12,"currency":"USD","billing_months":1,"status":"paused"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+}
+
+func TestVPSSubscriptionsListsOnlyScopedVPSSubscriptions(t *testing.T) {
+	repo := &fakeSubscriptionRepository{}
+	handler := handlers.VPSSubscriptions(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/subscriptions?status=active&order=desc", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.listSubscriptionsFilter.VPSID != "vps_001" {
+		t.Fatalf("filter vps id = %q, want vps_001", repo.listSubscriptionsFilter.VPSID)
+	}
+	if repo.listSubscriptionsFilter.Status != subscriptions.StatusActive || repo.listSubscriptionsFilter.Order != subscriptions.OrderDesc {
+		t.Fatalf("filters = %#v, want normalized query filters plus scoped vps", repo.listSubscriptionsFilter)
+	}
+}
+
 func TestSubscriptionsCollectionRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -409,6 +496,7 @@ func TestSubscriptionsUnsupportedMethodsReturnMethodNotAllowed(t *testing.T) {
 		path    string
 	}{
 		{name: "collection", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{}), method: http.MethodDelete, path: "/api/subscriptions"},
+		{name: "vps scoped", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{}), method: http.MethodDelete, path: "/api/vps/vps_001/subscriptions"},
 		{name: "item", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{}), method: http.MethodPost, path: "/api/subscriptions/sub_001"},
 	}
 
@@ -436,6 +524,8 @@ func TestSubscriptionsMapRepositoryFailures(t *testing.T) {
 	}{
 		{name: "list", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{listSubscriptionsErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/subscriptions"},
 		{name: "create", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/subscriptions", body: `{"vps_id":"vps_001","price":12,"currency":"USD","billing_months":1}`},
+		{name: "vps scoped list", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{listSubscriptionsErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/vps/vps_001/subscriptions"},
+		{name: "vps scoped create", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/vps/vps_001/subscriptions", body: `{"price":12,"currency":"USD","billing_months":1}`},
 		{name: "get", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{getSubscriptionErr: errors.New("get failed")}), method: http.MethodGet, path: "/api/subscriptions/sub_001"},
 		{name: "patch", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{patchSubscriptionErr: errors.New("patch failed")}), method: http.MethodPatch, path: "/api/subscriptions/sub_001", body: `{"note":"review"}`},
 	}

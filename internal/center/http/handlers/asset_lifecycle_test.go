@@ -73,9 +73,9 @@ func TestVPSCancellationPreviewReturnsImpactGraph(t *testing.T) {
 			Record:            subscriptions.Record{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusExpired, CreatedAt: now, UpdatedAt: now},
 			Role:              "inactive",
 			RecommendedAction: "keep_inactive",
-			Message:           "订阅已处于非活跃状态，仍需处理 VPS、MonitoringInstance 与实例状态。",
+			Message:           "订阅账单记录已无续费动作，仍需处理 VPS、MonitoringInstance 与入口探测状态。",
 		}},
-		Warnings: []string{"关联订阅已处于过期或取消状态；这不是“没有关联订阅”，仍需处理 VPS、MonitoringInstance 与实例状态。"},
+		Warnings: []string{"关联订阅账单记录已无续费动作；这不是“没有关联订阅”，仍需处理 VPS、MonitoringInstance 与入口探测状态。"},
 	}}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/cancellation-preview", nil)

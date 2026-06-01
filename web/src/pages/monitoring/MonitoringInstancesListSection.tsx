@@ -52,7 +52,7 @@ type MonitoringInstancesListSectionProps = {
   onRowClick: (monitoringInstance: MonitoringInstanceRecord) => void
   onConfirmPause: (monitoringInstance: MonitoringInstanceRecord) => void
   onCancelPause: (monitoringInstance: MonitoringInstanceRecord) => void
-  onCreateMonitoringInstance: () => void
+  onOpenVPSInventory: () => void
 }
 
 export function MonitoringInstancesListSection({
@@ -85,7 +85,7 @@ export function MonitoringInstancesListSection({
   onRowClick,
   onConfirmPause,
   onCancelPause,
-  onCreateMonitoringInstance,
+  onOpenVPSInventory,
 }: MonitoringInstancesListSectionProps) {
   const firstRunEmpty = baseMonitoringInstances.length === 0 && !hasActiveFilters && monitoringInstanceListView === 'all'
   const bindingConflictEmpty =
@@ -123,11 +123,11 @@ export function MonitoringInstancesListSection({
         <PageState
           kind="empty"
           surface="empty"
-          title="候风尚未接入任何监控实例"
-          description="请先接入第一个监控实例，完成接入后再用它支撑 VPS 运行事实。"
+          title="尚无观测事实"
+          description="普通服务器请先创建 VPS，再从 VPS 详情页创建监控实例并接入 agent。"
           action={(
-            <button type="button" className="btn md primary" onClick={onCreateMonitoringInstance}>
-              接入第一个监控实例
+            <button type="button" className="btn md primary" onClick={onOpenVPSInventory}>
+              创建第一台 VPS
             </button>
           )}
         />

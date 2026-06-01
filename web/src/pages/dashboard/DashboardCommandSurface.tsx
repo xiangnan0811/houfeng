@@ -102,7 +102,7 @@ function commandDescription(
   maintenanceTotal: number,
   isFreshInstall: boolean,
 ) {
-  if (isFreshInstall) return '接入监控实例 → 补 VPS → 配目标。'
+  if (isFreshInstall) return '创建 VPS → 补账单事实 → 接入 agent。'
 
   const summary = overview.asset_summary
   const pressureTotal = assetPressureCount(summary)
@@ -262,10 +262,10 @@ function observabilityRows(metrics: DashboardMetric[], overview: DashboardOvervi
   if (metrics.length === 0) {
     return [
       {
-        label: '监控实例',
+        label: 'VPS 主体',
         value: overview.total_monitoring_instance_count,
-        detail: '尚未接入观测监控实例',
-        to: DASHBOARD_LINKS.monitoring,
+        detail: '从 VPS 详情页接入观测',
+        to: DASHBOARD_LINKS.vps,
         tone: 'notice',
       },
       {
@@ -297,16 +297,16 @@ function nextActions(
   if (isFreshInstall) {
     return [
       {
-        label: '接入第一个监控实例',
-        detail: '登记 · 接入',
-        to: DASHBOARD_LINKS.monitoring,
+        label: '创建第一台 VPS',
+        detail: '主体 · 入口',
+        to: DASHBOARD_LINKS.vps,
         tone: 'notice',
         primary: true,
       },
       {
-        label: '查看监控实例接入',
-        detail: '待接入 / 绑定',
-        to: DASHBOARD_LINKS.monitoringPendingOnboarding,
+        label: '从 VPS 接入 agent',
+        detail: '详情页 · 一键命令',
+        to: DASHBOARD_LINKS.vps,
         tone: 'neutral',
       },
       {

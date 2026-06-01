@@ -128,7 +128,7 @@ describe('MonitoringComparePage', () => {
     expect(screen.getByRole('link', { name: 'Osaka Core' })).toHaveAttribute('href', '/monitoring/mi_b')
     expect(screen.getAllByRole('link', { name: '监控实例详情' })).toHaveLength(2)
     expect(screen.getAllByText('健康状态')).toHaveLength(2)
-    expect(screen.getAllByText('生命周期')).toHaveLength(2)
+    expect(screen.getAllByText('接入阶段')).toHaveLength(2)
     expect(screen.getAllByText('运行 / 绑定')).toHaveLength(2)
     expect(screen.getAllByText('位置上下文')).toHaveLength(2)
     expect(screen.getAllByText('样本可用性')).toHaveLength(2)

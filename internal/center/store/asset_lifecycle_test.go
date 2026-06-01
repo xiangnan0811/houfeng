@@ -52,6 +52,57 @@ func TestPostgresAssetLifecycleMigrationDefinesAuditTablesAndIndexes(t *testing.
 	}
 }
 
+func TestPostgresVPSFirstStatusMigrationNormalizesLegacyStateIntoVPSAudit(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0030_vps_first_status_semantics.sql"))
+	if err != nil {
+		t.Fatalf("ReadFile(vps-first migration) error = %v", err)
+	}
+	text := string(source)
+	for _, snippet := range []string{
+		"set status = 'unknown'",
+		"not in ('active', 'paused', 'cancelled', 'expired', 'unknown')",
+		"set lifecycle_status = '待接入'",
+		"not in ('待接入', '在用', '观察中', '不续费', '已退役')",
+		"subscription_evidence as",
+		"monitoring_evidence as",
+		"cancelled_auto_renew_count",
+		"new_lifecycle_status",
+		"new_renewal_decision",
+		"update vps_assets",
+		"insert into asset_lifecycle_actions",
+		"ala_mig0030_",
+		"insert into asset_lifecycle_action_steps",
+		"als_mig0030_",
+		"insert into renewal_decisions",
+		"rdec_mig0030_",
+		"old_lifecycle_status",
+		"new_lifecycle_status",
+		"legacy_evidence",
+		"subscription_evidence",
+		"monitoring_evidence",
+	} {
+		if !strings.Contains(text, snippet) {
+			t.Fatalf("vps-first status migration missing %q", snippet)
+		}
+	}
+	if strings.Contains(text, "set status = 'active'") {
+		t.Fatalf("vps-first status migration must not coerce invalid legacy subscription status to active")
+	}
+	statusNormalize := strings.Index(text, "update subscriptions")
+	classify := strings.Index(text, "classified as")
+	if statusNormalize < 0 || classify < 0 || statusNormalize > classify {
+		t.Fatalf("vps-first status migration must normalize legacy subscription status before classification")
+	}
+	actionInsert := strings.Index(text, "insert into asset_lifecycle_actions")
+	stepInsert := strings.Index(text, "insert into asset_lifecycle_action_steps")
+	renewalInsert := strings.Index(text, "insert into renewal_decisions")
+	if actionInsert < 0 || stepInsert < 0 || renewalInsert < 0 || actionInsert > stepInsert || actionInsert > renewalInsert {
+		t.Fatalf("vps-first status migration must create action audit before steps and renewal history")
+	}
+}
+
 func TestApplyVPSCancellationRejectsArchivedVPSBeforeMutation(t *testing.T) {
 	t.Parallel()
 

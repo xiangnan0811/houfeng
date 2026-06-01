@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { MonoDigits } from '../../components/atoms'
 
 type MonitoringHeroProps = {
@@ -8,7 +10,6 @@ type MonitoringHeroProps = {
   onAbnormalClick: () => void
   onOnboardingClick: () => void
   onRuntimeAttentionClick: () => void
-  onCreateClick: () => void
 }
 
 export function MonitoringHero({
@@ -19,7 +20,6 @@ export function MonitoringHero({
   onAbnormalClick,
   onOnboardingClick,
   onRuntimeAttentionClick,
-  onCreateClick,
 }: MonitoringHeroProps) {
   return (
     <>
@@ -29,9 +29,9 @@ export function MonitoringHero({
           <p className="page-sub">观察 agent 接入后的监控实例、心跳、主机性能与运行控制。</p>
         </div>
         <div className="header-actions">
-          <button type="button" className="btn md primary" onClick={onCreateClick}>
-            接入监控实例
-          </button>
+          <Link className="btn md primary" to="/vps">
+            从 VPS 接入 agent
+          </Link>
         </div>
       </div>
       <div className="hero-stats animate-in">

@@ -22,10 +22,6 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
-function mockTextResponse(body: string, status = 200) {
-  return new Response(body, { status })
-}
-
 function deferredResponse() {
   let resolve!: (response: Response) => void
   let reject!: (error?: unknown) => void
@@ -57,6 +53,10 @@ function monitoringInstanceRecord(overrides: Partial<Record<string, unknown>> = 
   }
 }
 
+function getMonitoringHeaderVPSLink() {
+  return screen.getByRole('link', { name: '从 VPS 接入 agent' })
+}
+
 
 
 describe('MonitoringPage', () => {
@@ -65,159 +65,63 @@ describe('MonitoringPage', () => {
     window.sessionStorage.clear()
   })
 
-  it('creates a monitoringInstance and navigates to onboarding without pre-issuing a token', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(
-        mockJSONResponse({
-          monitoring_instance_id: 'mi_001',
-          display_name: 'Tokyo Edge',
-          region: 'ap-northeast-1',
-          city: 'Tokyo',
-          provider: 'Vultr',
-          lifecycle_status: '待接入',
-          monitoring_status: '启用',
-          binding_status: '未绑定',
-          labels: [],
-          note: '',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          created_at: '2026-04-26T09:00:00Z',
-          updated_at: '2026-04-26T09:00:00Z',
-        }),
-      )
+  it('routes the monitoring page onboarding CTA to VPS inventory without opening a standalone create form', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
       <MemoryRouter initialEntries={['/monitoring']}>
         <Routes>
           <Route path="/monitoring" element={<MonitoringPage />} />
-          <Route path="/monitoring/:monitoringInstanceId" element={<div>onboarding workspace</div>} />
+          <Route path="/vps" element={<div>vps inventory</div>} />
         </Routes>
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '接入监控实例' })).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(getMonitoringHeaderVPSLink()).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: '监控' })).toBeInTheDocument()
     expect(screen.getByText('观察 agent 接入后的监控实例、心跳、主机性能与运行控制。')).toBeInTheDocument()
-
-	fireEvent.click(screen.getByRole('button', { name: '接入监控实例' }))
-	const createDrawer = screen.getByRole('dialog', { name: '接入监控实例表单' })
-	expect(within(createDrawer).getByRole('heading', { name: '接入监控实例' })).toBeInTheDocument()
-	expect(within(createDrawer).getByText('创建完成后将进入监控实例详情页，并自动打开接入抽屉生成一键安装命令。')).toBeInTheDocument()
-	expect(within(createDrawer).queryByLabelText('生命周期状态')).not.toBeInTheDocument()
-	fireEvent.change(within(createDrawer).getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
-	fireEvent.change(within(createDrawer).getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })
-	fireEvent.change(within(createDrawer).getByLabelText('城市'), { target: { value: 'Tokyo' } })
-	fireEvent.change(within(createDrawer).getByLabelText('供应商'), { target: { value: 'Vultr' } })
-
-    fireEvent.click(screen.getByRole('button', { name: '创建并接入' }))
-
-    await waitFor(() => expect(screen.getByText('onboarding workspace')).toBeInTheDocument())
+    expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps')
+    expect(screen.queryByRole('button', { name: '高级创建' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '高级创建监控实例表单' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('显示名称')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '创建并接入' })).not.toBeInTheDocument()
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({
-        display_name: 'Tokyo Edge',
-        group: '',
-        region: 'ap-northeast-1',
-        city: 'Tokyo',
-        provider: 'Vultr',
-        labels: [],
-        note: '',
-        lifecycle_status: '待接入',
-      }),
-    })
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/monitoring-instances/mi_001/enrollment-token', expect.anything())
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(getMonitoringHeaderVPSLink())
+
+    await waitFor(() => expect(screen.getByText('vps inventory')).toBeInTheDocument())
   })
 
-  it('keeps create errors local to the page', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockJSONResponse({ error: 'display name already exists' }, 409)),
-    )
+  it('routes the empty monitoring list action to VPS inventory', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
 
     render(
       <MemoryRouter initialEntries={['/monitoring']}>
         <Routes>
           <Route path="/monitoring" element={<MonitoringPage />} />
-          <Route path="/monitoring/:monitoringInstanceId" element={<div>onboarding workspace</div>} />
+          <Route path="/vps" element={<div>vps inventory</div>} />
         </Routes>
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '接入监控实例' })).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByText('尚无观测事实')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: '接入监控实例' }))
-    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
-    fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })
-    fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
-    fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'Vultr' } })
+    expect(screen.getByRole('button', { name: '创建第一台 VPS' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '高级创建监控实例表单' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '创建并接入' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
 
-    await waitFor(() =>
-      expect(screen.getByText('display name already exists')).toBeInTheDocument(),
-    )
-    expect(screen.getByRole('heading', { name: '监控' })).toBeInTheDocument()
-    expect(screen.queryByText('onboarding workspace')).not.toBeInTheDocument()
-  })
-
-  it('surfaces the shared API fallback message when monitoringInstance creation fails without an error body', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockTextResponse('', 500)),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
-          <Route path="/monitoring/:monitoringInstanceId" element={<div>onboarding workspace</div>} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '接入监控实例' })).toBeInTheDocument(),
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '接入监控实例' }))
-    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Tokyo Edge' } })
-    fireEvent.change(screen.getByLabelText('地区'), { target: { value: 'ap-northeast-1' } })
-    fireEvent.change(screen.getByLabelText('城市'), { target: { value: 'Tokyo' } })
-    fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'Vultr' } })
-
-    fireEvent.click(screen.getByRole('button', { name: '创建并接入' }))
-
-    await waitFor(() => expect(screen.getByText('Request failed: 500')).toBeInTheDocument())
-    expect(screen.queryByText('请求失败：状态码 500')).not.toBeInTheDocument()
-    expect(screen.queryByText('onboarding workspace')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('vps inventory')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('shows a clear onboarding workspace path for an existing monitoringInstance', async () => {
@@ -920,7 +824,7 @@ describe('MonitoringPage', () => {
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
 
-    const lifecycleSelect = screen.getByDisplayValue('生命周期: 全部')
+    const lifecycleSelect = screen.getByDisplayValue('接入阶段: 全部')
     fireEvent.change(lifecycleSelect, { target: { value: '在用' } })
 
     await waitFor(() =>
@@ -1081,7 +985,7 @@ describe('MonitoringPage', () => {
   })
 
 
-  it('opens the create monitoringInstance drawer from the section heading button', async () => {
+  it('does not expose the standalone monitoringInstance create drawer from the page chrome', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(mockJSONResponse([])),
@@ -1095,18 +999,12 @@ describe('MonitoringPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '接入监控实例' })).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(getMonitoringHeaderVPSLink()).toBeInTheDocument())
 
-	expect(screen.queryByRole('dialog', { name: '接入监控实例表单' })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '接入监控实例' }))
-    const createDrawer = screen.getByRole('dialog', { name: '接入监控实例表单' })
-	expect(within(createDrawer).getByRole('heading', { name: '接入监控实例' })).toBeInTheDocument()
-
-    fireEvent.click(within(createDrawer).getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('dialog', { name: '接入监控实例表单' })).not.toBeInTheDocument()
+    expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps')
+    expect(screen.queryByRole('button', { name: '高级创建' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '高级创建监控实例表单' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('显示名称')).not.toBeInTheDocument()
   })
 
   it('renders three mini sparklines per row when sparklines data is loaded', async () => {

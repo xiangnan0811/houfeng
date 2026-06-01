@@ -82,7 +82,7 @@ The center applies embedded migrations on startup and serves API plus the built 
 
 ## Docker Compose center deployment
 
-The Compose path packages only the center and built web UI plus PostgreSQL. It does not run agents in containers; monitored hosts still use the center-generated Linux/systemd onboarding command from the MonitoringInstance onboarding page.
+The Compose path packages only the center and built web UI plus PostgreSQL. It does not run agents in containers; monitored hosts still use the center-generated Linux/systemd onboarding command reached after creating a VPS and its scoped MonitoringInstance from the VPS detail page.
 
 Prerequisites: Docker with Compose support, and an operator-managed HTTPS reverse proxy for production/public access.
 
@@ -135,7 +135,7 @@ HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h
 ```
 
-The token file initially contains an enrollment token issued from the MonitoringInstance onboarding workflow. After the first successful enrollment, `houfeng-agent` replaces it with post-enrollment sync credentials for that MonitoringInstance so service restarts do not reuse the consumed enrollment token. In normal deployments, use the one-command installer from the MonitoringInstance onboarding page instead of manually writing this file.
+The token file initially contains an enrollment token issued from the MonitoringInstance onboarding workflow. After the first successful enrollment, `houfeng-agent` replaces it with post-enrollment sync credentials for that MonitoringInstance so service restarts do not reuse the consumed enrollment token. In normal deployments, create or open the VPS first, use **创建并接入 agent** from the VPS detail page, and run the generated one-command installer instead of manually writing this file.
 
 ## Local agent run
 
@@ -183,7 +183,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now houfeng-center
 ```
 
-Then create a MonitoringInstance in the web UI and open its MonitoringInstance onboarding workspace. The primary path is the generated one-command installer. During early development, the same generated command is also the accepted agent upgrade path for an already-bound systemd monitoring instance:
+Then create or open the VPS in the web UI and use **创建并接入 agent** from the VPS detail page. That action creates the scoped MonitoringInstance and opens its onboarding workspace. The primary path is the generated one-command installer. During early development, the same generated command is also the accepted agent upgrade path for an already-bound systemd monitoring instance:
 
 1. Click **生成一键安装命令**.
 2. Copy the command shown by the center.

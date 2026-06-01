@@ -2,11 +2,9 @@ import type { ReactNode } from 'react'
 
 import { Badge, MonoDigits, Timestamp } from './atoms'
 import {
-  SUBSCRIPTION_STATUS_LABELS,
   VPS_EXPERIENCE_CATEGORY_LABELS,
   VPS_EXPERIENCE_SEVERITY_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
-  type SubscriptionStatus,
   type VPSExperienceCategory,
   type VPSExperienceSeverity,
   type VPSRenewalDecision,
@@ -26,10 +24,6 @@ type TimelineMetaItem = {
 function renewalLabel(value?: VPSRenewalDecision | string | null): string {
   if (!value) return '首次记录'
   return VPS_RENEWAL_DECISION_LABELS[value as VPSRenewalDecision] ?? value
-}
-
-function subscriptionStatusLabel(value: SubscriptionStatus | string): string {
-  return SUBSCRIPTION_STATUS_LABELS[value as SubscriptionStatus] ?? value
 }
 
 function booleanLabel(value: boolean): string {
@@ -225,12 +219,6 @@ export function VPSTimelinePanel({ timeline }: VPSTimelinePanelProps) {
                       value: `${booleanLabel(
                         history.from_auto_renew_cancelled,
                       )} -> ${booleanLabel(history.to_auto_renew_cancelled)}`,
-                    },
-                    {
-                      label: '订阅状态',
-                      value: `${subscriptionStatusLabel(
-                        history.from_status,
-                      )} -> ${subscriptionStatusLabel(history.to_status)}`,
                     },
                   ]}
                 />

@@ -235,6 +235,10 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"monitoring_instance_id":"mi_001"}]`))
 		}),
+		VPSSubscriptionsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"subscription_id":"sub_001"}]`))
+		}),
 		VPSLinkMonitoringInstanceHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -279,6 +283,7 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 		{name: "collection", path: "/api/vps", wantStatus: http.StatusOK, wantBodySnippet: `"vps_id":"vps_001"`},
 		{name: "item", path: "/api/vps/vps_001", wantStatus: http.StatusOK, wantBodySnippet: `"vps_id":"vps_001"`},
 		{name: "monitoring_instances", path: "/api/vps/vps_001/monitoring-instances", wantStatus: http.StatusOK, wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
+		{name: "subscriptions", path: "/api/vps/vps_001/subscriptions", wantStatus: http.StatusOK, wantBodySnippet: `"subscription_id":"sub_001"`},
 		{name: "link monitoringInstance", path: "/api/vps/vps_001/link-monitoring-instance", wantStatus: http.StatusCreated, wantBodySnippet: `"link_id":"vnl_001"`},
 		{name: "unlink monitoringInstance", path: "/api/vps/vps_001/unlink-monitoring-instance", wantStatus: http.StatusOK, wantBodySnippet: `"link_id":"vnl_001"`},
 		{name: "timeline", path: "/api/vps/vps_001/timeline", wantStatus: http.StatusOK, wantBodySnippet: `"price_history_id":"ph_001"`},
@@ -770,13 +775,13 @@ func TestRouterKeepsMonitoringInstanceActionsOutOfSPAFallback(t *testing.T) {
 	}
 }
 
-func TestRouterKeepsMonitoringInstanceLifecycleRoutesOutOfSPAFallback(t *testing.T) {
+func TestRouterRejectsMonitoringInstanceLifecycleRoutesWithoutSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		MonitoringInstanceLifecycleControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"monitoring_instance_id":"mi_001","lifecycle_status":"已退役"}`))
+			_, _ = w.Write([]byte(`{"monitoring_instance_id":"mi_001"}`))
 		}),
 	})
 
@@ -789,8 +794,8 @@ func TestRouterKeepsMonitoringInstanceLifecycleRoutesOutOfSPAFallback(t *testing
 
 		handler.ServeHTTP(recorder, req)
 
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusOK)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusNotFound)
 		}
 		body, err := io.ReadAll(recorder.Body)
 		if err != nil {
@@ -798,9 +803,6 @@ func TestRouterKeepsMonitoringInstanceLifecycleRoutesOutOfSPAFallback(t *testing
 		}
 		if strings.TrimSpace(string(body)) == spaShell {
 			t.Fatalf("%s returned SPA fallback body %q", path, string(body))
-		}
-		if !strings.Contains(string(body), `"monitoring_instance_id":"mi_001"`) {
-			t.Fatalf("%s body = %q, want monitoringInstance payload", path, string(body))
 		}
 	}
 }

@@ -8,12 +8,15 @@ import { LifecycleBadge, RenewalBadge, UsageBadge } from '../assetPageBadges'
 type VPSDetailHeroProps = {
   detail: VPSAssetDetail
   isArchived: boolean
+  showCancellationWorkbench: boolean
   lifecycleSubmitting: boolean
   onDecisionEdit: () => void
   onCancellationOpen: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
+  onMonitoringInstanceCreate: () => void
   onMonitoringInstanceLink: () => void
+  onSubscriptionCreate: () => void
   onServiceCreate: () => void
   onDomainCreate: () => void
   onArchiveStart: () => void
@@ -23,12 +26,15 @@ type VPSDetailHeroProps = {
 export function VPSDetailHero({
   detail,
   isArchived,
+  showCancellationWorkbench,
   lifecycleSubmitting,
   onDecisionEdit,
   onCancellationOpen,
   onFactEdit,
   onExperienceLog,
+  onMonitoringInstanceCreate,
   onMonitoringInstanceLink,
+  onSubscriptionCreate,
   onServiceCreate,
   onDomainCreate,
   onArchiveStart,
@@ -51,16 +57,21 @@ export function VPSDetailHero({
         <div className="watchtower-header__actions-block">
           <div className="watchtower-header__actions">
             <Button variant="primary" size="sm" onClick={onDecisionEdit}>处理决策</Button>
-            <Button variant="danger" size="sm" onClick={onCancellationOpen}>取消/退役</Button>
+            <Button variant="secondary" size="sm" onClick={onSubscriptionCreate}>创建订阅</Button>
+            <Button variant="secondary" size="sm" onClick={onMonitoringInstanceCreate}>接入 agent</Button>
             <details className="watchtower-actions-menu vps-detail-actions-menu">
               <summary aria-label="VPS 详情操作">…</summary>
               <div className="watchtower-actions-menu__panel">
-                <button type="button" onClick={onCancellationOpen}>取消/退役工作台</button>
                 <button type="button" onClick={onFactEdit}>编辑基础信息</button>
                 <button type="button" onClick={onExperienceLog}>记录经验</button>
-                <button type="button" onClick={onMonitoringInstanceLink}>关联监控实例</button>
+                <button type="button" onClick={onSubscriptionCreate}>快速创建订阅</button>
+                <button type="button" onClick={onMonitoringInstanceCreate}>创建并接入 agent</button>
+                <button type="button" onClick={onMonitoringInstanceLink}>关联已有监控实例</button>
                 <button type="button" onClick={onServiceCreate}>新增服务</button>
                 <button type="button" onClick={onDomainCreate}>新增域名</button>
+                {showCancellationWorkbench ? (
+                  <button type="button" onClick={onCancellationOpen}>取消/退役工作台</button>
+                ) : null}
                 {isArchived ? (
                   <button type="button" disabled={lifecycleSubmitting} onClick={onRestoreStart}>
                     {lifecycleSubmitting ? '恢复中…' : '恢复为闲置'}

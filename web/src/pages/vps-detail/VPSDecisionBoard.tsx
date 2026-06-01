@@ -11,7 +11,7 @@ import type {
   VPSMonitoringInstanceSummary,
   VPSTimeline,
 } from '../../lib/types'
-import { renewalTimingLabel, subscriptionStatusLabel } from '../assetPageUtils'
+import { renewalTimingLabel } from '../assetPageUtils'
 import { HealthBadge } from '../assetPageBadges'
 import { buildVPSDecisionModel, countDecisionRecords, toneToGlyphState } from './vpsDecisionModel'
 
@@ -32,6 +32,10 @@ type VPSDecisionBoardProps = {
   domainNotice: string | null
   domainError: string | null
   experienceNotice: string | null
+  subscriptionNotice: string | null
+  subscriptionCreateError: string | null
+  monitoringCreateNotice: string | null
+  monitoringCreateError: string | null
   lifecycleNotice: string | null
   lifecycleError: string | null
   cancellationPreview: CancellationPreview | null
@@ -40,7 +44,8 @@ type VPSDecisionBoardProps = {
   onCancellationOpen: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
-  onMonitoringInstanceLink: () => void
+  onSubscriptionCreate: () => void
+  onMonitoringInstanceCreate: () => void
   onOpenFacts: () => void
   onOpenMonitoringInstanceEvidence: () => void
   onOpenServices: () => void
@@ -69,6 +74,16 @@ function buildFeedback(props: VPSDecisionBoardProps): FeedbackItem[] {
         ? { message: props.domainNotice, error: false }
         : null,
     props.experienceNotice ? { message: props.experienceNotice, error: false } : null,
+    props.subscriptionCreateError
+      ? { message: props.subscriptionCreateError, error: true }
+      : props.subscriptionNotice
+        ? { message: props.subscriptionNotice, error: false }
+        : null,
+    props.monitoringCreateError
+      ? { message: props.monitoringCreateError, error: true }
+      : props.monitoringCreateNotice
+        ? { message: props.monitoringCreateNotice, error: false }
+        : null,
     props.lifecycleError
       ? { message: props.lifecycleError, error: true }
       : props.lifecycleNotice
@@ -108,7 +123,7 @@ function isCancellationRelevant(detail: VPSAssetDetail, preview: CancellationPre
 
 function lifecycleCoordinationTitle(detail: VPSAssetDetail, preview: CancellationPreview | null, error: string | null): string {
   if (error && !preview) return '取消上下文暂不可用'
-  if (!preview) return '正在读取取消上下文'
+  if (!preview) return '生命周期联动待需要时读取'
   if ((preview.blockers ?? []).length > 0) return '取消动作存在阻塞'
   if ((preview.warnings ?? []).length > 0) return '需要处理资产联动'
   if (isCancellationRelevant(detail, preview)) return '取消状态已纳入工作台'
@@ -118,7 +133,7 @@ function lifecycleCoordinationTitle(detail: VPSAssetDetail, preview: Cancellatio
 function lifecycleCoordinationSummary(detail: VPSAssetDetail, preview: CancellationPreview | null, error: string | null): string {
   void detail
   if (error && !preview) return error
-  if (!preview) return '取消/退役工作台会统一展示订阅、VPS、监控实例、服务、域名与 Target 影响范围。'
+  if (!preview) return '当前 VPS 未处于取消或迁移流程；取消/退役工作台会在需要联动处理时再突出显示。'
   const blockers = preview.blockers ?? []
   const warnings = preview.warnings ?? []
   const subscriptions = preview.subscriptions ?? []
@@ -145,7 +160,8 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
     onCancellationOpen,
     onFactEdit,
     onExperienceLog,
-    onMonitoringInstanceLink,
+    onSubscriptionCreate,
+    onMonitoringInstanceCreate,
     onOpenFacts,
     onOpenMonitoringInstanceEvidence,
     onOpenServices,
@@ -163,7 +179,8 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
     onDecisionEdit,
     onFactEdit,
     onExperienceLog,
-    onMonitoringInstanceLink,
+    onSubscriptionCreate,
+    onMonitoringInstanceCreate,
   })
   const feedbackItems = buildFeedback(props)
   const accessHost = detail.ssh_host || detail.ipv4 || detail.ipv6 || detail.display_name
@@ -227,28 +244,30 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
         </div>
       </div>
 
-      <div className="vps-decision-board__coordination">
-        <div className="vps-decision-board__coordination-head">
-          <div>
-            <p className="asset-cancel-workbench__eyebrow">LIFECYCLE COORDINATION</p>
-            <h3>{lifecycleCoordinationTitle(detail, cancellationPreview, cancellationPreviewError)}</h3>
-            <span>{lifecycleCoordinationSummary(detail, cancellationPreview, cancellationPreviewError)}</span>
+      {lifecycleAttention ? (
+        <div className="vps-decision-board__coordination">
+          <div className="vps-decision-board__coordination-head">
+            <div>
+              <p className="asset-cancel-workbench__eyebrow">LIFECYCLE COORDINATION</p>
+              <h3>{lifecycleCoordinationTitle(detail, cancellationPreview, cancellationPreviewError)}</h3>
+              <span>{lifecycleCoordinationSummary(detail, cancellationPreview, cancellationPreviewError)}</span>
+            </div>
+            <Badge variant="state" tone={lifecycleAttention ? 'notice' : 'normal'}>
+              {lifecycleAttention ? '需核对' : '已同步'}
+            </Badge>
           </div>
-          <Badge variant="state" tone={lifecycleAttention ? 'notice' : 'normal'}>
-            {lifecycleAttention ? '需核对' : '已同步'}
-          </Badge>
+          <div className="vps-decision-board__coordination-metrics" aria-label="生命周期影响范围">
+            <span>订阅 <MonoDigits>{cancellationPreview?.subscriptions?.length ?? 0}</MonoDigits></span>
+            <span>监控实例 <MonoDigits>{cancellationPreview?.monitoring_instance_links?.length ?? detail.active_monitoring_instance_link_count}</MonoDigits></span>
+            <span>Target <MonoDigits>{cancellationPreview?.target_links?.length ?? 0}</MonoDigits></span>
+          </div>
+          <div className="vps-decision-board__coordination-actions">
+            <Button variant={lifecycleAttention ? 'danger' : 'secondary'} size="sm" onClick={onCancellationOpen}>
+              打开取消/退役工作台
+            </Button>
+          </div>
         </div>
-        <div className="vps-decision-board__coordination-metrics" aria-label="生命周期影响范围">
-          <span>订阅 <MonoDigits>{cancellationPreview?.subscriptions?.length ?? 0}</MonoDigits></span>
-          <span>监控实例 <MonoDigits>{cancellationPreview?.monitoring_instance_links?.length ?? detail.active_monitoring_instance_link_count}</MonoDigits></span>
-          <span>Target <MonoDigits>{cancellationPreview?.target_links?.length ?? 0}</MonoDigits></span>
-        </div>
-        <div className="vps-decision-board__coordination-actions">
-          <Button variant={lifecycleAttention ? 'danger' : 'secondary'} size="sm" onClick={onCancellationOpen}>
-            打开取消/退役工作台
-          </Button>
-        </div>
-      </div>
+      ) : null}
 
       <div className="vps-decision-board__grid">
         <article className={`vps-decision-card vps-decision-card--${subscriptionTone}`}>
@@ -264,7 +283,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
               </h3>
             </div>
             <Badge variant="state" tone={subscriptionTone}>
-              {primarySubscription ? subscriptionStatusLabel(primarySubscription.status) : '需核对'}
+              {primarySubscription ? '账单事实' : '需补录'}
             </Badge>
           </div>
           <p className="vps-decision-card__summary">
@@ -277,7 +296,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
           <div className="vps-decision-card__footer">
             <Link className="text-link" to={`/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}`}>订阅列表</Link>
             {!primarySubscription && !subscriptionLoadFailed ? (
-              <Link className="text-link" to={`/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}&create=1`}>创建订阅</Link>
+              <button type="button" className="text-link" onClick={onSubscriptionCreate}>快速创建订阅</button>
             ) : null}
           </div>
         </article>
@@ -297,7 +316,11 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
             ) : (
               <span>需要关联监控实例</span>
             )}
-            <Button variant="ghost" size="sm" onClick={onOpenMonitoringInstanceEvidence}>查看监控实例详情</Button>
+            {monitoringInstance ? (
+              <Button variant="ghost" size="sm" onClick={onOpenMonitoringInstanceEvidence}>查看监控实例详情</Button>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={onMonitoringInstanceCreate}>创建并接入 agent</Button>
+            )}
           </div>
         </article>
 
@@ -322,7 +345,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
               <p>最近历史</p>
               <h3><MonoDigits>{countDecisionRecords(timeline)}</MonoDigits> 条判断记录</h3>
             </div>
-            <Badge variant="count" tone="neutral">Timeline</Badge>
+            <Badge variant="count" tone="neutral">历史</Badge>
           </div>
           <p className="vps-decision-card__summary">{latestHistorySummary(timeline)}</p>
           <div className="vps-decision-card__footer">

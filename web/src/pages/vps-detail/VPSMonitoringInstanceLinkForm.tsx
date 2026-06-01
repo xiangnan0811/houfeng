@@ -75,8 +75,8 @@ export function VPSMonitoringInstanceLinkForm({
             : monitoringInstancesError
               ? `监控实例列表不可用：${monitoringInstancesError}`
               : selectableMonitoringInstances.length === 0
-                ? '没有可关联的监控实例，请先创建并完成接入。'
-                : '只创建资产↔监控实例关联，不会修改监控实例生命周期、provider 或运行时状态。'}
+                ? '没有可关联的既有监控实例；普通 agent 接入请使用 VPS 详情页的“创建并接入 agent”。'
+                : '高级关联只补建 VPS 与既有监控实例之间的关系，不重复采集服务商、位置或业务状态。'}
           {' '}
           <Link className="text-link" to="/monitoring">监控实例列表</Link>
         </small>

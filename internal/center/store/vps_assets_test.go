@@ -615,8 +615,8 @@ func TestPostgresVPSAssetPatchCancellationDecisionDoesNotBulkUpdateAmbiguousSubs
 		wantMessage   string
 	}{
 		{name: "none", subscriptions: nil, wantStatus: vpsassets.RenewalSubscriptionLinkageNoActiveSubscription, wantCount: 0, wantMessage: "缺少生效中的订阅"},
-		{name: "inactive", subscriptions: []subscriptions.Record{{SubscriptionID: "sub_expired", VPSID: "vps_001", Status: subscriptions.StatusExpired}}, wantStatus: vpsassets.RenewalSubscriptionLinkageNoActiveSubscription, wantCount: 1, wantMessage: "非活跃状态"},
-		{name: "multiple", subscriptions: []subscriptions.Record{{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusActive}, {SubscriptionID: "sub_002", VPSID: "vps_001", Status: subscriptions.StatusActive}, {SubscriptionID: "sub_expired", VPSID: "vps_001", Status: subscriptions.StatusExpired}}, wantStatus: vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription, wantCount: 2, wantMessage: "多条生效中的订阅"},
+		{name: "inactive", subscriptions: []subscriptions.Record{{SubscriptionID: "sub_expired", VPSID: "vps_001", Status: subscriptions.StatusExpired}}, wantStatus: vpsassets.RenewalSubscriptionLinkageNoActiveSubscription, wantCount: 1, wantMessage: "账单记录已无续费动作"},
+		{name: "multiple", subscriptions: []subscriptions.Record{{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusActive}, {SubscriptionID: "sub_002", VPSID: "vps_001", Status: subscriptions.StatusActive}, {SubscriptionID: "sub_expired", VPSID: "vps_001", Status: subscriptions.StatusExpired}}, wantStatus: vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription, wantCount: 2, wantMessage: "多条仍显示自动续费有效"},
 	}
 
 	for _, tt := range tests {

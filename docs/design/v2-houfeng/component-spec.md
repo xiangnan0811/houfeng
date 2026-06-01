@@ -206,7 +206,7 @@ parent: docs/design/v2-houfeng/design-language.md
 2. Command Surface 固定包含三条 lane：
    - `资产决策队列`：30 天续费、待决策、取消/迁移、未关联监控实例、关联异常、成本。它是 `asset_summary` 的唯一高权重展示位置，只展示聚合入口，不展开 VPS / subscription 明细。
    - `观测异常队列`：复用最多 4 个 dashboard metric（异常对象 / 严重 / 24h 变化 / 维护，或正常态监控实例 / 目标 / 24h / 通知），保留 PR4 filtered URL contract：异常监控实例 `/monitoring?abnormal=1`、异常目标 `/targets?abnormal=1`、严重 `/events?severity=严重`、维护 `/events?maintenance_only=1`、`24h 变化` `/events?time_range=24h`、监控 / 目标管理入口按库存状态优先跳转。可在 lane 底部展示最高优先级 3 个异常对象作为跳转，不替代下方完整处理队列。
-   - `下一步动作`：根据资产压力、严重/异常对象、未关联 VPS、维护态或正常态生成 3-4 条有序动作。主按钮等于第一条动作；正常态主动作是核对 VPS 库存，首次接入主动作是接入第一个监控实例。
+   - `下一步动作`：根据资产压力、严重/异常对象、未关联 VPS、维护态或正常态生成 3-4 条有序动作。主按钮等于第一条动作；正常态主动作是核对 VPS 库存，首次接入主动作是创建第一台 VPS，再从 VPS 详情页补录订阅和接入 agent。
 3. Command Surface 下方保留一个 DetailSection 工作台，而不是 `当前需要处理` / `系统入口` / `按 Group 分布` / `最近事件` 四个同权 section 线性堆叠。工作台 title 随状态切换：
    - 异常态：`当前需要处理`，主体优先展示统一处理队列，合并异常监控实例与异常目标，按 severity + active incident count 排序；默认只展示最高优先级少量对象，完整处理跳 Monitoring / Targets / Events。队列下方可在同一 DetailSection surface 内展示 `运行上下文` 与 `管理入口`，但不得拆回多个同权 page section。
    - 维护态：`维护观察`，eyebrow `维护观察`，主体展示维护观察、库存、事件和一个紧凑管理入口，不把维护态伪装成紧急异常。
@@ -216,12 +216,12 @@ parent: docs/design/v2-houfeng/design-language.md
 5. 工作台内部可展示一个低权重 `运行上下文` strip，用于补充同类系统常见的影响范围、库存状态、最近活动。它最多 3 个 Link item，不作为独立 page section，不使用 `Group 摘要` / `最近事件摘要` heading，不展开完整 group/recent 列表；最近活动只展示事件类型、严重度、对象和跳转，不展示 event summary 正文。视觉应表现为工作台内的 context rail：同一 surface 内用细边界和状态顶线区分，不做三个强卡片。
 6. 异常 / 正常 / 维护态的系统入口表现为主体内的 `管理入口` 紧凑行，不是 `系统快捷入口` heading + 详细描述列表，也不是右侧 context rail。异常态中它位于处理队列之后，作为系统跳转补充，不抢占队列主任务；正常 / 维护态中它属于运行概览主体。四个入口为监控 / 目标 / 事件 / 设置：监控入口展示待接入、暂停、退役，并按优先级跳到 `/monitoring?onboarding=pending`、`/monitoring?run_status=暂停`、`/monitoring?lifecycle=已退役`、`/monitoring`；目标入口展示异常、暂停、归档，并按优先级跳到 `/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档`、`/targets`；事件入口展示 24h 新增/恢复并跳到 `/events?time_range=24h`；设置入口只展示 `notification_status` 的通道配置布尔摘要，不暴露 token、chat id 或 webhook URL。管理入口可以显示轻量 `进入` action，使其像可操作 surface，而不是静态说明文本。
 7. Dashboard 默认不展示所有 `/api/dashboard` contract 字段。`group_summaries` 与 `recent_events` 是次级详情入口的数据来源，不在 Dashboard 首屏展开为 `Group 摘要` 或 `最近事件摘要` 列表；用户通过监控、入口探测、事件页深链查看完整上下文。需要重新展示这些字段时必须先证明它们服务当前状态的主决策路径，并同步测试防止信息摊开。
-8. 首次接入态只渲染 onboarding 主工作台和必要入口，不渲染摘要指标、运行上下文、空 Group、空最近事件、API facts 或其它暗示系统已有数据的大区块。四步入口分别为 `/monitoring`、`/monitoring?onboarding=pending`、`/targets`、`/targets`。
+8. 首次接入态只渲染 onboarding 主工作台和必要入口，不渲染摘要指标、运行上下文、空 Group、空最近事件、API facts 或其它暗示系统已有数据的大区块。四步入口以 `/vps` 为首：先建 VPS，再在 VPS 详情页创建订阅和 MonitoringInstance；Monitoring / Targets 只作为观测列表和后续诊断入口。
 
 ### AssetDecisionsPage
 1. 资产决策页是 Asset Ledger 的主工作队列，不是三张 VPS 状态表的拼接。首屏必须出现一个统一 `资产决策工作队列` surface，按未评估、续费窗口、迁移/取消、取消联动待处理、未关联监控实例、缺订阅等人工处理优先级排序。
 2. 顶部 summary 只保留能指导处理顺序的少量数字：续费窗口订阅数、统一队列数量、缺订阅/未关联数量、迁移/取消数量、取消联动待处理数量。不要恢复同权 KPI 卡片墙。
-3. 队列行必须服务扫描和判断：rank、VPS identity、provider/region/access、生命周期/用途/续费决策、订阅/月化成本/续费日/自动续费、监控实例关联数量、数据质量 badge、详情与处理 action。当前 `VPSAssetRecord` 只有 `active_monitoring_instance_link_count`，不得展示或暗示 linked monitoring instance health。
+3. 队列行必须服务扫描和判断：rank、VPS identity、provider/region/access、生命周期/用途/续费决策、订阅/月化成本/续费日/自动续费、监控实例关联数量、数据质量 badge、详情与处理 action。队列主体永远是 VPS；订阅和监控实例只是证据/缺口。当前 `VPSAssetRecord` 只有 `active_monitoring_instance_link_count`，不得展示或暗示 linked monitoring instance health。
 4. 决策编辑使用 `Drawer` 中的 `AssetDecisionWorkPanel`。Drawer 打开时处理单台 VPS；关闭后队列保持可扫描。保存成功的 notice 留在工作队列 surface 内，而不是只出现在已关闭 drawer 内。
 5. 续费候选表是 `RENEWAL EVIDENCE` 次级证据区。它保留续费窗口切换和订阅入口，但视觉权重低于统一工作队列。
 
@@ -240,11 +240,12 @@ parent: docs/design/v2-houfeng/design-language.md
 5. 生命周期 archive/restore 是独立危险区，保留 alertdialog 确认；取消 / 退役 action 是独立的可预览、可确认、可审计工作台，不进入基础信息 Drawer，也不和服务/域名创建同权。
 6. 取消 / 退役工作台必须是高密度决策表单，而不是纵向卡片墙：顶部影响摘要在桌面四项同排、中等视口 2×2、手机单列；主体在桌面拆为左侧 VPS state + audit 决策栏、右侧订阅 / MonitoringInstance / Target 确认栏，小桌面以下降为紧凑单列；单值状态如 `取消` / `已取消` 只能作为 badge 或 select value，不得渲染成整行宽条。
 7. 服务/域名在 Detail 页是 VPS scoped manual records，只展示和创建当前 VPS 的上下文记录；不要在这里扩成完整服务注册表、域名管理或 DNS 记录管理。
+8. 缺订阅和缺监控实例时，Detail 页必须提供内联快速创建。快速创建订阅只收账单事实，不展示订阅状态；创建并接入 agent 默认从 VPS 派生 MonitoringInstance identity 并进入 onboarding。取消 / 退役工作台只在取消、迁移、已取消、归档或存在联动冲突时突出显示，刚创建的 active VPS 不显示危险主 CTA。
 
 ### MonitoringPage
-1. Section heading「监控」+ 「接入监控实例」按钮。页面标题使用“监控”，section 与表格主体使用“监控实例”，文案必须把 MonitoringInstance 定位为 agent 接入后的运行观测对象。
+1. Section heading「监控」+「从 VPS 接入 agent」跳转。页面标题使用“监控”，section 与表格主体使用“监控实例”，文案必须把 MonitoringInstance 定位为 agent 接入后的运行观测对象；普通服务器接入主路径在 VPS 详情页，监控页不得弹出无 VPS 上下文的创建 / 接入表单。
 2. 观测支撑面「资产判断支撑」放在 hero 之后、创建 drawer/列表控制之前，展示四个证据 lane：异常证据、接入/绑定、维护/暂停、VPS 关联。列表可以使用批量 `asset-context/monitoring-instances` 显示关联 VPS 的取消 / 过期 / 状态割裂上下文，但不得逐行请求，也不得展示 contract 中不存在的 linked VPS health。
-3. （可选）接入监控实例表单/Drawer；接入入口不抢占首屏扫描路径。
+3. 监控页空态动作为「创建第一台 VPS」或返回 VPS 库存；独立 MonitoringInstance 创建只允许作为后端 / 运维级高级能力存在，不进入普通前端 CTA。
 4. 视图切换：segmented control 「全部监控实例 N」/「绑定异常 M」
 5. 筛选栏：URL-state 承接 Dashboard 深链；`onboarding=pending` 显示 `待接入/绑定待处理` chip/toggle，匹配生命周期待接入、未绑定或指纹变更待确认的监控实例。支撑面快捷按钮可复用 `abnormal=1`、`onboarding=pending`、运行状态筛选，但必须保持清空和 chip 移除回写 URL。
 6. **DataTable**（density compact）：列 `[StatusGlyph, 监控实例(Hostname + 名字 + 心跳/同步 mono), 位置, 标签, 当前主问题, 近 24h 趋势(sparkline strip), 操作 hover]`
@@ -272,8 +273,8 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
    - 次指标 dl（CPU 卡含 steal%；Memory 卡含 Swap used%；Disk 卡含 disk_busy% / read+write；其他单值）
 5. ④ 次要信息默认 collapsed `<details className="watchtower-secondary">` 折叠：
    - 「标签与备注」（MonitoringInstanceLabelsAndNote 子组件，编辑/查看切换 + 乐观锁）
-   - 「生命周期」（退役按钮 + 二次确认；已退役时显示「恢复到观察中」）
-   - 「接入凭证状态」（当前 binding_status `<StatusBadge>` + `<Link>` 到 `/monitoring/:id/onboarding` 接入工作台）
+   - 「所属 VPS / 资产上下文」（显示绑定 VPS、VPS 生命周期与返回 VPS 详情的主路径；没有绑定时提示普通接入应从 VPS 详情创建）
+   - 「接入凭证状态」（当前 binding_status `<StatusBadge>` + 接入抽屉入口）。监控详情页不得提供监控实例退役/恢复观察入口；退役、不续费、取消类业务收尾只能从 VPS 取消/退役工作台发起。
 6. 页面底部 mono 小字：数据快照时间 (`<Timestamp value={now} mode="absolute">`)，刷新页面获取最新（不做实时 polling，保留"页面打开 = 静态快照"模型）
 7. 历史抽屉（右侧 `<Drawer>`，桌面 440px 且不超过 40vw，窄屏不超过 92vw）：标题 `${display_name} · 历史`；抽屉内 `<Tabs variant="pill">` 切换 [事件时间线] / [历史异常]；
    - 事件 tab：复用 `<EventList>`，数据来自 page 已加载的 `state.events`（监控实例详情主入口已拉取）
