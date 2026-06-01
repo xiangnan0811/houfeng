@@ -1222,3 +1222,36 @@ Completed the destructive Node to MonitoringInstance concept refactor across bac
 ### Next Steps
 
 - None - task complete
+
+
+## Session 154: Agent legacy sync compatibility
+
+**Date**: 2026-06-01
+**Task**: Agent legacy sync compatibility
+**Branch**: `fix/agent-legacy-sync-compat`
+
+### Summary
+
+Restored upgrade compatibility for pre-v0.25 agent local state by reading legacy node_id token and sync queue entries, preserving legacy post-enrollment tokens in the installer, and documenting the local-state upgrade contract.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8f100e9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

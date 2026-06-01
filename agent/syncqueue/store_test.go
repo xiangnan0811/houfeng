@@ -45,6 +45,43 @@ func TestFileStorePersistsEntriesAcrossInstancesAndDeletesAckedEntry(t *testing.
 	}
 }
 
+func TestFileStoreReadsLegacyNodeIDBufferedRequests(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/sync-buffer.json"
+	payload := `[
+		{
+			"id":"sync_legacy",
+			"created_at":"2026-04-28T08:00:00Z",
+			"attempts":1,
+			"request":{
+				"node_id":"node-legacy-001",
+				"sync_token":"sync-token-legacy",
+				"heartbeats":[{"observed_at":"2026-04-28T08:00:00Z","agent_version":"v0.24.1","fingerprint":"fp-001","sync_batch_id":"sync_legacy"}]
+			}
+		}
+	]`
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write legacy queue file: %v", err)
+	}
+
+	entries, err := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour}).List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+	if entries[0].Request.MonitoringInstanceID != "node-legacy-001" {
+		t.Fatalf("MonitoringInstanceID = %q, want legacy node id", entries[0].Request.MonitoringInstanceID)
+	}
+	if entries[0].Request.SyncToken != "sync-token-legacy" {
+		t.Fatalf("SyncToken = %q, want legacy sync token", entries[0].Request.SyncToken)
+	}
+	if entries[0].Attempts != 1 {
+		t.Fatalf("Attempts = %d, want 1", entries[0].Attempts)
+	}
+}
+
 func TestFileStoreMarksAttemptsAndBuildsBackfilledRequests(t *testing.T) {
 	t.Parallel()
 	path := t.TempDir() + "/sync-buffer.json"

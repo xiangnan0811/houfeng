@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 153
+- **Total Sessions**: 154
 - **Last Active**: 2026-06-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1224 | Active |
+| `journal-3.md` | ~1257 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 154 | 2026-06-01 | Agent legacy sync compatibility | `8f100e9` | `fix/agent-legacy-sync-compat` |
 | 153 | 2026-06-01 | Monitoring instance concept refactor | `67c54f9`, `9ffde36`, `0885bd7` | `worktree/monitoring-instances-concept` |
 | 152 | 2026-05-31 | Asset lifecycle release and Node 24 workflow follow-up | `5d6539c`, `3252b8f`, `b8ca918` | `worktree/archive-node24-main-drift` |
 | 151 | 2026-05-30 | Update Trellis beta workflow | `692976b` | `worktree/archive-trellis-update-task` |

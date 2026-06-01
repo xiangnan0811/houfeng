@@ -38,6 +38,35 @@ type Entry struct {
 	Request   agentapi.SyncRequest `json:"request"`
 }
 
+type storedEntry struct {
+	ID        string            `json:"id"`
+	CreatedAt time.Time         `json:"created_at"`
+	Attempts  int               `json:"attempts"`
+	Request   storedSyncRequest `json:"request"`
+}
+
+type storedSyncRequest struct {
+	agentapi.SyncRequest
+	LegacyNodeID string `json:"node_id"`
+}
+
+func (r *storedSyncRequest) UnmarshalJSON(payload []byte) error {
+	type syncRequestAlias agentapi.SyncRequest
+	var stored struct {
+		syncRequestAlias
+		LegacyNodeID string `json:"node_id"`
+	}
+	if err := json.Unmarshal(payload, &stored); err != nil {
+		return err
+	}
+	r.SyncRequest = agentapi.SyncRequest(stored.syncRequestAlias)
+	if r.MonitoringInstanceID == "" {
+		r.MonitoringInstanceID = stored.LegacyNodeID
+	}
+	r.LegacyNodeID = stored.LegacyNodeID
+	return nil
+}
+
 type FileStore struct {
 	path string
 	opts Options
@@ -232,9 +261,18 @@ func (s *FileStore) readEntries() ([]Entry, error) {
 	if len(payload) == 0 {
 		return []Entry{}, nil
 	}
-	var entries []Entry
-	if err := json.Unmarshal(payload, &entries); err != nil {
+	var storedEntries []storedEntry
+	if err := json.Unmarshal(payload, &storedEntries); err != nil {
 		return nil, err
+	}
+	entries := make([]Entry, len(storedEntries))
+	for i, entry := range storedEntries {
+		entries[i] = Entry{
+			ID:        entry.ID,
+			CreatedAt: entry.CreatedAt,
+			Attempts:  entry.Attempts,
+			Request:   agentapi.SyncRequest(entry.Request.SyncRequest),
+		}
 	}
 	sortEntries(entries)
 	return entries, nil

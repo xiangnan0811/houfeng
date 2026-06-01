@@ -47,3 +47,14 @@ func TestScriptRestartsActiveServiceAfterInstall(t *testing.T) {
 		t.Fatal("installer script should not use enable --now because it does not restart active services")
 	}
 }
+
+func TestScriptPreservesCurrentAndLegacyPostEnrollmentTokens(t *testing.T) {
+	t.Parallel()
+
+	if !strings.Contains(Script, `grep -Eq '"(monitoring_instance_id|node_id)"' /etc/houfeng-agent/token`) {
+		t.Fatal("installer script should preserve post-enrollment tokens with current monitoring_instance_id or legacy node_id")
+	}
+	if !strings.Contains(Script, `grep -q '"sync_token"' /etc/houfeng-agent/token`) {
+		t.Fatal("installer script should require sync_token before preserving the token file")
+	}
+}
