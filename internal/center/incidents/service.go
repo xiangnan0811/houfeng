@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/notify"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
@@ -24,9 +24,9 @@ const defaultHeartbeatInterval = 5 * time.Second
 
 var errNotificationSuppressed = errors.New("incident notification suppressed")
 
-type NodeRepository interface {
-	GetNode(context.Context, string) (nodes.Record, error)
-	ListNodes(context.Context) ([]nodes.Record, error)
+type MonitoringInstanceRepository interface {
+	GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
+	ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error)
 }
 
 type TargetRepository interface {
@@ -37,7 +37,7 @@ type SnapshotReader interface {
 	ListActiveIncidents(context.Context, ObjectType, string) ([]IncidentRecord, error)
 	ListRecentHostSamples(context.Context, string, time.Time) ([]runtimefacts.HostSample, error)
 	ListRecentProbeObservations(context.Context, string, time.Time) ([]runtimefacts.ProbeObservation, error)
-	ListNodeHostDailyAggregates(context.Context, string, time.Time, time.Time) ([]NodeHostDailyAggregate, error)
+	ListMonitoringInstanceHostDailyAggregates(context.Context, string, time.Time, time.Time) ([]MonitoringInstanceHostDailyAggregate, error)
 	ListTargetProbeDailyAggregates(context.Context, string, time.Time, time.Time) ([]TargetProbeDailyAggregate, error)
 }
 
@@ -299,7 +299,7 @@ func notificationDispatcherFor(notifier Notifier) NotificationDispatcher {
 }
 
 type Service struct {
-	nodes                     NodeRepository
+	monitoringInstances       MonitoringInstanceRepository
 	targets                   TargetRepository
 	snapshots                 SnapshotReader
 	writer                    MutationWriter
@@ -311,11 +311,11 @@ type Service struct {
 	fallbackSweepInterval     time.Duration
 }
 
-func NewService(nodesRepo NodeRepository, targetsRepo TargetRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
-	return NewSettingsBackedService(nodesRepo, targetsRepo, snapshots, writer, notifier, nil, logger, heartbeatInterval, sweepInterval)
+func NewService(monitoringInstancesRepo MonitoringInstanceRepository, targetsRepo TargetRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
+	return NewSettingsBackedService(monitoringInstancesRepo, targetsRepo, snapshots, writer, notifier, nil, logger, heartbeatInterval, sweepInterval)
 }
 
-func NewSettingsBackedService(nodesRepo NodeRepository, targetsRepo TargetRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, settingsRepo SettingsRepository, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
+func NewSettingsBackedService(monitoringInstancesRepo MonitoringInstanceRepository, targetsRepo TargetRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, settingsRepo SettingsRepository, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -326,7 +326,7 @@ func NewSettingsBackedService(nodesRepo NodeRepository, targetsRepo TargetReposi
 		sweepInterval = 5 * time.Second
 	}
 	return &Service{
-		nodes:                     nodesRepo,
+		monitoringInstances:       monitoringInstancesRepo,
 		targets:                   targetsRepo,
 		snapshots:                 snapshots,
 		writer:                    writer,
@@ -344,8 +344,8 @@ func (s *Service) AfterSuccessfulSync(ctx context.Context, batch syncing.Batch, 
 	if now.IsZero() {
 		now = s.now()
 	}
-	if err := s.evaluateNode(ctx, batch.NodeID, now); err != nil {
-		s.logger.Error("evaluate node incidents after sync failed", "node_id", batch.NodeID, "error", err)
+	if err := s.evaluateMonitoringInstance(ctx, batch.MonitoringInstanceID, now); err != nil {
+		s.logger.Error("evaluate monitoring instance incidents after sync failed", "monitoring_instance_id", batch.MonitoringInstanceID, "error", err)
 	}
 	for _, targetID := range uniqueTargetIDs(batch.Observations.ProbeObservations) {
 		if err := s.evaluateTarget(ctx, targetID, now); err != nil {
@@ -377,7 +377,7 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) EvaluatePeriodicState(ctx context.Context, now time.Time) error {
-	if err := s.EvaluateStaleNodes(ctx, now); err != nil {
+	if err := s.EvaluateStaleMonitoringInstances(ctx, now); err != nil {
 		return err
 	}
 	if s.targets == nil {
@@ -395,79 +395,79 @@ func (s *Service) EvaluatePeriodicState(ctx context.Context, now time.Time) erro
 	return nil
 }
 
-func (s *Service) EvaluateStaleNodes(ctx context.Context, now time.Time) error {
+func (s *Service) EvaluateStaleMonitoringInstances(ctx context.Context, now time.Time) error {
 	heartbeatInterval := s.heartbeatIntervalFor(ctx)
-	records, err := s.nodes.ListNodes(ctx)
+	records, err := s.monitoringInstances.ListMonitoringInstances(ctx)
 	if err != nil {
-		return fmt.Errorf("list nodes for stale sweep: %w", err)
+		return fmt.Errorf("list monitoring instances for stale sweep: %w", err)
 	}
 	for _, record := range records {
-		if err := s.evaluateNodeHeartbeatOnly(ctx, record, now, heartbeatInterval); err != nil {
+		if err := s.evaluateMonitoringInstanceHeartbeatOnly(ctx, record, now, heartbeatInterval); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) evaluateNodeHeartbeatOnly(ctx context.Context, record nodes.Record, now time.Time, heartbeatInterval time.Duration) error {
-	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeNode, record.NodeID)
+func (s *Service) evaluateMonitoringInstanceHeartbeatOnly(ctx context.Context, record monitoringinstances.Record, now time.Time, heartbeatInterval time.Duration) error {
+	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeMonitoringInstance, record.MonitoringInstanceID)
 	if err != nil {
-		return fmt.Errorf("list previous node incidents for %q: %w", record.NodeID, err)
+		return fmt.Errorf("list previous monitoring instance incidents for %q: %w", record.MonitoringInstanceID, err)
 	}
 	previousByClass := incidentsByClass(previous)
 	evaluations := []classEvaluation{{
-		class:  IncidentNodeHeartbeatMissing,
-		result: EvaluateNodeHeartbeatMissing(previousByClass[IncidentNodeHeartbeatMissing], record.NodeID, now, record.LastHeartbeatAt, heartbeatInterval),
+		class:  IncidentMonitoringInstanceHeartbeatMissing,
+		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], record.MonitoringInstanceID, now, record.LastHeartbeatAt, heartbeatInterval),
 	}}
-	return s.applyEvaluations(ctx, ObjectTypeNode, record.NodeID, previous, evaluations, now)
+	return s.applyEvaluations(ctx, ObjectTypeMonitoringInstance, record.MonitoringInstanceID, previous, evaluations, now)
 }
 
-func (s *Service) evaluateNode(ctx context.Context, nodeID string, now time.Time) error {
-	record, err := s.nodes.GetNode(ctx, nodeID)
+func (s *Service) evaluateMonitoringInstance(ctx context.Context, monitoringInstanceID string, now time.Time) error {
+	record, err := s.monitoringInstances.GetMonitoringInstance(ctx, monitoringInstanceID)
 	if err != nil {
-		return fmt.Errorf("get node %q for incident evaluation: %w", nodeID, err)
+		return fmt.Errorf("get monitoring instance %q for incident evaluation: %w", monitoringInstanceID, err)
 	}
-	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeNode, nodeID)
+	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID)
 	if err != nil {
-		return fmt.Errorf("list previous node incidents for %q: %w", nodeID, err)
+		return fmt.Errorf("list previous monitoring instance incidents for %q: %w", monitoringInstanceID, err)
 	}
 	previousByClass := incidentsByClass(previous)
 	heartbeatInterval := s.heartbeatIntervalFor(ctx)
 	evaluations := []classEvaluation{{
-		class:  IncidentNodeHeartbeatMissing,
-		result: EvaluateNodeHeartbeatMissing(previousByClass[IncidentNodeHeartbeatMissing], nodeID, now, record.LastHeartbeatAt, heartbeatInterval),
+		class:  IncidentMonitoringInstanceHeartbeatMissing,
+		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], monitoringInstanceID, now, record.LastHeartbeatAt, heartbeatInterval),
 	}}
 
-	hostSamples, err := s.snapshots.ListRecentHostSamples(ctx, nodeID, now.Add(-30*time.Minute))
+	hostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-30*time.Minute))
 	if err != nil {
-		return fmt.Errorf("list recent host samples for %q: %w", nodeID, err)
+		return fmt.Errorf("list recent host samples for %q: %w", monitoringInstanceID, err)
 	}
 	if len(hostSamples) > 0 {
 		latest := &hostSamples[0]
-		resourceSamples := nodeResourceSamplesFromHostSamples(hostSamples)
+		resourceSamples := monitoringInstanceResourceSamplesFromHostSamples(hostSamples)
 		thresholds := s.metricThresholdsFor(ctx)
 		evaluations = append(evaluations,
-			classEvaluation{class: IncidentNodeDiskPressure, result: EvaluateNodeDiskPressure(previousByClass[IncidentNodeDiskPressure], nodeID, latest, thresholds)},
-			classEvaluation{class: IncidentNodeInodePressure, result: EvaluateNodeInodePressure(previousByClass[IncidentNodeInodePressure], nodeID, latest, thresholds)},
-			classEvaluation{class: IncidentNodeResourcePressure, result: EvaluateNodeResourcePressure(previousByClass[IncidentNodeResourcePressure], nodeID, resourceSamples, thresholds)},
+			classEvaluation{class: IncidentMonitoringInstanceDiskPressure, result: EvaluateMonitoringInstanceDiskPressure(previousByClass[IncidentMonitoringInstanceDiskPressure], monitoringInstanceID, latest, thresholds)},
+			classEvaluation{class: IncidentMonitoringInstanceInodePressure, result: EvaluateMonitoringInstanceInodePressure(previousByClass[IncidentMonitoringInstanceInodePressure], monitoringInstanceID, latest, thresholds)},
+			classEvaluation{class: IncidentMonitoringInstanceResourcePressure, result: EvaluateMonitoringInstanceResourcePressure(previousByClass[IncidentMonitoringInstanceResourcePressure], monitoringInstanceID, resourceSamples, thresholds)},
 		)
 	}
 
-	trendHostSamples, err := s.snapshots.ListRecentHostSamples(ctx, nodeID, now.Add(-24*time.Hour))
+	trendHostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-24*time.Hour))
 	if err != nil {
-		return fmt.Errorf("list trend host samples for %q: %w", nodeID, err)
+		return fmt.Errorf("list trend host samples for %q: %w", monitoringInstanceID, err)
 	}
 	baselineStart, baselineEnd := trendBaselineWindow(now)
-	nodeBaselines, err := s.snapshots.ListNodeHostDailyAggregates(ctx, nodeID, baselineStart, baselineEnd)
+	monitoringInstanceBaselines, err := s.snapshots.ListMonitoringInstanceHostDailyAggregates(ctx, monitoringInstanceID, baselineStart, baselineEnd)
 	if err != nil {
-		return fmt.Errorf("list node trend baselines for %q: %w", nodeID, err)
+		return fmt.Errorf("list monitoring instance trend baselines for %q: %w", monitoringInstanceID, err)
 	}
 	evaluations = append(evaluations, classEvaluation{
-		class:  IncidentNodeTrendDegradation,
-		result: EvaluateNodeTrendDegradation(previousByClass[IncidentNodeTrendDegradation], nodeID, nodeResourceSamplesFromHostSamples(trendHostSamples), nodeBaselines),
+		class:  IncidentMonitoringInstanceTrendDegradation,
+		result: EvaluateMonitoringInstanceTrendDegradation(previousByClass[IncidentMonitoringInstanceTrendDegradation], monitoringInstanceID, monitoringInstanceResourceSamplesFromHostSamples(trendHostSamples), monitoringInstanceBaselines),
 	})
 
-	return s.applyEvaluations(ctx, ObjectTypeNode, nodeID, previous, evaluations, now)
+	return s.applyEvaluations(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID, previous, evaluations, now)
 }
 
 func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.Time) error {
@@ -818,10 +818,10 @@ func incidentsByClass(records []IncidentRecord) map[IncidentClass]*IncidentRecor
 	return out
 }
 
-func nodeResourceSamplesFromHostSamples(hostSamples []runtimefacts.HostSample) []NodeResourceSample {
-	resourceSamples := make([]NodeResourceSample, 0, len(hostSamples))
+func monitoringInstanceResourceSamplesFromHostSamples(hostSamples []runtimefacts.HostSample) []MonitoringInstanceResourceSample {
+	resourceSamples := make([]MonitoringInstanceResourceSample, 0, len(hostSamples))
 	for _, sample := range hostSamples {
-		resourceSamples = append(resourceSamples, NodeResourceSample{
+		resourceSamples = append(resourceSamples, MonitoringInstanceResourceSample{
 			ObservedAt:         sample.ObservedAt,
 			CPUUsagePct:        sample.CPUUsagePct,
 			NormalizedLoad5:    sample.Load5,
@@ -866,7 +866,7 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 	recoveryEligibleCount := 0
 	recoverySuppressed := false
 	latestObservedAt := time.Time{}
-	tcpNodes := map[string]struct{}{}
+	tcpMonitoringInstances := map[string]struct{}{}
 	httpProbeItems := map[string]struct{}{}
 
 	for _, series := range grouped {
@@ -876,8 +876,8 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 		}
 		if result.Current != nil {
 			activeResults = append(activeResults, result)
-			if series[0].ProbeKind == agentapi.ProbeKindTCP && series[0].NodeID != "" {
-				tcpNodes[series[0].NodeID] = struct{}{}
+			if series[0].ProbeKind == agentapi.ProbeKindTCP && series[0].MonitoringInstanceID != "" {
+				tcpMonitoringInstances[series[0].MonitoringInstanceID] = struct{}{}
 			}
 			if series[0].ProbeKind == agentapi.ProbeKindHTTP && series[0].ProbeItemID != "" {
 				httpProbeItems[series[0].ProbeItemID] = struct{}{}
@@ -910,9 +910,9 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 			summary = result.Current.SourceSummary
 		}
 	}
-	if len(tcpNodes) >= 2 {
+	if len(tcpMonitoringInstances) >= 2 {
 		severity = SeverityCritical
-		summary = "TCP 探针在多个执行节点上持续失败"
+		summary = "TCP 探针在多个执行监控实例上持续失败"
 	}
 	if len(httpProbeItems) >= 2 {
 		severity = SeverityCritical
@@ -979,7 +979,7 @@ func groupProbeSeries(observations []runtimefacts.ProbeObservation) [][]runtimef
 	grouped := map[string][]runtimefacts.ProbeObservation{}
 	keys := make([]string, 0)
 	for _, observation := range normalizeProbeObservations(observations) {
-		key := observation.ProbeItemID + "|" + observation.NodeID
+		key := observation.ProbeItemID + "|" + observation.MonitoringInstanceID
 		if _, ok := grouped[key]; !ok {
 			keys = append(keys, key)
 		}
@@ -1037,27 +1037,27 @@ func (r *PostgresSnapshotReader) ListActiveIncidents(ctx context.Context, object
 	return records, nil
 }
 
-func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, nodeID string, since time.Time) ([]runtimefacts.HostSample, error) {
+func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, monitoringInstanceID string, since time.Time) ([]runtimefacts.HostSample, error) {
 	rows, err := r.db.Query(ctx, `
 		select
-			node_id, observed_at, received_at, agent_version, fingerprint,
+			monitoring_instance_id, observed_at, received_at, agent_version, fingerprint,
 			cpu_usage_pct, load_1, load_5, load_15, mem_used_pct, mem_available_bytes, mem_total_bytes,
 			swap_used_pct, disk_used_pct, disk_total_bytes, inode_used_pct, net_in_bytes_per_sec,
 			net_out_bytes_per_sec, cpu_iowait_pct, cpu_steal_pct, disk_read_bytes_per_sec,
 			disk_write_bytes_per_sec, disk_busy_pct, uptime_seconds,
 			maintenance_context, is_backfilled, sync_batch_id
 		from host_samples
-		where node_id = $1 and observed_at >= $2
-		order by observed_at desc, id desc`, nodeID, since)
+		where monitoring_instance_id = $1 and observed_at >= $2
+		order by observed_at desc, id desc`, monitoringInstanceID, since)
 	if err != nil {
-		return nil, fmt.Errorf("query host samples for %q: %w", nodeID, err)
+		return nil, fmt.Errorf("query host samples for %q: %w", monitoringInstanceID, err)
 	}
 	defer rows.Close()
 	out := make([]runtimefacts.HostSample, 0)
 	for rows.Next() {
 		var sample runtimefacts.HostSample
 		if err := rows.Scan(
-			&sample.NodeID, &sample.ObservedAt, &sample.ReceivedAt, &sample.AgentVersion, &sample.Fingerprint,
+			&sample.MonitoringInstanceID, &sample.ObservedAt, &sample.ReceivedAt, &sample.AgentVersion, &sample.Fingerprint,
 			&sample.CPUUsagePct, &sample.Load1, &sample.Load5, &sample.Load15, &sample.MemUsedPct, &sample.MemAvailableBytes, &sample.MemTotalBytes,
 			&sample.SwapUsedPct, &sample.DiskUsedPct, &sample.DiskTotalBytes, &sample.InodeUsedPct, &sample.NetInBytesPerSec,
 			&sample.NetOutBytesPerSec, &sample.CPUIOWaitPct, &sample.CPUStealPct, &sample.DiskReadBytesPerSec,
@@ -1077,7 +1077,7 @@ func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, node
 func (r *PostgresSnapshotReader) ListRecentProbeObservations(ctx context.Context, targetID string, since time.Time) ([]runtimefacts.ProbeObservation, error) {
 	rows, err := r.db.Query(ctx, `
 		select
-			po.node_id, po.target_id, po.probe_item_id, pi.probe_kind,
+			po.monitoring_instance_id, po.target_id, po.probe_item_id, pi.probe_kind,
 			po.observed_at, po.received_at, po.agent_version, po.fingerprint,
 			po.result_kind, po.latency_ms, po.http_status, po.tls_expiry_days,
 			coalesce(po.error_code, ''), coalesce(po.error_summary, ''),
@@ -1094,7 +1094,7 @@ func (r *PostgresSnapshotReader) ListRecentProbeObservations(ctx context.Context
 	for rows.Next() {
 		var observation runtimefacts.ProbeObservation
 		if err := rows.Scan(
-			&observation.NodeID, &observation.TargetID, &observation.ProbeItemID, &observation.ProbeKind,
+			&observation.MonitoringInstanceID, &observation.TargetID, &observation.ProbeItemID, &observation.ProbeKind,
 			&observation.ObservedAt, &observation.ReceivedAt, &observation.AgentVersion, &observation.Fingerprint,
 			&observation.ResultKind, &observation.LatencyMS, &observation.HTTPStatus, &observation.TLSExpiryDays,
 			&observation.ErrorCode, &observation.ErrorSummary,
@@ -1110,7 +1110,7 @@ func (r *PostgresSnapshotReader) ListRecentProbeObservations(ctx context.Context
 	return out, nil
 }
 
-func (r *PostgresSnapshotReader) ListNodeHostDailyAggregates(ctx context.Context, nodeID string, since, before time.Time) ([]NodeHostDailyAggregate, error) {
+func (r *PostgresSnapshotReader) ListMonitoringInstanceHostDailyAggregates(ctx context.Context, monitoringInstanceID string, since, before time.Time) ([]MonitoringInstanceHostDailyAggregate, error) {
 	rows, err := r.db.Query(ctx, `
 		select
 			bucket_date,
@@ -1120,18 +1120,18 @@ func (r *PostgresSnapshotReader) ListNodeHostDailyAggregates(ctx context.Context
 			avg_cpu_steal_pct,
 			backfilled_sample_count,
 			maintenance_sample_count
-		from node_host_sample_daily_aggregates
-		where node_id = $1
+		from monitoring_instance_host_sample_daily_aggregates
+		where monitoring_instance_id = $1
 			and bucket_date >= $2::date
 			and bucket_date < $3::date
-		order by bucket_date desc`, nodeID, since, before)
+		order by bucket_date desc`, monitoringInstanceID, since, before)
 	if err != nil {
-		return nil, fmt.Errorf("query node host daily aggregates for %q: %w", nodeID, err)
+		return nil, fmt.Errorf("query monitoring instance host daily aggregates for %q: %w", monitoringInstanceID, err)
 	}
 	defer rows.Close()
-	out := make([]NodeHostDailyAggregate, 0)
+	out := make([]MonitoringInstanceHostDailyAggregate, 0)
 	for rows.Next() {
-		var aggregate NodeHostDailyAggregate
+		var aggregate MonitoringInstanceHostDailyAggregate
 		if err := rows.Scan(
 			&aggregate.BucketDate,
 			&aggregate.SampleCount,
@@ -1141,12 +1141,12 @@ func (r *PostgresSnapshotReader) ListNodeHostDailyAggregates(ctx context.Context
 			&aggregate.BackfilledSampleCount,
 			&aggregate.MaintenanceSampleCount,
 		); err != nil {
-			return nil, fmt.Errorf("scan node host daily aggregate: %w", err)
+			return nil, fmt.Errorf("scan monitoring instance host daily aggregate: %w", err)
 		}
 		out = append(out, aggregate)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate node host daily aggregates: %w", err)
+		return nil, fmt.Errorf("iterate monitoring instance host daily aggregates: %w", err)
 	}
 	return out, nil
 }

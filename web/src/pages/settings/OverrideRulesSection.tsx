@@ -4,7 +4,7 @@ import type { SettingsFormState } from './types'
 
 type OverrideRulesForm = Pick<
   SettingsFormState,
-  'nodeLabelOverridesText' | 'targetTypeOverridesText' | 'targetLabelOverridesText'
+  'monitoringInstanceLabelOverridesText' | 'targetTypeOverridesText' | 'targetLabelOverridesText'
 >
 
 type OverrideRulesSectionProps = {
@@ -71,11 +71,11 @@ export function OverrideRulesSection({ form, onChange }: OverrideRulesSectionPro
   return (
     <>
       <div className="ss-title">覆盖规则</div>
-      <div className="ss-desc">节点标签、目标类型、目标标签结构化覆盖</div>
+      <div className="ss-desc">监控实例标签、目标类型、目标标签结构化覆盖</div>
       <OverrideTextarea
-        ariaLabel="节点标签覆盖规则 JSON"
-        value={form.nodeLabelOverridesText}
-        onChange={(value) => onChange({ nodeLabelOverridesText: value })}
+        ariaLabel="监控实例标签覆盖规则 JSON"
+        value={form.monitoringInstanceLabelOverridesText}
+        onChange={(value) => onChange({ monitoringInstanceLabelOverridesText: value })}
       />
       <OverrideTextarea
         ariaLabel="目标类型覆盖规则 JSON"

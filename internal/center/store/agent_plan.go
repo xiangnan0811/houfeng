@@ -10,25 +10,25 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/agentplan"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/contracts/agentapi"
 )
 
-const selectAgentPlanNodeLabelsSQL = `
+const selectAgentPlanMonitoringInstanceLabelsSQL = `
 	select labels,
 		lifecycle_status,
 		monitoring_status,
 		coalesce(nullif(cs.host_sample_frequency_tier, ''), '5s') as host_sample_frequency_tier,
 		coalesce(
 			cs.override_rules,
-			'{"node_labels":[],"target_types":[],"target_labels":[]}'::jsonb
+			'{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]}'::jsonb
 		) as override_rules,
 		cs.settings_id is not null as settings_row_present
-	from nodes n
+	from monitoring_instances n
 	left join center_settings cs on cs.settings_id = $2
-	where n.node_id = $1`
+	where n.monitoring_instance_id = $1`
 
 const selectAgentPlanAssignmentsSQL = `
 	select
@@ -47,7 +47,7 @@ const selectAgentPlanAssignmentsSQL = `
 	join probe_items p on p.target_id = t.target_id
 	where p.enabled = true
 		and t.run_status = any($1)
-		and t.execution_node_labels && $2
+		and t.execution_monitoring_instance_labels && $2
 	order by t.target_id, p.probe_item_id`
 
 type agentPlanQueryer interface {
@@ -70,11 +70,11 @@ func NewPostgresAgentPlanRepository(db *pgxpool.Pool) *PostgresAgentPlanReposito
 
 var _ agentplan.Repository = (*PostgresAgentPlanRepository)(nil)
 
-func (r *PostgresAgentPlanRepository) BuildSyncPlan(ctx context.Context, nodeID string) (agentplan.SyncPlan, error) {
-	return buildSyncPlan(ctx, r.db, nodeID)
+func (r *PostgresAgentPlanRepository) BuildSyncPlan(ctx context.Context, monitoringInstanceID string) (agentplan.SyncPlan, error) {
+	return buildSyncPlan(ctx, r.db, monitoringInstanceID)
 }
 
-func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string) (agentplan.SyncPlan, error) {
+func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, monitoringInstanceID string) (agentplan.SyncPlan, error) {
 	var (
 		labels             []string
 		lifecycleStatus    string
@@ -83,23 +83,23 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string)
 		overrideRulesJSON  []byte
 		settingsRowPresent bool
 	)
-	if err := queryer.QueryRow(ctx, selectAgentPlanNodeLabelsSQL, nodeID, centersettings.SingletonID).Scan(&labels, &lifecycleStatus, &monitoringStatus, &hostSampleTier, &overrideRulesJSON, &settingsRowPresent); errors.Is(err, pgx.ErrNoRows) {
-		return agentplan.SyncPlan{}, nodes.ErrNodeNotFound
+	if err := queryer.QueryRow(ctx, selectAgentPlanMonitoringInstanceLabelsSQL, monitoringInstanceID, centersettings.SingletonID).Scan(&labels, &lifecycleStatus, &monitoringStatus, &hostSampleTier, &overrideRulesJSON, &settingsRowPresent); errors.Is(err, pgx.ErrNoRows) {
+		return agentplan.SyncPlan{}, monitoringinstances.ErrMonitoringInstanceNotFound
 	} else if err != nil {
-		return agentplan.SyncPlan{}, fmt.Errorf("query labels for node %q: %w", nodeID, err)
+		return agentplan.SyncPlan{}, fmt.Errorf("query labels for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	settings, err := resolveAgentPlanSettings(settingsRowPresent, labels, hostSampleTier, overrideRulesJSON)
 	if err != nil {
-		return agentplan.SyncPlan{}, fmt.Errorf("resolve sync-plan settings for node %q: %w", nodeID, err)
+		return agentplan.SyncPlan{}, fmt.Errorf("resolve sync-plan settings for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	plan := agentplan.SyncPlan{
 		HostSampleFrequencyTier:      resolveHostSampleFrequencyTier(settings.HostSampleFrequencyTier, labels, settings.OverrideRules),
-		HostSampleMaintenanceContext: monitoringStatus == nodes.MonitoringMaintenance,
+		HostSampleMaintenanceContext: monitoringStatus == monitoringinstances.MonitoringMaintenance,
 		ProbeAssignments:             make([]agentplan.ProbeAssignment, 0),
 	}
-	if lifecycleStatus == nodes.LifecycleRetired || monitoringStatus == nodes.MonitoringPaused {
+	if lifecycleStatus == monitoringinstances.LifecycleRetired || monitoringStatus == monitoringinstances.MonitoringPaused {
 		plan.HostSampleFrequencyTier = ""
 		plan.HostSampleMaintenanceContext = false
 		return plan, nil
@@ -110,7 +110,7 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string)
 
 	rows, err := queryer.Query(ctx, selectAgentPlanAssignmentsSQL, []string{targets.RunStatusEnabled, targets.RunStatusMaintenance}, labels)
 	if err != nil {
-		return agentplan.SyncPlan{}, fmt.Errorf("query sync-plan assignments for node %q: %w", nodeID, err)
+		return agentplan.SyncPlan{}, fmt.Errorf("query sync-plan assignments for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	defer rows.Close()
 
@@ -135,9 +135,9 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string)
 			&targetType,
 			&targetLabels,
 		); err != nil {
-			return agentplan.SyncPlan{}, fmt.Errorf("scan sync-plan assignment for node %q: %w", nodeID, err)
+			return agentplan.SyncPlan{}, fmt.Errorf("scan sync-plan assignment for monitoring instance %q: %w", monitoringInstanceID, err)
 		}
-		assignment.MaintenanceContext = monitoringStatus == nodes.MonitoringMaintenance || runStatus == targets.RunStatusMaintenance
+		assignment.MaintenanceContext = monitoringStatus == monitoringinstances.MonitoringMaintenance || runStatus == targets.RunStatusMaintenance
 		assignment.Config = json.RawMessage(append([]byte(nil), config...))
 		assignment.FrequencyTier = resolveProbeAssignmentFrequencyTier(
 			assignment.FrequencyTier,
@@ -149,19 +149,19 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, nodeID string)
 		plan.ProbeAssignments = append(plan.ProbeAssignments, assignment)
 	}
 	if err := rows.Err(); err != nil {
-		return agentplan.SyncPlan{}, fmt.Errorf("iterate sync-plan assignments for node %q: %w", nodeID, err)
+		return agentplan.SyncPlan{}, fmt.Errorf("iterate sync-plan assignments for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	return plan, nil
 }
 
-func resolveAgentPlanSettings(settingsRowPresent bool, nodeLabels []string, hostSampleTier string, overrideRulesJSON []byte) (agentPlanSettingsSnapshot, error) {
+func resolveAgentPlanSettings(settingsRowPresent bool, monitoringInstanceLabels []string, hostSampleTier string, overrideRulesJSON []byte) (agentPlanSettingsSnapshot, error) {
 	settings := agentPlanSettingsSnapshot{
 		HostSampleFrequencyTier: centersettings.Default().HostSampleFrequencyTier,
 		OverrideRules:           centersettings.Default().OverrideRules,
 	}
 	if !settingsRowPresent {
-		settings.HostSampleFrequencyTier = legacyHostSampleFrequencyTier(nodeLabels)
+		settings.HostSampleFrequencyTier = legacyHostSampleFrequencyTier(monitoringInstanceLabels)
 		return settings, nil
 	}
 	if hostSampleTier != "" {
@@ -176,9 +176,9 @@ func resolveAgentPlanSettings(settingsRowPresent bool, nodeLabels []string, host
 	return settings, nil
 }
 
-func resolveHostSampleFrequencyTier(base string, nodeLabels []string, overrideRules centersettings.OverrideRules) string {
-	labelSet := labelSet(nodeLabels)
-	for _, rule := range overrideRules.NodeLabels {
+func resolveHostSampleFrequencyTier(base string, monitoringInstanceLabels []string, overrideRules centersettings.OverrideRules) string {
+	labelSet := labelSet(monitoringInstanceLabels)
+	for _, rule := range overrideRules.MonitoringInstanceLabels {
 		if _, ok := labelSet[rule.Label]; !ok {
 			continue
 		}

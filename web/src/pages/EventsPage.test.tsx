@@ -17,8 +17,8 @@ function mockEventsResponse(events: unknown[], status = 200) {
   return mockJSONResponse({ items: events }, status)
 }
 
-function mockNodesResponse(nodes: unknown[] = []) {
-  return mockJSONResponse(nodes)
+function mockMonitoringInstancesResponse(monitoring: unknown[] = []) {
+  return mockJSONResponse(monitoring)
 }
 
 function mockTargetsResponse(targets: unknown[] = []) {
@@ -40,11 +40,11 @@ const SAMPLE_EVENTS = [
     event_id: 'evt_001',
     incident_id: 'inc_001',
     incident_class: 'connectivity',
-    object_type: 'node',
-    object_id: 'nd_001',
+    object_type: 'monitoring_instance',
+    object_id: 'mi_001',
     event_type: 'incident_started',
     severity: '告警',
-    summary: '节点连接超时',
+    summary: '监控实例连接超时',
     created_at: '2026-05-28T10:00:00Z',
   },
   {
@@ -60,27 +60,27 @@ const SAMPLE_EVENTS = [
   },
 ]
 
-const SAMPLE_NODES = [{ node_id: 'nd_001', display_name: '生产节点-01' }]
+const SAMPLE_MONITORING_INSTANCES = [{ monitoring_instance_id: 'mi_001', display_name: '生产监控实例-01' }]
 const SAMPLE_TARGETS = [{ target_id: 'tg_001', name: 'api.example.com' }]
 
 function setupFetchMock(options: {
   events?: unknown[]
   eventsStatus?: number
-  nodes?: unknown[]
+  monitoring?: unknown[]
   targets?: unknown[]
   dashboard?: object | null
 }) {
   const {
     events = SAMPLE_EVENTS,
     eventsStatus = 200,
-    nodes = SAMPLE_NODES,
+    monitoring = SAMPLE_MONITORING_INSTANCES,
     targets = SAMPLE_TARGETS,
     dashboard = {},
   } = options
 
   return vi.fn((url: string) => {
     if (url.startsWith('/api/events')) return Promise.resolve(mockEventsResponse(events, eventsStatus))
-    if (url === '/api/nodes') return Promise.resolve(mockNodesResponse(nodes))
+    if (url === '/api/monitoring-instances') return Promise.resolve(mockMonitoringInstancesResponse(monitoring))
     if (url === '/api/targets') return Promise.resolve(mockTargetsResponse(targets))
     if (url === '/api/dashboard') return Promise.resolve(mockDashboardResponse(dashboard ?? {}))
     return Promise.resolve(mockJSONResponse({}, 404))
@@ -109,7 +109,7 @@ describe('EventsPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
     )
-    expect(screen.getByText('节点连接超时')).toBeInTheDocument()
+    expect(screen.getByText('监控实例连接超时')).toBeInTheDocument()
     expect(screen.getByText('证书即将过期')).toBeInTheDocument()
   })
 
@@ -143,12 +143,12 @@ describe('EventsPage', () => {
     expect(screen.getByText('1')).toBeInTheDocument()
   })
 
-  it('resolves object names from nodes and targets', async () => {
+  it('resolves object names from monitoring and targets', async () => {
     vi.stubGlobal('fetch', setupFetchMock({}))
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByText(/生产节点-01/)).toBeInTheDocument(),
+      expect(screen.getByText(/生产监控实例-01/)).toBeInTheDocument(),
     )
     expect(screen.getByText(/api\.example\.com/)).toBeInTheDocument()
   })
@@ -172,7 +172,7 @@ describe('EventsPage', () => {
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByText('节点连接超时')).toBeInTheDocument(),
+      expect(screen.getByText('监控实例连接超时')).toBeInTheDocument(),
     )
     expect(screen.getByText('证书即将过期')).toBeInTheDocument()
 
@@ -181,7 +181,7 @@ describe('EventsPage', () => {
     await waitFor(() =>
       expect(screen.queryByText('证书即将过期')).not.toBeInTheDocument(),
     )
-    expect(screen.getByText('节点连接超时')).toBeInTheDocument()
+    expect(screen.getByText('监控实例连接超时')).toBeInTheDocument()
   })
 
   it('has CSV export button', async () => {

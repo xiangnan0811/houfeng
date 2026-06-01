@@ -384,7 +384,7 @@ func sortEntries(entries []Entry) {
 
 func cloneRequest(request agentapi.SyncRequest) agentapi.SyncRequest {
 	cloned := request
-	cloned.Heartbeats = append([]agentapi.NodeHeartbeat(nil), request.Heartbeats...)
+	cloned.Heartbeats = append([]agentapi.MonitoringInstanceHeartbeat(nil), request.Heartbeats...)
 	cloned.HostSamples = append([]agentapi.HostSamplePayload(nil), request.HostSamples...)
 	cloned.ProbeObservations = append([]agentapi.ProbeObservationPayload(nil), request.ProbeObservations...)
 	return cloned

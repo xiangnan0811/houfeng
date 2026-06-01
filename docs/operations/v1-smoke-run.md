@@ -6,7 +6,7 @@ This smoke run verifies the current first operating path for `候风 / Houfeng F
 
 1. build and start the center against PostgreSQL;
 2. log in with the initial admin user;
-3. create a Node;
+3. create a MonitoringInstance;
 4. generate a center-owned one-command agent install command;
 5. enroll/sync an agent;
 6. create a Target and ProbeItem;
@@ -14,7 +14,7 @@ This smoke run verifies the current first operating path for `候风 / Houfeng F
 8. trigger and recover an incident;
 9. verify events and notification records.
 
-The primary onboarding path is the generated install command from the Node onboarding page or `POST /api/nodes/{node_id}/install-command`. Manual enrollment-token issuance is kept only as an API/troubleshooting fallback.
+The primary onboarding path is the generated install command from the MonitoringInstance onboarding page or `POST /api/monitoring-instances/{monitoring_instance_id}/install-command`. Manual enrollment-token issuance is kept only as an API/troubleshooting fallback.
 
 ## Evidence levels
 
@@ -99,23 +99,23 @@ curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
 
 Expected: HTTP 200 JSON response with the current user and a `houfeng_session` cookie in `$COOKIE_JAR`.
 
-## Step 1: Create a Node
+## Step 1: Create a MonitoringInstance
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/nodes \
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/monitoring-instances \
   -H 'Content-Type: application/json' \
   -d '{
-    "display_name": "smoke-node-01",
+    "display_name": "smoke-monitoring-instance-01",
     "group": "smoke",
     "provider": "local",
     "region": "local",
     "city": "local",
     "labels": ["smoke", "v1"],
-    "note": "fresh-install smoke node"
+    "note": "fresh-install smoke monitoring instance"
   }'
 ```
 
-Record the returned `node_id`.
+Record the returned `monitoring_instance_id`.
 
 ## Step 2: Generate the one-command install command
 
@@ -123,14 +123,14 @@ Preferred UI path:
 
 1. Open `http://127.0.0.1:8080/`.
 2. Log in.
-3. Open the Node onboarding workspace for the smoke Node.
+3. Open the MonitoringInstance onboarding workspace for the smoke monitoring instance from `/monitoring`.
 4. Click **生成一键安装命令** and copy the command shown by the center.
 
 API equivalent:
 
 ```bash
 curl -fsS -b "$COOKIE_JAR" \
-  -X POST http://127.0.0.1:8080/api/nodes/<node_id>/install-command
+  -X POST http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/install-command
 ```
 
 Expected response fields:
@@ -143,7 +143,7 @@ Expected response fields:
 - `agent_version`
 - `release_repo`
 
-The generated command downloads the center-served `/api/agent/install.sh`, passes a 30-minute one-time enrollment token, and tells the installer which GitHub Release repository/version to use for the Linux agent binary. Regenerating the command invalidates the previous active token for that Node.
+The generated command downloads the center-served `/api/agent/install.sh`, passes a 30-minute one-time enrollment token, and tells the installer which GitHub Release repository/version to use for the Linux agent binary. Regenerating the command invalidates the previous active token for that MonitoringInstance.
 
 Treat the full command as secret material. Do not paste it into public issues, screenshots, shared shell transcripts, or long-lived logs.
 
@@ -165,13 +165,13 @@ Expected runtime behavior:
 
 - agent enrolls through `/api/agent/enroll`;
 - subsequent syncs call `/api/agent/sync`;
-- node onboarding state changes from `未绑定` toward `已绑定` / `接入完成` after accepted observations.
+- monitoring instance onboarding state changes from `未绑定` toward `已绑定` / `接入完成` after accepted observations.
 
 Check from the center machine:
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/nodes/<node_id>/onboarding
-curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/nodes/<node_id>/runtime-facts
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/onboarding
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/runtime-facts
 ```
 
 On the agent host:
@@ -194,7 +194,7 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets \
     "run_status": "启用",
     "group": "smoke",
     "labels": ["smoke", "v1"],
-    "execution_node_labels": ["smoke"],
+    "execution_monitoring_instance_labels": ["smoke"],
     "note": "fresh-install smoke target"
   }'
 ```
@@ -278,9 +278,9 @@ Expected:
 Open `http://127.0.0.1:8080/` and check the current UI surfaces that are relevant to the smoke:
 
 - Dashboard shows the current workbench and abnormal/asset decision summaries without pretending the smoke proves production health.
-- Nodes page shows the smoke node and visible onboarding/binding status.
-- Node onboarding page shows generated-command metadata, token expiry, and bound/conflict state truthfully.
-- Node detail shows latest host sample and runtime evidence once the agent has synced.
+- Monitoring page shows the smoke monitoring instance and visible onboarding/binding status.
+- MonitoringInstance onboarding page shows generated-command metadata, token expiry, and bound/conflict state truthfully.
+- MonitoringInstance detail shows latest host sample and runtime evidence once the agent has synced.
 - Targets page shows the smoke target.
 - Target detail shows ProbeItem, latest probe observation, incident context, and recent trend evidence.
 - Events page filters by object, time, severity/type, notification-only, recovery-only, maintenance-only, and explicit backfilled-event opt-in.
@@ -295,7 +295,7 @@ Use this only when debugging the installer or doing API-level local verification
 Issue a raw enrollment token:
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/nodes/<node_id>/enrollment-token
+curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/enrollment-token
 ```
 
 The response key is `token`. Store it in a private token file:
@@ -317,7 +317,7 @@ make build-agent
 AGENT_PID=$!
 ```
 
-After the first successful enrollment, the agent replaces the enrollment token file with post-enrollment sync credentials for that Node. Do not reuse a consumed token for another host.
+After the first successful enrollment, the agent replaces the enrollment token file with post-enrollment sync credentials for that MonitoringInstance. Do not reuse a consumed token for another host.
 
 ## Historical evidence snapshot
 

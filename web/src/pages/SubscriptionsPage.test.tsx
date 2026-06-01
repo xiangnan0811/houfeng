@@ -36,7 +36,7 @@ const vps = {
   importance: 'normal',
   labels: [],
   note: '',
-  active_node_link_count: 0,
+  active_monitoring_instance_link_count: 0,
   created_at: '2026-05-09T08:00:00Z',
   updated_at: '2026-05-09T08:00:00Z',
   archived_at: null,

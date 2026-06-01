@@ -3,7 +3,7 @@ import type { StateChangeEventRecord, StateChangeEventType } from '../../lib/typ
 export type TimeRange = '24h' | '7d' | '30d' | 'custom'
 
 export type FilterState = {
-  object_type: '' | 'node' | 'target'
+  object_type: '' | 'monitoring_instance' | 'target'
   severity: '' | '关注' | '告警' | '严重'
   event_type: '' | StateChangeEventType
   limit: string

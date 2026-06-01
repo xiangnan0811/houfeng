@@ -79,7 +79,7 @@ verify-web:
 
 **当前阶段不强制覆盖率阈值**——CI 不跑 coverage，`vitest` 也未启用 `--coverage`。但仓库当前已经做到的"事实约束"是：
 
-- **每个路由页有至少 1 份 `<Page>.test.tsx`**：实读 `web/src/pages/` 下 9 个 page 全部配套（`DashboardPage` / `EventsPage` / `LoginPage` / `NodeDetailPage` / `NodeOnboardingPage` / `NodesPage` / `SettingsPage` / `TargetDetailPage` / `TargetsPage`）。**新增 page 必须保持这条线**——至少 1 个 happy-path test 覆盖渲染 + 拉数据 + 默认交互。
+- **每个路由页有至少 1 份 `<Page>.test.tsx`**：实读 `web/src/pages/` 下 9 个 page 全部配套（`DashboardPage` / `EventsPage` / `LoginPage` / `MonitoringDetailPage` / `MonitoringDetailPage` / `MonitoringPage` / `SettingsPage` / `TargetDetailPage` / `TargetsPage`）。**新增 page 必须保持这条线**——至少 1 个 happy-path test 覆盖渲染 + 拉数据 + 默认交互。
 - **每个 atom 有同名测试**（`atoms/Button.test.tsx` / `Card.test.tsx` / `Sparkline.test.tsx` / `Input.test.tsx` / `Badge.test.tsx` / `DataTable.test.tsx` / `Mono.test.tsx` / `StatusGlyph.test.tsx` / `Tabs.test.tsx` / `Toggle.test.tsx`）。新增 atom 同样补一份。
 - **跨页业务组合组件按需测**（`IncidentList.test.tsx` / `EventList.test.tsx` / `ActionConfirmationCard.test.tsx` 已有；`DetailSection` / `StatusBadge` 当前未测——**不强制**，但如果改动到行为分支，请补）。
 - **`lib/` 工具函数**——纯逻辑（`format.ts` / `theme.ts`）应有单测，I/O 边界（`api.ts` / `auth-client.ts`）按现状 mock `fetch` 跑表驱动用例。
@@ -144,7 +144,7 @@ vi.spyOn(authCtx, 'useAuth').mockReturnValue({
 
 - **`vi.spyOn(module, 'useX').mockReturnValue(...)`** 比 `vi.mock(...)` 整文件 mock 更精准、不影响其他测试。
 - **`vi.fn()`** 给 callback / handler 占位，按需 `expect(spy).toHaveBeenCalledWith(...)`。
-- 跨业务模块的具体函数 mock 用 `vi.spyOn(api, 'listNodes').mockResolvedValue(mockNodes)`（参考 `web/src/app/layout/GlobalSearch.test.tsx:53`）。
+- 跨业务模块的具体函数 mock 用 `vi.spyOn(api, 'listMonitoringInstances').mockResolvedValue(mockMonitoringInstances)`（参考 `web/src/app/layout/GlobalSearch.test.tsx:53`）。
 
 #### Atom 测试：渲染 + 类名 / 行为断言
 
@@ -224,7 +224,7 @@ export default defineConfig([
 | 改动 | 必须连带的修改 |
 |------|----------------|
 | 新增 / 修改 center HTTP 端点的请求 / 响应字段 | 1) 后端按 `.trellis/spec/backend/` 改完；2) `web/src/lib/types.ts` 加 / 改 `*Record` `*Input`，**保持 snake_case 与 Go JSON tag 一致**；3) `web/src/lib/api.ts` 加 / 改函数；4) page / component 调用方更新；5) 必要时 page 测试的 `toHaveBeenLastCalledWith` 断言一起更新 |
-| 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/api.ts`，**不要**在 page / component 里直接 `fetch()`；历史直连创建节点 API 已偿还，reviewer 不要让这类请求回流到 page |
+| 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/api.ts`，**不要**在 page / component 里直接 `fetch()`；历史直连创建监控实例 API 已偿还，reviewer 不要让这类请求回流到 page |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/atoms.css` 加样式（用令牌） |
 | 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步改 4 个主题块（`:root` / `theme-houfeng-light` / `theme-classic-dark` / `theme-classic-light`），见 `.trellis/spec/web/styling-guidelines.md` |

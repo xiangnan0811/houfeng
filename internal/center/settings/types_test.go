@@ -45,7 +45,7 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 			InodeCriticalPct:         95,
 		},
 		OverrideRules: OverrideRules{
-			NodeLabels: []NodeLabelOverrideRule{
+			MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{
 				{
 					Label: "core",
 					Overrides: SettingsOverrideFields{
@@ -157,12 +157,12 @@ func TestSettingsValidateRejectsInvalidOverrideScope(t *testing.T) {
 	}
 }
 
-func TestSettingsValidateRejectsDuplicateNodeLabelOverrides(t *testing.T) {
+func TestSettingsValidateRejectsDuplicateMonitoringInstanceLabelOverrides(t *testing.T) {
 	t.Parallel()
 
 	input := Default()
 	input.OverrideRules = OverrideRules{
-		NodeLabels: []NodeLabelOverrideRule{
+		MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{
 			{
 				Label: " core ",
 				Overrides: SettingsOverrideFields{
@@ -338,7 +338,7 @@ func TestSettingsValidateRejectsOutOfRangeOverrideThreshold(t *testing.T) {
 
 	input := Default()
 	input.OverrideRules = OverrideRules{
-		NodeLabels: []NodeLabelOverrideRule{{
+		MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{{
 			Label: "core",
 			Overrides: SettingsOverrideFields{
 				IncidentDefaults: &IncidentDefaultsOverride{

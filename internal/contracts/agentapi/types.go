@@ -12,14 +12,14 @@ const (
 )
 
 const (
-	ErrorCodeInvalidRequest         = "invalid_request"
-	ErrorCodeInvalidJSON            = "invalid_json"
-	ErrorCodeInvalidEnrollmentToken = "invalid_enrollment_token"
-	ErrorCodeInvalidSyncToken       = "invalid_sync_token"
-	ErrorCodeBindingNotAccepted     = "binding_not_accepted"
-	ErrorCodeMethodNotAllowed       = "method_not_allowed"
-	ErrorCodeNodeNotFound           = "node_not_found"
-	ErrorCodeInternalError          = "internal_error"
+	ErrorCodeInvalidRequest             = "invalid_request"
+	ErrorCodeInvalidJSON                = "invalid_json"
+	ErrorCodeInvalidEnrollmentToken     = "invalid_enrollment_token"
+	ErrorCodeInvalidSyncToken           = "invalid_sync_token"
+	ErrorCodeBindingNotAccepted         = "binding_not_accepted"
+	ErrorCodeMethodNotAllowed           = "method_not_allowed"
+	ErrorCodeMonitoringInstanceNotFound = "monitoring_instance_not_found"
+	ErrorCodeInternalError              = "internal_error"
 )
 
 const (
@@ -54,10 +54,10 @@ type EnrollmentRequest struct {
 }
 
 type EnrollmentResponse struct {
-	NodeID        string `json:"node_id"`
-	Status        string `json:"status"`
-	BindingStatus string `json:"binding_status"`
-	SyncToken     string `json:"sync_token,omitempty"`
+	MonitoringInstanceID string `json:"monitoring_instance_id"`
+	Status               string `json:"status"`
+	BindingStatus        string `json:"binding_status"`
+	SyncToken            string `json:"sync_token,omitempty"`
 }
 
 type ErrorResponse struct {
@@ -65,7 +65,7 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
-type NodeHeartbeat struct {
+type MonitoringInstanceHeartbeat struct {
 	ObservedAt   time.Time `json:"observed_at"`
 	AgentVersion string    `json:"agent_version"`
 	Fingerprint  string    `json:"fingerprint"`
@@ -139,12 +139,12 @@ type ProbeObservationPayload struct {
 // CommandResults carries back outputs from pending actions that were executed
 // since the last sync.
 type SyncRequest struct {
-	NodeID            string                    `json:"node_id"`
-	SyncToken         string                    `json:"sync_token"`
-	Heartbeats        []NodeHeartbeat           `json:"heartbeats,omitempty"`
-	HostSamples       []HostSamplePayload       `json:"host_samples,omitempty"`
-	ProbeObservations []ProbeObservationPayload `json:"probe_observations,omitempty"`
-	CommandResults    []CommandResult           `json:"command_results,omitempty"`
+	MonitoringInstanceID string                        `json:"monitoring_instance_id"`
+	SyncToken            string                        `json:"sync_token"`
+	Heartbeats           []MonitoringInstanceHeartbeat `json:"heartbeats,omitempty"`
+	HostSamples          []HostSamplePayload           `json:"host_samples,omitempty"`
+	ProbeObservations    []ProbeObservationPayload     `json:"probe_observations,omitempty"`
+	CommandResults       []CommandResult               `json:"command_results,omitempty"`
 }
 
 type ProbeAssignment struct {

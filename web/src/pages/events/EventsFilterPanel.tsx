@@ -37,7 +37,7 @@ export function EventsFilterPanel({
           value={filters.object_type || null}
           options={OBJECT_TYPE_OPTIONS}
           onChange={(value) =>
-            onFilterChange('object_type', value === 'node' || value === 'target' ? value : '')
+            onFilterChange('object_type', value === 'monitoring_instance' || value === 'target' ? value : '')
           }
         />
         <FilterSelect

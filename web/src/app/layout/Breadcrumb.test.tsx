@@ -21,15 +21,15 @@ describe('Breadcrumb', () => {
   })
 
   it('hides on level-1 routes (no duplicate links with sidebar)', () => {
-    const { container } = renderAt('/nodes', '/nodes')
+    const { container } = renderAt('/monitoring', '/monitoring')
     expect(container.querySelector('.breadcrumb')).toBeNull()
   })
 
-  it('renders parent link + current id on /nodes/:id', () => {
-    renderAt('/nodes/nd_001', '/nodes/:nodeId')
-    const link = screen.getByRole('link', { name: '节点' })
-    expect(link).toHaveAttribute('href', '/nodes')
-    expect(screen.getByText('nd_001')).toBeInTheDocument()
+  it('renders parent link + current id on /monitoring/:id', () => {
+    renderAt('/monitoring/mi_001', '/monitoring/:monitoringInstanceId')
+    const link = screen.getByRole('link', { name: '监控' })
+    expect(link).toHaveAttribute('href', '/monitoring')
+    expect(screen.getByText('mi_001')).toBeInTheDocument()
   })
 
   it('renders parent link + current id on /vps/:id', () => {
@@ -51,7 +51,7 @@ describe('Breadcrumb', () => {
   })
 
   it('truncates long detail ids in the current segment', () => {
-    renderAt('/nodes/nd_8901234567890123456', '/nodes/:nodeId')
-    expect(screen.getByText(/^nd_8901234567…$/)).toBeInTheDocument()
+    renderAt('/monitoring/mi_8901234567890123456', '/monitoring/:monitoringInstanceId')
+    expect(screen.getByText(/^mi_8901234567…$/)).toBeInTheDocument()
   })
 })

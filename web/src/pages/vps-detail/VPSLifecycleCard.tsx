@@ -37,7 +37,7 @@ export function VPSLifecycleCard({
           <p>
             {isRestore
               ? '恢复是独立生命周期操作，确认后会把已归档 VPS 重新放回闲置资产工作集。'
-              : '归档是独立危险操作，不进入常规编辑弹窗；它会让 VPS 退出当前工作集，但保留基础信息、历史与 Node 关联。'}
+              : '归档是独立危险操作，不进入常规编辑弹窗；它会让 VPS 退出当前工作集，但保留基础信息、历史与监控实例关联。'}
           </p>
         </div>
         <LifecycleBadge value={detail.lifecycle_status} />
@@ -71,12 +71,12 @@ export function VPSLifecycleCard({
           {isRestore ? (
             <>
               <p>恢复后它会重新进入 VPS 台账的人工核对范围，但不会自动改变续费决策。</p>
-              <p>不会删除或重建 VPS、订阅、Node 关联或资产历史。</p>
+              <p>不会删除或重建 VPS、订阅、监控实例关联或资产历史。</p>
             </>
           ) : (
             <>
               <p>归档后它不会作为活跃 VPS 进入续费、迁移或成本核对队列。</p>
-              <p>不会删除 VPS、订阅、Node 关联或资产历史。后续可恢复为闲置。</p>
+              <p>不会删除 VPS、订阅、监控实例关联或资产历史。后续可恢复为闲置。</p>
             </>
           )}
         </div>

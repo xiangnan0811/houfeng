@@ -111,7 +111,7 @@ export function TargetsSupportSurface({
         }
       />
 
-      <div className="observability-support__grid" aria-label="目标观测证据摘要">
+      <div className="observability-support__grid" aria-label="入口探测证据摘要">
         <article className="observability-support-lane observability-support-lane--alert">
           <div className="observability-support-lane__head">
             <span>异常入口</span>
@@ -171,11 +171,11 @@ export function TargetsSupportSurface({
             </Badge>
           </div>
           <p>
-            <MonoDigits>{executionLabelCount}</MonoDigits> 个执行节点标签支撑探测边界；缺口目标需要补齐覆盖语义。
+            <MonoDigits>{executionLabelCount}</MonoDigits> 个执行监控实例标签支撑探测边界；缺口目标需要补齐覆盖语义。
           </p>
           <div className="observability-support-lane__actions">
-            <Link className="observability-support-link" to="/nodes">
-              节点覆盖
+            <Link className="observability-support-link" to="/monitoring">
+              监控实例覆盖
             </Link>
             <Link className="observability-support-link" to="/events?object_type=target&time_range=24h">
               24h 事件

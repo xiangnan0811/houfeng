@@ -24,7 +24,7 @@ export function AttentionQueue({ items }: AttentionQueueProps) {
             <Link
               className="dashboard-attention-item__main"
               to={item.route}
-              aria-label={`进入${item.kind === 'node' ? '节点' : '目标'} ${item.name}`}
+              aria-label={`进入${item.kind === 'monitoring_instance' ? '监控实例' : '目标'} ${item.name}`}
             >
               <div className="dashboard-attention-item__status">
                 <span className="dashboard-attention-item__rank">
@@ -62,7 +62,7 @@ export function AttentionQueue({ items }: AttentionQueueProps) {
             <Link
               className="text-link dashboard-attention-item__link"
               to={item.route}
-              aria-label={`查看${item.kind === 'node' ? '节点' : '目标'} ${item.name}`}
+              aria-label={`查看${item.kind === 'monitoring_instance' ? '监控实例' : '目标'} ${item.name}`}
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
             >
@@ -73,7 +73,7 @@ export function AttentionQueue({ items }: AttentionQueueProps) {
       </div>
       {items.length > visibleItems.length ? (
         <p className="dashboard-attention__limit">
-          仅显示 P<MonoDigits>{visibleItems.length}</MonoDigits> 以内；完整队列进节点 / 目标 / 事件。
+          仅显示 P<MonoDigits>{visibleItems.length}</MonoDigits> 以内；完整队列进监控实例 / 目标 / 事件。
         </p>
       ) : null}
     </div>

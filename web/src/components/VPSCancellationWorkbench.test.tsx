@@ -30,7 +30,7 @@ function previewFixture(): CancellationPreview {
       importance: 'normal',
       labels: [],
       note: '',
-      active_node_link_count: 1,
+      active_monitoring_instance_link_count: 1,
       created_at: '2026-05-30T08:00:00Z',
       updated_at: '2026-05-30T08:00:00Z',
       archived_at: null,
@@ -58,9 +58,9 @@ function previewFixture(): CancellationPreview {
       recommended_action: 'cancel_auto_renew_and_mark_cancelled',
       message: '订阅仍处于 active，需要显式确认取消订阅自动续费并标记为 cancelled。',
     }],
-    node_links: [{
-      node_id: 'nd_001',
-      display_name: 'Tokyo Node',
+    monitoring_instance_links: [{
+      monitoring_instance_id: 'mi_001',
+      display_name: 'Tokyo Monitoring Instance',
       group: 'prod',
       region: 'Kanto',
       city: 'Tokyo',
@@ -99,7 +99,7 @@ function previewFixture(): CancellationPreview {
 }
 
 describe('VPSCancellationWorkbench', () => {
-  it('submits only user-confirmed node and target steps', async () => {
+  it('submits only user-confirmed monitoring instance and target steps', async () => {
     const onSubmit = vi.fn()
     render(
       <VPSCancellationWorkbench
@@ -115,7 +115,7 @@ describe('VPSCancellationWorkbench', () => {
       target: { value: '已过期且不准备续费' },
     })
     fireEvent.click(within(screen.getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('checkbox'))
-    fireEvent.click(within(screen.getByText('Tokyo Node').closest('.asset-checkbox-line')!).getByRole('checkbox'))
+    fireEvent.click(within(screen.getByText('Tokyo Monitoring Instance').closest('.asset-checkbox-line')!).getByRole('checkbox'))
     fireEvent.click(within(screen.getByText('Blog').closest('.asset-checkbox-line')!).getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
 
@@ -125,7 +125,7 @@ describe('VPSCancellationWorkbench', () => {
       effective_date: expect.any(String),
       subscription_ids: ['sub_001'],
       vps_lifecycle_status: 'cancelled',
-      node_actions: [{ node_id: 'nd_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
+      monitoring_instance_actions: [{ monitoring_instance_id: 'mi_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
       target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
     })
   })

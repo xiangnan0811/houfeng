@@ -147,7 +147,7 @@ function queuePriority(
   if (vps.renewal_decision === 'unreviewed') priority += 500
   if (renewalDue) priority += 300
   if (vps.renewal_decision === 'migrate' || vps.renewal_decision === 'cancel') priority += 180
-  if (vps.active_node_link_count <= 0) priority += 90
+  if (vps.active_monitoring_instance_link_count <= 0) priority += 90
   if (!subscription) priority += 80
   return priority + qualityIssues.length * 8
 }
@@ -158,7 +158,7 @@ function filterDecisionQueue(
 ): DecisionQueueItem[] {
   if (view === 'all') return rows
   if (view === 'renewal') return rows.filter((row) => row.renewalDue)
-  if (view === 'unlinked') return rows.filter((row) => row.vps.active_node_link_count <= 0)
+  if (view === 'unlinked') return rows.filter((row) => row.vps.active_monitoring_instance_link_count <= 0)
   if (view === 'missing_subscription') return rows.filter((row) => !row.subscription)
   if (view === 'cancellation_attention') return rows.filter((row) => hasCancellationAttention(row))
   return rows.filter((row) => row.vps.renewal_decision === view)
@@ -270,7 +270,7 @@ export function AssetDecisionsPage() {
   )
   const renewalDueQueueCount = decisionQueue.filter((item) => item.renewalDue).length
   const missingSubscriptionCount = decisionQueue.filter((item) => !item.subscription).length
-  const unlinkedCount = decisionQueue.filter((item) => item.vps.active_node_link_count <= 0).length
+  const unlinkedCount = decisionQueue.filter((item) => item.vps.active_monitoring_instance_link_count <= 0).length
   const cancellationAttentionCount = decisionQueue.filter(hasCancellationAttention).length
   const priorityDecisionCount = decisionQueue.filter(
     (item) => item.renewalDue && item.vps.renewal_decision === 'unreviewed',
@@ -478,7 +478,7 @@ export function AssetDecisionsPage() {
                 <th>供应商</th>
                 <th>决策</th>
                 <th>订阅</th>
-                <th>Node</th>
+                <th>监控实例</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -515,8 +515,8 @@ export function AssetDecisionsPage() {
                       )}
                     </td>
                     <td>
-                      {vps.active_node_link_count > 0 ? (
-                        <span><MonoDigits>{vps.active_node_link_count}</MonoDigits> 关联</span>
+                      {vps.active_monitoring_instance_link_count > 0 ? (
+                        <span><MonoDigits>{vps.active_monitoring_instance_link_count}</MonoDigits> 关联</span>
                       ) : (
                         <span className="text-muted">未关联</span>
                       )}

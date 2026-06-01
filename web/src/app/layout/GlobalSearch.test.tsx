@@ -30,16 +30,16 @@ const mockVPS = [
     importance: 'normal',
     labels: ['edge'],
     note: '',
-    active_node_link_count: 1,
+    active_monitoring_instance_link_count: 1,
     created_at: '2026-05-09T08:00:00Z',
     updated_at: '2026-05-09T08:00:00Z',
     archived_at: null,
   },
 ] as Awaited<ReturnType<typeof api.listVPSAssets>>
 
-const mockNodes = [
+const mockMonitoringInstances = [
   {
-    node_id: 'nd_001',
+    monitoring_instance_id: 'mi_001',
     display_name: 'Tokyo Edge',
     region: 'ap-northeast-1',
     city: 'Tokyo',
@@ -58,7 +58,7 @@ const mockNodes = [
     created_at: '2026-04-20T00:00:00Z',
     updated_at: '2026-04-30T08:00:00Z',
   },
-] as Awaited<ReturnType<typeof api.listNodes>>
+] as Awaited<ReturnType<typeof api.listMonitoringInstances>>
 
 const mockTargets = [
   {
@@ -67,7 +67,7 @@ const mockTargets = [
     target_type: 'service' as const,
     host: 'blog.example.com',
     base_port: 443,
-    execution_node_labels: ['edge'],
+    execution_monitoring_instance_labels: ['edge'],
     run_status: '启用',
     group: 'prod-group',
     labels: [],
@@ -122,7 +122,7 @@ const mockSubscriptions = [
 describe('GlobalSearch', () => {
   beforeEach(() => {
     vi.spyOn(api, 'listVPSAssets').mockResolvedValue(mockVPS)
-    vi.spyOn(api, 'listNodes').mockResolvedValue(mockNodes)
+    vi.spyOn(api, 'listMonitoringInstances').mockResolvedValue(mockMonitoringInstances)
     vi.spyOn(api, 'listTargets').mockResolvedValue(mockTargets)
     vi.spyOn(api, 'listProviders').mockResolvedValue(mockProviders)
     vi.spyOn(api, 'listSubscriptions').mockResolvedValue(mockSubscriptions)
@@ -153,11 +153,11 @@ describe('GlobalSearch', () => {
 
     expect(api.listSubscriptions).toHaveBeenCalledWith({ sort: 'renew_at', order: 'asc' })
     expect(screen.getAllByText('VPS').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('节点').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('监控实例').length).toBeGreaterThan(0)
     const vpsLink = screen.getByRole('option', { name: /Tokyo VPS/ })
     expect(vpsLink).toHaveAttribute('href', '/vps/vps_001')
     expect(vpsLink.tagName).toBe('A')
-    expect(screen.getByRole('option', { name: /Tokyo Edge/ })).toHaveAttribute('href', '/nodes/nd_001')
+    expect(screen.getByRole('option', { name: /Tokyo Edge/ })).toHaveAttribute('href', '/monitoring/mi_001')
     expect(screen.getByRole('option', { name: /sub_001/ })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
   })
 

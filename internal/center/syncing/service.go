@@ -28,11 +28,11 @@ type CommandResult struct {
 }
 
 type Batch struct {
-	NodeID         string
-	SyncToken      string
-	Heartbeats     []HeartbeatPayload
-	Observations   observations.BatchWrite
-	CommandResults []CommandResult
+	MonitoringInstanceID string
+	SyncToken            string
+	Heartbeats           []HeartbeatPayload
+	Observations         observations.BatchWrite
+	CommandResults       []CommandResult
 }
 
 type Result struct {

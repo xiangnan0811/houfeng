@@ -6,7 +6,7 @@ import type { SyncStatusProps } from './SyncStatus'
 export interface SidebarProps {
   user: User
   sync: SyncStatusProps
-  anomalyCounts: { nodes: number; targets: number }
+  anomalyCounts: { monitoring: number; targets: number }
   collapsed: boolean
   onToggle: () => void
   onLogout: () => void
@@ -62,8 +62,8 @@ export function Sidebar({
         </div>
         <div className="nav-section">
           <div className="nav-label">观测</div>
-          <SidebarNavItem to="/nodes" label="节点" badge={anomalyCounts.nodes} icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2"/></svg>} />
-          <SidebarNavItem to="/targets" label="入口" badge={anomalyCounts.targets} icon={<svg viewBox="0 0 16 16"><path d="M2 8h3l2-4 2 8 2-4h3"/></svg>} />
+          <SidebarNavItem to="/monitoring" label="监控" badge={anomalyCounts.monitoring} icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2"/></svg>} />
+          <SidebarNavItem to="/targets" label="入口探测" badge={anomalyCounts.targets} icon={<svg viewBox="0 0 16 16"><path d="M2 8h3l2-4 2 8 2-4h3"/></svg>} />
           <SidebarNavItem to="/events" label="事件" icon={<svg viewBox="0 0 16 16"><path d="M4 12V7M8 12V4M12 12V9"/></svg>} />
         </div>
         <div className="nav-section">

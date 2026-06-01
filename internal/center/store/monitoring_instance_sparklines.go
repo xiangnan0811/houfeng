@@ -1,0 +1,252 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// MonitoringInstanceSparklinesRepository provides downsampled metric time-series for all
+// active monitoring instances, grouped by monitoring_instance_id. Each metric returns exactly downSample
+// bucket-level average values spanning the window [since, now].
+type MonitoringInstanceSparklinesRepository interface {
+	GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]float64, error)
+}
+
+type sparklinesQueryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+// PostgresMonitoringInstanceSparklinesRepository implements MonitoringInstanceSparklinesRepository against
+// the host_samples table.
+type PostgresMonitoringInstanceSparklinesRepository struct {
+	db sparklinesQueryer
+}
+
+func NewPostgresMonitoringInstanceSparklinesRepository(db *pgxpool.Pool) *PostgresMonitoringInstanceSparklinesRepository {
+	return &PostgresMonitoringInstanceSparklinesRepository{db: db}
+}
+
+// ValidSparklineMetrics contains every numeric column in host_samples that can
+// be requested as a sparkline metric. The key is the snake_case column name
+// matching the JSON tag used by runtimefacts.HostSample.
+var ValidSparklineMetrics = map[string]bool{
+	"cpu_usage_pct":            true,
+	"load_1":                   true,
+	"load_5":                   true,
+	"load_15":                  true,
+	"mem_used_pct":             true,
+	"mem_available_bytes":      true,
+	"mem_total_bytes":          true,
+	"swap_used_pct":            true,
+	"disk_used_pct":            true,
+	"disk_total_bytes":         true,
+	"inode_used_pct":           true,
+	"net_in_bytes_per_sec":     true,
+	"net_out_bytes_per_sec":    true,
+	"cpu_iowait_pct":           true,
+	"cpu_steal_pct":            true,
+	"disk_read_bytes_per_sec":  true,
+	"disk_write_bytes_per_sec": true,
+	"disk_busy_pct":            true,
+	"uptime_seconds":           true,
+}
+
+const getMonitoringInstanceSparklinesSQL = `
+	select
+		monitoring_instance_id,
+		observed_at,
+		cpu_usage_pct,
+		load_1,
+		load_5,
+		load_15,
+		mem_used_pct,
+		mem_available_bytes,
+		mem_total_bytes,
+		swap_used_pct,
+		disk_used_pct,
+		disk_total_bytes,
+		inode_used_pct,
+		net_in_bytes_per_sec,
+		net_out_bytes_per_sec,
+		cpu_iowait_pct,
+		cpu_steal_pct,
+		disk_read_bytes_per_sec,
+		disk_write_bytes_per_sec,
+		disk_busy_pct,
+		uptime_seconds
+	from host_samples
+	where observed_at >= $1
+	order by monitoring_instance_id, observed_at asc`
+
+func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]float64, error) {
+	if downsample <= 0 {
+		return nil, fmt.Errorf("downsample must be positive, got %d", downsample)
+	}
+
+	rows, err := r.db.Query(ctx, getMonitoringInstanceSparklinesSQL, since)
+	if err != nil {
+		return nil, fmt.Errorf("query host_samples for sparklines: %w", err)
+	}
+	defer rows.Close()
+
+	// Build metric index (column position in the scan) from the fixed query order.
+	metricIndex := func(m string) int {
+		switch m {
+		case "cpu_usage_pct":
+			return 0
+		case "load_1":
+			return 1
+		case "load_5":
+			return 2
+		case "load_15":
+			return 3
+		case "mem_used_pct":
+			return 4
+		case "mem_available_bytes":
+			return 5
+		case "mem_total_bytes":
+			return 6
+		case "swap_used_pct":
+			return 7
+		case "disk_used_pct":
+			return 8
+		case "disk_total_bytes":
+			return 9
+		case "inode_used_pct":
+			return 10
+		case "net_in_bytes_per_sec":
+			return 11
+		case "net_out_bytes_per_sec":
+			return 12
+		case "cpu_iowait_pct":
+			return 13
+		case "cpu_steal_pct":
+			return 14
+		case "disk_read_bytes_per_sec":
+			return 15
+		case "disk_write_bytes_per_sec":
+			return 16
+		case "disk_busy_pct":
+			return 17
+		case "uptime_seconds":
+			return 18
+		default:
+			return -1
+		}
+	}
+
+	// Pre-build a list of metric indices for efficient scanning.
+	metricIndices := make([]int, len(metrics))
+	for i, m := range metrics {
+		metricIndices[i] = metricIndex(m)
+	}
+
+	now := time.Now()
+	windowDuration := now.Sub(since)
+	if windowDuration <= 0 {
+		return map[string]map[string][]float64{}, nil
+	}
+
+	// Accumulators: per-monitoring instance -> per-metric -> per-bucket -> (sum, count)
+	type bucketAcc struct {
+		sum   float64
+		count int
+	}
+	type metricAcc map[string][]bucketAcc // metric name -> bucket slice
+	monitoringInstanceAcc := make(map[string]metricAcc)
+
+	for rows.Next() {
+		var monitoringInstanceID string
+		var observedAt time.Time
+		// 19 numeric columns matching the SELECT order.
+		var vals [19]float64
+
+		if err := rows.Scan(
+			&monitoringInstanceID,
+			&observedAt,
+			&vals[0],  // cpu_usage_pct
+			&vals[1],  // load_1
+			&vals[2],  // load_5
+			&vals[3],  // load_15
+			&vals[4],  // mem_used_pct
+			&vals[5],  // mem_available_bytes
+			&vals[6],  // mem_total_bytes
+			&vals[7],  // swap_used_pct
+			&vals[8],  // disk_used_pct
+			&vals[9],  // disk_total_bytes
+			&vals[10], // inode_used_pct
+			&vals[11], // net_in_bytes_per_sec
+			&vals[12], // net_out_bytes_per_sec
+			&vals[13], // cpu_iowait_pct
+			&vals[14], // cpu_steal_pct
+			&vals[15], // disk_read_bytes_per_sec
+			&vals[16], // disk_write_bytes_per_sec
+			&vals[17], // disk_busy_pct
+			&vals[18], // uptime_seconds
+		); err != nil {
+			return nil, fmt.Errorf("scan host_sample row: %w", err)
+		}
+
+		// Determine bucket index.
+		bucketIdx := int(float64(observedAt.Sub(since)) / float64(windowDuration) * float64(downsample))
+		if bucketIdx < 0 {
+			bucketIdx = 0
+		}
+		if bucketIdx >= downsample {
+			bucketIdx = downsample - 1
+		}
+
+		// Initialize per-monitoring instance accumulator if needed.
+		ma, ok := monitoringInstanceAcc[monitoringInstanceID]
+		if !ok {
+			ma = make(metricAcc, len(metrics))
+			for _, m := range metrics {
+				ma[m] = make([]bucketAcc, downsample)
+			}
+			monitoringInstanceAcc[monitoringInstanceID] = ma
+		}
+
+		// Accumulate each requested metric.
+		for i, m := range metrics {
+			idx := metricIndices[i]
+			if idx < 0 {
+				continue
+			}
+			v := vals[idx]
+			// Some integer columns come back as 0.0 when NULL; that's fine for
+			// aggregation (skipping NaN / Inf values).
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				continue
+			}
+			ma[m][bucketIdx].sum += v
+			ma[m][bucketIdx].count++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate host_samples: %w", err)
+	}
+
+	// Build the result map. MonitoringInstances with no rows in the window are absent.
+	result := make(map[string]map[string][]float64, len(monitoringInstanceAcc))
+	for monitoringInstanceID, ma := range monitoringInstanceAcc {
+		monitoringInstanceResult := make(map[string][]float64, len(metrics))
+		for _, m := range metrics {
+			buckets := make([]float64, downsample)
+			acc := ma[m]
+			for b := 0; b < downsample; b++ {
+				if acc[b].count > 0 {
+					buckets[b] = math.Round(acc[b].sum/float64(acc[b].count)*10) / 10
+				}
+			}
+			monitoringInstanceResult[m] = buckets
+		}
+		result[monitoringInstanceID] = monitoringInstanceResult
+	}
+
+	return result, nil
+}

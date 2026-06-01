@@ -46,11 +46,11 @@ describe('EventList', () => {
             event_id: 'evt_bind_001',
             incident_id: '',
             incident_class: '',
-            object_type: 'node',
-            object_id: 'nd_001',
-            event_type: 'node_binding_reset',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_001',
+            event_type: 'monitoring_instance_binding_reset',
             severity: '',
-            summary: '节点已重置绑定并等待重新接入',
+            summary: '监控实例已重置绑定并等待重新接入',
             created_at: '2026-04-26T08:10:00Z',
           },
         ]}
@@ -58,9 +58,9 @@ describe('EventList', () => {
     )
 
     expect(screen.getByText('绑定已重置')).toBeInTheDocument()
-    expect(screen.getByText('节点')).toBeInTheDocument()
-    expect(screen.getByText('nd_001')).toBeInTheDocument()
-    expect(screen.getByText('节点已重置绑定并等待重新接入')).toBeInTheDocument()
+    expect(screen.getByText('监控实例')).toBeInTheDocument()
+    expect(screen.getByText('mi_001')).toBeInTheDocument()
+    expect(screen.getByText('监控实例已重置绑定并等待重新接入')).toBeInTheDocument()
     expect(screen.queryByText('异常类型')).not.toBeInTheDocument()
   })
 
@@ -72,44 +72,44 @@ describe('EventList', () => {
             event_id: 'evt_runtime_001',
             incident_id: '',
             incident_class: '',
-            object_type: 'node',
-            object_id: 'nd_001',
-            event_type: 'node_monitoring_maintenance_entered',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_001',
+            event_type: 'monitoring_instance_monitoring_maintenance_entered',
             severity: '',
-            summary: '节点已进入维护模式',
+            summary: '监控实例已进入维护模式',
             created_at: '2026-04-26T08:10:00Z',
           },
           {
             event_id: 'evt_runtime_002',
             incident_id: '',
             incident_class: '',
-            object_type: 'node',
-            object_id: 'nd_001',
-            event_type: 'node_monitoring_maintenance_exited',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_001',
+            event_type: 'monitoring_instance_monitoring_maintenance_exited',
             severity: '',
-            summary: '节点已退出维护模式',
+            summary: '监控实例已退出维护模式',
             created_at: '2026-04-26T08:11:00Z',
           },
           {
             event_id: 'evt_runtime_003',
             incident_id: '',
             incident_class: '',
-            object_type: 'node',
-            object_id: 'nd_001',
-            event_type: 'node_monitoring_paused',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_001',
+            event_type: 'monitoring_instance_monitoring_paused',
             severity: '',
-            summary: '节点监控已暂停',
+            summary: '监控实例监控已暂停',
             created_at: '2026-04-26T08:12:00Z',
           },
           {
             event_id: 'evt_runtime_004',
             incident_id: '',
             incident_class: '',
-            object_type: 'node',
-            object_id: 'nd_001',
-            event_type: 'node_monitoring_resumed',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_001',
+            event_type: 'monitoring_instance_monitoring_resumed',
             severity: '',
-            summary: '节点监控已恢复',
+            summary: '监控实例监控已恢复',
             created_at: '2026-04-26T08:13:00Z',
           },
           {
@@ -182,10 +182,10 @@ describe('EventList', () => {
       />,
     )
 
-    expect(screen.getByRole('heading', { level: 3, name: '节点进入维护' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 3, name: '节点退出维护' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 3, name: '节点暂停监控' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 3, name: '节点恢复监控' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: '监控实例进入维护' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: '监控实例退出维护' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: '监控实例暂停监控' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: '监控实例恢复监控' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: '目标进入维护' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: '目标退出维护' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: '目标已暂停' })).toBeInTheDocument()
@@ -203,31 +203,31 @@ describe('EventList', () => {
             event_id: 'evt_lifecycle_001',
             incident_id: '',
             incident_class: '',
-            object_type: 'node',
-            object_id: 'nd_001',
-            event_type: 'node_retired',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_001',
+            event_type: 'monitoring_instance_retired',
             severity: '',
-            summary: '节点已退役并退出活跃舰队，历史记录保留',
+            summary: '监控实例已退役并退出活跃舰队，历史记录保留',
             created_at: '2026-04-26T08:10:00Z',
           },
           {
             event_id: 'evt_lifecycle_002',
             incident_id: '',
             incident_class: '',
-            object_type: 'node',
-            object_id: 'nd_001',
-            event_type: 'node_restored_to_observing',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_001',
+            event_type: 'monitoring_instance_restored_to_observing',
             severity: '',
-            summary: '节点已从退役恢复到观察中',
+            summary: '监控实例已从退役恢复到观察中',
             created_at: '2026-04-26T08:11:00Z',
           },
         ]}
       />,
     )
 
-    expect(screen.getByRole('heading', { level: 3, name: '节点已退役' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: '监控实例已退役' })).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { level: 3, name: '节点恢复到观察中' }),
+      screen.getByRole('heading', { level: 3, name: '监控实例恢复到观察中' }),
     ).toBeInTheDocument()
     expect(screen.queryByText('异常类型')).not.toBeInTheDocument()
   })

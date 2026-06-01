@@ -15,7 +15,7 @@ export type CreateTargetFormState = {
   targetType: CreateTargetInput['target_type']
   host: string
   basePort: string
-  executionNodeLabels: string
+  executionMonitoringInstanceLabels: string
   runStatus: CreateTargetInput['run_status']
   group: string
   labels: string

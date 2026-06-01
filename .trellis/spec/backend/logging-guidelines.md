@@ -51,7 +51,7 @@ runtime := agentruntime.New(cfg, logger, ...)
 | Level | 何时使用 | 例子 |
 |-------|----------|------|
 | `Info` | 进程 / worker 生命周期事件、首次绑定成功、retention pass 完成、session sweep 删除条数 > 0 | `agent/runtime/runtime.go:139` `"agent runtime started"`；`agent/runtime/runtime.go:160` `"agent enrolled"`；`retention/worker.go:90-101` `"retention pass completed"`；`auth/cleanup.go:48` `"session sweep"` (deleted > 0) |
-| `Error` | 操作失败但 worker 选择继续；HTTP / DB 异常需要排查 | `incidents/service.go:172` `"evaluate node incidents after sync failed"`；`retention/worker.go:71/77/86`；`auth/cleanup.go:44` `"session sweep"` (with error)；`agent/runtime/runtime.go:194` `"sync queue flush failed"` |
+| `Error` | 操作失败但 worker 选择继续；HTTP / DB 异常需要排查 | `incidents/service.go` `"evaluate monitoring instance incidents after sync failed"`；`retention/worker.go`；`auth/cleanup.go` `"session sweep"` (with error)；`agent/runtime/runtime.go` `"sync queue flush failed"` |
 
 **新代码不要随便引入 `Debug`**：当前没有运行时 level 切换机制（slog 默认 handler 不读 `LOG_LEVEL` env），加 `Debug` 等于代码里写死永远不输出。如果确实需要详细诊断，先讨论是否扩 `cmd/houfeng-center/main.go` 与 `cmd/houfeng-agent/main.go` 的 handler 配置。
 
@@ -66,7 +66,7 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 | Key | 出现位置 | 含义 |
 |-----|----------|------|
 | `error` | 所有 `Error` 调用 | 必填，挂底层 `err`，例如 `"error", err` |
-| `node_id` | `incidents/service.go:172`、`agent/runtime/runtime.go:160` | Node 主键 `nd_xxx` |
+| `monitoring_instance_id` | `incidents/service.go:172`、`agent/runtime/runtime.go:160` | MonitoringInstance 主键 `mi_xxx` |
 | `target_id` | `incidents/service.go:176`、`incidents/service.go:491` | Target 主键 `tg_xxx` |
 | `object_type` / `object_id` | `incidents/service.go:491` | incident 通知失败时定位主体 |
 | `server_url` | `agent/runtime/runtime.go:139,140` | agent 当前指向的 center 地址 |
@@ -125,9 +125,9 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 ## 反模式 / Common Mistakes
 
 - ❌ **`fmt.Println("debug:", ...)` 调试遗漏到 main**：会污染 systemd journal，且无 level 标记。用 `slog.Info` / `slog.Debug` 配合临时 handler。
-- ❌ **同时 log + 返回 error，导致重复输出**：调用栈每一层都 log 同一个 err。约定**只在最外层 worker / handler / main 处 log**；内层只 `fmt.Errorf("...: %w", err)` 包装。当前代码遵循这一点（参考 `incidents/service.go` 内部 `evaluateNode` 返回 wrapped error，最外层 `AfterSuccessfulSync` 才 `s.logger.Error`）。
+- ❌ **同时 log + 返回 error，导致重复输出**：调用栈每一层都 log 同一个 err。约定**只在最外层 worker / handler / main 处 log**；内层只 `fmt.Errorf("...: %w", err)` 包装。当前代码遵循这一点（参考 `incidents/service.go` 内部 `evaluateMonitoringInstance` 返回 wrapped error，最外层 `AfterSuccessfulSync` 才 `s.logger.Error`）。
 - ❌ **在 worker 内 log info 后吞掉 error**：`logger.Info("...", "error", err)` 会让监控系统漏掉异常。所有错误必须用 `Error` level。
-- ❌ **拼字符串 log**：`logger.Info(fmt.Sprintf("node %s started", id))`。slog 提供 key-value，**直接 `logger.Info("node started", "node_id", id)`**。
+- ❌ **拼字符串 log**：`logger.Info(fmt.Sprintf("monitoring instance %s started", id))`。slog 提供 key-value，**直接 `logger.Info("monitoring instance started", "monitoring_instance_id", id)`**。
 - ❌ **log 含 token / 密码 / Telegram chat 内容 / Feishu webhook URL**：见上节"不该 log"。
 - ❌ **新增第三方 logger 依赖（zap、logrus、zerolog 等）**：项目硬性约束，stdlib `log/slog` 已足够。
 

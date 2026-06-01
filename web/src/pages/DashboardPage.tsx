@@ -117,9 +117,9 @@ export function DashboardPage() {
   const poem = POEMS[Math.floor(new Date().getDate() % POEMS.length)]
 
   // Metric card data
-  const abnormalNodeCount = overview.abnormal_node_count + overview.severe_node_count
-  const totalNodes = overview.total_node_count
-  const onlineNodes = totalNodes - abnormalNodeCount
+  const abnormalMonitoringInstanceCount = overview.abnormal_monitoring_instance_count + overview.severe_monitoring_instance_count
+  const totalMonitoringInstances = overview.total_monitoring_instance_count
+  const onlineMonitoringInstances = totalMonitoringInstances - abnormalMonitoringInstanceCount
   const renewal30d = overview.asset_summary.renewal_due_30d_vps_count
   const cancelledVps = overview.asset_summary.cancelled_vps_count ?? 0
   const cancellationAttention = overview.asset_summary.cancellation_attention_vps_count ?? 0
@@ -137,8 +137,8 @@ export function DashboardPage() {
   // Events (recent)
   const recentEvents = overview.recent_events.slice(0, 4)
 
-  // Nodes for column (show abnormal first, then normal)
-  const abnormalNodes = overview.abnormal_nodes.slice(0, 4)
+  // Monitoring instances for column (show abnormal first, then normal)
+  const abnormalMonitoringInstances = overview.abnormal_monitoring_instances.slice(0, 4)
 
   return (
     <div className="page-stack">
@@ -152,10 +152,10 @@ export function DashboardPage() {
       <div className="wb-cards animate-in d1">
         <div className="wb-card">
           <div className="wb-card-primary">
-            <span className={`wb-card-num ${abnormalNodeCount === 0 ? 'ok' : 'err'}`}>{abnormalNodeCount}</span>
-            <span className="wb-card-label">异常节点</span>
+            <span className={`wb-card-num ${abnormalMonitoringInstanceCount === 0 ? 'ok' : 'err'}`}>{abnormalMonitoringInstanceCount}</span>
+            <span className="wb-card-label">异常监控实例</span>
           </div>
-          <div className="wb-card-secondary">共 {totalNodes} 个 · 在线 {onlineNodes}</div>
+          <div className="wb-card-secondary">共 {totalMonitoringInstances} 个 · 在线 {onlineMonitoringInstances}</div>
         </div>
         <div className="wb-card">
           <div className="wb-card-primary">
@@ -188,7 +188,7 @@ export function DashboardPage() {
             <span className="wb-col-title">关注</span>
           </div>
           <div className="wb-col-list">
-            {overview.abnormal_nodes.length === 0 && overview.abnormal_targets.length === 0 && cancellationAttention === 0 && (
+            {overview.abnormal_monitoring_instances.length === 0 && overview.abnormal_targets.length === 0 && cancellationAttention === 0 && (
               <div className="wb-att-item"><span className="wb-att-text text-muted text-sm">暂无需关注项</span></div>
             )}
             {cancellationAttention > 0 ? (
@@ -200,8 +200,8 @@ export function DashboardPage() {
                 </div>
               </div>
             ) : null}
-            {overview.abnormal_nodes.slice(0, 2).map(n => (
-              <div className="wb-att-item" key={n.node_id}>
+            {overview.abnormal_monitoring_instances.slice(0, 2).map(n => (
+              <div className="wb-att-item" key={n.monitoring_instance_id}>
                 <span className={`alert-dot ${n.current_health_status === '严重' ? 'err' : 'warn'}`}></span>
                 <div className="wb-att-body">
                   <span className="wb-att-text">{n.display_name} {n.current_primary_issue_summary}</span>
@@ -221,18 +221,18 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* Column 2: Nodes */}
+        {/* Column 2: Monitoring instances */}
         <div className="wb-col">
           <div className="wb-col-header">
-            <span className="wb-col-title">节点</span>
-            <span className="wb-col-link" onClick={() => navigate('/nodes')}>全部 →</span>
+            <span className="wb-col-title">监控实例</span>
+            <span className="wb-col-link" onClick={() => navigate('/monitoring')}>全部 →</span>
           </div>
           <div className="wb-col-list">
-            {abnormalNodes.length === 0 && (
+            {abnormalMonitoringInstances.length === 0 && (
               <div className="wb-row"><span className="dot dot-ok"></span><span className="wb-row-name text-muted">全部正常</span></div>
             )}
-            {abnormalNodes.map(n => (
-              <div className="wb-row" key={n.node_id} onClick={() => navigate(`/nodes/${n.node_id}`)}>
+            {abnormalMonitoringInstances.map(n => (
+              <div className="wb-row" key={n.monitoring_instance_id} onClick={() => navigate(`/monitoring/${n.monitoring_instance_id}`)}>
                 <span className={severityDotClass(n.current_health_status)}></span>
                 <span className="wb-row-name">{n.display_name}</span>
                 <span className="wb-row-val" style={{ color: n.current_health_status !== '正常' ? 'var(--warn)' : undefined }}>{n.current_health_status}</span>
@@ -310,7 +310,7 @@ export function DashboardPage() {
                 <th>IP</th>
                 <th>生命周期</th>
                 <th>续费决策</th>
-                <th>关联节点</th>
+                <th>关联监控实例</th>
               </tr>
             </thead>
             <tbody>
@@ -321,7 +321,7 @@ export function DashboardPage() {
                   <td className="mono">{vps.ipv4 || '—'}</td>
                   <td><span className={`badge ${lifecycleBadgeClass(vps.lifecycle_status)}`}>{lifecycleLabel(vps.lifecycle_status)}</span></td>
                   <td><span className={`badge ${renewalBadgeClass(vps.renewal_decision)}`}>{renewalLabel(vps.renewal_decision)}</span></td>
-                  <td>{vps.active_node_link_count > 0 ? `${vps.active_node_link_count} 个` : '—'}</td>
+                  <td>{vps.active_monitoring_instance_link_count > 0 ? `${vps.active_monitoring_instance_link_count} 个` : '—'}</td>
                 </tr>
               ))}
             </tbody>

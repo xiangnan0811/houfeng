@@ -59,15 +59,15 @@
 │   │   ├── providers/         # Asset Ledger 服务商主数据 + Repository 接口
 │   │   ├── vpsassets/         # Asset Ledger VPS 资产 + Repository 接口
 │   │   ├── subscriptions/     # Asset Ledger VPS 订阅 + Repository 接口
-│   │   ├── assetlinks/        # Asset Ledger VPS ↔ Node 关联 + 摘要查询接口
+│   │   ├── assetlinks/        # Asset Ledger VPS ↔ MonitoringInstance 关联 + 摘要查询接口
 │   │   ├── renewals/          # Asset Ledger 续费 / 价格 / IP / 规格历史 + VPS timeline 接口
 │   │   ├── importing/         # Asset Ledger JSON dry-run/import 解析、校验、报告与编排
 │   │   ├── targets/           # Target / ProbeItem 领域类型与频率档枚举
-│   │   ├── nodes/             # Node 领域类型 + Repository 接口
+│   │   ├── monitoringinstances/             # MonitoringInstance 领域类型 + Repository 接口
 │   │   ├── agentplan/         # 下发给 agent 的 plan 类型
 │   │   ├── runtimefacts/      # 运行时事实领域类型
 │   │   ├── observations/      # 原始观测的 service / 校验
-│   │   └── ids/               # ID 生成（node_id / target_id 等）
+│   │   └── ids/               # ID 生成（monitoring_instance_id / target_id 等）
 │   └── contracts/
 │       └── agentapi/          # ★ center 与 agent 共享的契约：路径、类型、错误码
 ├── db/
@@ -99,7 +99,7 @@
 - `<file>_test.go`：与被测文件并列
 - 包对外 API 通过包级函数 / 构造器暴露，例如 `incidents.NewSettingsBackedService(...)`、`auth.New(...)`、`enrollment.NewService(...)`
 
-新增一个领域子包前先确认 `internal/center/` 下没有合适归属。**不要为每个新需求都建子包**；如果只是给 nodes 加一个查询函数，就放进 `internal/center/nodes/` 与 `internal/center/store/nodes.go`。
+新增一个领域子包前先确认 `internal/center/` 下没有合适归属。**不要为每个新需求都建子包**；如果只是给 MonitoringInstance 加一个查询函数，就放进 `internal/center/monitoringinstances/` 与 `internal/center/store/monitoring_instances.go`。
 
 ### `internal/center/http/handlers/`
 
@@ -114,14 +114,14 @@
 | `health.go` | `/api/healthz` |
 | `incidents.go` | `/api/incidents` |
 | `metadata.go` | 元数据查询辅助 |
-| `node_onboarding.go` | 节点接入与 binding 操作 |
-| `nodes.go` | `/api/nodes`、`/api/nodes/{id}` |
+| `monitoring_instance_onboarding.go` | 监控实例接入与 binding 操作 |
+| `monitoring_instances.go` | `/api/monitoring-instances`、`/api/monitoring-instances/{id}` |
 | `providers.go` | `/api/providers`、`/api/providers/{provider_id}` |
 | `subscriptions.go` | `/api/subscriptions`、`/api/subscriptions/{subscription_id}` |
 | `vps.go` | `/api/vps`、`/api/vps/{vps_id}`、`/api/vps/{vps_id}/timeline` |
-| `asset_links.go` | `/api/vps/{vps_id}/nodes`、`link-node`、`unlink-node`、`/api/nodes/{node_id}/vps` |
-| `runtime_controls.go` | 节点 / 目标 runtime 控制（含维护开关） |
-| `runtime_facts.go` | 节点 / 目标运行时事实 |
+| `asset_links.go` | `/api/vps/{vps_id}/monitoring-instances`、`link-monitoring-instance`、`unlink-monitoring-instance`、`/api/monitoring-instances/{monitoring_instance_id}/vps` |
+| `runtime_controls.go` | 监控实例 / 目标 runtime 控制（含维护开关） |
+| `runtime_facts.go` | 监控实例 / 目标运行时事实 |
 | `settings.go` | `/api/settings` |
 | `spa.go` | 静态 SPA fallback（`HOUFENG_WEB_DIST_DIR`） |
 | `targets.go` | `/api/targets` |
@@ -134,15 +134,15 @@
 **一文件一 aggregate** 的 Postgres 仓库，全部使用 `pgxpool.Pool`。当前真实文件：
 
 ```
-agent_plan.go          dashboard.go       incidents.go      nodes.go
+agent_plan.go          dashboard.go       incidents.go      monitoring_instances.go
 observations.go        postgres.go        probe_metadata.go providers.go
 renewal_decisions.go   retention.go       runtime_facts.go  sessions.go
 settings.go            subscriptions.go   sync_batches.go   targets.go
-users.go               vps_assets.go      vps_node_links.go
+users.go               vps_assets.go      vps_monitoring_instance_links.go
 migrate/
 ```
 
-每个文件提供一个 `NewPostgres<Aggregate>Repository(*pgxpool.Pool)` 构造器（参见 `store/nodes.go:34-36`）。`postgres.go` 提供共享的 `OpenPostgres` 入口（`store/postgres.go:11-31`）。
+每个文件提供一个 `NewPostgres<Aggregate>Repository(*pgxpool.Pool)` 构造器（参见 `store/monitoring.go:34-36`）。`postgres.go` 提供共享的 `OpenPostgres` 入口（`store/postgres.go:11-31`）。
 
 ### `agent/<subpkg>/`
 
@@ -385,7 +385,7 @@ services:
 ```
 
 ```text
-正确：agent 继续通过 Node onboarding 生成的一键安装命令安装到真实 Linux/systemd 主机。
+正确：agent 继续通过 MonitoringInstance onboarding 生成的一键安装命令安装到真实 Linux/systemd 主机。
 ```
 
 ### `internal/contracts/agentapi/`
@@ -400,13 +400,13 @@ center 与 agent 同时引用的唯一契约包。内容：
 #### Scenario: Agent one-command install contract
 
 1. **Scope / Trigger**
-   - 触发：修改 Node onboarding、一键安装命令、center-served installer、`HOUFENG_PUBLIC_BASE_URL`、agent release artifact 命名、或 `/api/agent/install.sh` 路由。
+   - 触发：修改 MonitoringInstance onboarding、一键安装命令、center-served installer、`HOUFENG_PUBLIC_BASE_URL`、agent release artifact 命名、或 `/api/agent/install.sh` 路由。
    - 目标：让每个自部署 center 负责生成自己的安装命令和 enrollment token；GitHub Release 只提供二进制与 `sha256sums.txt`，不得成为 token/script authority。
 
 2. **Signatures**
    - Config: `config.CenterConfig.PublicBaseURL` 来自 `HOUFENG_PUBLIC_BASE_URL`，必须是无 query/fragment 的 absolute `http(s)` URL，可为 domain 或 `IP:port`。
    - Public route: `GET agentapi.InstallScriptPath` -> embedded shell script，未登录可读，只允许读取脚本。
-   - Authenticated route: `POST /api/nodes/{node_id}/install-command` -> `nodes.InstallCommandIssue`。
+   - Authenticated route: `POST /api/monitoring-instances/{monitoring_instance_id}/install-command` -> `monitoringinstances.InstallCommandIssue`。
    - Response JSON: `{command, issued_at, expires_at, installer_url, public_base_url, agent_version, release_repo}`。
    - Generated command:
 
@@ -416,7 +416,7 @@ center 与 agent 同时引用的唯一契约包。内容：
 
 3. **Contracts**
    - Production install commands must use `HOUFENG_PUBLIC_BASE_URL` as the authoritative externally reachable center URL; do not derive production commands from browser origin, request host, `Referer`, or SPA location.
-   - `POST /api/nodes/{node_id}/install-command` issues a fresh short-lived one-time enrollment token for that Node; regeneration invalidates the previous active token.
+   - `POST /api/monitoring-instances/{monitoring_instance_id}/install-command` issues a fresh short-lived one-time enrollment token for that MonitoringInstance; regeneration invalidates the previous active token.
    - `agent_version` must be a real release version, not empty and not `dev`; the installer downloads `houfeng-agent_<version>_linux_<amd64|arm64>` from the configured release repo.
    - The installer must verify the downloaded binary against `sha256sums.txt` before replacing `/usr/local/bin/houfeng-agent` or starting systemd.
    - MVP support is Linux + systemd + `amd64`/`arm64` only. Auto-upgrade, uninstall UX, non-systemd hosts, package repos, Docker/Kubernetes installs, and center-hosted binary mirrors are out of scope.
@@ -429,13 +429,13 @@ center 与 agent 同时引用的唯一契约包。内容：
    | Missing `HOUFENG_PUBLIC_BASE_URL` | install-command returns 409 `public base URL is not configured` |
    | Invalid public URL scheme/query/fragment | center config load fails before serving traffic |
    | Missing or `dev` agent version | install-command returns 409 `agent release version is not configured` |
-   | Unknown node | install-command returns 404 `node not found` |
+   | Unknown monitoring instance | install-command returns 404 `monitoring instance not found` |
    | Unsupported install method | installer returns non-zero with a short error; no partial service start |
    | Unsupported OS / architecture / no running systemd | installer exits before writing binary/config/token |
    | Missing checksum entry or checksum mismatch | installer exits before replacing binary or starting service |
 
 5. **Good / Base / Bad Cases**
-   - Good: logged-in operator opens Node onboarding, generates a command from center, copies it to a Linux systemd amd64/arm64 host, checksum verification passes, installer writes config/token with restrictive permissions, enables and starts `houfeng-agent`.
+   - Good: logged-in operator opens MonitoringInstance onboarding, generates a command from center, copies it to a Linux systemd amd64/arm64 host, checksum verification passes, installer writes config/token with restrictive permissions, enables and starts `houfeng-agent`.
    - Base: the public script route is unauthenticated but contains no deployment-specific secret until command generation passes `--enrollment-token` at execution time.
    - Bad: SPA constructs `curl ${window.location.origin}/api/agent/install.sh ...` and ships a command that works only behind the browser's current origin.
    - Bad: putting the installer script only in GitHub Release/raw means all self-hosted deployments share script authority and cannot couple script behavior to their center token contract.
@@ -443,8 +443,8 @@ center 与 agent 同时引用的唯一契约包。内容：
 
 6. **Tests Required**
    - Config tests for valid domain/IP public URLs, trim/trailing slash behavior, rejected scheme, relative URL, query, and fragment.
-   - Handler tests for install-command success, 404 node, 409 missing public URL, 409 dev/missing version, method not allowed, and shell quoting of all command arguments.
-   - Router/bootstrap tests proving `/api/agent/install.sh` is public while `/api/nodes/{id}/install-command` remains session-protected and wired non-nil.
+   - Handler tests for install-command success, 404 monitoring instance, 409 missing public URL, 409 dev/missing version, method not allowed, and shell quoting of all command arguments.
+   - Router/bootstrap tests proving `/api/agent/install.sh` is public while `/api/monitoring-instances/{id}/install-command` remains session-protected and wired non-nil.
    - Installer tests or embedded-script checks for Linux arch mapping, systemd requirement, exact checksum-manifest matching, token file permissions, and no full-token logging.
    - Release target test/sanity that `make build-agent-release VERSION=<tag>` emits both Linux binaries and `sha256sums.txt` with names matching installer expectations.
 
@@ -457,7 +457,7 @@ const command = `curl -fsSL ${window.location.origin}/api/agent/install.sh | sud
 
 ```tsx
 // 正确：前端只展示 center 生成的命令。
-const issue = await issueNodeInstallCommand(node.node_id)
+const issue = await issueMonitoringInstanceInstallCommand(node.monitoring_instance_id)
 setInstallCommand(issue.command)
 ```
 
@@ -476,7 +476,7 @@ installerURL := publicBaseURL + agentapi.InstallScriptPath
 ## Naming Conventions
 
 - 包名：全小写、单词内部不用下划线。一个领域一个子包（`incidents`、`enrollment`、`runtimefacts`）。
-- 文件名：`snake_case.go`，与其内最重要的类型 / 资源对齐（`runtime_facts.go`、`node_onboarding.go`）。
+- 文件名：`snake_case.go`，与其内最重要的类型 / 资源对齐（`runtime_facts.go`、`monitoring_instance_onboarding.go`）。
 - 测试文件：`<file>_test.go`，与被测文件**同目录同包**；端到端测试加 `_e2e_test.go` 后缀（参考 `internal/center/http/auth_e2e_test.go`）。
 - 仓库类型：`Postgres<Aggregate>Repository`，构造器 `NewPostgres<Aggregate>Repository`。
 - HTTP handler 工厂：`handlers.<Resource>(repoOrSvc)` 或 `handlers.<Resource><Action>(...)`，统一返回 `http.Handler`，由 `bootstrap.go` 注入到 `RouterOptions`。
@@ -501,13 +501,13 @@ installerURL := publicBaseURL + agentapi.InstallScriptPath
 
 以下是当前代码库内"组织到位"的真实参考点：
 
-- **HTTP 资源完整一条线**：`internal/center/http/handlers/nodes.go`（handler）+ `internal/center/http/handlers/nodes_test.go`（table-driven 测试）+ `internal/center/store/nodes.go`（仓库）+ `internal/center/nodes/`（领域类型）+ `cmd/houfeng-center/bootstrap.go:122-131`（wiring）。
-- **Asset Ledger providers 完整一条线**：`internal/center/http/handlers/providers.go`（handler）+ `internal/center/store/providers.go`（仓库）+ `internal/center/providers/`（领域类型 / 校验 / PATCH presence helper）+ `db/migrations/0016_create_asset_ledger.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源是资产层服务商主数据，不回写 `nodes.provider`。
-- **Asset Ledger VPS assets 完整一条线**：`internal/center/http/handlers/vps.go`（handler）+ `internal/center/store/vps_assets.go`（仓库）+ `internal/center/vpsassets/`（领域类型 / 校验 / PATCH presence helper）+ `db/migrations/0017_add_vps_assets.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护资产层 VPS 账本，不改写 Node / Target / Agent 语义。
-- **Asset Ledger subscriptions 完整一条线**：`internal/center/http/handlers/subscriptions.go`（handler）+ `internal/center/store/subscriptions.go`（仓库）+ `internal/center/subscriptions/`（领域类型 / 校验 / PATCH presence helper / nullable date）+ `db/migrations/0018_add_subscriptions.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护资产层 VPS 订阅账本，不创建 node-link、不改写 Node / Target / Agent 语义。
-- **Asset Ledger VPS ↔ Node link 完整一条线**：`internal/center/http/handlers/asset_links.go`（link / unlink / query handler）+ `internal/center/store/vps_node_links.go`（仓库）+ `internal/center/assetlinks/`（领域类型 / 摘要 DTO / sentinel errors）+ `db/migrations/0019_create_vps_node_links.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护关联历史；link / unlink 不改写 `nodes.provider`、Node lifecycle / monitoring / health、Target 或 Agent。
-- **Asset Ledger history / timeline 完整一条线**：`internal/center/http/handlers/vps.go`（`VPSTimeline` handler 与 VPS PATCH 入口）+ `internal/center/store/renewal_decisions.go`（续费、价格、IP、规格历史仓库与 timeline 聚合）+ `internal/center/store/vps_assets.go`（续费 / IP / 规格 PATCH 事务内记录历史）+ `internal/center/store/subscriptions.go`（价格 / 续费日期 PATCH 事务内记录历史）+ `internal/center/renewals/`（历史 DTO / timeline DTO / sentinel errors）+ `db/migrations/0020_create_renewal_decisions.sql` / `0021_create_asset_histories.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只记录资产层历史；不得创建 Node link、不得改写 Node / Target / Agent。
-- **Asset Ledger JSON import CLI**：`cmd/houfeng-import-vps-json/main.go`（flag / 文件 / DB / migration / 事务 / 输出）+ `internal/center/importing/`（严格 JSON、复用 provider/VPS/subscription 领域校验、dry-run 报告、导入编排）。dry-run 不写库；`-import` 才能写 provider、VPS asset、subscription，且不得创建 `vps_node_links` 或改写 Node / Target / Agent。
+- **MonitoringInstance 资源完整一条线**：`internal/center/http/handlers/monitoring_instances.go`（handler）+ `internal/center/http/handlers/monitoring_instances_test.go`（table-driven 测试）+ `internal/center/store/monitoring_instances.go`（仓库）+ `internal/center/monitoringinstances/`（领域类型）+ `cmd/houfeng-center/bootstrap.go`（wiring）。
+- **Asset Ledger providers 完整一条线**：`internal/center/http/handlers/providers.go`（handler）+ `internal/center/store/providers.go`（仓库）+ `internal/center/providers/`（领域类型 / 校验 / PATCH presence helper）+ `db/migrations/0016_create_asset_ledger.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源是资产层服务商主数据，不回写 `monitoring_instances.provider`。
+- **Asset Ledger VPS assets 完整一条线**：`internal/center/http/handlers/vps.go`（handler）+ `internal/center/store/vps_assets.go`（仓库）+ `internal/center/vpsassets/`（领域类型 / 校验 / PATCH presence helper）+ `db/migrations/0017_add_vps_assets.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护资产层 VPS 账本，不改写 MonitoringInstance / Target / Agent 语义。
+- **Asset Ledger subscriptions 完整一条线**：`internal/center/http/handlers/subscriptions.go`（handler）+ `internal/center/store/subscriptions.go`（仓库）+ `internal/center/subscriptions/`（领域类型 / 校验 / PATCH presence helper / nullable date）+ `db/migrations/0018_add_subscriptions.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护资产层 VPS 订阅账本，不创建 monitoring-instance-link、不改写 MonitoringInstance / Target / Agent 语义。
+- **Asset Ledger VPS ↔ MonitoringInstance link 完整一条线**：`internal/center/http/handlers/asset_links.go`（link / unlink / query handler）+ `internal/center/store/vps_monitoring_instance_links.go`（仓库）+ `internal/center/assetlinks/`（领域类型 / 摘要 DTO / sentinel errors）+ `db/migrations/0019_create_vps_node_links.sql` + `0029_rename_nodes_to_monitoring_instances.sql`（schema 历史与重命名迁移）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护关联历史；link / unlink 不改写 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target 或 Agent。
+- **Asset Ledger history / timeline 完整一条线**：`internal/center/http/handlers/vps.go`（`VPSTimeline` handler 与 VPS PATCH 入口）+ `internal/center/store/renewal_decisions.go`（续费、价格、IP、规格历史仓库与 timeline 聚合）+ `internal/center/store/vps_assets.go`（续费 / IP / 规格 PATCH 事务内记录历史）+ `internal/center/store/subscriptions.go`（价格 / 续费日期 PATCH 事务内记录历史）+ `internal/center/renewals/`（历史 DTO / timeline DTO / sentinel errors）+ `db/migrations/0020_create_renewal_decisions.sql` / `0021_create_asset_histories.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只记录资产层历史；不得创建 MonitoringInstance link、不得改写 MonitoringInstance / Target / Agent。
+- **Asset Ledger JSON import CLI**：`cmd/houfeng-import-vps-json/main.go`（flag / 文件 / DB / migration / 事务 / 输出）+ `internal/center/importing/`（严格 JSON、复用 provider/VPS/subscription 领域校验、dry-run 报告、导入编排）。dry-run 不写库；`-import` 才能写 provider、VPS asset、subscription，且不得创建 `vps_monitoring_instance_links` 或改写 MonitoringInstance / Target / Agent。
 - **Settings-aware notifier**：`internal/center/notify/`（基础 Telegram / Feishu 客户端）被 `internal/center/incidents/` 用 `NewSettingsAwareNotifier` 包装，最终在 `bootstrap.go:88-99` 装配。`notify/` 只负责单 channel HTTP 调用；settings 读取、fallback、channel 展开与 notification record 状态判定都属于 `incidents/` 领域层。
 - **agent ↔ center 契约**：`internal/contracts/agentapi/routes.go` + `types.go` 同时被 `internal/center/http/handlers/agent.go` 与 `agent/runtime/` 引用。
 - **迁移闭环**：`db/migrations/0010_add_users_and_sessions.sql`（schema） + `internal/center/store/users.go` + `internal/center/store/sessions.go`（仓库） + `internal/center/auth/`（领域）+ `bootstrap.go:102-113`（wiring）。

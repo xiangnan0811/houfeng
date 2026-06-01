@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/providers"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
@@ -28,15 +28,15 @@ type SubscriptionRepository interface {
 	CreateSubscription(context.Context, subscriptions.CreateInput) (subscriptions.Record, error)
 }
 
-type NodeRepository interface {
-	ListNodes(context.Context) ([]nodes.Record, error)
+type MonitoringInstanceRepository interface {
+	ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error)
 }
 
 type Repositories struct {
-	Providers     ProviderRepository
-	VPSAssets     VPSAssetRepository
-	Subscriptions SubscriptionRepository
-	Nodes         NodeRepository
+	Providers           ProviderRepository
+	VPSAssets           VPSAssetRepository
+	Subscriptions       SubscriptionRepository
+	MonitoringInstances MonitoringInstanceRepository
 }
 
 type Options struct {
@@ -45,33 +45,33 @@ type Options struct {
 }
 
 type InputRecord struct {
-	DisplayName     string                    `json:"display_name"`
-	ProviderID      *string                   `json:"provider_id"`
-	ProviderName    string                    `json:"provider_name"`
-	ProductName     string                    `json:"product_name"`
-	OrderRef        string                    `json:"order_ref"`
-	Country         string                    `json:"country"`
-	Region          string                    `json:"region"`
-	City            string                    `json:"city"`
-	Datacenter      string                    `json:"datacenter"`
-	IPv4            string                    `json:"ipv4"`
-	IPv6            string                    `json:"ipv6"`
-	SSHHost         string                    `json:"ssh_host"`
-	SSHPort         int                       `json:"ssh_port"`
-	SSHUser         string                    `json:"ssh_user"`
-	OSName          string                    `json:"os_name"`
-	Virtualization  string                    `json:"virtualization"`
-	LifecycleStatus vpsassets.LifecycleStatus `json:"lifecycle_status"`
-	UsageStatus     vpsassets.UsageStatus     `json:"usage_status"`
-	RenewalDecision vpsassets.RenewalDecision `json:"renewal_decision"`
-	Importance      string                    `json:"importance"`
-	Labels          []string                  `json:"labels"`
-	Note            string                    `json:"note"`
-	Subscription    *SubscriptionInput        `json:"subscription"`
-	NodeID          string                    `json:"node_id"`
-	NodeName        string                    `json:"node_name"`
-	AgentTokenHint  string                    `json:"agent_token_hint"`
-	TargetURL       string                    `json:"target_url"`
+	DisplayName            string                    `json:"display_name"`
+	ProviderID             *string                   `json:"provider_id"`
+	ProviderName           string                    `json:"provider_name"`
+	ProductName            string                    `json:"product_name"`
+	OrderRef               string                    `json:"order_ref"`
+	Country                string                    `json:"country"`
+	Region                 string                    `json:"region"`
+	City                   string                    `json:"city"`
+	Datacenter             string                    `json:"datacenter"`
+	IPv4                   string                    `json:"ipv4"`
+	IPv6                   string                    `json:"ipv6"`
+	SSHHost                string                    `json:"ssh_host"`
+	SSHPort                int                       `json:"ssh_port"`
+	SSHUser                string                    `json:"ssh_user"`
+	OSName                 string                    `json:"os_name"`
+	Virtualization         string                    `json:"virtualization"`
+	LifecycleStatus        vpsassets.LifecycleStatus `json:"lifecycle_status"`
+	UsageStatus            vpsassets.UsageStatus     `json:"usage_status"`
+	RenewalDecision        vpsassets.RenewalDecision `json:"renewal_decision"`
+	Importance             string                    `json:"importance"`
+	Labels                 []string                  `json:"labels"`
+	Note                   string                    `json:"note"`
+	Subscription           *SubscriptionInput        `json:"subscription"`
+	MonitoringInstanceID   string                    `json:"monitoring_instance_id"`
+	MonitoringInstanceName string                    `json:"monitoring_instance_name"`
+	AgentTokenHint         string                    `json:"agent_token_hint"`
+	TargetURL              string                    `json:"target_url"`
 }
 
 type SubscriptionInput struct {
@@ -89,40 +89,40 @@ type SubscriptionInput struct {
 }
 
 type Report struct {
-	Mode                      string                     `json:"mode"`
-	CurrentDate               string                     `json:"current_date"`
-	DatabaseChecked           bool                       `json:"database_checked"`
-	CanImport                 bool                       `json:"can_import"`
-	Warnings                  []string                   `json:"warnings"`
-	Totals                    Totals                     `json:"totals"`
-	ProviderCandidates        []ProviderCandidate        `json:"provider_candidates"`
-	VPSCandidates             []VPSCandidate             `json:"vps_candidates"`
-	SubscriptionCandidates    []SubscriptionCandidate    `json:"subscription_candidates"`
-	MissingProviderRows       []RowIssue                 `json:"missing_provider_rows"`
-	MissingRenewDateRows      []RowIssue                 `json:"missing_renew_date_rows"`
-	ValidationErrors          []RowIssue                 `json:"validation_errors"`
-	DuplicateCandidates       []DuplicateCandidate       `json:"duplicate_candidates"`
-	NodeAssociationCandidates []NodeAssociationCandidate `json:"node_association_candidates"`
-	RenewalCandidates         []RenewalCandidate         `json:"renewal_candidates"`
-	IdlePaidCandidates        []IdlePaidCandidate        `json:"idle_paid_candidates"`
-	Import                    ImportResult               `json:"import"`
+	Mode                                    string                                   `json:"mode"`
+	CurrentDate                             string                                   `json:"current_date"`
+	DatabaseChecked                         bool                                     `json:"database_checked"`
+	CanImport                               bool                                     `json:"can_import"`
+	Warnings                                []string                                 `json:"warnings"`
+	Totals                                  Totals                                   `json:"totals"`
+	ProviderCandidates                      []ProviderCandidate                      `json:"provider_candidates"`
+	VPSCandidates                           []VPSCandidate                           `json:"vps_candidates"`
+	SubscriptionCandidates                  []SubscriptionCandidate                  `json:"subscription_candidates"`
+	MissingProviderRows                     []RowIssue                               `json:"missing_provider_rows"`
+	MissingRenewDateRows                    []RowIssue                               `json:"missing_renew_date_rows"`
+	ValidationErrors                        []RowIssue                               `json:"validation_errors"`
+	DuplicateCandidates                     []DuplicateCandidate                     `json:"duplicate_candidates"`
+	MonitoringInstanceAssociationCandidates []MonitoringInstanceAssociationCandidate `json:"monitoring_instance_association_candidates"`
+	RenewalCandidates                       []RenewalCandidate                       `json:"renewal_candidates"`
+	IdlePaidCandidates                      []IdlePaidCandidate                      `json:"idle_paid_candidates"`
+	Import                                  ImportResult                             `json:"import"`
 }
 
 type Totals struct {
-	InputRows                 int `json:"input_rows"`
-	ProviderCreateCandidates  int `json:"provider_create_candidates"`
-	VPSCreateCandidates       int `json:"vps_create_candidates"`
-	SubscriptionCandidates    int `json:"subscription_candidates"`
-	MissingProviderRows       int `json:"missing_provider_rows"`
-	MissingRenewDateRows      int `json:"missing_renew_date_rows"`
-	ValidationErrors          int `json:"validation_errors"`
-	DuplicateCandidates       int `json:"duplicate_candidates"`
-	NodeAssociationCandidates int `json:"node_association_candidates"`
-	RenewalCandidates         int `json:"renewal_candidates"`
-	IdlePaidCandidates        int `json:"idle_paid_candidates"`
-	ImportedProviders         int `json:"imported_providers"`
-	ImportedVPSAssets         int `json:"imported_vps_assets"`
-	ImportedSubscriptions     int `json:"imported_subscriptions"`
+	InputRows                               int `json:"input_rows"`
+	ProviderCreateCandidates                int `json:"provider_create_candidates"`
+	VPSCreateCandidates                     int `json:"vps_create_candidates"`
+	SubscriptionCandidates                  int `json:"subscription_candidates"`
+	MissingProviderRows                     int `json:"missing_provider_rows"`
+	MissingRenewDateRows                    int `json:"missing_renew_date_rows"`
+	ValidationErrors                        int `json:"validation_errors"`
+	DuplicateCandidates                     int `json:"duplicate_candidates"`
+	MonitoringInstanceAssociationCandidates int `json:"monitoring_instance_association_candidates"`
+	RenewalCandidates                       int `json:"renewal_candidates"`
+	IdlePaidCandidates                      int `json:"idle_paid_candidates"`
+	ImportedProviders                       int `json:"imported_providers"`
+	ImportedVPSAssets                       int `json:"imported_vps_assets"`
+	ImportedSubscriptions                   int `json:"imported_subscriptions"`
 }
 
 type ProviderCandidate struct {
@@ -164,13 +164,13 @@ type DuplicateCandidate struct {
 	Message    string `json:"message"`
 }
 
-type NodeAssociationCandidate struct {
-	Row         int    `json:"row"`
-	DisplayName string `json:"display_name"`
-	NodeID      string `json:"node_id,omitempty"`
-	NodeName    string `json:"node_name,omitempty"`
-	TargetURL   string `json:"target_url,omitempty"`
-	Status      string `json:"status"`
+type MonitoringInstanceAssociationCandidate struct {
+	Row                    int    `json:"row"`
+	DisplayName            string `json:"display_name"`
+	MonitoringInstanceID   string `json:"monitoring_instance_id,omitempty"`
+	MonitoringInstanceName string `json:"monitoring_instance_name,omitempty"`
+	TargetURL              string `json:"target_url,omitempty"`
+	Status                 string `json:"status"`
 }
 
 type RenewalCandidate struct {

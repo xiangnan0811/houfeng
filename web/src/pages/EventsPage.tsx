@@ -7,7 +7,7 @@ import {
   ApiError,
   getDashboard,
   listEvents,
-  listNodes,
+  listMonitoringInstances,
   listTargets,
 } from '../lib/api'
 import {
@@ -29,8 +29,8 @@ import {
 } from './events/eventsPageConstants'
 import type { EventsPageState, FilterState, TimeRange } from './events/types'
 
-function isObjectType(value: string | null): value is 'node' | 'target' {
-  return value === 'node' || value === 'target'
+function isObjectType(value: string | null): value is FilterState['object_type'] {
+  return value === 'monitoring_instance' || value === 'target'
 }
 
 function isSeverity(value: string | null): value is FilterState['severity'] {
@@ -289,9 +289,9 @@ export function EventsPage() {
 
   // Load name map and dashboard on mount
   useEffect(() => {
-    Promise.all([listNodes(), listTargets()]).then(([nodes, targets]) => {
+    Promise.all([listMonitoringInstances(), listTargets()]).then(([monitoring, targets]) => {
       const map = new Map<string, string>()
-      for (const n of nodes) map.set(n.node_id, n.display_name)
+      for (const n of monitoring) map.set(n.monitoring_instance_id, n.display_name)
       for (const t of targets) map.set(t.target_id, t.name)
       setNameMap(map)
     }).catch(() => {})

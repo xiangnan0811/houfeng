@@ -22,7 +22,7 @@ function probeItem(overrides: Partial<ProbeItemRecord> = {}): ProbeItemRecord {
 
 function observation(overrides: Partial<ProbeObservation> = {}): ProbeObservation {
   return {
-    node_id: 'nd_001',
+    monitoring_instance_id: 'mi_001',
     target_id: 'tg_001',
     probe_item_id: 'pb_001',
     probe_kind: 'http',
@@ -81,7 +81,7 @@ describe('TargetProbeList', () => {
     )
 
     expect(screen.getByText('HTTP')).toBeInTheDocument()
-    expect(screen.getByText('nd_001')).toBeInTheDocument()
+    expect(screen.getByText('mi_001')).toBeInTheDocument()
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
   })
@@ -133,9 +133,9 @@ describe('TargetProbeList', () => {
             [
               'pb_001',
               [
-                observation({ node_id: 'nd_alpha', latency_ms: 42, http_status: 200 }),
+                observation({ monitoring_instance_id: 'mi_alpha', latency_ms: 42, http_status: 200 }),
                 observation({
-                  node_id: 'nd_beta',
+                  monitoring_instance_id: 'mi_beta',
                   observed_at: '2026-04-24T08:55:00Z',
                   result_kind: 'failure',
                   latency_ms: null,
@@ -160,15 +160,15 @@ describe('TargetProbeList', () => {
     expect(table).toHaveClass('probe-observations')
 
     // Column headers
-    expect(screen.getByRole('columnheader', { name: '执行节点' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '执行监控实例' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '观测时间' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '延迟' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'HTTP / TLS' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '错误摘要' })).toBeInTheDocument()
 
     // Row content
-    expect(screen.getByText('nd_alpha')).toBeInTheDocument()
-    expect(screen.getByText('nd_beta')).toBeInTheDocument()
+    expect(screen.getByText('mi_alpha')).toBeInTheDocument()
+    expect(screen.getByText('mi_beta')).toBeInTheDocument()
     expect(screen.getByText('42 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
     expect(screen.getByText('connect: timeout')).toBeInTheDocument()

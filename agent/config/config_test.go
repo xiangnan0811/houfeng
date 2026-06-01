@@ -16,7 +16,7 @@ func TestLoadAgentConfigRequiresServerURLAndTokenFile(t *testing.T) {
 	}
 }
 
-func TestLoadAgentConfigDoesNotRequireNodeName(t *testing.T) {
+func TestLoadAgentConfigDoesNotRequireMonitoringInstanceName(t *testing.T) {
 	t.Setenv("HOUFENG_AGENT_SERVER_URL", "http://center")
 	t.Setenv("HOUFENG_AGENT_TOKEN_FILE", "/tmp/token")
 	t.Setenv("HOUFENG_AGENT_NODE_NAME", "")

@@ -26,26 +26,26 @@ func (f *fakeDashboardRepository) GetDashboardOverview(_ context.Context, limit 
 func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	repo := &fakeDashboardRepository{result: incidents.DashboardOverview{
-		SnapshotGeneratedAt:        now,
-		TotalNodeCount:             5,
-		TotalTargetCount:           4,
-		AbnormalNodeCount:          2,
-		PendingOnboardingNodeCount: 1,
-		PausedNodeCount:            1,
-		RetiredNodeCount:           1,
-		PausedTargetCount:          1,
-		ArchivedTargetCount:        1,
-		RecentNewIncidentCount:     3,
+		SnapshotGeneratedAt:                      now,
+		TotalMonitoringInstanceCount:             5,
+		TotalTargetCount:                         4,
+		AbnormalMonitoringInstanceCount:          2,
+		PendingOnboardingMonitoringInstanceCount: 1,
+		PausedMonitoringInstanceCount:            1,
+		RetiredMonitoringInstanceCount:           1,
+		PausedTargetCount:                        1,
+		ArchivedTargetCount:                      1,
+		RecentNewIncidentCount:                   3,
 		GroupSummaries: []incidents.DashboardGroupSummary{{
-			Group:                  "production",
-			NodeCount:              3,
-			TargetCount:            2,
-			AbnormalNodeCount:      1,
-			AbnormalTargetCount:    1,
-			SevereNodeCount:        0,
-			SevereTargetCount:      1,
-			MaintenanceNodeCount:   1,
-			MaintenanceTargetCount: 0,
+			Group:                              "production",
+			MonitoringInstanceCount:            3,
+			TargetCount:                        2,
+			AbnormalMonitoringInstanceCount:    1,
+			AbnormalTargetCount:                1,
+			SevereMonitoringInstanceCount:      0,
+			SevereTargetCount:                  1,
+			MaintenanceMonitoringInstanceCount: 1,
+			MaintenanceTargetCount:             0,
 		}},
 		NotificationStatus: incidents.DashboardNotificationStatus{
 			TelegramConfigured:         true,
@@ -72,16 +72,16 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 		},
 		RecentEvents: []incidents.StateChangeEventRecord{{
 			IncidentID:    "inc_001",
-			IncidentClass: incidents.IncidentNodeDiskPressure,
-			ObjectType:    incidents.ObjectTypeNode,
-			ObjectID:      "nd_001",
+			IncidentClass: incidents.IncidentMonitoringInstanceDiskPressure,
+			ObjectType:    incidents.ObjectTypeMonitoringInstance,
+			ObjectID:      "mi_001",
 			EventType:     incidents.EventIncidentStarted,
 			Severity:      incidents.SeverityAlert,
 			Summary:       "磁盘使用率 92.0%",
 			CreatedAt:     now,
 		}},
-		AbnormalNodes: []incidents.DashboardNodeSummary{{
-			NodeID:                     "nd_001",
+		AbnormalMonitoringInstances: []incidents.DashboardMonitoringInstanceSummary{{
+			MonitoringInstanceID:       "mi_001",
 			DisplayName:                "Tokyo Edge",
 			Region:                     "ap-northeast-1",
 			City:                       "Tokyo",
@@ -121,25 +121,25 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body["total_node_count"] != float64(5) {
-		t.Fatalf("body = %#v, want total_node_count=5", body)
+	if body["total_monitoring_instance_count"] != float64(5) {
+		t.Fatalf("body = %#v, want total_monitoring_instance_count=5", body)
 	}
 	if body["total_target_count"] != float64(4) {
 		t.Fatalf("body = %#v, want total_target_count=4", body)
 	}
-	if body["abnormal_node_count"] != float64(2) {
-		t.Fatalf("body = %#v, want abnormal_node_count=2", body)
+	if body["abnormal_monitoring_instance_count"] != float64(2) {
+		t.Fatalf("body = %#v, want abnormal_monitoring_instance_count=2", body)
 	}
 	if body["snapshot_generated_at"] != "2026-04-25T12:00:00Z" {
 		t.Fatalf("body = %#v, want snapshot_generated_at", body)
 	}
-	if body["pending_onboarding_node_count"] != float64(1) || body["paused_node_count"] != float64(1) || body["retired_node_count"] != float64(1) {
-		t.Fatalf("body = %#v, want node completeness counts", body)
+	if body["pending_onboarding_monitoring_instance_count"] != float64(1) || body["paused_monitoring_instance_count"] != float64(1) || body["retired_monitoring_instance_count"] != float64(1) {
+		t.Fatalf("body = %#v, want monitoring instance completeness counts", body)
 	}
 	if body["paused_target_count"] != float64(1) || body["archived_target_count"] != float64(1) {
 		t.Fatalf("body = %#v, want target completeness counts", body)
 	}
-	if _, ok := body["AbnormalNodeCount"]; ok {
+	if _, ok := body["AbnormalMonitoringInstanceCount"]; ok {
 		t.Fatalf("body = %#v, want snake_case keys only", body)
 	}
 	groupSummaries, ok := body["group_summaries"].([]any)
@@ -153,7 +153,7 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	if groupSummary["group"] != "production" || groupSummary["target_count"] != float64(2) {
 		t.Fatalf("group summary = %#v, want snake_case group summary", groupSummary)
 	}
-	if _, ok := groupSummary["NodeCount"]; ok {
+	if _, ok := groupSummary["MonitoringInstanceCount"]; ok {
 		t.Fatalf("group summary = %#v, want snake_case keys only", groupSummary)
 	}
 	notificationStatus, ok := body["notification_status"].(map[string]any)
@@ -202,19 +202,19 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	if _, ok := cost["MonthlyTotal"]; ok {
 		t.Fatalf("asset cost = %#v, want snake_case keys only", cost)
 	}
-	abnormalNodes, ok := body["abnormal_nodes"].([]any)
-	if !ok || len(abnormalNodes) != 1 {
-		t.Fatalf("body = %#v, want one abnormal node", body)
+	abnormalMonitoringInstances, ok := body["abnormal_monitoring_instances"].([]any)
+	if !ok || len(abnormalMonitoringInstances) != 1 {
+		t.Fatalf("body = %#v, want one abnormal monitoringInstance", body)
 	}
-	abnormalNode, ok := abnormalNodes[0].(map[string]any)
+	abnormalMonitoringInstance, ok := abnormalMonitoringInstances[0].(map[string]any)
 	if !ok {
-		t.Fatalf("abnormalNodes[0] = %#v, want object", abnormalNodes[0])
+		t.Fatalf("abnormalMonitoringInstances[0] = %#v, want object", abnormalMonitoringInstances[0])
 	}
-	if abnormalNode["node_id"] != "nd_001" || abnormalNode["current_primary_issue_summary"] != "磁盘使用率 92.0%" {
-		t.Fatalf("abnormal node = %#v, want snake_case node summary", abnormalNode)
+	if abnormalMonitoringInstance["monitoring_instance_id"] != "mi_001" || abnormalMonitoringInstance["current_primary_issue_summary"] != "磁盘使用率 92.0%" {
+		t.Fatalf("abnormal monitoringInstance = %#v, want snake_case monitoringInstance summary", abnormalMonitoringInstance)
 	}
-	if _, ok := abnormalNode["NodeID"]; ok {
-		t.Fatalf("abnormal node = %#v, want snake_case keys only", abnormalNode)
+	if _, ok := abnormalMonitoringInstance["MonitoringInstanceID"]; ok {
+		t.Fatalf("abnormal monitoringInstance = %#v, want snake_case keys only", abnormalMonitoringInstance)
 	}
 	abnormalTargets, ok := body["abnormal_targets"].([]any)
 	if !ok || len(abnormalTargets) != 1 {

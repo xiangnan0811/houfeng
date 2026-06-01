@@ -22,7 +22,7 @@ func TestSPAHandlerServesIndexForUnknownGet(t *testing.T) {
 
 	handler := handlers.SPA(dir)
 
-	req := httptest.NewRequest(http.MethodGet, "/nodes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/monitoring", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)

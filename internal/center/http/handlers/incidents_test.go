@@ -29,9 +29,9 @@ func TestIncidentsHandlerReturnsListWithFilters(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 	repo := &fakeIncidentsRepository{result: []store.ActiveIncidentListItem{{
 		IncidentID:      "inc_001",
-		IncidentClass:   incidents.IncidentNodeDiskPressure,
-		ObjectType:      incidents.ObjectTypeNode,
-		ObjectID:        "nd_001",
+		IncidentClass:   incidents.IncidentMonitoringInstanceDiskPressure,
+		ObjectType:      incidents.ObjectTypeMonitoringInstance,
+		ObjectID:        "mi_001",
 		Severity:        incidents.SeverityAlert,
 		StartedAt:       now,
 		LastEvaluatedAt: now.Add(time.Minute),
@@ -39,14 +39,14 @@ func TestIncidentsHandlerReturnsListWithFilters(t *testing.T) {
 	}}}
 
 	handler := handlers.Incidents(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/incidents?object_type=node&object_id=nd_001&severity=告警&limit=25", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/incidents?object_type=monitoring_instance&object_id=mi_001&severity=告警&limit=25", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
-	if repo.filter.ObjectType != incidents.ObjectTypeNode || repo.filter.ObjectID != "nd_001" || repo.filter.Severity != incidents.SeverityAlert || repo.filter.Limit != 25 {
+	if repo.filter.ObjectType != incidents.ObjectTypeMonitoringInstance || repo.filter.ObjectID != "mi_001" || repo.filter.Severity != incidents.SeverityAlert || repo.filter.Limit != 25 {
 		t.Fatalf("filter = %#v, want parsed filters", repo.filter)
 	}
 	var body []store.ActiveIncidentListItem

@@ -13,7 +13,7 @@ type VPSDetailHeroProps = {
   onCancellationOpen: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
-  onNodeLink: () => void
+  onMonitoringInstanceLink: () => void
   onServiceCreate: () => void
   onDomainCreate: () => void
   onArchiveStart: () => void
@@ -28,7 +28,7 @@ export function VPSDetailHero({
   onCancellationOpen,
   onFactEdit,
   onExperienceLog,
-  onNodeLink,
+  onMonitoringInstanceLink,
   onServiceCreate,
   onDomainCreate,
   onArchiveStart,
@@ -45,7 +45,7 @@ export function VPSDetailHero({
             <LifecycleBadge value={detail.lifecycle_status} />
             <UsageBadge value={detail.usage_status} />
             <RenewalBadge value={detail.renewal_decision} />
-            <Badge variant="count" tone="neutral">{detail.active_node_link_count} 个 Node</Badge>
+            <Badge variant="count" tone="neutral">{detail.active_monitoring_instance_link_count} 个监控实例</Badge>
           </div>
         </div>
         <div className="watchtower-header__actions-block">
@@ -58,7 +58,7 @@ export function VPSDetailHero({
                 <button type="button" onClick={onCancellationOpen}>取消/退役工作台</button>
                 <button type="button" onClick={onFactEdit}>编辑基础信息</button>
                 <button type="button" onClick={onExperienceLog}>记录经验</button>
-                <button type="button" onClick={onNodeLink}>关联 Node</button>
+                <button type="button" onClick={onMonitoringInstanceLink}>关联监控实例</button>
                 <button type="button" onClick={onServiceCreate}>新增服务</button>
                 <button type="button" onClick={onDomainCreate}>新增域名</button>
                 {isArchived ? (

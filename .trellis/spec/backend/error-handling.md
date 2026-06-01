@@ -24,7 +24,7 @@
 
 | 子包 | sentinel 定义位置 | 例子 |
 |------|-------------------|------|
-| `internal/center/nodes/` | `types.go:30-32` | `ErrNodeNotFound`、`ErrInvalidBindingTransition`、`ErrNodeMetadataConflict` |
+| `internal/center/monitoringinstances/` | `types.go:30-32` | `ErrMonitoringInstanceNotFound`、`ErrInvalidBindingTransition`、`ErrMonitoringInstanceMetadataConflict` |
 | `internal/center/targets/` | `types.go:31-33` | `ErrTargetNotFound`、`ErrProbeItemNotFound`、`ErrTargetMetadataConflict` |
 | `internal/center/auth/` | `types.go:22-30` | `ErrUserNotFound`、`ErrInvalidCredentials`、`ErrSessionExpired`、`ErrPasswordTooShort` 等 |
 | `internal/center/enrollment/` | `service.go:14-16` | `ErrBindingNotAccepted`、`ErrInvalidEnrollmentToken`、`ErrInvalidSyncToken` |
@@ -36,7 +36,7 @@
 
 命名约定：
 
-- 公开 sentinel：`Err<Subject><Condition>` 全大写驼峰（`ErrNodeNotFound`）。
+- 公开 sentinel：`Err<Subject><Condition>` 全大写驼峰（`ErrMonitoringInstanceNotFound`）。
 - 包内私有 sentinel：`err<Subject><Condition>`（参考 `internal/center/targets/probe_config.go:12` 的 `errInvalidProbeItemInput`）。
 - sentinel 文案（`errors.New("...")` 内的字符串）使用全小写英文，**禁止句末标点**（与 Go stdlib 风格一致）。
 
@@ -45,7 +45,7 @@
 ## 错误包装：`%w` vs `%v`
 
 - **必须用 `%w`**：当上层需要 `errors.Is` / `errors.As` 判定底层 sentinel 时。这是绝大多数包装场景。
-  - 例：`store/sync_batches.go:51` `fmt.Errorf("begin sync batch transaction for node %q: %w", batch.NodeID, err)`
+  - 例：`store/sync_batches.go:51` `fmt.Errorf("begin sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)`
   - 例：`auth/seed.go:28` `fmt.Errorf("count users: %w", err)`
   - 例：`observations/service.go:53` `fmt.Errorf("%w: probe_item_id %q not found", ErrInvalidProbeObservation, observation.ProbeItemID)` — sentinel 放在格式串前面，便于 `errors.Is` 判定 `ErrInvalidProbeObservation`。
 - **可以用 `%v`**：仅当确认底层 error 是文案性、不参与上层判定时（极少数）。当前代码库几乎全部用 `%w`。
@@ -79,15 +79,15 @@ writeError(w, http.StatusInternalServerError, "internal server error")
 - 405 走 `writeError(w, http.StatusMethodNotAllowed, "method not allowed")`（参考 `targets.go:41`）。
 - 同一 handler 内出现 2 个以上 sentinel 分支时使用 `switch { case errors.Is(...) }`（参考 `internal/center/http/handlers/auth.go:128-131`、`runtime_controls.go:63-66`）。
 
-### Node onboarding install-command endpoint
+### MonitoringInstance onboarding install-command endpoint
 
-`POST /api/nodes/{node_id}/install-command` 是登录用户触发的普通 center API，不是 agent contract endpoint。它仍走 `writeError`，但有两个配置类 409 是产品契约，不能降级成 500：
+`POST /api/monitoring-instances/{monitoring_instance_id}/install-command` 是登录用户触发的普通 center API，不是 agent contract endpoint。它仍走 `writeError`，但有两个配置类 409 是产品契约，不能降级成 500：
 
 | Condition | HTTP status | Message |
 | --- | --- | --- |
 | `HOUFENG_PUBLIC_BASE_URL` 未配置 | 409 | `public base URL is not configured` |
 | agent release version 为空或 `dev` | 409 | `agent release version is not configured` |
-| Node 不存在 | 404 | `node not found` |
+| MonitoringInstance 不存在 | 404 | `monitoring instance not found` |
 | 其他 repository error | 500 | `internal server error` |
 
 前端必须展示这些短文案，引导 operator 回到部署配置或发布流程；不要在浏览器侧用 `window.location.origin` 兜底绕过 409。
@@ -109,7 +109,7 @@ agent handler 的判定与映射全在 `agent.go:46-94`，必须使用 `agentapi
 | `enrollment.ErrInvalidEnrollmentToken` | 401 | `ErrorCodeInvalidEnrollmentToken` |
 | `syncing.ErrInvalidSyncToken` | 401 | `ErrorCodeInvalidSyncToken` |
 | `syncing.ErrBindingNotAccepted` | 409 | `ErrorCodeBindingNotAccepted` |
-| `nodes.ErrNodeNotFound` | 404 | `ErrorCodeNodeNotFound` |
+| `monitoringinstances.ErrMonitoringInstanceNotFound` | 404 | `ErrorCodeMonitoringInstanceNotFound` |
 | `observations.ErrInvalidProbeObservation` | 400 | `ErrorCodeInvalidRequest` |
 | 任意其他 | 500 | `ErrorCodeInternalError` |
 | `decodeJSON` 失败 | 400 | `ErrorCodeInvalidJSON` |
@@ -143,9 +143,9 @@ type RemoteError struct {
 **重要区分**：
 
 - **业务错误**：HTTP 请求处理 / 仓库读写出错，使用 `error` 返回链路，`writeError` 翻译成 4xx/5xx。
-- **incident（异常事件）**：节点 / 目标的健康观测结论，是**派生数据**，不是 `error`。它由 `internal/center/incidents/` 的 `Service.Run(ctx)` 异步产出 `IncidentRecord` / `StateChangeEventRecord`，写入 DB 与 Telegram。
+- **incident（异常事件）**：监控实例 / 目标的健康观测结论，是**派生数据**，不是 `error`。它由 `internal/center/incidents/` 的 `Service.Run(ctx)` 异步产出 `IncidentRecord` / `StateChangeEventRecord`，写入 DB 与 Telegram。
 
-请求路径**只**收原始观测、入库；**不要在 handler / service 内把 incident 失败当成 HTTP error 抛回 agent**。incident 评估失败由 `s.logger.Error("evaluate node incidents after sync failed", ...)` 记录后继续（`incidents/service.go:172-178`），不阻塞 sync 应答。
+请求路径**只**收原始观测、入库；**不要在 handler / service 内把 incident 失败当成 HTTP error 抛回 agent**。incident 评估失败由 `s.logger.Error("evaluate monitoring instance incidents after sync failed", ...)` 记录后继续，不阻塞 sync 应答。
 
 ---
 

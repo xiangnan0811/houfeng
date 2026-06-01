@@ -40,7 +40,7 @@ export const initialCreateForm: CreateTargetFormState = {
   targetType: 'service',
   host: '',
   basePort: '',
-  executionNodeLabels: '',
+  executionMonitoringInstanceLabels: '',
   runStatus: '启用',
   group: '',
   labels: '',
@@ -95,7 +95,7 @@ export function targetEvidenceGlyphState(target: TargetRecord): HealthState {
 }
 
 export function isCoverageGapTarget(target: TargetRecord) {
-  return target.execution_node_labels.length === 0
+  return target.execution_monitoring_instance_labels.length === 0
 }
 
 export function countAbnormalTargets(targets: TargetRecord[]) {
@@ -128,10 +128,10 @@ function targetAttentionRank(target: TargetRecord): number {
 function targetEvidenceReason(target: TargetRecord): string {
   if (target.current_primary_issue_summary) return target.current_primary_issue_summary
   if (target.current_health_status !== '正常') return `健康状态：${target.current_health_status}`
-  if (target.run_status === '暂停') return '目标暂停，当前不会产生新的入口观测'
+  if (target.run_status === '暂停') return '目标暂停，当前不会产生新的入口探测'
   if (target.run_status === '已归档') return '目标已归档，不再作为活跃入口证据'
   if (target.run_status === '维护中') return '维护窗口内，探测空窗应按维护上下文解读'
-  if (isCoverageGapTarget(target)) return '缺少执行节点标签，探测覆盖边界不明确'
+  if (isCoverageGapTarget(target)) return '缺少执行监控实例标签，探测覆盖边界不明确'
   return '当前没有明显异常'
 }
 
@@ -139,8 +139,8 @@ function targetEvidenceMeta(target: TargetRecord): string {
   const host = target.base_port ? `${target.host}:${target.base_port}` : target.host
   const group = target.group || '未分组'
   const coverage =
-    target.execution_node_labels.length > 0
-      ? `执行 ${target.execution_node_labels.join(' · ')}`
+    target.execution_monitoring_instance_labels.length > 0
+      ? `执行 ${target.execution_monitoring_instance_labels.join(' · ')}`
       : '无执行标签'
   const freshness = target.last_failure_at
     ? `失败 ${formatDateTime(target.last_failure_at)}`
@@ -190,7 +190,7 @@ export function describeTargetFilterContext(filterState: TargetFilterState): str
   if (filterState.runStatus) items.push(`运行 ${filterState.runStatus}`)
   if (filterState.health) items.push(`健康 ${filterState.health}`)
   for (const label of filterState.labels) items.push(`标签 ${label}`)
-  for (const label of filterState.executionLabels) items.push(`执行节点标签 ${label}`)
+  for (const label of filterState.executionLabels) items.push(`执行监控实例标签 ${label}`)
   if (filterState.abnormal) items.push('仅看异常')
   return items
 }
@@ -263,9 +263,9 @@ export function buildTargetEvidenceLead(args: {
     return {
       eyebrow: '覆盖边界',
       title: `补齐 ${coverageGapTargetCount} 个执行覆盖标签`,
-      description: '这些 Target 缺少执行节点标签，探测从哪里发出的边界不明确。',
+      description: '这些 Target 缺少执行监控实例标签，探测从哪里发出的边界不明确。',
       actionKind: 'coverage',
-      actionLabel: '核对节点覆盖',
+      actionLabel: '核对监控实例覆盖',
       tone: 'notice',
     }
   }
@@ -307,9 +307,9 @@ function parseOptionalPositiveInteger(value: string, label: string): number | un
 }
 
 export function buildCreateTargetInput(form: CreateTargetFormState): CreateTargetInput {
-  const executionNodeLabels = parseLabels(form.executionNodeLabels)
-  if (executionNodeLabels.length === 0) {
-    throw new Error('执行节点标签至少需要填写一个。')
+  const executionMonitoringInstanceLabels = parseLabels(form.executionMonitoringInstanceLabels)
+  if (executionMonitoringInstanceLabels.length === 0) {
+    throw new Error('执行监控实例标签至少需要填写一个。')
   }
 
   const basePort = parseOptionalPositiveInteger(form.basePort, '基础端口')
@@ -318,7 +318,7 @@ export function buildCreateTargetInput(form: CreateTargetFormState): CreateTarge
     target_type: form.targetType,
     host: form.host.trim(),
     ...(basePort == null ? {} : { base_port: basePort }),
-    execution_node_labels: executionNodeLabels,
+    execution_monitoring_instance_labels: executionMonitoringInstanceLabels,
     run_status: form.runStatus,
     group: form.group.trim(),
     labels: parseLabels(form.labels),

@@ -63,7 +63,7 @@ For browser sanity against a running preview, use the local-only helper:
 ```bash
 python3 scripts/visual_evidence.py browser-sanity \
   --base-url http://127.0.0.1:5178/ \
-  --route /nodes \
+  --route /monitoring \
   --route /targets \
   --viewport 1440x1000 \
   --viewport 390x900
@@ -120,14 +120,14 @@ If local Playwright cannot create browser temp files, prefer a repo-local temp d
 
 ### Observability support routes
 
-Nodes, Targets, and Events are also protected by the app auth gate. To exercise the observability support pages without a running center, use the explicit local mock API profile:
+Monitoring, Targets, and Events are also protected by the app auth gate. To exercise the observability support pages without a running center, use the explicit local mock API profile:
 
 ```bash
 mkdir -p .tmp/playwright
 TMPDIR="$PWD/.tmp/playwright" python3 scripts/visual_evidence.py browser-sanity \
   --base-url http://127.0.0.1:5178/ \
   --mock-api observability-support \
-  --route /nodes \
+  --route /monitoring \
   --route /targets \
   --route /events \
   --viewport 1440x1000 \
@@ -140,14 +140,14 @@ Use the interpreter that has local Python Playwright installed when needed:
 TMPDIR="$PWD/.tmp/playwright" /opt/homebrew/opt/python@3.11/bin/python3.11 scripts/visual_evidence.py browser-sanity \
   --base-url http://127.0.0.1:5178/ \
   --mock-api observability-support \
-  --route /nodes \
+  --route /monitoring \
   --route /targets \
   --route /events \
   --viewport 1440x1000 \
   --viewport 390x900
 ```
 
-`--mock-api observability-support` intercepts `/api/auth/me`, `/api/dashboard`, `/api/nodes`, `/api/nodes/sparklines`, `/api/targets`, `/api/targets/sparklines`, and `/api/events` in the browser session. The fixture rows intentionally cover abnormal nodes, pending onboarding and binding conflict, maintenance / paused / retired nodes, abnormal targets, paused / archived / maintenance targets, missing execution coverage, event severity, recovery / maintenance / notification filters, and explicit backfilled event opt-in.
+`--mock-api observability-support` intercepts `/api/auth/me`, `/api/dashboard`, `/api/monitoring-instances`, `/api/monitoring-instances/sparklines`, `/api/targets`, `/api/targets/sparklines`, and `/api/events` in the browser session. The fixture rows intentionally cover abnormal monitoring instances, pending onboarding and binding conflict, maintenance / paused / retired monitoring instances, abnormal targets, paused / archived / maintenance targets, missing execution coverage, event severity, recovery / maintenance / notification filters, and explicit backfilled event opt-in.
 
 Report this as `Data source: mock-api observability-support`. It proves the protected observability support route layout can render with representative states, but it does not prove backend correctness, real incident evaluation, real notification delivery, real backfill classification, or real asset-to-observability linkage.
 
@@ -187,8 +187,8 @@ This is the current v2 core-page acceptance set. A task only needs to check rout
 | Asset decisions | `/asset-decisions` | Main asset work queue |
 | VPS inventory | `/vps` | Primary real-data testing entry |
 | VPS detail | `/vps/:vpsId` | Single-asset decision workbench |
-| Nodes | `/nodes` | Observability evidence for assets |
-| Node detail | `/nodes/:nodeId` | Runtime evidence and watchtower details |
+| Monitoring | `/monitoring` | Monitoring instances and runtime evidence for assets |
+| Monitoring detail | `/monitoring/:monitoringInstanceId` | Runtime evidence and watchtower details |
 | Targets | `/targets` | Service / entry observability evidence |
 | Target detail | `/targets/:targetId` | ProbeItem and entry detail workflow |
 | Events | `/events` | Diagnostic and audit timeline |

@@ -23,7 +23,7 @@ export function TargetRuntimePauseConfirmation({
           : '当前：目标运行状态为启用。'
       }
       result="操作后：目标运行状态变为暂停。"
-      impact="会停止该目标下所有 ProbeItem 的执行，不再产生新的目标观测记录。"
+      impact="会停止该目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。"
       unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。"
       confirmLabel="确认暂停目标"
       disabled={disabled}

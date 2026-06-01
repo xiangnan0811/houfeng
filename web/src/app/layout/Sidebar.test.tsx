@@ -13,7 +13,7 @@ describe('Sidebar', () => {
         <Sidebar
           user={user}
           sync={sync}
-          anomalyCounts={{ nodes: 0, targets: 0 }}
+          anomalyCounts={{ monitoring: 0, targets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -29,19 +29,19 @@ describe('Sidebar', () => {
         ),
       ).toBe(true)
     }
-    for (const label of ['VPS', '服务商', '订阅', '资产决策', '节点', '入口', '事件', '设置']) {
+    for (const label of ['VPS', '服务商', '订阅', '资产决策', '监控', '入口探测', '事件', '设置']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
   })
 
-  it('renders anomaly counts only on nodes/targets nav', () => {
+  it('renders anomaly counts only on monitoring/targets nav', () => {
     render(
       <MemoryRouter>
         <Sidebar
           user={user}
           sync={sync}
-          anomalyCounts={{ nodes: 3, targets: 1 }}
+          anomalyCounts={{ monitoring: 3, targets: 1 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -51,7 +51,7 @@ describe('Sidebar', () => {
     )
     const links = screen.getAllByRole('link')
     const linkText = links.map((link) => link.textContent)
-    expect(linkText).toEqual(['工作台', 'VPS', '服务商', '订阅', '资产决策', '节点3', '入口1', '事件', '设置'])
+    expect(linkText).toEqual(['工作台', 'VPS', '服务商', '订阅', '资产决策', '监控3', '入口探测1', '事件', '设置'])
     expect(screen.getByText('3')).toHaveClass('nav-badge')
     expect(screen.getByText('1')).toHaveClass('nav-badge')
   })
@@ -62,7 +62,7 @@ describe('Sidebar', () => {
         <Sidebar
           user={user}
           sync={sync}
-          anomalyCounts={{ nodes: 0, targets: 0 }}
+          anomalyCounts={{ monitoring: 0, targets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}

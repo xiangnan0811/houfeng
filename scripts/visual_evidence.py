@@ -189,8 +189,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "importance": "critical",
             "labels": ["prod", "web"],
             "note": "Primary asset workflow fixture with complete facts.",
-            "active_node_link_count": 2,
-            "running_node_count": 0,
+            "active_monitoring_instance_link_count": 2,
+            "running_monitoring_instance_count": 0,
             "running_target_count": 0,
             "created_at": iso_timestamp(-100),
             "updated_at": iso_timestamp(-1),
@@ -220,8 +220,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "importance": "normal",
             "labels": ["edge", "migration"],
             "note": "Migration candidate with active subscription evidence.",
-            "active_node_link_count": 1,
-            "running_node_count": 0,
+            "active_monitoring_instance_link_count": 1,
+            "running_monitoring_instance_count": 0,
             "running_target_count": 0,
             "created_at": iso_timestamp(-80),
             "updated_at": iso_timestamp(-1),
@@ -251,8 +251,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "importance": "low",
             "labels": ["needs-facts"],
             "note": "Fixture row intentionally missing subscription, provider, location, and access facts.",
-            "active_node_link_count": 0,
-            "running_node_count": 0,
+            "active_monitoring_instance_link_count": 0,
+            "running_monitoring_instance_count": 0,
             "running_target_count": 0,
             "created_at": iso_timestamp(-20),
             "updated_at": iso_timestamp(-1),
@@ -282,8 +282,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "importance": "low",
             "labels": ["legacy", "cost-review"],
             "note": "Cancel queue fixture with auto-renew cancelled.",
-            "active_node_link_count": 1,
-            "running_node_count": 1,
+            "active_monitoring_instance_link_count": 1,
+            "running_monitoring_instance_count": 1,
             "running_target_count": 1,
             "created_at": iso_timestamp(-240),
             "updated_at": iso_timestamp(-4),
@@ -313,8 +313,8 @@ def asset_workflow_vps_assets() -> list[dict[str, object]]:
             "importance": "low",
             "labels": ["archived"],
             "note": "Archived fixture row for quick-view coverage.",
-            "active_node_link_count": 0,
-            "running_node_count": 0,
+            "active_monitoring_instance_link_count": 0,
+            "running_monitoring_instance_count": 0,
             "running_target_count": 0,
             "created_at": iso_timestamp(-900),
             "updated_at": iso_timestamp(-60),
@@ -416,22 +416,22 @@ def lifecycle_context_for(
     }
 
 
-def asset_workflow_node_contexts() -> list[dict[str, object]]:
+def asset_workflow_monitoring_instance_contexts() -> list[dict[str, object]]:
     return [
         {
-            "node_id": "node_hkg_edge_01",
+            "monitoring_instance_id": "mi_hkg_edge_01",
             "linked_vps_count": 1,
             "cancellation_attention": True,
             "summaries": [
                 lifecycle_context_for(
                     "vps_fra_legacy",
                     "expired",
-                    "关联 VPS 已待取消，节点仍在运行，需确认监控和退役动作。",
+                    "关联 VPS 已待取消，监控实例仍在运行，需确认监控和退役动作。",
                 )
             ],
         },
         {
-            "node_id": "node_ams_conflict_03",
+            "monitoring_instance_id": "mi_ams_conflict_03",
             "linked_vps_count": 1,
             "cancellation_attention": False,
             "summaries": [
@@ -478,10 +478,10 @@ def asset_workflow_target_contexts() -> list[dict[str, object]]:
     ]
 
 
-def asset_workflow_nodes() -> list[dict[str, object]]:
+def asset_workflow_monitoring_instances() -> list[dict[str, object]]:
     return [
         {
-            "node_id": "node_hkg_edge_01",
+            "monitoring_instance_id": "mi_hkg_edge_01",
             "display_name": "fra legacy runtime",
             "group": "asset-fixture",
             "region": "EU-Central",
@@ -491,7 +491,7 @@ def asset_workflow_nodes() -> list[dict[str, object]]:
             "monitoring_status": "启用",
             "binding_status": "已绑定",
             "labels": ["legacy", "vps-linked"],
-            "note": "Node intentionally still running for lifecycle workbench evidence.",
+            "note": "Monitoring Instance intentionally still running for lifecycle workbench evidence.",
             "current_health_status": "关注",
             "last_heartbeat_at": iso_timestamp(0),
             "last_sync_at": iso_timestamp(0),
@@ -501,7 +501,7 @@ def asset_workflow_nodes() -> list[dict[str, object]]:
             "updated_at": iso_timestamp(0),
         },
         {
-            "node_id": "node_ams_conflict_03",
+            "monitoring_instance_id": "mi_ams_conflict_03",
             "display_name": "ams-core-runtime",
             "group": "asset-fixture",
             "region": "EU-West",
@@ -511,7 +511,7 @@ def asset_workflow_nodes() -> list[dict[str, object]]:
             "monitoring_status": "启用",
             "binding_status": "已绑定",
             "labels": ["prod", "vps-linked"],
-            "note": "Healthy linked node fixture.",
+            "note": "Healthy linked monitoring_instance fixture.",
             "current_health_status": "正常",
             "last_heartbeat_at": iso_timestamp(0),
             "last_sync_at": iso_timestamp(0),
@@ -531,7 +531,7 @@ def asset_workflow_targets() -> list[dict[str, object]]:
             "target_type": "service",
             "host": "legacy-api.example.test",
             "base_port": 443,
-            "execution_node_labels": ["legacy"],
+            "execution_monitoring_instance_labels": ["legacy"],
             "run_status": "启用",
             "group": "asset-fixture",
             "labels": ["legacy", "api"],
@@ -548,7 +548,7 @@ def asset_workflow_targets() -> list[dict[str, object]]:
             "target_type": "service",
             "host": "www-core.example.test",
             "base_port": 443,
-            "execution_node_labels": ["prod"],
+            "execution_monitoring_instance_labels": ["prod"],
             "run_status": "启用",
             "group": "asset-fixture",
             "labels": ["prod"],
@@ -562,15 +562,15 @@ def asset_workflow_targets() -> list[dict[str, object]]:
     ]
 
 
-def asset_workflow_node_sparklines() -> dict[str, object]:
+def asset_workflow_monitoring_instance_sparklines() -> dict[str, object]:
     return {
-        "nodes": {
-            row["node_id"]: {
+        "monitoring_instances": {
+            row["monitoring_instance_id"]: {
                 "cpu_usage_pct": [24, 31, 42, 45, 36, 30],
                 "mem_used_pct": [40, 43, 47, 50, 49, 46],
                 "disk_used_pct": [55, 55, 56, 56, 57, 57],
             }
-            for row in asset_workflow_nodes()
+            for row in asset_workflow_monitoring_instances()
         }
     }
 
@@ -586,12 +586,12 @@ def asset_workflow_target_sparklines() -> dict[str, object]:
     }
 
 
-def asset_workflow_vps_node_links(vps_id: str) -> list[dict[str, object]]:
+def asset_workflow_vps_monitoring_instance_links(vps_id: str) -> list[dict[str, object]]:
     if vps_id != "vps_fra_legacy":
         return []
     return [
         {
-            "node_id": "node_hkg_edge_01",
+            "monitoring_instance_id": "mi_hkg_edge_01",
             "display_name": "fra legacy runtime",
             "group": "asset-fixture",
             "region": "EU-Central",
@@ -606,7 +606,7 @@ def asset_workflow_vps_node_links(vps_id: str) -> list[dict[str, object]]:
             "current_active_incident_count": 1,
             "current_primary_issue_summary": "legacy service still responds on cancelled host",
             "linked_at": iso_timestamp(-120),
-            "note": "Node intentionally still running for lifecycle workbench evidence.",
+            "note": "Monitoring Instance intentionally still running for lifecycle workbench evidence.",
         }
     ]
 
@@ -661,7 +661,7 @@ def asset_workflow_vps_detail(vps_id: str) -> dict[str, object] | None:
     if vps is None:
         return None
     detail = dict(vps)
-    detail["node_links"] = asset_workflow_vps_node_links(vps_id)
+    detail["monitoring_instance_links"] = asset_workflow_vps_monitoring_instance_links(vps_id)
     return detail
 
 
@@ -694,7 +694,7 @@ def asset_workflow_cancellation_preview(vps_id: str) -> dict[str, object] | None
             "message": (
                 "订阅仍处于 active，需要显式确认取消订阅自动续费并标记为 cancelled。"
                 if row["status"] == "active"
-                else "订阅已处于非活跃状态，仍需处理 VPS、Node 与实例状态。"
+                else "订阅已处于非活跃状态，仍需处理 VPS、Monitoring Instance 与实例状态。"
             ),
         }
         for row in asset_workflow_subscriptions()
@@ -717,7 +717,7 @@ def asset_workflow_cancellation_preview(vps_id: str) -> dict[str, object] | None
     return {
         "vps": detail,
         "subscriptions": subscriptions,
-        "node_links": detail["node_links"],
+        "monitoring_instance_links": detail["monitoring_instance_links"],
         "services": services,
         "domains": domains,
         "target_links": target_links,
@@ -733,7 +733,7 @@ def asset_workflow_cancellation_preview(vps_id: str) -> dict[str, object] | None
             }
         ],
         "warnings": [
-            "仍有 1 个关联 Node 未标记不续费或已退役。",
+            "仍有 1 个关联 Monitoring Instance 未标记不续费或已退役。",
             "仍有 1 个关联 Target/实例处于运行或维护状态。",
         ]
         if vps_id == "vps_fra_legacy"
@@ -745,17 +745,17 @@ def asset_workflow_cancellation_preview(vps_id: str) -> dict[str, object] | None
 def asset_workflow_dashboard() -> dict[str, object]:
     return {
         "snapshot_generated_at": iso_timestamp(0),
-        "total_node_count": 3,
+        "total_monitoring_instance_count": 3,
         "total_target_count": 5,
-        "abnormal_node_count": 1,
+        "abnormal_monitoring_instance_count": 1,
         "abnormal_target_count": 1,
-        "severe_node_count": 0,
+        "severe_monitoring_instance_count": 0,
         "severe_target_count": 0,
-        "maintenance_node_count": 0,
+        "maintenance_monitoring_instance_count": 0,
         "maintenance_target_count": 1,
-        "pending_onboarding_node_count": 1,
-        "paused_node_count": 0,
-        "retired_node_count": 0,
+        "pending_onboarding_monitoring_instance_count": 1,
+        "paused_monitoring_instance_count": 0,
+        "retired_monitoring_instance_count": 0,
         "paused_target_count": 1,
         "archived_target_count": 0,
         "recent_new_incident_count": 2,
@@ -763,13 +763,13 @@ def asset_workflow_dashboard() -> dict[str, object]:
         "group_summaries": [
             {
                 "group": "asset-fixture",
-                "node_count": 3,
+                "monitoring_instance_count": 3,
                 "target_count": 5,
-                "abnormal_node_count": 1,
+                "abnormal_monitoring_instance_count": 1,
                 "abnormal_target_count": 1,
-                "severe_node_count": 0,
+                "severe_monitoring_instance_count": 0,
                 "severe_target_count": 0,
-                "maintenance_node_count": 0,
+                "maintenance_monitoring_instance_count": 0,
                 "maintenance_target_count": 1,
             }
         ],
@@ -795,7 +795,7 @@ def asset_workflow_dashboard() -> dict[str, object]:
                 {"currency": "EUR", "monthly_total": 8.0, "yearly_total": 96.0},
             ],
         },
-        "abnormal_nodes": [],
+        "abnormal_monitoring_instances": [],
         "abnormal_targets": [],
         "recent_events": [],
         "new_incident_trend_24h": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
@@ -803,10 +803,10 @@ def asset_workflow_dashboard() -> dict[str, object]:
     }
 
 
-def observability_support_nodes() -> list[dict[str, object]]:
+def observability_support_monitoring_instances() -> list[dict[str, object]]:
     return [
         {
-            "node_id": "node_hkg_edge_01",
+            "monitoring_instance_id": "mi_hkg_edge_01",
             "display_name": "hkg-edge-01",
             "group": "asset-prod",
             "region": "APAC",
@@ -816,7 +816,7 @@ def observability_support_nodes() -> list[dict[str, object]]:
             "monitoring_status": "启用",
             "binding_status": "已绑定",
             "labels": ["prod", "edge", "vps-linked"],
-            "note": "Severe node fixture for UX-5 abnormal evidence.",
+            "note": "Severe monitoring_instance fixture for UX-5 abnormal evidence.",
             "current_health_status": "严重",
             "last_heartbeat_at": iso_timestamp_hours_ago(1),
             "last_sync_at": iso_timestamp_hours_ago(1),
@@ -826,7 +826,7 @@ def observability_support_nodes() -> list[dict[str, object]]:
             "updated_at": iso_timestamp_hours_ago(1),
         },
         {
-            "node_id": "node_pending_sfo_02",
+            "monitoring_instance_id": "mi_pending_sfo_02",
             "display_name": "sfo-pending-onboarding",
             "group": "asset-intake",
             "region": "US-West",
@@ -846,7 +846,7 @@ def observability_support_nodes() -> list[dict[str, object]]:
             "updated_at": iso_timestamp_hours_ago(6),
         },
         {
-            "node_id": "node_ams_conflict_03",
+            "monitoring_instance_id": "mi_ams_conflict_03",
             "display_name": "ams-conflict-03",
             "group": "asset-prod",
             "region": "EU-West",
@@ -866,7 +866,7 @@ def observability_support_nodes() -> list[dict[str, object]]:
             "updated_at": iso_timestamp_hours_ago(5),
         },
         {
-            "node_id": "node_fra_maint_04",
+            "monitoring_instance_id": "mi_fra_maint_04",
             "display_name": "fra-maintenance-04",
             "group": "asset-ops",
             "region": "EU-Central",
@@ -886,7 +886,7 @@ def observability_support_nodes() -> list[dict[str, object]]:
             "updated_at": iso_timestamp_hours_ago(2),
         },
         {
-            "node_id": "node_sin_paused_05",
+            "monitoring_instance_id": "mi_sin_paused_05",
             "display_name": "sin-paused-05",
             "group": "asset-observe",
             "region": "APAC",
@@ -906,7 +906,7 @@ def observability_support_nodes() -> list[dict[str, object]]:
             "updated_at": iso_timestamp_hours_ago(30),
         },
         {
-            "node_id": "node_old_retired_06",
+            "monitoring_instance_id": "mi_old_retired_06",
             "display_name": "old-retired-06",
             "group": "archive",
             "region": "EU-Central",
@@ -916,7 +916,7 @@ def observability_support_nodes() -> list[dict[str, object]]:
             "monitoring_status": "暂停",
             "binding_status": "已绑定",
             "labels": ["archived", "legacy"],
-            "note": "Retired node fixture for inventory completeness.",
+            "note": "Retired monitoring_instance fixture for inventory completeness.",
             "current_health_status": "正常",
             "last_heartbeat_at": iso_timestamp(-45),
             "last_sync_at": iso_timestamp(-45),
@@ -936,7 +936,7 @@ def observability_support_targets() -> list[dict[str, object]]:
             "target_type": "service",
             "host": "api-core.example.test",
             "base_port": 443,
-            "execution_node_labels": ["prod", "edge"],
+            "execution_monitoring_instance_labels": ["prod", "edge"],
             "run_status": "启用",
             "group": "asset-prod",
             "labels": ["prod", "api", "vps-linked"],
@@ -945,7 +945,7 @@ def observability_support_targets() -> list[dict[str, object]]:
             "current_active_incident_count": 2,
             "last_success_at": iso_timestamp_hours_ago(7),
             "last_failure_at": iso_timestamp_hours_ago(1),
-            "current_primary_issue_summary": "HTTP 5xx 持续出现，需结合 Node 与资产决策核对。",
+            "current_primary_issue_summary": "HTTP 5xx 持续出现，需结合 Monitoring Instance 与资产决策核对。",
             "created_at": iso_timestamp(-90),
             "updated_at": iso_timestamp_hours_ago(1),
         },
@@ -955,7 +955,7 @@ def observability_support_targets() -> list[dict[str, object]]:
             "target_type": "china_reference",
             "host": "www.baidu.com",
             "base_port": 443,
-            "execution_node_labels": ["cn-probe"],
+            "execution_monitoring_instance_labels": ["cn-probe"],
             "run_status": "启用",
             "group": "network-reference",
             "labels": ["reference", "china", "notification"],
@@ -974,7 +974,7 @@ def observability_support_targets() -> list[dict[str, object]]:
             "target_type": "service",
             "host": "www-maintenance.example.test",
             "base_port": 443,
-            "execution_node_labels": ["prod"],
+            "execution_monitoring_instance_labels": ["prod"],
             "run_status": "维护中",
             "group": "asset-ops",
             "labels": ["maintenance", "web"],
@@ -993,7 +993,7 @@ def observability_support_targets() -> list[dict[str, object]]:
             "target_type": "service",
             "host": "docs-paused.example.test",
             "base_port": 443,
-            "execution_node_labels": ["docs"],
+            "execution_monitoring_instance_labels": ["docs"],
             "run_status": "暂停",
             "group": "docs",
             "labels": ["paused", "docs"],
@@ -1012,7 +1012,7 @@ def observability_support_targets() -> list[dict[str, object]]:
             "target_type": "service",
             "host": "legacy-archived.example.test",
             "base_port": 80,
-            "execution_node_labels": ["legacy"],
+            "execution_monitoring_instance_labels": ["legacy"],
             "run_status": "已归档",
             "group": "archive",
             "labels": ["archived", "legacy"],
@@ -1031,7 +1031,7 @@ def observability_support_targets() -> list[dict[str, object]]:
             "target_type": "service",
             "host": "no-execution-label.example.test",
             "base_port": 8443,
-            "execution_node_labels": [],
+            "execution_monitoring_instance_labels": [],
             "run_status": "启用",
             "group": "asset-intake",
             "labels": ["needs-coverage"],
@@ -1050,11 +1050,11 @@ def observability_support_targets() -> list[dict[str, object]]:
 def observability_support_events() -> list[dict[str, object]]:
     return [
         {
-            "event_id": "event_node_severe_started",
-            "incident_id": "inc_node_hkg_cpu",
-            "incident_class": "node_resource_pressure",
-            "object_type": "node",
-            "object_id": "node_hkg_edge_01",
+            "event_id": "event_monitoring_instance_severe_started",
+            "incident_id": "inc_monitoring_instance_hkg_cpu",
+            "incident_class": "monitoring_instance_resource_pressure",
+            "object_type": "monitoring_instance",
+            "object_id": "mi_hkg_edge_01",
             "event_type": "incident_started",
             "severity": "严重",
             "summary": "hkg-edge-01 CPU 与 load5 同时进入严重区间。",
@@ -1106,12 +1106,12 @@ def observability_support_events() -> list[dict[str, object]]:
             "_is_backfilled": False,
         },
         {
-            "event_id": "event_node_maintenance_entered",
-            "incident_id": "runtime_node_fra_maint",
+            "event_id": "event_monitoring_instance_maintenance_entered",
+            "incident_id": "runtime_monitoring_instance_fra_maint",
             "incident_class": "",
-            "object_type": "node",
-            "object_id": "node_fra_maint_04",
-            "event_type": "node_monitoring_maintenance_entered",
+            "object_type": "monitoring_instance",
+            "object_id": "mi_fra_maint_04",
+            "event_type": "monitoring_instance_monitoring_maintenance_entered",
             "severity": "",
             "summary": "fra-maintenance-04 进入维护窗口。",
             "created_at": iso_timestamp_hours_ago(6),
@@ -1134,11 +1134,11 @@ def observability_support_events() -> list[dict[str, object]]:
             "_is_backfilled": False,
         },
         {
-            "event_id": "event_backfilled_node",
-            "incident_id": "inc_backfilled_node_disk",
-            "incident_class": "node_disk_pressure",
-            "object_type": "node",
-            "object_id": "node_hkg_edge_01",
+            "event_id": "event_backfilled_monitoring_instance",
+            "incident_id": "inc_backfilled_monitoring_instance_disk",
+            "incident_class": "monitoring_instance_disk_pressure",
+            "object_type": "monitoring_instance",
+            "object_id": "mi_hkg_edge_01",
             "event_type": "incident_started",
             "severity": "告警",
             "summary": "补传观测触发的磁盘压力事件，默认应被事件流排除。",
@@ -1148,12 +1148,12 @@ def observability_support_events() -> list[dict[str, object]]:
             "_is_backfilled": True,
         },
         {
-            "event_id": "event_node_binding_confirmed",
-            "incident_id": "binding_node_ams_conflict",
+            "event_id": "event_monitoring_instance_binding_confirmed",
+            "incident_id": "binding_monitoring_instance_ams_conflict",
             "incident_class": "",
-            "object_type": "node",
-            "object_id": "node_ams_conflict_03",
-            "event_type": "node_binding_rebind_confirmed",
+            "object_type": "monitoring_instance",
+            "object_id": "mi_ams_conflict_03",
+            "event_type": "monitoring_instance_binding_rebind_confirmed",
             "severity": "关注",
             "summary": "ams-conflict-03 新指纹确认重新绑定。",
             "created_at": iso_timestamp_hours_ago(10),
@@ -1193,55 +1193,55 @@ def observability_support_events() -> list[dict[str, object]]:
 
 
 def observability_support_dashboard() -> dict[str, object]:
-    nodes = observability_support_nodes()
+    monitoring = observability_support_monitoring_instances()
     targets = observability_support_targets()
     events = filter_observability_support_events({"limit": ["6"]})
-    abnormal_nodes = [node for node in nodes if node["current_health_status"] != "正常"]
+    abnormal_monitoring_instances = [monitoring_instance for monitoring_instance in monitoring if monitoring_instance["current_health_status"] != "正常"]
     abnormal_targets = [target for target in targets if target["current_health_status"] != "正常"]
 
     group_names = sorted(
         {
             str(item.get("group") or "未分组")
-            for item in [*nodes, *targets]
+            for item in [*monitoring, *targets]
         },
         key=lambda value: value or "未分组",
     )
     group_summaries: list[dict[str, object]] = []
     for group in group_names:
-        group_nodes = [node for node in nodes if str(node.get("group") or "未分组") == group]
+        group_monitoring_instances = [monitoring_instance for monitoring_instance in monitoring if str(monitoring_instance.get("group") or "未分组") == group]
         group_targets = [target for target in targets if str(target.get("group") or "未分组") == group]
         group_summaries.append(
             {
                 "group": group,
-                "node_count": len(group_nodes),
+                "monitoring_instance_count": len(group_monitoring_instances),
                 "target_count": len(group_targets),
-                "abnormal_node_count": sum(1 for node in group_nodes if node["current_health_status"] != "正常"),
+                "abnormal_monitoring_instance_count": sum(1 for monitoring_instance in group_monitoring_instances if monitoring_instance["current_health_status"] != "正常"),
                 "abnormal_target_count": sum(1 for target in group_targets if target["current_health_status"] != "正常"),
-                "severe_node_count": sum(1 for node in group_nodes if node["current_health_status"] == "严重"),
+                "severe_monitoring_instance_count": sum(1 for monitoring_instance in group_monitoring_instances if monitoring_instance["current_health_status"] == "严重"),
                 "severe_target_count": sum(1 for target in group_targets if target["current_health_status"] == "严重"),
-                "maintenance_node_count": sum(1 for node in group_nodes if node["monitoring_status"] == "维护中"),
+                "maintenance_monitoring_instance_count": sum(1 for monitoring_instance in group_monitoring_instances if monitoring_instance["monitoring_status"] == "维护中"),
                 "maintenance_target_count": sum(1 for target in group_targets if target["run_status"] == "维护中"),
             }
         )
 
     return {
         "snapshot_generated_at": iso_timestamp_hours_ago(0),
-        "total_node_count": len(nodes),
+        "total_monitoring_instance_count": len(monitoring),
         "total_target_count": len(targets),
-        "abnormal_node_count": len(abnormal_nodes),
+        "abnormal_monitoring_instance_count": len(abnormal_monitoring_instances),
         "abnormal_target_count": len(abnormal_targets),
-        "severe_node_count": sum(1 for node in nodes if node["current_health_status"] == "严重"),
+        "severe_monitoring_instance_count": sum(1 for monitoring_instance in monitoring if monitoring_instance["current_health_status"] == "严重"),
         "severe_target_count": sum(1 for target in targets if target["current_health_status"] == "严重"),
-        "maintenance_node_count": sum(1 for node in nodes if node["monitoring_status"] == "维护中"),
+        "maintenance_monitoring_instance_count": sum(1 for monitoring_instance in monitoring if monitoring_instance["monitoring_status"] == "维护中"),
         "maintenance_target_count": sum(1 for target in targets if target["run_status"] == "维护中"),
-        "pending_onboarding_node_count": sum(
+        "pending_onboarding_monitoring_instance_count": sum(
             1
-            for node in nodes
-            if node["lifecycle_status"] == "待接入"
-            or node["binding_status"] in ("未绑定", "指纹变更待确认")
+            for monitoring_instance in monitoring
+            if monitoring_instance["lifecycle_status"] == "待接入"
+            or monitoring_instance["binding_status"] in ("未绑定", "指纹变更待确认")
         ),
-        "paused_node_count": sum(1 for node in nodes if node["monitoring_status"] == "暂停"),
-        "retired_node_count": sum(1 for node in nodes if node["lifecycle_status"] == "已退役"),
+        "paused_monitoring_instance_count": sum(1 for monitoring_instance in monitoring if monitoring_instance["monitoring_status"] == "暂停"),
+        "retired_monitoring_instance_count": sum(1 for monitoring_instance in monitoring if monitoring_instance["lifecycle_status"] == "已退役"),
         "paused_target_count": sum(1 for target in targets if target["run_status"] == "暂停"),
         "archived_target_count": sum(1 for target in targets if target["run_status"] == "已归档"),
         "recent_new_incident_count": sum(1 for event in events if event["event_type"] == "incident_started"),
@@ -1263,22 +1263,22 @@ def observability_support_dashboard() -> dict[str, object]:
             "abnormal_linked_vps_count": 0,
             "cost_by_currency": [],
         },
-        "abnormal_nodes": [
+        "abnormal_monitoring_instances": [
             {
-                "node_id": node["node_id"],
-                "display_name": node["display_name"],
-                "group": node["group"],
-                "region": node["region"],
-                "city": node["city"],
-                "provider": node["provider"],
-                "lifecycle_status": node["lifecycle_status"],
-                "monitoring_status": node["monitoring_status"],
-                "current_health_status": node["current_health_status"],
-                "last_heartbeat_at": node["last_heartbeat_at"],
-                "current_active_incident_count": node["current_active_incident_count"],
-                "current_primary_issue_summary": node["current_primary_issue_summary"],
+                "monitoring_instance_id": monitoring_instance["monitoring_instance_id"],
+                "display_name": monitoring_instance["display_name"],
+                "group": monitoring_instance["group"],
+                "region": monitoring_instance["region"],
+                "city": monitoring_instance["city"],
+                "provider": monitoring_instance["provider"],
+                "lifecycle_status": monitoring_instance["lifecycle_status"],
+                "monitoring_status": monitoring_instance["monitoring_status"],
+                "current_health_status": monitoring_instance["current_health_status"],
+                "last_heartbeat_at": monitoring_instance["last_heartbeat_at"],
+                "current_active_incident_count": monitoring_instance["current_active_incident_count"],
+                "current_primary_issue_summary": monitoring_instance["current_primary_issue_summary"],
             }
-            for node in abnormal_nodes[:4]
+            for monitoring_instance in abnormal_monitoring_instances[:4]
         ],
         "abnormal_targets": [
             {
@@ -1303,7 +1303,7 @@ def observability_support_dashboard() -> dict[str, object]:
     }
 
 
-def observability_node_sparklines(query: dict[str, list[str]]) -> dict[str, object]:
+def observability_monitoring_instance_sparklines(query: dict[str, list[str]]) -> dict[str, object]:
     metrics = [
         metric.strip()
         for value in query.get("metrics", ["cpu_usage_pct,mem_used_pct,disk_used_pct"])
@@ -1320,14 +1320,198 @@ def observability_node_sparklines(query: dict[str, list[str]]) -> dict[str, obje
         "mem_used_pct": [34, 35, 35, 36, 35, 36, 37, 36, 36, 35, 35, 36],
         "disk_used_pct": [40, 40, 41, 41, 42, 42, 42, 43, 43, 43, 44, 44],
     }
-    nodes: dict[str, dict[str, list[float | None]]] = {}
-    for node in observability_support_nodes():
-        node_id = str(node["node_id"])
-        source = defaults if node_id == "node_hkg_edge_01" else stable
-        if node["monitoring_status"] == "暂停":
+    monitoring: dict[str, dict[str, list[float | None]]] = {}
+    for monitoring_instance in observability_support_monitoring_instances():
+        monitoring_instance_id = str(monitoring_instance["monitoring_instance_id"])
+        source = defaults if monitoring_instance_id == "mi_hkg_edge_01" else stable
+        if monitoring_instance["monitoring_status"] == "暂停":
             source = {key: [None, None, None, None] for key in defaults}
-        nodes[node_id] = {metric: source.get(metric, []) for metric in metrics}
-    return {"nodes": nodes}
+        monitoring[monitoring_instance_id] = {metric: source.get(metric, []) for metric in metrics}
+    return {"monitoring_instances": monitoring}
+
+
+def observability_support_monitoring_instance(monitoring_instance_id: str) -> dict[str, object] | None:
+    return next(
+        (
+            row
+            for row in observability_support_monitoring_instances()
+            if row["monitoring_instance_id"] == monitoring_instance_id
+        ),
+        None,
+    )
+
+
+def observability_support_host_sample(
+    monitoring_instance: dict[str, object],
+    hours_ago: int,
+    *,
+    cpu: float,
+    mem: float,
+    disk: float,
+) -> dict[str, object]:
+    monitoring_instance_id = str(monitoring_instance["monitoring_instance_id"])
+    observed_at = iso_timestamp_hours_ago(hours_ago)
+    return {
+        "monitoring_instance_id": monitoring_instance_id,
+        "observed_at": observed_at,
+        "received_at": observed_at,
+        "agent_version": "visual-evidence",
+        "fingerprint": f"fp-{monitoring_instance_id}",
+        "cpu_usage_pct": cpu,
+        "load_1": round(cpu / 18, 2),
+        "load_5": round(cpu / 20, 2),
+        "load_15": round(cpu / 24, 2),
+        "mem_used_pct": mem,
+        "mem_available_bytes": 2_147_483_648,
+        "mem_total_bytes": 8_589_934_592,
+        "swap_used_pct": 4,
+        "disk_used_pct": disk,
+        "disk_total_bytes": 85_899_345_920,
+        "inode_used_pct": min(96, disk + 8),
+        "net_in_bytes_per_sec": 2_400_000 + hours_ago * 1000,
+        "net_out_bytes_per_sec": 1_700_000 + hours_ago * 900,
+        "cpu_iowait_pct": 7 if cpu >= 90 else 2,
+        "cpu_steal_pct": 1.2,
+        "disk_read_bytes_per_sec": 6_200_000,
+        "disk_write_bytes_per_sec": 3_800_000,
+        "disk_busy_pct": 68 if disk >= 75 else 18,
+        "uptime_seconds": 86400 * 18 + 3600,
+        "maintenance_context": monitoring_instance["monitoring_status"] == "维护中",
+        "is_backfilled": False,
+        "sync_batch_id": f"sync_{monitoring_instance_id}_{hours_ago}",
+        "containers": [
+            {
+                "id": "ctr-api",
+                "name": "api",
+                "image": "houfeng/api:visual",
+                "status": "running",
+                "cpu_pct": 12.4,
+                "mem_pct": 23.8,
+            }
+        ]
+        if hours_ago == 1
+        else [],
+    }
+
+
+def observability_support_monitoring_instance_runtime_facts(monitoring_instance_id: str) -> dict[str, object] | None:
+    monitoring_instance = observability_support_monitoring_instance(monitoring_instance_id)
+    if monitoring_instance is None:
+        return None
+    severe = monitoring_instance_id == "mi_hkg_edge_01"
+    recent = [
+        observability_support_host_sample(
+            monitoring_instance,
+            hours_ago,
+            cpu=92 - hours_ago if severe else 22 + (hours_ago % 3),
+            mem=88 - hours_ago * 0.5 if severe else 36 + (hours_ago % 4),
+            disk=78 - hours_ago * 0.2 if severe else 44,
+        )
+        for hours_ago in range(12, 0, -1)
+    ]
+    return {
+        "monitoring_instance_id": monitoring_instance_id,
+        "latest_host_sample": recent[-1] if monitoring_instance["monitoring_status"] != "暂停" else None,
+        "recent_host_samples": recent if monitoring_instance["monitoring_status"] != "暂停" else [],
+    }
+
+
+def observability_support_monitoring_instance_onboarding(monitoring_instance_id: str) -> dict[str, object] | None:
+    monitoring_instance = observability_support_monitoring_instance(monitoring_instance_id)
+    if monitoring_instance is None:
+        return None
+    phase = "完成接入" if monitoring_instance["binding_status"] == "已绑定" else "等待确认主机指纹"
+    state = dict(monitoring_instance)
+    state.update(
+        {
+            "phase": phase,
+            "has_host_sample": monitoring_instance["last_heartbeat_at"] is not None,
+            "has_accepted_observation": monitoring_instance["current_active_incident_count"] > 0,
+            "enrollment_token_issued_at": iso_timestamp_hours_ago(24),
+            "current_binding_fingerprint_summary": f"fp-{monitoring_instance_id[:8]}",
+        }
+    )
+    if monitoring_instance["binding_status"] == "指纹变更待确认":
+        state["pending_binding"] = {
+            "fingerprint_summary": f"pending-{monitoring_instance_id[:8]}",
+            "first_seen_at": iso_timestamp_hours_ago(5),
+            "last_seen_at": iso_timestamp_hours_ago(1),
+            "attempt_count": 3,
+        }
+    return state
+
+
+def observability_support_vps_for_monitoring_instance(monitoring_instance_id: str) -> list[dict[str, object]]:
+    context = next(
+        (
+            row
+            for row in asset_workflow_monitoring_instance_contexts()
+            if row["monitoring_instance_id"] == monitoring_instance_id
+        ),
+        None,
+    )
+    if context is None:
+        return []
+    records: list[dict[str, object]] = []
+    for summary in context.get("summaries", []):
+        if not isinstance(summary, dict):
+            continue
+        vps_id = str(summary.get("vps_id") or "")
+        vps = next((row for row in asset_workflow_vps_assets() if row["vps_id"] == vps_id), None)
+        if vps is None:
+            continue
+        records.append(
+            {
+                "vps_id": vps["vps_id"],
+                "display_name": vps["display_name"],
+                "provider_id": vps.get("provider_id"),
+                "provider_name": vps.get("provider_name") or "",
+                "country": vps.get("country") or "",
+                "region": vps.get("region") or "",
+                "city": vps.get("city") or "",
+                "lifecycle_status": vps.get("lifecycle_status") or "",
+                "usage_status": vps.get("usage_status") or "",
+                "renewal_decision": vps.get("renewal_decision") or "",
+                "importance": vps.get("importance") or "normal",
+                "labels": vps.get("labels") or [],
+                "archived_at": vps.get("archived_at"),
+                "linked_at": iso_timestamp(-20),
+                "note": str(summary.get("message") or "visual evidence linked VPS"),
+            }
+        )
+    return records
+
+
+def filter_observability_support_incidents(query: dict[str, list[str]]) -> list[dict[str, object]]:
+    object_type = first_query_value(query, "object_type")
+    object_id = first_query_value(query, "object_id")
+    rows = [
+        {
+            "incident_id": "inc_monitoring_instance_hkg_cpu",
+            "incident_class": "monitoring_instance_resource_pressure",
+            "object_type": "monitoring_instance",
+            "object_id": "mi_hkg_edge_01",
+            "severity": "严重",
+            "started_at": iso_timestamp_hours_ago(3),
+            "last_evaluated_at": iso_timestamp_hours_ago(1),
+            "source_summary": "CPU 与 load5 持续高位，建议先核对 VPS 工作负载。",
+        },
+        {
+            "incident_id": "inc_monitoring_instance_hkg_disk",
+            "incident_class": "monitoring_instance_disk_pressure",
+            "object_type": "monitoring_instance",
+            "object_id": "mi_hkg_edge_01",
+            "severity": "告警",
+            "started_at": iso_timestamp_hours_ago(6),
+            "last_evaluated_at": iso_timestamp_hours_ago(1),
+            "source_summary": "磁盘使用率接近告警阈值。",
+        },
+    ]
+    if object_type:
+        rows = [row for row in rows if row["object_type"] == object_type]
+    if object_id:
+        rows = [row for row in rows if row["object_id"] == object_id]
+    return rows
 
 
 def observability_target_sparklines() -> dict[str, object]:
@@ -1407,8 +1591,8 @@ def filter_observability_support_events(
         rows = [row for row in rows if row.get("event_type") == "incident_recovered"]
     if query_bool(query, "maintenance_only"):
         maintenance_types = {
-            "node_monitoring_maintenance_entered",
-            "node_monitoring_maintenance_exited",
+            "monitoring_instance_monitoring_maintenance_entered",
+            "monitoring_instance_monitoring_maintenance_exited",
             "target_maintenance_entered",
             "target_maintenance_exited",
         }
@@ -1554,20 +1738,20 @@ def fulfill_asset_workflow_api(route: object) -> None:
         fulfill_json(route, 200, filter_asset_workflow_subscriptions(query))
         return
 
-    if method == "GET" and path == "/api/asset-context/nodes":
-        fulfill_json(route, 200, asset_workflow_node_contexts())
+    if method == "GET" and path == "/api/asset-context/monitoring-instances":
+        fulfill_json(route, 200, asset_workflow_monitoring_instance_contexts())
         return
 
     if method == "GET" and path == "/api/asset-context/targets":
         fulfill_json(route, 200, asset_workflow_target_contexts())
         return
 
-    if method == "GET" and path == "/api/nodes":
-        fulfill_json(route, 200, asset_workflow_nodes())
+    if method == "GET" and path == "/api/monitoring-instances":
+        fulfill_json(route, 200, asset_workflow_monitoring_instances())
         return
 
-    if method == "GET" and path == "/api/nodes/sparklines":
-        fulfill_json(route, 200, asset_workflow_node_sparklines())
+    if method == "GET" and path == "/api/monitoring-instances/sparklines":
+        fulfill_json(route, 200, asset_workflow_monitoring_instance_sparklines())
         return
 
     if method == "GET" and path == "/api/targets":
@@ -1613,12 +1797,35 @@ def fulfill_observability_support_api(route: object) -> None:
         fulfill_json(route, 200, observability_support_dashboard())
         return
 
-    if method == "GET" and path == "/api/nodes":
-        fulfill_json(route, 200, observability_support_nodes())
+    if method == "GET" and path == "/api/monitoring-instances":
+        fulfill_json(route, 200, observability_support_monitoring_instances())
         return
 
-    if method == "GET" and path == "/api/nodes/sparklines":
-        fulfill_json(route, 200, observability_node_sparklines(query))
+    if method == "GET" and path.startswith("/api/monitoring-instances/"):
+        parts = [part for part in path.split("/") if part]
+        if len(parts) >= 3:
+            monitoring_instance_id = parts[2]
+            if len(parts) == 3:
+                monitoring_instance = observability_support_monitoring_instance(monitoring_instance_id)
+                if monitoring_instance is not None:
+                    fulfill_json(route, 200, monitoring_instance)
+                    return
+            if len(parts) == 4 and parts[3] == "runtime-facts":
+                facts = observability_support_monitoring_instance_runtime_facts(monitoring_instance_id)
+                if facts is not None:
+                    fulfill_json(route, 200, facts)
+                    return
+            if len(parts) == 4 and parts[3] == "onboarding":
+                onboarding = observability_support_monitoring_instance_onboarding(monitoring_instance_id)
+                if onboarding is not None:
+                    fulfill_json(route, 200, onboarding)
+                    return
+            if len(parts) == 4 and parts[3] == "vps":
+                fulfill_json(route, 200, observability_support_vps_for_monitoring_instance(monitoring_instance_id))
+                return
+
+    if method == "GET" and path == "/api/monitoring-instances/sparklines":
+        fulfill_json(route, 200, observability_monitoring_instance_sparklines(query))
         return
 
     if method == "GET" and path == "/api/targets":
@@ -1629,8 +1836,8 @@ def fulfill_observability_support_api(route: object) -> None:
         fulfill_json(route, 200, observability_target_sparklines())
         return
 
-    if method == "GET" and path == "/api/asset-context/nodes":
-        fulfill_json(route, 200, asset_workflow_node_contexts())
+    if method == "GET" and path == "/api/asset-context/monitoring-instances":
+        fulfill_json(route, 200, asset_workflow_monitoring_instance_contexts())
         return
 
     if method == "GET" and path == "/api/asset-context/targets":
@@ -1639,6 +1846,10 @@ def fulfill_observability_support_api(route: object) -> None:
 
     if method == "GET" and path == "/api/events":
         fulfill_json(route, 200, {"items": filter_observability_support_events(query)})
+        return
+
+    if method == "GET" and path == "/api/incidents":
+        fulfill_json(route, 200, filter_observability_support_incidents(query))
         return
 
     fulfill_json(
@@ -1921,7 +2132,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--route",
         action="append",
         required=True,
-        help="Route to check. Repeat for multiple routes, for example --route /nodes.",
+        help="Route to check. Repeat for multiple routes, for example --route /monitoring.",
     )
     sanity.add_argument(
         "--viewport",
@@ -1942,7 +2153,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="none",
         help=(
             "Optional local-only API fixture profile. Use asset-workflows for "
-            "protected Asset Ledger routes or observability-support for Nodes, "
+            "protected Asset Ledger routes or observability-support for Monitoring, "
             "Targets, and Events without a running center."
         ),
     )

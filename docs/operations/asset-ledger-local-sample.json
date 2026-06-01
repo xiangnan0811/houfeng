@@ -33,7 +33,7 @@
       "payment_method": "sample-card",
       "note": "Renewal-window sample."
     },
-    "node_name": "sample-tokyo-node",
+    "monitoring_instance_name": "sample-tokyo-node",
     "target_url": "https://sample-tokyo.example.invalid"
   },
   {
@@ -70,7 +70,7 @@
       "payment_method": "sample-card",
       "note": "Idle paid sample."
     },
-    "node_name": "sample-fremont-node",
+    "monitoring_instance_name": "sample-fremont-node",
     "target_url": "https://sample-fremont.example.invalid"
   },
   {

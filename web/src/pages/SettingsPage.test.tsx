@@ -56,7 +56,7 @@ const settingsResponseBody = {
     load5_critical: 8,
   },
   override_rules: {
-    node_labels: [
+    monitoring_instance_labels: [
       {
         label: 'edge',
         overrides: {
@@ -125,7 +125,7 @@ describe('SettingsPage', () => {
 
     // Switch to monitoring tab to check frequency
     switchTab('监控策略')
-    expect(screen.getByLabelText('当前节点主机样本频率')).toHaveValue('5s')
+    expect(screen.getByLabelText('当前监控实例主机样本频率')).toHaveValue('5s')
 
     // Switch to notification tab to check Telegram
     await expandTelegram()
@@ -141,7 +141,7 @@ describe('SettingsPage', () => {
 
     // Switch to advanced tab to check override rules
     switchTab('高级')
-    expect((screen.getByLabelText('节点标签覆盖规则 JSON') as HTMLTextAreaElement).value).toContain(
+    expect((screen.getByLabelText('监控实例标签覆盖规则 JSON') as HTMLTextAreaElement).value).toContain(
       '"label": "edge"',
     )
   })
@@ -190,7 +190,7 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
 
     switchTab('监控策略')
-    fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
+    fireEvent.change(screen.getByLabelText('当前监控实例主机样本频率'), {
       target: { value: '1m' },
     })
     fireEvent.change(screen.getByLabelText('原始层保留天数'), {
@@ -282,7 +282,7 @@ describe('SettingsPage', () => {
       target: { value: 'replacement-token' },
     })
     switchTab('监控策略')
-    fireEvent.change(screen.getByLabelText('当前节点主机样本频率'), {
+    fireEvent.change(screen.getByLabelText('当前监控实例主机样本频率'), {
       target: { value: '1m' },
     })
     fireEvent.change(screen.getByLabelText('原始层保留天数'), {
@@ -442,7 +442,7 @@ describe('SettingsPage', () => {
     expect(screen.queryByText('JSON 格式无效')).not.toBeInTheDocument()
 
     // Invalid JSON shows error
-    fireEvent.change(screen.getByLabelText('节点标签覆盖规则 JSON'), {
+    fireEvent.change(screen.getByLabelText('监控实例标签覆盖规则 JSON'), {
       target: { value: 'not valid json {' },
     })
     expect(screen.getByText('JSON 格式无效')).toBeInTheDocument()
@@ -468,7 +468,7 @@ describe('SettingsPage', () => {
 
     switchTab('高级')
 
-    const textarea = screen.getByLabelText('节点标签覆盖规则 JSON') as HTMLTextAreaElement
+    const textarea = screen.getByLabelText('监控实例标签覆盖规则 JSON') as HTMLTextAreaElement
     // The initial value is already pretty-printed, compact it first
     fireEvent.change(textarea, { target: { value: '[{"label":"edge","overrides":{}}]' } })
 

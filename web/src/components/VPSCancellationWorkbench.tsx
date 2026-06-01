@@ -12,7 +12,7 @@ import { formatDate, formatOptional } from '../lib/format'
 import { Badge, Button, Input, MonoDigits, Select } from './atoms'
 import { LifecycleBadge, RenewalBadge, SubscriptionStatusBadge } from '../pages/assetPageBadges'
 
-type WorkbenchNodeChoice = {
+type WorkbenchMonitoringInstanceChoice = {
   enabled: boolean
   lifecycleStatus: '' | '不续费' | '已退役'
   pauseMonitoring: boolean
@@ -44,11 +44,11 @@ function targetIDsFromPreview(preview: CancellationPreview): string[] {
   return preview.target_links.map((target) => target.target_id)
 }
 
-function buildInitialNodeChoices(preview: CancellationPreview): Record<string, WorkbenchNodeChoice> {
-  const map: Record<string, WorkbenchNodeChoice> = {}
+function buildInitialMonitoringInstanceChoices(preview: CancellationPreview): Record<string, WorkbenchMonitoringInstanceChoice> {
+  const map: Record<string, WorkbenchMonitoringInstanceChoice> = {}
   const actualCancelled = defaultVPSLifecycle(preview) === 'cancelled'
-  for (const node of preview.node_links) {
-    map[node.node_id] = {
+  for (const monitoringInstance of preview.monitoring_instance_links) {
+    map[monitoringInstance.monitoring_instance_id] = {
       enabled: false,
       lifecycleStatus: actualCancelled ? '已退役' : '不续费',
       pauseMonitoring: actualCancelled,
@@ -80,7 +80,7 @@ export function VPSCancellationWorkbench({
   const [effectiveDate, setEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [vpsLifecycleStatus, setVpsLifecycleStatus] = useState<'to_cancel' | 'cancelled'>(() => defaultVPSLifecycle(preview))
   const [subscriptionIDs, setSubscriptionIDs] = useState<string[]>([])
-  const [nodeChoices, setNodeChoices] = useState<Record<string, WorkbenchNodeChoice>>(() => buildInitialNodeChoices(preview))
+  const [monitoringInstanceChoices, setMonitoringInstanceChoices] = useState<Record<string, WorkbenchMonitoringInstanceChoice>>(() => buildInitialMonitoringInstanceChoices(preview))
   const [targetChoices, setTargetChoices] = useState<Record<string, WorkbenchTargetChoice>>(() => buildInitialTargetChoices(preview))
   const [validationError, setValidationError] = useState<string | null>(null)
   const targetIDs = useMemo(() => targetIDsFromPreview(preview), [preview])
@@ -95,10 +95,10 @@ export function VPSCancellationWorkbench({
     )
   }
 
-  function updateNodeChoice(nodeID: string, patch: Partial<WorkbenchNodeChoice>) {
-    setNodeChoices((current) => ({
+  function updateMonitoringInstanceChoice(monitoringInstanceID: string, patch: Partial<WorkbenchMonitoringInstanceChoice>) {
+    setMonitoringInstanceChoices((current) => ({
       ...current,
-      [nodeID]: { ...current[nodeID], ...patch },
+      [monitoringInstanceID]: { ...current[monitoringInstanceID], ...patch },
     }))
   }
 
@@ -122,11 +122,11 @@ export function VPSCancellationWorkbench({
       effective_date: effectiveDate || null,
       subscription_ids: subscriptionIDs,
       vps_lifecycle_status: vpsLifecycleStatus,
-      node_actions: preview.node_links
-        .map((node) => ({ node, choice: nodeChoices[node.node_id] }))
+      monitoring_instance_actions: preview.monitoring_instance_links
+        .map((monitoringInstance) => ({ monitoringInstance, choice: monitoringInstanceChoices[monitoringInstance.monitoring_instance_id] }))
         .filter(({ choice }) => choice?.enabled)
-        .map(({ node, choice }) => ({
-          node_id: node.node_id,
+        .map(({ monitoringInstance, choice }) => ({
+          monitoring_instance_id: monitoringInstance.monitoring_instance_id,
           lifecycle_status: choice.lifecycleStatus || undefined,
           monitoring_status: choice.pauseMonitoring ? '暂停' : undefined,
         })),
@@ -153,9 +153,9 @@ export function VPSCancellationWorkbench({
   }
 
   const blocking = preview.blockers.length > 0
-  const selectedNodeCount = Object.values(nodeChoices).filter((choice) => choice.enabled).length
+  const selectedMonitoringInstanceCount = Object.values(monitoringInstanceChoices).filter((choice) => choice.enabled).length
   const selectedTargetCount = Object.values(targetChoices).filter((choice) => choice.enabled).length
-  const selectedStepCount = subscriptionIDs.length + selectedNodeCount + selectedTargetCount + 1
+  const selectedStepCount = subscriptionIDs.length + selectedMonitoringInstanceCount + selectedTargetCount + 1
   const vpsLifecycleLabel = vpsLifecycleStatus === 'cancelled' ? '已取消' : '待取消'
 
   return (
@@ -172,9 +172,9 @@ export function VPSCancellationWorkbench({
           <small>active {activeSubscriptions.length} · 非活跃 {inactiveSubscriptions.length}</small>
         </div>
         <div className="asset-cancel-workbench__summary-item">
-          <span className="summary-card__label">Node</span>
-          <strong className="summary-card__value"><MonoDigits>{preview.node_links.length}</MonoDigits></strong>
-          <small>已选择 {selectedNodeCount} 个变更</small>
+          <span className="summary-card__label">监控实例</span>
+          <strong className="summary-card__value"><MonoDigits>{preview.monitoring_instance_links.length}</MonoDigits></strong>
+          <small>已选择 {selectedMonitoringInstanceCount} 个变更</small>
         </div>
         <div className="asset-cancel-workbench__summary-item">
           <span className="summary-card__label">Target/实例</span>
@@ -289,7 +289,7 @@ export function VPSCancellationWorkbench({
               </span>
             </div>
             {preview.subscriptions.length === 0 ? (
-              <p className="asset-cancel-workbench__empty">没有订阅记录；仍可继续处理 VPS、Node 与实例。</p>
+              <p className="asset-cancel-workbench__empty">没有订阅记录；仍可继续处理 VPS、监控实例与入口探测。</p>
             ) : (
               <div className="asset-cancel-workbench__list">
                 {preview.subscriptions.map((impact) => {
@@ -330,23 +330,23 @@ export function VPSCancellationWorkbench({
           <section className="asset-cancel-workbench__section">
             <div className="asset-cancel-workbench__section-head">
               <div>
-                <p className="asset-cancel-workbench__eyebrow">NODES</p>
-                <h3>Node 确认</h3>
-                <p>未勾选的 Node 只保留预览证据，不会修改生命周期或监控。</p>
+                <p className="asset-cancel-workbench__eyebrow">MONITORING INSTANCES</p>
+                <h3>监控实例确认</h3>
+                <p>未勾选的监控实例只保留预览证据，不会修改生命周期或监控。</p>
               </div>
               <span className="asset-cancel-workbench__step-count">
-                <MonoDigits>{selectedNodeCount}</MonoDigits> selected
+                <MonoDigits>{selectedMonitoringInstanceCount}</MonoDigits> selected
               </span>
             </div>
-            {preview.node_links.length === 0 ? (
-              <p className="asset-cancel-workbench__empty">没有活跃 Node 关联。</p>
+            {preview.monitoring_instance_links.length === 0 ? (
+              <p className="asset-cancel-workbench__empty">没有活跃监控实例关联。</p>
             ) : (
               <div className="asset-cancel-workbench__list">
-                {preview.node_links.map((node) => {
-                  const choice = nodeChoices[node.node_id]
+                {preview.monitoring_instance_links.map((monitoringInstance) => {
+                  const choice = monitoringInstanceChoices[monitoringInstance.monitoring_instance_id]
                   return (
                     <div
-                      key={node.node_id}
+                      key={monitoringInstance.monitoring_instance_id}
                       className={[
                         'asset-cancel-workbench__row',
                         'asset-cancel-workbench__choice',
@@ -358,16 +358,16 @@ export function VPSCancellationWorkbench({
                           type="checkbox"
                           checked={choice?.enabled ?? false}
                           disabled={submitting}
-                          onChange={(event) => updateNodeChoice(node.node_id, { enabled: event.target.checked })}
+                          onChange={(event) => updateMonitoringInstanceChoice(monitoringInstance.monitoring_instance_id, { enabled: event.target.checked })}
                         />
                         <span className="asset-cancel-workbench__choice-main">
                           <span className="asset-cancel-workbench__choice-title">
-                            <strong>{node.display_name}</strong>
-                            <Badge variant="state" tone={node.lifecycle_status === '已退役' ? 'offline' : 'normal'}>
-                              {node.lifecycle_status}
+                            <strong>{monitoringInstance.display_name}</strong>
+                            <Badge variant="state" tone={monitoringInstance.lifecycle_status === '已退役' ? 'offline' : 'normal'}>
+                              {monitoringInstance.lifecycle_status}
                             </Badge>
                           </span>
-                          <small>{formatOptional(node.provider)} · 监控 {node.monitoring_status}</small>
+                          <small>{formatOptional(monitoringInstance.provider)} · 监控 {monitoringInstance.monitoring_status}</small>
                         </span>
                       </label>
                       <div className="asset-cancel-workbench__controls">
@@ -375,7 +375,7 @@ export function VPSCancellationWorkbench({
                           label="生命周期"
                           value={choice?.lifecycleStatus ?? ''}
                           disabled={!choice?.enabled || submitting}
-                          onChange={(event) => updateNodeChoice(node.node_id, { lifecycleStatus: event.target.value as WorkbenchNodeChoice['lifecycleStatus'] })}
+                          onChange={(event) => updateMonitoringInstanceChoice(monitoringInstance.monitoring_instance_id, { lifecycleStatus: event.target.value as WorkbenchMonitoringInstanceChoice['lifecycleStatus'] })}
                           options={[
                             { value: '不续费', label: '不续费' },
                             { value: '已退役', label: '已退役' },
@@ -386,7 +386,7 @@ export function VPSCancellationWorkbench({
                             type="checkbox"
                             checked={choice?.pauseMonitoring ?? false}
                             disabled={!choice?.enabled || submitting}
-                            onChange={(event) => updateNodeChoice(node.node_id, { pauseMonitoring: event.target.checked })}
+                            onChange={(event) => updateMonitoringInstanceChoice(monitoringInstance.monitoring_instance_id, { pauseMonitoring: event.target.checked })}
                           />
                           <span>暂停监控</span>
                         </label>

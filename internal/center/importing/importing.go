@@ -29,12 +29,12 @@ type preparedRecord struct {
 }
 
 type existingState struct {
-	ProvidersByID   map[string]providers.Record
-	ProvidersByName map[string]providers.Record
-	VPSAssets       []vpsassets.Record
-	NodeIDs         map[string]struct{}
-	NodeNames       map[string]struct{}
-	DatabaseChecked bool
+	ProvidersByID           map[string]providers.Record
+	ProvidersByName         map[string]providers.Record
+	VPSAssets               []vpsassets.Record
+	MonitoringInstanceIDs   map[string]struct{}
+	MonitoringInstanceNames map[string]struct{}
+	DatabaseChecked         bool
 }
 
 func DecodeRecords(r io.Reader) ([]InputRecord, error) {
@@ -224,7 +224,7 @@ func analyze(ctx context.Context, records []InputRecord, repos Repositories, opt
 			report.SubscriptionCandidates = append(report.SubscriptionCandidates, subscriptionCandidateFromRecord(record))
 			appendRenewalAndIdleCandidates(&report, record, now)
 		}
-		appendNodeCandidate(&report, record, state)
+		appendMonitoringInstanceCandidate(&report, record, state)
 		trackInputDuplicates(inputDuplicateRows, record)
 		appendExistingDuplicates(&report, record, state, existingDuplicateKeys)
 	}
@@ -240,10 +240,10 @@ func analyze(ctx context.Context, records []InputRecord, repos Repositories, opt
 
 func loadExistingState(ctx context.Context, repos Repositories, opts Options) (existingState, []string, error) {
 	state := existingState{
-		ProvidersByID:   map[string]providers.Record{},
-		ProvidersByName: map[string]providers.Record{},
-		NodeIDs:         map[string]struct{}{},
-		NodeNames:       map[string]struct{}{},
+		ProvidersByID:           map[string]providers.Record{},
+		ProvidersByName:         map[string]providers.Record{},
+		MonitoringInstanceIDs:   map[string]struct{}{},
+		MonitoringInstanceNames: map[string]struct{}{},
 	}
 	warnings := []string{}
 	checkRequested := false
@@ -288,20 +288,20 @@ func loadExistingState(ctx context.Context, repos Repositories, opts Options) (e
 			checkFailed = true
 		}
 	}
-	if repos.Nodes != nil {
+	if repos.MonitoringInstances != nil {
 		checkRequested = true
-		records, err := repos.Nodes.ListNodes(ctx)
+		records, err := repos.MonitoringInstances.ListMonitoringInstances(ctx)
 		if err != nil {
 			if !opts.IgnoreRepositoryErrors {
-				return state, warnings, fmt.Errorf("list nodes for import analysis: %w", err)
+				return state, warnings, fmt.Errorf("list monitoring instances for import analysis: %w", err)
 			}
-			warnings = append(warnings, fmt.Sprintf("node database check skipped: %v", err))
+			warnings = append(warnings, fmt.Sprintf("monitoring instance database check skipped: %v", err))
 			checkFailed = true
 			records = nil
 		}
 		for _, record := range records {
-			state.NodeIDs[record.NodeID] = struct{}{}
-			state.NodeNames[canonicalKey(record.DisplayName)] = struct{}{}
+			state.MonitoringInstanceIDs[record.MonitoringInstanceID] = struct{}{}
+			state.MonitoringInstanceNames[canonicalKey(record.DisplayName)] = struct{}{}
 		}
 	}
 	state.DatabaseChecked = checkRequested && !checkFailed
@@ -363,8 +363,8 @@ func prepareInputRecord(row int, input InputRecord, state existingState, report 
 		subscriptionInput = &normalized
 	}
 
-	input.NodeID = strings.TrimSpace(input.NodeID)
-	input.NodeName = strings.TrimSpace(input.NodeName)
+	input.MonitoringInstanceID = strings.TrimSpace(input.MonitoringInstanceID)
+	input.MonitoringInstanceName = strings.TrimSpace(input.MonitoringInstanceName)
 	input.AgentTokenHint = strings.TrimSpace(input.AgentTokenHint)
 	input.TargetURL = strings.TrimSpace(input.TargetURL)
 
@@ -474,38 +474,38 @@ func appendRenewalAndIdleCandidates(report *Report, record preparedRecord, now t
 	}
 }
 
-func appendNodeCandidate(report *Report, record preparedRecord, state existingState) {
-	if record.Input.NodeID == "" && record.Input.NodeName == "" && record.Input.AgentTokenHint == "" && record.Input.TargetURL == "" {
+func appendMonitoringInstanceCandidate(report *Report, record preparedRecord, state existingState) {
+	if record.Input.MonitoringInstanceID == "" && record.Input.MonitoringInstanceName == "" && record.Input.AgentTokenHint == "" && record.Input.TargetURL == "" {
 		return
 	}
 
 	status := "manual confirmation required"
 	if state.DatabaseChecked {
 		switch {
-		case record.Input.NodeID != "":
-			if _, ok := state.NodeIDs[record.Input.NodeID]; ok {
-				status = "node_id exists; manual confirmation required"
+		case record.Input.MonitoringInstanceID != "":
+			if _, ok := state.MonitoringInstanceIDs[record.Input.MonitoringInstanceID]; ok {
+				status = "monitoring_instance_id exists; manual confirmation required"
 			} else {
-				status = "node_id not found"
+				status = "monitoring_instance_id not found"
 			}
-		case record.Input.NodeName != "":
-			if _, ok := state.NodeNames[canonicalKey(record.Input.NodeName)]; ok {
-				status = "node_name matches existing node; manual confirmation required"
+		case record.Input.MonitoringInstanceName != "":
+			if _, ok := state.MonitoringInstanceNames[canonicalKey(record.Input.MonitoringInstanceName)]; ok {
+				status = "monitoring_instance_name matches existing monitoring instance; manual confirmation required"
 			} else {
-				status = "node_name not found"
+				status = "monitoring_instance_name not found"
 			}
 		default:
-			status = "database checked; no direct node match key supplied"
+			status = "database checked; no direct monitoring instance match key supplied"
 		}
 	}
 
-	report.NodeAssociationCandidates = append(report.NodeAssociationCandidates, NodeAssociationCandidate{
-		Row:         record.Row,
-		DisplayName: record.VPSInput.DisplayName,
-		NodeID:      record.Input.NodeID,
-		NodeName:    record.Input.NodeName,
-		TargetURL:   record.Input.TargetURL,
-		Status:      status,
+	report.MonitoringInstanceAssociationCandidates = append(report.MonitoringInstanceAssociationCandidates, MonitoringInstanceAssociationCandidate{
+		Row:                    record.Row,
+		DisplayName:            record.VPSInput.DisplayName,
+		MonitoringInstanceID:   record.Input.MonitoringInstanceID,
+		MonitoringInstanceName: record.Input.MonitoringInstanceName,
+		TargetURL:              record.Input.TargetURL,
+		Status:                 status,
 	})
 }
 
@@ -629,7 +629,7 @@ func reportTotals(report Report, inputRows int) Totals {
 	totals.MissingRenewDateRows = len(report.MissingRenewDateRows)
 	totals.ValidationErrors = len(report.ValidationErrors)
 	totals.DuplicateCandidates = len(report.DuplicateCandidates)
-	totals.NodeAssociationCandidates = len(report.NodeAssociationCandidates)
+	totals.MonitoringInstanceAssociationCandidates = len(report.MonitoringInstanceAssociationCandidates)
 	totals.RenewalCandidates = len(report.RenewalCandidates)
 	totals.IdlePaidCandidates = len(report.IdlePaidCandidates)
 	totals.ImportedProviders = len(report.Import.CreatedProviders)
@@ -663,8 +663,8 @@ func ensureReportCollections(report *Report) {
 	if report.DuplicateCandidates == nil {
 		report.DuplicateCandidates = []DuplicateCandidate{}
 	}
-	if report.NodeAssociationCandidates == nil {
-		report.NodeAssociationCandidates = []NodeAssociationCandidate{}
+	if report.MonitoringInstanceAssociationCandidates == nil {
+		report.MonitoringInstanceAssociationCandidates = []MonitoringInstanceAssociationCandidate{}
 	}
 	if report.RenewalCandidates == nil {
 		report.RenewalCandidates = []RenewalCandidate{}

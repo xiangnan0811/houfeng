@@ -204,14 +204,14 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSItemHandler == nil {
 		t.Fatal("router vps item handler = nil, want non-nil")
 	}
-	if gotOpts.VPSNodesHandler == nil {
-		t.Fatal("router vps nodes handler = nil, want non-nil")
+	if gotOpts.VPSMonitoringInstancesHandler == nil {
+		t.Fatal("router vps monitoringInstances handler = nil, want non-nil")
 	}
-	if gotOpts.VPSLinkNodeHandler == nil {
-		t.Fatal("router vps link node handler = nil, want non-nil")
+	if gotOpts.VPSLinkMonitoringInstanceHandler == nil {
+		t.Fatal("router vps link monitoringInstance handler = nil, want non-nil")
 	}
-	if gotOpts.VPSUnlinkNodeHandler == nil {
-		t.Fatal("router vps unlink node handler = nil, want non-nil")
+	if gotOpts.VPSUnlinkMonitoringInstanceHandler == nil {
+		t.Fatal("router vps unlink monitoringInstance handler = nil, want non-nil")
 	}
 	if gotOpts.VPSTimelineHandler == nil {
 		t.Fatal("router vps timeline handler = nil, want non-nil")
@@ -231,8 +231,8 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSCancellationHandler == nil {
 		t.Fatal("router vps cancellation handler = nil, want non-nil")
 	}
-	if gotOpts.AssetContextNodesHandler == nil {
-		t.Fatal("router asset context nodes handler = nil, want non-nil")
+	if gotOpts.AssetContextMonitoringInstancesHandler == nil {
+		t.Fatal("router asset context monitoringInstances handler = nil, want non-nil")
 	}
 	if gotOpts.AssetContextTargetsHandler == nil {
 		t.Fatal("router asset context targets handler = nil, want non-nil")
@@ -243,47 +243,47 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.SubscriptionItemHandler == nil {
 		t.Fatal("router subscription item handler = nil, want non-nil")
 	}
-	if gotOpts.NodesCollectionHandler == nil {
-		t.Fatal("router nodes collection handler = nil, want non-nil")
+	if gotOpts.MonitoringInstancesCollectionHandler == nil {
+		t.Fatal("router monitoringInstances collection handler = nil, want non-nil")
 	}
-	if gotOpts.NodeItemHandler == nil {
-		t.Fatal("router node item handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceItemHandler == nil {
+		t.Fatal("router monitoringInstance item handler = nil, want non-nil")
 	}
-	if gotOpts.NodeVPSHandler == nil {
-		t.Fatal("router node vps handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceVPSHandler == nil {
+		t.Fatal("router monitoringInstance vps handler = nil, want non-nil")
 	}
-	if gotOpts.NodeRuntimeFactsHandler == nil {
-		t.Fatal("router node runtime facts handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceRuntimeFactsHandler == nil {
+		t.Fatal("router monitoringInstance runtime facts handler = nil, want non-nil")
 	}
-	if gotOpts.NodeRuntimeControlHandler == nil {
-		t.Fatal("router node runtime control handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceRuntimeControlHandler == nil {
+		t.Fatal("router monitoringInstance runtime control handler = nil, want non-nil")
 	}
-	if gotOpts.NodeLifecycleControlHandler == nil {
-		t.Fatal("router node lifecycle control handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceLifecycleControlHandler == nil {
+		t.Fatal("router monitoringInstance lifecycle control handler = nil, want non-nil")
 	}
-	if gotOpts.NodeOnboardingHandler == nil {
-		t.Fatal("router node onboarding handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceOnboardingHandler == nil {
+		t.Fatal("router monitoringInstance onboarding handler = nil, want non-nil")
 	}
-	if gotOpts.NodeEnrollmentTokenHandler == nil {
-		t.Fatal("router node enrollment token handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceEnrollmentTokenHandler == nil {
+		t.Fatal("router monitoringInstance enrollment token handler = nil, want non-nil")
 	}
-	if gotOpts.NodeInstallCommandHandler == nil {
-		t.Fatal("router node install command handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceInstallCommandHandler == nil {
+		t.Fatal("router monitoringInstance install command handler = nil, want non-nil")
 	}
-	if gotOpts.NodeBindingConfirmRebindHandler == nil {
-		t.Fatal("router node binding confirm rebind handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceBindingConfirmRebindHandler == nil {
+		t.Fatal("router monitoringInstance binding confirm rebind handler = nil, want non-nil")
 	}
-	if gotOpts.NodeBindingRejectPendingHandler == nil {
-		t.Fatal("router node binding reject pending handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceBindingRejectPendingHandler == nil {
+		t.Fatal("router monitoringInstance binding reject pending handler = nil, want non-nil")
 	}
-	if gotOpts.NodeBindingResetHandler == nil {
-		t.Fatal("router node binding reset handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceBindingResetHandler == nil {
+		t.Fatal("router monitoringInstance binding reset handler = nil, want non-nil")
 	}
-	if gotOpts.NodeSparklinesHandler == nil {
-		t.Fatal("router node sparklines handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceSparklinesHandler == nil {
+		t.Fatal("router monitoringInstance sparklines handler = nil, want non-nil")
 	}
-	if gotOpts.NodeActionsHandler == nil {
-		t.Fatal("router node actions handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceActionsHandler == nil {
+		t.Fatal("router monitoringInstance actions handler = nil, want non-nil")
 	}
 	if gotOpts.TargetsCollectionHandler == nil {
 		t.Fatal("router targets collection handler = nil, want non-nil")
@@ -354,19 +354,19 @@ func TestSettingsPresentationRepositoryReturnsEffectiveFreshInstallSettings(t *t
 	if got.IncidentDefaults.SweepIntervalSeconds != 90 {
 		t.Fatalf("SweepIntervalSeconds = %d, want %d", got.IncidentDefaults.SweepIntervalSeconds, 90)
 	}
-	if len(got.OverrideRules.NodeLabels) != 1 {
-		t.Fatalf("len(NodeLabelOverrides) = %d, want 1", len(got.OverrideRules.NodeLabels))
+	if len(got.OverrideRules.MonitoringInstanceLabels) != 1 {
+		t.Fatalf("len(MonitoringInstanceLabelOverrides) = %d, want 1", len(got.OverrideRules.MonitoringInstanceLabels))
 	}
-	if got.OverrideRules.NodeLabels[0].Label != "核心" {
-		t.Fatalf("NodeLabelOverrides[0].Label = %q, want %q", got.OverrideRules.NodeLabels[0].Label, "核心")
+	if got.OverrideRules.MonitoringInstanceLabels[0].Label != "核心" {
+		t.Fatalf("MonitoringInstanceLabelOverrides[0].Label = %q, want %q", got.OverrideRules.MonitoringInstanceLabels[0].Label, "核心")
 	}
-	if got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier == nil {
+	if got.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier == nil {
 		t.Fatal("HostSampleFrequencyTier override = nil, want legacy core override")
 	}
-	if *got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier5s {
+	if *got.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier5s {
 		t.Fatalf(
 			"HostSampleFrequencyTier override = %q, want %q",
-			*got.OverrideRules.NodeLabels[0].Overrides.HostSampleFrequencyTier,
+			*got.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier,
 			targets.FrequencyTier5s,
 		)
 	}
@@ -392,8 +392,8 @@ func TestSettingsPresentationRepositoryReturnsPersistedSettingsUnchanged(t *test
 	if got.IncidentDefaults.SweepIntervalSeconds != 180 {
 		t.Fatalf("SweepIntervalSeconds = %d, want %d", got.IncidentDefaults.SweepIntervalSeconds, 180)
 	}
-	if len(got.OverrideRules.NodeLabels) != 0 {
-		t.Fatalf("len(NodeLabelOverrides) = %d, want 0", len(got.OverrideRules.NodeLabels))
+	if len(got.OverrideRules.MonitoringInstanceLabels) != 0 {
+		t.Fatalf("len(MonitoringInstanceLabelOverrides) = %d, want 0", len(got.OverrideRules.MonitoringInstanceLabels))
 	}
 }
 
@@ -419,7 +419,7 @@ func TestSettingsPresentationRepositoryDelegatesPutSettings(t *testing.T) {
 }
 
 func TestEnsureLegacyCoreHostSampleOverrideAugmentsExistingCoreRule(t *testing.T) {
-	rules := []centersettings.NodeLabelOverrideRule{{
+	rules := []centersettings.MonitoringInstanceLabelOverrideRule{{
 		Label: "核心",
 		Overrides: centersettings.SettingsOverrideFields{
 			ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{

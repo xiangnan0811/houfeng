@@ -13,14 +13,14 @@ import {
   getVPSAsset,
   getVPSCancellationPreview,
   getVPSTimeline,
-  linkVPSNode,
-  listNodes,
+  linkVPSMonitoringInstance,
+  listMonitoringInstances,
   listProviders,
   listSubscriptions,
   listTargets,
   listVPSDomains,
   listVPSServices,
-  unlinkVPSNode,
+  unlinkVPSMonitoringInstance,
   updateVPSAsset,
 } from '../lib/api'
 import type {
@@ -36,7 +36,7 @@ import type {
   SubscriptionRecord,
   UpdateVPSAssetInput,
   VPSAssetDetail,
-  VPSNodeSummary,
+  VPSMonitoringInstanceSummary,
 } from '../lib/types'
 import { VPSDecisionBoard } from './vps-detail/VPSDecisionBoard'
 import { VPSDetailErrorPanel } from './vps-detail/VPSDetailErrorPanel'
@@ -49,8 +49,8 @@ import { VPSExperienceLogForm } from './vps-detail/VPSExperienceLogForm'
 import { VPSFactsEditForm } from './vps-detail/VPSFactsEditForm'
 import { VPSFactsSection } from './vps-detail/VPSFactsSection'
 import { VPSLifecycleCard } from './vps-detail/VPSLifecycleCard'
-import { VPSNodeLinkForm } from './vps-detail/VPSNodeLinkForm'
-import { VPSNodeLinksSection } from './vps-detail/VPSNodeLinksSection'
+import { VPSMonitoringInstanceLinkForm } from './vps-detail/VPSMonitoringInstanceLinkForm'
+import { VPSMonitoringInstanceLinksSection } from './vps-detail/VPSMonitoringInstanceLinksSection'
 import { VPSRenewalDecisionForm } from './vps-detail/VPSRenewalDecisionForm'
 import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
@@ -123,7 +123,7 @@ function selectPrimarySubscription(subscriptions: SubscriptionRecord[]): Subscri
 function normalizeVPSDetail(detail: VPSAssetDetail): VPSAssetDetail {
   return {
     ...detail,
-    node_links: detail.node_links ?? [],
+    monitoring_instance_links: detail.monitoring_instance_links ?? [],
   }
 }
 
@@ -171,11 +171,11 @@ export function VPSDetailPage() {
   const [factSubmitting, setFactSubmitting] = useState(false)
   const [factError, setFactError] = useState<string | null>(null)
   const [factNotice, setFactNotice] = useState<string | null>(null)
-  const [linkDraft, setLinkDraft] = useState<LinkDraftState>({ nodeId: '', note: '' })
+  const [linkDraft, setLinkDraft] = useState<LinkDraftState>({ monitoringInstanceId: '', note: '' })
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [linkNotice, setLinkNotice] = useState<string | null>(null)
-  const [unlinkingNodeId, setUnlinkingNodeId] = useState<string | null>(null)
+  const [unlinkingMonitoringInstanceId, setUnlinkingMonitoringInstanceId] = useState<string | null>(null)
   const [unlinkError, setUnlinkError] = useState<string | null>(null)
   const [lifecycleConfirmingAction, setLifecycleConfirmingAction] = useState<'archive' | 'restore' | null>(null)
   const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false)
@@ -234,7 +234,7 @@ export function VPSDetailPage() {
         setFactDraft(detailToFactEditForm(normalizedDetail))
         setFactError(null)
         setFactNotice(null)
-        setLinkDraft({ nodeId: '', note: '' })
+        setLinkDraft({ monitoringInstanceId: '', note: '' })
         setLinkError(null)
         setLinkNotice(null)
         setUnlinkError(null)
@@ -399,12 +399,17 @@ export function VPSDetailPage() {
     setLifecycleError(null)
   }
 
-  function ensureNodesLoaded() {
-    if (selectors.nodesLoading || selectors.nodes.length > 0) return
-    setSelectors((current) => ({ ...current, nodesLoading: true, nodesError: null }))
-    listNodes()
-      .then((nodes) => setSelectors((current) => ({ ...current, nodesLoading: false, nodesError: null, nodes })))
-      .catch((error: unknown) => setSelectors((current) => ({ ...current, nodesLoading: false, nodesError: describeError(error, '加载 Node 列表失败'), nodes: [] })))
+  function ensureMonitoringInstancesLoaded() {
+    if (selectors.monitoringInstancesLoading || selectors.monitoring.length > 0) return
+    setSelectors((current) => ({ ...current, monitoringInstancesLoading: true, monitoringInstancesError: null }))
+    listMonitoringInstances()
+      .then((monitoring) => setSelectors((current) => ({ ...current, monitoringInstancesLoading: false, monitoringInstancesError: null, monitoring })))
+      .catch((error: unknown) => setSelectors((current) => ({
+        ...current,
+        monitoringInstancesLoading: false,
+        monitoringInstancesError: describeError(error, '加载监控实例列表失败'),
+        monitoring: [],
+      })))
   }
 
   function ensureProvidersLoaded() {
@@ -427,10 +432,10 @@ export function VPSDetailPage() {
     if (mode === 'decision') {
       clearDecisionFeedback()
     }
-    if (mode === 'node-link') {
+    if (mode === 'monitoring-instance-link') {
       clearLinkFormFeedback()
       setUnlinkError(null)
-      ensureNodesLoaded()
+      ensureMonitoringInstancesLoaded()
     }
     if (mode === 'experience') {
       clearExperienceFeedback()
@@ -467,8 +472,8 @@ export function VPSDetailPage() {
       setFactError(null)
       setFactNotice(null)
     }
-    if (activeDrawer === 'node-link') {
-      setLinkDraft({ nodeId: '', note: '' })
+    if (activeDrawer === 'monitoring-instance-link') {
+      setLinkDraft({ monitoringInstanceId: '', note: '' })
       clearLinkFormFeedback()
     }
     if (activeDrawer === 'experience') {
@@ -483,7 +488,7 @@ export function VPSDetailPage() {
       setDomainDraft(INITIAL_DOMAIN_DRAFT)
       clearDomainFeedback()
     }
-    if (activeDrawer === 'node-evidence') {
+    if (activeDrawer === 'monitoring-instance-evidence') {
       setUnlinkError(null)
     }
     if (activeDrawer === 'cancellation') {
@@ -572,9 +577,9 @@ export function VPSDetailPage() {
     const detail = state.detail
     if (!detail) return
 
-    const nodeId = linkDraft.nodeId.trim()
-    if (!nodeId) {
-      setLinkError('请选择要关联的 Node。')
+    const monitoringInstanceId = linkDraft.monitoringInstanceId.trim()
+    if (!monitoringInstanceId) {
+      setLinkError('请选择要关联的监控实例。')
       setLinkNotice(null)
       return
     }
@@ -585,41 +590,41 @@ export function VPSDetailPage() {
     setUnlinkError(null)
 
     try {
-      await linkVPSNode(detail.vps_id, {
-        node_id: nodeId,
+      await linkVPSMonitoringInstance(detail.vps_id, {
+        monitoring_instance_id: monitoringInstanceId,
         note: linkDraft.note.trim(),
       })
       await refreshDetail(detail.vps_id)
-      setLinkDraft({ nodeId: '', note: '' })
-      setLinkNotice('Node 关联已更新')
+      setLinkDraft({ monitoringInstanceId: '', note: '' })
+      setLinkNotice('监控实例关联已更新')
       setActiveDrawer(null)
     } catch (error: unknown) {
-      setLinkError(describeError(error, '关联 Node 失败'))
+      setLinkError(describeError(error, '关联监控实例失败'))
     } finally {
       setLinkSubmitting(false)
     }
   }
 
-  async function handleUnlinkNode(node: VPSNodeSummary) {
+  async function handleUnlinkMonitoringInstance(monitoringInstance: VPSMonitoringInstanceSummary) {
     const detail = state.detail
     if (!detail) return
 
-    setUnlinkingNodeId(node.node_id)
+    setUnlinkingMonitoringInstanceId(monitoringInstance.monitoring_instance_id)
     setUnlinkError(null)
     setLinkError(null)
     setLinkNotice(null)
 
     try {
-      await unlinkVPSNode(detail.vps_id, {
-        node_id: node.node_id,
-        note: node.note,
+      await unlinkVPSMonitoringInstance(detail.vps_id, {
+        monitoring_instance_id: monitoringInstance.monitoring_instance_id,
+        note: monitoringInstance.note,
       })
       await refreshDetail(detail.vps_id)
-      setLinkNotice('Node 关联已解除')
+      setLinkNotice('监控实例关联已解除')
     } catch (error: unknown) {
-      setUnlinkError(describeError(error, '解除 Node 关联失败'))
+      setUnlinkError(describeError(error, '解除监控实例关联失败'))
     } finally {
-      setUnlinkingNodeId(null)
+      setUnlinkingMonitoringInstanceId(null)
     }
   }
 
@@ -803,7 +808,7 @@ export function VPSDetailPage() {
   const detail = state.detail
   const timeline = state.timeline
   const decisionChanged = decisionDraft.renewalDecision !== detail.renewal_decision
-  const linkControlsDisabled = linkSubmitting || unlinkingNodeId !== null
+  const linkControlsDisabled = linkSubmitting || unlinkingMonitoringInstanceId !== null
   const isArchived = detail.lifecycle_status === 'archived'
   const linkFeedback = linkError ?? unlinkError ?? linkNotice
   const linkFeedbackIsError = linkError !== null || unlinkError !== null
@@ -814,11 +819,11 @@ export function VPSDetailPage() {
     if (activeDrawer === 'decision') return '续费决策'
     if (activeDrawer === 'cancellation') return '取消/退役工作台'
     if (activeDrawer === 'facts') return '编辑基础信息'
-    if (activeDrawer === 'node-link') return '关联 Node'
+    if (activeDrawer === 'monitoring-instance-link') return '关联监控实例'
     if (activeDrawer === 'experience') return '经验记录'
     if (activeDrawer === 'service') return '新增服务'
     if (activeDrawer === 'domain') return '新增域名'
-    if (activeDrawer === 'node-evidence') return 'Node 观测证据'
+    if (activeDrawer === 'monitoring-instance-evidence') return '监控实例证据'
     if (activeDrawer === 'services-detail') return '服务资产详情'
     if (activeDrawer === 'domains-detail') return '域名资产详情'
     if (activeDrawer === 'timeline-detail') return '资产历史详情'
@@ -890,14 +895,14 @@ export function VPSDetailPage() {
         />
       ) : null
     }
-    if (activeDrawer === 'node-link') {
+    if (activeDrawer === 'monitoring-instance-link') {
       return (
-        <VPSNodeLinkForm
+        <VPSMonitoringInstanceLinkForm
           detail={detail}
           draft={linkDraft}
-          nodes={selectors.nodes}
-          nodesLoading={selectors.nodesLoading}
-          nodesError={selectors.nodesError}
+          monitoring={selectors.monitoring}
+          monitoringInstancesLoading={selectors.monitoringInstancesLoading}
+          monitoringInstancesError={selectors.monitoringInstancesError}
           controlsDisabled={linkControlsDisabled}
           submitting={linkSubmitting}
           error={linkError}
@@ -959,15 +964,15 @@ export function VPSDetailPage() {
         />
       )
     }
-    if (activeDrawer === 'node-evidence') {
+    if (activeDrawer === 'monitoring-instance-evidence') {
       return (
-        <VPSNodeLinksSection
-          nodes={detail.node_links ?? []}
-          unlinkingNodeId={unlinkingNodeId}
+        <VPSMonitoringInstanceLinksSection
+          monitoring={detail.monitoring_instance_links ?? []}
+          unlinkingMonitoringInstanceId={unlinkingMonitoringInstanceId}
           linkFeedback={linkFeedback}
           linkFeedbackIsError={linkFeedbackIsError}
-          onOpenLink={() => openDrawer('node-link')}
-          onUnlinkNode={(node) => void handleUnlinkNode(node)}
+          onOpenLink={() => openDrawer('monitoring-instance-link')}
+          onUnlinkMonitoringInstance={(monitoringInstance) => void handleUnlinkMonitoringInstance(monitoringInstance)}
         />
       )
     }
@@ -1017,7 +1022,7 @@ export function VPSDetailPage() {
         onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
-        onNodeLink={() => openDrawer('node-link')}
+        onMonitoringInstanceLink={() => openDrawer('monitoring-instance-link')}
         onServiceCreate={() => openDrawer('service')}
         onDomainCreate={() => openDrawer('domain')}
         onArchiveStart={() => openLifecycleConfirmation('archive')}
@@ -1051,7 +1056,7 @@ export function VPSDetailPage() {
         domains={state.domains}
         factNotice={factNotice}
         factError={activeDrawer === 'facts' ? null : factError}
-        linkFeedback={activeDrawer === 'node-link' || activeDrawer === 'node-evidence' ? null : linkFeedback}
+        linkFeedback={activeDrawer === 'monitoring-instance-link' || activeDrawer === 'monitoring-instance-evidence' ? null : linkFeedback}
         linkFeedbackIsError={linkFeedbackIsError}
         serviceNotice={serviceNotice}
         serviceError={activeDrawer === 'service' ? null : serviceError}
@@ -1066,9 +1071,9 @@ export function VPSDetailPage() {
         onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
-        onNodeLink={() => openDrawer('node-link')}
+        onMonitoringInstanceLink={() => openDrawer('monitoring-instance-link')}
         onOpenFacts={() => openDrawer('facts-detail')}
-        onOpenNodeEvidence={() => openDrawer('node-evidence')}
+        onOpenMonitoringInstanceEvidence={() => openDrawer('monitoring-instance-evidence')}
         onOpenServices={() => openDrawer('services-detail')}
         onOpenDomains={() => openDrawer('domains-detail')}
         onOpenTimeline={() => openDrawer('timeline-detail')}
@@ -1092,8 +1097,8 @@ export function VPSDetailPage() {
         onClose={closeDrawer}
         title={drawerTitle()}
         ariaLabel={drawerTitle()}
-        persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'node-evidence'}
-        size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'node-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation') ? 'lg' : undefined}
+        persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'monitoring-instance-evidence'}
+        size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation') ? 'lg' : undefined}
         contentClassName={activeDrawer === 'cancellation' ? 'modal-content--asset-cancel' : undefined}
       >
         <div className="vps-detail-drawer">

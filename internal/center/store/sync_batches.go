@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/agentplan"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
 )
@@ -49,7 +49,7 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 
 	tx, err := r.beginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return syncing.Result{}, fmt.Errorf("begin sync batch transaction for node %q: %w", batch.NodeID, err)
+		return syncing.Result{}, fmt.Errorf("begin sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
@@ -66,14 +66,14 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		return syncing.Result{}, err
 	}
 
-	lastHeartbeatAt, err := recordHeartbeatBatch(ctx, tx, batch.NodeID, bindingFingerprint, receivedAt, batch.Heartbeats)
+	lastHeartbeatAt, err := recordHeartbeatBatch(ctx, tx, batch.MonitoringInstanceID, bindingFingerprint, receivedAt, batch.Heartbeats)
 	if err != nil {
 		return syncing.Result{}, err
 	}
 	if err := recordObservationBatch(ctx, tx, observationBatch); err != nil {
 		return syncing.Result{}, err
 	}
-	if err := advanceNodeSyncState(ctx, tx, batch.NodeID, lastHeartbeatAt, receivedAt); err != nil {
+	if err := advanceMonitoringInstanceSyncState(ctx, tx, batch.MonitoringInstanceID, lastHeartbeatAt, receivedAt); err != nil {
 		return syncing.Result{}, err
 	}
 
@@ -83,19 +83,19 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		return syncing.Result{}, err
 	}
 
-	pendingAction, err := dispatchPendingAction(ctx, tx, batch.NodeID)
+	pendingAction, err := dispatchPendingAction(ctx, tx, batch.MonitoringInstanceID)
 	if err != nil {
 		return syncing.Result{}, err
 	}
 
-	plan, err := buildSyncPlan(ctx, tx, batch.NodeID)
+	plan, err := buildSyncPlan(ctx, tx, batch.MonitoringInstanceID)
 	if err != nil {
 		return syncing.Result{}, err
 	}
 	plan.PendingAction = pendingAction
 
 	if err := tx.Commit(ctx); err != nil {
-		return syncing.Result{}, fmt.Errorf("commit sync batch transaction for node %q: %w", batch.NodeID, err)
+		return syncing.Result{}, fmt.Errorf("commit sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 	}
 
 	return syncing.Result{
@@ -114,16 +114,16 @@ func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncin
 		select binding_status,
 			coalesce(binding_fingerprint, ''),
 			coalesce(sync_token_hash, '')
-		from nodes
-		where node_id = $1
+		from monitoring_instances
+		where monitoring_instance_id = $1
 		for update`,
-		batch.NodeID,
+		batch.MonitoringInstanceID,
 	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash); errors.Is(err, pgx.ErrNoRows) {
-		return "", nodes.ErrNodeNotFound
+		return "", monitoringinstances.ErrMonitoringInstanceNotFound
 	} else if err != nil {
-		return "", fmt.Errorf("query sync batch state for node %q: %w", batch.NodeID, err)
+		return "", fmt.Errorf("query sync batch state for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 	}
-	if bindingStatus != nodes.BindingBound {
+	if bindingStatus != monitoringinstances.BindingBound {
 		return "", syncing.ErrBindingNotAccepted
 	}
 	if storedSyncTokenHash == "" || storedSyncTokenHash != hashSyncToken(batch.SyncToken) {
@@ -185,15 +185,15 @@ func validateProbeObservations(ctx context.Context, tx syncBatchTx, writes []obs
 	return nil
 }
 
-func recordHeartbeatBatch(ctx context.Context, tx syncBatchTx, nodeID, bindingFingerprint string, receivedAt time.Time, writes []syncing.HeartbeatPayload) (time.Time, error) {
+func recordHeartbeatBatch(ctx context.Context, tx syncBatchTx, monitoringInstanceID, bindingFingerprint string, receivedAt time.Time, writes []syncing.HeartbeatPayload) (time.Time, error) {
 	lastHeartbeatAt := writes[0].ObservedAt
 	for _, write := range writes {
 		if write.Fingerprint != bindingFingerprint {
 			return time.Time{}, syncing.ErrBindingNotAccepted
 		}
 		if _, err := tx.Exec(ctx, `
-			insert into node_heartbeats (
-				node_id,
+			insert into monitoring_instance_heartbeats (
+				monitoring_instance_id,
 				observed_at,
 				received_at,
 				agent_version,
@@ -209,7 +209,7 @@ func recordHeartbeatBatch(ctx context.Context, tx syncBatchTx, nodeID, bindingFi
 				$6,
 				$7
 			)`,
-			nodeID,
+			monitoringInstanceID,
 			write.ObservedAt,
 			receivedAt,
 			write.AgentVersion,
@@ -217,7 +217,7 @@ func recordHeartbeatBatch(ctx context.Context, tx syncBatchTx, nodeID, bindingFi
 			write.SyncBatchID,
 			write.IsBackfilled,
 		); err != nil {
-			return time.Time{}, fmt.Errorf("record heartbeat for node %q: %w", nodeID, err)
+			return time.Time{}, fmt.Errorf("record heartbeat for monitoring instance %q: %w", monitoringInstanceID, err)
 		}
 
 		if write.ObservedAt.After(lastHeartbeatAt) {
@@ -228,22 +228,22 @@ func recordHeartbeatBatch(ctx context.Context, tx syncBatchTx, nodeID, bindingFi
 	return lastHeartbeatAt, nil
 }
 
-func advanceNodeSyncState(ctx context.Context, tx syncBatchTx, nodeID string, lastHeartbeatAt, lastSyncAt time.Time) error {
+func advanceMonitoringInstanceSyncState(ctx context.Context, tx syncBatchTx, monitoringInstanceID string, lastHeartbeatAt, lastSyncAt time.Time) error {
 	tag, err := tx.Exec(ctx, `
-		update nodes
+		update monitoring_instances
 		set last_heartbeat_at = greatest(coalesce(last_heartbeat_at, $2), $2),
 			last_sync_at = greatest(coalesce(last_sync_at, $3), $3),
 			updated_at = now()
-		where node_id = $1`,
-		nodeID,
+		where monitoring_instance_id = $1`,
+		monitoringInstanceID,
 		lastHeartbeatAt,
 		lastSyncAt,
 	)
 	if err != nil {
-		return fmt.Errorf("touch sync batch state for node %q: %w", nodeID, err)
+		return fmt.Errorf("touch sync batch state for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return nodes.ErrNodeNotFound
+		return monitoringinstances.ErrMonitoringInstanceNotFound
 	}
 
 	return nil
@@ -251,9 +251,9 @@ func advanceNodeSyncState(ctx context.Context, tx syncBatchTx, nodeID string, la
 
 func batchWithReceivedAt(batch observations.BatchWrite, receivedAt time.Time) observations.BatchWrite {
 	out := observations.BatchWrite{
-		NodeID:            batch.NodeID,
-		HostSamples:       make([]observations.HostSampleWrite, 0, len(batch.HostSamples)),
-		ProbeObservations: make([]observations.ProbeObservationWrite, 0, len(batch.ProbeObservations)),
+		MonitoringInstanceID: batch.MonitoringInstanceID,
+		HostSamples:          make([]observations.HostSampleWrite, 0, len(batch.HostSamples)),
+		ProbeObservations:    make([]observations.ProbeObservationWrite, 0, len(batch.ProbeObservations)),
 	}
 
 	for _, sample := range batch.HostSamples {
@@ -270,14 +270,14 @@ func batchWithReceivedAt(batch observations.BatchWrite, receivedAt time.Time) ob
 
 // dispatchPendingAction reads the queued action, clears the queue columns,
 // and leaves a durable in-flight last_action for result identity matching.
-func dispatchPendingAction(ctx context.Context, tx syncBatchTx, nodeID string) (*agentplan.PendingAction, error) {
+func dispatchPendingAction(ctx context.Context, tx syncBatchTx, monitoringInstanceID string) (*agentplan.PendingAction, error) {
 	var actionID, commandID *string
 	if err := tx.QueryRow(ctx,
-		`SELECT pending_action_id, pending_action_command_id FROM nodes WHERE node_id = $1 AND pending_action_id IS NOT NULL`,
-		nodeID).Scan(&actionID, &commandID); errors.Is(err, pgx.ErrNoRows) {
+		`SELECT pending_action_id, pending_action_command_id FROM monitoring_instances WHERE monitoring_instance_id = $1 AND pending_action_id IS NOT NULL`,
+		monitoringInstanceID).Scan(&actionID, &commandID); errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("query pending action for node %q: %w", nodeID, err)
+		return nil, fmt.Errorf("query pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	if actionID == nil || commandID == nil {
 		return nil, nil
@@ -285,20 +285,20 @@ func dispatchPendingAction(ctx context.Context, tx syncBatchTx, nodeID string) (
 
 	raw, err := marshalPendingLastAction(*actionID, *commandID)
 	if err != nil {
-		return nil, fmt.Errorf("marshal pending action for node %q: %w", nodeID, err)
+		return nil, fmt.Errorf("marshal pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	if _, err := tx.Exec(ctx,
-		`UPDATE nodes
+		`UPDATE monitoring_instances
 		SET pending_action_id = NULL,
 			pending_action_command_id = NULL,
 			last_action = $2,
 			updated_at = now()
-		WHERE node_id = $1
+		WHERE monitoring_instance_id = $1
 			AND pending_action_id = $3
 			AND pending_action_command_id = $4`,
-		nodeID, raw, *actionID, *commandID); err != nil {
-		return nil, fmt.Errorf("clear pending action for node %q: %w", nodeID, err)
+		monitoringInstanceID, raw, *actionID, *commandID); err != nil {
+		return nil, fmt.Errorf("clear pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	return &agentplan.PendingAction{
@@ -308,7 +308,7 @@ func dispatchPendingAction(ctx context.Context, tx syncBatchTx, nodeID string) (
 }
 
 // storeCommandResults persists command execution results only when they match
-// the action currently marked in-flight for the node.
+// the action currently marked in-flight for the monitoring instance.
 func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batch) error {
 	if len(batch.CommandResults) == 0 {
 		return nil
@@ -320,19 +320,19 @@ func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batc
 		}
 		raw, err := marshalCompletedLastAction(result.ActionID, result.CommandID, result.Stdout, result.Stderr, result.ExitCode)
 		if err != nil {
-			return fmt.Errorf("marshal command result for node %q: %w", batch.NodeID, err)
+			return fmt.Errorf("marshal command result for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 		}
 
 		if _, err := tx.Exec(ctx,
-			`UPDATE nodes
+			`UPDATE monitoring_instances
 			SET last_action = $1,
 				updated_at = now()
-			WHERE node_id = $2
+			WHERE monitoring_instance_id = $2
 				AND last_action->>'status' = $3
 				AND last_action->>'action_id' = $4
 				AND last_action->>'command_id' = $5`,
-			raw, batch.NodeID, commandActionStatusPending, result.ActionID, result.CommandID); err != nil {
-			return fmt.Errorf("store command result for node %q: %w", batch.NodeID, err)
+			raw, batch.MonitoringInstanceID, commandActionStatusPending, result.ActionID, result.CommandID); err != nil {
+			return fmt.Errorf("store command result for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 		}
 	}
 

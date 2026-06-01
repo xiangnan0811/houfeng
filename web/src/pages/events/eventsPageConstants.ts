@@ -10,7 +10,7 @@ export const DEFAULT_LIMIT = 200
 export const PAGE_SIZE = 20
 
 export const OBJECT_TYPE_OPTIONS: FilterSelectOption[] = [
-  { value: 'node', label: '节点' },
+  { value: 'monitoring_instance', label: '监控实例' },
   { value: 'target', label: '目标' },
 ]
 export const SEVERITY_OPTIONS: FilterSelectOption[] = [

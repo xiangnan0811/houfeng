@@ -16,7 +16,7 @@ export type TargetLatencyTrend = {
   probeItemId: string
   probeKind: ProbeKind
   count: number
-  distinctNodeCount: number
+  distinctMonitoringInstanceCount: number
   averageLatency: number
   maxLatency: number
   latestLatency: number
@@ -40,7 +40,7 @@ type LatencyTrendCard = {
   averageLatency: number | null
   maxLatency: number | null
   sampleCount: number
-  distinctNodeCount: number
+  distinctMonitoringInstanceCount: number
 }
 
 function deriveLatencyTrends(
@@ -64,7 +64,7 @@ function deriveLatencyTrends(
         value: o.latency_ms as number,
         observedAt: o.observed_at,
       }))
-      const distinctNodes = new Set(obs.map((o) => o.node_id))
+      const distinctMonitoringInstances = new Set(obs.map((o) => o.monitoring_instance_id))
 
       const latestLatency =
         latencies.length > 0 ? latencies[latencies.length - 1] : null
@@ -82,7 +82,7 @@ function deriveLatencyTrends(
         averageLatency,
         maxLatency,
         sampleCount: latencies.length,
-        distinctNodeCount: distinctNodes.size,
+        distinctMonitoringInstanceCount: distinctMonitoringInstances.size,
       }
     })
 }
@@ -186,9 +186,9 @@ export function TargetLatencyTrends({
                       </dd>
                     </div>
                     <div>
-                      <dt>覆盖节点</dt>
+                      <dt>覆盖监控实例</dt>
                       <dd>
-                        <MonoDigits>{trend.distinctNodeCount}</MonoDigits>
+                        <MonoDigits>{trend.distinctMonitoringInstanceCount}</MonoDigits>
                       </dd>
                     </div>
                   </dl>
@@ -270,9 +270,9 @@ export function TargetLatencyTrends({
                   </dd>
                 </div>
                 <div>
-                  <dt>覆盖节点</dt>
+                  <dt>覆盖监控实例</dt>
                   <dd>
-                    <MonoDigits>{trend.distinctNodeCount}</MonoDigits>
+                    <MonoDigits>{trend.distinctMonitoringInstanceCount}</MonoDigits>
                   </dd>
                 </div>
               </dl>

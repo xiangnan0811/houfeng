@@ -19,9 +19,9 @@ func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 	}
 
 	original := agentapi.SyncRequest{
-		NodeID:    "nd_001",
-		SyncToken: "sync-token",
-		Heartbeats: []agentapi.NodeHeartbeat{{
+		MonitoringInstanceID: "mi_001",
+		SyncToken:            "sync-token",
+		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
 			ObservedAt:   observedAt,
 			AgentVersion: "v1.2.3",
 			Fingerprint:  "fp_001",
@@ -92,7 +92,7 @@ func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 }
 
 func TestSyncRequestOmitsObservationAdjunctsWithoutHeartbeatCarrier(t *testing.T) {
-	payload, err := json.Marshal(agentapi.SyncRequest{NodeID: "nd_001", SyncToken: "sync-token"})
+	payload, err := json.Marshal(agentapi.SyncRequest{MonitoringInstanceID: "mi_001", SyncToken: "sync-token"})
 	if err != nil {
 		t.Fatalf("marshal sync request: %v", err)
 	}

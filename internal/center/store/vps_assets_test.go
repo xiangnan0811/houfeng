@@ -1100,8 +1100,8 @@ func scanVPSAssetRecordDestinations(dest []any, record vpsassets.Record) {
 	*(dest[20].(*string)) = record.Importance
 	*(dest[21].(*[]string)) = append([]string(nil), record.Labels...)
 	*(dest[22].(*string)) = record.Note
-	*(dest[23].(*int)) = record.ActiveNodeLinkCount
-	*(dest[24].(*int)) = record.RunningNodeCount
+	*(dest[23].(*int)) = record.ActiveMonitoringInstanceLinkCount
+	*(dest[24].(*int)) = record.RunningMonitoringInstanceCount
 	*(dest[25].(*int)) = record.RunningTargetCount
 	*(dest[26].(*time.Time)) = record.CreatedAt
 	*(dest[27].(*time.Time)) = record.UpdatedAt

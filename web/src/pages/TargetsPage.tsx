@@ -370,7 +370,7 @@ export function TargetsPage() {
       }
       if (filterState.executionLabels.length > 0) {
         const hasAll = filterState.executionLabels.every((label) =>
-          target.execution_node_labels.includes(label),
+          target.execution_monitoring_instance_labels.includes(label),
         )
         if (!hasAll) return false
       }
@@ -499,7 +499,7 @@ export function TargetsPage() {
     <div className="page-stack animate-in">
       <div className="page-header animate-in">
         <div>
-          <h1 className="page-title">目标观测</h1>
+          <h1 className="page-title">入口探测</h1>
           <p className="page-sub">监控入口健康与延迟</p>
         </div>
         <div className="header-actions">
@@ -732,8 +732,8 @@ export function TargetsPage() {
                             <StatusBadge label={target.run_status} />
                             <StatusBadge label={target.current_health_status} />
                           </span>
-                          {target.execution_node_labels.length > 0 && (
-                            <div className="sub">执行: {target.execution_node_labels.join(', ')}</div>
+                          {target.execution_monitoring_instance_labels.length > 0 && (
+                            <div className="sub">执行: {target.execution_monitoring_instance_labels.join(', ')}</div>
                           )}
                         </td>
                         <td>

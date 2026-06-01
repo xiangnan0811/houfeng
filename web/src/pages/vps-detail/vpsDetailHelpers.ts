@@ -30,9 +30,9 @@ export const INITIAL_STATE: VPSDetailPageState = {
 }
 
 export const INITIAL_SELECTOR_STATE: VPSDetailSelectorState = {
-  nodesLoading: false,
-  nodesError: null,
-  nodes: [],
+  monitoringInstancesLoading: false,
+  monitoringInstancesError: null,
+  monitoring: [],
   providersLoading: false,
   providersError: null,
   providers: [],

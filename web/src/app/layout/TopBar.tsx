@@ -7,8 +7,8 @@ import type { User } from '../../lib/auth-client'
 
 const PAGE_TITLES: Record<string, string> = {
   '/': '工作台',
-  '/nodes': '节点观测',
-  '/targets': '目标观测',
+  '/monitoring': '监控',
+  '/targets': '入口探测',
   '/events': '事件流',
   '/vps': 'VPS 资产',
   '/providers': '服务商',
@@ -127,7 +127,8 @@ function UserAvatar({ user }: { user: User }) {
 
 function derivePageTitle(pathname: string): string {
   if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname]
-  if (pathname.startsWith('/nodes/')) return '节点详情'
+  if (pathname.startsWith('/monitoring/compare')) return '监控实例对比'
+  if (pathname.startsWith('/monitoring/')) return '监控实例详情'
   if (pathname.startsWith('/targets/')) return '目标详情'
   if (pathname.startsWith('/vps/')) return 'VPS 详情'
   return '候风'

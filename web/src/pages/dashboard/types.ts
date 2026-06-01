@@ -18,7 +18,7 @@ export type FleetState = {
 }
 
 export type AttentionItem = {
-  kind: 'node' | 'target'
+  kind: 'monitoring_instance' | 'target'
   id: string
   name: string
   route: string

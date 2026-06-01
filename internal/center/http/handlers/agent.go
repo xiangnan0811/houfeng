@@ -7,14 +7,14 @@ import (
 
 	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/enrollment"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/contracts/agentapi"
 )
 
 type AgentEnrollService interface {
-	EnrollNode(ctx context.Context, input enrollment.EnrollInput) (enrollment.EnrollResult, error)
+	EnrollMonitoringInstance(ctx context.Context, input enrollment.EnrollInput) (enrollment.EnrollResult, error)
 }
 
 type AgentSyncService interface {
@@ -38,7 +38,7 @@ func AgentEnroll(svc AgentEnrollService) http.Handler {
 			return
 		}
 
-		result, err := svc.EnrollNode(r.Context(), enrollment.EnrollInput{
+		result, err := svc.EnrollMonitoringInstance(r.Context(), enrollment.EnrollInput{
 			Token:       req.Token,
 			Fingerprint: req.Fingerprint,
 		})
@@ -53,10 +53,10 @@ func AgentEnroll(svc AgentEnrollService) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, agentapi.EnrollmentResponse{
-			NodeID:        result.NodeID,
-			BindingStatus: result.BindingStatus,
-			Status:        "accepted",
-			SyncToken:     result.SyncToken,
+			MonitoringInstanceID: result.MonitoringInstanceID,
+			BindingStatus:        result.BindingStatus,
+			Status:               "accepted",
+			SyncToken:            result.SyncToken,
 		})
 	})
 }
@@ -85,8 +85,8 @@ func AgentSync(svc AgentSyncService) http.Handler {
 				writeAgentAPIError(w, http.StatusUnauthorized, agentapi.ErrorCodeInvalidSyncToken, "invalid sync token")
 			case errors.Is(err, syncing.ErrBindingNotAccepted):
 				writeAgentAPIError(w, http.StatusConflict, agentapi.ErrorCodeBindingNotAccepted, "binding not accepted")
-			case errors.Is(err, nodes.ErrNodeNotFound):
-				writeAgentAPIError(w, http.StatusNotFound, agentapi.ErrorCodeNodeNotFound, "node not found")
+			case errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound):
+				writeAgentAPIError(w, http.StatusNotFound, agentapi.ErrorCodeMonitoringInstanceNotFound, "monitoring instance not found")
 			case errors.Is(err, observations.ErrInvalidProbeObservation):
 				writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
 			default:
@@ -112,7 +112,7 @@ func isValidEnrollmentRequest(req agentapi.EnrollmentRequest) bool {
 }
 
 func isValidSyncRequest(req agentapi.SyncRequest) bool {
-	if req.NodeID == "" || req.SyncToken == "" || len(req.Heartbeats) == 0 {
+	if req.MonitoringInstanceID == "" || req.SyncToken == "" || len(req.Heartbeats) == 0 {
 		return false
 	}
 
@@ -145,14 +145,14 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 	}
 
 	batch := observations.BatchWrite{
-		NodeID:            req.NodeID,
-		HostSamples:       make([]observations.HostSampleWrite, 0, len(req.HostSamples)),
-		ProbeObservations: make([]observations.ProbeObservationWrite, 0, len(req.ProbeObservations)),
+		MonitoringInstanceID: req.MonitoringInstanceID,
+		HostSamples:          make([]observations.HostSampleWrite, 0, len(req.HostSamples)),
+		ProbeObservations:    make([]observations.ProbeObservationWrite, 0, len(req.ProbeObservations)),
 	}
 
 	for _, sample := range req.HostSamples {
 		batch.HostSamples = append(batch.HostSamples, observations.HostSampleWrite{
-			NodeID:               req.NodeID,
+			MonitoringInstanceID: req.MonitoringInstanceID,
 			ObservedAt:           sample.ObservedAt,
 			AgentVersion:         sample.AgentVersion,
 			Fingerprint:          sample.Fingerprint,
@@ -184,22 +184,22 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 
 	for _, observation := range req.ProbeObservations {
 		batch.ProbeObservations = append(batch.ProbeObservations, observations.ProbeObservationWrite{
-			NodeID:             req.NodeID,
-			TargetID:           observation.TargetID,
-			ProbeItemID:        observation.ProbeItemID,
-			ProbeKind:          observation.ProbeKind,
-			ObservedAt:         observation.ObservedAt,
-			AgentVersion:       observation.AgentVersion,
-			Fingerprint:        observation.Fingerprint,
-			ResultKind:         observation.ResultKind,
-			LatencyMS:          observation.LatencyMS,
-			HTTPStatus:         observation.HTTPStatus,
-			TLSExpiryDays:      observation.TLSExpiryDays,
-			ErrorCode:          observation.ErrorCode,
-			ErrorSummary:       observation.ErrorSummary,
-			MaintenanceContext: observation.MaintenanceContext,
-			IsBackfilled:       observation.IsBackfilled,
-			SyncBatchID:        observation.SyncBatchID,
+			MonitoringInstanceID: req.MonitoringInstanceID,
+			TargetID:             observation.TargetID,
+			ProbeItemID:          observation.ProbeItemID,
+			ProbeKind:            observation.ProbeKind,
+			ObservedAt:           observation.ObservedAt,
+			AgentVersion:         observation.AgentVersion,
+			Fingerprint:          observation.Fingerprint,
+			ResultKind:           observation.ResultKind,
+			LatencyMS:            observation.LatencyMS,
+			HTTPStatus:           observation.HTTPStatus,
+			TLSExpiryDays:        observation.TLSExpiryDays,
+			ErrorCode:            observation.ErrorCode,
+			ErrorSummary:         observation.ErrorSummary,
+			MaintenanceContext:   observation.MaintenanceContext,
+			IsBackfilled:         observation.IsBackfilled,
+			SyncBatchID:          observation.SyncBatchID,
 		})
 	}
 
@@ -219,9 +219,9 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 	}
 
 	batch := syncing.Batch{
-		NodeID:     req.NodeID,
-		SyncToken:  req.SyncToken,
-		Heartbeats: heartbeats,
+		MonitoringInstanceID: req.MonitoringInstanceID,
+		SyncToken:            req.SyncToken,
+		Heartbeats:           heartbeats,
 	}
 	if observationBatch, ok := observationBatchFromSyncRequest(req); ok {
 		batch.Observations = observationBatch

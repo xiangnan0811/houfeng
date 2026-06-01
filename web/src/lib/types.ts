@@ -1,5 +1,5 @@
-export type NodeRecord = {
-  node_id: string
+export type MonitoringInstanceRecord = {
+  monitoring_instance_id: string
   display_name: string
   group: string
   region: string
@@ -42,7 +42,7 @@ export type PendingBindingMetadata = {
   attempt_count: number
 }
 
-export type NodeInstallCommandIssue = {
+export type MonitoringInstanceInstallCommandIssue = {
   command: string
   issued_at: string
   expires_at: string
@@ -52,13 +52,13 @@ export type NodeInstallCommandIssue = {
   release_repo: string
 }
 
-export type UpdateNodeMetadataInput = {
+export type UpdateMonitoringInstanceMetadataInput = {
   labels: string[]
   group?: string
   note: string
 }
 
-export type CreateNodeInput = {
+export type CreateMonitoringInstanceInput = {
   display_name: string
   group: string
   region: string
@@ -68,7 +68,7 @@ export type CreateNodeInput = {
   note: string
 }
 
-export type NodeOnboardingState = NodeRecord & {
+export type MonitoringInstanceOnboardingState = MonitoringInstanceRecord & {
   phase: OnboardingPhase
   has_host_sample: boolean
   has_accepted_observation: boolean
@@ -87,7 +87,7 @@ export type ContainerInfo = {
 }
 
 export type HostSample = {
-  node_id: string
+  monitoring_instance_id: string
   observed_at: string
   received_at: string
   agent_version: string
@@ -117,8 +117,8 @@ export type HostSample = {
   containers?: ContainerInfo[]
 }
 
-export type NodeRuntimeFacts = {
-  node_id: string
+export type MonitoringInstanceRuntimeFacts = {
+  monitoring_instance_id: string
   latest_host_sample: HostSample | null
   recent_host_samples: HostSample[]
 }
@@ -133,7 +133,7 @@ export type TargetRecord = {
   target_type: TargetType
   host: string
   base_port?: number
-  execution_node_labels: string[]
+  execution_monitoring_instance_labels: string[]
   run_status: TargetRunStatus
   group: string
   labels: string[]
@@ -158,7 +158,7 @@ export type CreateTargetInput = {
   target_type: TargetType
   host: string
   base_port?: number
-  execution_node_labels: string[]
+  execution_monitoring_instance_labels: string[]
   run_status: TargetRunStatus
   group: string
   labels: string[]
@@ -192,7 +192,7 @@ export type CreateProbeItemInput = {
 export type UpdateProbeItemInput = CreateProbeItemInput
 
 export type ProbeObservation = {
-  node_id: string
+  monitoring_instance_id: string
   target_id: string
   probe_item_id: string
   probe_kind: ProbeKind
@@ -217,7 +217,7 @@ export type TargetRuntimeFacts = {
   recent_probe_observations: ProbeObservation[]
 }
 
-export type ObservabilityObjectType = 'node' | 'target'
+export type ObservabilityObjectType = 'monitoring_instance' | 'target'
 
 export type IncidentSeverity = '正常' | '关注' | '告警' | '严重'
 
@@ -225,16 +225,16 @@ export type StateChangeEventType =
   | 'incident_started'
   | 'incident_escalated'
   | 'incident_recovered'
-  | 'node_binding_rebind_confirmed'
-  | 'node_binding_pending_rejected'
-  | 'node_binding_reset'
-  | 'node_lifecycle_updated'
-  | 'node_retired'
-  | 'node_restored_to_observing'
-  | 'node_monitoring_maintenance_entered'
-  | 'node_monitoring_maintenance_exited'
-  | 'node_monitoring_paused'
-  | 'node_monitoring_resumed'
+  | 'monitoring_instance_binding_rebind_confirmed'
+  | 'monitoring_instance_binding_pending_rejected'
+  | 'monitoring_instance_binding_reset'
+  | 'monitoring_instance_lifecycle_updated'
+  | 'monitoring_instance_retired'
+  | 'monitoring_instance_restored_to_observing'
+  | 'monitoring_instance_monitoring_maintenance_entered'
+  | 'monitoring_instance_monitoring_maintenance_exited'
+  | 'monitoring_instance_monitoring_paused'
+  | 'monitoring_instance_monitoring_resumed'
   | 'target_maintenance_entered'
   | 'target_maintenance_exited'
   | 'target_paused'
@@ -246,16 +246,16 @@ export const STATE_CHANGE_EVENT_TYPE_LABELS: Record<StateChangeEventType, string
   incident_started: '异常开始',
   incident_escalated: '异常升级',
   incident_recovered: '异常恢复',
-  node_binding_rebind_confirmed: '确认重新绑定',
-  node_binding_pending_rejected: '拒绝待确认指纹',
-  node_binding_reset: '绑定已重置',
-  node_lifecycle_updated: '节点生命周期已更新',
-  node_retired: '节点已退役',
-  node_restored_to_observing: '节点恢复到观察中',
-  node_monitoring_maintenance_entered: '节点进入维护',
-  node_monitoring_maintenance_exited: '节点退出维护',
-  node_monitoring_paused: '节点暂停监控',
-  node_monitoring_resumed: '节点恢复监控',
+  monitoring_instance_binding_rebind_confirmed: '确认重新绑定',
+  monitoring_instance_binding_pending_rejected: '拒绝待确认指纹',
+  monitoring_instance_binding_reset: '绑定已重置',
+  monitoring_instance_lifecycle_updated: '监控实例生命周期已更新',
+  monitoring_instance_retired: '监控实例已退役',
+  monitoring_instance_restored_to_observing: '监控实例恢复到观察中',
+  monitoring_instance_monitoring_maintenance_entered: '监控实例进入维护',
+  monitoring_instance_monitoring_maintenance_exited: '监控实例退出维护',
+  monitoring_instance_monitoring_paused: '监控实例暂停监控',
+  monitoring_instance_monitoring_resumed: '监控实例恢复监控',
   target_maintenance_entered: '目标进入维护',
   target_maintenance_exited: '目标退出维护',
   target_paused: '目标已暂停',
@@ -282,17 +282,17 @@ export type EventListResponse = {
 
 export type DashboardOverview = {
   snapshot_generated_at: string
-  total_node_count: number
+  total_monitoring_instance_count: number
   total_target_count: number
-  abnormal_node_count: number
+  abnormal_monitoring_instance_count: number
   abnormal_target_count: number
-  severe_node_count: number
+  severe_monitoring_instance_count: number
   severe_target_count: number
-  maintenance_node_count: number
+  maintenance_monitoring_instance_count: number
   maintenance_target_count: number
-  pending_onboarding_node_count: number
-  paused_node_count: number
-  retired_node_count: number
+  pending_onboarding_monitoring_instance_count: number
+  paused_monitoring_instance_count: number
+  retired_monitoring_instance_count: number
   paused_target_count: number
   archived_target_count: number
   recent_new_incident_count: number
@@ -300,7 +300,7 @@ export type DashboardOverview = {
   group_summaries: DashboardGroupSummary[]
   notification_status: DashboardNotificationStatus
   asset_summary: DashboardAssetSummary
-  abnormal_nodes: DashboardNodeSummary[]
+  abnormal_monitoring_instances: DashboardMonitoringInstanceSummary[]
   abnormal_targets: DashboardTargetSummary[]
   recent_events: StateChangeEventRecord[]
   /**
@@ -319,13 +319,13 @@ export type DashboardOverview = {
 
 export type DashboardGroupSummary = {
   group: string
-  node_count: number
+  monitoring_instance_count: number
   target_count: number
-  abnormal_node_count: number
+  abnormal_monitoring_instance_count: number
   abnormal_target_count: number
-  severe_node_count: number
+  severe_monitoring_instance_count: number
   severe_target_count: number
-  maintenance_node_count: number
+  maintenance_monitoring_instance_count: number
   maintenance_target_count: number
 }
 
@@ -356,8 +356,8 @@ export type DashboardAssetCostByCurrency = {
   yearly_total: number
 }
 
-export type DashboardNodeSummary = {
-  node_id: string
+export type DashboardMonitoringInstanceSummary = {
+  monitoring_instance_id: string
   display_name: string
   group: string
   region: string
@@ -511,7 +511,7 @@ export type SettingsOverrideFields = {
   incident_defaults?: IncidentDefaultsOverride
 }
 
-export type NodeLabelOverrideRule = {
+export type MonitoringInstanceLabelOverrideRule = {
   label: string
   overrides: SettingsOverrideFields
 }
@@ -527,7 +527,7 @@ export type TargetLabelOverrideRule = {
 }
 
 export type OverrideRules = {
-  node_labels: NodeLabelOverrideRule[]
+  monitoring_instance_labels: MonitoringInstanceLabelOverrideRule[]
   target_types: TargetTypeOverrideRule[]
   target_labels: TargetLabelOverrideRule[]
 }
@@ -549,8 +549,8 @@ export type SettingsRecord = {
   retention_policy: RetentionPolicy
 }
 
-export type NodeSparklinesResponse = {
-  nodes: Record<string, Record<string, (number | null)[]>>
+export type MonitoringInstanceSparklinesResponse = {
+  monitoring_instances: Record<string, Record<string, (number | null)[]>>
 }
 
 export type TargetSparklinesResponse = {
@@ -729,8 +729,8 @@ export type VPSAssetRecord = {
   importance: string
   labels: string[]
   note: string
-  active_node_link_count: number
-  running_node_count?: number
+  active_monitoring_instance_link_count: number
+  running_monitoring_instance_count?: number
   running_target_count?: number
   created_at: string
   updated_at: string
@@ -754,9 +754,15 @@ export type LifecycleActionStepStatus = 'completed' | 'skipped' | 'failed'
 export type LifecycleActionStep = {
   step_id: string
   action_id: string
-  object_type: 'vps' | 'subscription' | 'node' | 'target' | string
+  object_type: 'vps' | 'subscription' | 'monitoring_instance' | 'target' | string
   object_id: string
-  step_type: 'vps_lifecycle' | 'subscription_status' | 'node_lifecycle' | 'node_monitoring' | 'target_run_status' | string
+  step_type:
+    | 'vps_lifecycle'
+    | 'subscription_status'
+    | 'monitoring_instance_lifecycle'
+    | 'monitoring_instance_monitoring'
+    | 'target_run_status'
+    | string
   status: LifecycleActionStepStatus
   before_state: Record<string, unknown>
   after_state: Record<string, unknown>
@@ -800,9 +806,15 @@ export type TargetImpact = {
 }
 
 export type RecommendedLifecycleStep = {
-  object_type: 'vps' | 'subscription' | 'node' | 'target' | string
+  object_type: 'vps' | 'subscription' | 'monitoring_instance' | 'target' | string
   object_id: string
-  step_type: 'vps_lifecycle' | 'subscription_status' | 'node_lifecycle' | 'node_monitoring' | 'target_run_status' | string
+  step_type:
+    | 'vps_lifecycle'
+    | 'subscription_status'
+    | 'monitoring_instance_lifecycle'
+    | 'monitoring_instance_monitoring'
+    | 'target_run_status'
+    | string
   from_state: string
   to_state: string
   required: boolean
@@ -812,7 +824,7 @@ export type RecommendedLifecycleStep = {
 export type CancellationPreview = {
   vps: VPSAssetRecord
   subscriptions: SubscriptionImpact[]
-  node_links: VPSNodeSummary[]
+  monitoring_instance_links: VPSMonitoringInstanceSummary[]
   services: AssetServiceRecord[]
   domains: AssetDomainRecord[]
   target_links: TargetImpact[]
@@ -821,8 +833,8 @@ export type CancellationPreview = {
   blockers: string[]
 }
 
-export type NodeLifecycleActionInput = {
-  node_id: string
+export type MonitoringInstanceLifecycleActionInput = {
+  monitoring_instance_id: string
   lifecycle_status?: string
   monitoring_status?: string
 }
@@ -837,7 +849,7 @@ export type ApplyCancellationInput = {
   effective_date?: string | null
   subscription_ids: string[]
   vps_lifecycle_status: Extract<VPSLifecycleStatus, 'to_cancel' | 'cancelled'>
-  node_actions: NodeLifecycleActionInput[]
+  monitoring_instance_actions: MonitoringInstanceLifecycleActionInput[]
   target_actions: TargetLifecycleActionInput[]
 }
 
@@ -850,8 +862,8 @@ export type LinkedVPSContext = {
   message: string
 }
 
-export type AssetContextForNode = {
-  node_id: string
+export type AssetContextForMonitoringInstance = {
+  monitoring_instance_id: string
   linked_vps_count: number
   cancellation_attention: boolean
   summaries: LinkedVPSContext[]
@@ -924,8 +936,8 @@ export type VPSAssetListFilter = {
   renewal_decision?: VPSRenewalDecision | '' | null
 }
 
-export type VPSNodeSummary = {
-  node_id: string
+export type VPSMonitoringInstanceSummary = {
+  monitoring_instance_id: string
   display_name: string
   group: string
   region: string
@@ -943,27 +955,27 @@ export type VPSNodeSummary = {
   note: string
 }
 
-export type VPSNodeLinkRecord = {
+export type VPSMonitoringInstanceLinkRecord = {
   link_id: string
   vps_id: string
-  node_id: string
+  monitoring_instance_id: string
   linked_at: string
   unlinked_at?: string | null
   note: string
 }
 
-export type LinkVPSNodeInput = {
-  node_id: string
+export type LinkVPSMonitoringInstanceInput = {
+  monitoring_instance_id: string
   note?: string
 }
 
-export type UnlinkVPSNodeInput = {
-  node_id: string
+export type UnlinkVPSMonitoringInstanceInput = {
+  monitoring_instance_id: string
   note?: string
 }
 
 export type VPSAssetDetail = VPSAssetRecord & {
-  node_links: VPSNodeSummary[]
+  monitoring_instance_links: VPSMonitoringInstanceSummary[]
 }
 
 export type VPSDecisionHistoryRecord = {

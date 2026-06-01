@@ -396,19 +396,19 @@ func TestUpdateTargetMetadata(t *testing.T) {
 			gotArgs = append([]any(nil), args...)
 			return fakeTargetRow{scan: func(dest ...any) error {
 				scanTargetRecordDestinations(dest, targets.TargetRecord{
-					TargetID:                   "tg_001",
-					Name:                       "Blog",
-					TargetType:                 targets.TargetTypeService,
-					Host:                       "blog.example.com",
-					ExecutionNodeLabels:        []string{"edge"},
-					RunStatus:                  targets.RunStatusEnabled,
-					Labels:                     []string{"edge", "core"},
-					Note:                       "updated",
-					CurrentHealthStatus:        targets.HealthNormal,
-					CurrentActiveIncidentCount: 2,
-					CurrentPrimaryIssueSummary: "packet loss",
-					CreatedAt:                  now.Add(-time.Hour),
-					UpdatedAt:                  now,
+					TargetID:                          "tg_001",
+					Name:                              "Blog",
+					TargetType:                        targets.TargetTypeService,
+					Host:                              "blog.example.com",
+					ExecutionMonitoringInstanceLabels: []string{"edge"},
+					RunStatus:                         targets.RunStatusEnabled,
+					Labels:                            []string{"edge", "core"},
+					Note:                              "updated",
+					CurrentHealthStatus:               targets.HealthNormal,
+					CurrentActiveIncidentCount:        2,
+					CurrentPrimaryIssueSummary:        "packet loss",
+					CreatedAt:                         now.Add(-time.Hour),
+					UpdatedAt:                         now,
 				})
 				return nil
 			}}
@@ -633,7 +633,7 @@ func scanTargetRecordDestinations(dest []any, record targets.TargetRecord) {
 	*(dest[2].(*string)) = record.TargetType
 	*(dest[3].(*string)) = record.Host
 	*(dest[4].(**int)) = cloneIntPtr(record.BasePort)
-	*(dest[5].(*[]string)) = append([]string(nil), record.ExecutionNodeLabels...)
+	*(dest[5].(*[]string)) = append([]string(nil), record.ExecutionMonitoringInstanceLabels...)
 	*(dest[6].(*string)) = record.RunStatus
 	*(dest[7].(*string)) = record.Group
 	*(dest[8].(*[]string)) = append([]string(nil), record.Labels...)

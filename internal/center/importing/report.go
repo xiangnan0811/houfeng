@@ -39,7 +39,7 @@ func WriteTextReport(w io.Writer, report Report) error {
 		fmt.Sprintf("missing_renew_date_rows: %d", report.Totals.MissingRenewDateRows),
 		fmt.Sprintf("validation_errors: %d", report.Totals.ValidationErrors),
 		fmt.Sprintf("duplicate_candidates: %d", report.Totals.DuplicateCandidates),
-		fmt.Sprintf("node_association_candidates: %d", report.Totals.NodeAssociationCandidates),
+		fmt.Sprintf("monitoring_instance_association_candidates: %d", report.Totals.MonitoringInstanceAssociationCandidates),
 		fmt.Sprintf("renewal_candidates: %d", report.Totals.RenewalCandidates),
 		fmt.Sprintf("idle_paid_candidates: %d", report.Totals.IdlePaidCandidates),
 		fmt.Sprintf("imported_providers: %d", report.Totals.ImportedProviders),
@@ -69,7 +69,7 @@ func WriteTextReport(w io.Writer, report Report) error {
 	if err := writeDuplicateCandidates(w, report.DuplicateCandidates); err != nil {
 		return err
 	}
-	if err := writeNodeCandidates(w, report.NodeAssociationCandidates); err != nil {
+	if err := writeMonitoringInstanceCandidates(w, report.MonitoringInstanceAssociationCandidates); err != nil {
 		return err
 	}
 	if err := writeRenewalCandidates(w, report.RenewalCandidates); err != nil {
@@ -145,8 +145,8 @@ func writeDuplicateCandidates(w io.Writer, candidates []DuplicateCandidate) erro
 	return nil
 }
 
-func writeNodeCandidates(w io.Writer, candidates []NodeAssociationCandidate) error {
-	if _, err := fmt.Fprintf(w, "\nnode association candidates:\n"); err != nil {
+func writeMonitoringInstanceCandidates(w io.Writer, candidates []MonitoringInstanceAssociationCandidate) error {
+	if _, err := fmt.Fprintf(w, "\nmonitoring instance association candidates:\n"); err != nil {
 		return err
 	}
 	if len(candidates) == 0 {
@@ -154,7 +154,7 @@ func writeNodeCandidates(w io.Writer, candidates []NodeAssociationCandidate) err
 		return err
 	}
 	for _, candidate := range candidates {
-		if _, err := fmt.Fprintf(w, "  row %d %s node_id=%s node_name=%s target_url=%s: %s\n", candidate.Row, candidate.DisplayName, candidate.NodeID, candidate.NodeName, candidate.TargetURL, candidate.Status); err != nil {
+		if _, err := fmt.Fprintf(w, "  row %d %s monitoring_instance_id=%s monitoring_instance_name=%s target_url=%s: %s\n", candidate.Row, candidate.DisplayName, candidate.MonitoringInstanceID, candidate.MonitoringInstanceName, candidate.TargetURL, candidate.Status); err != nil {
 			return err
 		}
 	}

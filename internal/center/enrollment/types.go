@@ -8,9 +8,9 @@ type EnrollInput struct {
 }
 
 type EnrollResult struct {
-	NodeID        string
-	BindingStatus string
-	SyncToken     string
+	MonitoringInstanceID string
+	BindingStatus        string
+	SyncToken            string
 }
 
 type HeartbeatPayload struct {
@@ -22,17 +22,17 @@ type HeartbeatPayload struct {
 }
 
 type SyncInput struct {
-	NodeID     string
-	SyncToken  string
-	Heartbeats []HeartbeatPayload
+	MonitoringInstanceID string
+	SyncToken            string
+	Heartbeats           []HeartbeatPayload
 }
 
 type HeartbeatWrite struct {
-	NodeID       string
-	ObservedAt   time.Time
-	ReceivedAt   time.Time
-	AgentVersion string
-	Fingerprint  string
-	SyncBatchID  string
-	IsBackfilled bool
+	MonitoringInstanceID string
+	ObservedAt           time.Time
+	ReceivedAt           time.Time
+	AgentVersion         string
+	Fingerprint          string
+	SyncBatchID          string
+	IsBackfilled         bool
 }

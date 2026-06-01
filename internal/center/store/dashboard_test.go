@@ -64,7 +64,7 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 		},
 		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			switch {
-			case strings.Contains(sql, "node_groups"):
+			case strings.Contains(sql, "monitoring_instance_groups"):
 				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "production"
 					*(dest[1].(*int)) = 3
@@ -72,9 +72,10 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					*(dest[3].(*int)) = 1
 					*(dest[4].(*int)) = 1
 					*(dest[5].(*int)) = 1
+					*(dest[5].(*int)) = 1
 					*(dest[6].(*int)) = 0
 					*(dest[7].(*int)) = 1
-					*(dest[8].(*int)) = 1
+					*(dest[8].(*int)) = 0
 					return nil
 				}}}}, nil
 			case strings.Contains(sql, "hour_buckets"):
@@ -102,18 +103,18 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 			case strings.Contains(sql, "from state_change_events"):
 				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "evt_001"
-					*(dest[1].(*incidents.ObjectType)) = incidents.ObjectTypeNode
-					*(dest[2].(*string)) = "nd_001"
+					*(dest[1].(*incidents.ObjectType)) = incidents.ObjectTypeMonitoringInstance
+					*(dest[2].(*string)) = "mi_001"
 					*(dest[3].(*incidents.EventType)) = incidents.EventIncidentStarted
 					*(dest[4].(*string)) = string(incidents.SeverityAlert)
 					*(dest[5].(*string)) = "磁盘使用率 92.0%"
-					*(dest[6].(*[]byte)) = []byte(`{"incident_id":"inc_001","incident_class":"node_disk_pressure","attempts":3,"maintenance":false}`)
+					*(dest[6].(*[]byte)) = []byte(`{"incident_id":"inc_001","incident_class":"monitoring_instance_disk_pressure","attempts":3,"maintenance":false}`)
 					*(dest[7].(*time.Time)) = now
 					return nil
 				}}}}, nil
-			case strings.Contains(sql, "from nodes"):
+			case strings.Contains(sql, "from monitoring_instances"):
 				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "nd_001"
+					*(dest[0].(*string)) = "mi_001"
 					*(dest[1].(*string)) = "Tokyo Edge"
 					*(dest[2].(*string)) = "production"
 					*(dest[3].(*string)) = "ap-northeast-1"
@@ -154,17 +155,17 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetDashboardOverview() error = %v", err)
 	}
-	if overview.TotalNodeCount != 5 || overview.TotalTargetCount != 4 {
-		t.Fatalf("total counts = (%d,%d), want (5,4)", overview.TotalNodeCount, overview.TotalTargetCount)
+	if overview.TotalMonitoringInstanceCount != 5 || overview.TotalTargetCount != 4 {
+		t.Fatalf("total counts = (%d,%d), want (5,4)", overview.TotalMonitoringInstanceCount, overview.TotalTargetCount)
 	}
-	if overview.AbnormalNodeCount != 2 || overview.RecentRecoveryCount != 2 {
+	if overview.AbnormalMonitoringInstanceCount != 2 || overview.RecentRecoveryCount != 2 {
 		t.Fatalf("overview = %#v, want populated counts", overview)
 	}
 	if overview.SnapshotGeneratedAt.IsZero() {
 		t.Fatal("SnapshotGeneratedAt is zero, want dashboard generation time")
 	}
-	if overview.PendingOnboardingNodeCount != 2 || overview.PausedNodeCount != 1 || overview.RetiredNodeCount != 1 {
-		t.Fatalf("node completeness counts = (%d,%d,%d), want (2,1,1)", overview.PendingOnboardingNodeCount, overview.PausedNodeCount, overview.RetiredNodeCount)
+	if overview.PendingOnboardingMonitoringInstanceCount != 2 || overview.PausedMonitoringInstanceCount != 1 || overview.RetiredMonitoringInstanceCount != 1 {
+		t.Fatalf("monitoringInstance completeness counts = (%d,%d,%d), want (2,1,1)", overview.PendingOnboardingMonitoringInstanceCount, overview.PausedMonitoringInstanceCount, overview.RetiredMonitoringInstanceCount)
 	}
 	if overview.PausedTargetCount != 1 || overview.ArchivedTargetCount != 1 {
 		t.Fatalf("target completeness counts = (%d,%d), want (1,1)", overview.PausedTargetCount, overview.ArchivedTargetCount)
@@ -172,8 +173,8 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if len(overview.GroupSummaries) != 1 || overview.GroupSummaries[0].Group != "production" {
 		t.Fatalf("GroupSummaries = %#v, want production group summary", overview.GroupSummaries)
 	}
-	if overview.GroupSummaries[0].NodeCount != 3 || overview.GroupSummaries[0].TargetCount != 2 {
-		t.Fatalf("GroupSummaries[0] = %#v, want full node/target counts", overview.GroupSummaries[0])
+	if overview.GroupSummaries[0].MonitoringInstanceCount != 3 || overview.GroupSummaries[0].TargetCount != 2 {
+		t.Fatalf("GroupSummaries[0] = %#v, want full monitoringInstance/target counts", overview.GroupSummaries[0])
 	}
 	if !overview.NotificationStatus.TelegramConfigured || !overview.NotificationStatus.TelegramRuntimeManaged || !overview.NotificationStatus.TelegramRuntimeApplyActive {
 		t.Fatalf("NotificationStatus = %#v, want configured runtime-managed telegram", overview.NotificationStatus)
@@ -199,11 +200,11 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if len(overview.RecentEvents) != 1 || overview.RecentEvents[0].IncidentID != "inc_001" {
 		t.Fatalf("RecentEvents = %#v, want decoded event payload", overview.RecentEvents)
 	}
-	if len(overview.AbnormalNodes) != 1 || overview.AbnormalNodes[0].NodeID != "nd_001" {
-		t.Fatalf("AbnormalNodes = %#v, want node summary", overview.AbnormalNodes)
+	if len(overview.AbnormalMonitoringInstances) != 1 || overview.AbnormalMonitoringInstances[0].MonitoringInstanceID != "mi_001" {
+		t.Fatalf("AbnormalMonitoringInstances = %#v, want monitoringInstance summary", overview.AbnormalMonitoringInstances)
 	}
-	if overview.AbnormalNodes[0].CurrentPrimaryIssueSummary != "磁盘使用率 92.0%" || overview.AbnormalNodes[0].LastHeartbeatAt == nil {
-		t.Fatalf("AbnormalNodes[0] = %#v, want issue summary and heartbeat", overview.AbnormalNodes[0])
+	if overview.AbnormalMonitoringInstances[0].CurrentPrimaryIssueSummary != "磁盘使用率 92.0%" || overview.AbnormalMonitoringInstances[0].LastHeartbeatAt == nil {
+		t.Fatalf("AbnormalMonitoringInstances[0] = %#v, want issue summary and heartbeat", overview.AbnormalMonitoringInstances[0])
 	}
 	if len(overview.AbnormalTargets) != 1 || overview.AbnormalTargets[0].TargetID != "tg_001" {
 		t.Fatalf("AbnormalTargets = %#v, want target summary", overview.AbnormalTargets)
@@ -238,7 +239,7 @@ func TestPostgresDashboardRepositoryBuildsAbnormalSummaryQueries(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"from nodes",
+		"from monitoring_instances",
 		"from targets",
 		"current_health_status <> '正常'",
 		"when '严重' then 3",
@@ -267,12 +268,12 @@ func TestPostgresDashboardRepositoryBuildsFullGroupSummaryQuery(t *testing.T) {
 		t.Fatalf("GetDashboardOverview() error = %v", err)
 	}
 
-	groupSQL := firstSQLContaining(capturedSQL, "node_groups")
+	groupSQL := firstSQLContaining(capturedSQL, "monitoring_instance_groups")
 	if groupSQL == "" {
 		t.Fatalf("capturedSQL = %#v, want full group summary query", capturedSQL)
 	}
 	for _, want := range []string{
-		"from nodes",
+		"from monitoring_instances",
 		"from targets",
 		"full outer join target_groups",
 		`coalesce(nullif(btrim("group"), ''), '未分组')`,
@@ -348,7 +349,7 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 		"lifecycle_status <> 'archived'",
 		"cancellation_attention",
 		"cancelled_asset_runtime",
-		"from vps_node_links",
+		"from vps_monitoring_instance_links",
 		"unlinked_at is null",
 		"from subscriptions",
 		"status = 'active'",
@@ -511,7 +512,7 @@ func TestPostgresDashboardRepositoryListEventsBuildsShortcutFilters(t *testing.T
 		{
 			name:   "maintenance only",
 			filter: EventsFilter{MaintenanceOnly: true},
-			want:   "e.event_type in ('node_monitoring_maintenance_entered'",
+			want:   "e.event_type in ('monitoring_instance_monitoring_maintenance_entered'",
 		},
 	}
 
@@ -557,7 +558,7 @@ func TestPostgresDashboardRepositoryListEventsExcludesBackfilledEventsByDefault(
 	}
 	for _, want := range []string{
 		"not (",
-		"from node_heartbeats nh",
+		"from monitoring_instance_heartbeats nh",
 		"nh.is_backfilled",
 		"from host_samples hs",
 		"hs.is_backfilled",
@@ -588,7 +589,7 @@ func TestPostgresDashboardRepositoryListEventsIncludesBackfilledEventsWhenReques
 		t.Fatalf("ListEvents() error = %v", err)
 	}
 	for _, notWant := range []string{
-		"from node_heartbeats nh",
+		"from monitoring_instance_heartbeats nh",
 		"from host_samples hs",
 		"from probe_observations po",
 	} {

@@ -22,12 +22,12 @@ func TestPostgresObservationRepositoryRecordBatchReturnsNilForEmptyBatch(t *test
 	t.Parallel()
 
 	repo := &PostgresObservationRepository{}
-	if err := repo.RecordBatch(context.Background(), observations.BatchWrite{NodeID: "nd_001"}); err != nil {
+	if err := repo.RecordBatch(context.Background(), observations.BatchWrite{MonitoringInstanceID: "mi_001"}); err != nil {
 		t.Fatalf("RecordBatch() error = %v", err)
 	}
 }
 
-func TestRecordBatchUsesPerFactNodeIDsInsteadOfBatchNodeID(t *testing.T) {
+func TestRecordBatchUsesPerFactMonitoringInstanceIDsInsteadOfBatchMonitoringInstanceID(t *testing.T) {
 	t.Parallel()
 
 	source, err := os.ReadFile("observations.go")
@@ -36,14 +36,14 @@ func TestRecordBatchUsesPerFactNodeIDsInsteadOfBatchNodeID(t *testing.T) {
 	}
 
 	text := string(source)
-	if strings.Contains(text, "batch.NodeID,") {
-		t.Fatalf("RecordBatch() should not write node_id from batch.NodeID:\n%s", text)
+	if strings.Contains(text, "batch.MonitoringInstanceID,") {
+		t.Fatalf("RecordBatch() should not write monitoring_instance_id from batch.MonitoringInstanceID:\n%s", text)
 	}
-	if !strings.Contains(text, "sample.NodeID,") {
-		t.Fatal("RecordBatch() should write host_samples.node_id from sample.NodeID")
+	if !strings.Contains(text, "sample.MonitoringInstanceID,") {
+		t.Fatal("RecordBatch() should write host_samples.monitoring_instance_id from sample.MonitoringInstanceID")
 	}
-	if !strings.Contains(text, "observation.NodeID,") {
-		t.Fatal("RecordBatch() should write probe_observations.node_id from observation.NodeID")
+	if !strings.Contains(text, "observation.MonitoringInstanceID,") {
+		t.Fatal("RecordBatch() should write probe_observations.monitoring_instance_id from observation.MonitoringInstanceID")
 	}
 }
 

@@ -43,7 +43,7 @@ function objectLink(
   nameMap: Map<string, string>,
 ): { to: string; label: string } {
   const name = nameMap.get(objectId) || objectId
-  if (objectType === 'node') return { to: `/nodes/${objectId}`, label: `节点 · ${name}` }
+  if (objectType === 'monitoring_instance') return { to: `/monitoring/${objectId}`, label: `监控实例 · ${name}` }
   if (objectType === 'target') return { to: `/targets/${objectId}`, label: `目标 · ${name}` }
   return { to: '#', label: `${objectType} · ${name}` }
 }

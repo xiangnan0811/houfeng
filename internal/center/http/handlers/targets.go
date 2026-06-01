@@ -227,7 +227,7 @@ func isValidCreateTargetInput(input targets.CreateTargetInput) bool {
 	if input.Name == "" || input.TargetType == "" || input.Host == "" || input.RunStatus == "" {
 		return false
 	}
-	if len(input.ExecutionNodeLabels) == 0 {
+	if len(input.ExecutionMonitoringInstanceLabels) == 0 {
 		return false
 	}
 	if !targets.IsValidTargetType(input.TargetType) || !targets.IsValidRunStatus(input.RunStatus) {

@@ -10,10 +10,10 @@ import (
 
 func TestEnrollmentResponseRoundTrip(t *testing.T) {
 	original := agentapi.EnrollmentResponse{
-		NodeID:        "nd-local-01",
-		BindingStatus: agentapi.BindingStatusPendingConfirmation,
-		Status:        "accepted",
-		SyncToken:     "sync-token-001",
+		MonitoringInstanceID: "nd-local-01",
+		BindingStatus:        agentapi.BindingStatusPendingConfirmation,
+		Status:               "accepted",
+		SyncToken:            "sync-token-001",
 	}
 
 	payload, err := json.Marshal(original)
@@ -26,8 +26,8 @@ func TestEnrollmentResponseRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal enrollment response: %v", err)
 	}
 
-	if roundTrip.NodeID != "nd-local-01" {
-		t.Fatalf("NodeID = %q, want %q", roundTrip.NodeID, "nd-local-01")
+	if roundTrip.MonitoringInstanceID != "nd-local-01" {
+		t.Fatalf("MonitoringInstanceID = %q, want %q", roundTrip.MonitoringInstanceID, "nd-local-01")
 	}
 
 	if roundTrip.BindingStatus != agentapi.BindingStatusPendingConfirmation {
@@ -43,7 +43,7 @@ func TestEnrollmentResponseRoundTrip(t *testing.T) {
 }
 
 func TestEnrollmentResponseOmitsEmptySyncToken(t *testing.T) {
-	payload, err := json.Marshal(agentapi.EnrollmentResponse{NodeID: "nd-local-01", Status: "accepted"})
+	payload, err := json.Marshal(agentapi.EnrollmentResponse{MonitoringInstanceID: "nd-local-01", Status: "accepted"})
 	if err != nil {
 		t.Fatalf("marshal enrollment response: %v", err)
 	}
@@ -119,9 +119,9 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 	}
 
 	original := agentapi.SyncRequest{
-		NodeID:    "nd-local-01",
-		SyncToken: "sync-token-001",
-		Heartbeats: []agentapi.NodeHeartbeat{{
+		MonitoringInstanceID: "nd-local-01",
+		SyncToken:            "sync-token-001",
+		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
 			ObservedAt:   observedAt,
 			AgentVersion: "dev",
 			Fingerprint:  "fp-001",
@@ -140,8 +140,8 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal sync request: %v", err)
 	}
 
-	if roundTrip.NodeID != "nd-local-01" {
-		t.Fatalf("NodeID = %q, want %q", roundTrip.NodeID, "nd-local-01")
+	if roundTrip.MonitoringInstanceID != "nd-local-01" {
+		t.Fatalf("MonitoringInstanceID = %q, want %q", roundTrip.MonitoringInstanceID, "nd-local-01")
 	}
 	if roundTrip.SyncToken != "sync-token-001" {
 		t.Fatalf("SyncToken = %q, want %q", roundTrip.SyncToken, "sync-token-001")
@@ -160,7 +160,7 @@ func TestSyncRequestRoundTrip(t *testing.T) {
 }
 
 func TestSyncRequestOmitsEmptyHeartbeats(t *testing.T) {
-	payload, err := json.Marshal(agentapi.SyncRequest{NodeID: "nd-local-01", SyncToken: "sync-token-001"})
+	payload, err := json.Marshal(agentapi.SyncRequest{MonitoringInstanceID: "nd-local-01", SyncToken: "sync-token-001"})
 	if err != nil {
 		t.Fatalf("marshal sync request: %v", err)
 	}

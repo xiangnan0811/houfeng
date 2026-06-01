@@ -15,51 +15,51 @@ import (
 )
 
 type fakeAssetLinkRepository struct {
-	linkNodeResult            assetlinks.Record
-	linkNodeErr               error
-	linkNodeVPSID             string
-	linkNodeInput             assetlinks.LinkInput
-	unlinkNodeResult          assetlinks.Record
-	unlinkNodeErr             error
-	unlinkNodeVPSID           string
-	unlinkNodeInput           assetlinks.UnlinkInput
-	listNodesForVPSResult     []assetlinks.NodeSummary
-	listNodesForVPSErr        error
-	listNodesForVPSID         string
-	listVPSForNodeResult      []assetlinks.VPSSummary
-	listVPSForNodeErr         error
-	listVPSForNodeID          string
-	countActiveLinksForVPSVal int
-	countActiveLinksForVPSErr error
-	countActiveLinksForVPSID  string
+	linkMonitoringInstanceResult        assetlinks.Record
+	linkMonitoringInstanceErr           error
+	linkMonitoringInstanceVPSID         string
+	linkMonitoringInstanceInput         assetlinks.LinkInput
+	unlinkMonitoringInstanceResult      assetlinks.Record
+	unlinkMonitoringInstanceErr         error
+	unlinkMonitoringInstanceVPSID       string
+	unlinkMonitoringInstanceInput       assetlinks.UnlinkInput
+	listMonitoringInstancesForVPSResult []assetlinks.MonitoringInstanceSummary
+	listMonitoringInstancesForVPSErr    error
+	listMonitoringInstancesForVPSID     string
+	listVPSForMonitoringInstanceResult  []assetlinks.VPSSummary
+	listVPSForMonitoringInstanceErr     error
+	listVPSForMonitoringInstanceID      string
+	countActiveLinksForVPSVal           int
+	countActiveLinksForVPSErr           error
+	countActiveLinksForVPSID            string
 }
 
-func (f *fakeAssetLinkRepository) LinkNode(_ context.Context, vpsID string, input assetlinks.LinkInput) (assetlinks.Record, error) {
-	f.linkNodeVPSID = vpsID
-	f.linkNodeInput = input
-	if f.linkNodeErr != nil {
-		return assetlinks.Record{}, f.linkNodeErr
+func (f *fakeAssetLinkRepository) LinkMonitoringInstance(_ context.Context, vpsID string, input assetlinks.LinkInput) (assetlinks.Record, error) {
+	f.linkMonitoringInstanceVPSID = vpsID
+	f.linkMonitoringInstanceInput = input
+	if f.linkMonitoringInstanceErr != nil {
+		return assetlinks.Record{}, f.linkMonitoringInstanceErr
 	}
-	return f.linkNodeResult, nil
+	return f.linkMonitoringInstanceResult, nil
 }
 
-func (f *fakeAssetLinkRepository) UnlinkNode(_ context.Context, vpsID string, input assetlinks.UnlinkInput) (assetlinks.Record, error) {
-	f.unlinkNodeVPSID = vpsID
-	f.unlinkNodeInput = input
-	if f.unlinkNodeErr != nil {
-		return assetlinks.Record{}, f.unlinkNodeErr
+func (f *fakeAssetLinkRepository) UnlinkMonitoringInstance(_ context.Context, vpsID string, input assetlinks.UnlinkInput) (assetlinks.Record, error) {
+	f.unlinkMonitoringInstanceVPSID = vpsID
+	f.unlinkMonitoringInstanceInput = input
+	if f.unlinkMonitoringInstanceErr != nil {
+		return assetlinks.Record{}, f.unlinkMonitoringInstanceErr
 	}
-	return f.unlinkNodeResult, nil
+	return f.unlinkMonitoringInstanceResult, nil
 }
 
-func (f *fakeAssetLinkRepository) ListNodesForVPS(_ context.Context, vpsID string) ([]assetlinks.NodeSummary, error) {
-	f.listNodesForVPSID = vpsID
-	return f.listNodesForVPSResult, f.listNodesForVPSErr
+func (f *fakeAssetLinkRepository) ListMonitoringInstancesForVPS(_ context.Context, vpsID string) ([]assetlinks.MonitoringInstanceSummary, error) {
+	f.listMonitoringInstancesForVPSID = vpsID
+	return f.listMonitoringInstancesForVPSResult, f.listMonitoringInstancesForVPSErr
 }
 
-func (f *fakeAssetLinkRepository) ListVPSForNode(_ context.Context, nodeID string) ([]assetlinks.VPSSummary, error) {
-	f.listVPSForNodeID = nodeID
-	return f.listVPSForNodeResult, f.listVPSForNodeErr
+func (f *fakeAssetLinkRepository) ListVPSForMonitoringInstance(_ context.Context, monitoringInstanceID string) ([]assetlinks.VPSSummary, error) {
+	f.listVPSForMonitoringInstanceID = monitoringInstanceID
+	return f.listVPSForMonitoringInstanceResult, f.listVPSForMonitoringInstanceErr
 }
 
 func (f *fakeAssetLinkRepository) CountActiveLinksForVPS(_ context.Context, vpsID string) (int, error) {
@@ -67,18 +67,18 @@ func (f *fakeAssetLinkRepository) CountActiveLinksForVPS(_ context.Context, vpsI
 	return f.countActiveLinksForVPSVal, f.countActiveLinksForVPSErr
 }
 
-func TestVPSLinkNodeCreatesLink(t *testing.T) {
+func TestVPSLinkMonitoringInstanceCreatesLink(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 16, 0, 0, 0, time.UTC)
-	repo := &fakeAssetLinkRepository{linkNodeResult: assetlinks.Record{
-		LinkID:   "vnl_001",
-		VPSID:    "vps_001",
-		NodeID:   "nd_001",
-		LinkedAt: now,
-		Note:     "primary",
+	repo := &fakeAssetLinkRepository{linkMonitoringInstanceResult: assetlinks.Record{
+		LinkID:               "vnl_001",
+		VPSID:                "vps_001",
+		MonitoringInstanceID: "mi_001",
+		LinkedAt:             now,
+		Note:                 "primary",
 	}}
 
-	handler := handlers.VPSLinkNode(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/link-node", strings.NewReader(`{"node_id":" nd_001 ","note":" primary "}`))
+	handler := handlers.VPSLinkMonitoringInstance(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/link-monitoring-instance", strings.NewReader(`{"monitoring_instance_id":" mi_001 ","note":" primary "}`))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -86,8 +86,8 @@ func TestVPSLinkNodeCreatesLink(t *testing.T) {
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
 	}
-	if repo.linkNodeVPSID != "vps_001" || repo.linkNodeInput.NodeID != "nd_001" || repo.linkNodeInput.Note != "primary" {
-		t.Fatalf("link input = vps:%q input:%#v, want normalized values", repo.linkNodeVPSID, repo.linkNodeInput)
+	if repo.linkMonitoringInstanceVPSID != "vps_001" || repo.linkMonitoringInstanceInput.MonitoringInstanceID != "mi_001" || repo.linkMonitoringInstanceInput.Note != "primary" {
+		t.Fatalf("link input = vps:%q input:%#v, want normalized values", repo.linkMonitoringInstanceVPSID, repo.linkMonitoringInstanceInput)
 	}
 	var body assetlinks.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
@@ -98,20 +98,20 @@ func TestVPSLinkNodeCreatesLink(t *testing.T) {
 	}
 }
 
-func TestVPSUnlinkNodeEndsActiveLink(t *testing.T) {
+func TestVPSUnlinkMonitoringInstanceEndsActiveLink(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 16, 0, 0, 0, time.UTC)
 	unlinkedAt := now.Add(time.Minute)
-	repo := &fakeAssetLinkRepository{unlinkNodeResult: assetlinks.Record{
-		LinkID:     "vnl_001",
-		VPSID:      "vps_001",
-		NodeID:     "nd_001",
-		LinkedAt:   now,
-		UnlinkedAt: &unlinkedAt,
-		Note:       "rotated",
+	repo := &fakeAssetLinkRepository{unlinkMonitoringInstanceResult: assetlinks.Record{
+		LinkID:               "vnl_001",
+		VPSID:                "vps_001",
+		MonitoringInstanceID: "mi_001",
+		LinkedAt:             now,
+		UnlinkedAt:           &unlinkedAt,
+		Note:                 "rotated",
 	}}
 
-	handler := handlers.VPSUnlinkNode(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/unlink-node", strings.NewReader(`{"node_id":" nd_001 ","note":" rotated "}`))
+	handler := handlers.VPSUnlinkMonitoringInstance(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/unlink-monitoring-instance", strings.NewReader(`{"monitoring_instance_id":" mi_001 ","note":" rotated "}`))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -119,8 +119,8 @@ func TestVPSUnlinkNodeEndsActiveLink(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
 	}
-	if repo.unlinkNodeVPSID != "vps_001" || repo.unlinkNodeInput.NodeID != "nd_001" || repo.unlinkNodeInput.Note != "rotated" {
-		t.Fatalf("unlink input = vps:%q input:%#v, want normalized values", repo.unlinkNodeVPSID, repo.unlinkNodeInput)
+	if repo.unlinkMonitoringInstanceVPSID != "vps_001" || repo.unlinkMonitoringInstanceInput.MonitoringInstanceID != "mi_001" || repo.unlinkMonitoringInstanceInput.Note != "rotated" {
+		t.Fatalf("unlink input = vps:%q input:%#v, want normalized values", repo.unlinkMonitoringInstanceVPSID, repo.unlinkMonitoringInstanceInput)
 	}
 	var body assetlinks.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
@@ -131,20 +131,20 @@ func TestVPSUnlinkNodeEndsActiveLink(t *testing.T) {
 	}
 }
 
-func TestVPSNodesListsActiveNodeSummaries(t *testing.T) {
+func TestVPSMonitoringInstancesListsActiveMonitoringInstanceSummaries(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 16, 0, 0, 0, time.UTC)
-	repo := &fakeAssetLinkRepository{listNodesForVPSResult: []assetlinks.NodeSummary{{
-		NodeID:                     "nd_001",
-		DisplayName:                "Tokyo Node",
-		Provider:                   "Node Hint",
+	repo := &fakeAssetLinkRepository{listMonitoringInstancesForVPSResult: []assetlinks.MonitoringInstanceSummary{{
+		MonitoringInstanceID:       "mi_001",
+		DisplayName:                "Tokyo MonitoringInstance",
+		Provider:                   "MonitoringInstance Hint",
 		MonitoringStatus:           "启用",
 		CurrentHealthStatus:        "关注",
 		CurrentActiveIncidentCount: 1,
 		LinkedAt:                   now,
 	}}}
 
-	handler := handlers.VPSNodes(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/nodes", nil)
+	handler := handlers.VPSMonitoringInstances(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/monitoring-instances", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -152,21 +152,21 @@ func TestVPSNodesListsActiveNodeSummaries(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
 	}
-	if repo.listNodesForVPSID != "vps_001" {
-		t.Fatalf("list vps id = %q, want vps_001", repo.listNodesForVPSID)
+	if repo.listMonitoringInstancesForVPSID != "vps_001" {
+		t.Fatalf("list vps id = %q, want vps_001", repo.listMonitoringInstancesForVPSID)
 	}
-	var body []assetlinks.NodeSummary
+	var body []assetlinks.MonitoringInstanceSummary
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if len(body) != 1 || body[0].NodeID != "nd_001" || body[0].CurrentHealthStatus != "关注" {
-		t.Fatalf("body = %#v, want active node summary", body)
+	if len(body) != 1 || body[0].MonitoringInstanceID != "mi_001" || body[0].CurrentHealthStatus != "关注" {
+		t.Fatalf("body = %#v, want active monitoringInstance summary", body)
 	}
 }
 
-func TestNodeVPSListsActiveVPSSummaries(t *testing.T) {
+func TestMonitoringInstanceVPSListsActiveVPSSummaries(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 16, 0, 0, 0, time.UTC)
-	repo := &fakeAssetLinkRepository{listVPSForNodeResult: []assetlinks.VPSSummary{{
+	repo := &fakeAssetLinkRepository{listVPSForMonitoringInstanceResult: []assetlinks.VPSSummary{{
 		VPSID:           "vps_001",
 		DisplayName:     "Tokyo VPS",
 		ProviderName:    "Asset Provider",
@@ -176,8 +176,8 @@ func TestNodeVPSListsActiveVPSSummaries(t *testing.T) {
 		LinkedAt:        now,
 	}}}
 
-	handler := handlers.NodeVPS(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/vps", nil)
+	handler := handlers.MonitoringInstanceVPS(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/vps", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -185,8 +185,8 @@ func TestNodeVPSListsActiveVPSSummaries(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
 	}
-	if repo.listVPSForNodeID != "nd_001" {
-		t.Fatalf("list node id = %q, want nd_001", repo.listVPSForNodeID)
+	if repo.listVPSForMonitoringInstanceID != "mi_001" {
+		t.Fatalf("list monitoringInstance id = %q, want mi_001", repo.listVPSForMonitoringInstanceID)
 	}
 	var body []assetlinks.VPSSummary
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
@@ -205,9 +205,9 @@ func TestAssetLinkHandlersRejectInvalidInput(t *testing.T) {
 		path    string
 		body    string
 	}{
-		{name: "link blank node", handler: handlers.VPSLinkNode(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/link-node", body: `{"node_id":" "}`},
-		{name: "unlink blank node", handler: handlers.VPSUnlinkNode(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/unlink-node", body: `{"node_id":" "}`},
-		{name: "link unknown field", handler: handlers.VPSLinkNode(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/link-node", body: `{"node_id":"nd_001","extra":true}`},
+		{name: "link blank monitoringInstance", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", body: `{"monitoring_instance_id":" "}`},
+		{name: "unlink blank monitoringInstance", handler: handlers.VPSUnlinkMonitoringInstance(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", body: `{"monitoring_instance_id":" "}`},
+		{name: "link unknown field", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", body: `{"monitoring_instance_id":"mi_001","extra":true}`},
 	}
 
 	for _, tt := range tests {
@@ -233,11 +233,11 @@ func TestAssetLinkHandlersMapDomainErrors(t *testing.T) {
 		body    string
 		want    int
 	}{
-		{name: "link conflict", handler: handlers.VPSLinkNode(&fakeAssetLinkRepository{linkNodeErr: assetlinks.ErrVPSNodeLinkConflict}), method: http.MethodPost, path: "/api/vps/vps_001/link-node", body: `{"node_id":"nd_001"}`, want: http.StatusConflict},
-		{name: "link missing vps or node", handler: handlers.VPSLinkNode(&fakeAssetLinkRepository{linkNodeErr: assetlinks.ErrVPSNodeLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/link-node", body: `{"node_id":"nd_001"}`, want: http.StatusNotFound},
-		{name: "unlink missing active link", handler: handlers.VPSUnlinkNode(&fakeAssetLinkRepository{unlinkNodeErr: assetlinks.ErrVPSNodeLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/unlink-node", body: `{"node_id":"nd_001"}`, want: http.StatusNotFound},
-		{name: "list nodes repo failure", handler: handlers.VPSNodes(&fakeAssetLinkRepository{listNodesForVPSErr: errors.New("query failed")}), method: http.MethodGet, path: "/api/vps/vps_001/nodes", want: http.StatusInternalServerError},
-		{name: "list vps repo failure", handler: handlers.NodeVPS(&fakeAssetLinkRepository{listVPSForNodeErr: errors.New("query failed")}), method: http.MethodGet, path: "/api/nodes/nd_001/vps", want: http.StatusInternalServerError},
+		{name: "link conflict", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{linkMonitoringInstanceErr: assetlinks.ErrVPSMonitoringInstanceLinkConflict}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusConflict},
+		{name: "link missing vps or monitoring instance", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{linkMonitoringInstanceErr: assetlinks.ErrVPSMonitoringInstanceLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusNotFound},
+		{name: "unlink missing active link", handler: handlers.VPSUnlinkMonitoringInstance(&fakeAssetLinkRepository{unlinkMonitoringInstanceErr: assetlinks.ErrVPSMonitoringInstanceLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusNotFound},
+		{name: "list monitoringInstances repo failure", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{listMonitoringInstancesForVPSErr: errors.New("query failed")}), method: http.MethodGet, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusInternalServerError},
+		{name: "list vps repo failure", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{listVPSForMonitoringInstanceErr: errors.New("query failed")}), method: http.MethodGet, path: "/api/monitoring-instances/mi_001/vps", want: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {
@@ -262,10 +262,10 @@ func TestAssetLinkHandlersRejectWrongMethodsAndMalformedPaths(t *testing.T) {
 		path    string
 		want    int
 	}{
-		{name: "vps nodes wrong method", handler: handlers.VPSNodes(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/nodes", want: http.StatusMethodNotAllowed},
-		{name: "node vps wrong method", handler: handlers.NodeVPS(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/nodes/nd_001/vps", want: http.StatusMethodNotAllowed},
-		{name: "malformed vps path", handler: handlers.VPSLinkNode(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/link-node/extra", want: http.StatusNotFound},
-		{name: "malformed node path", handler: handlers.NodeVPS(&fakeAssetLinkRepository{}), method: http.MethodGet, path: "/api/nodes/nd_001/vps/extra", want: http.StatusNotFound},
+		{name: "vps monitoringInstances wrong method", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusMethodNotAllowed},
+		{name: "monitoringInstance vps wrong method", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/monitoring-instances/mi_001/vps", want: http.StatusMethodNotAllowed},
+		{name: "malformed vps path", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance/extra", want: http.StatusNotFound},
+		{name: "malformed monitoringInstance path", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{}), method: http.MethodGet, path: "/api/monitoring-instances/mi_001/vps/extra", want: http.StatusNotFound},
 	}
 
 	for _, tt := range tests {

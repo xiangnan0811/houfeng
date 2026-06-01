@@ -33,8 +33,8 @@ func (f *fakeClient) Enroll(_ context.Context, request agentapi.EnrollmentReques
 	f.enrollCalls++
 	f.lastEnroll = request
 	response := f.enrollResponse
-	if response.NodeID == "" {
-		response.NodeID = "node-123"
+	if response.MonitoringInstanceID == "" {
+		response.MonitoringInstanceID = "monitoringInstance-123"
 	}
 	if response.Status == "" {
 		response.Status = "accepted"
@@ -81,13 +81,13 @@ func (staticTokenSource) Token(context.Context) (string, error) {
 }
 
 type syncCredentialTokenSource struct {
-	enrollmentToken string
-	nodeID          string
-	syncToken       string
-	hasCredentials  bool
-	loadErr         error
-	saveErr         error
-	saveCalls       int
+	enrollmentToken      string
+	monitoringInstanceID string
+	syncToken            string
+	hasCredentials       bool
+	loadErr              error
+	saveErr              error
+	saveCalls            int
 }
 
 func (s *syncCredentialTokenSource) Token(context.Context) (string, error) {
@@ -101,15 +101,15 @@ func (s *syncCredentialTokenSource) SyncCredentials(context.Context) (string, st
 	if s.loadErr != nil {
 		return "", "", false, s.loadErr
 	}
-	return s.nodeID, s.syncToken, s.hasCredentials, nil
+	return s.monitoringInstanceID, s.syncToken, s.hasCredentials, nil
 }
 
-func (s *syncCredentialTokenSource) SaveSyncCredentials(_ context.Context, nodeID, syncToken string) error {
+func (s *syncCredentialTokenSource) SaveSyncCredentials(_ context.Context, monitoringInstanceID, syncToken string) error {
 	s.saveCalls++
 	if s.saveErr != nil {
 		return s.saveErr
 	}
-	s.nodeID = nodeID
+	s.monitoringInstanceID = monitoringInstanceID
 	s.syncToken = syncToken
 	s.hasCredentials = true
 	return nil
@@ -269,8 +269,8 @@ func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
 	if client.lastEnroll.Fingerprint != "fp-001" {
 		t.Fatalf("Enroll fingerprint = %q, want %q", client.lastEnroll.Fingerprint, "fp-001")
 	}
-	if client.lastSync.NodeID != "node-123" {
-		t.Fatalf("Sync node_id = %q, want %q", client.lastSync.NodeID, "node-123")
+	if client.lastSync.MonitoringInstanceID != "monitoringInstance-123" {
+		t.Fatalf("Sync monitoring_instance_id = %q, want %q", client.lastSync.MonitoringInstanceID, "monitoringInstance-123")
 	}
 	if client.lastSync.SyncToken != "sync-token-001" {
 		t.Fatalf("Sync sync_token = %q, want %q", client.lastSync.SyncToken, "sync-token-001")
@@ -290,9 +290,9 @@ func TestRuntimeUsesPersistedSyncCredentialsWithoutReusingEnrollmentToken(t *tes
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{}
 	tokenSource := &syncCredentialTokenSource{
-		nodeID:         "node-456",
-		syncToken:      "sync-token-persisted",
-		hasCredentials: true,
+		monitoringInstanceID: "monitoringInstance-456",
+		syncToken:            "sync-token-persisted",
+		hasCredentials:       true,
 	}
 	rt := agentruntime.NewWithDeps(cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
 
@@ -308,8 +308,8 @@ func TestRuntimeUsesPersistedSyncCredentialsWithoutReusingEnrollmentToken(t *tes
 	if client.syncCalls == 0 {
 		t.Fatal("Sync() was not called")
 	}
-	if client.lastSync.NodeID != "node-456" {
-		t.Fatalf("Sync node_id = %q, want %q", client.lastSync.NodeID, "node-456")
+	if client.lastSync.MonitoringInstanceID != "monitoringInstance-456" {
+		t.Fatalf("Sync monitoring_instance_id = %q, want %q", client.lastSync.MonitoringInstanceID, "monitoringInstance-456")
 	}
 	if client.lastSync.SyncToken != "sync-token-persisted" {
 		t.Fatalf("Sync sync_token = %q, want %q", client.lastSync.SyncToken, "sync-token-persisted")
@@ -340,8 +340,8 @@ func TestRuntimePersistsSyncCredentialsAfterEnrollment(t *testing.T) {
 	if tokenSource.saveCalls != 1 {
 		t.Fatalf("SaveSyncCredentials() calls = %d, want 1", tokenSource.saveCalls)
 	}
-	if tokenSource.nodeID != "node-123" {
-		t.Fatalf("persisted nodeID = %q, want %q", tokenSource.nodeID, "node-123")
+	if tokenSource.monitoringInstanceID != "monitoringInstance-123" {
+		t.Fatalf("persisted monitoringInstanceID = %q, want %q", tokenSource.monitoringInstanceID, "monitoringInstance-123")
 	}
 	if tokenSource.syncToken != "sync-token-001" {
 		t.Fatalf("persisted syncToken = %q, want %q", tokenSource.syncToken, "sync-token-001")
@@ -371,9 +371,9 @@ func TestRuntimeReturnsEnrollmentNotBoundErrorWithoutStartingSyncLoop(t *testing
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
 		enrollResponse: agentapi.EnrollmentResponse{
-			NodeID:        "node-123",
-			Status:        "accepted",
-			BindingStatus: agentapi.BindingStatusPendingConfirmation,
+			MonitoringInstanceID: "monitoringInstance-123",
+			Status:               "accepted",
+			BindingStatus:        agentapi.BindingStatusPendingConfirmation,
 		},
 	}
 	rt := agentruntime.NewWithDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
@@ -406,10 +406,10 @@ func TestRuntimeReturnsMissingSyncTokenErrorForBoundEnrollment(t *testing.T) {
 	client := &fakeClient{
 		forceEmptySyncToken: true,
 		enrollResponse: agentapi.EnrollmentResponse{
-			NodeID:        "node-123",
-			Status:        "accepted",
-			BindingStatus: agentapi.BindingStatusBound,
-			SyncToken:     "",
+			MonitoringInstanceID: "monitoringInstance-123",
+			Status:               "accepted",
+			BindingStatus:        agentapi.BindingStatusBound,
+			SyncToken:            "",
 		},
 	}
 	rt := agentruntime.NewWithDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
@@ -716,9 +716,9 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 	path := t.TempDir() + "/buffer.json"
 	seedStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 	seeded := agentapi.SyncRequest{
-		NodeID:    "node-123",
-		SyncToken: "sync-token-001",
-		Heartbeats: []agentapi.NodeHeartbeat{{
+		MonitoringInstanceID: "monitoringInstance-123",
+		SyncToken:            "sync-token-001",
+		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
 			ObservedAt:   time.Now().UTC().Add(-time.Minute),
 			AgentVersion: "dev",
 			Fingerprint:  "fp-001",

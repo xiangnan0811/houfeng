@@ -55,7 +55,7 @@ const vps = {
   importance: 'normal',
   labels: ['edge'],
   note: '',
-  active_node_link_count: 1,
+  active_monitoring_instance_link_count: 1,
   created_at: '2026-05-09T08:00:00Z',
   updated_at: '2026-05-09T08:00:00Z',
   archived_at: null,
@@ -79,7 +79,7 @@ const cancelVPS = {
   region: 'Seoul',
   city: 'Seoul',
   renewal_decision: 'cancel',
-  active_node_link_count: 0,
+  active_monitoring_instance_link_count: 0,
 }
 
 describe('AssetDecisionsPage', () => {

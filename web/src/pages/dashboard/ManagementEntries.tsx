@@ -4,8 +4,8 @@ import type { DashboardOverview } from '../../lib/types'
 import { DASHBOARD_LINKS } from './dashboardLinks'
 import {
   eventManagementStat,
-  nodeEntryLink,
-  nodeManagementStat,
+  monitoringEntryLink,
+  monitoringManagementStat,
   notificationSummary,
   targetEntryLink,
   targetManagementStat,
@@ -20,9 +20,9 @@ type ManagementEntriesProps = {
 export function ManagementEntries({ overview, showEventLink = true }: ManagementEntriesProps) {
   const entries: ManagementEntry[] = [
     {
-      title: '节点',
-      stat: nodeManagementStat(overview),
-      to: nodeEntryLink(overview),
+      title: '监控实例',
+      stat: monitoringManagementStat(overview),
+      to: monitoringEntryLink(overview),
     },
     {
       title: '目标',

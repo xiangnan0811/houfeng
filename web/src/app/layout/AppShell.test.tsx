@@ -28,17 +28,17 @@ function mockJSONResponse(body: unknown, status = 200) {
 function baseOverview(overrides: Record<string, unknown> = {}) {
   return {
     snapshot_generated_at: '2026-04-25T08:30:00Z',
-    total_node_count: 5,
+    total_monitoring_instance_count: 5,
     total_target_count: 4,
-    abnormal_node_count: 0,
+    abnormal_monitoring_instance_count: 0,
     abnormal_target_count: 0,
-    severe_node_count: 0,
+    severe_monitoring_instance_count: 0,
     severe_target_count: 0,
-    maintenance_node_count: 0,
+    maintenance_monitoring_instance_count: 0,
     maintenance_target_count: 0,
-    pending_onboarding_node_count: 0,
-    paused_node_count: 0,
-    retired_node_count: 0,
+    pending_onboarding_monitoring_instance_count: 0,
+    paused_monitoring_instance_count: 0,
+    retired_monitoring_instance_count: 0,
     paused_target_count: 0,
     archived_target_count: 0,
     recent_new_incident_count: 0,
@@ -61,7 +61,7 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
       cost_by_currency: [],
     },
     recent_events: [],
-    abnormal_nodes: [],
+    abnormal_monitoring_instances: [],
     abnormal_targets: [],
     ...overrides,
   }
@@ -94,8 +94,8 @@ describe('AppShell', () => {
     expect(screen.getByText(PRODUCT_NAME_ZH)).toBeInTheDocument()
     // New sidebar uses hardcoded nav sections
     expect(screen.getByRole('link', { name: '工作台' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '节点' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '入口' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '监控' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '入口探测' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '事件' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
     expect(screen.getByText('admin')).toBeInTheDocument()
@@ -134,9 +134,9 @@ describe('AppShell', () => {
       vi.fn().mockResolvedValue(
         mockJSONResponse(
           baseOverview({
-            abnormal_node_count: 3,
+            abnormal_monitoring_instance_count: 3,
             abnormal_target_count: 2,
-            severe_node_count: 1,
+            severe_monitoring_instance_count: 1,
             severe_target_count: 1,
           }),
         ),
@@ -158,7 +158,7 @@ describe('AppShell', () => {
       vi.fn().mockResolvedValue(
         mockJSONResponse(
           baseOverview({
-            abnormal_node_count: 1,
+            abnormal_monitoring_instance_count: 1,
             abnormal_target_count: 2,
           }),
         ),
@@ -180,9 +180,9 @@ describe('AppShell', () => {
       vi.fn().mockResolvedValue(
         mockJSONResponse(
           baseOverview({
-            abnormal_node_count: 3,
+            abnormal_monitoring_instance_count: 3,
             abnormal_target_count: 2,
-            severe_node_count: 1,
+            severe_monitoring_instance_count: 1,
           }),
         ),
       ),
@@ -205,7 +205,7 @@ describe('AppShell', () => {
       .mockResolvedValueOnce(
         mockJSONResponse(
           baseOverview({
-            abnormal_node_count: 3,
+            abnormal_monitoring_instance_count: 3,
             abnormal_target_count: 2,
           }),
         ),
@@ -236,7 +236,7 @@ describe('AppShell', () => {
       vi.fn().mockResolvedValue(
         mockJSONResponse(
           baseOverview({
-            abnormal_node_count: 1,
+            abnormal_monitoring_instance_count: 1,
             abnormal_target_count: 0,
           }),
         ),

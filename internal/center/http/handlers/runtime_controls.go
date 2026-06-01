@@ -6,20 +6,20 @@ import (
 	"net/http"
 	"strings"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/targets"
 )
 
-type nodeRuntimeControlRepository interface {
-	SetNodeMonitoringMaintenance(context.Context, string) (nodes.Record, error)
-	PauseNodeMonitoring(context.Context, string) (nodes.Record, error)
-	ResumeNodeMonitoring(context.Context, string) (nodes.Record, error)
+type monitoringInstanceRuntimeControlRepository interface {
+	SetMonitoringInstanceMonitoringMaintenance(context.Context, string) (monitoringinstances.Record, error)
+	PauseMonitoringInstanceMonitoring(context.Context, string) (monitoringinstances.Record, error)
+	ResumeMonitoringInstanceMonitoring(context.Context, string) (monitoringinstances.Record, error)
 }
 
-type nodeLifecycleControlRepository interface {
-	RetireNode(context.Context, string) (nodes.Record, error)
-	RestoreRetiredNodeToObserving(context.Context, string) (nodes.Record, error)
+type monitoringInstanceLifecycleControlRepository interface {
+	RetireMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
+	RestoreRetiredMonitoringInstanceToObserving(context.Context, string) (monitoringinstances.Record, error)
 }
 
 type targetRuntimeControlRepository interface {
@@ -30,40 +30,40 @@ type targetRuntimeControlRepository interface {
 	RestoreArchivedTargetToPaused(context.Context, string) (targets.TargetRecord, error)
 }
 
-func NodeRuntimeControls(repo nodeRuntimeControlRepository) http.Handler {
+func MonitoringInstanceRuntimeControls(repo monitoringInstanceRuntimeControlRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
-		nodeID, action := nodeRuntimeControlAction(r.URL.Path)
-		if nodeID == "" || action == "" {
-			writeError(w, http.StatusNotFound, "node not found")
+		monitoringInstanceID, action := monitoringInstanceRuntimeControlAction(r.URL.Path)
+		if monitoringInstanceID == "" || action == "" {
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
 
 		var (
-			record nodes.Record
+			record monitoringinstances.Record
 			err    error
 		)
 		switch action {
 		case "enter-maintenance":
-			record, err = repo.SetNodeMonitoringMaintenance(r.Context(), nodeID)
+			record, err = repo.SetMonitoringInstanceMonitoringMaintenance(r.Context(), monitoringInstanceID)
 		case "exit-maintenance", "resume":
-			record, err = repo.ResumeNodeMonitoring(r.Context(), nodeID)
+			record, err = repo.ResumeMonitoringInstanceMonitoring(r.Context(), monitoringInstanceID)
 		case "pause":
-			record, err = repo.PauseNodeMonitoring(r.Context(), nodeID)
+			record, err = repo.PauseMonitoringInstanceMonitoring(r.Context(), monitoringInstanceID)
 		default:
-			writeError(w, http.StatusNotFound, "node not found")
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
 
 		switch {
-		case errors.Is(err, nodes.ErrNodeNotFound):
-			writeError(w, http.StatusNotFound, "node not found")
+		case errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound):
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
-		case errors.Is(err, store.ErrInvalidNodeRuntimeTransition):
+		case errors.Is(err, store.ErrInvalidMonitoringInstanceRuntimeTransition):
 			writeError(w, http.StatusConflict, "invalid runtime transition")
 			return
 		case err != nil:
@@ -75,38 +75,38 @@ func NodeRuntimeControls(repo nodeRuntimeControlRepository) http.Handler {
 	})
 }
 
-func NodeLifecycleControls(repo nodeLifecycleControlRepository) http.Handler {
+func MonitoringInstanceLifecycleControls(repo monitoringInstanceLifecycleControlRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
-		nodeID, action := nodeLifecycleControlAction(r.URL.Path)
-		if nodeID == "" || action == "" {
-			writeError(w, http.StatusNotFound, "node not found")
+		monitoringInstanceID, action := monitoringInstanceLifecycleControlAction(r.URL.Path)
+		if monitoringInstanceID == "" || action == "" {
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
 
 		var (
-			record nodes.Record
+			record monitoringinstances.Record
 			err    error
 		)
 		switch action {
 		case "retire":
-			record, err = repo.RetireNode(r.Context(), nodeID)
+			record, err = repo.RetireMonitoringInstance(r.Context(), monitoringInstanceID)
 		case "restore-to-observing":
-			record, err = repo.RestoreRetiredNodeToObserving(r.Context(), nodeID)
+			record, err = repo.RestoreRetiredMonitoringInstanceToObserving(r.Context(), monitoringInstanceID)
 		default:
-			writeError(w, http.StatusNotFound, "node not found")
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
 
 		switch {
-		case errors.Is(err, nodes.ErrNodeNotFound):
-			writeError(w, http.StatusNotFound, "node not found")
+		case errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound):
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
-		case errors.Is(err, store.ErrInvalidNodeLifecycleTransition):
+		case errors.Is(err, store.ErrInvalidMonitoringInstanceLifecycleTransition):
 			writeError(w, http.StatusConflict, "invalid lifecycle transition")
 			return
 		case err != nil:
@@ -167,8 +167,8 @@ func TargetRuntimeControls(repo targetRuntimeControlRepository) http.Handler {
 	})
 }
 
-func nodeLifecycleControlAction(path string) (string, string) {
-	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/nodes/"), "/")
+func monitoringInstanceLifecycleControlAction(path string) (string, string) {
+	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/monitoring-instances/"), "/")
 	if trimmed == "" {
 		return "", ""
 	}
@@ -180,8 +180,8 @@ func nodeLifecycleControlAction(path string) (string, string) {
 	return segments[0], segments[2]
 }
 
-func nodeRuntimeControlAction(path string) (string, string) {
-	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/nodes/"), "/")
+func monitoringInstanceRuntimeControlAction(path string) (string, string) {
+	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/monitoring-instances/"), "/")
 	if trimmed == "" {
 		return "", ""
 	}

@@ -75,15 +75,15 @@ func TestPostgresIncidentRepositoryListActiveIncidentsBuildsOptionalFilters(t *t
 	}{
 		{
 			name:      "object type",
-			filter:    IncidentsFilter{ObjectType: incidents.ObjectTypeNode, Limit: 25},
+			filter:    IncidentsFilter{ObjectType: incidents.ObjectTypeMonitoringInstance, Limit: 25},
 			wantParts: []string{"object_type = $1", "status = $2"},
-			wantArgs:  []any{string(incidents.ObjectTypeNode), incidents.IncidentStatusActive, 25},
+			wantArgs:  []any{string(incidents.ObjectTypeMonitoringInstance), incidents.IncidentStatusActive, 25},
 		},
 		{
 			name:      "object id",
-			filter:    IncidentsFilter{ObjectID: "nd_001", Limit: 25},
+			filter:    IncidentsFilter{ObjectID: "mi_001", Limit: 25},
 			wantParts: []string{"object_id = $1", "status = $2"},
-			wantArgs:  []any{"nd_001", incidents.IncidentStatusActive, 25},
+			wantArgs:  []any{"mi_001", incidents.IncidentStatusActive, 25},
 		},
 		{
 			name:      "severity",
@@ -104,9 +104,9 @@ func TestPostgresIncidentRepositoryListActiveIncidentsBuildsOptionalFilters(t *t
 		},
 		{
 			name:      "include resolved drops status filter",
-			filter:    IncidentsFilter{ObjectID: "nd_001", IncludeResolved: true, Limit: 25},
+			filter:    IncidentsFilter{ObjectID: "mi_001", IncludeResolved: true, Limit: 25},
 			wantParts: []string{"object_id = $1"},
-			wantArgs:  []any{"nd_001", 25},
+			wantArgs:  []any{"mi_001", 25},
 		},
 	}
 
@@ -160,9 +160,9 @@ func TestPostgresIncidentRepositoryListActiveIncidentsScansRows(t *testing.T) {
 			}},
 			{scan: func(dest ...any) error {
 				*(dest[0].(*string)) = "inc_001"
-				*(dest[1].(*incidents.IncidentClass)) = incidents.IncidentNodeDiskPressure
-				*(dest[2].(*incidents.ObjectType)) = incidents.ObjectTypeNode
-				*(dest[3].(*string)) = "nd_001"
+				*(dest[1].(*incidents.IncidentClass)) = incidents.IncidentMonitoringInstanceDiskPressure
+				*(dest[2].(*incidents.ObjectType)) = incidents.ObjectTypeMonitoringInstance
+				*(dest[3].(*string)) = "mi_001"
 				*(dest[4].(*incidents.Severity)) = incidents.SeverityAlert
 				*(dest[5].(*time.Time)) = now.Add(-time.Minute)
 				*(dest[6].(*time.Time)) = now
@@ -182,12 +182,12 @@ func TestPostgresIncidentRepositoryListActiveIncidentsScansRows(t *testing.T) {
 	if records[0].IncidentID != "inc_002" || records[0].SourceSummary != "HTTP 500" {
 		t.Fatalf("records[0] = %#v, want first row decoded", records[0])
 	}
-	if records[1].IncidentID != "inc_001" || records[1].ObjectID != "nd_001" {
+	if records[1].IncidentID != "inc_001" || records[1].ObjectID != "mi_001" {
 		t.Fatalf("records[1] = %#v, want second row decoded", records[1])
 	}
 }
 
-func TestPostgresIncidentRepositoryAppliesMutationAndProjectsNodeSummary(t *testing.T) {
+func TestPostgresIncidentRepositoryAppliesMutationAndProjectsMonitoringInstanceSummary(t *testing.T) {
 	tx := &fakeIncidentTx{
 		summaryCount:    2,
 		summarySeverity: string(incidents.SeverityAlert),
@@ -198,13 +198,13 @@ func TestPostgresIncidentRepositoryAppliesMutationAndProjectsNodeSummary(t *test
 	sentAt := now.Add(time.Second)
 
 	err := repo.ApplyIncidentMutation(context.Background(), incidents.IncidentMutation{
-		ObjectType: incidents.ObjectTypeNode,
-		ObjectID:   "nd_001",
+		ObjectType: incidents.ObjectTypeMonitoringInstance,
+		ObjectID:   "mi_001",
 		Active: []incidents.IncidentRecord{{
-			IncidentID:      "inc_node_nd_001_node_disk_pressure",
-			ObjectType:      incidents.ObjectTypeNode,
-			ObjectID:        "nd_001",
-			IncidentClass:   incidents.IncidentNodeDiskPressure,
+			IncidentID:      "inc_monitoring_instance_mi_001_monitoring_instance_disk_pressure",
+			ObjectType:      incidents.ObjectTypeMonitoringInstance,
+			ObjectID:        "mi_001",
+			IncidentClass:   incidents.IncidentMonitoringInstanceDiskPressure,
 			Severity:        incidents.SeverityAlert,
 			StartedAt:       now,
 			LastEvaluatedAt: now,
@@ -212,19 +212,19 @@ func TestPostgresIncidentRepositoryAppliesMutationAndProjectsNodeSummary(t *test
 			SourceSummary:   "磁盘使用率 92.0%",
 		}},
 		Events: []incidents.StateChangeEventRecord{{
-			IncidentID:    "inc_node_nd_001_node_disk_pressure",
-			IncidentClass: incidents.IncidentNodeDiskPressure,
-			ObjectType:    incidents.ObjectTypeNode,
-			ObjectID:      "nd_001",
+			IncidentID:    "inc_monitoring_instance_mi_001_monitoring_instance_disk_pressure",
+			IncidentClass: incidents.IncidentMonitoringInstanceDiskPressure,
+			ObjectType:    incidents.ObjectTypeMonitoringInstance,
+			ObjectID:      "mi_001",
 			EventType:     incidents.EventIncidentStarted,
 			Severity:      incidents.SeverityAlert,
 			Summary:       "磁盘使用率 92.0%",
 			CreatedAt:     now,
 		}},
 		Notifications: []incidents.NotificationRecordWrite{{
-			IncidentID:     "inc_node_nd_001_node_disk_pressure",
-			ObjectType:     incidents.ObjectTypeNode,
-			ObjectID:       "nd_001",
+			IncidentID:     "inc_monitoring_instance_mi_001_monitoring_instance_disk_pressure",
+			ObjectType:     incidents.ObjectTypeMonitoringInstance,
+			ObjectID:       "mi_001",
 			Channel:        incidents.NotificationChannelTelegram,
 			DeliveryStatus: incidents.DeliveryStatusSent,
 			Summary:        "磁盘使用率 92.0%",
@@ -241,7 +241,7 @@ func TestPostgresIncidentRepositoryAppliesMutationAndProjectsNodeSummary(t *test
 	assertContainsSQL(t, tx.execSQL, "insert into active_incidents")
 	assertContainsSQL(t, tx.execSQL, "insert into state_change_events")
 	assertContainsSQL(t, tx.execSQL, "insert into notification_records")
-	assertContainsSQL(t, tx.execSQL, "update nodes")
+	assertContainsSQL(t, tx.execSQL, "update monitoring_instances")
 }
 
 func TestPostgresIncidentRepositoryProjectsNormalSummaryWhenActiveSetIsEmpty(t *testing.T) {
@@ -268,13 +268,13 @@ func TestPostgresIncidentRepositoryFailsWhenObjectSummaryUpdateTouchesNoRows(t *
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 
 	err := repo.ApplyIncidentMutation(context.Background(), incidents.IncidentMutation{
-		ObjectType: incidents.ObjectTypeNode,
-		ObjectID:   "nd_missing",
+		ObjectType: incidents.ObjectTypeMonitoringInstance,
+		ObjectID:   "mi_missing",
 		Active: []incidents.IncidentRecord{{
-			IncidentID:      "inc_node_nd_missing_node_disk_pressure",
-			ObjectType:      incidents.ObjectTypeNode,
-			ObjectID:        "nd_missing",
-			IncidentClass:   incidents.IncidentNodeDiskPressure,
+			IncidentID:      "inc_monitoring_instance_mi_missing_monitoring_instance_disk_pressure",
+			ObjectType:      incidents.ObjectTypeMonitoringInstance,
+			ObjectID:        "mi_missing",
+			IncidentClass:   incidents.IncidentMonitoringInstanceDiskPressure,
 			Severity:        incidents.SeverityAlert,
 			StartedAt:       now,
 			LastEvaluatedAt: now,
@@ -302,7 +302,7 @@ type fakeIncidentTx struct {
 
 func (f *fakeIncidentTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	f.execSQL = append(f.execSQL, sql)
-	if containsSQL([]string{sql}, "update nodes") || containsSQL([]string{sql}, "update targets") {
+	if containsSQL([]string{sql}, "update monitoring_instances") || containsSQL([]string{sql}, "update targets") {
 		rows := f.updateRows
 		if rows == 0 {
 			rows = 1

@@ -7,16 +7,16 @@ import { PageState } from './PageState'
 import { StatusBadge } from './StatusBadge'
 
 const INCIDENT_CLASS_LABELS: Record<string, string> = {
-  node_heartbeat_missing: '节点心跳缺失',
-  node_disk_pressure: '节点磁盘压力',
-  node_inode_pressure: '节点 inode 压力',
-  node_resource_pressure: '节点资源压力',
+  monitoring_instance_heartbeat_missing: '监控实例心跳缺失',
+  monitoring_instance_disk_pressure: '监控实例磁盘压力',
+  monitoring_instance_inode_pressure: '监控实例 inode 压力',
+  monitoring_instance_resource_pressure: '监控实例资源压力',
   target_probe_failure: '目标探测失败',
   target_tls_expiry: '目标 TLS 即将过期',
 }
 
 const OBJECT_TYPE_LABELS = {
-  node: '节点',
+  monitoring_instance: '监控实例',
   target: '目标',
 } as const
 

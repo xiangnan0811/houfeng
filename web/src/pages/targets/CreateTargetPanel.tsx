@@ -31,7 +31,7 @@ export function CreateTargetPanel({
       <p className="target-create-drawer__eyebrow">目标创建</p>
       <h3 className="target-create-drawer__title">创建目标</h3>
       <p className="target-create-drawer__description">
-        填写入口、执行节点标签与运行状态，创建后进入目标详情页继续配置 ProbeItem。
+        填写入口、执行监控实例标签与运行状态，创建后进入目标详情页继续配置 ProbeItem。
       </p>
       <form className="target-create-drawer__form" onSubmit={onSubmit}>
         <p>
@@ -90,11 +90,11 @@ export function CreateTargetPanel({
         </p>
         <p>
           <label>
-            执行节点标签
+            执行监控实例标签
             <input
-              name="executionNodeLabels"
-              value={form.executionNodeLabels}
-              onChange={(event) => onFieldChange('executionNodeLabels', event.target.value)}
+              name="executionMonitoringInstanceLabels"
+              value={form.executionMonitoringInstanceLabels}
+              onChange={(event) => onFieldChange('executionMonitoringInstanceLabels', event.target.value)}
             />
           </label>
         </p>

@@ -121,9 +121,9 @@ export function buildTargetsTableColumns({
         <span className="targets-table__status">
           <StatusBadge label={target.run_status} />
           <StatusBadge label={target.current_health_status} />
-          {target.execution_node_labels.length > 0 ? (
+          {target.execution_monitoring_instance_labels.length > 0 ? (
             <span className="targets-table__exec-labels">
-              {formatLabelList(target.execution_node_labels)}
+              {formatLabelList(target.execution_monitoring_instance_labels)}
             </span>
           ) : null}
         </span>

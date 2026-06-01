@@ -22,7 +22,7 @@ func TestFileStoreSyncsCreatedDirectoryParentsAndTarget(t *testing.T) {
 	defer func() { syncDir = oldSyncDir }()
 
 	store := NewFileStore(path, Options{MaxEntries: 10, MaxAge: time.Hour})
-	if _, err := store.Enqueue(context.Background(), agentapi.SyncRequest{NodeID: "nd_001", SyncToken: "sync-token-001"}); err != nil {
+	if _, err := store.Enqueue(context.Background(), agentapi.SyncRequest{MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001"}); err != nil {
 		t.Fatalf("Enqueue() error = %v", err)
 	}
 

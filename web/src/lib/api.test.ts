@@ -6,7 +6,7 @@ import {
   applyVPSCancellation,
   archiveTarget,
   createAssetDomain,
-  confirmNodeRebind,
+  confirmMonitoringInstanceRebind,
   createAssetService,
   createProbeItem,
   createProvider,
@@ -16,43 +16,43 @@ import {
   createVPSExperienceLog,
   createVPSService,
   deleteProbeItem,
-  enterNodeMaintenance,
+  enterMonitoringInstanceMaintenance,
   enterTargetMaintenance,
-  exitNodeMaintenance,
+  exitMonitoringInstanceMaintenance,
   exitTargetMaintenance,
   getDashboard,
-  getNodeOnboarding,
+  getMonitoringInstanceOnboarding,
   getProvider,
   getSettings,
   getSubscription,
   getVPSAsset,
   getVPSCancellationPreview,
   getVPSTimeline,
-  issueNodeInstallCommand,
-  linkVPSNode,
+  issueMonitoringInstanceInstallCommand,
+  linkVPSMonitoringInstance,
   listAssetDomains,
   listAssetServices,
   listVPSDomains,
   listVPSExperienceLogs,
   listProviders,
-  listNodes,
+  listMonitoringInstances,
   listEvents,
   listIncidents,
   listSubscriptions,
-  listNodeAssetContexts,
+  listMonitoringInstanceAssetContexts,
   listTargetAssetContexts,
-  pauseNodeMonitoring,
+  pauseMonitoringInstanceMonitoring,
   pauseTarget,
-  rejectPendingNodeBinding,
-  restoreRetiredNodeToObserving,
-  resetNodeBinding,
-  retireNode,
+  rejectPendingMonitoringInstanceBinding,
+  restoreRetiredMonitoringInstanceToObserving,
+  resetMonitoringInstanceBinding,
+  retireMonitoringInstance,
   restoreTargetToPaused,
-  resumeNodeMonitoring,
+  resumeMonitoringInstanceMonitoring,
   resumeTarget,
-  postNodeAction,
-  unlinkVPSNode,
-  updateNodeMetadata,
+  postMonitoringInstanceAction,
+  unlinkVPSMonitoringInstance,
+  updateMonitoringInstanceMetadata,
   updateProbeItem,
   updateProvider,
   updateSettings,
@@ -60,8 +60,8 @@ import {
   updateTargetMetadata,
   updateVPSAsset,
   listVPSAssets,
-  listVPSForNode,
-  listVPSNodes,
+  listVPSForMonitoringInstance,
+  listVPSMonitoringInstances,
   listVPSServices,
   createVPSDomain,
 } from './api'
@@ -77,7 +77,7 @@ import type {
   CreateTargetInput,
   CreateVPSAssetInput,
   CreateVPSExperienceLogInput,
-  NodeRecord,
+  MonitoringInstanceRecord,
   ProbeItemRecord,
   ProviderRecord,
   SettingsRecord,
@@ -85,14 +85,14 @@ import type {
   SubscriptionRecord,
   TargetRecord,
   AssetServiceListFilter,
-  UpdateNodeMetadataInput,
+  UpdateMonitoringInstanceMetadataInput,
   UpdateProbeItemInput,
   UpdateProviderInput,
   UpdateSubscriptionInput,
   UpdateTargetMetadataInput,
   VPSAssetRecord,
   VPSExperienceLogRecord,
-  VPSNodeLinkRecord,
+  VPSMonitoringInstanceLinkRecord,
   VPSTimeline,
 } from './types'
 import { appRoutes } from '../app/router'
@@ -149,7 +149,7 @@ const settingsResponseBody = {
     load5_critical: 8.0,
   },
   override_rules: {
-    node_labels: [
+    monitoring_instance_labels: [
       {
         label: 'edge',
         overrides: {
@@ -223,7 +223,7 @@ const settingsUpdateBody = {
     load5_critical: 8.0,
   },
   override_rules: {
-    node_labels: [
+    monitoring_instance_labels: [
       {
         label: 'edge',
         overrides: {
@@ -265,7 +265,7 @@ describe('api helpers', () => {
   it('surfaces plain-text non-JSON error bodies as ApiError messages', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(502, 'upstream unavailable')))
 
-    await expect(listNodes()).rejects.toMatchObject({
+    await expect(listMonitoringInstances()).rejects.toMatchObject({
       name: 'ApiError',
       status: 502,
       message: 'upstream unavailable',
@@ -277,30 +277,30 @@ describe('api helpers', () => {
       'fetch',
       vi
         .fn()
-        .mockResolvedValue(mockResponse(404, JSON.stringify({ error: 'node not found' }))),
+        .mockResolvedValue(mockResponse(404, JSON.stringify({ error: 'monitoring instance not found' }))),
     )
 
-    await expect(listNodes()).rejects.toMatchObject({
+    await expect(listMonitoringInstances()).rejects.toMatchObject({
       name: 'ApiError',
       status: 404,
-      message: 'node not found',
+      message: 'monitoring instance not found',
     })
   })
 
   it('loads dashboard overview from /api/dashboard', async () => {
     const responseBody = {
       snapshot_generated_at: '2026-04-25T08:30:00Z',
-      total_node_count: 5,
+      total_monitoring_instance_count: 5,
       total_target_count: 4,
-      abnormal_node_count: 1,
+      abnormal_monitoring_instance_count: 1,
       abnormal_target_count: 2,
-      severe_node_count: 0,
+      severe_monitoring_instance_count: 0,
       severe_target_count: 1,
-      maintenance_node_count: 1,
+      maintenance_monitoring_instance_count: 1,
       maintenance_target_count: 0,
-      pending_onboarding_node_count: 1,
-      paused_node_count: 1,
-      retired_node_count: 0,
+      pending_onboarding_monitoring_instance_count: 1,
+      paused_monitoring_instance_count: 1,
+      retired_monitoring_instance_count: 0,
       paused_target_count: 1,
       archived_target_count: 0,
       recent_new_incident_count: 3,
@@ -308,13 +308,13 @@ describe('api helpers', () => {
       group_summaries: [
         {
           group: 'production',
-          node_count: 3,
+          monitoring_instance_count: 3,
           target_count: 2,
-          abnormal_node_count: 1,
+          abnormal_monitoring_instance_count: 1,
           abnormal_target_count: 2,
-          severe_node_count: 0,
+          severe_monitoring_instance_count: 0,
           severe_target_count: 1,
-          maintenance_node_count: 1,
+          maintenance_monitoring_instance_count: 1,
           maintenance_target_count: 0,
         },
       ],
@@ -458,7 +458,7 @@ describe('api helpers', () => {
       importance: 'normal',
       labels: ['edge'],
       note: '',
-      active_node_link_count: 1,
+      active_monitoring_instance_link_count: 1,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
       archived_at: null,
@@ -487,7 +487,7 @@ describe('api helpers', () => {
       labels: ['edge'],
       note: '',
     } satisfies CreateVPSAssetInput
-    const detail = { ...vps, node_links: [] }
+    const detail = { ...vps, monitoring_instance_links: [] }
     const timeline = {
       vps_id: 'vps_001',
       renewal_decisions: [],
@@ -807,19 +807,19 @@ describe('api helpers', () => {
     })
   })
 
-  it('loads VPS link summaries from asset and node sides', async () => {
+  it('loads VPS link summaries from asset and monitoring instance sides', async () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '[]'))
     vi.stubGlobal('fetch', fetchMock)
 
-    await listVPSNodes('vps_001')
-    await listVPSForNode('nd_001')
+    await listVPSMonitoringInstances('vps_001')
+    await listVPSForMonitoringInstance('mi_001')
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/nodes', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/monitoring-instances', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/vps', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/vps', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -835,14 +835,14 @@ describe('api helpers', () => {
         lifecycle_status: 'active',
         usage_status: 'in_use',
         renewal_decision: 'cancel',
-        active_node_link_count: 1,
+        active_monitoring_instance_link_count: 1,
         ssh_port: 22,
         labels: [],
         created_at: '2026-05-30T08:00:00Z',
         updated_at: '2026-05-30T08:00:00Z',
       },
       subscriptions: [],
-      node_links: [],
+      monitoring_instance_links: [],
       services: [],
       domains: [],
       target_links: [],
@@ -861,8 +861,8 @@ describe('api helpers', () => {
       },
       steps: [],
     }
-    const nodeContexts = [{
-      node_id: 'nd_001',
+    const monitoringInstanceContexts = [{
+      monitoring_instance_id: 'mi_001',
       linked_vps_count: 1,
       cancellation_attention: true,
       summaries: [{
@@ -871,14 +871,14 @@ describe('api helpers', () => {
         lifecycle_status: 'cancelled',
         renewal_decision: 'cancel',
         subscription_state: 'expired',
-        message: '关联 VPS 已取消，Node 仍需确认状态。',
+        message: '关联 VPS 已取消，监控实例仍需确认状态。',
       }],
     }]
     const targetContexts = [{
       target_id: 'tg_001',
       linked_vps_count: 1,
       cancellation_attention: true,
-      summaries: nodeContexts[0].summaries,
+      summaries: monitoringInstanceContexts[0].summaries,
       service_ids: ['svc_001'],
       domain_ids: ['dom_001'],
     }]
@@ -887,20 +887,20 @@ describe('api helpers', () => {
       effective_date: '2026-05-30',
       subscription_ids: ['sub_001'],
       vps_lifecycle_status: 'cancelled',
-      node_actions: [{ node_id: 'nd_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
+      monitoring_instance_actions: [{ monitoring_instance_id: 'mi_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
       target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
     } satisfies ApplyCancellationInput
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(preview)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(actionResult)))
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(nodeContexts)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(monitoringInstanceContexts)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(targetContexts)))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(getVPSCancellationPreview('vps_001')).resolves.toEqual(preview)
     await expect(applyVPSCancellation('vps_001', input)).resolves.toEqual(actionResult)
-    await expect(listNodeAssetContexts()).resolves.toEqual(nodeContexts)
+    await expect(listMonitoringInstanceAssetContexts()).resolves.toEqual(monitoringInstanceContexts)
     await expect(listTargetAssetContexts()).resolves.toEqual(targetContexts)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/cancellation-preview', {
@@ -918,7 +918,7 @@ describe('api helpers', () => {
       credentials: 'include',
       body: JSON.stringify(input),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-context/nodes', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-context/monitoring-instances', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -955,7 +955,7 @@ describe('api helpers', () => {
       importance: 'normal',
       labels: ['edge'],
       note: '',
-      active_node_link_count: 1,
+      active_monitoring_instance_link_count: 1,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T09:00:00Z',
       archived_at: null,
@@ -963,19 +963,19 @@ describe('api helpers', () => {
     const linkRecord = {
       link_id: 'vpn_001',
       vps_id: 'vps_001',
-      node_id: 'nd_001',
+      monitoring_instance_id: 'mi_001',
       linked_at: '2026-05-09T09:01:00Z',
       unlinked_at: null,
       note: 'primary',
-    } satisfies VPSNodeLinkRecord
+    } satisfies VPSMonitoringInstanceLinkRecord
     const unlinkedRecord = {
       ...linkRecord,
       unlinked_at: '2026-05-09T09:02:00Z',
       note: 'rotated',
-    } satisfies VPSNodeLinkRecord
+    } satisfies VPSMonitoringInstanceLinkRecord
     const patchBody = { renewal_decision: 'cancel', renewal_reason: 'too expensive' } as const
-    const linkBody = { node_id: 'nd_001', note: 'primary' } as const
-    const unlinkBody = { node_id: 'nd_001', note: 'rotated' } as const
+    const linkBody = { monitoring_instance_id: 'mi_001', note: 'primary' } as const
+    const unlinkBody = { monitoring_instance_id: 'mi_001', note: 'rotated' } as const
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(updatedVPS)))
@@ -984,8 +984,8 @@ describe('api helpers', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(updateVPSAsset('vps_001', patchBody)).resolves.toEqual(updatedVPS)
-    await expect(linkVPSNode('vps_001', linkBody)).resolves.toEqual(linkRecord)
-    await expect(unlinkVPSNode('vps_001', unlinkBody)).resolves.toEqual(unlinkedRecord)
+    await expect(linkVPSMonitoringInstance('vps_001', linkBody)).resolves.toEqual(linkRecord)
+    await expect(unlinkVPSMonitoringInstance('vps_001', unlinkBody)).resolves.toEqual(unlinkedRecord)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001', {
       method: 'PATCH',
@@ -997,7 +997,7 @@ describe('api helpers', () => {
       credentials: 'include',
       body: JSON.stringify(patchBody),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001/link-node', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001/link-monitoring-instance', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1007,7 +1007,7 @@ describe('api helpers', () => {
       credentials: 'include',
       body: JSON.stringify(linkBody),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/unlink-node', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/unlink-monitoring-instance', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1173,13 +1173,13 @@ describe('api helpers', () => {
     })
   })
 
-  it('updates node metadata with PATCH /api/nodes/:nodeId and returns the updated node', async () => {
+  it('updates monitoring instance metadata with PATCH /api/monitoring-instances/:monitoringInstanceId and returns the updated monitoring instance', async () => {
     const requestBody = {
       labels: ['edge', 'core'],
       note: 'updated note',
-    } satisfies UpdateNodeMetadataInput
+    } satisfies UpdateMonitoringInstanceMetadataInput
     const responseBody = {
-      node_id: 'nd_001',
+      monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
       group: 'edge-group',
       region: 'ap-northeast-1',
@@ -1195,12 +1195,12 @@ describe('api helpers', () => {
       current_primary_issue_summary: '',
       created_at: '2026-04-27T09:00:00Z',
       updated_at: '2026-04-27T09:15:00Z',
-    } satisfies NodeRecord
+    } satisfies MonitoringInstanceRecord
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(updateNodeMetadata('nd_001', requestBody)).resolves.toEqual(responseBody)
-    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001', {
+    await expect(updateMonitoringInstanceMetadata('mi_001', requestBody)).resolves.toEqual(responseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -1212,13 +1212,13 @@ describe('api helpers', () => {
     })
   })
 
-  it('sends node metadata optimistic preconditions when provided', async () => {
+  it('sends monitoring instance metadata optimistic preconditions when provided', async () => {
     const requestBody = {
       labels: ['edge'],
       note: 'updated note',
-    } satisfies UpdateNodeMetadataInput
+    } satisfies UpdateMonitoringInstanceMetadataInput
     const responseBody = {
-      node_id: 'nd_001',
+      monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
       group: 'edge-group',
       region: 'ap-northeast-1',
@@ -1234,15 +1234,15 @@ describe('api helpers', () => {
       current_primary_issue_summary: '',
       created_at: '2026-04-27T09:00:00Z',
       updated_at: '2026-04-27T09:15:00Z',
-    } satisfies NodeRecord
+    } satisfies MonitoringInstanceRecord
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await updateNodeMetadata('nd_001', requestBody, {
+    await updateMonitoringInstanceMetadata('mi_001', requestBody, {
       expectedUpdatedAt: '2026-04-27T09:00:00Z',
     })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -1266,7 +1266,7 @@ describe('api helpers', () => {
       target_type: 'service',
       host: 'blog.example.com',
       base_port: 443,
-      execution_node_labels: ['edge'],
+      execution_monitoring_instance_labels: ['edge'],
       run_status: '启用',
       group: 'prod-group',
       labels: ['public', 'external'],
@@ -1304,7 +1304,7 @@ describe('api helpers', () => {
       target_type: 'service',
       host: 'blog.example.com',
       base_port: 443,
-      execution_node_labels: ['edge'],
+      execution_monitoring_instance_labels: ['edge'],
       run_status: '启用',
       group: 'prod-group',
       labels: ['public'],
@@ -1341,7 +1341,7 @@ describe('api helpers', () => {
       target_type: 'service',
       host: 'blog.example.com',
       base_port: 443,
-      execution_node_labels: ['edge', 'core'],
+      execution_monitoring_instance_labels: ['edge', 'core'],
       run_status: '启用',
       group: 'prod-group',
       labels: ['public'],
@@ -1467,14 +1467,14 @@ describe('api helpers', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listEvents({
-      object_type: 'node',
+      object_type: 'monitoring_instance',
       object_id: '',
       severity: '',
       event_type: 'incident_started',
       limit: 25,
     })).resolves.toEqual([])
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/events?object_type=node&event_type=incident_started&limit=25', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/events?object_type=monitoring_instance&event_type=incident_started&limit=25', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -1486,7 +1486,7 @@ describe('api helpers', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await listEvents({
-      object_type: 'node',
+      object_type: 'monitoring_instance',
       created_from: '2026-04-25T00:00:00Z',
       created_to: '2026-04-26T00:00:00Z',
       label: 'edge',
@@ -1498,7 +1498,7 @@ describe('api helpers', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/events?object_type=node&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true&include_backfilled=true',
+      '/api/events?object_type=monitoring_instance&limit=25&created_from=2026-04-25T00%3A00%3A00Z&created_to=2026-04-26T00%3A00%3A00Z&label=edge&notification_only=true&recovery_only=true&include_backfilled=true',
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
@@ -1548,9 +1548,9 @@ describe('api helpers', () => {
     })
   })
 
-  it('loads onboarding state from /api/nodes/:nodeId/onboarding', async () => {
+  it('loads onboarding state from /api/monitoring-instances/:monitoringInstanceId/onboarding', async () => {
     const responseBody = {
-      node_id: 'nd_001',
+      monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
       region: 'ap-northeast-1',
       city: 'Tokyo',
@@ -1573,15 +1573,15 @@ describe('api helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(getNodeOnboarding('nd_001')).resolves.toEqual(responseBody)
-    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001/onboarding', {
+    await expect(getMonitoringInstanceOnboarding('mi_001')).resolves.toEqual(responseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_001/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
   })
 
-  it('issues one-command install commands with POST /api/nodes/:nodeId/install-command', async () => {
+  it('issues one-command install commands with POST /api/monitoring-instances/:monitoringInstanceId/install-command', async () => {
     const responseBody = {
       command: 'curl -fsSL "https://center.example.com/api/agent/install.sh" | sudo sh -s -- --server-url "https://center.example.com" --enrollment-token "enroll_001" --version "v1.2.3" --release-repo "owner/repo"',
       issued_at: '2026-04-26T09:10:00Z',
@@ -1594,8 +1594,8 @@ describe('api helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(issueNodeInstallCommand('nd_001')).resolves.toEqual(responseBody)
-    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001/install-command', {
+    await expect(issueMonitoringInstanceInstallCommand('mi_001')).resolves.toEqual(responseBody)
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_001/install-command', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1605,7 +1605,7 @@ describe('api helpers', () => {
 
   it('posts binding actions and returns onboarding state', async () => {
     const responseBody = {
-      node_id: 'nd_001',
+      monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
       region: 'ap-northeast-1',
       city: 'Tokyo',
@@ -1627,23 +1627,23 @@ describe('api helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(confirmNodeRebind('nd_001')).resolves.toEqual(responseBody)
-    await expect(rejectPendingNodeBinding('nd_001')).resolves.toEqual(responseBody)
-    await expect(resetNodeBinding('nd_001')).resolves.toEqual(responseBody)
+    await expect(confirmMonitoringInstanceRebind('mi_001')).resolves.toEqual(responseBody)
+    await expect(rejectPendingMonitoringInstanceBinding('mi_001')).resolves.toEqual(responseBody)
+    await expect(resetMonitoringInstanceBinding('mi_001')).resolves.toEqual(responseBody)
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_001/binding/confirm-rebind', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances/mi_001/binding/confirm-rebind', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/binding/reject-pending', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/binding/reject-pending', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/binding/reset', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/monitoring-instances/mi_001/binding/reset', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1651,9 +1651,9 @@ describe('api helpers', () => {
     })
   })
 
-  it('posts node runtime control actions to the explicit endpoints', async () => {
+  it('posts monitoring instance runtime control actions to the explicit endpoints', async () => {
     const responseBody = {
-      node_id: 'nd_001',
+      monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
       region: 'ap-northeast-1',
       city: 'Tokyo',
@@ -1672,30 +1672,30 @@ describe('api helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(enterNodeMaintenance('nd_001')).resolves.toEqual(responseBody)
-    await expect(exitNodeMaintenance('nd_001')).resolves.toEqual(responseBody)
-    await expect(pauseNodeMonitoring('nd_001')).resolves.toEqual(responseBody)
-    await expect(resumeNodeMonitoring('nd_001')).resolves.toEqual(responseBody)
+    await expect(enterMonitoringInstanceMaintenance('mi_001')).resolves.toEqual(responseBody)
+    await expect(exitMonitoringInstanceMaintenance('mi_001')).resolves.toEqual(responseBody)
+    await expect(pauseMonitoringInstanceMonitoring('mi_001')).resolves.toEqual(responseBody)
+    await expect(resumeMonitoringInstanceMonitoring('mi_001')).resolves.toEqual(responseBody)
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_001/runtime/enter-maintenance', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances/mi_001/runtime/enter-maintenance', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/nodes/nd_001/runtime/exit-maintenance', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/runtime/exit-maintenance', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/nodes/nd_001/runtime/pause', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/monitoring-instances/mi_001/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/nodes/nd_001/runtime/resume', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/monitoring-instances/mi_001/runtime/resume', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1703,7 +1703,7 @@ describe('api helpers', () => {
     })
   })
 
-  it('posts node command actions and preserves command identity', async () => {
+  it('posts monitoring instance command actions and preserves command identity', async () => {
     const responseBody = {
       action_id: 'act_001',
       command_id: 'uptime',
@@ -1712,9 +1712,9 @@ describe('api helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(postNodeAction('nd_001', 'uptime')).resolves.toEqual(responseBody)
+    await expect(postMonitoringInstanceAction('mi_001', 'uptime')).resolves.toEqual(responseBody)
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/nodes/nd_001/actions', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_001/actions', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1726,9 +1726,9 @@ describe('api helpers', () => {
     })
   })
 
-  it('posts node lifecycle actions to the explicit endpoints', async () => {
+  it('posts monitoring instance lifecycle actions to the explicit endpoints', async () => {
     const responseBody = {
-      node_id: 'nd_001',
+      monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
       region: 'ap-northeast-1',
       city: 'Tokyo',
@@ -1747,10 +1747,10 @@ describe('api helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(retireNode('nd_001')).resolves.toEqual(responseBody)
-    await expect(restoreRetiredNodeToObserving('nd_001')).resolves.toEqual(responseBody)
+    await expect(retireMonitoringInstance('mi_001')).resolves.toEqual(responseBody)
+    await expect(restoreRetiredMonitoringInstanceToObserving('mi_001')).resolves.toEqual(responseBody)
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/nodes/nd_001/lifecycle/retire', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances/mi_001/lifecycle/retire', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1758,7 +1758,7 @@ describe('api helpers', () => {
     })
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/nodes/nd_001/lifecycle/restore-to-observing',
+      '/api/monitoring-instances/mi_001/lifecycle/restore-to-observing',
       {
         method: 'POST',
         headers: { Accept: 'application/json' },
@@ -1775,7 +1775,7 @@ describe('api helpers', () => {
       target_type: 'service',
       host: 'blog.example.com',
       base_port: 443,
-      execution_node_labels: ['edge'],
+      execution_monitoring_instance_labels: ['edge'],
       run_status: '暂停',
       labels: [],
       note: '',
@@ -1842,7 +1842,7 @@ describe('router onboarding route', () => {
   })
 
   it('no longer matches the removed onboarding route (falls through to catch-all)', () => {
-    const matches = matchRoutes(appRoutes, '/nodes/nd_001/onboarding')
+    const matches = matchRoutes(appRoutes, '/monitoring/mi_001/onboarding')
 
     expect(matches?.at(-1)?.route.path).toBe('*')
   })

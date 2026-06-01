@@ -18,7 +18,7 @@ import (
 	"houfeng/internal/center/assetservices"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/incidents"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/targets"
@@ -91,7 +91,7 @@ func (r *PostgresAssetLifecycleRepository) GetVPSCancellationPreview(ctx context
 	if err != nil {
 		return assetlifecycle.CancellationPreview{}, err
 	}
-	nodeLinks, err := listLifecycleNodesForVPS(ctx, r.db, vpsID)
+	monitoringInstanceLinks, err := listLifecycleMonitoringInstancesForVPS(ctx, r.db, vpsID)
 	if err != nil {
 		return assetlifecycle.CancellationPreview{}, err
 	}
@@ -109,12 +109,12 @@ func (r *PostgresAssetLifecycleRepository) GetVPSCancellationPreview(ctx context
 	}
 
 	preview := assetlifecycle.CancellationPreview{
-		VPS:           vps,
-		Subscriptions: buildSubscriptionImpacts(subscriptionRecords),
-		NodeLinks:     nodeLinks,
-		Services:      services,
-		Domains:       domains,
-		TargetLinks:   targetLinks,
+		VPS:                     vps,
+		Subscriptions:           buildSubscriptionImpacts(subscriptionRecords),
+		MonitoringInstanceLinks: monitoringInstanceLinks,
+		Services:                services,
+		Domains:                 domains,
+		TargetLinks:             targetLinks,
 	}
 	preview.RecommendedSteps = buildCancellationRecommendedSteps(preview)
 	preview.Warnings, preview.Blockers = buildCancellationPreviewFindings(preview)
@@ -169,7 +169,7 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSCancellation(ctx context.Cont
 		return assetlifecycle.LifecycleActionResult{}, err
 	}
 
-	steps := make([]assetlifecycle.LifecycleActionStep, 0, 1+len(input.SubscriptionIDs)+len(input.NodeActions)*2+len(input.TargetActions))
+	steps := make([]assetlifecycle.LifecycleActionStep, 0, 1+len(input.SubscriptionIDs)+len(input.MonitoringInstanceActions)*2+len(input.TargetActions))
 	addStep := func(step assetlifecycle.LifecycleActionStep, err error) error {
 		if err != nil {
 			return err
@@ -193,16 +193,16 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSCancellation(ctx context.Cont
 		}
 		steps = append(steps, step)
 	}
-	for _, nodeAction := range input.NodeActions {
-		nodeSteps, err := applyNodeLifecycleAction(ctx, tx, action.ActionID, currentVPS.VPSID, nodeAction)
+	for _, monitoringInstanceAction := range input.MonitoringInstanceActions {
+		monitoringInstanceSteps, err := applyMonitoringInstanceLifecycleAction(ctx, tx, action.ActionID, currentVPS.VPSID, monitoringInstanceAction)
 		if err != nil {
-			stepType := assetlifecycle.StepTypeNodeLifecycle
-			if nodeAction.LifecycleStatus == "" && nodeAction.MonitoringStatus != "" {
-				stepType = assetlifecycle.StepTypeNodeMonitoring
+			stepType := assetlifecycle.StepTypeMonitoringInstanceLifecycle
+			if monitoringInstanceAction.LifecycleStatus == "" && monitoringInstanceAction.MonitoringStatus != "" {
+				stepType = assetlifecycle.StepTypeMonitoringInstanceMonitoring
 			}
-			return assetlifecycle.LifecycleActionResult{}, recordFailedStep(steps, assetlifecycle.ObjectTypeNode, nodeAction.NodeID, stepType, "Node 生命周期或监控状态写入失败。", err)
+			return assetlifecycle.LifecycleActionResult{}, recordFailedStep(steps, assetlifecycle.ObjectTypeMonitoringInstance, monitoringInstanceAction.MonitoringInstanceID, stepType, "MonitoringInstance 生命周期或监控状态写入失败。", err)
 		}
-		steps = append(steps, nodeSteps...)
+		steps = append(steps, monitoringInstanceSteps...)
 	}
 	for _, targetAction := range input.TargetActions {
 		step, err := applyTargetLifecycleAction(ctx, tx, action.ActionID, currentVPS.VPSID, targetAction)
@@ -245,10 +245,10 @@ func (r *PostgresAssetLifecycleRepository) recordFailedVPSCancellation(
 	return cause
 }
 
-func (r *PostgresAssetLifecycleRepository) ListNodeAssetContexts(ctx context.Context) ([]assetlifecycle.AssetContextForNode, error) {
+func (r *PostgresAssetLifecycleRepository) ListMonitoringInstanceAssetContexts(ctx context.Context) ([]assetlifecycle.AssetContextForMonitoringInstance, error) {
 	rows, err := r.db.Query(ctx, `
 		select
-			l.node_id,
+			l.monitoring_instance_id,
 			v.vps_id,
 			v.display_name,
 			v.lifecycle_status,
@@ -269,34 +269,34 @@ func (r *PostgresAssetLifecycleRepository) ListNodeAssetContexts(ctx context.Con
 					s.subscription_id
 				limit 1
 			), 'missing') as subscription_state
-		from vps_node_links l
+		from vps_monitoring_instance_links l
 		join vps_assets v on v.vps_id = l.vps_id
 		where l.unlinked_at is null
-		order by l.node_id, lower(v.display_name), v.vps_id`)
+		order by l.monitoring_instance_id, lower(v.display_name), v.vps_id`)
 	if err != nil {
-		return nil, fmt.Errorf("query node asset contexts: %w", err)
+		return nil, fmt.Errorf("query monitoring instance asset contexts: %w", err)
 	}
 	defer rows.Close()
 
-	contexts := map[string]*assetlifecycle.AssetContextForNode{}
+	contexts := map[string]*assetlifecycle.AssetContextForMonitoringInstance{}
 	order := []string{}
 	for rows.Next() {
 		var (
-			nodeID            string
-			summary           assetlifecycle.LinkedVPSContext
-			lifecycleStatus   string
-			renewalDecision   string
-			subscriptionState string
+			monitoringInstanceID string
+			summary              assetlifecycle.LinkedVPSContext
+			lifecycleStatus      string
+			renewalDecision      string
+			subscriptionState    string
 		)
 		if err := rows.Scan(
-			&nodeID,
+			&monitoringInstanceID,
 			&summary.VPSID,
 			&summary.DisplayName,
 			&lifecycleStatus,
 			&renewalDecision,
 			&subscriptionState,
 		); err != nil {
-			return nil, fmt.Errorf("scan node asset context: %w", err)
+			return nil, fmt.Errorf("scan monitoring instance asset context: %w", err)
 		}
 		summary.LifecycleStatus = vpsassets.LifecycleStatus(lifecycleStatus)
 		summary.RenewalDecision = vpsassets.RenewalDecision(renewalDecision)
@@ -304,23 +304,23 @@ func (r *PostgresAssetLifecycleRepository) ListNodeAssetContexts(ctx context.Con
 		attention, message := linkedVPSCancellationContext(summary)
 		summary.Message = message
 
-		context, ok := contexts[nodeID]
+		context, ok := contexts[monitoringInstanceID]
 		if !ok {
-			context = &assetlifecycle.AssetContextForNode{NodeID: nodeID}
-			contexts[nodeID] = context
-			order = append(order, nodeID)
+			context = &assetlifecycle.AssetContextForMonitoringInstance{MonitoringInstanceID: monitoringInstanceID}
+			contexts[monitoringInstanceID] = context
+			order = append(order, monitoringInstanceID)
 		}
 		context.Summaries = append(context.Summaries, summary)
 		context.LinkedVPSCount = len(context.Summaries)
 		context.CancellationAttention = context.CancellationAttention || attention
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate node asset contexts: %w", err)
+		return nil, fmt.Errorf("iterate monitoring instance asset contexts: %w", err)
 	}
 
-	records := make([]assetlifecycle.AssetContextForNode, 0, len(order))
-	for _, nodeID := range order {
-		records = append(records, *contexts[nodeID])
+	records := make([]assetlifecycle.AssetContextForMonitoringInstance, 0, len(order))
+	for _, monitoringInstanceID := range order {
+		records = append(records, *contexts[monitoringInstanceID])
 	}
 	return records, nil
 }
@@ -491,10 +491,10 @@ func listLifecycleSubscriptionsForVPS(ctx context.Context, queryer assetLifecycl
 	return records, nil
 }
 
-func listLifecycleNodesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string) ([]assetlinks.NodeSummary, error) {
+func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string) ([]assetlinks.MonitoringInstanceSummary, error) {
 	rows, err := queryer.Query(ctx, `
 		select
-			n.node_id,
+			n.monitoring_instance_id,
 			n.display_name,
 			n."group",
 			n.region,
@@ -510,21 +510,21 @@ func listLifecycleNodesForVPS(ctx context.Context, queryer assetLifecycleQueryer
 			n.current_primary_issue_summary,
 			l.linked_at,
 			l.note
-		from vps_node_links l
-		join nodes n on n.node_id = l.node_id
+		from vps_monitoring_instance_links l
+		join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
 		where l.vps_id = $1
 		  and l.unlinked_at is null
-		order by l.linked_at desc, n.display_name, n.node_id`, vpsID)
+		order by l.linked_at desc, n.display_name, n.monitoring_instance_id`, vpsID)
 	if err != nil {
-		return nil, fmt.Errorf("query active nodes for vps lifecycle %q: %w", vpsID, err)
+		return nil, fmt.Errorf("query active monitoring instances for vps lifecycle %q: %w", vpsID, err)
 	}
 	defer rows.Close()
 
-	summaries := make([]assetlinks.NodeSummary, 0)
+	summaries := make([]assetlinks.MonitoringInstanceSummary, 0)
 	for rows.Next() {
-		var summary assetlinks.NodeSummary
+		var summary assetlinks.MonitoringInstanceSummary
 		if err := rows.Scan(
-			&summary.NodeID,
+			&summary.MonitoringInstanceID,
 			&summary.DisplayName,
 			&summary.Group,
 			&summary.Region,
@@ -541,12 +541,12 @@ func listLifecycleNodesForVPS(ctx context.Context, queryer assetLifecycleQueryer
 			&summary.LinkedAt,
 			&summary.Note,
 		); err != nil {
-			return nil, fmt.Errorf("scan active node for vps lifecycle %q: %w", vpsID, err)
+			return nil, fmt.Errorf("scan active monitoring instance for vps lifecycle %q: %w", vpsID, err)
 		}
 		summaries = append(summaries, summary)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate active nodes for vps lifecycle %q: %w", vpsID, err)
+		return nil, fmt.Errorf("iterate active monitoring instances for vps lifecycle %q: %w", vpsID, err)
 	}
 	return summaries, nil
 }
@@ -685,11 +685,11 @@ func buildSubscriptionImpacts(records []subscriptions.Record) []assetlifecycle.S
 		case subscriptions.StatusExpired, subscriptions.StatusCancelled, subscriptions.StatusPaused:
 			impact.Role = "inactive"
 			impact.RecommendedAction = "keep_inactive"
-			impact.Message = "订阅已处于非活跃状态，仍需处理 VPS、Node 与实例状态。"
+			impact.Message = "订阅已处于非活跃状态，仍需处理 VPS、MonitoringInstance 与实例状态。"
 		case subscriptions.StatusUnknown:
 			impact.Role = "inactive"
 			impact.RecommendedAction = "review_inactive"
-			impact.Message = "订阅状态未知且不是 active，仍需处理 VPS、Node 与实例状态。"
+			impact.Message = "订阅状态未知且不是 active，仍需处理 VPS、MonitoringInstance 与实例状态。"
 		default:
 			impact.Role = "attention"
 			impact.RecommendedAction = "review_before_cancel"
@@ -728,31 +728,31 @@ func buildCancellationRecommendedSteps(preview assetlifecycle.CancellationPrevie
 			Message:    "取消订阅自动续费，并将 active 订阅标记为 cancelled。",
 		})
 	}
-	for _, link := range preview.NodeLinks {
-		targetLifecycle := nodes.LifecycleNoRenewal
+	for _, link := range preview.MonitoringInstanceLinks {
+		targetLifecycle := monitoringinstances.LifecycleNoRenewal
 		if recommendedVPSLifecycle == vpsassets.LifecycleCancelled {
-			targetLifecycle = nodes.LifecycleRetired
+			targetLifecycle = monitoringinstances.LifecycleRetired
 		}
 		if link.LifecycleStatus != targetLifecycle {
 			steps = append(steps, assetlifecycle.RecommendedLifecycleStep{
-				ObjectType: assetlifecycle.ObjectTypeNode,
-				ObjectID:   link.NodeID,
-				StepType:   assetlifecycle.StepTypeNodeLifecycle,
+				ObjectType: assetlifecycle.ObjectTypeMonitoringInstance,
+				ObjectID:   link.MonitoringInstanceID,
+				StepType:   assetlifecycle.StepTypeMonitoringInstanceLifecycle,
 				FromState:  link.LifecycleStatus,
 				ToState:    targetLifecycle,
 				Required:   false,
-				Message:    "关联节点需要由用户确认后标记不续费或已退役。",
+				Message:    "关联监控实例需要由用户确认后标记不续费或已退役。",
 			})
 		}
-		if recommendedVPSLifecycle == vpsassets.LifecycleCancelled && link.MonitoringStatus != nodes.MonitoringPaused {
+		if recommendedVPSLifecycle == vpsassets.LifecycleCancelled && link.MonitoringStatus != monitoringinstances.MonitoringPaused {
 			steps = append(steps, assetlifecycle.RecommendedLifecycleStep{
-				ObjectType: assetlifecycle.ObjectTypeNode,
-				ObjectID:   link.NodeID,
-				StepType:   assetlifecycle.StepTypeNodeMonitoring,
+				ObjectType: assetlifecycle.ObjectTypeMonitoringInstance,
+				ObjectID:   link.MonitoringInstanceID,
+				StepType:   assetlifecycle.StepTypeMonitoringInstanceMonitoring,
 				FromState:  link.MonitoringStatus,
-				ToState:    nodes.MonitoringPaused,
+				ToState:    monitoringinstances.MonitoringPaused,
 				Required:   false,
-				Message:    "已实际退役的节点可在确认后暂停监控。",
+				Message:    "已实际退役的监控实例可在确认后暂停监控。",
 			})
 		}
 	}
@@ -789,10 +789,10 @@ func buildCancellationPreviewFindings(preview assetlifecycle.CancellationPreview
 	}
 
 	if len(preview.Subscriptions) == 0 {
-		warnings = append(warnings, "没有找到关联订阅；仍可继续处理 VPS、Node 与实例生命周期。")
+		warnings = append(warnings, "没有找到关联订阅；仍可继续处理 VPS、MonitoringInstance 与实例生命周期。")
 	}
 	if activeSubscriptions == 0 && inactiveSubscriptions > 0 {
-		warnings = append(warnings, "关联订阅已处于非 active 状态；这不是“没有关联订阅”，仍需处理 VPS、Node 与实例状态。")
+		warnings = append(warnings, "关联订阅已处于非 active 状态；这不是“没有关联订阅”，仍需处理 VPS、MonitoringInstance 与实例状态。")
 	}
 	if activeSubscriptions > 1 {
 		warnings = append(warnings, "存在多条 active 订阅，执行取消时必须显式选择要处理的订阅。")
@@ -804,14 +804,14 @@ func buildCancellationPreviewFindings(preview assetlifecycle.CancellationPreview
 		blockers = append(blockers, "VPS 已归档，普通取消/退役动作不应再修改归档资产。")
 	}
 
-	runningNodes := 0
-	for _, link := range preview.NodeLinks {
-		if link.LifecycleStatus != nodes.LifecycleNoRenewal && link.LifecycleStatus != nodes.LifecycleRetired {
-			runningNodes++
+	runningMonitoringInstances := 0
+	for _, link := range preview.MonitoringInstanceLinks {
+		if link.LifecycleStatus != monitoringinstances.LifecycleNoRenewal && link.LifecycleStatus != monitoringinstances.LifecycleRetired {
+			runningMonitoringInstances++
 		}
 	}
-	if runningNodes > 0 {
-		warnings = append(warnings, fmt.Sprintf("仍有 %d 个关联 Node 未标记不续费或已退役。", runningNodes))
+	if runningMonitoringInstances > 0 {
+		warnings = append(warnings, fmt.Sprintf("仍有 %d 个关联 MonitoringInstance 未标记不续费或已退役。", runningMonitoringInstances))
 	}
 
 	runningTargets := 0
@@ -850,12 +850,12 @@ func insertLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID string, input a
 	}
 	now := time.Now().UTC()
 	summary := map[string]any{
-		"subscription_count":     len(input.SubscriptionIDs),
-		"node_action_count":      len(input.NodeActions),
-		"target_action_count":    len(input.TargetActions),
-		"vps_lifecycle_status":   string(input.VPSLifecycleStatus),
-		"renewal_decision":       string(vpsassets.RenewalCancel),
-		"confirmed_by_workbench": true,
+		"subscription_count":               len(input.SubscriptionIDs),
+		"monitoring_instance_action_count": len(input.MonitoringInstanceActions),
+		"target_action_count":              len(input.TargetActions),
+		"vps_lifecycle_status":             string(input.VPSLifecycleStatus),
+		"renewal_decision":                 string(vpsassets.RenewalCancel),
+		"confirmed_by_workbench":           true,
 	}
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {
@@ -966,14 +966,14 @@ func insertFailedLifecycleAction(
 	}
 	now := time.Now().UTC()
 	summary := map[string]any{
-		"subscription_count":     len(input.SubscriptionIDs),
-		"node_action_count":      len(input.NodeActions),
-		"target_action_count":    len(input.TargetActions),
-		"vps_lifecycle_status":   string(input.VPSLifecycleStatus),
-		"renewal_decision":       string(vpsassets.RenewalCancel),
-		"confirmed_by_workbench": true,
-		"completed_step_count":   len(completedSteps),
-		"failure_reason":         cause.Error(),
+		"subscription_count":               len(input.SubscriptionIDs),
+		"monitoring_instance_action_count": len(input.MonitoringInstanceActions),
+		"target_action_count":              len(input.TargetActions),
+		"vps_lifecycle_status":             string(input.VPSLifecycleStatus),
+		"renewal_decision":                 string(vpsassets.RenewalCancel),
+		"confirmed_by_workbench":           true,
+		"completed_step_count":             len(completedSteps),
+		"failure_reason":                   cause.Error(),
 	}
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {
@@ -1130,14 +1130,14 @@ func lockSubscriptionForLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID, s
 	return record, nil
 }
 
-func applyNodeLifecycleAction(ctx context.Context, tx pgx.Tx, actionID, vpsID string, input assetlifecycle.NodeActionInput) ([]assetlifecycle.LifecycleActionStep, error) {
-	current, err := lockNodeForLifecycleAction(ctx, tx, vpsID, input.NodeID)
+func applyMonitoringInstanceLifecycleAction(ctx context.Context, tx pgx.Tx, actionID, vpsID string, input assetlifecycle.MonitoringInstanceActionInput) ([]assetlifecycle.LifecycleActionStep, error) {
+	current, err := lockMonitoringInstanceForLifecycleAction(ctx, tx, vpsID, input.MonitoringInstanceID)
 	if err != nil {
 		return nil, err
 	}
 	steps := make([]assetlifecycle.LifecycleActionStep, 0, 2)
 	if input.LifecycleStatus != "" {
-		step, updated, err := applyNodeLifecycleStatus(ctx, tx, actionID, current, input.LifecycleStatus)
+		step, updated, err := applyMonitoringInstanceLifecycleStatus(ctx, tx, actionID, current, input.LifecycleStatus)
 		if err != nil {
 			return nil, err
 		}
@@ -1145,7 +1145,7 @@ func applyNodeLifecycleAction(ctx context.Context, tx pgx.Tx, actionID, vpsID st
 		current = updated
 	}
 	if input.MonitoringStatus != "" {
-		step, updated, err := applyNodeMonitoringStatus(ctx, tx, actionID, current, input.MonitoringStatus)
+		step, updated, err := applyMonitoringInstanceMonitoringStatus(ctx, tx, actionID, current, input.MonitoringStatus)
 		if err != nil {
 			return nil, err
 		}
@@ -1155,108 +1155,108 @@ func applyNodeLifecycleAction(ctx context.Context, tx pgx.Tx, actionID, vpsID st
 	return steps, nil
 }
 
-func lockNodeForLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID, nodeID string) (nodes.Record, error) {
-	record, err := scanNode(tx.QueryRow(ctx, `
-		select `+qualifiedNodeSelectColumns("n")+`
-		from vps_node_links l
-		join nodes n on n.node_id = l.node_id
+func lockMonitoringInstanceForLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID, monitoringInstanceID string) (monitoringinstances.Record, error) {
+	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		select `+qualifiedMonitoringInstanceSelectColumns("n")+`
+		from vps_monitoring_instance_links l
+		join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
 		where l.vps_id = $1
-		  and l.node_id = $2
+		  and l.monitoring_instance_id = $2
 		  and l.unlinked_at is null
-		for update of n`, vpsID, nodeID))
+		for update of n`, vpsID, monitoringInstanceID))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nodes.Record{}, fmt.Errorf("%w: node %q is not actively linked to vps %q", assetlifecycle.ErrInvalidLifecycleActionInput, nodeID, vpsID)
+		return monitoringinstances.Record{}, fmt.Errorf("%w: monitoring instance %q is not actively linked to vps %q", assetlifecycle.ErrInvalidLifecycleActionInput, monitoringInstanceID, vpsID)
 	}
 	if err != nil {
-		return nodes.Record{}, fmt.Errorf("lock node %q for lifecycle action: %w", nodeID, err)
+		return monitoringinstances.Record{}, fmt.Errorf("lock monitoring instance %q for lifecycle action: %w", monitoringInstanceID, err)
 	}
 	return record, nil
 }
 
-func applyNodeLifecycleStatus(ctx context.Context, tx pgx.Tx, actionID string, current nodes.Record, nextStatus string) (assetlifecycle.LifecycleActionStep, nodes.Record, error) {
+func applyMonitoringInstanceLifecycleStatus(ctx context.Context, tx pgx.Tx, actionID string, current monitoringinstances.Record, nextStatus string) (assetlifecycle.LifecycleActionStep, monitoringinstances.Record, error) {
 	before := map[string]any{"lifecycle_status": current.LifecycleStatus}
 	if current.LifecycleStatus == nextStatus {
-		step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeNode, current.NodeID, assetlifecycle.StepTypeNodeLifecycle, assetlifecycle.StepStatusSkipped, before, before, "节点生命周期已处于确认状态。")
+		step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceLifecycle, assetlifecycle.StepStatusSkipped, before, before, "监控实例生命周期已处于确认状态。")
 		return step, current, err
 	}
 
-	updated, err := scanNode(tx.QueryRow(ctx, `
-		update nodes
+	updated, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		update monitoring_instances
 		set lifecycle_status = $2,
 		    updated_at = now()
-		where node_id = $1
-		returning `+nodeSelectColumns,
-		current.NodeID,
+		where monitoring_instance_id = $1
+		returning `+monitoringInstanceSelectColumns,
+		current.MonitoringInstanceID,
 		nextStatus,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return assetlifecycle.LifecycleActionStep{}, nodes.Record{}, nodes.ErrNodeNotFound
+		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
 	}
 	if err != nil {
-		return assetlifecycle.LifecycleActionStep{}, nodes.Record{}, fmt.Errorf("update node %q lifecycle for asset lifecycle action: %w", current.NodeID, err)
+		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, fmt.Errorf("update monitoring instance %q lifecycle for asset lifecycle action: %w", current.MonitoringInstanceID, err)
 	}
-	eventType, summary := nodeLifecycleEventForStatus(nextStatus)
-	if err := insertNodeLifecycleEvent(ctx, tx, updated, eventType, summary); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, nodes.Record{}, err
+	eventType, summary := monitoringInstanceLifecycleEventForStatus(nextStatus)
+	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, updated, eventType, summary); err != nil {
+		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, err
 	}
 	after := map[string]any{"lifecycle_status": updated.LifecycleStatus}
-	step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeNode, current.NodeID, assetlifecycle.StepTypeNodeLifecycle, assetlifecycle.StepStatusCompleted, before, after, "节点生命周期状态已确认。")
+	step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceLifecycle, assetlifecycle.StepStatusCompleted, before, after, "监控实例生命周期状态已确认。")
 	return step, updated, err
 }
 
-func applyNodeMonitoringStatus(ctx context.Context, tx pgx.Tx, actionID string, current nodes.Record, nextStatus string) (assetlifecycle.LifecycleActionStep, nodes.Record, error) {
+func applyMonitoringInstanceMonitoringStatus(ctx context.Context, tx pgx.Tx, actionID string, current monitoringinstances.Record, nextStatus string) (assetlifecycle.LifecycleActionStep, monitoringinstances.Record, error) {
 	before := map[string]any{"monitoring_status": current.MonitoringStatus}
 	if current.MonitoringStatus == nextStatus {
-		step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeNode, current.NodeID, assetlifecycle.StepTypeNodeMonitoring, assetlifecycle.StepStatusSkipped, before, before, "节点监控状态已处于确认状态。")
+		step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceMonitoring, assetlifecycle.StepStatusSkipped, before, before, "监控实例监控状态已处于确认状态。")
 		return step, current, err
 	}
 
-	updated, err := scanNode(tx.QueryRow(ctx, `
-		update nodes
+	updated, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		update monitoring_instances
 		set monitoring_status = $2,
 		    updated_at = now()
-		where node_id = $1
-		returning `+nodeSelectColumns,
-		current.NodeID,
+		where monitoring_instance_id = $1
+		returning `+monitoringInstanceSelectColumns,
+		current.MonitoringInstanceID,
 		nextStatus,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return assetlifecycle.LifecycleActionStep{}, nodes.Record{}, nodes.ErrNodeNotFound
+		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
 	}
 	if err != nil {
-		return assetlifecycle.LifecycleActionStep{}, nodes.Record{}, fmt.Errorf("update node %q monitoring for asset lifecycle action: %w", current.NodeID, err)
+		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, fmt.Errorf("update monitoring instance %q monitoring for asset lifecycle action: %w", current.MonitoringInstanceID, err)
 	}
-	eventType, summary := nodeMonitoringEventForStatus(current.MonitoringStatus, nextStatus)
-	if err := insertNodeRuntimeEvent(ctx, tx, updated, eventType, summary); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, nodes.Record{}, err
+	eventType, summary := monitoringInstanceMonitoringEventForStatus(current.MonitoringStatus, nextStatus)
+	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, updated, eventType, summary); err != nil {
+		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, err
 	}
 	after := map[string]any{"monitoring_status": updated.MonitoringStatus}
-	step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeNode, current.NodeID, assetlifecycle.StepTypeNodeMonitoring, assetlifecycle.StepStatusCompleted, before, after, "节点监控状态已确认。")
+	step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceMonitoring, assetlifecycle.StepStatusCompleted, before, after, "监控实例监控状态已确认。")
 	return step, updated, err
 }
 
-func nodeLifecycleEventForStatus(status string) (incidents.EventType, string) {
+func monitoringInstanceLifecycleEventForStatus(status string) (incidents.EventType, string) {
 	switch status {
-	case nodes.LifecycleRetired:
-		return incidents.EventNodeRetired, "节点已退役并退出活跃舰队，历史记录保留"
-	case nodes.LifecycleObserving:
-		return incidents.EventNodeRestoredToObserving, "节点已恢复到观察中"
+	case monitoringinstances.LifecycleRetired:
+		return incidents.EventMonitoringInstanceRetired, "监控实例已退役并退出活跃观测集，历史记录保留"
+	case monitoringinstances.LifecycleObserving:
+		return incidents.EventMonitoringInstanceRestoredToObserving, "监控实例已恢复到观察中"
 	default:
-		return incidents.EventNodeLifecycleUpdated, fmt.Sprintf("节点生命周期已更新为%s", status)
+		return incidents.EventMonitoringInstanceLifecycleUpdated, fmt.Sprintf("监控实例生命周期已更新为%s", status)
 	}
 }
 
-func nodeMonitoringEventForStatus(previousStatus, nextStatus string) (incidents.EventType, string) {
+func monitoringInstanceMonitoringEventForStatus(previousStatus, nextStatus string) (incidents.EventType, string) {
 	switch nextStatus {
-	case nodes.MonitoringMaintenance:
-		return incidents.EventNodeMonitoringMaintenanceEntered, "节点监控已进入维护"
-	case nodes.MonitoringPaused:
-		return incidents.EventNodeMonitoringPaused, "节点监控已暂停"
+	case monitoringinstances.MonitoringMaintenance:
+		return incidents.EventMonitoringInstanceMonitoringMaintenanceEntered, "监控实例已进入维护"
+	case monitoringinstances.MonitoringPaused:
+		return incidents.EventMonitoringInstanceMonitoringPaused, "监控实例监控已暂停"
 	default:
-		if previousStatus == nodes.MonitoringMaintenance {
-			return incidents.EventNodeMonitoringMaintenanceExited, "节点监控已退出维护"
+		if previousStatus == monitoringinstances.MonitoringMaintenance {
+			return incidents.EventMonitoringInstanceMonitoringMaintenanceExited, "监控实例已退出维护"
 		}
-		return incidents.EventNodeMonitoringResumed, "节点监控已恢复"
+		return incidents.EventMonitoringInstanceMonitoringResumed, "监控实例监控已恢复"
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/providers"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
@@ -30,18 +30,18 @@ func TestDryRunReportsValidationAndDecisionSignals(t *testing.T) {
 	missingRenew := ""
 	records := []InputRecord{
 		{
-			DisplayName:     " tokyo-01 ",
-			ProviderName:    " Example Provider ",
-			Country:         " Japan ",
-			Region:          " Tokyo ",
-			City:            " Tokyo ",
-			IPv4:            "192.0.2.10",
-			SSHPort:         22,
-			LifecycleStatus: vpsassets.LifecycleActive,
-			UsageStatus:     vpsassets.UsageIdle,
-			Labels:          []string{" proxy ", "proxy", ""},
-			NodeName:        "tokyo-node",
-			TargetURL:       "https://tokyo.example",
+			DisplayName:            " tokyo-01 ",
+			ProviderName:           " Example Provider ",
+			Country:                " Japan ",
+			Region:                 " Tokyo ",
+			City:                   " Tokyo ",
+			IPv4:                   "192.0.2.10",
+			SSHPort:                22,
+			LifecycleStatus:        vpsassets.LifecycleActive,
+			UsageStatus:            vpsassets.UsageIdle,
+			Labels:                 []string{" proxy ", "proxy", ""},
+			MonitoringInstanceName: "tokyo-monitoringInstance",
+			TargetURL:              "https://tokyo.example",
 			Subscription: &SubscriptionInput{
 				Price:         36,
 				Currency:      " usd ",
@@ -71,9 +71,9 @@ func TestDryRunReportsValidationAndDecisionSignals(t *testing.T) {
 	}
 
 	report, err := DryRun(context.Background(), records, Repositories{
-		Providers: &fakeProviderRepo{},
-		VPSAssets: &fakeVPSRepo{},
-		Nodes:     fakeNodeRepo{records: []nodes.Record{{NodeID: "nd_1", DisplayName: "tokyo-node"}}},
+		Providers:           &fakeProviderRepo{},
+		VPSAssets:           &fakeVPSRepo{},
+		MonitoringInstances: fakeMonitoringInstanceRepo{records: []monitoringinstances.Record{{MonitoringInstanceID: "mi_1", DisplayName: "tokyo-monitoringInstance"}}},
 	}, Options{Now: func() time.Time {
 		return time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
 	}})
@@ -108,8 +108,8 @@ func TestDryRunReportsValidationAndDecisionSignals(t *testing.T) {
 	if len(report.DuplicateCandidates) == 0 {
 		t.Fatal("DuplicateCandidates empty, want input duplicate candidates")
 	}
-	if len(report.NodeAssociationCandidates) != 1 || !strings.Contains(report.NodeAssociationCandidates[0].Status, "node_name matches") {
-		t.Fatalf("NodeAssociationCandidates = %#v, want node_name match", report.NodeAssociationCandidates)
+	if len(report.MonitoringInstanceAssociationCandidates) != 1 || !strings.Contains(report.MonitoringInstanceAssociationCandidates[0].Status, "monitoring_instance_name matches") {
+		t.Fatalf("MonitoringInstanceAssociationCandidates = %#v, want monitoring_instance_name match", report.MonitoringInstanceAssociationCandidates)
 	}
 	if len(report.RenewalCandidates) != 1 || report.RenewalCandidates[0].DaysUntil != 11 {
 		t.Fatalf("RenewalCandidates = %#v, want 11 day candidate", report.RenewalCandidates)
@@ -314,12 +314,12 @@ func (f *fakeSubscriptionRepo) CreateSubscription(_ context.Context, input subsc
 	return subscriptions.Record{SubscriptionID: "sub_created_1", VPSID: input.VPSID}, nil
 }
 
-type fakeNodeRepo struct {
-	records []nodes.Record
+type fakeMonitoringInstanceRepo struct {
+	records []monitoringinstances.Record
 }
 
-func (f fakeNodeRepo) ListNodes(context.Context) ([]nodes.Record, error) {
-	return append([]nodes.Record(nil), f.records...), nil
+func (f fakeMonitoringInstanceRepo) ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error) {
+	return append([]monitoringinstances.Record(nil), f.records...), nil
 }
 
 func stringPtrForTest(value string) *string {

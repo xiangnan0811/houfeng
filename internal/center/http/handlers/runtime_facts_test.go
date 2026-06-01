@@ -10,23 +10,23 @@ import (
 	"time"
 
 	"houfeng/internal/center/http/handlers"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/targets"
 )
 
 type fakeRuntimeFactsRepository struct {
-	getNodeRuntimeFactsResult   runtimefacts.NodeRuntimeFacts
-	getNodeRuntimeFactsErr      error
-	getTargetRuntimeFactsResult runtimefacts.TargetRuntimeFacts
-	getTargetRuntimeFactsErr    error
+	getMonitoringInstanceRuntimeFactsResult runtimefacts.MonitoringInstanceRuntimeFacts
+	getMonitoringInstanceRuntimeFactsErr    error
+	getTargetRuntimeFactsResult             runtimefacts.TargetRuntimeFacts
+	getTargetRuntimeFactsErr                error
 }
 
-func (f *fakeRuntimeFactsRepository) GetNodeRuntimeFacts(_ context.Context, _ string, _ time.Time, _ int) (runtimefacts.NodeRuntimeFacts, error) {
-	if f.getNodeRuntimeFactsErr != nil {
-		return runtimefacts.NodeRuntimeFacts{}, f.getNodeRuntimeFactsErr
+func (f *fakeRuntimeFactsRepository) GetMonitoringInstanceRuntimeFacts(_ context.Context, _ string, _ time.Time, _ int) (runtimefacts.MonitoringInstanceRuntimeFacts, error) {
+	if f.getMonitoringInstanceRuntimeFactsErr != nil {
+		return runtimefacts.MonitoringInstanceRuntimeFacts{}, f.getMonitoringInstanceRuntimeFactsErr
 	}
-	return f.getNodeRuntimeFactsResult, nil
+	return f.getMonitoringInstanceRuntimeFactsResult, nil
 }
 
 func (f *fakeRuntimeFactsRepository) GetTargetRuntimeFacts(context.Context, string, time.Time, int) (runtimefacts.TargetRuntimeFacts, error) {
@@ -36,24 +36,24 @@ func (f *fakeRuntimeFactsRepository) GetTargetRuntimeFacts(context.Context, stri
 	return f.getTargetRuntimeFactsResult, nil
 }
 
-func TestNodeRuntimeFactsReturnsLatestHostSample(t *testing.T) {
+func TestMonitoringInstanceRuntimeFactsReturnsLatestHostSample(t *testing.T) {
 	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
 	repo := &fakeRuntimeFactsRepository{
-		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
-			NodeID: "nd_001",
+		getMonitoringInstanceRuntimeFactsResult: runtimefacts.MonitoringInstanceRuntimeFacts{
+			MonitoringInstanceID: "mi_001",
 			LatestHostSample: &runtimefacts.HostSample{
-				NodeID:         "nd_001",
-				ObservedAt:     now,
-				ReceivedAt:     now,
-				AgentVersion:   "1.0.0",
-				MemTotalBytes:  8589934592,
-				DiskTotalBytes: 107374182400,
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           now,
+				ReceivedAt:           now,
+				AgentVersion:         "1.0.0",
+				MemTotalBytes:        8589934592,
+				DiskTotalBytes:       107374182400,
 			},
 		},
 	}
 
-	handler := handlers.NodeRuntimeFacts(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts", nil)
+	handler := handlers.MonitoringInstanceRuntimeFacts(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -62,12 +62,12 @@ func TestNodeRuntimeFactsReturnsLatestHostSample(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
 
-	var body runtimefacts.NodeRuntimeFacts
+	var body runtimefacts.MonitoringInstanceRuntimeFacts
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body.NodeID != "nd_001" {
-		t.Fatalf("expected node_id %q, got %q", "nd_001", body.NodeID)
+	if body.MonitoringInstanceID != "mi_001" {
+		t.Fatalf("expected monitoring_instance_id %q, got %q", "mi_001", body.MonitoringInstanceID)
 	}
 	if body.LatestHostSample == nil || body.LatestHostSample.AgentVersion != "1.0.0" {
 		t.Fatalf("expected latest host sample, got %#v", body.LatestHostSample)
@@ -80,11 +80,11 @@ func TestNodeRuntimeFactsReturnsLatestHostSample(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeFactsMapsNodeNotFound(t *testing.T) {
-	repo := &fakeRuntimeFactsRepository{getNodeRuntimeFactsErr: nodes.ErrNodeNotFound}
+func TestMonitoringInstanceRuntimeFactsMapsMonitoringInstanceNotFound(t *testing.T) {
+	repo := &fakeRuntimeFactsRepository{getMonitoringInstanceRuntimeFactsErr: monitoringinstances.ErrMonitoringInstanceNotFound}
 
-	handler := handlers.NodeRuntimeFacts(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_missing/runtime-facts", nil)
+	handler := handlers.MonitoringInstanceRuntimeFacts(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_missing/runtime-facts", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -97,19 +97,19 @@ func TestNodeRuntimeFactsMapsNodeNotFound(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if !errors.Is(repo.getNodeRuntimeFactsErr, nodes.ErrNodeNotFound) {
-		t.Fatalf("expected fake repo error to match ErrNodeNotFound")
+	if !errors.Is(repo.getMonitoringInstanceRuntimeFactsErr, monitoringinstances.ErrMonitoringInstanceNotFound) {
+		t.Fatalf("expected fake repo error to match ErrMonitoringInstanceNotFound")
 	}
-	if body["error"] != "node not found" {
-		t.Fatalf("expected error %q, got %q", "node not found", body["error"])
+	if body["error"] != "monitoring instance not found" {
+		t.Fatalf("expected error %q, got %q", "monitoring instance not found", body["error"])
 	}
 }
 
-func TestNodeRuntimeFactsRejectsDeeperPaths(t *testing.T) {
+func TestMonitoringInstanceRuntimeFactsRejectsDeeperPaths(t *testing.T) {
 	repo := &fakeRuntimeFactsRepository{}
 
-	handler := handlers.NodeRuntimeFacts(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts/extra", nil)
+	handler := handlers.MonitoringInstanceRuntimeFacts(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts/extra", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -127,16 +127,16 @@ func TestTargetRuntimeFactsReturnsLatestProbeObservations(t *testing.T) {
 		getTargetRuntimeFactsResult: runtimefacts.TargetRuntimeFacts{
 			TargetID: "tg_001",
 			LatestProbeObservations: []runtimefacts.ProbeObservation{{
-				NodeID:       "nd_001",
-				TargetID:     "tg_001",
-				ProbeItemID:  "pb_001",
-				ProbeKind:    "http",
-				ObservedAt:   now,
-				ReceivedAt:   now,
-				AgentVersion: "1.0.0",
-				ResultKind:   "success",
-				LatencyMS:    &latency,
-				HTTPStatus:   &httpStatus,
+				MonitoringInstanceID: "mi_001",
+				TargetID:             "tg_001",
+				ProbeItemID:          "pb_001",
+				ProbeKind:            "http",
+				ObservedAt:           now,
+				ReceivedAt:           now,
+				AgentVersion:         "1.0.0",
+				ResultKind:           "success",
+				LatencyMS:            &latency,
+				HTTPStatus:           &httpStatus,
 			}},
 		},
 	}
@@ -202,25 +202,25 @@ func TestTargetRuntimeFactsRejectsDeeperPaths(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeFactsDefaultWindowIs24h(t *testing.T) {
+func TestMonitoringInstanceRuntimeFactsDefaultWindowIs24h(t *testing.T) {
 	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
 	repo := &fakeRuntimeFactsRepository{
-		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
-			NodeID: "nd_001",
+		getMonitoringInstanceRuntimeFactsResult: runtimefacts.MonitoringInstanceRuntimeFacts{
+			MonitoringInstanceID: "mi_001",
 			LatestHostSample: &runtimefacts.HostSample{
-				NodeID:         "nd_001",
-				ObservedAt:     now,
-				ReceivedAt:     now,
-				AgentVersion:   "1.0.0",
-				MemTotalBytes:  8589934592,
-				DiskTotalBytes: 107374182400,
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           now,
+				ReceivedAt:           now,
+				AgentVersion:         "1.0.0",
+				MemTotalBytes:        8589934592,
+				DiskTotalBytes:       107374182400,
 			},
 		},
 	}
 
-	handler := handlers.NodeRuntimeFacts(repo)
+	handler := handlers.MonitoringInstanceRuntimeFacts(repo)
 	// No window query param — should default to 24h.
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -230,24 +230,24 @@ func TestNodeRuntimeFactsDefaultWindowIs24h(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeFactsWith7dWindow(t *testing.T) {
+func TestMonitoringInstanceRuntimeFactsWith7dWindow(t *testing.T) {
 	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
 	repo := &fakeRuntimeFactsRepository{
-		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
-			NodeID: "nd_001",
+		getMonitoringInstanceRuntimeFactsResult: runtimefacts.MonitoringInstanceRuntimeFacts{
+			MonitoringInstanceID: "mi_001",
 			LatestHostSample: &runtimefacts.HostSample{
-				NodeID:         "nd_001",
-				ObservedAt:     now,
-				ReceivedAt:     now,
-				AgentVersion:   "1.0.0",
-				MemTotalBytes:  8589934592,
-				DiskTotalBytes: 107374182400,
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           now,
+				ReceivedAt:           now,
+				AgentVersion:         "1.0.0",
+				MemTotalBytes:        8589934592,
+				DiskTotalBytes:       107374182400,
 			},
 		},
 	}
 
-	handler := handlers.NodeRuntimeFacts(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts?window=7d", nil)
+	handler := handlers.MonitoringInstanceRuntimeFacts(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts?window=7d", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -257,24 +257,24 @@ func TestNodeRuntimeFactsWith7dWindow(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeFactsWith30dWindow(t *testing.T) {
+func TestMonitoringInstanceRuntimeFactsWith30dWindow(t *testing.T) {
 	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
 	repo := &fakeRuntimeFactsRepository{
-		getNodeRuntimeFactsResult: runtimefacts.NodeRuntimeFacts{
-			NodeID: "nd_001",
+		getMonitoringInstanceRuntimeFactsResult: runtimefacts.MonitoringInstanceRuntimeFacts{
+			MonitoringInstanceID: "mi_001",
 			LatestHostSample: &runtimefacts.HostSample{
-				NodeID:         "nd_001",
-				ObservedAt:     now,
-				ReceivedAt:     now,
-				AgentVersion:   "1.0.0",
-				MemTotalBytes:  8589934592,
-				DiskTotalBytes: 107374182400,
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           now,
+				ReceivedAt:           now,
+				AgentVersion:         "1.0.0",
+				MemTotalBytes:        8589934592,
+				DiskTotalBytes:       107374182400,
 			},
 		},
 	}
 
-	handler := handlers.NodeRuntimeFacts(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts?window=30d", nil)
+	handler := handlers.MonitoringInstanceRuntimeFacts(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts?window=30d", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -284,7 +284,7 @@ func TestNodeRuntimeFactsWith30dWindow(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeFactsRejectsInvalidWindow(t *testing.T) {
+func TestMonitoringInstanceRuntimeFactsRejectsInvalidWindow(t *testing.T) {
 	repo := &fakeRuntimeFactsRepository{}
 
 	tests := []struct {
@@ -298,8 +298,8 @@ func TestNodeRuntimeFactsRejectsInvalidWindow(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := handlers.NodeRuntimeFacts(repo)
-			req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts?window="+tt.window, nil)
+			handler := handlers.MonitoringInstanceRuntimeFacts(repo)
+			req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts?window="+tt.window, nil)
 			recorder := httptest.NewRecorder()
 
 			handler.ServeHTTP(recorder, req)

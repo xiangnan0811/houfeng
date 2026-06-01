@@ -13,8 +13,8 @@ type FileSource struct {
 }
 
 type fileCredentials struct {
-	NodeID    string `json:"node_id"`
-	SyncToken string `json:"sync_token"`
+	MonitoringInstanceID string `json:"monitoring_instance_id"`
+	SyncToken            string `json:"sync_token"`
 }
 
 func (s FileSource) Token(ctx context.Context) (string, error) {
@@ -33,23 +33,23 @@ func (s FileSource) SyncCredentials(ctx context.Context) (string, string, bool, 
 	if err != nil {
 		return "", "", false, err
 	}
-	if credentials.NodeID == "" && credentials.SyncToken == "" {
+	if credentials.MonitoringInstanceID == "" && credentials.SyncToken == "" {
 		return "", "", false, nil
 	}
-	if credentials.NodeID == "" || credentials.SyncToken == "" {
+	if credentials.MonitoringInstanceID == "" || credentials.SyncToken == "" {
 		return "", "", false, fmt.Errorf("token file %q contains incomplete sync credentials", s.Path)
 	}
-	return credentials.NodeID, credentials.SyncToken, true, nil
+	return credentials.MonitoringInstanceID, credentials.SyncToken, true, nil
 }
 
-func (s FileSource) SaveSyncCredentials(_ context.Context, nodeID, syncToken string) error {
-	nodeID = strings.TrimSpace(nodeID)
+func (s FileSource) SaveSyncCredentials(_ context.Context, monitoringInstanceID, syncToken string) error {
+	monitoringInstanceID = strings.TrimSpace(monitoringInstanceID)
 	syncToken = strings.TrimSpace(syncToken)
-	if nodeID == "" || syncToken == "" {
-		return fmt.Errorf("sync credentials for token file %q must include node_id and sync_token", s.Path)
+	if monitoringInstanceID == "" || syncToken == "" {
+		return fmt.Errorf("sync credentials for token file %q must include monitoring_instance_id and sync_token", s.Path)
 	}
 
-	payload, err := json.Marshal(fileCredentials{NodeID: nodeID, SyncToken: syncToken})
+	payload, err := json.Marshal(fileCredentials{MonitoringInstanceID: monitoringInstanceID, SyncToken: syncToken})
 	if err != nil {
 		return fmt.Errorf("encode sync credentials for token file %q: %w", s.Path, err)
 	}
@@ -75,9 +75,9 @@ func (s FileSource) SaveSyncCredentials(_ context.Context, nodeID, syncToken str
 }
 
 type credentials struct {
-	EnrollmentToken string
-	NodeID          string
-	SyncToken       string
+	EnrollmentToken      string
+	MonitoringInstanceID string
+	SyncToken            string
 }
 
 func (s FileSource) load(context.Context) (credentials, error) {
@@ -96,8 +96,8 @@ func (s FileSource) load(context.Context) (credentials, error) {
 			return credentials{}, fmt.Errorf("parse token file %q sync credentials: %w", s.Path, err)
 		}
 		return credentials{
-			NodeID:    strings.TrimSpace(stored.NodeID),
-			SyncToken: strings.TrimSpace(stored.SyncToken),
+			MonitoringInstanceID: strings.TrimSpace(stored.MonitoringInstanceID),
+			SyncToken:            strings.TrimSpace(stored.SyncToken),
 		}, nil
 	}
 
