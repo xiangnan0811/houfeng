@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -38,9 +39,12 @@ func (s *Service) Login(ctx context.Context, username, password, userAgent, clie
 	}
 	u, err := s.users.FindByUsername(ctx, username)
 	if err != nil {
-		// Equalize timing/work to avoid leaking user existence.
-		_ = VerifyPassword("$2y$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalid", password)
-		return Session{}, ErrInvalidCredentials
+		if errors.Is(err, ErrUserNotFound) {
+			// Equalize timing/work to avoid leaking user existence.
+			_ = VerifyPassword("$2y$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalid", password)
+			return Session{}, ErrInvalidCredentials
+		}
+		return Session{}, fmt.Errorf("find user by username: %w", err)
 	}
 	if err := VerifyPassword(u.PasswordHash, password); err != nil {
 		return Session{}, ErrInvalidCredentials

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +78,24 @@ func TestLoginHandlerInvalidCredentials(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if len(w.Result().Cookies()) != 0 {
+		t.Fatal("must not set cookie on failure")
+	}
+}
+
+func TestLoginHandlerInternalFailure(t *testing.T) {
+	svc := &stubAuth{loginErr: errors.New("find user by username: query user")}
+	h := Login(svc)
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "invalid username or password") {
+		t.Fatalf("body = %q, must not present system failure as invalid credentials", w.Body.String())
 	}
 	if len(w.Result().Cookies()) != 0 {
 		t.Fatal("must not set cookie on failure")

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { ApiError } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 
 export function LoginPage() {
@@ -19,8 +20,12 @@ export function LoginPage() {
       await login(username, password)
       const next = params.get('next') ?? '/'
       navigate(next, { replace: true })
-    } catch {
-      setError('用户名或密码不正确')
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setError('用户名或密码不正确')
+      } else {
+        setError('登录服务异常，请检查服务状态或稍后重试')
+      }
     } finally {
       setSubmitting(false)
     }
