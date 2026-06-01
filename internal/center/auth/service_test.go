@@ -3,13 +3,15 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
 
 type fakeUsers struct {
-	byID   map[string]User
-	byUser map[string]string
+	byID              map[string]User
+	byUser            map[string]string
+	findByUsernameErr error
 }
 
 func newFakeUsers() *fakeUsers {
@@ -25,6 +27,9 @@ func (f *fakeUsers) Create(_ context.Context, u User) error {
 	return nil
 }
 func (f *fakeUsers) FindByUsername(_ context.Context, n string) (User, error) {
+	if f.findByUsernameErr != nil {
+		return User{}, f.findByUsernameErr
+	}
 	id, ok := f.byUser[n]
 	if !ok {
 		return User{}, ErrUserNotFound
@@ -156,6 +161,22 @@ func TestServiceLoginUnknownUser(t *testing.T) {
 	_, err := svc.Login(context.Background(), "ghost", "any-password-xx", "", "")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("Login unknown = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+func TestServiceLoginPropagatesUserRepositoryError(t *testing.T) {
+	svc, users, _ := newTestService(t)
+	users.findByUsernameErr = errors.New("query user: scan password_changed_at")
+
+	_, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	if err == nil {
+		t.Fatal("Login = nil, want repository error")
+	}
+	if errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Login error = %v, must not be ErrInvalidCredentials", err)
+	}
+	if !strings.Contains(err.Error(), "find user by username") {
+		t.Fatalf("Login error = %v, want find user context", err)
 	}
 }
 

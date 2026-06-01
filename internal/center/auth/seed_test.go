@@ -54,6 +54,38 @@ func TestSeedInitialUserSkipWhenNonEmpty(t *testing.T) {
 	}
 }
 
+func TestSeedInitialUserDoesNotOverwriteExistingPassword(t *testing.T) {
+	users := newFakeUsers()
+	existingHash, err := HashPassword("existing-password-xx")
+	if err != nil {
+		t.Fatalf("HashPassword existing: %v", err)
+	}
+	_ = users.Create(context.Background(), User{
+		UserID:       "existing",
+		Username:     "admin",
+		PasswordHash: existingHash,
+		Role:         RoleAdmin,
+	})
+
+	err = SeedInitialUser(context.Background(), users, "admin", "new-password-xx", "管理员", staticNow())
+	if err != nil {
+		t.Fatalf("SeedInitialUser: %v", err)
+	}
+	u, err := users.FindByUsername(context.Background(), "admin")
+	if err != nil {
+		t.Fatalf("FindByUsername: %v", err)
+	}
+	if u.PasswordHash != existingHash {
+		t.Fatal("SeedInitialUser changed an existing password hash")
+	}
+	if err := VerifyPassword(u.PasswordHash, "existing-password-xx"); err != nil {
+		t.Fatalf("existing password no longer verifies: %v", err)
+	}
+	if err := VerifyPassword(u.PasswordHash, "new-password-xx"); err == nil {
+		t.Fatal("seed password unexpectedly replaced existing password")
+	}
+}
+
 func TestSeedInitialUserRejectsBadInputs(t *testing.T) {
 	cases := []struct {
 		name, user, pass string

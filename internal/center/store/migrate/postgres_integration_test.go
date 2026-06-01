@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/db/migrations"
+	"houfeng/internal/center/auth"
+	"houfeng/internal/center/store"
 )
 
 const postgresIntegrationFlag = "HOUFENG_POSTGRES_INTEGRATION"
@@ -67,6 +69,59 @@ func TestPostgresIntegrationVPSFirstUpgradeNormalizesLegacyState(t *testing.T) {
 	assertSingleIntValue(t, ctx, db, "select count(*)::int from asset_lifecycle_actions where action_id like 'ala_mig0030_%'", 5)
 	assertSingleIntValue(t, ctx, db, "select count(*)::int from asset_lifecycle_action_steps where step_id like 'als_mig0030_%'", 5)
 	assertSingleIntValue(t, ctx, db, "select count(*)::int from renewal_decisions where decision_id like 'rdec_mig0030_%'", 5)
+}
+
+func TestPostgresIntegrationUpgradePreservesExistingLogin(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresSchema(t, ctx)
+
+	createLegacyAuthSchema(t, ctx, db)
+	createMinimalPost0029Schema(t, ctx, db)
+	legacyHash, err := auth.HashPassword("existing-password-xx")
+	if err != nil {
+		t.Fatalf("HashPassword legacy: %v", err)
+	}
+	execSQL(t, ctx, db, `
+		insert into users (user_id, username, password_hash, display_name, role, created_at, password_changed_at)
+		values ('usr_existing', 'admin', $1, '管理员', 'admin', now() - interval '1 day', now() - interval '1 day')
+	`, legacyHash)
+	markMigrationsAppliedThrough(t, ctx, db, "0029_rename_nodes_to_monitoring_instances.sql")
+
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() upgrade with existing user error = %v", err)
+	}
+
+	users := store.NewPostgresUserRepository(db)
+	if err := auth.SeedInitialUser(ctx, users, "admin", "new-password-xx", "管理员", func() time.Time {
+		return time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	}); err != nil {
+		t.Fatalf("SeedInitialUser: %v", err)
+	}
+	u, err := users.FindByUsername(ctx, "admin")
+	if err != nil {
+		t.Fatalf("FindByUsername admin: %v", err)
+	}
+	if u.PasswordHash != legacyHash {
+		t.Fatal("existing password hash changed during upgrade/bootstrap")
+	}
+
+	svc := auth.New(users, store.NewPostgresSessionRepository(db), auth.Options{
+		SessionTTL: time.Hour,
+		Now: func() time.Time {
+			return time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+		},
+	})
+	sess, err := svc.Login(ctx, "admin", "existing-password-xx", "ua", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("Login with existing password after upgrade: %v", err)
+	}
+	if sess.UserID != "usr_existing" {
+		t.Fatalf("session user = %q, want usr_existing", sess.UserID)
+	}
+	_, err = svc.Login(ctx, "admin", "new-password-xx", "", "")
+	if !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("Login with seed replacement password = %v, want ErrInvalidCredentials", err)
+	}
 }
 
 func openTemporaryPostgresDatabase(t *testing.T, ctx context.Context) *pgxpool.Pool {
@@ -174,6 +229,54 @@ func openTemporaryPostgresSchema(t *testing.T, ctx context.Context) *pgxpool.Poo
 		t.Fatalf("ping temporary postgres schema %q: %v", schemaName, err)
 	}
 	return testPool
+}
+
+func createLegacyAuthSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
+	t.Helper()
+
+	execSQL(t, ctx, db, `
+		create table users (
+		  user_id              text primary key,
+		  username             text not null unique,
+		  password_hash        text not null,
+		  display_name         text not null default '',
+		  role                 text not null default 'admin',
+		  created_at           timestamptz not null default now(),
+		  password_changed_at  timestamptz not null default now()
+		)
+	`)
+	execSQL(t, ctx, db, `
+		create table sessions (
+		  session_id    text primary key,
+		  user_id       text not null references users(user_id) on delete cascade,
+		  issued_at     timestamptz not null default now(),
+		  last_seen_at  timestamptz not null default now(),
+		  expires_at    timestamptz not null,
+		  user_agent    text not null default '',
+		  client_ip     text not null default ''
+		)
+	`)
+	execSQL(t, ctx, db, `create index sessions_user_idx on sessions(user_id)`)
+	execSQL(t, ctx, db, `create index sessions_expires_idx on sessions(expires_at)`)
+}
+
+func markMigrationsAppliedThrough(t *testing.T, ctx context.Context, db *pgxpool.Pool, throughName string) {
+	t.Helper()
+
+	if _, err := db.Exec(ctx, ensureSchemaMigrationsSQL); err != nil {
+		t.Fatalf("ensure schema_migrations: %v", err)
+	}
+	names, err := Names()
+	if err != nil {
+		t.Fatalf("Names: %v", err)
+	}
+	for _, name := range names {
+		execSQL(t, ctx, db, `insert into schema_migrations (name) values ($1)`, name)
+		if name == throughName {
+			return
+		}
+	}
+	t.Fatalf("migration %q not found", throughName)
 }
 
 func createMinimalPost0029Schema(t *testing.T, ctx context.Context, db *pgxpool.Pool) {

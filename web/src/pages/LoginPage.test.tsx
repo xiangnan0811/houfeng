@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LoginPage } from './LoginPage'
+import { ApiError } from '../lib/api'
 import * as authCtx from '../lib/auth-context'
 
 const baseAuth = { logout: vi.fn(), refresh: vi.fn() }
@@ -88,7 +89,7 @@ describe('LoginPage', () => {
   })
 
   it('shows a generic in-place alert on bad credentials', async () => {
-    const login = mockAuth(vi.fn().mockRejectedValue(new Error('request failed (401): backend detail')))
+    const login = mockAuth(vi.fn().mockRejectedValue(new ApiError(401, 'backend detail')))
 
     renderLogin()
 
@@ -101,5 +102,21 @@ describe('LoginPage', () => {
     expect(alert).toHaveTextContent('用户名或密码不正确')
     expect(alert).not.toHaveTextContent('request failed')
     expect(alert).not.toHaveTextContent('backend detail')
+  })
+
+  it('does not present login service failures as bad credentials', async () => {
+    const login = mockAuth(vi.fn().mockRejectedValue(new ApiError(500, 'login failed')))
+
+    renderLogin()
+
+    fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'admin' } })
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'pw1234567' } })
+    fireEvent.click(screen.getByRole('button', { name: '登录' }))
+
+    await waitFor(() => expect(login).toHaveBeenCalledWith('admin', 'pw1234567'))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('登录服务异常，请检查服务状态或稍后重试')
+    expect(alert).not.toHaveTextContent('用户名或密码不正确')
+    expect(alert).not.toHaveTextContent('login failed')
   })
 })
