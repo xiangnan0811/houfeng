@@ -1187,3 +1187,38 @@ Completed the asset lifecycle release chain, fixed publish-images artifact actio
 ### Next Steps
 
 - None - task complete
+
+
+## Session 153: Monitoring instance concept refactor
+
+**Date**: 2026-06-01
+**Task**: Monitoring instance concept refactor
+**Branch**: `worktree/monitoring-instances-concept`
+
+### Summary
+
+Completed the destructive Node to MonitoringInstance concept refactor across backend, agent contracts, web routes, docs, and Trellis task artifacts; performed final verification and archived the task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `67c54f9` | (see git log) |
+| `9ffde36` | (see git log) |
+| `0885bd7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
