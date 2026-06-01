@@ -1,6 +1,7 @@
 import type {
   CreateAssetDomainInput,
   CreateAssetServiceInput,
+  CreateVPSSubscriptionInput,
   CreateVPSExperienceLogInput,
   UpdateVPSAssetInput,
   VPSAssetDetail,
@@ -11,6 +12,7 @@ import type {
   ExperienceDraftState,
   FactEditFormState,
   ServiceDraftState,
+  SubscriptionDraftState,
   VPSDetailPageState,
   VPSDetailSelectorState,
 } from './types'
@@ -60,6 +62,19 @@ export const INITIAL_SERVICE_DRAFT: ServiceDraftState = {
   note: '',
 }
 
+export const INITIAL_SUBSCRIPTION_DRAFT: SubscriptionDraftState = {
+  price: '',
+  currency: 'USD',
+  billingCycle: 'monthly',
+  billingMonths: '1',
+  startedAt: '',
+  renewAt: '',
+  autoRenew: false,
+  autoRenewCancelled: false,
+  paymentMethod: '',
+  note: '',
+}
+
 export const INITIAL_DOMAIN_DRAFT: DomainDraftState = {
   domainName: '',
   status: 'active',
@@ -72,6 +87,33 @@ export const INITIAL_DOMAIN_DRAFT: DomainDraftState = {
   httpsEnabled: true,
   labels: '',
   note: '',
+}
+
+export function buildSubscriptionInput(form: SubscriptionDraftState): CreateVPSSubscriptionInput {
+  const price = Number.parseFloat(form.price.trim())
+  if (!Number.isFinite(price) || price < 0) {
+    throw new Error('价格必须为非负数字。')
+  }
+  const billingMonths = Number.parseInt(form.billingMonths.trim(), 10)
+  if (!Number.isInteger(billingMonths) || billingMonths <= 0) {
+    throw new Error('计费月数必须大于 0。')
+  }
+  const currency = form.currency.trim().toUpperCase()
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new Error('币种必须为 3 位大写代码。')
+  }
+  return {
+    price,
+    currency,
+    billing_cycle: form.billingCycle.trim() || 'monthly',
+    billing_months: billingMonths,
+    started_at: form.startedAt || null,
+    renew_at: form.renewAt || null,
+    auto_renew: form.autoRenew,
+    auto_renew_cancelled: form.autoRenewCancelled,
+    payment_method: form.paymentMethod.trim(),
+    note: form.note.trim(),
+  }
 }
 
 export function detailToFactEditForm(detail: VPSAssetDetail): FactEditFormState {

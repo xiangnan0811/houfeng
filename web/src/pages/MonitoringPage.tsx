@@ -1,11 +1,10 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { type DataTableSortState } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
-  createMonitoringInstance,
   enterMonitoringInstanceMaintenance,
   exitMonitoringInstanceMaintenance,
   listMonitoringInstanceAssetContexts,
@@ -15,12 +14,9 @@ import {
   postMonitoringInstanceAction,
   postMonitoringInstanceBatch,
   resumeMonitoringInstanceMonitoring,
-  retireMonitoringInstance,
-  restoreRetiredMonitoringInstanceToObserving,
   updateMonitoringInstanceMetadata,
 } from '../lib/api'
-import type { AssetContextForMonitoringInstance, CreateMonitoringInstanceInput, MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../lib/types'
-import { CreateMonitoringInstanceDrawer } from './monitoring/CreateMonitoringInstanceDrawer'
+import type { AssetContextForMonitoringInstance, MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../lib/types'
 import { MonitoringHero } from './monitoring/MonitoringHero'
 import { MonitoringInstancesListSection } from './monitoring/MonitoringInstancesListSection'
 import { buildMonitoringInstancesTableColumns } from './monitoring/MonitoringInstancesTableColumns'
@@ -31,7 +27,6 @@ import {
   countMaintenanceOrPausedMonitoringInstances,
   countPendingOnboardingMonitoringInstances,
   distinctSorted,
-  initialCreateForm,
   isBindingConflictMonitoringInstance,
   isPendingOnboardingMonitoringInstance,
   isRuntimeAttentionMonitoringInstance,
@@ -60,11 +55,6 @@ export function MonitoringPage() {
   const [monitoringInstanceListView, setMonitoringInstanceListView] = useState<MonitoringInstanceListView>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
-  const [createSubmitting, setCreateSubmitting] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
-  const [labelInput, setLabelInput] = useState('')
-  const [createForm, setCreateForm] = useState<CreateMonitoringInstanceInput>(initialCreateForm)
   const [runtimeBusyMonitoringInstanceId, setRuntimeBusyMonitoringInstanceId] = useState<string | null>(null)
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
   const [editingLabelMonitoringInstanceId, setEditingLabelMonitoringInstanceId] = useState<string | null>(null)
@@ -86,12 +76,6 @@ export function MonitoringPage() {
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set())
   const [monitoringInstanceAssetContexts, setMonitoringInstanceAssetContexts] = useState<Map<string, AssetContextForMonitoringInstance>>(new Map())
   const [monitoringInstanceAssetContextError, setMonitoringInstanceAssetContextError] = useState<string | null>(null)
-
-  function resetCreateFlow() {
-    setCreateError(null)
-    setLabelInput('')
-    setCreateForm(initialCreateForm)
-  }
 
   useEffect(() => {
     let cancelled = false
@@ -143,10 +127,6 @@ export function MonitoringPage() {
     }
   }, [])
 
-  function updateField<K extends keyof CreateMonitoringInstanceInput>(field: K, value: CreateMonitoringInstanceInput[K]) {
-    setCreateForm((current) => ({ ...current, [field]: value }))
-  }
-
   function queueFocusRestore(monitoringInstanceId: string, preferredAction: MonitoringInstanceRuntimeAction) {
     pendingFocusRestoreRef.current = { monitoringInstanceId, preferredAction }
   }
@@ -194,11 +174,7 @@ export function MonitoringPage() {
             ? await exitMonitoringInstanceMaintenance(monitoringInstance.monitoring_instance_id)
             : action === 'pause'
               ? await pauseMonitoringInstanceMonitoring(monitoringInstance.monitoring_instance_id)
-              : action === 'resume'
-                ? await resumeMonitoringInstanceMonitoring(monitoringInstance.monitoring_instance_id)
-                : action === 'retire'
-                  ? await retireMonitoringInstance(monitoringInstance.monitoring_instance_id)
-                  : await restoreRetiredMonitoringInstanceToObserving(monitoringInstance.monitoring_instance_id)
+              : await resumeMonitoringInstanceMonitoring(monitoringInstance.monitoring_instance_id)
       setMonitoringInstances((current) =>
         current.map((item) =>
           item.monitoring_instance_id === updated.monitoring_instance_id ? mergeNonMetadataMonitoringInstanceRecord(item, updated) : item,
@@ -262,38 +238,6 @@ export function MonitoringPage() {
       }))
     } finally {
       setMetadataBusyMonitoringInstanceId((current) => (current === monitoringInstance.monitoring_instance_id ? null : current))
-    }
-  }
-
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setCreateSubmitting(true)
-    setCreateError(null)
-
-    const payload: CreateMonitoringInstanceInput = {
-      ...createForm,
-      display_name: createForm.display_name.trim(),
-      group: createForm.group.trim(),
-      region: createForm.region.trim(),
-      city: createForm.city.trim(),
-      provider: createForm.provider.trim(),
-      note: createForm.note.trim(),
-      labels: parseLabels(labelInput),
-    }
-
-    try {
-      const monitoringInstance = await createMonitoringInstance(payload)
-      setMonitoringInstances((current) => {
-        const withoutCreated = current.filter((item) => item.monitoring_instance_id !== monitoringInstance.monitoring_instance_id)
-        return [monitoringInstance, ...withoutCreated]
-      })
-      setCreateOpen(false)
-      resetCreateFlow()
-      navigate(`/monitoring/${monitoringInstance.monitoring_instance_id}?onboarding=1`)
-    } catch (submitError) {
-      setCreateError(describeError(submitError, '接入监控实例失败'))
-    } finally {
-      setCreateSubmitting(false)
     }
   }
 
@@ -608,15 +552,6 @@ export function MonitoringPage() {
     return true
   }
 
-  function toggleCreateDrawer() {
-    setCreateOpen((current) => {
-      if (current) {
-        resetCreateFlow()
-      }
-      return !current
-    })
-  }
-
   return (
     <div className="page-stack animate-in">
       <MonitoringHero
@@ -627,22 +562,6 @@ export function MonitoringPage() {
         onAbnormalClick={() => setAbnormalFilter(abnormalMonitoringInstanceCount > 0)}
         onOnboardingClick={() => setOnboardingFilter(pendingOnboardingMonitoringInstanceCount > 0)}
         onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
-        onCreateClick={toggleCreateDrawer}
-      />
-
-      <CreateMonitoringInstanceDrawer
-        open={createOpen}
-        form={createForm}
-        labelInput={labelInput}
-        submitting={createSubmitting}
-        error={createError}
-        onClose={() => {
-          setCreateOpen(false)
-          resetCreateFlow()
-        }}
-        onSubmit={handleCreate}
-        onFieldChange={updateField}
-        onLabelInputChange={setLabelInput}
       />
 
       <div className="animate-in d2">
@@ -701,7 +620,7 @@ export function MonitoringPage() {
               current?.monitoringInstanceId === monitoringInstance.monitoring_instance_id ? null : current,
             )
           }}
-          onCreateMonitoringInstance={toggleCreateDrawer}
+          onOpenVPSInventory={() => navigate('/vps')}
         />
       </div>
     </div>

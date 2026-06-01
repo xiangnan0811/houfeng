@@ -85,9 +85,11 @@ See `.env.example` and `docs/deploy/local-and-systemd.md`. Required at minimum:
 
 Key model invariants:
 
-- `VPS = a server asset ledger object`. It owns provider, cost, lifecycle, service/domain context, and operator decisions.
-- `MonitoringInstance = an agent-attached runtime observation object`. Same machine reinstall can stay the same MonitoringInstance; hardware replacement or a distinct agent identity should become a new MonitoringInstance unless the operator explicitly confirms otherwise.
-- VPS and MonitoringInstance are connected only through explicit links. Link/unlink never implicitly rewrites VPS lifecycle, subscription state, Target state, agent plan, or MonitoringInstance runtime state.
+- `VPS = the primary server control-plane object`. It owns provider identity, business lifecycle, usage status, renewal / migration / cancellation decisions, billing evidence, service/domain context, and the main user workflow.
+- `Subscription = VPS-scoped billing facts`. Price, currency, billing cadence, renewal date, auto-renew flags, payment method, and note support VPS decisions; subscription status is legacy/internal compatibility and must not be a second user-facing business-state source.
+- `MonitoringInstance = VPS-scoped or explicitly linked runtime observation evidence`. Same machine reinstall can stay the same MonitoringInstance; hardware replacement or a distinct agent identity should become a new MonitoringInstance unless the operator explicitly confirms otherwise. Binding, monitoring, heartbeat, health, pause, maintenance, and incident fields are runtime facts, not VPS business lifecycle.
+- The normal onboarding path is VPS first: create or open a VPS, then create subscription facts or create-and-link a MonitoringInstance from that VPS. The scoped create path derives display name, provider, location, labels, and note from the VPS. Existing MonitoringInstance link/unlink remains an advanced association/history operation and must not make the user re-enter VPS identity fields.
+- Business state is centralized on VPS: `vps_assets.lifecycle_status`, `usage_status`, and `renewal_decision` are the only manual business-state source for lifecycle / usage / renewal decisions. Cancellation / retirement workflows start from the VPS detail workbench and use explicit preview + confirmation + audit before changing related runtime or billing facts.
 - `Target = an observable entrypoint`. `ProbeItem` only describes how to observe it; address belongs to `Target`.
 - `agentapi.ProbeKind` constants are exactly three: `tcp` / `http` / `tls` (see `internal/contracts/agentapi/types.go`). `https` is not a separate kind — it runs as `http` with TLS configuration on the Target.
 - Health state is derived (`正常` / `关注` / `告警` / `严重`); lifecycle is managed (`待接入` / `在用` / `观察中` / `不续费` / `已退役`); maintenance is a runtime control, not a health state.

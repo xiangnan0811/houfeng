@@ -17,11 +17,6 @@ type monitoringInstanceRuntimeControlRepository interface {
 	ResumeMonitoringInstanceMonitoring(context.Context, string) (monitoringinstances.Record, error)
 }
 
-type monitoringInstanceLifecycleControlRepository interface {
-	RetireMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
-	RestoreRetiredMonitoringInstanceToObserving(context.Context, string) (monitoringinstances.Record, error)
-}
-
 type targetRuntimeControlRepository interface {
 	SetTargetMaintenance(context.Context, string) (targets.TargetRecord, error)
 	PauseTargetRun(context.Context, string) (targets.TargetRecord, error)
@@ -65,49 +60,6 @@ func MonitoringInstanceRuntimeControls(repo monitoringInstanceRuntimeControlRepo
 			return
 		case errors.Is(err, store.ErrInvalidMonitoringInstanceRuntimeTransition):
 			writeError(w, http.StatusConflict, "invalid runtime transition")
-			return
-		case err != nil:
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-
-		writeJSON(w, http.StatusOK, record)
-	})
-}
-
-func MonitoringInstanceLifecycleControls(repo monitoringInstanceLifecycleControlRepository) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
-		monitoringInstanceID, action := monitoringInstanceLifecycleControlAction(r.URL.Path)
-		if monitoringInstanceID == "" || action == "" {
-			writeError(w, http.StatusNotFound, "monitoring instance not found")
-			return
-		}
-
-		var (
-			record monitoringinstances.Record
-			err    error
-		)
-		switch action {
-		case "retire":
-			record, err = repo.RetireMonitoringInstance(r.Context(), monitoringInstanceID)
-		case "restore-to-observing":
-			record, err = repo.RestoreRetiredMonitoringInstanceToObserving(r.Context(), monitoringInstanceID)
-		default:
-			writeError(w, http.StatusNotFound, "monitoring instance not found")
-			return
-		}
-
-		switch {
-		case errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound):
-			writeError(w, http.StatusNotFound, "monitoring instance not found")
-			return
-		case errors.Is(err, store.ErrInvalidMonitoringInstanceLifecycleTransition):
-			writeError(w, http.StatusConflict, "invalid lifecycle transition")
 			return
 		case err != nil:
 			writeError(w, http.StatusInternalServerError, "internal server error")
@@ -165,19 +117,6 @@ func TargetRuntimeControls(repo targetRuntimeControlRepository) http.Handler {
 
 		writeJSON(w, http.StatusOK, record)
 	})
-}
-
-func monitoringInstanceLifecycleControlAction(path string) (string, string) {
-	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/monitoring-instances/"), "/")
-	if trimmed == "" {
-		return "", ""
-	}
-
-	segments := strings.Split(trimmed, "/")
-	if len(segments) != 3 || segments[0] == "" || segments[1] != "lifecycle" || segments[2] == "" {
-		return "", ""
-	}
-	return segments[0], segments[2]
 }
 
 func monitoringInstanceRuntimeControlAction(path string) (string, string) {

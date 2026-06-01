@@ -171,7 +171,7 @@ Before using the user's real 40+ VPS data:
 - Keep the real source file out of git unless the user explicitly wants a redacted fixture committed.
 - Remove secrets: SSH private keys, API tokens, provider passwords, one-time recovery codes, session cookies, billing portal credentials, agent tokens, webhook URLs, and private notes unrelated to asset operation.
 - Replace or redact account identifiers that are not useful for product validation.
-- Keep only operational fields needed by the current importer: provider identity, VPS display name, product/location/access facts, lifecycle/usage/renewal decision, labels, notes, subscription price/currency/billing/renewal/status, and optional monitoring instance/target hints.
+- Keep only operational fields needed by the current importer: provider identity, VPS display name, product/location/access facts, VPS lifecycle/usage/renewal decision, labels, notes, subscription billing facts (price, currency, billing cadence, renewal date, auto-renew/payment/note), and optional monitoring instance/target hints. Treat legacy subscription status only as imported historical/internal evidence, not as a user-entered business state.
 - Use `null` or omit unknown optional facts; do not invent fake dates or prices for real-data validation.
 - Run `-dry-run -format json` first and review `validation_errors`, `duplicate_candidates`, `missing_provider_rows`, `missing_renew_date_rows`, `monitoring_instance_association_candidates`, `renewal_candidates`, and `idle_paid_candidates`.
 - Decide whether to import into a disposable local database or do manual entry for the first pass.
@@ -185,7 +185,7 @@ When real or local-sample data is visible:
 - `/asset-decisions`: queue priority for renewal due, unreviewed, migrate/cancel, missing subscriptions, and unlinked rows.
 - `/vps`: scanning density, quick views, visible URL chips, provider filters, missing-fact badges, table scroll behavior, and mobile readability.
 - `/providers`: duplicate provider naming, account hints, ratings, labels, and update timestamps.
-- `/subscriptions`: price/monthly conversion, renewal sorting, status filters, and auto-renew labels.
+- `/subscriptions`: price/monthly conversion, renewal sorting, auto-renew/payment labels, and links back to the VPS detail workbench. Subscription status is not a primary user filter in the VPS-first flow.
 
 If the real-data shape materially changes visual judgment, capture local screenshots for private review or external attachment, but do not commit screenshot directories or manifests by default. Browser sanity plus explicit row counts and limitations is enough for the readiness pass unless the user explicitly approves public README/docs image assets.
 

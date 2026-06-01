@@ -223,6 +223,10 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 			called = "monitoring-instances"
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSSubscriptionsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "subscriptions"
+			w.WriteHeader(http.StatusCreated)
+		}),
 		VPSLinkMonitoringInstanceHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "link-monitoring-instance"
 			w.WriteHeader(http.StatusCreated)
@@ -268,6 +272,7 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 		called string
 	}{
 		{method: http.MethodGet, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusOK, called: "monitoring-instances"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/subscriptions", want: http.StatusCreated, called: "subscriptions"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", want: http.StatusCreated, called: "link-monitoring-instance"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", want: http.StatusOK, called: "unlink-monitoring-instance"},
 		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusOK, called: "cancellation-preview"},
@@ -288,6 +293,7 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 func TestRouterProtectsVPSRoutes(t *testing.T) {
 	collectionCalled := false
 	itemCalled := false
+	subscriptionsCalled := false
 	cancellationPreviewCalled := false
 	cancellationCalled := false
 	middlewareCalls := 0
@@ -299,6 +305,10 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 		}),
 		VPSItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			itemCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSSubscriptionsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			subscriptionsCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
 		VPSCancellationPreviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -317,7 +327,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/monitoring-instances", "/api/vps/vps_001/link-monitoring-instance", "/api/vps/vps_001/unlink-monitoring-instance", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation"} {
+	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/monitoring-instances", "/api/vps/vps_001/subscriptions", "/api/vps/vps_001/link-monitoring-instance", "/api/vps/vps_001/unlink-monitoring-instance", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 
@@ -333,14 +343,17 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	if itemCalled {
 		t.Fatal("vps item handler was called despite auth middleware blocking")
 	}
+	if subscriptionsCalled {
+		t.Fatal("vps subscriptions handler was called despite auth middleware blocking")
+	}
 	if cancellationPreviewCalled {
 		t.Fatal("vps cancellation preview handler was called despite auth middleware blocking")
 	}
 	if cancellationCalled {
 		t.Fatal("vps cancellation handler was called despite auth middleware blocking")
 	}
-	if middlewareCalls != 7 {
-		t.Fatalf("middleware calls = %d, want 7", middlewareCalls)
+	if middlewareCalls != 8 {
+		t.Fatalf("middleware calls = %d, want 8", middlewareCalls)
 	}
 }
 
@@ -727,6 +740,7 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	vpsInnerCalled := false
 	vpsItemInnerCalled := false
 	vpsMonitoringInstancesInnerCalled := false
+	vpsSubscriptionsInnerCalled := false
 	monitoringInstanceVPSInnerCalled := false
 	subscriptionsInnerCalled := false
 	subscriptionItemInnerCalled := false
@@ -755,6 +769,10 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 		}),
 		VPSMonitoringInstancesHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			vpsMonitoringInstancesInnerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSSubscriptionsHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			vpsSubscriptionsInnerCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
 		MonitoringInstanceVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -858,6 +876,20 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	}
 	if !mwCalled {
 		t.Fatal("middleware not invoked for vps monitoringInstances route")
+	}
+
+	mwCalled = false
+	r = httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("vps subscriptions status = %d, want 401 (middleware should block)", w.Code)
+	}
+	if vpsSubscriptionsInnerCalled {
+		t.Fatal("inner vps subscriptions handler must not be called when middleware blocks")
+	}
+	if !mwCalled {
+		t.Fatal("middleware not invoked for vps subscriptions route")
 	}
 
 	mwCalled = false

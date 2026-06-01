@@ -8,6 +8,7 @@ type VPSMonitoringInstanceLinksSectionProps = {
   unlinkingMonitoringInstanceId: string | null
   linkFeedback: string | null
   linkFeedbackIsError: boolean
+  onCreateMonitoringInstance: () => void
   onOpenLink: () => void
   onUnlinkMonitoringInstance: (monitoringInstance: VPSMonitoringInstanceSummary) => void
 }
@@ -17,6 +18,7 @@ export function VPSMonitoringInstanceLinksSection({
   unlinkingMonitoringInstanceId,
   linkFeedback,
   linkFeedbackIsError,
+  onCreateMonitoringInstance,
   onOpenLink,
   onUnlinkMonitoringInstance,
 }: VPSMonitoringInstanceLinksSectionProps) {
@@ -26,14 +28,17 @@ export function VPSMonitoringInstanceLinksSection({
         <div>
           <p className="section-heading__eyebrow">MONITORING EVIDENCE</p>
           <h2>监控实例证据</h2>
-          <p className="section-heading__description">
-            关联监控实例用于解释续费决策，只使用 VPS detail contract 返回的 linked monitoring instance health、心跳、异常数量和主问题摘要。
-          </p>
+        <p className="section-heading__description">
+            监控实例作为 VPS 的运行观测事实，用于解释续费和迁移判断。
+        </p>
         </div>
         <span className="section-heading__meta">
           <MonoDigits>{monitoring.length}</MonoDigits> 个 active link
         </span>
-        <Button variant="secondary" size="sm" onClick={onOpenLink}>关联监控实例</Button>
+        <div className="section-heading__actions">
+          <Button variant="primary" size="sm" onClick={onCreateMonitoringInstance}>创建并接入 agent</Button>
+          <Button variant="secondary" size="sm" onClick={onOpenLink}>关联已有监控实例</Button>
+        </div>
       </div>
       {linkFeedback ? (
         <p

@@ -13,7 +13,7 @@ export type MonitoringInstanceFilterState = {
   onboardingPending: boolean
 }
 
-export type MonitoringInstanceRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume' | 'retire' | 'restore-to-observing'
+export type MonitoringInstanceRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
 
 export type MonitoringInstanceListView = 'all' | 'runtime-attention' | 'binding-conflict'
 
@@ -34,7 +34,7 @@ export type MonitoringInstanceFilterOption = {
   label: string
 }
 
-export type MonitoringInstanceEvidenceActionKind = 'abnormal' | 'onboarding' | 'runtime' | 'clear' | 'create' | 'asset'
+export type MonitoringInstanceEvidenceActionKind = 'abnormal' | 'onboarding' | 'runtime' | 'clear' | 'asset'
 
 export type MonitoringInstanceEvidenceLead = {
   eyebrow: string

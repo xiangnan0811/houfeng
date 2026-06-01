@@ -38,7 +38,8 @@ type BuildDecisionModelInput = {
   onDecisionEdit: () => void
   onFactEdit: () => void
   onExperienceLog: () => void
-  onMonitoringInstanceLink: () => void
+  onSubscriptionCreate: () => void
+  onMonitoringInstanceCreate: () => void
 }
 
 export function countDecisionRecords(timeline: VPSTimeline): number {
@@ -94,7 +95,8 @@ export function buildVPSDecisionModel(input: BuildDecisionModelInput) {
     input.onDecisionEdit,
     input.onFactEdit,
     input.onExperienceLog,
-    input.onMonitoringInstanceLink,
+    input.onSubscriptionCreate,
+    input.onMonitoringInstanceCreate,
   )
   const evidenceItems: WorkbenchEvidence[] = [
     {
@@ -197,7 +199,8 @@ function buildNextAction(
   onDecisionEdit: () => void,
   onFactEdit: () => void,
   onExperienceLog: () => void,
-  onMonitoringInstanceLink: () => void,
+  onSubscriptionCreate: () => void,
+  onMonitoringInstanceCreate: () => void,
 ): NextAction {
   if (detail.renewal_decision === 'unreviewed') {
     return {
@@ -222,8 +225,8 @@ function buildNextAction(
       title: '补录续费成本',
       summary: '订阅接口已成功返回空结果，当前缺少真实续费日和月化成本。',
       tone: 'critical',
-      linkLabel: '补订阅',
-      to: `/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}&create=1`,
+      buttonLabel: '快速创建订阅',
+      onAction: onSubscriptionCreate,
     }
   }
   if (!monitoringInstance) {
@@ -231,8 +234,8 @@ function buildNextAction(
       title: '补监控实例运行证据',
       summary: '这台 VPS 尚未关联监控实例，资产判断缺少心跳、健康和异常证据。',
       tone: 'alert',
-      buttonLabel: '关联监控实例',
-      onAction: onMonitoringInstanceLink,
+      buttonLabel: '创建并接入 agent',
+      onAction: onMonitoringInstanceCreate,
     }
   }
   if (monitoringInstance.current_active_incident_count > 0 || monitoringInstance.current_health_status === '告警' || monitoringInstance.current_health_status === '严重') {

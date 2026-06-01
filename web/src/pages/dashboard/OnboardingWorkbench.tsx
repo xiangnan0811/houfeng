@@ -6,16 +6,22 @@ import { DASHBOARD_LINKS } from './dashboardLinks'
 export function OnboardingWorkbench() {
   const steps = [
     {
-      title: '接入监控实例',
-      description: '登记第一台服务器。',
-      to: DASHBOARD_LINKS.monitoring,
-      cta: '接入第一个监控实例',
+      title: '创建 VPS',
+      description: '登记第一台服务器主体。',
+      to: DASHBOARD_LINKS.vps,
+      cta: '创建第一台 VPS',
+    },
+    {
+      title: '补账单事实',
+      description: '在 VPS 详情页快速创建订阅。',
+      to: DASHBOARD_LINKS.vps,
+      cta: '查看 VPS 详情',
     },
     {
       title: '接入 agent',
-      description: '进入监控实例详情完成 agent 接入。',
-      to: DASHBOARD_LINKS.monitoringPendingOnboarding,
-      cta: '查看监控实例接入',
+      description: '从 VPS 详情页创建监控实例并进入接入抽屉。',
+      to: DASHBOARD_LINKS.vps,
+      cta: '从 VPS 接入 agent',
     },
     {
       title: '创建目标',

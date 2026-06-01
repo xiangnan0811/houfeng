@@ -276,7 +276,7 @@ function CompareSummaryCard({ state, side }: { state: MonitoringInstanceState; s
           </dd>
         </div>
         <div className="compare-summary-row">
-          <dt>生命周期</dt>
+          <dt>接入阶段</dt>
           <dd><StatusBadge label={monitoringInstance.lifecycle_status} /></dd>
         </div>
         <div className="compare-summary-row">

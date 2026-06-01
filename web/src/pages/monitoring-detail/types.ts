@@ -27,7 +27,6 @@ export type BindingConflictState = {
 }
 
 export type BindingConflictAction = 'confirm' | 'reject' | 'reset'
-export type MonitoringInstanceLifecycleAction = 'retire' | 'restore-to-observing'
 
 export type PendingRuntimeConfirmation = {
   action: 'pause'

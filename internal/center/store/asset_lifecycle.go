@@ -681,19 +681,19 @@ func buildSubscriptionImpacts(records []subscriptions.Record) []assetlifecycle.S
 		case subscriptions.StatusActive:
 			impact.Role = "active"
 			impact.RecommendedAction = "cancel_auto_renew_and_mark_cancelled"
-			impact.Message = "订阅仍处于 active，需要显式确认取消订阅自动续费并标记为 cancelled。"
+			impact.Message = "订阅账单记录仍显示自动续费有效，需要显式确认取消自动续费。"
 		case subscriptions.StatusExpired, subscriptions.StatusCancelled, subscriptions.StatusPaused:
 			impact.Role = "inactive"
 			impact.RecommendedAction = "keep_inactive"
-			impact.Message = "订阅已处于非活跃状态，仍需处理 VPS、MonitoringInstance 与实例状态。"
+			impact.Message = "订阅账单记录已无续费动作，仍需处理 VPS、MonitoringInstance 与入口探测状态。"
 		case subscriptions.StatusUnknown:
 			impact.Role = "inactive"
 			impact.RecommendedAction = "review_inactive"
-			impact.Message = "订阅状态未知且不是 active，仍需处理 VPS、MonitoringInstance 与实例状态。"
+			impact.Message = "订阅账单记录缺少明确自动续费事实，仍需处理 VPS、MonitoringInstance 与入口探测状态。"
 		default:
 			impact.Role = "attention"
 			impact.RecommendedAction = "review_before_cancel"
-			impact.Message = "订阅不是 active，但也不是最终取消/过期状态，请在执行前确认。"
+			impact.Message = "订阅账单记录不是明确可续费事实，请在执行前确认自动续费与支付记录。"
 		}
 		impacts = append(impacts, impact)
 	}
@@ -792,13 +792,13 @@ func buildCancellationPreviewFindings(preview assetlifecycle.CancellationPreview
 		warnings = append(warnings, "没有找到关联订阅；仍可继续处理 VPS、MonitoringInstance 与实例生命周期。")
 	}
 	if activeSubscriptions == 0 && inactiveSubscriptions > 0 {
-		warnings = append(warnings, "关联订阅已处于非 active 状态；这不是“没有关联订阅”，仍需处理 VPS、MonitoringInstance 与实例状态。")
+		warnings = append(warnings, "关联订阅账单记录已无续费动作；这不是“没有关联订阅”，仍需处理 VPS、MonitoringInstance 与入口探测状态。")
 	}
 	if activeSubscriptions > 1 {
 		warnings = append(warnings, "存在多条 active 订阅，执行取消时必须显式选择要处理的订阅。")
 	}
 	if inactiveSubscriptions > 0 && preview.VPS.LifecycleStatus != vpsassets.LifecycleCancelled && preview.VPS.LifecycleStatus != vpsassets.LifecycleToCancel {
-		warnings = append(warnings, "订阅已非活跃，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。")
+		warnings = append(warnings, "订阅账单记录已无续费动作，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。")
 	}
 	if preview.VPS.LifecycleStatus == vpsassets.LifecycleArchived {
 		blockers = append(blockers, "VPS 已归档，普通取消/退役动作不应再修改归档资产。")
@@ -1430,7 +1430,7 @@ func linkedVPSCancellationContext(summary assetlifecycle.LinkedVPSContext) (bool
 	case vpsassets.IsCancellationRenewalDecision(summary.RenewalDecision):
 		return true, "关联 VPS 已决定不续费"
 	case isInactiveSubscriptionEvidence(subscriptions.Status(summary.SubscriptionState)):
-		return true, "关联订阅已非 active，但 VPS 未进入取消状态"
+		return true, "关联订阅账单记录已无续费动作，但 VPS 未进入取消状态"
 	default:
 		return false, "关联资产状态正常"
 	}

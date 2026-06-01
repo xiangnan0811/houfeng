@@ -12,7 +12,28 @@ import (
 
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/monitoringinstances"
+	"houfeng/internal/center/vpsassets"
 )
+
+type fakeLinkedMonitoringInstanceCreator struct {
+	result     monitoringinstances.Record
+	linkResult assetlinks.Record
+	err        error
+	vpsID      string
+	input      monitoringinstances.CreateInput
+	linkNote   string
+}
+
+func (f *fakeLinkedMonitoringInstanceCreator) CreateLinkedMonitoringInstance(_ context.Context, vpsID string, input monitoringinstances.CreateInput, linkNote string) (monitoringinstances.Record, assetlinks.Record, error) {
+	f.vpsID = vpsID
+	f.input = input
+	f.linkNote = linkNote
+	if f.err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, f.err
+	}
+	return f.result, f.linkResult, nil
+}
 
 type fakeAssetLinkRepository struct {
 	linkMonitoringInstanceResult        assetlinks.Record
@@ -143,7 +164,7 @@ func TestVPSMonitoringInstancesListsActiveMonitoringInstanceSummaries(t *testing
 		LinkedAt:                   now,
 	}}}
 
-	handler := handlers.VPSMonitoringInstances(repo)
+	handler := handlers.VPSMonitoringInstances(repo, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/monitoring-instances", nil)
 	recorder := httptest.NewRecorder()
 
@@ -161,6 +182,78 @@ func TestVPSMonitoringInstancesListsActiveMonitoringInstanceSummaries(t *testing
 	}
 	if len(body) != 1 || body[0].MonitoringInstanceID != "mi_001" || body[0].CurrentHealthStatus != "关注" {
 		t.Fatalf("body = %#v, want active monitoringInstance summary", body)
+	}
+}
+
+func TestVPSMonitoringInstancesCreatesDerivedMonitoringInstance(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 16, 0, 0, 0, time.UTC)
+	vpsRepo := &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{
+		VPSID:        "vps_001",
+		DisplayName:  "Tokyo Edge",
+		ProviderName: "Acme Cloud",
+		Region:       "ap-northeast-1",
+		City:         "Tokyo",
+		Labels:       []string{"edge", "prod"},
+		Note:         "primary asset note",
+	}}
+	creator := &fakeLinkedMonitoringInstanceCreator{
+		result: monitoringinstances.Record{
+			MonitoringInstanceID: "mi_001",
+			DisplayName:          "Tokyo Edge",
+			Provider:             "Acme Cloud",
+			Region:               "ap-northeast-1",
+			City:                 "Tokyo",
+			LifecycleStatus:      monitoringinstances.LifecyclePendingEnrollment,
+			MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+			BindingStatus:        monitoringinstances.BindingUnbound,
+			CurrentHealthStatus:  monitoringinstances.HealthNormal,
+			Labels:               []string{"edge", "prod"},
+			Note:                 "primary asset note",
+			CreatedAt:            now,
+			UpdatedAt:            now,
+		},
+		linkResult: assetlinks.Record{
+			LinkID:               "vnl_001",
+			VPSID:                "vps_001",
+			MonitoringInstanceID: "mi_001",
+			LinkedAt:             now,
+			Note:                 "created from vps detail",
+		},
+	}
+
+	handler := handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, vpsRepo, creator)
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/monitoring-instances", strings.NewReader(`{}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+	if vpsRepo.getVPSAssetID != "vps_001" {
+		t.Fatalf("get vps id = %q, want vps_001", vpsRepo.getVPSAssetID)
+	}
+	if creator.vpsID != "vps_001" {
+		t.Fatalf("creator vps id = %q, want vps_001", creator.vpsID)
+	}
+	if creator.input.DisplayName != "Tokyo Edge" || creator.input.Provider != "Acme Cloud" || creator.input.Region != "ap-northeast-1" || creator.input.City != "Tokyo" {
+		t.Fatalf("creator input = %#v, want VPS-derived identity", creator.input)
+	}
+	if creator.input.LifecycleStatus != monitoringinstances.LifecyclePendingEnrollment {
+		t.Fatalf("lifecycle status = %q, want pending enrollment", creator.input.LifecycleStatus)
+	}
+	if len(creator.input.Labels) != 2 || creator.input.Note != "primary asset note" {
+		t.Fatalf("metadata = labels:%#v note:%q, want inherited VPS metadata", creator.input.Labels, creator.input.Note)
+	}
+	var body struct {
+		MonitoringInstanceID string            `json:"monitoring_instance_id"`
+		Link                 assetlinks.Record `json:"link"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.MonitoringInstanceID != "mi_001" || body.Link.LinkID != "vnl_001" {
+		t.Fatalf("body = %#v, want monitoring instance plus link", body)
 	}
 }
 
@@ -236,7 +329,9 @@ func TestAssetLinkHandlersMapDomainErrors(t *testing.T) {
 		{name: "link conflict", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{linkMonitoringInstanceErr: assetlinks.ErrVPSMonitoringInstanceLinkConflict}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusConflict},
 		{name: "link missing vps or monitoring instance", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{linkMonitoringInstanceErr: assetlinks.ErrVPSMonitoringInstanceLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusNotFound},
 		{name: "unlink missing active link", handler: handlers.VPSUnlinkMonitoringInstance(&fakeAssetLinkRepository{unlinkMonitoringInstanceErr: assetlinks.ErrVPSMonitoringInstanceLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusNotFound},
-		{name: "list monitoringInstances repo failure", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{listMonitoringInstancesForVPSErr: errors.New("query failed")}), method: http.MethodGet, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusInternalServerError},
+		{name: "list monitoringInstances repo failure", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{listMonitoringInstancesForVPSErr: errors.New("query failed")}, nil, nil), method: http.MethodGet, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusInternalServerError},
+		{name: "create monitoringInstance missing vps", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, &fakeVPSAssetRepository{getVPSAssetErr: vpsassets.ErrVPSAssetNotFound}, &fakeLinkedMonitoringInstanceCreator{}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", body: `{}`, want: http.StatusNotFound},
+		{name: "create monitoringInstance link conflict", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{VPSID: "vps_001", DisplayName: "Tokyo Edge", ProviderName: "Acme Cloud", Region: "Tokyo", City: "Tokyo"}}, &fakeLinkedMonitoringInstanceCreator{err: assetlinks.ErrVPSMonitoringInstanceLinkConflict}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", body: `{}`, want: http.StatusConflict},
 		{name: "list vps repo failure", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{listVPSForMonitoringInstanceErr: errors.New("query failed")}), method: http.MethodGet, path: "/api/monitoring-instances/mi_001/vps", want: http.StatusInternalServerError},
 	}
 
@@ -262,7 +357,7 @@ func TestAssetLinkHandlersRejectWrongMethodsAndMalformedPaths(t *testing.T) {
 		path    string
 		want    int
 	}{
-		{name: "vps monitoringInstances wrong method", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusMethodNotAllowed},
+		{name: "vps monitoringInstances wrong method", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, nil, nil), method: http.MethodDelete, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusMethodNotAllowed},
 		{name: "monitoringInstance vps wrong method", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/monitoring-instances/mi_001/vps", want: http.StatusMethodNotAllowed},
 		{name: "malformed vps path", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance/extra", want: http.StatusNotFound},
 		{name: "malformed monitoringInstance path", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{}), method: http.MethodGet, path: "/api/monitoring-instances/mi_001/vps/extra", want: http.StatusNotFound},

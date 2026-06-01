@@ -8,8 +8,10 @@ import {
   ApiError,
   applyVPSCancellation,
   createVPSDomain,
+  createVPSMonitoringInstance,
   createVPSService,
   createVPSExperienceLog,
+  createVPSSubscription,
   getVPSAsset,
   getVPSCancellationPreview,
   getVPSTimeline,
@@ -49,9 +51,11 @@ import { VPSExperienceLogForm } from './vps-detail/VPSExperienceLogForm'
 import { VPSFactsEditForm } from './vps-detail/VPSFactsEditForm'
 import { VPSFactsSection } from './vps-detail/VPSFactsSection'
 import { VPSLifecycleCard } from './vps-detail/VPSLifecycleCard'
+import { VPSMonitoringInstanceCreateForm } from './vps-detail/VPSMonitoringInstanceCreateForm'
 import { VPSMonitoringInstanceLinkForm } from './vps-detail/VPSMonitoringInstanceLinkForm'
 import { VPSMonitoringInstanceLinksSection } from './vps-detail/VPSMonitoringInstanceLinksSection'
 import { VPSRenewalDecisionForm } from './vps-detail/VPSRenewalDecisionForm'
+import { VPSSubscriptionForm } from './vps-detail/VPSSubscriptionForm'
 import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import type {
@@ -61,9 +65,11 @@ import type {
   FactEditFormState,
   LinkDraftState,
   ServiceDraftState,
+  SubscriptionDraftState,
   VPSDetailDrawerMode,
 } from './vps-detail/types'
 import {
+  buildSubscriptionInput,
   buildDomainInput,
   buildExperienceLogInput,
   buildFactEditInput,
@@ -73,6 +79,7 @@ import {
   INITIAL_EXPERIENCE_DRAFT,
   INITIAL_SELECTOR_STATE,
   INITIAL_SERVICE_DRAFT,
+  INITIAL_SUBSCRIPTION_DRAFT,
   INITIAL_STATE,
 } from './vps-detail/vpsDetailHelpers'
 
@@ -140,7 +147,7 @@ function subscriptionLinkageAction(linkage: RenewalSubscriptionLinkage | null | 
     if (linkage.candidate_count > 0) {
       return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=cancellation`, label: '打开取消/退役工作台' }
     }
-    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}&create=1`, label: '创建该 VPS 订阅' }
+    return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=subscription`, label: '快速创建订阅' }
   }
   if (linkage.status === 'multiple_active_subscriptions') {
     return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}`, label: '去订阅页选择处理' }
@@ -151,11 +158,30 @@ function subscriptionLinkageAction(linkage: RenewalSubscriptionLinkage | null | 
   return null
 }
 
+function drawerModeFromWorkbenchQuery(value: string | null): VPSDetailDrawerMode {
+  if (value === 'cancellation') return 'cancellation'
+  if (value === 'subscription') return 'subscription'
+  if (value === 'monitoring' || value === 'monitoring-instance-create') return 'monitoring-instance-create'
+  return null
+}
+
+function shouldExposeCancellationWorkbench(detail: VPSAssetDetail, preview: CancellationPreview | null): boolean {
+  return detail.renewal_decision === 'migrate' ||
+    detail.renewal_decision === 'cancel' ||
+    detail.renewal_decision === 'auto_renew_cancelled' ||
+    detail.lifecycle_status === 'to_migrate' ||
+    detail.lifecycle_status === 'to_cancel' ||
+    detail.lifecycle_status === 'cancelled' ||
+    detail.lifecycle_status === 'archived' ||
+    Boolean(preview && ((preview.warnings ?? []).length > 0 || (preview.blockers ?? []).length > 0))
+}
+
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const openCancellationFromQuery = searchParams.get('workbench') === 'cancellation'
+  const initialDrawerFromQuery = drawerModeFromWorkbenchQuery(searchParams.get('workbench'))
+  const openCancellationFromQuery = initialDrawerFromQuery === 'cancellation'
   const [state, setState] = useState(INITIAL_STATE)
   const [selectors, setSelectors] = useState(INITIAL_SELECTOR_STATE)
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraftState>({
@@ -175,6 +201,13 @@ export function VPSDetailPage() {
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [linkNotice, setLinkNotice] = useState<string | null>(null)
+  const [monitoringCreateSubmitting, setMonitoringCreateSubmitting] = useState(false)
+  const [monitoringCreateError, setMonitoringCreateError] = useState<string | null>(null)
+  const [monitoringCreateNotice, setMonitoringCreateNotice] = useState<string | null>(null)
+  const [subscriptionDraft, setSubscriptionDraft] = useState<SubscriptionDraftState>(INITIAL_SUBSCRIPTION_DRAFT)
+  const [subscriptionSubmitting, setSubscriptionSubmitting] = useState(false)
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null)
+  const [subscriptionNotice, setSubscriptionNotice] = useState<string | null>(null)
   const [unlinkingMonitoringInstanceId, setUnlinkingMonitoringInstanceId] = useState<string | null>(null)
   const [unlinkError, setUnlinkError] = useState<string | null>(null)
   const [lifecycleConfirmingAction, setLifecycleConfirmingAction] = useState<'archive' | 'restore' | null>(null)
@@ -237,6 +270,11 @@ export function VPSDetailPage() {
         setLinkDraft({ monitoringInstanceId: '', note: '' })
         setLinkError(null)
         setLinkNotice(null)
+        setMonitoringCreateError(null)
+        setMonitoringCreateNotice(null)
+        setSubscriptionDraft(INITIAL_SUBSCRIPTION_DRAFT)
+        setSubscriptionError(null)
+        setSubscriptionNotice(null)
         setUnlinkError(null)
         setLifecycleConfirmingAction(null)
         setLifecycleError(null)
@@ -251,7 +289,7 @@ export function VPSDetailPage() {
         setDomainDraft(INITIAL_DOMAIN_DRAFT)
         setDomainError(null)
         setDomainNotice(null)
-        setActiveDrawer(openCancellationFromQuery ? 'cancellation' : null)
+        setActiveDrawer(initialDrawerFromQuery)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -273,7 +311,7 @@ export function VPSDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [openCancellationFromQuery, vpsId])
+  }, [initialDrawerFromQuery, openCancellationFromQuery, vpsId])
 
   const refreshCancellationPreview = useCallback(async (targetVPSId: string) => {
     const cancellationState = await loadCancellationPreview(targetVPSId)
@@ -367,6 +405,20 @@ export function VPSDetailPage() {
     setLinkNotice(null)
   }
 
+  function clearMonitoringCreateFeedback() {
+    setMonitoringCreateError(null)
+    setMonitoringCreateNotice(null)
+  }
+
+  function clearSubscriptionFeedback() {
+    setSubscriptionError(null)
+    setSubscriptionNotice(null)
+  }
+
+  function handleSubscriptionDraftChange(draft: SubscriptionDraftState) {
+    setSubscriptionDraft(draft)
+  }
+
   function clearExperienceFeedback() {
     setExperienceError(null)
     setExperienceNotice(null)
@@ -437,6 +489,13 @@ export function VPSDetailPage() {
       setUnlinkError(null)
       ensureMonitoringInstancesLoaded()
     }
+    if (mode === 'monitoring-instance-create') {
+      clearMonitoringCreateFeedback()
+      setUnlinkError(null)
+    }
+    if (mode === 'subscription') {
+      clearSubscriptionFeedback()
+    }
     if (mode === 'experience') {
       clearExperienceFeedback()
     }
@@ -475,6 +534,13 @@ export function VPSDetailPage() {
     if (activeDrawer === 'monitoring-instance-link') {
       setLinkDraft({ monitoringInstanceId: '', note: '' })
       clearLinkFormFeedback()
+    }
+    if (activeDrawer === 'monitoring-instance-create') {
+      clearMonitoringCreateFeedback()
+    }
+    if (activeDrawer === 'subscription') {
+      setSubscriptionDraft(INITIAL_SUBSCRIPTION_DRAFT)
+      clearSubscriptionFeedback()
     }
     if (activeDrawer === 'experience') {
       setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
@@ -602,6 +668,68 @@ export function VPSDetailPage() {
       setLinkError(describeError(error, '关联监控实例失败'))
     } finally {
       setLinkSubmitting(false)
+    }
+  }
+
+  async function handleMonitoringInstanceCreateSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = state.detail
+    if (!detail) return
+
+    setMonitoringCreateSubmitting(true)
+    setMonitoringCreateError(null)
+    setMonitoringCreateNotice(null)
+    setUnlinkError(null)
+
+    try {
+      const created = await createVPSMonitoringInstance(detail.vps_id, {})
+      await refreshDetail(detail.vps_id)
+      setMonitoringCreateNotice('监控实例已创建并关联，正在进入接入流程')
+      setActiveDrawer(null)
+      navigate(`/monitoring/${created.monitoring_instance_id}?onboarding=1`)
+    } catch (error: unknown) {
+      setMonitoringCreateError(describeError(error, '创建监控实例失败'))
+    } finally {
+      setMonitoringCreateSubmitting(false)
+    }
+  }
+
+  async function handleSubscriptionSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = state.detail
+    if (!detail) return
+
+    clearSubscriptionFeedback()
+
+    let input
+    try {
+      input = buildSubscriptionInput(subscriptionDraft)
+    } catch (error: unknown) {
+      setSubscriptionError(describeError(error, '订阅输入无效'))
+      return
+    }
+
+    setSubscriptionSubmitting(true)
+    try {
+      const subscription = await createVPSSubscription(detail.vps_id, input)
+      setState((current) => {
+        if (current.vpsId !== detail.vps_id) return current
+        return {
+          ...current,
+          subscriptions: [
+            subscription,
+            ...current.subscriptions.filter((item) => item.subscription_id !== subscription.subscription_id),
+          ],
+          subscriptionsError: null,
+        }
+      })
+      setSubscriptionDraft(INITIAL_SUBSCRIPTION_DRAFT)
+      setSubscriptionNotice('订阅账单事实已创建')
+      setActiveDrawer(null)
+    } catch (error: unknown) {
+      setSubscriptionError(describeError(error, '创建订阅失败'))
+    } finally {
+      setSubscriptionSubmitting(false)
     }
   }
 
@@ -814,12 +942,15 @@ export function VPSDetailPage() {
   const linkFeedbackIsError = linkError !== null || unlinkError !== null
   const primarySubscription = selectPrimarySubscription(state.subscriptions)
   const subscriptionLoadFailed = state.subscriptionsError !== null
+  const showCancellationWorkbench = shouldExposeCancellationWorkbench(detail, state.cancellationPreview)
 
   function drawerTitle(): string {
     if (activeDrawer === 'decision') return '续费决策'
     if (activeDrawer === 'cancellation') return '取消/退役工作台'
     if (activeDrawer === 'facts') return '编辑基础信息'
-    if (activeDrawer === 'monitoring-instance-link') return '关联监控实例'
+    if (activeDrawer === 'subscription') return '快速创建订阅'
+    if (activeDrawer === 'monitoring-instance-create') return '创建并接入 agent'
+    if (activeDrawer === 'monitoring-instance-link') return '关联已有监控实例'
     if (activeDrawer === 'experience') return '经验记录'
     if (activeDrawer === 'service') return '新增服务'
     if (activeDrawer === 'domain') return '新增域名'
@@ -914,6 +1045,33 @@ export function VPSDetailPage() {
         />
       )
     }
+    if (activeDrawer === 'monitoring-instance-create') {
+      return (
+        <VPSMonitoringInstanceCreateForm
+          detail={detail}
+          submitting={monitoringCreateSubmitting}
+          error={monitoringCreateError}
+          notice={monitoringCreateNotice}
+          onCancel={closeDrawer}
+          onSubmit={(event) => void handleMonitoringInstanceCreateSubmit(event)}
+        />
+      )
+    }
+    if (activeDrawer === 'subscription') {
+      return (
+        <VPSSubscriptionForm
+          detail={detail}
+          draft={subscriptionDraft}
+          submitting={subscriptionSubmitting}
+          error={subscriptionError}
+          notice={subscriptionNotice}
+          onCancel={closeDrawer}
+          onDraftChange={handleSubscriptionDraftChange}
+          onFeedbackClear={clearSubscriptionFeedback}
+          onSubmit={(event) => void handleSubscriptionSubmit(event)}
+        />
+      )
+    }
     if (activeDrawer === 'experience') {
       return (
         <VPSExperienceLogForm
@@ -971,6 +1129,7 @@ export function VPSDetailPage() {
           unlinkingMonitoringInstanceId={unlinkingMonitoringInstanceId}
           linkFeedback={linkFeedback}
           linkFeedbackIsError={linkFeedbackIsError}
+          onCreateMonitoringInstance={() => openDrawer('monitoring-instance-create')}
           onOpenLink={() => openDrawer('monitoring-instance-link')}
           onUnlinkMonitoringInstance={(monitoringInstance) => void handleUnlinkMonitoringInstance(monitoringInstance)}
         />
@@ -1017,12 +1176,15 @@ export function VPSDetailPage() {
       <VPSDetailHero
         detail={detail}
         isArchived={isArchived}
+        showCancellationWorkbench={showCancellationWorkbench}
         lifecycleSubmitting={lifecycleSubmitting}
         onDecisionEdit={() => openDrawer('decision')}
         onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
+        onMonitoringInstanceCreate={() => openDrawer('monitoring-instance-create')}
         onMonitoringInstanceLink={() => openDrawer('monitoring-instance-link')}
+        onSubscriptionCreate={() => openDrawer('subscription')}
         onServiceCreate={() => openDrawer('service')}
         onDomainCreate={() => openDrawer('domain')}
         onArchiveStart={() => openLifecycleConfirmation('archive')}
@@ -1063,6 +1225,10 @@ export function VPSDetailPage() {
         domainNotice={domainNotice}
         domainError={activeDrawer === 'domain' ? null : domainError}
         experienceNotice={experienceNotice}
+        subscriptionNotice={activeDrawer === 'subscription' ? null : subscriptionNotice}
+        subscriptionCreateError={activeDrawer === 'subscription' ? null : subscriptionError}
+        monitoringCreateNotice={activeDrawer === 'monitoring-instance-create' ? null : monitoringCreateNotice}
+        monitoringCreateError={activeDrawer === 'monitoring-instance-create' ? null : monitoringCreateError}
         lifecycleNotice={lifecycleNotice}
         lifecycleError={lifecycleConfirmingAction ? null : lifecycleError}
         cancellationPreview={state.cancellationPreview}
@@ -1071,7 +1237,8 @@ export function VPSDetailPage() {
         onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
-        onMonitoringInstanceLink={() => openDrawer('monitoring-instance-link')}
+        onMonitoringInstanceCreate={() => openDrawer('monitoring-instance-create')}
+        onSubscriptionCreate={() => openDrawer('subscription')}
         onOpenFacts={() => openDrawer('facts-detail')}
         onOpenMonitoringInstanceEvidence={() => openDrawer('monitoring-instance-evidence')}
         onOpenServices={() => openDrawer('services-detail')}
@@ -1098,7 +1265,7 @@ export function VPSDetailPage() {
         title={drawerTitle()}
         ariaLabel={drawerTitle()}
         persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'monitoring-instance-evidence'}
-        size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation') ? 'lg' : undefined}
+        size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation' || activeDrawer === 'subscription') ? 'lg' : undefined}
         contentClassName={activeDrawer === 'cancellation' ? 'modal-content--asset-cancel' : undefined}
       >
         <div className="vps-detail-drawer">

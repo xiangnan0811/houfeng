@@ -64,6 +64,7 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 		"0027_add_host_sample_capacity_bytes.sql",
 		"0028_create_asset_lifecycle_actions.sql",
 		"0029_rename_nodes_to_monitoring_instances.sql",
+		"0030_vps_first_status_semantics.sql",
 	}
 	offset := 0
 	for _, name := range names {

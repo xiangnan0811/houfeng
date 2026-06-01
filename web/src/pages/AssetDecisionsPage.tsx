@@ -298,6 +298,10 @@ export function AssetDecisionsPage() {
     navigate(`/vps/${vps.vps_id}`)
   }
 
+  function navigateToVPSSubscription(vpsID: string) {
+    navigate(`/vps/${vpsID}?workbench=subscription`)
+  }
+
   function closeDecisionDrawer() {
     setSelectedVPS(null)
     setDecisionDraft(INITIAL_DECISION_DRAFT)
@@ -422,7 +426,7 @@ export function AssetDecisionsPage() {
           renderActions={(subscription) => (
             <>
               <Link className="btn-text sm secondary" to={`/vps/${subscription.vps_id}`}>VPS</Link>
-              <Link className="btn-text sm secondary" to={`/subscriptions?vps_id=${subscription.vps_id}&renew_within_days=${renewalWindow}`}>订阅</Link>
+              <Link className="btn-text sm secondary" to={`/vps/${subscription.vps_id}`}>VPS 详情</Link>
             </>
           )}
         />
@@ -457,14 +461,14 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="empty"
             title="当前视图暂无待处理 VPS"
-            description="可回到全部、库存或订阅。"
+            description="可回到全部或 VPS 库存；订阅和接入都从 VPS 详情页补齐。"
             action={
               <div className="flex-row gap-2">
                 {queueView !== 'all' && (
                   <button className="btn sm secondary" onClick={() => setQueueView('all')}>查看全部</button>
                 )}
                 <Link className="btn sm ghost" to="/vps">VPS 库存</Link>
-                <Link className="btn sm ghost" to="/subscriptions">补充订阅</Link>
+                <Link className="btn sm ghost" to="/vps?view=missing_subscription">缺订阅 VPS</Link>
               </div>
             }
             surface="empty"
@@ -511,7 +515,16 @@ export function AssetDecisionsPage() {
                           )}
                         </span>
                       ) : (
-                        <span className="badge badge-warn">缺订阅</span>
+                        <button
+                          type="button"
+                          className="text-link"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            navigateToVPSSubscription(vps.vps_id)
+                          }}
+                        >
+                          缺订阅
+                        </button>
                       )}
                     </td>
                     <td>

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/incidents"
@@ -81,7 +82,6 @@ const (
 )
 
 var ErrInvalidMonitoringInstanceRuntimeTransition = errors.New("invalid monitoring instance runtime transition")
-var ErrInvalidMonitoringInstanceLifecycleTransition = errors.New("invalid monitoring instance lifecycle transition")
 
 var monitoringInstanceSelectColumnNames = []string{
 	"monitoring_instance_id",
@@ -448,6 +448,106 @@ func (r *PostgresMonitoringInstanceRepository) CreateMonitoringInstance(ctx cont
 		return monitoringinstances.Record{}, fmt.Errorf("create monitoring instance: %w", err)
 	}
 	return record, nil
+}
+
+func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstance(ctx context.Context, vpsID string, input monitoringinstances.CreateInput, linkNote string) (monitoringinstances.Record, assetlinks.Record, error) {
+	if strings.TrimSpace(vpsID) == "" {
+		return monitoringinstances.Record{}, assetlinks.Record{}, assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput
+	}
+
+	monitoringInstanceID, err := ids.New("mi")
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("generate monitoring instance id: %w", err)
+	}
+	linkID, err := ids.New("vnl")
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("generate vps monitoring instance link id: %w", err)
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("begin linked monitoring instance transaction for vps %q: %w", vpsID, err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		insert into monitoring_instances (
+			monitoring_instance_id,
+			display_name,
+			"group",
+			region,
+			city,
+			provider,
+			lifecycle_status,
+			monitoring_status,
+			binding_status,
+			labels,
+			note,
+			current_health_status,
+			current_active_incident_count,
+			current_primary_issue_summary
+		) values (
+			$1,
+			$2,
+			$3,
+			$4,
+			$5,
+			$6,
+			$7,
+			$8,
+			$9,
+			$10,
+			$11,
+			$12,
+			0,
+			''
+		)
+		returning `+monitoringInstanceSelectColumns,
+		monitoringInstanceID,
+		input.DisplayName,
+		input.Group,
+		input.Region,
+		input.City,
+		input.Provider,
+		input.LifecycleStatus,
+		monitoringinstances.MonitoringEnabled,
+		monitoringinstances.BindingUnbound,
+		input.Labels,
+		input.Note,
+		monitoringinstances.HealthNormal,
+	))
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("create monitoring instance for vps %q: %w", vpsID, err)
+	}
+
+	link, err := scanVPSMonitoringInstanceLink(tx.QueryRow(ctx, `
+		insert into vps_monitoring_instance_links (
+			link_id,
+			vps_id,
+			monitoring_instance_id,
+			note
+		) values (
+			$1,
+			$2,
+			$3,
+			$4
+		)
+		returning `+vpsMonitoringInstanceLinkSelectColumns,
+		linkID,
+		vpsID,
+		record.MonitoringInstanceID,
+		strings.TrimSpace(linkNote),
+	))
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, mapVPSMonitoringInstanceLinkWriteError(err, "create linked monitoring instance for vps %q", vpsID)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("commit linked monitoring instance transaction for vps %q: %w", vpsID, err)
+	}
+	return record, link, nil
 }
 
 func (r *PostgresMonitoringInstanceRepository) IssueEnrollmentToken(ctx context.Context, monitoringInstanceID string) (string, error) {
@@ -830,82 +930,6 @@ func insertMonitoringInstanceRuntimeEvent(
 	}
 
 	return nil
-}
-
-func (r *PostgresMonitoringInstanceRepository) RetireMonitoringInstance(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return monitoringinstances.Record{}, fmt.Errorf("begin retire monitoring instance transaction for %q: %w", monitoringInstanceID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
-		update monitoring_instances
-		set lifecycle_status = '已退役',
-			updated_at = now()
-		where monitoring_instance_id = $1
-			and lifecycle_status <> '已退役'
-		returning `+monitoringInstanceSelectColumns,
-		monitoringInstanceID,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		exists, existsErr := r.monitoringInstanceExists(ctx, monitoringInstanceID)
-		if existsErr != nil {
-			return monitoringinstances.Record{}, fmt.Errorf("retire monitoring instance %q: %w", monitoringInstanceID, existsErr)
-		}
-		if !exists {
-			return monitoringinstances.Record{}, fmt.Errorf("%w: monitoring instance %q", monitoringinstances.ErrMonitoringInstanceNotFound, monitoringInstanceID)
-		}
-		return monitoringinstances.Record{}, fmt.Errorf("%w: monitoring instance %q cannot retire from current lifecycle status", ErrInvalidMonitoringInstanceLifecycleTransition, monitoringInstanceID)
-	}
-	if err != nil {
-		return monitoringinstances.Record{}, fmt.Errorf("retire monitoring instance %q: %w", monitoringInstanceID, err)
-	}
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRetired, "监控实例已退役并退出活跃观测集，历史记录保留"); err != nil {
-		return monitoringinstances.Record{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return monitoringinstances.Record{}, fmt.Errorf("commit retire monitoring instance %q: %w", monitoringInstanceID, err)
-	}
-	return record, nil
-}
-
-func (r *PostgresMonitoringInstanceRepository) RestoreRetiredMonitoringInstanceToObserving(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return monitoringinstances.Record{}, fmt.Errorf("begin restore retired monitoring instance transaction for %q: %w", monitoringInstanceID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
-		update monitoring_instances
-		set lifecycle_status = '观察中',
-			updated_at = now()
-		where monitoring_instance_id = $1
-			and lifecycle_status = '已退役'
-		returning `+monitoringInstanceSelectColumns,
-		monitoringInstanceID,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		exists, existsErr := r.monitoringInstanceExists(ctx, monitoringInstanceID)
-		if existsErr != nil {
-			return monitoringinstances.Record{}, fmt.Errorf("restore retired monitoring instance %q to observing: %w", monitoringInstanceID, existsErr)
-		}
-		if !exists {
-			return monitoringinstances.Record{}, fmt.Errorf("%w: monitoring instance %q", monitoringinstances.ErrMonitoringInstanceNotFound, monitoringInstanceID)
-		}
-		return monitoringinstances.Record{}, fmt.Errorf("%w: monitoring instance %q can only restore to observing from retired", ErrInvalidMonitoringInstanceLifecycleTransition, monitoringInstanceID)
-	}
-	if err != nil {
-		return monitoringinstances.Record{}, fmt.Errorf("restore retired monitoring instance %q to observing: %w", monitoringInstanceID, err)
-	}
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRestoredToObserving, "监控实例已从退役恢复到观察中"); err != nil {
-		return monitoringinstances.Record{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return monitoringinstances.Record{}, fmt.Errorf("commit restore retired monitoring instance %q to observing: %w", monitoringInstanceID, err)
-	}
-	return record, nil
 }
 
 func (r *PostgresMonitoringInstanceRepository) SetMonitoringInstanceMonitoringMaintenance(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {

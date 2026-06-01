@@ -57,6 +57,8 @@ const (
 
 const (
 	DefaultSSHPort         = 22
+	DefaultLifecycleStatus = LifecycleActive
+	DefaultUsageStatus     = UsageUnknown
 	DefaultRenewalDecision = RenewalUnreviewed
 	DefaultImportance      = "normal"
 )
@@ -345,7 +347,13 @@ func NormalizeCreateInput(input CreateInput) CreateInput {
 	input.OSName = strings.TrimSpace(input.OSName)
 	input.Virtualization = strings.TrimSpace(input.Virtualization)
 	input.LifecycleStatus = LifecycleStatus(strings.TrimSpace(string(input.LifecycleStatus)))
+	if input.LifecycleStatus == "" {
+		input.LifecycleStatus = DefaultLifecycleStatus
+	}
 	input.UsageStatus = UsageStatus(strings.TrimSpace(string(input.UsageStatus)))
+	if input.UsageStatus == "" {
+		input.UsageStatus = DefaultUsageStatus
+	}
 	input.RenewalDecision = RenewalDecision(strings.TrimSpace(string(input.RenewalDecision)))
 	if input.RenewalDecision == "" {
 		input.RenewalDecision = DefaultRenewalDecision

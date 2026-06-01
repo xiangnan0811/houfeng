@@ -895,8 +895,8 @@ export type CreateVPSAssetInput = {
   ssh_user: string
   os_name: string
   virtualization: string
-  lifecycle_status: VPSLifecycleStatus
-  usage_status: VPSUsageStatus
+  lifecycle_status?: VPSLifecycleStatus
+  usage_status?: VPSUsageStatus
   renewal_decision?: VPSRenewalDecision
   importance: string
   labels: string[]
@@ -962,6 +962,21 @@ export type VPSMonitoringInstanceLinkRecord = {
   linked_at: string
   unlinked_at?: string | null
   note: string
+}
+
+export type CreateVPSMonitoringInstanceInput = {
+  display_name?: string
+  group?: string
+  region?: string
+  city?: string
+  provider?: string
+  labels?: string[]
+  note?: string
+  link_note?: string
+}
+
+export type CreateVPSMonitoringInstanceResponse = MonitoringInstanceRecord & {
+  link: VPSMonitoringInstanceLinkRecord
 }
 
 export type LinkVPSMonitoringInstanceInput = {
@@ -1191,6 +1206,8 @@ export type CreateSubscriptionInput = {
   payment_method: string
   note: string
 }
+
+export type CreateVPSSubscriptionInput = Omit<CreateSubscriptionInput, 'vps_id' | 'status'>
 
 export type UpdateSubscriptionInput = Partial<CreateSubscriptionInput>
 

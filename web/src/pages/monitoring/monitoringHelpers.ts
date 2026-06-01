@@ -1,6 +1,6 @@
 import type { HealthState } from '../../components/atoms'
 import { formatDateTime } from '../../lib/format'
-import type { CreateMonitoringInstanceInput, MonitoringInstanceRecord } from '../../lib/types'
+import type { MonitoringInstanceRecord } from '../../lib/types'
 import type { MonitoringInstanceEvidenceItem, MonitoringInstanceEvidenceLead, MonitoringInstanceFilterState, MonitoringInstanceRuntimeAction } from './types'
 
 export const MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS = [
@@ -23,16 +23,6 @@ export const MONITORING_INSTANCE_HEALTH_STATUS_FILTER_OPTIONS = [
   { value: '告警', label: '告警' },
   { value: '严重', label: '严重' },
 ] as const
-
-export const initialCreateForm: CreateMonitoringInstanceInput = {
-  display_name: '',
-  group: '',
-  region: '',
-  city: '',
-  provider: '',
-  labels: [],
-  note: '',
-}
 
 export const MONITORING_INSTANCE_BINDING_CONFLICT_STATUS = '指纹变更待确认'
 export const MONITORING_INSTANCE_BINDING_UNBOUND_STATUS = '未绑定'
@@ -102,8 +92,8 @@ export function parseLabels(value: string) {
 
 export function monitoringInstanceRuntimeActions(
   monitoringInstance: MonitoringInstanceRecord,
-): Array<{ action: MonitoringInstanceRuntimeAction; label: string; variant?: 'danger' }> {
-  const actions: Array<{ action: MonitoringInstanceRuntimeAction; label: string; variant?: 'danger' }> = []
+): Array<{ action: MonitoringInstanceRuntimeAction; label: string }> {
+  const actions: Array<{ action: MonitoringInstanceRuntimeAction; label: string }> = []
 
   if (monitoringInstance.monitoring_status === '启用') {
     actions.push(
@@ -117,12 +107,6 @@ export function monitoringInstanceRuntimeActions(
     )
   } else if (monitoringInstance.monitoring_status === '暂停') {
     actions.push({ action: 'resume', label: '恢复监控' })
-  }
-
-  if (monitoringInstance.lifecycle_status === '在用' || monitoringInstance.lifecycle_status === '观察中' || monitoringInstance.lifecycle_status === '不续费') {
-    actions.push({ action: 'retire', label: '退役', variant: 'danger' })
-  } else if (monitoringInstance.lifecycle_status === '已退役') {
-    actions.push({ action: 'restore-to-observing', label: '恢复观察' })
   }
 
   return actions
@@ -221,7 +205,7 @@ export function describeMonitoringInstanceFilterContext(filterState: MonitoringI
   if (filterState.region) items.push(`地区 ${filterState.region}`)
   if (filterState.city) items.push(`城市 ${filterState.city}`)
   if (filterState.provider) items.push(`供应商 ${filterState.provider}`)
-  if (filterState.lifecycle) items.push(`生命周期 ${filterState.lifecycle}`)
+  if (filterState.lifecycle) items.push(`接入阶段 ${filterState.lifecycle}`)
   if (filterState.runStatus) items.push(`运行 ${filterState.runStatus}`)
   if (filterState.health) items.push(`健康 ${filterState.health}`)
   for (const label of filterState.labels) items.push(`标签 ${label}`)
@@ -260,11 +244,11 @@ export function buildMonitoringInstanceEvidenceLead(args: {
 
   if (totalMonitoringInstanceCount === 0) {
     return {
-      eyebrow: '首次接入',
-      title: '先接入第一条监控实例证据',
-      description: '创建并接入。',
-      actionKind: 'create',
-      actionLabel: '接入监控实例',
+      eyebrow: '观测列表',
+      title: '还没有 VPS 观测证据',
+      description: '普通服务器从 VPS 详情页创建并接入。',
+      actionKind: 'asset',
+      actionLabel: '创建第一台 VPS',
       tone: 'notice',
     }
   }

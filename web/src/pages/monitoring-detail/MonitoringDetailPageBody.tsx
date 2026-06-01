@@ -1,6 +1,5 @@
 import type { RefObject } from 'react'
 
-import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
 import { DetailSection } from '../../components/DetailSection'
 import {
   MonitoringInstanceWatchtowerHeader,
@@ -29,13 +28,11 @@ import {
   COMMAND_LABELS,
   COMMAND_LIST,
   MONITORING_INSTANCE_BINDING_CONFLICT_STATUS,
-  MONITORING_INSTANCE_LIFECYCLE_RETIRED,
 } from './monitoringDetailConstants'
 import { monitoringInstanceRuntimeActions } from './monitoringDetailHelpers'
 import type {
   BindingConflictAction,
   HistoryTab,
-  MonitoringInstanceLifecycleAction,
   PendingRuntimeConfirmation,
   TimeWindow,
 } from './types'
@@ -66,13 +63,6 @@ type MonitoringDetailPageBodyProps = {
   onBindingReset: () => void
   timeWindow: TimeWindow
   onTimeWindowChange: (value: TimeWindow) => void
-  showRetireConfirmation: boolean
-  lifecycleSubmitting: MonitoringInstanceLifecycleAction | null
-  lifecycleError: string | null
-  onLifecycleRestore: () => void
-  onStartRetire: () => void
-  onConfirmRetire: () => void
-  onCancelRetire: () => void
   historyOpen: boolean
   historyTab: HistoryTab
   historyIncidents: ActiveIncidentRecord[] | null
@@ -119,13 +109,6 @@ export function MonitoringDetailPageBody({
   onBindingReset,
   timeWindow,
   onTimeWindowChange,
-  showRetireConfirmation,
-  lifecycleSubmitting,
-  lifecycleError,
-  onLifecycleRestore,
-  onStartRetire,
-  onConfirmRetire,
-  onCancelRetire,
   historyOpen,
   historyTab,
   historyIncidents,
@@ -149,7 +132,6 @@ export function MonitoringDetailPageBody({
   const recentSamples = runtimeFacts?.recent_host_samples ?? []
   const isMaintenance = monitoringInstance.monitoring_status === '维护中'
   const showBindingConflict = monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
-  const isRetiredMonitoringInstance = monitoringInstance.lifecycle_status === MONITORING_INSTANCE_LIFECYCLE_RETIRED
   const bindingActionsDisabled =
     bindingAction !== null || bindingConflictLoading || !bindingConflict
   const showDangerZone = monitoringInstance.current_active_incident_count > 0
@@ -172,10 +154,6 @@ export function MonitoringDetailPageBody({
         onOpenHistory={() => onOpenHistory('events')}
         onOpenCommands={onOpenCommands}
         onOpenOnboarding={onOpenOnboarding}
-        isRetiredMonitoringInstance={isRetiredMonitoringInstance}
-        lifecycleSubmitting={lifecycleSubmitting !== null}
-        onRestoreLifecycle={onLifecycleRestore}
-        onStartRetire={onStartRetire}
       />
 
       {pendingRuntimeConfirmation?.action === 'pause' ? (
@@ -224,25 +202,6 @@ export function MonitoringDetailPageBody({
         loaded={linkedVPSLoaded}
         error={linkedVPSError}
       />
-
-      {!isRetiredMonitoringInstance && showRetireConfirmation ? (
-        <ActionConfirmationCard
-          title="确认退役监控实例"
-          current="当前：监控实例仍在当前工作集中。"
-          result="操作后：监控实例生命周期变为已退役。"
-          impact="这不是删除，会让监控实例退出当前工作集并停止承担观测任务。"
-          unchanged="不会清空事件、观测记录或 agent 绑定历史。"
-          confirmLabel={lifecycleSubmitting === 'retire' ? '正在退役…' : '确认退役'}
-          error={lifecycleError}
-          disabled={lifecycleSubmitting !== null}
-          onConfirm={onConfirmRetire}
-          onCancel={onCancelRetire}
-        />
-      ) : lifecycleError ? (
-        <p className="watchtower-runtime-error" role="alert">
-          {lifecycleError}
-        </p>
-      ) : null}
 
       <DetailSection
         eyebrow="RUNTIME FACTS"

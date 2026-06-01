@@ -6,29 +6,26 @@ import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createSubscription, listSubscriptions, listVPSAssets, updateSubscription } from '../lib/api'
 import { formatDate, formatMoney } from '../lib/format'
 import {
-  SUBSCRIPTION_STATUS_LABELS,
   type CreateSubscriptionInput,
   type SubscriptionListFilter,
   type SubscriptionRecord,
-  type SubscriptionStatus,
   type VPSAssetRecord,
 } from '../lib/types'
 
 type PageState = { loading: boolean; error: string | null; subscriptions: SubscriptionRecord[]; vps: VPSAssetRecord[] }
-type FilterState = { vps_id: string | null; status: SubscriptionStatus | null; renew_window: string | null }
+type FilterState = { vps_id: string | null; renew_window: string | null }
 type FormState = {
   vpsID: string; price: string; currency: string; billingCycle: string; billingMonths: string
   startedAt: string; renewAt: string; autoRenew: boolean; autoRenewCancelled: boolean
-  status: SubscriptionStatus; paymentMethod: string; note: string
+  paymentMethod: string; note: string
 }
 
 const INITIAL_PAGE: PageState = { loading: true, error: null, subscriptions: [], vps: [] }
 const INITIAL_FORM: FormState = {
   vpsID: '', price: '', currency: 'USD', billingCycle: 'monthly', billingMonths: '1',
   startedAt: '', renewAt: '', autoRenew: false, autoRenewCancelled: false,
-  status: 'active', paymentMethod: '', note: '',
+  paymentMethod: '', note: '',
 }
-const STATUS_OPTIONS = Object.entries(SUBSCRIPTION_STATUS_LABELS).map(([value, label]) => ({ value, label }))
 
 function describeError(err: unknown, fallback: string): string {
   if (err instanceof ApiError) return err.message
@@ -37,25 +34,22 @@ function describeError(err: unknown, fallback: string): string {
 }
 
 function parseFilters(sp: URLSearchParams): FilterState {
-  const status = sp.get('status') as SubscriptionStatus | null
   const rw = sp.get('renew_within_days')
   return {
     vps_id: sp.get('vps_id') || null,
-    status: status && status in SUBSCRIPTION_STATUS_LABELS ? status : null,
     renew_window: rw && ['30', '60', '90'].includes(rw) ? rw : null,
   }
 }
 function filtersToParams(f: FilterState): URLSearchParams {
   const p = new URLSearchParams()
   if (f.vps_id) p.set('vps_id', f.vps_id)
-  if (f.status) p.set('status', f.status)
   if (f.renew_window) p.set('renew_within_days', f.renew_window)
   return p
 }
 
 function filtersToAPI(f: FilterState): SubscriptionListFilter {
   return {
-    vps_id: f.vps_id, status: f.status,
+    vps_id: f.vps_id,
     renew_within_days: f.renew_window ? Number.parseInt(f.renew_window, 10) : null,
     sort: f.renew_window ? 'renew_at' : '', order: f.renew_window ? 'asc' : '',
   }
@@ -73,7 +67,7 @@ function buildCreateInput(form: FormState): CreateSubscriptionInput {
     vps_id: form.vpsID.trim(), price, currency, billing_cycle: form.billingCycle.trim(),
     billing_months: billingMonths, started_at: form.startedAt || null, renew_at: form.renewAt || null,
     auto_renew: form.autoRenew, auto_renew_cancelled: form.autoRenewCancelled,
-    status: form.status, payment_method: form.paymentMethod.trim(), note: form.note.trim(),
+    payment_method: form.paymentMethod.trim(), note: form.note.trim(),
   }
 }
 
@@ -83,22 +77,8 @@ function subToForm(s: SubscriptionRecord): FormState {
     billingCycle: s.billing_cycle, billingMonths: String(s.billing_months),
     startedAt: s.started_at ?? '', renewAt: s.renew_at ?? '',
     autoRenew: s.auto_renew, autoRenewCancelled: s.auto_renew_cancelled,
-    status: s.status, paymentMethod: s.payment_method, note: s.note,
+    paymentMethod: s.payment_method, note: s.note,
   }
-}
-
-function statusBadgeClass(status: SubscriptionStatus): string {
-  switch (status) {
-    case 'active': return 'badge badge-ok'
-    case 'paused': return 'badge badge-warn'
-    case 'cancelled': case 'expired': return 'badge badge-muted'
-    default: return 'badge'
-  }
-}
-
-function vpsNeedsLifecycleAction(subscription: SubscriptionRecord, vps: VPSAssetRecord | undefined): boolean {
-  if (!vps || subscription.status === 'active') return false
-  return vps.lifecycle_status !== 'to_cancel' && vps.lifecycle_status !== 'cancelled'
 }
 
 export function SubscriptionsPage() {
@@ -118,15 +98,20 @@ export function SubscriptionsPage() {
   const panelOpen = createOpen || createRequested
   const effectiveForm = createRequested && filters.vps_id && createForm.vpsID === ''
     ? { ...createForm, vpsID: filters.vps_id } : createForm
+  const filterVPSID = filters.vps_id
+  const filterRenewWindow = filters.renew_window
+  const apiFilters = useMemo(
+    () => filtersToAPI({ vps_id: filterVPSID, renew_window: filterRenewWindow }),
+    [filterRenewWindow, filterVPSID],
+  )
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([listSubscriptions(filtersToAPI(filters)), listVPSAssets()])
+    Promise.all([listSubscriptions(apiFilters), listVPSAssets()])
       .then(([subs, vps]) => { if (!cancelled) setState({ loading: false, error: null, subscriptions: subs, vps }) })
       .catch((err: unknown) => { if (!cancelled) setState({ loading: false, error: describeError(err, '加载订阅失败'), subscriptions: [], vps: [] }) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.renew_window, filters.status, filters.vps_id, reloadKey])
+  }, [apiFilters, reloadKey])
 
   function setFilter<K extends keyof FilterState>(key: K, val: FilterState[K]) {
     setSearchParams(filtersToParams({ ...filters, [key]: val }), { replace: true })
@@ -169,12 +154,8 @@ export function SubscriptionsPage() {
     if (!id) return ''; return state.vps.find((v) => v.vps_id === id)?.display_name ?? id
   }
 
-  const vpsByID = useMemo(
-    () => new Map(state.vps.map((vps) => [vps.vps_id, vps])),
-    [state.vps],
-  )
   const vpsOpts = state.vps.map((v) => ({ value: v.vps_id, label: v.display_name }))
-  const hasFilters = Boolean(filters.vps_id || filters.status || filters.renew_window)
+  const hasFilters = Boolean(filters.vps_id || filters.renew_window)
   const [now] = useState(Date.now)
 
   return (
@@ -202,13 +183,6 @@ export function SubscriptionsPage() {
                   <select className="filter-select__control" value={filters.vps_id ?? ''} onChange={(e) => setFilter('vps_id', e.target.value || null)}>
                     <option value="">全部</option>
                     {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-                <div className="filter-select">
-                  <span className="filter-select__label">状态</span>
-                  <select className="filter-select__control" value={filters.status ?? ''} onChange={(e) => setFilter('status', (e.target.value || null) as SubscriptionStatus | null)}>
-                    <option value="">全部</option>
-                    {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
                 <div className="filter-select">
@@ -254,15 +228,13 @@ export function SubscriptionsPage() {
               <th>付费周期</th>
               <th>金额</th>
               <th>下次续费</th>
-              <th>状态</th>
+              <th>续费事实</th>
               <th className="cell-end">操作</th>
             </tr>
           </thead>
           <tbody>
             {state.subscriptions.map((s) => {
               const isUrgent = s.renew_at && (new Date(s.renew_at).getTime() - now) < 30 * 86400000
-              const linkedVPS = vpsByID.get(s.vps_id)
-              const needsLifecycleAction = vpsNeedsLifecycleAction(s, linkedVPS)
               return (
                 <tr key={s.subscription_id}>
                   <td className="name">{vpsName(s.vps_id)}</td>
@@ -271,14 +243,11 @@ export function SubscriptionsPage() {
                   <td className="mono">{formatMoney(s.price, s.currency)}</td>
                   <td className={`time${isUrgent ? ' text-warn' : ''}`}>{formatDate(s.renew_at)}</td>
                   <td>
-                    <span className={statusBadgeClass(s.status)}>{SUBSCRIPTION_STATUS_LABELS[s.status]}</span>
-                    {needsLifecycleAction ? (
-                      <span className="asset-context-inline">
-                        <span>需要处理资产联动</span>
-                        <span aria-hidden="true">·</span>
-                        <Link className="text-link" to={`/vps/${s.vps_id}?workbench=cancellation`}>打开工作台</Link>
-                      </span>
-                    ) : null}
+                    <span className="asset-context-inline">
+                      <span>{s.auto_renew ? '自动续费' : '手工续费'}</span>
+                      {s.auto_renew_cancelled ? <span>已取消自动续费</span> : null}
+                      <Link className="text-link" to={`/vps/${s.vps_id}`}>回到 VPS</Link>
+                    </span>
                   </td>
                   <td className="cell-end"><button className="btn-text sm secondary" onClick={() => startEdit(s)}>编辑</button></td>
                 </tr>
@@ -300,7 +269,6 @@ export function SubscriptionsPage() {
           <Input label="计费月数" type="number" min="1" value={createForm.billingMonths} onChange={(e) => setCreateForm({ ...createForm, billingMonths: e.target.value })} />
           <Input label="开始日期" type="date" value={createForm.startedAt} onChange={(e) => setCreateForm({ ...createForm, startedAt: e.target.value })} />
           <Input label="续费日期" type="date" value={createForm.renewAt} onChange={(e) => setCreateForm({ ...createForm, renewAt: e.target.value })} />
-          <Select label="状态" id="sub-create-status" options={STATUS_OPTIONS} value={createForm.status} onChange={(e) => setCreateForm({ ...createForm, status: e.target.value as SubscriptionStatus })} />
           <Input label="支付方式" value={createForm.paymentMethod} onChange={(e) => setCreateForm({ ...createForm, paymentMethod: e.target.value })} />
           <label className="ck">
             <input type="checkbox" checked={createForm.autoRenew} onChange={(e) => setCreateForm({ ...createForm, autoRenew: e.target.checked })} />
@@ -331,7 +299,6 @@ export function SubscriptionsPage() {
           <Input label="计费月数" type="number" min="1" value={editForm.billingMonths} onChange={(e) => setEditForm({ ...editForm, billingMonths: e.target.value })} />
           <Input label="开始日期" type="date" value={editForm.startedAt} onChange={(e) => setEditForm({ ...editForm, startedAt: e.target.value })} />
           <Input label="续费日期" type="date" value={editForm.renewAt} onChange={(e) => setEditForm({ ...editForm, renewAt: e.target.value })} />
-          <Select label="状态" id="sub-edit-status" options={STATUS_OPTIONS} value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value as SubscriptionStatus })} />
           <Input label="支付方式" value={editForm.paymentMethod} onChange={(e) => setEditForm({ ...editForm, paymentMethod: e.target.value })} />
           <label className="ck">
             <input type="checkbox" checked={editForm.autoRenew} onChange={(e) => setEditForm({ ...editForm, autoRenew: e.target.checked })} />

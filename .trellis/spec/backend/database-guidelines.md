@@ -254,6 +254,7 @@ _, err := tx.Exec(ctx, `
 - `provider_name` 是导入 / 展示兼容字符串，不能创建、更新或回填 `providers`。
 - `display_name` 必须由数据库 `vps_assets_display_name_not_blank` 约束保证 trim 后非空；领域层 create / patch 也必须校验。
 - `lifecycle_status`、`usage_status`、`renewal_decision` 使用稳定英文机器值，并分别由数据库 check 约束和领域校验共同保护。
+- VPS 是业务状态主体：人工生命周期、用途、续费 / 迁移 / 取消决策只写在 `vps_assets`。Subscription 和 MonitoringInstance 只能提供账单事实与运行观测事实，不得在普通创建 / 编辑流程里要求用户重复选择业务状态。
 - `ssh_port` 默认为 `22`，数据库约束为 `1..65535`；领域 create 中 `0` 表示省略并默认，patch 中显式 `0` 必须拒绝。
 - `archived_at` 是派生字段：生命周期切到 `archived` 时补时间，从 `archived` 切出时清空；API 输入不得任意写入 `archived_at`。
 - VPS 资产 CRUD 不得改写 `monitoring_instances.provider`，也不得改变 MonitoringInstance / Target / Agent 的既有语义。
@@ -270,7 +271,7 @@ _, err := tx.Exec(ctx, `
 - `price` 对齐数据库 `numeric(12, 2)`，领域层必须拒绝负数、超过精度或超过 2 位小数的输入，避免入库四舍五入后与派生字段漂移。
 - `monthly_price` 是后端派生字段，按 `price / billing_months` 计算并四舍五入到 4 位小数；create / patch JSON 不接受 `monthly_price`，patch 修改 `price` 或 `billing_months` 时必须重新计算。
 - `started_at` 与 `renew_at` 是 nullable `date`：未知日期用 `null`，不要写假日期。
-- `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。
+- `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。新用户流程不得把它暴露为必填业务状态；VPS-scoped create 默认只收 price / currency / billing cycle / dates / auto-renew / payment / note 等账单事实，内部可保留 legacy status 作为兼容和历史解释字段。
 - 订阅 CRUD 不得创建 `vps_monitoring_instance_links`、不得改写 `monitoring_instances.provider`、不得增加 Dashboard / import / currency exchange 行为。
 - 订阅 CRUD 仍不得反向改写 VPS、MonitoringInstance 或 Target；订阅取消 / 过期后如资产状态不一致，前端必须暴露 lifecycle action 入口，而不是在订阅 PATCH 中隐式停机或退役。
 - 受控例外：用户显式在 `PATCH /api/vps/{vps_id}` 将 VPS `renewal_decision` 改成取消类决策（当前为 `cancel` 或 `auto_renew_cancelled`）时，VPS patch 事务可以同步处理该 VPS 的明确订阅事实。只有恰好一条 `status='active'` 的订阅候选时，才能在同一事务里把该订阅 `auto_renew=false`、`auto_renew_cancelled=true`，并按既有 `price_histories` 机制记录自动续费字段变化；无 active 订阅或多 active 订阅时只返回 linkage status/message，不批量写订阅。
@@ -286,7 +287,7 @@ _, err := tx.Exec(ctx, `
   - `GET /api/asset-context/monitoring-instances` 与 `GET /api/asset-context/targets` 是批量上下文接口，供列表页显示关联 VPS 的取消 / 过期 / 不一致状态，避免前端逐行请求。
 - 审计表：`asset_lifecycle_actions` 保存一次操作的发起对象、确认时间、原因、执行摘要和最终状态；`asset_lifecycle_action_steps` 保存每个 subscription / VPS / MonitoringInstance / Target 步骤的前后状态、状态码、错误和摘要。
 - 普通 CRUD 不得静默调用 lifecycle action；只有工作台或等价的显式确认入口可以调用 `POST /api/vps/{vps_id}/cancellation`。
-- 如果 VPS 没有 active subscription，但存在 expired/cancelled/paused/unknown subscription，preview 和旧续费联动提示必须说明“订阅已处于非活跃状态，仍需处理 VPS、MonitoringInstance 与实例状态”，不得误导为“没有关联订阅，需要创建订阅”。
+- 如果 VPS 没有 active subscription，但存在 expired/cancelled/paused/unknown subscription，preview 和旧续费联动提示必须说明“订阅账单记录已无续费动作，仍需处理 VPS、MonitoringInstance 与入口探测状态”，不得误导为“没有关联订阅，需要创建订阅”。
 - 默认语义：已过期且不续费的 VPS 写 `renewal_decision=cancel`、`lifecycle_status=cancelled`；未来到期但已决定不续费的 VPS 写 `renewal_decision=cancel`、`lifecycle_status=to_cancel`；未来取消但仍观察的 MonitoringInstance 用 `lifecycle_status='不续费'` 且监控保持启用；实际退役 MonitoringInstance 用 `lifecycle_status='已退役'` 并可按确认步骤暂停监控；随 VPS 下线的 Target/实例确认后用 `run_status='已归档'`，临时停用才用 `暂停`。
 - `vps_monitoring_instance_links` 默认保留为历史证据；取消 / 退役 action 不自动 unlink，除非未来新增单独的“解除错误关联”显式动作。
 - 执行事务必须先锁定 VPS，再写 action 与各步骤；任何一步失败时业务状态与步骤写入整体回滚，避免部分取消造成新割裂。失败审计是例外：必须先显式回滚业务事务，再用独立事务写入 `status='failed'` 的 action 和 failed step，避免失败记录随业务回滚消失，也避免复用同一 `action_id` 时被未回滚事务锁住。
@@ -376,6 +377,23 @@ return vpsassets.RenewalSubscriptionLinkage{Status: vpsassets.RenewalSubscriptio
 - link / unlink 不得改写 `monitoring_instances.provider`、MonitoringInstance `lifecycle_status`、`monitoring_status`、`current_health_status`、Target、Agent 或 subscription。
 - VPS item/list API 可以补 `active_monitoring_instance_link_count`，VPS detail 可以返回 active MonitoringInstance 摘要；这些摘要通过 `internal/center/assetlinks.Repository` 查询，不要把 MonitoringInstance 查询 SQL 塞进 `store/vps_assets.go`。
 - MonitoringInstance 侧 VPS 摘要使用独立 `/api/monitoring-instances/{monitoring_instance_id}/vps` 查询，不把资产字段混入基础 `monitoringinstances.Record`。
+
+### VPS-scoped MonitoringInstance creation
+
+`POST /api/vps/{vps_id}/monitoring-instances` 是普通 agent 接入的主合同。它从 VPS 创建 MonitoringInstance 并在同一个事务内写入 active `vps_monitoring_instance_links`，避免先创建孤立监控实例再回 VPS 关联。
+
+- 请求只允许少量覆盖字段：`display_name`、`group`、`region`、`city`、`provider`、`labels`、`note`、`link_note`。缺省值必须从 VPS 的 display name、provider、region/city/datacenter/country、labels、note 派生。
+- 创建出的 MonitoringInstance 默认是运行观测附属事实：`lifecycle_status='待接入'`，binding / health / heartbeat 等仍由 onboarding 和 agent sync 推进。
+- 如果 VPS 不存在、MonitoringInstance insert 失败或 link 失败，整个事务必须回滚，不留下孤立 MonitoringInstance。
+- 该路径不得修改 VPS lifecycle / usage / renewal decision，也不得修改 Subscription、Target、ProbeItem 或 Agent plan；它只创建观测对象和 VPS 关联证据。
+
+### VPS-scoped Subscription creation
+
+`POST /api/vps/{vps_id}/subscriptions` 是普通补录订阅的主合同。path `vps_id` 是唯一 VPS 来源，请求体不得接受或覆盖 `vps_id`，也不得接受用户输入的 `status`。
+
+- 请求字段只表达账单事实：`price`、`currency`、`billing_cycle`、`billing_months`、`started_at`、`renew_at`、`auto_renew`、`auto_renew_cancelled`、`payment_method`、`note`。
+- 后端可以为 legacy `subscriptions.status` 写入内部默认值，但新 UI / API contract 不把它作为人工业务状态。
+- 创建订阅不得反向修改 VPS lifecycle / usage / renewal decision，不得创建 MonitoringInstance link，不得修改 Provider、Target、ProbeItem 或 Agent。
 
 ### Asset Ledger timeline histories
 
@@ -756,7 +774,7 @@ where not exists (
 2. **Target = 一个可观测入口**，地址 (`host` / `base_port`) 属于 Target；`ProbeItem` 仅描述**如何观测**它（探针种类、频率档、超时、配置），不再额外存地址。Target 与 ProbeItem 是 1:N，删除 Target 级联清理 ProbeItem (`on delete cascade`)。
 3. **探针种类只有 `tcp` / `http` / `tls`**（`internal/contracts/agentapi/types.go` 中的 `ProbeKind*` 常量）。`https` 不是独立种类，而是带 TLS 配置的 HTTP 观测。新增种类必须先获得基线批准，并同步更新设计文档与契约包。
 4. **健康状态 (`current_health_status`) 是派生量**（`正常 / 关注 / 告警 / 严重`），由 incident service 在写后计算并回写；**不要直接接受外部 API 的健康字段写入**。
-5. **生命周期状态 (`lifecycle_status`) 是托管量**（`待接入 / 在用 / 观察中 / 不续费 / 已退役`），通过专用 handler (`runtime_controls.go` + `monitoring_instance_onboarding.go`) 改变；其他写路径不应触碰该列。
+5. **MonitoringInstance 生命周期状态 (`lifecycle_status`) 是 VPS 附属接入/收尾事实，不是独立业务状态入口**（`待接入 / 在用 / 观察中 / 不续费 / 已退役`）。普通监控 handler 只能处理运行控制、接入、绑定和 metadata；退役/不续费类变更只能从 VPS 生命周期工作台的 `asset_lifecycle` 联动路径写入，并记录审计步骤。其他写路径不应触碰该列。
 6. **维护模式 (`monitoring_status = '维护中'` / `'暂停'`) 是 runtime control，不是健康状态**。维护期间观测照常落库（`maintenance_context = true`），但 incident / notification 处理需识别该上下文（参考 `store/monitoring_instances.go:74-77`、`incidents/service.go`）。
 7. **请求路径只写原始观测**：handler 接收 sync batch 后通过 `internal/center/syncing/` 落 `monitoring_instance_heartbeats` / `host_samples` / `probe_observations`，**不在请求路径里跑 incident 判定 / 通知**。incident 与通知由 `incidentSvc`（`incidents.NewSettingsBackedService`，启动时作为 `Worker.Run(ctx)` 跑）异步产出。
 8. **回填观测 (`is_backfilled = true`) 必须落库但不得触发实时告警**。请求路径仍旧 `insert`（参见 `store/sync_batches.go:188`），但 incident service 在 select 阶段对历史数据的处理需带条件分支。**不要在 incident 判定里忽略 `is_backfilled` 字段，也不要在写路径里干脆丢弃这条数据**。

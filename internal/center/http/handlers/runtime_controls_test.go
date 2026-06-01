@@ -27,13 +27,6 @@ type fakeMonitoringInstanceRuntimeControlRepository struct {
 	resumeMonitoringInstanceID string
 	resumeResult               monitoringinstances.Record
 	resumeErr                  error
-
-	retireMonitoringInstanceID  string
-	retireResult                monitoringinstances.Record
-	retireErr                   error
-	restoreMonitoringInstanceID string
-	restoreResult               monitoringinstances.Record
-	restoreErr                  error
 }
 
 func (f *fakeMonitoringInstanceRuntimeControlRepository) SetMonitoringInstanceMonitoringMaintenance(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
@@ -58,22 +51,6 @@ func (f *fakeMonitoringInstanceRuntimeControlRepository) ResumeMonitoringInstanc
 		return monitoringinstances.Record{}, f.resumeErr
 	}
 	return f.resumeResult, nil
-}
-
-func (f *fakeMonitoringInstanceRuntimeControlRepository) RetireMonitoringInstance(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	f.retireMonitoringInstanceID = monitoringInstanceID
-	if f.retireErr != nil {
-		return monitoringinstances.Record{}, f.retireErr
-	}
-	return f.retireResult, nil
-}
-
-func (f *fakeMonitoringInstanceRuntimeControlRepository) RestoreRetiredMonitoringInstanceToObserving(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	f.restoreMonitoringInstanceID = monitoringInstanceID
-	if f.restoreErr != nil {
-		return monitoringinstances.Record{}, f.restoreErr
-	}
-	return f.restoreResult, nil
 }
 
 type fakeTargetRuntimeControlRepository struct {
@@ -286,124 +263,6 @@ func TestMonitoringInstanceRuntimeControlHandlerMapsErrors(t *testing.T) {
 	}
 }
 
-func TestMonitoringInstanceLifecycleControlHandlerReturnsUpdatedMonitoringInstance(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name                     string
-		path                     string
-		wantMonitoringInstanceID string
-		wantLifecycle            string
-		buildRepo                func() *fakeMonitoringInstanceRuntimeControlRepository
-		assertCalledID           func(*testing.T, *fakeMonitoringInstanceRuntimeControlRepository, string)
-	}{
-		{
-			name:                     "retire",
-			path:                     "/api/monitoring-instances/mi_001/lifecycle/retire",
-			wantMonitoringInstanceID: "mi_001",
-			wantLifecycle:            monitoringinstances.LifecycleRetired,
-			buildRepo: func() *fakeMonitoringInstanceRuntimeControlRepository {
-				return &fakeMonitoringInstanceRuntimeControlRepository{retireResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LifecycleStatus: monitoringinstances.LifecycleRetired, UpdatedAt: now}}
-			},
-			assertCalledID: func(t *testing.T, repo *fakeMonitoringInstanceRuntimeControlRepository, want string) {
-				t.Helper()
-				if repo.retireMonitoringInstanceID != want {
-					t.Fatalf("RetireMonitoringInstance monitoringInstanceID = %q, want %q", repo.retireMonitoringInstanceID, want)
-				}
-			},
-		},
-		{
-			name:                     "restore retired to observing",
-			path:                     "/api/monitoring-instances/mi_002/lifecycle/restore-to-observing",
-			wantMonitoringInstanceID: "mi_002",
-			wantLifecycle:            monitoringinstances.LifecycleObserving,
-			buildRepo: func() *fakeMonitoringInstanceRuntimeControlRepository {
-				return &fakeMonitoringInstanceRuntimeControlRepository{restoreResult: monitoringinstances.Record{MonitoringInstanceID: "mi_002", LifecycleStatus: monitoringinstances.LifecycleObserving, UpdatedAt: now}}
-			},
-			assertCalledID: func(t *testing.T, repo *fakeMonitoringInstanceRuntimeControlRepository, want string) {
-				t.Helper()
-				if repo.restoreMonitoringInstanceID != want {
-					t.Fatalf("RestoreRetiredMonitoringInstanceToObserving monitoringInstanceID = %q, want %q", repo.restoreMonitoringInstanceID, want)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			repo := tt.buildRepo()
-			handler := handlers.MonitoringInstanceLifecycleControls(repo)
-			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
-			recorder := httptest.NewRecorder()
-
-			handler.ServeHTTP(recorder, req)
-
-			if recorder.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
-			}
-			tt.assertCalledID(t, repo, tt.wantMonitoringInstanceID)
-
-			var body monitoringinstances.Record
-			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-				t.Fatalf("unmarshal response body: %v", err)
-			}
-			if body.MonitoringInstanceID != tt.wantMonitoringInstanceID {
-				t.Fatalf("MonitoringInstanceID = %q, want %q", body.MonitoringInstanceID, tt.wantMonitoringInstanceID)
-			}
-			if body.LifecycleStatus != tt.wantLifecycle {
-				t.Fatalf("LifecycleStatus = %q, want %q", body.LifecycleStatus, tt.wantLifecycle)
-			}
-		})
-	}
-}
-
-func TestMonitoringInstanceLifecycleControlHandlerMapsErrors(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		repo        *fakeMonitoringInstanceRuntimeControlRepository
-		path        string
-		wantStatus  int
-		wantMessage string
-	}{
-		{
-			name:        "invalid transition",
-			repo:        &fakeMonitoringInstanceRuntimeControlRepository{retireErr: errors.Join(store.ErrInvalidMonitoringInstanceLifecycleTransition, errors.New("cannot retire"))},
-			path:        "/api/monitoring-instances/mi_001/lifecycle/retire",
-			wantStatus:  http.StatusConflict,
-			wantMessage: "invalid lifecycle transition",
-		},
-		{
-			name:        "not found",
-			repo:        &fakeMonitoringInstanceRuntimeControlRepository{restoreErr: monitoringinstances.ErrMonitoringInstanceNotFound},
-			path:        "/api/monitoring-instances/mi_missing/lifecycle/restore-to-observing",
-			wantStatus:  http.StatusNotFound,
-			wantMessage: "monitoring instance not found",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			handler := handlers.MonitoringInstanceLifecycleControls(tt.repo)
-			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
-			recorder := httptest.NewRecorder()
-
-			handler.ServeHTTP(recorder, req)
-
-			if recorder.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
-			}
-			assertAdminError(t, recorder, tt.wantMessage)
-		})
-	}
-}
-
 func TestTargetRuntimeControlHandlerReturnsUpdatedTarget(t *testing.T) {
 	t.Parallel()
 
@@ -592,7 +451,6 @@ func TestRuntimeControlHandlersRejectWrongMethod(t *testing.T) {
 		method  string
 	}{
 		{name: "monitoringInstance runtime", handler: handlers.MonitoringInstanceRuntimeControls(&fakeMonitoringInstanceRuntimeControlRepository{}), path: "/api/monitoring-instances/mi_001/runtime/pause", method: http.MethodGet},
-		{name: "monitoringInstance lifecycle", handler: handlers.MonitoringInstanceLifecycleControls(&fakeMonitoringInstanceRuntimeControlRepository{}), path: "/api/monitoring-instances/mi_001/lifecycle/retire", method: http.MethodGet},
 		{name: "target runtime", handler: handlers.TargetRuntimeControls(&fakeTargetRuntimeControlRepository{}), path: "/api/targets/tg_001/runtime/archive", method: http.MethodGet},
 	}
 

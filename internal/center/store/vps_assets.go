@@ -447,7 +447,7 @@ func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vps
 	if len(activeRecords) == 0 {
 		message := "缺少生效中的订阅记录，续费决策已保存但没有自动取消订阅自动续费。"
 		if len(records) > 0 {
-			message = "关联订阅已处于非活跃状态，续费决策已保存；仍需通过取消/退役工作台处理 VPS、监控实例与入口探测状态。"
+			message = "关联订阅账单记录已无续费动作，续费决策已保存；仍需通过取消/退役工作台处理 VPS、监控实例与入口探测状态。"
 		}
 		return vpsassets.RenewalSubscriptionLinkage{
 			Status:         vpsassets.RenewalSubscriptionLinkageNoActiveSubscription,
@@ -459,7 +459,7 @@ func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vps
 		return vpsassets.RenewalSubscriptionLinkage{
 			Status:         vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription,
 			CandidateCount: len(activeRecords),
-			Message:        "存在多条生效中的订阅记录，续费决策已保存但未自动批量修改订阅；请到订阅页选择要取消自动续费的记录。",
+			Message:        "存在多条仍显示自动续费有效的订阅账单记录，续费决策已保存但未自动批量修改；请到订阅页核对要取消自动续费的记录。",
 		}, nil
 	}
 

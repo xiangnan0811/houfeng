@@ -44,9 +44,7 @@ import {
   pauseMonitoringInstanceMonitoring,
   pauseTarget,
   rejectPendingMonitoringInstanceBinding,
-  restoreRetiredMonitoringInstanceToObserving,
   resetMonitoringInstanceBinding,
-  retireMonitoringInstance,
   restoreTargetToPaused,
   resumeMonitoringInstanceMonitoring,
   resumeTarget,
@@ -62,8 +60,10 @@ import {
   listVPSAssets,
   listVPSForMonitoringInstance,
   listVPSMonitoringInstances,
+  createVPSMonitoringInstance,
   listVPSServices,
   createVPSDomain,
+  createVPSSubscription,
 } from './api'
 import type {
   AssetDomainListFilter,
@@ -826,6 +826,48 @@ describe('api helpers', () => {
     })
   })
 
+  it('creates VPS-scoped monitoring instances from the VPS aggregate route', async () => {
+    const created = {
+      monitoring_instance_id: 'mi_001',
+      display_name: 'Tokyo Edge',
+      group: '',
+      region: 'Kanto',
+      city: 'Tokyo',
+      provider: 'Hetzner',
+      lifecycle_status: '待接入',
+      monitoring_status: '启用',
+      binding_status: '未绑定',
+      labels: ['edge'],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-05-09T09:00:00Z',
+      updated_at: '2026-05-09T09:00:00Z',
+      link: {
+        link_id: 'vnl_001',
+        vps_id: 'vps_001',
+        monitoring_instance_id: 'mi_001',
+        linked_at: '2026-05-09T09:00:00Z',
+        note: 'created from vps detail',
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockResponse(201, JSON.stringify(created)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(createVPSMonitoringInstance('vps_001')).resolves.toEqual(created)
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/monitoring-instances', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({}),
+    })
+  })
+
   it('serializes VPS cancellation preview, confirmed action, and asset contexts', async () => {
     const preview = {
       vps: {
@@ -847,7 +889,7 @@ describe('api helpers', () => {
       domains: [],
       target_links: [],
       recommended_steps: [],
-      warnings: ['订阅已非活跃，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
+      warnings: ['订阅账单记录已无续费动作，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
       blockers: [],
     }
     const actionResult = {
@@ -1078,17 +1120,31 @@ describe('api helpers', () => {
       note: 'review',
       updated_at: '2026-05-09T09:00:00Z',
     } satisfies SubscriptionRecord
+    const vpsScopedInput = {
+      price: 12,
+      currency: 'USD',
+      billing_cycle: 'monthly',
+      billing_months: 1,
+      started_at: '2026-05-01',
+      renew_at: '2026-06-01',
+      auto_renew: true,
+      auto_renew_cancelled: false,
+      payment_method: 'card',
+      note: 'production',
+    }
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([subscription])))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(subscription)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(subscription)))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify(subscription)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(updatedSubscription)))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc' })).resolves.toEqual([subscription])
     await expect(getSubscription('sub_001')).resolves.toEqual(subscription)
     await expect(createSubscription(input)).resolves.toEqual(subscription)
+    await expect(createVPSSubscription('vps_001', vpsScopedInput)).resolves.toEqual(subscription)
     await expect(updateSubscription('sub_001', patchBody)).resolves.toEqual(updatedSubscription)
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -1115,7 +1171,17 @@ describe('api helpers', () => {
       credentials: 'include',
       body: JSON.stringify(input),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/subscriptions/sub_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/subscriptions', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(vpsScopedInput),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/subscriptions/sub_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -1724,48 +1790,6 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-  })
-
-  it('posts monitoring instance lifecycle actions to the explicit endpoints', async () => {
-    const responseBody = {
-      monitoring_instance_id: 'mi_001',
-      display_name: 'Tokyo Edge',
-      region: 'ap-northeast-1',
-      city: 'Tokyo',
-      provider: 'aws',
-      lifecycle_status: '已退役',
-      monitoring_status: '暂停',
-      binding_status: '已绑定',
-      labels: [],
-      note: '',
-      current_health_status: '正常',
-      current_active_incident_count: 0,
-      current_primary_issue_summary: '',
-      created_at: '2026-04-26T09:00:00Z',
-      updated_at: '2026-04-26T09:18:00Z',
-    }
-    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(retireMonitoringInstance('mi_001')).resolves.toEqual(responseBody)
-    await expect(restoreRetiredMonitoringInstanceToObserving('mi_001')).resolves.toEqual(responseBody)
-
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances/mi_001/lifecycle/retire', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      '/api/monitoring-instances/mi_001/lifecycle/restore-to-observing',
-      {
-        method: 'POST',
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-      credentials: 'include',
-      },
-    )
   })
 
   it('posts target runtime control actions to the explicit endpoints', async () => {

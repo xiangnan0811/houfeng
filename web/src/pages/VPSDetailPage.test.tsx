@@ -92,7 +92,7 @@ function cancellationPreviewBody(overrides: Record<string, unknown> = {}) {
       record: subscriptionBody,
       role: 'active',
       recommended_action: 'cancel_auto_renew_and_mark_cancelled',
-      message: '订阅仍处于 active，需要显式确认取消订阅自动续费并标记为 cancelled。',
+      message: '订阅账单记录仍显示自动续费有效，需要显式确认取消自动续费。',
     }],
     monitoring_instance_links: vpsDetailBody.monitoring_instance_links,
     services: [serviceBody],
@@ -374,7 +374,9 @@ describe('VPSDetailPage', () => {
     openVPSActionsMenu()
     expect(screen.getByRole('button', { name: '编辑基础信息' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '记录经验' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '关联监控实例' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '快速创建订阅' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '创建并接入 agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关联已有监控实例' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增服务' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增域名' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '归档 VPS' })).toBeInTheDocument()
@@ -412,7 +414,7 @@ describe('VPSDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
     const nodeDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
     expect(within(nodeDrawer).getAllByRole('heading', { name: '监控实例证据' }).length).toBeGreaterThan(0)
-    expect(within(nodeDrawer).getByText(/关联监控实例用于解释续费决策/)).toBeInTheDocument()
+    expect(within(nodeDrawer).getByText(/监控实例作为 VPS 的运行观测事实/)).toBeInTheDocument()
     expect(within(nodeDrawer).getAllByText('Tokyo Monitoring Instance').length).toBeGreaterThan(0)
     fireEvent.click(within(nodeDrawer).getByLabelText('关闭'))
 
@@ -595,8 +597,273 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
     expect(screen.getByText('补录续费成本')).toBeInTheDocument()
     expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
-    expect(screen.getByRole('link', { name: '补订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_missing_subscription&create=1')
+    expect(screen.getAllByRole('button', { name: '快速创建订阅' }).length).toBeGreaterThan(0)
     expect(screen.queryByText('订阅读取失败')).not.toBeInTheDocument()
+  })
+
+  it('creates subscription facts from the VPS detail page without asking for subscription status', async () => {
+    const responseBody = {
+      ...vpsDetailBody,
+      vps_id: 'vps_missing_subscription',
+      display_name: 'Missing Subscription Edge',
+      renewal_decision: 'keep',
+    }
+    const createdSubscription = {
+      ...subscriptionBody,
+      subscription_id: 'sub_scoped_001',
+      vps_id: 'vps_missing_subscription',
+      price: 18,
+      monthly_price: 18,
+      renew_at: '2026-07-01',
+      auto_renew: true,
+      payment_method: 'visa',
+      note: 'created from vps detail',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(responseBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse(createdSubscription, 201))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_missing_subscription']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
+    fireEvent.click(screen.getAllByRole('button', { name: '快速创建订阅' })[0])
+    const drawer = screen.getByRole('dialog', { name: '快速创建订阅' })
+    expect(within(drawer).queryByLabelText('订阅状态')).not.toBeInTheDocument()
+    fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
+    fireEvent.change(within(drawer).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
+    fireEvent.click(within(drawer).getByLabelText('自动续费'))
+    fireEvent.change(within(drawer).getByLabelText('支付方式'), { target: { value: 'visa' } })
+    fireEvent.change(within(drawer).getByLabelText('备注'), { target: { value: 'created from vps detail' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建订阅' }))
+
+    await waitFor(() => expect(screen.getByText('订阅账单事实已创建')).toBeInTheDocument())
+    expect(screen.getAllByText('USD 18.00').length).toBeGreaterThan(0)
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_missing_subscription/subscriptions', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        price: 18,
+        currency: 'USD',
+        billing_cycle: 'monthly',
+        billing_months: 1,
+        started_at: null,
+        renew_at: '2026-07-01',
+        auto_renew: true,
+        auto_renew_cancelled: false,
+        payment_method: 'visa',
+        note: 'created from vps detail',
+      }),
+    })
+  })
+
+  it('opens quick subscription creation from the VPS workbench deep link', async () => {
+    const responseBody = {
+      ...vpsDetailBody,
+      vps_id: 'vps_missing_subscription',
+      display_name: 'Missing Subscription Edge',
+      renewal_decision: 'keep',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(responseBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_missing_subscription?workbench=subscription']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const drawer = await screen.findByRole('dialog', { name: '快速创建订阅' })
+    expect(within(drawer).getByText('只补录账单事实；生命周期、用途和续费决策继续归 VPS 管理。')).toBeInTheDocument()
+    expect(within(drawer).queryByLabelText('订阅状态')).not.toBeInTheDocument()
+  })
+
+  it('opens monitoring instance creation from the VPS workbench deep link', async () => {
+    const detailBody = {
+      ...vpsDetailBody,
+      renewal_decision: 'keep',
+      active_monitoring_instance_link_count: 0,
+      monitoring_instance_links: [],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001?workbench=monitoring']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const drawer = await screen.findByRole('dialog', { name: '创建并接入 agent' })
+    expect(within(drawer).getByLabelText('继承字段')).toHaveValue('Tokyo Edge · Hetzner · Kanto · Tokyo')
+    expect(within(drawer).getByText('系统会继承 VPS 身份、服务商、位置、标签和备注，创建后直接进入接入抽屉生成安装命令。')).toBeInTheDocument()
+  })
+
+  it('creates a monitoring instance from VPS identity and navigates to onboarding', async () => {
+    const detailBody = {
+      ...vpsDetailBody,
+      renewal_decision: 'keep',
+      active_monitoring_instance_link_count: 0,
+      monitoring_instance_links: [],
+    }
+    const refreshedDetail = {
+      ...detailBody,
+      active_monitoring_instance_link_count: 1,
+      monitoring_instance_links: [{
+        monitoring_instance_id: 'mi_scoped_001',
+        display_name: 'Tokyo Edge',
+        group: 'edge',
+        region: 'Kanto',
+        city: 'Tokyo',
+        provider: 'Hetzner',
+        lifecycle_status: '待接入',
+        monitoring_status: '启用',
+        binding_status: '待绑定',
+        current_health_status: '正常',
+        last_heartbeat_at: null,
+        last_sync_at: null,
+        current_active_incident_count: 0,
+        current_primary_issue_summary: '',
+        linked_at: '2026-05-09T09:02:00Z',
+        note: 'primary',
+      }],
+    }
+    const createdMonitoringInstance = {
+      monitoring_instance_id: 'mi_scoped_001',
+      display_name: 'Tokyo Edge',
+      group: 'edge',
+      region: 'Kanto',
+      city: 'Tokyo',
+      provider: 'Hetzner',
+      lifecycle_status: '待接入',
+      monitoring_status: '启用',
+      binding_status: '待绑定',
+      labels: ['edge'],
+      note: 'primary',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-05-09T09:02:00Z',
+      updated_at: '2026-05-09T09:02:00Z',
+      link: {
+        link_id: 'vnl_scoped_001',
+        vps_id: 'vps_001',
+        monitoring_instance_id: 'mi_scoped_001',
+        linked_at: '2026-05-09T09:02:00Z',
+        unlinked_at: null,
+        note: 'created from vps detail',
+      },
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+      .mockResolvedValueOnce(mockJSONResponse(createdMonitoringInstance, 201))
+      .mockResolvedValueOnce(mockJSONResponse(refreshedDetail))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+          <Route path="/monitoring/:monitoringInstanceId" element={<div>monitoring onboarding route</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    fireEvent.click(screen.getAllByRole('button', { name: '创建并接入 agent' })[0])
+    const drawer = screen.getByRole('dialog', { name: '创建并接入 agent' })
+    expect(within(drawer).getByLabelText('继承字段')).toHaveValue('Tokyo Edge · Hetzner · Kanto · Tokyo')
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建并接入 agent' }))
+
+    await waitFor(() => expect(screen.getByText('monitoring onboarding route')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/monitoring-instances', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({}),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('does not promote the cancellation workbench for a fresh active VPS', async () => {
+    const detailBody = {
+      ...vpsDetailBody,
+      renewal_decision: 'unreviewed',
+      active_monitoring_instance_link_count: 0,
+      running_monitoring_instance_count: 0,
+      running_target_count: 0,
+      monitoring_instance_links: [],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '处理决策' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建订阅' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '接入 agent' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '打开取消/退役工作台' })).not.toBeInTheDocument()
+    openVPSActionsMenu()
+    expect(screen.queryByRole('button', { name: '取消/退役工作台' })).not.toBeInTheDocument()
+    expect(screen.queryByText('LIFECYCLE COORDINATION')).not.toBeInTheDocument()
   })
 
   it('updates the renewal decision and refreshes asset history', async () => {
@@ -804,15 +1071,15 @@ describe('VPSDetailPage', () => {
     expect(within(factsDialog).getByLabelText('VPS 名称')).toHaveValue('Tokyo Edge')
     fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
 
-    clickVPSAction('关联监控实例')
-    let nodeDialog = screen.getByRole('dialog', { name: '关联监控实例' })
+    clickVPSAction('关联已有监控实例')
+    let nodeDialog = screen.getByRole('dialog', { name: '关联已有监控实例' })
     expect(within(nodeDialog).getByLabelText('选择监控实例')).toBeDisabled()
     fireEvent.change(within(nodeDialog).getByLabelText('关联备注'), { target: { value: 'stale note' } })
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('dialog', { name: '关联监控实例' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '关联已有监控实例' })).not.toBeInTheDocument()
 
-    clickVPSAction('关联监控实例')
-    nodeDialog = screen.getByRole('dialog', { name: '关联监控实例' })
+    clickVPSAction('关联已有监控实例')
+    nodeDialog = screen.getByRole('dialog', { name: '关联已有监控实例' })
     expect(within(nodeDialog).getByLabelText('选择监控实例')).toHaveValue('')
     expect(within(nodeDialog).getByLabelText('关联备注')).toHaveValue('')
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
@@ -1153,15 +1420,15 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    clickVPSAction('关联监控实例')
+    clickVPSAction('关联已有监控实例')
     await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     }))
-    fireEvent.change(within(screen.getByRole('dialog', { name: '关联监控实例' })).getByLabelText('选择监控实例'), { target: { value: 'mi_002' } })
-    fireEvent.change(within(screen.getByRole('dialog', { name: '关联监控实例' })).getByLabelText('关联备注'), { target: { value: 'secondary' } })
-    fireEvent.click(within(screen.getByRole('dialog', { name: '关联监控实例' })).getByRole('button', { name: '关联监控实例' }))
+    fireEvent.change(within(screen.getByRole('dialog', { name: '关联已有监控实例' })).getByLabelText('选择监控实例'), { target: { value: 'mi_002' } })
+    fireEvent.change(within(screen.getByRole('dialog', { name: '关联已有监控实例' })).getByLabelText('关联备注'), { target: { value: 'secondary' } })
+    fireEvent.click(within(screen.getByRole('dialog', { name: '关联已有监控实例' })).getByRole('button', { name: '关联监控实例' }))
 
     await waitFor(() => expect(screen.getAllByText('Seoul Monitoring Instance').length).toBeGreaterThan(0))
     expect(screen.getByText('监控实例关联已更新')).toBeInTheDocument()
@@ -1178,7 +1445,15 @@ describe('VPSDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
     const nodeEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
-    fireEvent.click(within(nodeEvidenceDrawer).getByRole('button', { name: '解除关联' }))
+    fireEvent.click(within(nodeEvidenceDrawer).getByRole('button', { name: '关联已有监控实例' }))
+    expect(await screen.findByRole('dialog', { name: '关联已有监控实例' })).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '查看监控实例详情' })[0])
+    const reopenedEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
+    fireEvent.click(within(reopenedEvidenceDrawer).getByRole('button', { name: '创建并接入 agent' }))
+    expect(screen.getByRole('dialog', { name: '创建并接入 agent' })).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '查看监控实例详情' })[0])
+    const unlinkEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
+    fireEvent.click(within(unlinkEvidenceDrawer).getByRole('button', { name: '解除关联' }))
     await waitFor(() => expect(screen.queryByText('Seoul Monitoring Instance')).not.toBeInTheDocument())
     expect(screen.getByText('监控实例关联已解除')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/unlink-monitoring-instance', {
@@ -2067,7 +2342,7 @@ describe('VPSDetailPage', () => {
         },
         role: 'inactive',
         recommended_action: 'keep_inactive',
-        message: '订阅已处于非活跃状态，仍需处理 VPS、监控实例与入口探测状态。',
+        message: '订阅账单记录已无续费动作，仍需处理 VPS、监控实例与入口探测状态。',
       }],
       monitoring_instance_links: refreshedDetail.monitoring_instance_links,
       target_links: [{

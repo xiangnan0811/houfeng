@@ -1547,7 +1547,7 @@ describe('MonitoringDetailPage', () => {
     })
   })
 
-  it('renders restore-to-observing in the watchtower actions menu for retired monitoring', async () => {
+  it('keeps monitoring lifecycle actions out of the watchtower actions menu', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -1581,176 +1581,8 @@ describe('MonitoringDetailPage', () => {
     )
     openRuntimeMenu()
 
-    expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复到观察中' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '退役监控实例' })).not.toBeInTheDocument()
-    expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
-  })
-
-  it('retires a monitoring instance from monitoring instance detail with inline confirmation instead of window.confirm', async () => {
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_lifecycle',
-            binding_status: '已绑定',
-            lifecycle_status: '在用',
-            current_health_status: '正常',
-            current_primary_issue_summary: '',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_lifecycle')))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_lifecycle',
-            binding_status: '已绑定',
-            lifecycle_status: '已退役',
-            monitoring_status: '暂停',
-            current_health_status: '正常',
-            current_primary_issue_summary: '',
-            updated_at: '2026-04-27T09:30:00Z',
-          }),
-        ),
-      )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring/mi_lifecycle']}>
-        <Routes>
-          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openRuntimeMenu()
-    expect(screen.getByRole('button', { name: '退役监控实例' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '退役监控实例' }))
-    expect(screen.getByRole('button', { name: '确认退役' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
-    expect(screen.getByText(/这不是删除/)).toBeInTheDocument()
-    expect(screen.getByText(/不会清空事件、观测记录或 agent 绑定历史/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '确认退役' }))
-
-    expect(confirmMock).not.toHaveBeenCalled()
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '恢复到观察中' })).toBeInTheDocument(),
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_lifecycle/lifecycle/retire', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-        credentials: 'include',
-    })
-  })
-
-  it('restores a retired monitoring instance only to observing from monitoring instance detail', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_restore',
-            binding_status: '已绑定',
-            lifecycle_status: '已退役',
-            monitoring_status: '暂停',
-            current_health_status: '正常',
-            current_primary_issue_summary: '',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_restore')))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_restore',
-            binding_status: '已绑定',
-            lifecycle_status: '观察中',
-            monitoring_status: '暂停',
-            current_health_status: '正常',
-            current_primary_issue_summary: '',
-            updated_at: '2026-04-27T09:40:00Z',
-          }),
-        ),
-      )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring/mi_restore']}>
-        <Routes>
-          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
-
-    // "观察中" StatusBadge surfaces in multiple places (lifecycle badge in header)
-    await waitFor(() => expect(screen.getAllByText('观察中').length).toBeGreaterThanOrEqual(1))
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      5,
-      '/api/monitoring-instances/mi_restore/lifecycle/restore-to-observing',
-      {
-        method: 'POST',
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-        credentials: 'include',
-      },
-    )
-  })
-
-  it('keeps lifecycle action errors visible near the action surface', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_lifecycle_error',
-            binding_status: '已绑定',
-            lifecycle_status: '已退役',
-            monitoring_status: '暂停',
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_lifecycle_error')))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid lifecycle transition' }, 409))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring/mi_lifecycle_error']}>
-        <Routes>
-          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
-
-    await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('invalid lifecycle transition'),
-    )
-    expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
     expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
   })
 
@@ -1863,98 +1695,6 @@ describe('MonitoringDetailPage', () => {
     )
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
-  })
-
-  it('ignores a stale lifecycle-action success after switching to a different monitoringInstance route', async () => {
-    const lifecycleAction = deferredResponse()
-
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          mockJSONResponse(
-            monitoringInstanceRecord({
-              monitoring_instance_id: 'mi_001',
-              binding_status: '已绑定',
-              lifecycle_status: '已退役',
-              monitoring_status: '暂停',
-              current_health_status: '正常',
-              current_primary_issue_summary: '',
-            }),
-          ),
-        )
-        .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_001')))
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockImplementationOnce(() => lifecycleAction.promise)
-        .mockResolvedValueOnce(
-          mockJSONResponse({
-            monitoring_instance_id: 'mi_002',
-            display_name: 'Seoul Edge',
-            region: 'ap-northeast-2',
-            city: 'Seoul',
-            provider: 'Hetzner',
-            lifecycle_status: '在用',
-            monitoring_status: '启用',
-            binding_status: '已绑定',
-            labels: [],
-            note: '',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-            created_at: '2026-04-20T00:00:00Z',
-            updated_at: '2026-04-24T09:10:00Z',
-          }),
-        )
-        .mockResolvedValueOnce(
-          mockJSONResponse({
-            monitoring_instance_id: 'mi_002',
-            latest_host_sample: null,
-          }),
-        )
-        .mockResolvedValueOnce(mockJSONResponse([]))
-        .mockResolvedValueOnce(mockJSONResponse([])),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring/mi_001']}>
-        <MonitoringDetailTestHarness />
-      </MemoryRouter>,
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
-    )
-    openRuntimeMenu()
-
-    fireEvent.click(screen.getByRole('button', { name: '恢复到观察中' }))
-    fireEvent.click(screen.getByRole('button', { name: 'switch monitoring instance' }))
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
-    )
-    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-
-    lifecycleAction.resolve(
-      mockJSONResponse(
-        monitoringInstanceRecord({
-          monitoring_instance_id: 'mi_001',
-          binding_status: '已绑定',
-          lifecycle_status: '观察中',
-          monitoring_status: '暂停',
-          current_health_status: '正常',
-          current_primary_issue_summary: '',
-          updated_at: '2026-04-27T09:45:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
-    )
-    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-    expect(screen.queryByText('观察中')).not.toBeInTheDocument()
   })
 
   it('ignores a stale binding-action success after switching to a different monitoringInstance route', async () => {
@@ -2730,7 +2470,7 @@ describe('MonitoringDetailPage', () => {
 
     expect(screen.getByRole('button', { name: '接入 agent…' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '执行命令…' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '退役监控实例' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '退役监控实例' })).not.toBeInTheDocument()
   })
 
   it('opens command drawer with 8 preset command options', async () => {

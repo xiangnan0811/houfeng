@@ -244,9 +244,9 @@ export function buildFleetState(
   if (isFreshInstall) {
     return {
       title: '开始接入第一台服务器',
-      description: '接入监控实例，再配置目标。',
+      description: '先创建 VPS，再从 VPS 详情页补账单事实并接入 agent。',
       tone: 'notice',
-      primaryCta: { label: '接入第一个监控实例', to: DASHBOARD_LINKS.monitoring },
+      primaryCta: { label: '创建第一台 VPS', to: DASHBOARD_LINKS.vps },
       secondaryCtas: [],
     }
   }

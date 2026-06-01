@@ -84,7 +84,7 @@ describe('SubscriptionsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
     expect(screen.queryByRole('dialog', { name: '新建订阅表单' })).not.toBeInTheDocument()
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('生效中').length).toBeGreaterThan(0)
+    expect(screen.getByText('自动续费')).toBeInTheDocument()
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc', {
       headers: { Accept: 'application/json' },
@@ -156,7 +156,6 @@ describe('SubscriptionsPage', () => {
         renew_at: '2026-07-01',
         auto_renew: true,
         auto_renew_cancelled: false,
-        status: 'active',
         payment_method: '',
         note: '',
       }),
@@ -215,7 +214,7 @@ describe('SubscriptionsPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('updates subscriptions through PATCH and shows updated status', async () => {
+  it('updates subscriptions through PATCH and shows updated billing facts', async () => {
     const updated = {
       ...subscription,
       price: 24,
@@ -256,10 +255,10 @@ describe('SubscriptionsPage', () => {
     fireEvent.click(within(editDialog).getByLabelText('已取消自动续费'))
     fireEvent.change(within(editDialog).getByLabelText('支付方式'), { target: { value: 'paypal' } })
     fireEvent.change(within(editDialog).getByLabelText('备注'), { target: { value: 'review' } })
-    fireEvent.change(within(editDialog).getByLabelText('状态'), { target: { value: 'paused' } })
     fireEvent.click(within(editDialog).getByRole('button', { name: '保存' }))
 
-    await waitFor(() => expect(screen.getAllByText('已暂停').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('USD 24.00').length).toBeGreaterThan(0))
+    expect(screen.getByText('已取消自动续费')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/subscriptions/sub_001', {
       method: 'PATCH',
       headers: {
@@ -278,23 +277,16 @@ describe('SubscriptionsPage', () => {
         renew_at: '2026-08-01',
         auto_renew: false,
         auto_renew_cancelled: true,
-        status: 'paused',
         payment_method: 'paypal',
         note: 'review',
       }),
     })
   })
 
-  it('shows asset lifecycle follow-up when subscription becomes inactive but VPS is still active', async () => {
-    const expired = {
-      ...subscription,
-      status: 'expired' as const,
-      auto_renew: false,
-      auto_renew_cancelled: true,
-    }
+  it('links subscription billing facts back to the VPS owner', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([expired]))
+      .mockResolvedValueOnce(mockJSONResponse([{ ...subscription, auto_renew: false, auto_renew_cancelled: true }]))
       .mockResolvedValueOnce(mockJSONResponse([vps]))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -304,8 +296,8 @@ describe('SubscriptionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('需要处理资产联动')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: '打开工作台' })).toHaveAttribute('href', '/vps/vps_001?workbench=cancellation')
+    await waitFor(() => expect(screen.getByText('已取消自动续费')).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: '回到 VPS' })).toHaveAttribute('href', '/vps/vps_001')
   })
 
   it('shows subscription error state with retry', async () => {
