@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/xiangnan0811/houfeng/compare/v0.24.1...v0.25.0) (2026-06-01)
+
+
+### Features
+
+* rename nodes to monitoring instances ([0236fee](https://github.com/xiangnan0811/houfeng/commit/0236feee73fefe98b54c06b002ba1b9f6569e2a7))
+
 ## [0.24.1](https://github.com/xiangnan0811/houfeng/compare/v0.24.0...v0.24.1) (2026-05-31)
 
 
