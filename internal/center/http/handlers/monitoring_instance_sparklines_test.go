@@ -12,27 +12,27 @@ import (
 	"houfeng/internal/center/http/handlers"
 )
 
-type fakeNodeSparklinesRepository struct {
+type fakeMonitoringInstanceSparklinesRepository struct {
 	result map[string]map[string][]float64
 	err    error
 }
 
-func (f *fakeNodeSparklinesRepository) GetNodeSparklines(_ context.Context, _ []string, _ time.Time, _ int) (map[string]map[string][]float64, error) {
+func (f *fakeMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparklines(_ context.Context, _ []string, _ time.Time, _ int) (map[string]map[string][]float64, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.result, nil
 }
 
-func TestNodeSparklinesHandlerBasic(t *testing.T) {
-	repo := &fakeNodeSparklinesRepository{
+func TestMonitoringInstanceSparklinesHandlerBasic(t *testing.T) {
+	repo := &fakeMonitoringInstanceSparklinesRepository{
 		result: map[string]map[string][]float64{
-			"nd_001": {
+			"mi_001": {
 				"cpu_usage_pct": make24(12.5, 13.0, 14.2),
 				"mem_used_pct":  make24(65.0, 64.2, 63.8),
 				"disk_used_pct": make24(52.0, 52.1, 52.2),
 			},
-			"nd_002": {
+			"mi_002": {
 				"cpu_usage_pct": make24(25.0, 24.5, 26.0),
 				"mem_used_pct":  make24(70.0, 71.0, 69.5),
 				"disk_used_pct": make24(45.0, 45.1, 44.9),
@@ -40,9 +40,9 @@ func TestNodeSparklinesHandlerBasic(t *testing.T) {
 		},
 	}
 
-	handler := handlers.NodeSparklines(repo)
+	handler := handlers.MonitoringInstanceSparklines(repo)
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/nodes/sparklines?metrics=cpu_usage_pct,mem_used_pct,disk_used_pct&window=24h&downsample=24", nil)
+		"/api/monitoring-instances/sparklines?metrics=cpu_usage_pct,mem_used_pct,disk_used_pct&window=24h&downsample=24", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -52,41 +52,41 @@ func TestNodeSparklinesHandlerBasic(t *testing.T) {
 	}
 
 	var body struct {
-		Nodes map[string]map[string][]float64 `json:"nodes"`
+		MonitoringInstances map[string]map[string][]float64 `json:"monitoring_instances"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
-	if len(body.Nodes) != 2 {
-		t.Fatalf("expected 2 nodes, got %d", len(body.Nodes))
+	if len(body.MonitoringInstances) != 2 {
+		t.Fatalf("expected 2 monitoringInstances, got %d", len(body.MonitoringInstances))
 	}
 
-	for _, nodeID := range []string{"nd_001", "nd_002"} {
-		nodeData, ok := body.Nodes[nodeID]
+	for _, monitoringInstanceID := range []string{"mi_001", "mi_002"} {
+		monitoringInstanceData, ok := body.MonitoringInstances[monitoringInstanceID]
 		if !ok {
-			t.Fatalf("missing node %s in response", nodeID)
+			t.Fatalf("missing monitoring instance %s in response", monitoringInstanceID)
 		}
 		for _, metric := range []string{"cpu_usage_pct", "mem_used_pct", "disk_used_pct"} {
-			values, ok := nodeData[metric]
+			values, ok := monitoringInstanceData[metric]
 			if !ok {
-				t.Fatalf("node %s missing metric %s", nodeID, metric)
+				t.Fatalf("monitoringInstance %s missing metric %s", monitoringInstanceID, metric)
 			}
 			if len(values) != 24 {
-				t.Fatalf("node %s metric %s has %d values, want 24", nodeID, metric, len(values))
+				t.Fatalf("monitoringInstance %s metric %s has %d values, want 24", monitoringInstanceID, metric, len(values))
 			}
 		}
 	}
 }
 
-func TestNodeSparklinesHandlerEmpty(t *testing.T) {
-	repo := &fakeNodeSparklinesRepository{
+func TestMonitoringInstanceSparklinesHandlerEmpty(t *testing.T) {
+	repo := &fakeMonitoringInstanceSparklinesRepository{
 		result: map[string]map[string][]float64{},
 	}
 
-	handler := handlers.NodeSparklines(repo)
+	handler := handlers.MonitoringInstanceSparklines(repo)
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/nodes/sparklines?metrics=cpu_usage_pct&window=24h&downsample=24", nil)
+		"/api/monitoring-instances/sparklines?metrics=cpu_usage_pct&window=24h&downsample=24", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -96,16 +96,16 @@ func TestNodeSparklinesHandlerEmpty(t *testing.T) {
 	}
 
 	responseBody := recorder.Body.String()
-	if !strings.Contains(responseBody, `"nodes":`) {
-		t.Fatalf("response should contain nodes key, got: %s", responseBody)
+	if !strings.Contains(responseBody, `"monitoring_instances":`) {
+		t.Fatalf("response should contain monitoringInstances key, got: %s", responseBody)
 	}
-	if !strings.Contains(responseBody, `{}`) && !strings.Contains(responseBody, `"nodes":{}`) {
-		t.Fatalf("response should have empty nodes object, got: %s", responseBody)
+	if !strings.Contains(responseBody, `{}`) && !strings.Contains(responseBody, `"monitoring_instances":{}`) {
+		t.Fatalf("response should have empty monitoringInstances object, got: %s", responseBody)
 	}
 }
 
-func TestNodeSparklinesHandlerInvalidMetrics(t *testing.T) {
-	repo := &fakeNodeSparklinesRepository{}
+func TestMonitoringInstanceSparklinesHandlerInvalidMetrics(t *testing.T) {
+	repo := &fakeMonitoringInstanceSparklinesRepository{}
 
 	tests := []struct {
 		name    string
@@ -126,8 +126,8 @@ func TestNodeSparklinesHandlerInvalidMetrics(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := handlers.NodeSparklines(repo)
-			qs := "/api/nodes/sparklines?window=24h&downsample=24"
+			handler := handlers.MonitoringInstanceSparklines(repo)
+			qs := "/api/monitoring-instances/sparklines?window=24h&downsample=24"
 			if tc.metrics != "" {
 				qs += "&metrics=" + tc.metrics
 			}

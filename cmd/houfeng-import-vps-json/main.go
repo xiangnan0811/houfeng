@@ -132,10 +132,10 @@ func runImport(ctx context.Context, records []importing.InputRecord, format stri
 
 	providerRepo, vpsRepo, subscriptionRepo := store.NewPostgresAssetLedgerRepositories(tx)
 	report, err := importing.Import(ctx, records, importing.Repositories{
-		Providers:     providerRepo,
-		VPSAssets:     vpsRepo,
-		Subscriptions: subscriptionRepo,
-		Nodes:         store.NewPostgresNodeRepository(db),
+		Providers:           providerRepo,
+		VPSAssets:           vpsRepo,
+		Subscriptions:       subscriptionRepo,
+		MonitoringInstances: store.NewPostgresMonitoringInstanceRepository(db),
 	}, importing.Options{})
 	if err != nil {
 		if errors.Is(err, importing.ErrImportBlocked) {
@@ -165,10 +165,10 @@ func openRepositories(ctx context.Context, databaseURL string, applyMigrations b
 	}
 
 	repos := importing.Repositories{
-		Providers:     store.NewPostgresProviderRepository(db),
-		VPSAssets:     store.NewPostgresVPSAssetRepository(db),
-		Subscriptions: store.NewPostgresSubscriptionRepository(db),
-		Nodes:         store.NewPostgresNodeRepository(db),
+		Providers:           store.NewPostgresProviderRepository(db),
+		VPSAssets:           store.NewPostgresVPSAssetRepository(db),
+		Subscriptions:       store.NewPostgresSubscriptionRepository(db),
+		MonitoringInstances: store.NewPostgresMonitoringInstanceRepository(db),
 	}
 	return repos, db.Close, nil
 }

@@ -10,68 +10,68 @@ import (
 	"time"
 
 	"houfeng/internal/center/http/handlers"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/targets"
 )
 
-type fakeNodeRuntimeControlRepository struct {
-	setMaintenanceNodeID string
-	setMaintenanceResult nodes.Record
-	setMaintenanceErr    error
+type fakeMonitoringInstanceRuntimeControlRepository struct {
+	setMaintenanceMonitoringInstanceID string
+	setMaintenanceResult               monitoringinstances.Record
+	setMaintenanceErr                  error
 
-	pauseNodeID string
-	pauseResult nodes.Record
-	pauseErr    error
+	pauseMonitoringInstanceID string
+	pauseResult               monitoringinstances.Record
+	pauseErr                  error
 
-	resumeNodeID string
-	resumeResult nodes.Record
-	resumeErr    error
+	resumeMonitoringInstanceID string
+	resumeResult               monitoringinstances.Record
+	resumeErr                  error
 
-	retireNodeID  string
-	retireResult  nodes.Record
-	retireErr     error
-	restoreNodeID string
-	restoreResult nodes.Record
-	restoreErr    error
+	retireMonitoringInstanceID  string
+	retireResult                monitoringinstances.Record
+	retireErr                   error
+	restoreMonitoringInstanceID string
+	restoreResult               monitoringinstances.Record
+	restoreErr                  error
 }
 
-func (f *fakeNodeRuntimeControlRepository) SetNodeMonitoringMaintenance(_ context.Context, nodeID string) (nodes.Record, error) {
-	f.setMaintenanceNodeID = nodeID
+func (f *fakeMonitoringInstanceRuntimeControlRepository) SetMonitoringInstanceMonitoringMaintenance(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
+	f.setMaintenanceMonitoringInstanceID = monitoringInstanceID
 	if f.setMaintenanceErr != nil {
-		return nodes.Record{}, f.setMaintenanceErr
+		return monitoringinstances.Record{}, f.setMaintenanceErr
 	}
 	return f.setMaintenanceResult, nil
 }
 
-func (f *fakeNodeRuntimeControlRepository) PauseNodeMonitoring(_ context.Context, nodeID string) (nodes.Record, error) {
-	f.pauseNodeID = nodeID
+func (f *fakeMonitoringInstanceRuntimeControlRepository) PauseMonitoringInstanceMonitoring(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
+	f.pauseMonitoringInstanceID = monitoringInstanceID
 	if f.pauseErr != nil {
-		return nodes.Record{}, f.pauseErr
+		return monitoringinstances.Record{}, f.pauseErr
 	}
 	return f.pauseResult, nil
 }
 
-func (f *fakeNodeRuntimeControlRepository) ResumeNodeMonitoring(_ context.Context, nodeID string) (nodes.Record, error) {
-	f.resumeNodeID = nodeID
+func (f *fakeMonitoringInstanceRuntimeControlRepository) ResumeMonitoringInstanceMonitoring(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
+	f.resumeMonitoringInstanceID = monitoringInstanceID
 	if f.resumeErr != nil {
-		return nodes.Record{}, f.resumeErr
+		return monitoringinstances.Record{}, f.resumeErr
 	}
 	return f.resumeResult, nil
 }
 
-func (f *fakeNodeRuntimeControlRepository) RetireNode(_ context.Context, nodeID string) (nodes.Record, error) {
-	f.retireNodeID = nodeID
+func (f *fakeMonitoringInstanceRuntimeControlRepository) RetireMonitoringInstance(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
+	f.retireMonitoringInstanceID = monitoringInstanceID
 	if f.retireErr != nil {
-		return nodes.Record{}, f.retireErr
+		return monitoringinstances.Record{}, f.retireErr
 	}
 	return f.retireResult, nil
 }
 
-func (f *fakeNodeRuntimeControlRepository) RestoreRetiredNodeToObserving(_ context.Context, nodeID string) (nodes.Record, error) {
-	f.restoreNodeID = nodeID
+func (f *fakeMonitoringInstanceRuntimeControlRepository) RestoreRetiredMonitoringInstanceToObserving(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
+	f.restoreMonitoringInstanceID = monitoringInstanceID
 	if f.restoreErr != nil {
-		return nodes.Record{}, f.restoreErr
+		return monitoringinstances.Record{}, f.restoreErr
 	}
 	return f.restoreResult, nil
 }
@@ -138,75 +138,75 @@ func (f *fakeTargetRuntimeControlRepository) RestoreArchivedTargetToPaused(_ con
 	return f.restoreResult, nil
 }
 
-func TestNodeRuntimeControlHandlerReturnsUpdatedNode(t *testing.T) {
+func TestMonitoringInstanceRuntimeControlHandlerReturnsUpdatedMonitoringInstance(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.April, 26, 10, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name           string
-		path           string
-		wantNodeID     string
-		wantStatus     string
-		buildRepo      func() *fakeNodeRuntimeControlRepository
-		assertCalledID func(*testing.T, *fakeNodeRuntimeControlRepository, string)
+		name                     string
+		path                     string
+		wantMonitoringInstanceID string
+		wantStatus               string
+		buildRepo                func() *fakeMonitoringInstanceRuntimeControlRepository
+		assertCalledID           func(*testing.T, *fakeMonitoringInstanceRuntimeControlRepository, string)
 	}{
 		{
-			name:       "enter maintenance",
-			path:       "/api/nodes/nd_001/runtime/enter-maintenance",
-			wantNodeID: "nd_001",
-			wantStatus: "维护中",
-			buildRepo: func() *fakeNodeRuntimeControlRepository {
-				return &fakeNodeRuntimeControlRepository{setMaintenanceResult: nodes.Record{NodeID: "nd_001", MonitoringStatus: "维护中", UpdatedAt: now}}
+			name:                     "enter maintenance",
+			path:                     "/api/monitoring-instances/mi_001/runtime/enter-maintenance",
+			wantMonitoringInstanceID: "mi_001",
+			wantStatus:               "维护中",
+			buildRepo: func() *fakeMonitoringInstanceRuntimeControlRepository {
+				return &fakeMonitoringInstanceRuntimeControlRepository{setMaintenanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", MonitoringStatus: "维护中", UpdatedAt: now}}
 			},
-			assertCalledID: func(t *testing.T, repo *fakeNodeRuntimeControlRepository, want string) {
+			assertCalledID: func(t *testing.T, repo *fakeMonitoringInstanceRuntimeControlRepository, want string) {
 				t.Helper()
-				if repo.setMaintenanceNodeID != want {
-					t.Fatalf("SetNodeMonitoringMaintenance nodeID = %q, want %q", repo.setMaintenanceNodeID, want)
+				if repo.setMaintenanceMonitoringInstanceID != want {
+					t.Fatalf("SetMonitoringInstanceMonitoringMaintenance monitoringInstanceID = %q, want %q", repo.setMaintenanceMonitoringInstanceID, want)
 				}
 			},
 		},
 		{
-			name:       "exit maintenance",
-			path:       "/api/nodes/nd_002/runtime/exit-maintenance",
-			wantNodeID: "nd_002",
-			wantStatus: "启用",
-			buildRepo: func() *fakeNodeRuntimeControlRepository {
-				return &fakeNodeRuntimeControlRepository{resumeResult: nodes.Record{NodeID: "nd_002", MonitoringStatus: "启用", UpdatedAt: now}}
+			name:                     "exit maintenance",
+			path:                     "/api/monitoring-instances/mi_002/runtime/exit-maintenance",
+			wantMonitoringInstanceID: "mi_002",
+			wantStatus:               "启用",
+			buildRepo: func() *fakeMonitoringInstanceRuntimeControlRepository {
+				return &fakeMonitoringInstanceRuntimeControlRepository{resumeResult: monitoringinstances.Record{MonitoringInstanceID: "mi_002", MonitoringStatus: "启用", UpdatedAt: now}}
 			},
-			assertCalledID: func(t *testing.T, repo *fakeNodeRuntimeControlRepository, want string) {
+			assertCalledID: func(t *testing.T, repo *fakeMonitoringInstanceRuntimeControlRepository, want string) {
 				t.Helper()
-				if repo.resumeNodeID != want {
-					t.Fatalf("ResumeNodeMonitoring nodeID = %q, want %q", repo.resumeNodeID, want)
+				if repo.resumeMonitoringInstanceID != want {
+					t.Fatalf("ResumeMonitoringInstanceMonitoring monitoringInstanceID = %q, want %q", repo.resumeMonitoringInstanceID, want)
 				}
 			},
 		},
 		{
-			name:       "pause",
-			path:       "/api/nodes/nd_003/runtime/pause",
-			wantNodeID: "nd_003",
-			wantStatus: "暂停",
-			buildRepo: func() *fakeNodeRuntimeControlRepository {
-				return &fakeNodeRuntimeControlRepository{pauseResult: nodes.Record{NodeID: "nd_003", MonitoringStatus: "暂停", UpdatedAt: now}}
+			name:                     "pause",
+			path:                     "/api/monitoring-instances/mi_003/runtime/pause",
+			wantMonitoringInstanceID: "mi_003",
+			wantStatus:               "暂停",
+			buildRepo: func() *fakeMonitoringInstanceRuntimeControlRepository {
+				return &fakeMonitoringInstanceRuntimeControlRepository{pauseResult: monitoringinstances.Record{MonitoringInstanceID: "mi_003", MonitoringStatus: "暂停", UpdatedAt: now}}
 			},
-			assertCalledID: func(t *testing.T, repo *fakeNodeRuntimeControlRepository, want string) {
+			assertCalledID: func(t *testing.T, repo *fakeMonitoringInstanceRuntimeControlRepository, want string) {
 				t.Helper()
-				if repo.pauseNodeID != want {
-					t.Fatalf("PauseNodeMonitoring nodeID = %q, want %q", repo.pauseNodeID, want)
+				if repo.pauseMonitoringInstanceID != want {
+					t.Fatalf("PauseMonitoringInstanceMonitoring monitoringInstanceID = %q, want %q", repo.pauseMonitoringInstanceID, want)
 				}
 			},
 		},
 		{
-			name:       "resume",
-			path:       "/api/nodes/nd_004/runtime/resume",
-			wantNodeID: "nd_004",
-			wantStatus: "启用",
-			buildRepo: func() *fakeNodeRuntimeControlRepository {
-				return &fakeNodeRuntimeControlRepository{resumeResult: nodes.Record{NodeID: "nd_004", MonitoringStatus: "启用", UpdatedAt: now}}
+			name:                     "resume",
+			path:                     "/api/monitoring-instances/mi_004/runtime/resume",
+			wantMonitoringInstanceID: "mi_004",
+			wantStatus:               "启用",
+			buildRepo: func() *fakeMonitoringInstanceRuntimeControlRepository {
+				return &fakeMonitoringInstanceRuntimeControlRepository{resumeResult: monitoringinstances.Record{MonitoringInstanceID: "mi_004", MonitoringStatus: "启用", UpdatedAt: now}}
 			},
-			assertCalledID: func(t *testing.T, repo *fakeNodeRuntimeControlRepository, want string) {
+			assertCalledID: func(t *testing.T, repo *fakeMonitoringInstanceRuntimeControlRepository, want string) {
 				t.Helper()
-				if repo.resumeNodeID != want {
-					t.Fatalf("ResumeNodeMonitoring nodeID = %q, want %q", repo.resumeNodeID, want)
+				if repo.resumeMonitoringInstanceID != want {
+					t.Fatalf("ResumeMonitoringInstanceMonitoring monitoringInstanceID = %q, want %q", repo.resumeMonitoringInstanceID, want)
 				}
 			},
 		},
@@ -217,7 +217,7 @@ func TestNodeRuntimeControlHandlerReturnsUpdatedNode(t *testing.T) {
 			t.Parallel()
 
 			repo := tt.buildRepo()
-			handler := handlers.NodeRuntimeControls(repo)
+			handler := handlers.MonitoringInstanceRuntimeControls(repo)
 			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			recorder := httptest.NewRecorder()
 
@@ -226,14 +226,14 @@ func TestNodeRuntimeControlHandlerReturnsUpdatedNode(t *testing.T) {
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 			}
-			tt.assertCalledID(t, repo, tt.wantNodeID)
+			tt.assertCalledID(t, repo, tt.wantMonitoringInstanceID)
 
-			var body nodes.Record
+			var body monitoringinstances.Record
 			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 				t.Fatalf("unmarshal response body: %v", err)
 			}
-			if body.NodeID != tt.wantNodeID {
-				t.Fatalf("NodeID = %q, want %q", body.NodeID, tt.wantNodeID)
+			if body.MonitoringInstanceID != tt.wantMonitoringInstanceID {
+				t.Fatalf("MonitoringInstanceID = %q, want %q", body.MonitoringInstanceID, tt.wantMonitoringInstanceID)
 			}
 			if body.MonitoringStatus != tt.wantStatus {
 				t.Fatalf("MonitoringStatus = %q, want %q", body.MonitoringStatus, tt.wantStatus)
@@ -242,29 +242,29 @@ func TestNodeRuntimeControlHandlerReturnsUpdatedNode(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeControlHandlerMapsErrors(t *testing.T) {
+func TestMonitoringInstanceRuntimeControlHandlerMapsErrors(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name        string
-		repo        *fakeNodeRuntimeControlRepository
+		repo        *fakeMonitoringInstanceRuntimeControlRepository
 		path        string
 		wantStatus  int
 		wantMessage string
 	}{
 		{
 			name:        "invalid transition",
-			repo:        &fakeNodeRuntimeControlRepository{setMaintenanceErr: errors.Join(store.ErrInvalidNodeRuntimeTransition, errors.New("cannot enter maintenance"))},
-			path:        "/api/nodes/nd_001/runtime/enter-maintenance",
+			repo:        &fakeMonitoringInstanceRuntimeControlRepository{setMaintenanceErr: errors.Join(store.ErrInvalidMonitoringInstanceRuntimeTransition, errors.New("cannot enter maintenance"))},
+			path:        "/api/monitoring-instances/mi_001/runtime/enter-maintenance",
 			wantStatus:  http.StatusConflict,
 			wantMessage: "invalid runtime transition",
 		},
 		{
 			name:        "not found",
-			repo:        &fakeNodeRuntimeControlRepository{pauseErr: nodes.ErrNodeNotFound},
-			path:        "/api/nodes/nd_missing/runtime/pause",
+			repo:        &fakeMonitoringInstanceRuntimeControlRepository{pauseErr: monitoringinstances.ErrMonitoringInstanceNotFound},
+			path:        "/api/monitoring-instances/mi_missing/runtime/pause",
 			wantStatus:  http.StatusNotFound,
-			wantMessage: "node not found",
+			wantMessage: "monitoring instance not found",
 		},
 	}
 
@@ -272,7 +272,7 @@ func TestNodeRuntimeControlHandlerMapsErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := handlers.NodeRuntimeControls(tt.repo)
+			handler := handlers.MonitoringInstanceRuntimeControls(tt.repo)
 			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			recorder := httptest.NewRecorder()
 
@@ -286,45 +286,45 @@ func TestNodeRuntimeControlHandlerMapsErrors(t *testing.T) {
 	}
 }
 
-func TestNodeLifecycleControlHandlerReturnsUpdatedNode(t *testing.T) {
+func TestMonitoringInstanceLifecycleControlHandlerReturnsUpdatedMonitoringInstance(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name           string
-		path           string
-		wantNodeID     string
-		wantLifecycle  string
-		buildRepo      func() *fakeNodeRuntimeControlRepository
-		assertCalledID func(*testing.T, *fakeNodeRuntimeControlRepository, string)
+		name                     string
+		path                     string
+		wantMonitoringInstanceID string
+		wantLifecycle            string
+		buildRepo                func() *fakeMonitoringInstanceRuntimeControlRepository
+		assertCalledID           func(*testing.T, *fakeMonitoringInstanceRuntimeControlRepository, string)
 	}{
 		{
-			name:          "retire",
-			path:          "/api/nodes/nd_001/lifecycle/retire",
-			wantNodeID:    "nd_001",
-			wantLifecycle: nodes.LifecycleRetired,
-			buildRepo: func() *fakeNodeRuntimeControlRepository {
-				return &fakeNodeRuntimeControlRepository{retireResult: nodes.Record{NodeID: "nd_001", LifecycleStatus: nodes.LifecycleRetired, UpdatedAt: now}}
+			name:                     "retire",
+			path:                     "/api/monitoring-instances/mi_001/lifecycle/retire",
+			wantMonitoringInstanceID: "mi_001",
+			wantLifecycle:            monitoringinstances.LifecycleRetired,
+			buildRepo: func() *fakeMonitoringInstanceRuntimeControlRepository {
+				return &fakeMonitoringInstanceRuntimeControlRepository{retireResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LifecycleStatus: monitoringinstances.LifecycleRetired, UpdatedAt: now}}
 			},
-			assertCalledID: func(t *testing.T, repo *fakeNodeRuntimeControlRepository, want string) {
+			assertCalledID: func(t *testing.T, repo *fakeMonitoringInstanceRuntimeControlRepository, want string) {
 				t.Helper()
-				if repo.retireNodeID != want {
-					t.Fatalf("RetireNode nodeID = %q, want %q", repo.retireNodeID, want)
+				if repo.retireMonitoringInstanceID != want {
+					t.Fatalf("RetireMonitoringInstance monitoringInstanceID = %q, want %q", repo.retireMonitoringInstanceID, want)
 				}
 			},
 		},
 		{
-			name:          "restore retired to observing",
-			path:          "/api/nodes/nd_002/lifecycle/restore-to-observing",
-			wantNodeID:    "nd_002",
-			wantLifecycle: nodes.LifecycleObserving,
-			buildRepo: func() *fakeNodeRuntimeControlRepository {
-				return &fakeNodeRuntimeControlRepository{restoreResult: nodes.Record{NodeID: "nd_002", LifecycleStatus: nodes.LifecycleObserving, UpdatedAt: now}}
+			name:                     "restore retired to observing",
+			path:                     "/api/monitoring-instances/mi_002/lifecycle/restore-to-observing",
+			wantMonitoringInstanceID: "mi_002",
+			wantLifecycle:            monitoringinstances.LifecycleObserving,
+			buildRepo: func() *fakeMonitoringInstanceRuntimeControlRepository {
+				return &fakeMonitoringInstanceRuntimeControlRepository{restoreResult: monitoringinstances.Record{MonitoringInstanceID: "mi_002", LifecycleStatus: monitoringinstances.LifecycleObserving, UpdatedAt: now}}
 			},
-			assertCalledID: func(t *testing.T, repo *fakeNodeRuntimeControlRepository, want string) {
+			assertCalledID: func(t *testing.T, repo *fakeMonitoringInstanceRuntimeControlRepository, want string) {
 				t.Helper()
-				if repo.restoreNodeID != want {
-					t.Fatalf("RestoreRetiredNodeToObserving nodeID = %q, want %q", repo.restoreNodeID, want)
+				if repo.restoreMonitoringInstanceID != want {
+					t.Fatalf("RestoreRetiredMonitoringInstanceToObserving monitoringInstanceID = %q, want %q", repo.restoreMonitoringInstanceID, want)
 				}
 			},
 		},
@@ -335,7 +335,7 @@ func TestNodeLifecycleControlHandlerReturnsUpdatedNode(t *testing.T) {
 			t.Parallel()
 
 			repo := tt.buildRepo()
-			handler := handlers.NodeLifecycleControls(repo)
+			handler := handlers.MonitoringInstanceLifecycleControls(repo)
 			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			recorder := httptest.NewRecorder()
 
@@ -344,14 +344,14 @@ func TestNodeLifecycleControlHandlerReturnsUpdatedNode(t *testing.T) {
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 			}
-			tt.assertCalledID(t, repo, tt.wantNodeID)
+			tt.assertCalledID(t, repo, tt.wantMonitoringInstanceID)
 
-			var body nodes.Record
+			var body monitoringinstances.Record
 			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 				t.Fatalf("unmarshal response body: %v", err)
 			}
-			if body.NodeID != tt.wantNodeID {
-				t.Fatalf("NodeID = %q, want %q", body.NodeID, tt.wantNodeID)
+			if body.MonitoringInstanceID != tt.wantMonitoringInstanceID {
+				t.Fatalf("MonitoringInstanceID = %q, want %q", body.MonitoringInstanceID, tt.wantMonitoringInstanceID)
 			}
 			if body.LifecycleStatus != tt.wantLifecycle {
 				t.Fatalf("LifecycleStatus = %q, want %q", body.LifecycleStatus, tt.wantLifecycle)
@@ -360,29 +360,29 @@ func TestNodeLifecycleControlHandlerReturnsUpdatedNode(t *testing.T) {
 	}
 }
 
-func TestNodeLifecycleControlHandlerMapsErrors(t *testing.T) {
+func TestMonitoringInstanceLifecycleControlHandlerMapsErrors(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name        string
-		repo        *fakeNodeRuntimeControlRepository
+		repo        *fakeMonitoringInstanceRuntimeControlRepository
 		path        string
 		wantStatus  int
 		wantMessage string
 	}{
 		{
 			name:        "invalid transition",
-			repo:        &fakeNodeRuntimeControlRepository{retireErr: errors.Join(store.ErrInvalidNodeLifecycleTransition, errors.New("cannot retire"))},
-			path:        "/api/nodes/nd_001/lifecycle/retire",
+			repo:        &fakeMonitoringInstanceRuntimeControlRepository{retireErr: errors.Join(store.ErrInvalidMonitoringInstanceLifecycleTransition, errors.New("cannot retire"))},
+			path:        "/api/monitoring-instances/mi_001/lifecycle/retire",
 			wantStatus:  http.StatusConflict,
 			wantMessage: "invalid lifecycle transition",
 		},
 		{
 			name:        "not found",
-			repo:        &fakeNodeRuntimeControlRepository{restoreErr: nodes.ErrNodeNotFound},
-			path:        "/api/nodes/nd_missing/lifecycle/restore-to-observing",
+			repo:        &fakeMonitoringInstanceRuntimeControlRepository{restoreErr: monitoringinstances.ErrMonitoringInstanceNotFound},
+			path:        "/api/monitoring-instances/mi_missing/lifecycle/restore-to-observing",
 			wantStatus:  http.StatusNotFound,
-			wantMessage: "node not found",
+			wantMessage: "monitoring instance not found",
 		},
 	}
 
@@ -390,7 +390,7 @@ func TestNodeLifecycleControlHandlerMapsErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := handlers.NodeLifecycleControls(tt.repo)
+			handler := handlers.MonitoringInstanceLifecycleControls(tt.repo)
 			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			recorder := httptest.NewRecorder()
 
@@ -591,8 +591,8 @@ func TestRuntimeControlHandlersRejectWrongMethod(t *testing.T) {
 		path    string
 		method  string
 	}{
-		{name: "node runtime", handler: handlers.NodeRuntimeControls(&fakeNodeRuntimeControlRepository{}), path: "/api/nodes/nd_001/runtime/pause", method: http.MethodGet},
-		{name: "node lifecycle", handler: handlers.NodeLifecycleControls(&fakeNodeRuntimeControlRepository{}), path: "/api/nodes/nd_001/lifecycle/retire", method: http.MethodGet},
+		{name: "monitoringInstance runtime", handler: handlers.MonitoringInstanceRuntimeControls(&fakeMonitoringInstanceRuntimeControlRepository{}), path: "/api/monitoring-instances/mi_001/runtime/pause", method: http.MethodGet},
+		{name: "monitoringInstance lifecycle", handler: handlers.MonitoringInstanceLifecycleControls(&fakeMonitoringInstanceRuntimeControlRepository{}), path: "/api/monitoring-instances/mi_001/lifecycle/retire", method: http.MethodGet},
 		{name: "target runtime", handler: handlers.TargetRuntimeControls(&fakeTargetRuntimeControlRepository{}), path: "/api/targets/tg_001/runtime/archive", method: http.MethodGet},
 	}
 

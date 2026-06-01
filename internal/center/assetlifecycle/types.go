@@ -10,7 +10,7 @@ import (
 	"houfeng/internal/center/assetdomains"
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/assetservices"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
@@ -31,35 +31,35 @@ const (
 	StepStatusSkipped   = "skipped"
 	StepStatusFailed    = "failed"
 
-	ObjectTypeVPS          = "vps"
-	ObjectTypeSubscription = "subscription"
-	ObjectTypeNode         = "node"
-	ObjectTypeTarget       = "target"
+	ObjectTypeVPS                = "vps"
+	ObjectTypeSubscription       = "subscription"
+	ObjectTypeMonitoringInstance = "monitoring_instance"
+	ObjectTypeTarget             = "target"
 
-	StepTypeVPSLifecycle       = "vps_lifecycle"
-	StepTypeSubscriptionStatus = "subscription_status"
-	StepTypeNodeLifecycle      = "node_lifecycle"
-	StepTypeNodeMonitoring     = "node_monitoring"
-	StepTypeTargetRunStatus    = "target_run_status"
+	StepTypeVPSLifecycle                 = "vps_lifecycle"
+	StepTypeSubscriptionStatus           = "subscription_status"
+	StepTypeMonitoringInstanceLifecycle  = "monitoring_instance_lifecycle"
+	StepTypeMonitoringInstanceMonitoring = "monitoring_instance_monitoring"
+	StepTypeTargetRunStatus              = "target_run_status"
 )
 
 type Repository interface {
 	GetVPSCancellationPreview(context.Context, string) (CancellationPreview, error)
 	ApplyVPSCancellation(context.Context, string, ApplyCancellationInput) (LifecycleActionResult, error)
-	ListNodeAssetContexts(context.Context) ([]AssetContextForNode, error)
+	ListMonitoringInstanceAssetContexts(context.Context) ([]AssetContextForMonitoringInstance, error)
 	ListTargetAssetContexts(context.Context) ([]AssetContextForTarget, error)
 }
 
 type CancellationPreview struct {
-	VPS              vpsassets.Record           `json:"vps"`
-	Subscriptions    []SubscriptionImpact       `json:"subscriptions"`
-	NodeLinks        []assetlinks.NodeSummary   `json:"node_links"`
-	Services         []assetservices.Record     `json:"services"`
-	Domains          []assetdomains.Record      `json:"domains"`
-	TargetLinks      []TargetImpact             `json:"target_links"`
-	RecommendedSteps []RecommendedLifecycleStep `json:"recommended_steps"`
-	Warnings         []string                   `json:"warnings"`
-	Blockers         []string                   `json:"blockers"`
+	VPS                     vpsassets.Record                       `json:"vps"`
+	Subscriptions           []SubscriptionImpact                   `json:"subscriptions"`
+	MonitoringInstanceLinks []assetlinks.MonitoringInstanceSummary `json:"monitoring_instance_links"`
+	Services                []assetservices.Record                 `json:"services"`
+	Domains                 []assetdomains.Record                  `json:"domains"`
+	TargetLinks             []TargetImpact                         `json:"target_links"`
+	RecommendedSteps        []RecommendedLifecycleStep             `json:"recommended_steps"`
+	Warnings                []string                               `json:"warnings"`
+	Blockers                []string                               `json:"blockers"`
 }
 
 type SubscriptionImpact struct {
@@ -89,18 +89,18 @@ type RecommendedLifecycleStep struct {
 }
 
 type ApplyCancellationInput struct {
-	Reason             string                    `json:"reason"`
-	EffectiveDate      *subscriptions.Date       `json:"effective_date"`
-	SubscriptionIDs    []string                  `json:"subscription_ids"`
-	VPSLifecycleStatus vpsassets.LifecycleStatus `json:"vps_lifecycle_status"`
-	NodeActions        []NodeActionInput         `json:"node_actions"`
-	TargetActions      []TargetActionInput       `json:"target_actions"`
+	Reason                    string                          `json:"reason"`
+	EffectiveDate             *subscriptions.Date             `json:"effective_date"`
+	SubscriptionIDs           []string                        `json:"subscription_ids"`
+	VPSLifecycleStatus        vpsassets.LifecycleStatus       `json:"vps_lifecycle_status"`
+	MonitoringInstanceActions []MonitoringInstanceActionInput `json:"monitoring_instance_actions"`
+	TargetActions             []TargetActionInput             `json:"target_actions"`
 }
 
-type NodeActionInput struct {
-	NodeID           string `json:"node_id"`
-	LifecycleStatus  string `json:"lifecycle_status"`
-	MonitoringStatus string `json:"monitoring_status"`
+type MonitoringInstanceActionInput struct {
+	MonitoringInstanceID string `json:"monitoring_instance_id"`
+	LifecycleStatus      string `json:"lifecycle_status"`
+	MonitoringStatus     string `json:"monitoring_status"`
 }
 
 type TargetActionInput struct {
@@ -140,8 +140,8 @@ type LifecycleActionStep struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
-type AssetContextForNode struct {
-	NodeID                string             `json:"node_id"`
+type AssetContextForMonitoringInstance struct {
+	MonitoringInstanceID  string             `json:"monitoring_instance_id"`
 	LinkedVPSCount        int                `json:"linked_vps_count"`
 	CancellationAttention bool               `json:"cancellation_attention"`
 	Summaries             []LinkedVPSContext `json:"summaries"`
@@ -172,10 +172,10 @@ func NormalizeApplyCancellationInput(input ApplyCancellationInput) ApplyCancella
 	}
 	input.VPSLifecycleStatus = vpsassets.LifecycleStatus(strings.TrimSpace(string(input.VPSLifecycleStatus)))
 	input.SubscriptionIDs = normalizeStringList(input.SubscriptionIDs)
-	for i := range input.NodeActions {
-		input.NodeActions[i].NodeID = strings.TrimSpace(input.NodeActions[i].NodeID)
-		input.NodeActions[i].LifecycleStatus = strings.TrimSpace(input.NodeActions[i].LifecycleStatus)
-		input.NodeActions[i].MonitoringStatus = strings.TrimSpace(input.NodeActions[i].MonitoringStatus)
+	for i := range input.MonitoringInstanceActions {
+		input.MonitoringInstanceActions[i].MonitoringInstanceID = strings.TrimSpace(input.MonitoringInstanceActions[i].MonitoringInstanceID)
+		input.MonitoringInstanceActions[i].LifecycleStatus = strings.TrimSpace(input.MonitoringInstanceActions[i].LifecycleStatus)
+		input.MonitoringInstanceActions[i].MonitoringStatus = strings.TrimSpace(input.MonitoringInstanceActions[i].MonitoringStatus)
 	}
 	for i := range input.TargetActions {
 		input.TargetActions[i].TargetID = strings.TrimSpace(input.TargetActions[i].TargetID)
@@ -201,24 +201,24 @@ func ValidateApplyCancellationInput(input ApplyCancellationInput) error {
 		}
 		seenSubscriptions[subscriptionID] = struct{}{}
 	}
-	seenNodes := map[string]struct{}{}
-	for _, action := range input.NodeActions {
-		if action.NodeID == "" {
-			return fmt.Errorf("%w: node_id is required", ErrInvalidLifecycleActionInput)
+	seenMonitoringInstances := map[string]struct{}{}
+	for _, action := range input.MonitoringInstanceActions {
+		if action.MonitoringInstanceID == "" {
+			return fmt.Errorf("%w: monitoring_instance_id is required", ErrInvalidLifecycleActionInput)
 		}
 		if action.LifecycleStatus == "" && action.MonitoringStatus == "" {
-			return fmt.Errorf("%w: node action must include lifecycle_status or monitoring_status", ErrInvalidLifecycleActionInput)
+			return fmt.Errorf("%w: monitoringInstance action must include lifecycle_status or monitoring_status", ErrInvalidLifecycleActionInput)
 		}
-		if action.LifecycleStatus != "" && !nodes.IsValidLifecycleStatus(action.LifecycleStatus) {
-			return fmt.Errorf("%w: invalid node lifecycle_status", ErrInvalidLifecycleActionInput)
+		if action.LifecycleStatus != "" && !monitoringinstances.IsValidLifecycleStatus(action.LifecycleStatus) {
+			return fmt.Errorf("%w: invalid monitoringInstance lifecycle_status", ErrInvalidLifecycleActionInput)
 		}
-		if action.MonitoringStatus != "" && !isValidNodeMonitoringStatus(action.MonitoringStatus) {
-			return fmt.Errorf("%w: invalid node monitoring_status", ErrInvalidLifecycleActionInput)
+		if action.MonitoringStatus != "" && !isValidMonitoringInstanceMonitoringStatus(action.MonitoringStatus) {
+			return fmt.Errorf("%w: invalid monitoringInstance monitoring_status", ErrInvalidLifecycleActionInput)
 		}
-		if _, ok := seenNodes[action.NodeID]; ok {
-			return fmt.Errorf("%w: duplicate node_id", ErrInvalidLifecycleActionInput)
+		if _, ok := seenMonitoringInstances[action.MonitoringInstanceID]; ok {
+			return fmt.Errorf("%w: duplicate monitoring_instance_id", ErrInvalidLifecycleActionInput)
 		}
-		seenNodes[action.NodeID] = struct{}{}
+		seenMonitoringInstances[action.MonitoringInstanceID] = struct{}{}
 	}
 	seenTargets := map[string]struct{}{}
 	for _, action := range input.TargetActions {
@@ -239,9 +239,9 @@ func ValidateApplyCancellationInput(input ApplyCancellationInput) error {
 	return nil
 }
 
-func isValidNodeMonitoringStatus(status string) bool {
+func isValidMonitoringInstanceMonitoringStatus(status string) bool {
 	switch status {
-	case nodes.MonitoringEnabled, nodes.MonitoringMaintenance, nodes.MonitoringPaused:
+	case monitoringinstances.MonitoringEnabled, monitoringinstances.MonitoringMaintenance, monitoringinstances.MonitoringPaused:
 		return true
 	default:
 		return false

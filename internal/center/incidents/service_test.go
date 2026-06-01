@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
 	centersettings "houfeng/internal/center/settings"
@@ -16,16 +16,16 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-type fakeNodeRepo struct {
-	getNodeResult   nodes.Record
-	listNodesResult []nodes.Record
+type fakeMonitoringInstanceRepo struct {
+	getMonitoringInstanceResult   monitoringinstances.Record
+	listMonitoringInstancesResult []monitoringinstances.Record
 }
 
-func (f *fakeNodeRepo) GetNode(context.Context, string) (nodes.Record, error) {
-	return f.getNodeResult, nil
+func (f *fakeMonitoringInstanceRepo) GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error) {
+	return f.getMonitoringInstanceResult, nil
 }
-func (f *fakeNodeRepo) ListNodes(context.Context) ([]nodes.Record, error) {
-	return f.listNodesResult, nil
+func (f *fakeMonitoringInstanceRepo) ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error) {
+	return f.listMonitoringInstancesResult, nil
 }
 
 type fakeTargetRepo struct{ listTargetsResult []targets.TargetRecord }
@@ -35,24 +35,24 @@ func (f *fakeTargetRepo) ListTargets(context.Context) ([]targets.TargetRecord, e
 }
 
 type fakeSnapshotReader struct {
-	activeByObject   map[string][]IncidentRecord
-	hostSamples      map[string][]runtimefacts.HostSample
-	probeObs         map[string][]runtimefacts.ProbeObservation
-	nodeAggregates   map[string][]NodeHostDailyAggregate
-	targetAggregates map[string][]TargetProbeDailyAggregate
+	activeByObject               map[string][]IncidentRecord
+	hostSamples                  map[string][]runtimefacts.HostSample
+	probeObs                     map[string][]runtimefacts.ProbeObservation
+	monitoringInstanceAggregates map[string][]MonitoringInstanceHostDailyAggregate
+	targetAggregates             map[string][]TargetProbeDailyAggregate
 }
 
 func (f *fakeSnapshotReader) ListActiveIncidents(_ context.Context, objectType ObjectType, objectID string) ([]IncidentRecord, error) {
 	return append([]IncidentRecord(nil), f.activeByObject[string(objectType)+":"+objectID]...), nil
 }
-func (f *fakeSnapshotReader) ListRecentHostSamples(_ context.Context, nodeID string, _ time.Time) ([]runtimefacts.HostSample, error) {
-	return append([]runtimefacts.HostSample(nil), f.hostSamples[nodeID]...), nil
+func (f *fakeSnapshotReader) ListRecentHostSamples(_ context.Context, monitoringInstanceID string, _ time.Time) ([]runtimefacts.HostSample, error) {
+	return append([]runtimefacts.HostSample(nil), f.hostSamples[monitoringInstanceID]...), nil
 }
 func (f *fakeSnapshotReader) ListRecentProbeObservations(_ context.Context, targetID string, _ time.Time) ([]runtimefacts.ProbeObservation, error) {
 	return append([]runtimefacts.ProbeObservation(nil), f.probeObs[targetID]...), nil
 }
-func (f *fakeSnapshotReader) ListNodeHostDailyAggregates(_ context.Context, nodeID string, _, _ time.Time) ([]NodeHostDailyAggregate, error) {
-	return append([]NodeHostDailyAggregate(nil), f.nodeAggregates[nodeID]...), nil
+func (f *fakeSnapshotReader) ListMonitoringInstanceHostDailyAggregates(_ context.Context, monitoringInstanceID string, _, _ time.Time) ([]MonitoringInstanceHostDailyAggregate, error) {
+	return append([]MonitoringInstanceHostDailyAggregate(nil), f.monitoringInstanceAggregates[monitoringInstanceID]...), nil
 }
 func (f *fakeSnapshotReader) ListTargetProbeDailyAggregates(_ context.Context, targetID string, _, _ time.Time) ([]TargetProbeDailyAggregate, error) {
 	return append([]TargetProbeDailyAggregate(nil), f.targetAggregates[targetID]...), nil
@@ -143,13 +143,13 @@ func (f *fakeSettingsRepository) GetPersistedIncidentDefaults(context.Context) (
 func TestServiceNotificationFlags(t *testing.T) {
 	makeEvaluation := func(reason NotificationReason) classEvaluation {
 		return classEvaluation{
-			class: IncidentNodeDiskPressure,
+			class: IncidentMonitoringInstanceDiskPressure,
 			result: EvaluationResult{
 				Current: &IncidentRecord{
-					IncidentID:    "inc_node_nd_001_node_disk_pressure",
-					ObjectType:    ObjectTypeNode,
-					ObjectID:      "nd_001",
-					IncidentClass: IncidentNodeDiskPressure,
+					IncidentID:    "inc_monitoring_instance_mi_001_monitoring_instance_disk_pressure",
+					ObjectType:    ObjectTypeMonitoringInstance,
+					ObjectID:      "mi_001",
+					IncidentClass: IncidentMonitoringInstanceDiskPressure,
 				},
 				Notification: &NotificationDecision{
 					ShouldSend: true,
@@ -249,7 +249,7 @@ func TestServiceNotificationFlags(t *testing.T) {
 				return time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 			}
 
-			if err := service.appendNotificationRecords(context.Background(), ObjectTypeNode, "nd_001", []classEvaluation{makeEvaluation(tt.reason)}); err != nil {
+			if err := service.appendNotificationRecords(context.Background(), ObjectTypeMonitoringInstance, "mi_001", []classEvaluation{makeEvaluation(tt.reason)}); err != nil {
 				t.Fatalf("appendNotificationRecords() error = %v", err)
 			}
 			if len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 {
@@ -266,31 +266,31 @@ func TestServiceNotificationFlags(t *testing.T) {
 	}
 }
 
-func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) {
+func TestServiceAfterSuccessfulSyncEvaluatesMonitoringInstanceAndTouchedTargets(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		activeByObject: map[string][]IncidentRecord{},
 		hostSamples: map[string][]runtimefacts.HostSample{
-			"nd_001": {{ObservedAt: now, DiskUsedPct: 92}},
+			"mi_001": {{ObservedAt: now, DiskUsedPct: 92}},
 		},
 		probeObs: map[string][]runtimefacts.ProbeObservation{
 			"tg_001": {
-				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
-				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
-				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
+				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
+				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503"},
 			},
 		},
 	}
 	writer := &fakeMutationWriter{}
 	notifier := &fakeNotifier{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
-		NodeID:       "nd_001",
-		Observations: storeProbeBatch("tg_001"),
+		MonitoringInstanceID: "mi_001",
+		Observations:         storeProbeBatch("tg_001"),
 	}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
@@ -308,16 +308,16 @@ func TestServiceAfterSuccessfulSyncEvaluatesNodeAndTouchedTargets(t *testing.T) 
 
 func TestServiceAfterSuccessfulSyncSuppressesNotificationsWithoutNotifier(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 {
@@ -330,17 +330,17 @@ func TestServiceAfterSuccessfulSyncSuppressesNotificationsWithoutNotifier(t *tes
 
 func TestServiceRecordsFailedNotificationDelivery(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
 	notifier := &fakeNotifier{err: errors.New("send failed")}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusFailed {
@@ -350,10 +350,10 @@ func TestServiceRecordsFailedNotificationDelivery(t *testing.T) {
 
 func TestServiceRecordsNotificationDeliveryPerChannel(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
 	dispatcher := &fakeNotificationDispatcher{
@@ -363,11 +363,11 @@ func TestServiceRecordsNotificationDeliveryPerChannel(t *testing.T) {
 		},
 		channels: []NotificationChannel{NotificationChannelTelegram, NotificationChannelFeishu},
 	}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.dispatcher = dispatcher
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if len(dispatcher.summaries) != 1 {
@@ -407,13 +407,13 @@ func TestServiceSuppressesNotificationPerResolvedChannel(t *testing.T) {
 	service.dispatcher = dispatcher
 
 	evaluation := classEvaluation{
-		class: IncidentNodeDiskPressure,
+		class: IncidentMonitoringInstanceDiskPressure,
 		result: EvaluationResult{
 			Current: &IncidentRecord{
-				IncidentID:    "inc_node_nd_001_node_disk_pressure",
-				ObjectType:    ObjectTypeNode,
-				ObjectID:      "nd_001",
-				IncidentClass: IncidentNodeDiskPressure,
+				IncidentID:    "inc_monitoring_instance_mi_001_monitoring_instance_disk_pressure",
+				ObjectType:    ObjectTypeMonitoringInstance,
+				ObjectID:      "mi_001",
+				IncidentClass: IncidentMonitoringInstanceDiskPressure,
 			},
 			Notification: &NotificationDecision{
 				ShouldSend: true,
@@ -424,7 +424,7 @@ func TestServiceSuppressesNotificationPerResolvedChannel(t *testing.T) {
 		},
 	}
 
-	if err := service.appendNotificationRecords(context.Background(), ObjectTypeNode, "nd_001", []classEvaluation{evaluation}); err != nil {
+	if err := service.appendNotificationRecords(context.Background(), ObjectTypeMonitoringInstance, "mi_001", []classEvaluation{evaluation}); err != nil {
 		t.Fatalf("appendNotificationRecords() error = %v", err)
 	}
 	if len(dispatcher.summaries) != 0 {
@@ -442,10 +442,10 @@ func TestServiceSuppressesNotificationPerResolvedChannel(t *testing.T) {
 
 func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
 	fallbackNotifier := &fakeNotifier{}
@@ -456,7 +456,7 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 	}
 	buildCalls := 0
 	service := NewService(
-		nodeRepo,
+		monitoringInstanceRepo,
 		targetRepo,
 		snapshots,
 		writer,
@@ -470,7 +470,7 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 	)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 {
@@ -489,10 +489,10 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 
 func TestSettingsAwareNotifierUsesFallbackWhenFreshDBWouldAutoCreateDisabledDefaults(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
 	fallbackNotifier := &fakeNotifier{}
@@ -501,7 +501,7 @@ func TestSettingsAwareNotifierUsesFallbackWhenFreshDBWouldAutoCreateDisabledDefa
 		persistedExists:   false,
 	}
 	service := NewService(
-		nodeRepo,
+		monitoringInstanceRepo,
 		targetRepo,
 		snapshots,
 		writer,
@@ -514,7 +514,7 @@ func TestSettingsAwareNotifierUsesFallbackWhenFreshDBWouldAutoCreateDisabledDefa
 	)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if len(fallbackNotifier.messages) != 1 {
@@ -527,10 +527,10 @@ func TestSettingsAwareNotifierUsesFallbackWhenFreshDBWouldAutoCreateDisabledDefa
 
 func TestSettingsAwareNotifierUsesFallbackWhenPersistedTelegramIsNotManagingRuntime(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
 	fallbackNotifier := &fakeNotifier{}
@@ -544,7 +544,7 @@ func TestSettingsAwareNotifierUsesFallbackWhenPersistedTelegramIsNotManagingRunt
 	}
 	buildCalls := 0
 	service := NewService(
-		nodeRepo,
+		monitoringInstanceRepo,
 		targetRepo,
 		snapshots,
 		writer,
@@ -558,7 +558,7 @@ func TestSettingsAwareNotifierUsesFallbackWhenPersistedTelegramIsNotManagingRunt
 	)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if len(fallbackNotifier.messages) != 1 {
@@ -574,10 +574,10 @@ func TestSettingsAwareNotifierUsesFallbackWhenPersistedTelegramIsNotManagingRunt
 
 func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"nd_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
 	liveNotifier := &fakeNotifier{}
@@ -593,7 +593,7 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	var gotBotToken string
 	var gotChatID string
 	service := NewService(
-		nodeRepo,
+		monitoringInstanceRepo,
 		targetRepo,
 		snapshots,
 		writer,
@@ -608,7 +608,7 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if gotBotToken != settings.Telegram.BotToken {
@@ -717,7 +717,7 @@ func TestSettingsAwareNotificationDispatcherSendsTelegramAndFeishu(t *testing.T)
 func TestSettingsBackedHeartbeatIntervalUsesPersistedSettings(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	stale := now.Add(-75 * time.Second)
-	nodeRepo := &fakeNodeRepo{listNodesResult: []nodes.Record{{NodeID: "nd_001", LastHeartbeatAt: &stale}}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{listMonitoringInstancesResult: []monitoringinstances.Record{{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &stale}}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{}
 	writer := &fakeMutationWriter{}
@@ -728,10 +728,10 @@ func TestSettingsBackedHeartbeatIntervalUsesPersistedSettings(t *testing.T) {
 		persistedIncidentDefaults: settings.IncidentDefaults,
 		persistedIncidentExists:   true,
 	}
-	service := NewSettingsBackedService(nodeRepo, targetRepo, snapshots, writer, nil, settingsRepo, slog.Default(), 30*time.Second, time.Minute)
+	service := NewSettingsBackedService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, settingsRepo, slog.Default(), 30*time.Second, time.Minute)
 
-	if err := service.EvaluateStaleNodes(context.Background(), now); err != nil {
-		t.Fatalf("EvaluateStaleNodes() error = %v", err)
+	if err := service.EvaluateStaleMonitoringInstances(context.Background(), now); err != nil {
+		t.Fatalf("EvaluateStaleMonitoringInstances() error = %v", err)
 	}
 	if len(writer.mutations) != 1 {
 		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
@@ -785,33 +785,33 @@ func TestIncidentTimingFallsBackWhenPersistedSettingsAbsentOrUnavailable(t *test
 	}
 }
 
-func TestServiceEvaluateStaleNodesCreatesHeartbeatIncident(t *testing.T) {
+func TestServiceEvaluateStaleMonitoringInstancesCreatesHeartbeatIncident(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	stale := now.Add(-3 * time.Minute)
-	nodeRepo := &fakeNodeRepo{listNodesResult: []nodes.Record{{NodeID: "nd_001", LastHeartbeatAt: &stale}}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{listMonitoringInstancesResult: []monitoringinstances.Record{{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &stale}}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), time.Minute, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), time.Minute, time.Minute)
 
-	if err := service.EvaluateStaleNodes(context.Background(), now); err != nil {
-		t.Fatalf("EvaluateStaleNodes() error = %v", err)
+	if err := service.EvaluateStaleMonitoringInstances(context.Background(), now); err != nil {
+		t.Fatalf("EvaluateStaleMonitoringInstances() error = %v", err)
 	}
 	if len(writer.mutations) != 1 {
 		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
 	}
-	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].IncidentClass != IncidentNodeHeartbeatMissing {
+	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].IncidentClass != IncidentMonitoringInstanceHeartbeatMissing {
 		t.Fatalf("mutation = %#v, want heartbeat incident", writer.mutations[0])
 	}
 }
 
 func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		hostSamples: map[string][]runtimefacts.HostSample{
-			"nd_001": {
+			"mi_001": {
 				{ObservedAt: now, Load5: 1.9},
 				{ObservedAt: now.Add(-8 * time.Minute), Load5: 2.0},
 				{ObservedAt: now.Add(-15 * time.Minute), Load5: 1.8},
@@ -819,15 +819,15 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	found := false
 	for _, incident := range writer.mutations[0].Active {
-		if incident.IncidentClass == IncidentNodeResourcePressure {
+		if incident.IncidentClass == IncidentMonitoringInstanceResourcePressure {
 			found = true
 			break
 		}
@@ -837,20 +837,20 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 	}
 }
 
-func TestServiceAfterSuccessfulSyncDispatchesNodeTrendDegradation(t *testing.T) {
+func TestServiceAfterSuccessfulSyncDispatchesMonitoringInstanceTrendDegradation(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		hostSamples: map[string][]runtimefacts.HostSample{
-			"nd_001": {
+			"mi_001": {
 				{ObservedAt: now, Load5: 2.1, CPUIOWaitPct: 12, CPUStealPct: 0.5},
 				{ObservedAt: now.Add(-30 * time.Minute), Load5: 2.0, CPUIOWaitPct: 11, CPUStealPct: 0.4},
 				{ObservedAt: now.Add(-23 * time.Hour), Load5: 1.9, CPUIOWaitPct: 13, CPUStealPct: 0.5},
 			},
 		},
-		nodeAggregates: map[string][]NodeHostDailyAggregate{
-			"nd_001": {{
+		monitoringInstanceAggregates: map[string][]MonitoringInstanceHostDailyAggregate{
+			"mi_001": {{
 				BucketDate:      now.AddDate(0, 0, -1),
 				SampleCount:     288,
 				AvgLoad5:        0.7,
@@ -860,20 +860,20 @@ func TestServiceAfterSuccessfulSyncDispatchesNodeTrendDegradation(t *testing.T) 
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
-	if !mutationsContainIncident(writer.mutations, IncidentNodeTrendDegradation) {
-		t.Fatalf("mutations = %#v, want node trend degradation incident", writer.mutations)
+	if !mutationsContainIncident(writer.mutations, IncidentMonitoringInstanceTrendDegradation) {
+		t.Fatalf("mutations = %#v, want monitoringInstance trend degradation incident", writer.mutations)
 	}
 }
 
 func TestServiceAfterSuccessfulSyncDispatchesTargetLatencyTrendDegradation(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	latencyA := 450
 	latencyB := 460
@@ -882,9 +882,9 @@ func TestServiceAfterSuccessfulSyncDispatchesTargetLatencyTrendDegradation(t *te
 	snapshots := &fakeSnapshotReader{
 		probeObs: map[string][]runtimefacts.ProbeObservation{
 			"tg_001": {
-				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyA},
-				{ObservedAt: now.Add(-30 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_002", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyB},
-				{ObservedAt: now.Add(-23 * time.Hour), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyC},
+				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyA},
+				{ObservedAt: now.Add(-30 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", MonitoringInstanceID: "mi_002", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyB},
+				{ObservedAt: now.Add(-23 * time.Hour), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_001", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess, LatencyMS: &latencyC},
 			},
 		},
 		targetAggregates: map[string][]TargetProbeDailyAggregate{
@@ -899,12 +899,12 @@ func TestServiceAfterSuccessfulSyncDispatchesTargetLatencyTrendDegradation(t *te
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
-		NodeID:       "nd_001",
-		Observations: storeProbeBatch("tg_001"),
+		MonitoringInstanceID: "mi_001",
+		Observations:         storeProbeBatch("tg_001"),
 	}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
@@ -915,15 +915,15 @@ func TestServiceAfterSuccessfulSyncDispatchesTargetLatencyTrendDegradation(t *te
 
 func TestServiceSkippedEvaluationPreservesPriorIncidentDuringMaintenance(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		activeByObject: map[string][]IncidentRecord{
-			"node:nd_001": {{
-				IncidentID:      "inc_node_nd_001_node_disk_pressure",
-				ObjectType:      ObjectTypeNode,
-				ObjectID:        "nd_001",
-				IncidentClass:   IncidentNodeDiskPressure,
+			"monitoring_instance:mi_001": {{
+				IncidentID:      "inc_monitoring_instance_mi_001_monitoring_instance_disk_pressure",
+				ObjectType:      ObjectTypeMonitoringInstance,
+				ObjectID:        "mi_001",
+				IncidentClass:   IncidentMonitoringInstanceDiskPressure,
 				Severity:        SeverityAlert,
 				StartedAt:       now.Add(-time.Hour),
 				LastEvaluatedAt: now.Add(-time.Minute),
@@ -932,20 +932,20 @@ func TestServiceSkippedEvaluationPreservesPriorIncidentDuringMaintenance(t *test
 			}},
 		},
 		hostSamples: map[string][]runtimefacts.HostSample{
-			"nd_001": {{ObservedAt: now, DiskUsedPct: 99, MaintenanceContext: true}},
+			"mi_001": {{ObservedAt: now, DiskUsedPct: 99, MaintenanceContext: true}},
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if len(writer.mutations) != 1 {
 		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
 	}
-	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].IncidentClass != IncidentNodeDiskPressure {
+	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].IncidentClass != IncidentMonitoringInstanceDiskPressure {
 		t.Fatalf("Active = %#v, want prior incident preserved on skipped maintenance evaluation", writer.mutations[0].Active)
 	}
 	if len(writer.notifications) != 0 {
@@ -958,15 +958,15 @@ func TestServiceSkippedEvaluationPreservesPriorIncidentDuringMaintenance(t *test
 
 func TestServiceMaintenanceRecoveryClosesIncidentSilently(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		activeByObject: map[string][]IncidentRecord{
-			"node:nd_001": {{
-				IncidentID:      "inc_node_nd_001_node_disk_pressure",
-				ObjectType:      ObjectTypeNode,
-				ObjectID:        "nd_001",
-				IncidentClass:   IncidentNodeDiskPressure,
+			"monitoring_instance:mi_001": {{
+				IncidentID:      "inc_monitoring_instance_mi_001_monitoring_instance_disk_pressure",
+				ObjectType:      ObjectTypeMonitoringInstance,
+				ObjectID:        "mi_001",
+				IncidentClass:   IncidentMonitoringInstanceDiskPressure,
 				Severity:        SeverityAlert,
 				StartedAt:       now.Add(-time.Hour),
 				LastEvaluatedAt: now.Add(-time.Minute),
@@ -975,15 +975,15 @@ func TestServiceMaintenanceRecoveryClosesIncidentSilently(t *testing.T) {
 			}},
 		},
 		hostSamples: map[string][]runtimefacts.HostSample{
-			"nd_001": {{ObservedAt: now, DiskUsedPct: 40, MaintenanceContext: true}},
+			"mi_001": {{ObservedAt: now, DiskUsedPct: 40, MaintenanceContext: true}},
 		},
 	}
 	writer := &fakeMutationWriter{}
 	notifier := &fakeNotifier{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{NodeID: "nd_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 	if len(writer.mutations) != 1 {
@@ -1008,7 +1008,7 @@ func TestServiceMaintenanceRecoveryClosesIncidentSilently(t *testing.T) {
 
 func TestServiceDoesNotRecoverTargetProbeFailureUntilAllSeriesRecover(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	previous := IncidentRecord{
 		IncidentID:      "inc_target_tg_001_target_probe_failure",
@@ -1027,26 +1027,26 @@ func TestServiceDoesNotRecoverTargetProbeFailureUntilAllSeriesRecover(t *testing
 		},
 		probeObs: map[string][]runtimefacts.ProbeObservation{
 			"tg_001": {
-				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess},
-				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess},
-				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure},
-				{ObservedAt: now.Add(-3 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure},
+				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess},
+				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultFailure},
+				{ObservedAt: now.Add(-3 * time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultFailure},
 			},
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
-		NodeID:       "nd_001",
-		Observations: storeProbeBatch("tg_001"),
+		MonitoringInstanceID: "mi_001",
+		Observations:         storeProbeBatch("tg_001"),
 	}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 
 	if len(writer.mutations) < 2 {
-		t.Fatalf("mutations = %#v, want node and target mutations", writer.mutations)
+		t.Fatalf("mutations = %#v, want monitoringInstance and target mutations", writer.mutations)
 	}
 	targetMutation := writer.mutations[1]
 	if len(targetMutation.Active) != 1 || targetMutation.Active[0].IncidentClass != IncidentTargetProbeFailure {
@@ -1056,34 +1056,34 @@ func TestServiceDoesNotRecoverTargetProbeFailureUntilAllSeriesRecover(t *testing
 
 func TestServiceAfterSuccessfulSyncDoesNotNotifyForBackfilledProbeFailure(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{
 		probeObs: map[string][]runtimefacts.ProbeObservation{
 			"tg_001": {
-				{ObservedAt: now, TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
-				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
-				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, NodeID: "nd_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
+				{ObservedAt: now, TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
+				{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultFailure, ErrorSummary: "503", IsBackfilled: true},
 			},
 		},
 	}
 	writer := &fakeMutationWriter{}
 	notifier := &fakeNotifier{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
-		NodeID: "nd_001",
+		MonitoringInstanceID: "mi_001",
 		Observations: observations.BatchWrite{
 			ProbeObservations: []observations.ProbeObservationWrite{{
-				NodeID:       "nd_001",
-				TargetID:     "tg_001",
-				ProbeItemID:  "pb_001",
-				ProbeKind:    agentapi.ProbeKindHTTP,
-				ObservedAt:   now,
-				ResultKind:   agentapi.ProbeResultFailure,
-				ErrorSummary: "503",
-				IsBackfilled: true,
+				MonitoringInstanceID: "mi_001",
+				TargetID:             "tg_001",
+				ProbeItemID:          "pb_001",
+				ProbeKind:            agentapi.ProbeKindHTTP,
+				ObservedAt:           now,
+				ResultKind:           agentapi.ProbeResultFailure,
+				ErrorSummary:         "503",
+				IsBackfilled:         true,
 			}},
 		},
 	}, syncing.Result{AcceptedAt: now})
@@ -1092,7 +1092,7 @@ func TestServiceAfterSuccessfulSyncDoesNotNotifyForBackfilledProbeFailure(t *tes
 	}
 
 	if len(writer.mutations) < 2 {
-		t.Fatalf("mutations = %#v, want node and target mutations", writer.mutations)
+		t.Fatalf("mutations = %#v, want monitoringInstance and target mutations", writer.mutations)
 	}
 	targetMutation := writer.mutations[1]
 	if targetMutation.ObjectType != ObjectTypeTarget || targetMutation.ObjectID != "tg_001" {
@@ -1114,24 +1114,24 @@ func TestServiceAfterSuccessfulSyncDoesNotNotifyForBackfilledProbeFailure(t *tes
 
 func TestServiceEvaluatesTLSExpiryFromTLSOnlySeries(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	expiry := 2
 	snapshots := &fakeSnapshotReader{
 		probeObs: map[string][]runtimefacts.ProbeObservation{
 			"tg_001": {
-				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess},
-				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindTLS, ProbeItemID: "pb_tls", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, TLSExpiryDays: &expiry},
+				{ObservedAt: now, TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_001", ProbeKind: agentapi.ProbeKindTLS, ProbeItemID: "pb_tls", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess, TLSExpiryDays: &expiry},
 			},
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{
-		NodeID:       "nd_001",
-		Observations: storeProbeBatch("tg_001"),
+		MonitoringInstanceID: "mi_001",
+		Observations:         storeProbeBatch("tg_001"),
 	}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
@@ -1152,7 +1152,7 @@ func TestServiceEvaluatesTLSExpiryFromTLSOnlySeries(t *testing.T) {
 
 func TestServiceMaintenanceTargetRecoveriesAreSilent(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	nodeRepo := &fakeNodeRepo{getNodeResult: nodes.Record{NodeID: "nd_001", LastHeartbeatAt: &now}}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
 	expirySafeDays := 45
 	snapshots := &fakeSnapshotReader{
@@ -1182,19 +1182,19 @@ func TestServiceMaintenanceTargetRecoveriesAreSilent(t *testing.T) {
 		},
 		probeObs: map[string][]runtimefacts.ProbeObservation{
 			"tg_probe": {
-				{ObservedAt: now, TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
-				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
-				{ObservedAt: now, TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
-				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
+				{ObservedAt: now, TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_1", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
+				{ObservedAt: now, TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
+				{ObservedAt: now.Add(-time.Minute), TargetID: "tg_probe", ProbeKind: agentapi.ProbeKindHTTP, ProbeItemID: "pb_http_2", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess, MaintenanceContext: true},
 			},
 			"tg_tls": {
-				{ObservedAt: now, TargetID: "tg_tls", ProbeKind: agentapi.ProbeKindTLS, ProbeItemID: "pb_tls_1", NodeID: "nd_001", ResultKind: agentapi.ProbeResultSuccess, TLSExpiryDays: &expirySafeDays, IsBackfilled: true},
+				{ObservedAt: now, TargetID: "tg_tls", ProbeKind: agentapi.ProbeKindTLS, ProbeItemID: "pb_tls_1", MonitoringInstanceID: "mi_001", ResultKind: agentapi.ProbeResultSuccess, TLSExpiryDays: &expirySafeDays, IsBackfilled: true},
 			},
 		},
 	}
 	writer := &fakeMutationWriter{}
 	notifier := &fakeNotifier{}
-	service := NewService(nodeRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, notifier, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	if err := service.evaluateTarget(context.Background(), "tg_probe", now); err != nil {
@@ -1236,14 +1236,14 @@ func storeProbeBatch(targetID string) observations.BatchWrite {
 	status := 503
 	return observations.BatchWrite{
 		ProbeObservations: []observations.ProbeObservationWrite{{
-			NodeID:       "nd_001",
-			TargetID:     targetID,
-			ProbeItemID:  "pb_001",
-			ProbeKind:    agentapi.ProbeKindHTTP,
-			ResultKind:   agentapi.ProbeResultFailure,
-			LatencyMS:    &latency,
-			HTTPStatus:   &status,
-			ErrorSummary: "503",
+			MonitoringInstanceID: "mi_001",
+			TargetID:             targetID,
+			ProbeItemID:          "pb_001",
+			ProbeKind:            agentapi.ProbeKindHTTP,
+			ResultKind:           agentapi.ProbeResultFailure,
+			LatencyMS:            &latency,
+			HTTPStatus:           &status,
+			ErrorSummary:         "503",
 		}},
 	}
 }

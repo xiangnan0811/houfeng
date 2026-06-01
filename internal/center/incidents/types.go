@@ -48,28 +48,28 @@ type NotificationDecision struct {
 }
 
 type DashboardOverview struct {
-	SnapshotGeneratedAt        time.Time                   `json:"snapshot_generated_at"`
-	TotalNodeCount             int                         `json:"total_node_count"`
-	TotalTargetCount           int                         `json:"total_target_count"`
-	AbnormalNodeCount          int                         `json:"abnormal_node_count"`
-	AbnormalTargetCount        int                         `json:"abnormal_target_count"`
-	SevereNodeCount            int                         `json:"severe_node_count"`
-	SevereTargetCount          int                         `json:"severe_target_count"`
-	MaintenanceNodeCount       int                         `json:"maintenance_node_count"`
-	MaintenanceTargetCount     int                         `json:"maintenance_target_count"`
-	PendingOnboardingNodeCount int                         `json:"pending_onboarding_node_count"`
-	PausedNodeCount            int                         `json:"paused_node_count"`
-	RetiredNodeCount           int                         `json:"retired_node_count"`
-	PausedTargetCount          int                         `json:"paused_target_count"`
-	ArchivedTargetCount        int                         `json:"archived_target_count"`
-	RecentNewIncidentCount     int                         `json:"recent_new_incident_count"`
-	RecentRecoveryCount        int                         `json:"recent_recovery_count"`
-	GroupSummaries             []DashboardGroupSummary     `json:"group_summaries"`
-	NotificationStatus         DashboardNotificationStatus `json:"notification_status"`
-	AssetSummary               DashboardAssetSummary       `json:"asset_summary"`
-	AbnormalNodes              []DashboardNodeSummary      `json:"abnormal_nodes"`
-	AbnormalTargets            []DashboardTargetSummary    `json:"abnormal_targets"`
-	RecentEvents               []StateChangeEventRecord    `json:"recent_events"`
+	SnapshotGeneratedAt                      time.Time                            `json:"snapshot_generated_at"`
+	TotalMonitoringInstanceCount             int                                  `json:"total_monitoring_instance_count"`
+	TotalTargetCount                         int                                  `json:"total_target_count"`
+	AbnormalMonitoringInstanceCount          int                                  `json:"abnormal_monitoring_instance_count"`
+	AbnormalTargetCount                      int                                  `json:"abnormal_target_count"`
+	SevereMonitoringInstanceCount            int                                  `json:"severe_monitoring_instance_count"`
+	SevereTargetCount                        int                                  `json:"severe_target_count"`
+	MaintenanceMonitoringInstanceCount       int                                  `json:"maintenance_monitoring_instance_count"`
+	MaintenanceTargetCount                   int                                  `json:"maintenance_target_count"`
+	PendingOnboardingMonitoringInstanceCount int                                  `json:"pending_onboarding_monitoring_instance_count"`
+	PausedMonitoringInstanceCount            int                                  `json:"paused_monitoring_instance_count"`
+	RetiredMonitoringInstanceCount           int                                  `json:"retired_monitoring_instance_count"`
+	PausedTargetCount                        int                                  `json:"paused_target_count"`
+	ArchivedTargetCount                      int                                  `json:"archived_target_count"`
+	RecentNewIncidentCount                   int                                  `json:"recent_new_incident_count"`
+	RecentRecoveryCount                      int                                  `json:"recent_recovery_count"`
+	GroupSummaries                           []DashboardGroupSummary              `json:"group_summaries"`
+	NotificationStatus                       DashboardNotificationStatus          `json:"notification_status"`
+	AssetSummary                             DashboardAssetSummary                `json:"asset_summary"`
+	AbnormalMonitoringInstances              []DashboardMonitoringInstanceSummary `json:"abnormal_monitoring_instances"`
+	AbnormalTargets                          []DashboardTargetSummary             `json:"abnormal_targets"`
+	RecentEvents                             []StateChangeEventRecord             `json:"recent_events"`
 	// NewIncidentTrend24h is a 24-element array of per-hour incident_started
 	// counts. Index 0 is 23 hours ago, index 23 is the current hour. Frontend
 	// uses this to render the dashboard "新增异常" sparkline.
@@ -80,15 +80,15 @@ type DashboardOverview struct {
 }
 
 type DashboardGroupSummary struct {
-	Group                  string `json:"group"`
-	NodeCount              int    `json:"node_count"`
-	TargetCount            int    `json:"target_count"`
-	AbnormalNodeCount      int    `json:"abnormal_node_count"`
-	AbnormalTargetCount    int    `json:"abnormal_target_count"`
-	SevereNodeCount        int    `json:"severe_node_count"`
-	SevereTargetCount      int    `json:"severe_target_count"`
-	MaintenanceNodeCount   int    `json:"maintenance_node_count"`
-	MaintenanceTargetCount int    `json:"maintenance_target_count"`
+	Group                              string `json:"group"`
+	MonitoringInstanceCount            int    `json:"monitoring_instance_count"`
+	TargetCount                        int    `json:"target_count"`
+	AbnormalMonitoringInstanceCount    int    `json:"abnormal_monitoring_instance_count"`
+	AbnormalTargetCount                int    `json:"abnormal_target_count"`
+	SevereMonitoringInstanceCount      int    `json:"severe_monitoring_instance_count"`
+	SevereTargetCount                  int    `json:"severe_target_count"`
+	MaintenanceMonitoringInstanceCount int    `json:"maintenance_monitoring_instance_count"`
+	MaintenanceTargetCount             int    `json:"maintenance_target_count"`
 }
 
 type DashboardNotificationStatus struct {
@@ -118,8 +118,8 @@ type DashboardAssetCostByCurrency struct {
 	YearlyTotal  float64 `json:"yearly_total"`
 }
 
-type DashboardNodeSummary struct {
-	NodeID                     string     `json:"node_id"`
+type DashboardMonitoringInstanceSummary struct {
+	MonitoringInstanceID       string     `json:"monitoring_instance_id"`
 	DisplayName                string     `json:"display_name"`
 	Group                      string     `json:"group"`
 	Region                     string     `json:"region"`
@@ -166,7 +166,7 @@ type IncidentMutation struct {
 	Notifications []NotificationRecordWrite
 }
 
-type NodeResourceSample struct {
+type MonitoringInstanceResourceSample struct {
 	ObservedAt         time.Time
 	CPUUsagePct        float64
 	NormalizedLoad5    float64
@@ -188,7 +188,7 @@ type EvaluationResult struct {
 	Notification *NotificationDecision
 }
 
-type NodeHostDailyAggregate struct {
+type MonitoringInstanceHostDailyAggregate struct {
 	BucketDate             time.Time
 	SampleCount            int
 	AvgLoad5               float64
@@ -211,14 +211,14 @@ type TargetProbeDailyAggregate struct {
 }
 
 const (
-	IncidentNodeHeartbeatMissing          IncidentClass = "node_heartbeat_missing"
-	IncidentNodeDiskPressure              IncidentClass = "node_disk_pressure"
-	IncidentNodeInodePressure             IncidentClass = "node_inode_pressure"
-	IncidentNodeResourcePressure          IncidentClass = "node_resource_pressure"
-	IncidentNodeTrendDegradation          IncidentClass = "node_trend_degradation"
-	IncidentTargetProbeFailure            IncidentClass = "target_probe_failure"
-	IncidentTargetTLSExpiry               IncidentClass = "target_tls_expiry"
-	IncidentTargetLatencyTrendDegradation IncidentClass = "target_latency_trend_degradation"
+	IncidentMonitoringInstanceHeartbeatMissing IncidentClass = "monitoring_instance_heartbeat_missing"
+	IncidentMonitoringInstanceDiskPressure     IncidentClass = "monitoring_instance_disk_pressure"
+	IncidentMonitoringInstanceInodePressure    IncidentClass = "monitoring_instance_inode_pressure"
+	IncidentMonitoringInstanceResourcePressure IncidentClass = "monitoring_instance_resource_pressure"
+	IncidentMonitoringInstanceTrendDegradation IncidentClass = "monitoring_instance_trend_degradation"
+	IncidentTargetProbeFailure                 IncidentClass = "target_probe_failure"
+	IncidentTargetTLSExpiry                    IncidentClass = "target_tls_expiry"
+	IncidentTargetLatencyTrendDegradation      IncidentClass = "target_latency_trend_degradation"
 )
 
 const (
@@ -229,30 +229,30 @@ const (
 )
 
 const (
-	ObjectTypeNode   ObjectType = "node"
-	ObjectTypeTarget ObjectType = "target"
+	ObjectTypeMonitoringInstance ObjectType = "monitoring_instance"
+	ObjectTypeTarget             ObjectType = "target"
 )
 
 const (
-	EventIncidentStarted                  EventType = "incident_started"
-	EventIncidentEscalated                EventType = "incident_escalated"
-	EventIncidentRecovered                EventType = "incident_recovered"
-	EventNodeBindingRebindConfirmed       EventType = "node_binding_rebind_confirmed"
-	EventNodeBindingPendingRejected       EventType = "node_binding_pending_rejected"
-	EventNodeBindingReset                 EventType = "node_binding_reset"
-	EventNodeMonitoringMaintenanceEntered EventType = "node_monitoring_maintenance_entered"
-	EventNodeMonitoringMaintenanceExited  EventType = "node_monitoring_maintenance_exited"
-	EventNodeMonitoringPaused             EventType = "node_monitoring_paused"
-	EventNodeMonitoringResumed            EventType = "node_monitoring_resumed"
-	EventNodeLifecycleUpdated             EventType = "node_lifecycle_updated"
-	EventNodeRetired                      EventType = "node_retired"
-	EventNodeRestoredToObserving          EventType = "node_restored_to_observing"
-	EventTargetMaintenanceEntered         EventType = "target_maintenance_entered"
-	EventTargetMaintenanceExited          EventType = "target_maintenance_exited"
-	EventTargetPaused                     EventType = "target_paused"
-	EventTargetResumed                    EventType = "target_resumed"
-	EventTargetArchived                   EventType = "target_archived"
-	EventTargetRestoredToPaused           EventType = "target_restored_to_paused"
+	EventIncidentStarted                                EventType = "incident_started"
+	EventIncidentEscalated                              EventType = "incident_escalated"
+	EventIncidentRecovered                              EventType = "incident_recovered"
+	EventMonitoringInstanceBindingRebindConfirmed       EventType = "monitoring_instance_binding_rebind_confirmed"
+	EventMonitoringInstanceBindingPendingRejected       EventType = "monitoring_instance_binding_pending_rejected"
+	EventMonitoringInstanceBindingReset                 EventType = "monitoring_instance_binding_reset"
+	EventMonitoringInstanceMonitoringMaintenanceEntered EventType = "monitoring_instance_monitoring_maintenance_entered"
+	EventMonitoringInstanceMonitoringMaintenanceExited  EventType = "monitoring_instance_monitoring_maintenance_exited"
+	EventMonitoringInstanceMonitoringPaused             EventType = "monitoring_instance_monitoring_paused"
+	EventMonitoringInstanceMonitoringResumed            EventType = "monitoring_instance_monitoring_resumed"
+	EventMonitoringInstanceLifecycleUpdated             EventType = "monitoring_instance_lifecycle_updated"
+	EventMonitoringInstanceRetired                      EventType = "monitoring_instance_retired"
+	EventMonitoringInstanceRestoredToObserving          EventType = "monitoring_instance_restored_to_observing"
+	EventTargetMaintenanceEntered                       EventType = "target_maintenance_entered"
+	EventTargetMaintenanceExited                        EventType = "target_maintenance_exited"
+	EventTargetPaused                                   EventType = "target_paused"
+	EventTargetResumed                                  EventType = "target_resumed"
+	EventTargetArchived                                 EventType = "target_archived"
+	EventTargetRestoredToPaused                         EventType = "target_restored_to_paused"
 )
 
 const (

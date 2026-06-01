@@ -73,12 +73,12 @@ type IncidentDefaults struct {
 }
 
 type OverrideRules struct {
-	NodeLabels   []NodeLabelOverrideRule   `json:"node_labels"`
-	TargetTypes  []TargetTypeOverrideRule  `json:"target_types"`
-	TargetLabels []TargetLabelOverrideRule `json:"target_labels"`
+	MonitoringInstanceLabels []MonitoringInstanceLabelOverrideRule `json:"monitoring_instance_labels"`
+	TargetTypes              []TargetTypeOverrideRule              `json:"target_types"`
+	TargetLabels             []TargetLabelOverrideRule             `json:"target_labels"`
 }
 
-type NodeLabelOverrideRule struct {
+type MonitoringInstanceLabelOverrideRule struct {
 	Label     string                 `json:"label"`
 	Overrides SettingsOverrideFields `json:"overrides"`
 }
@@ -172,9 +172,9 @@ func Default() CenterSettings {
 			Load5Critical:            8.0,
 		},
 		OverrideRules: OverrideRules{
-			NodeLabels:   []NodeLabelOverrideRule{},
-			TargetTypes:  []TargetTypeOverrideRule{},
-			TargetLabels: []TargetLabelOverrideRule{},
+			MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{},
+			TargetTypes:              []TargetTypeOverrideRule{},
+			TargetLabels:             []TargetLabelOverrideRule{},
 		},
 		RetentionPolicy: RetentionPolicy{
 			RawLayerDays:          7,
@@ -312,25 +312,25 @@ func applyIntDefault(dst *int, defaultVal int) {
 }
 
 func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
-	if input.NodeLabels == nil {
-		input.NodeLabels = []NodeLabelOverrideRule{}
+	if input.MonitoringInstanceLabels == nil {
+		input.MonitoringInstanceLabels = []MonitoringInstanceLabelOverrideRule{}
 	}
-	seenNodeLabels := make(map[string]struct{}, len(input.NodeLabels))
-	for i := range input.NodeLabels {
-		label := strings.TrimSpace(input.NodeLabels[i].Label)
+	seenMonitoringInstanceLabels := make(map[string]struct{}, len(input.MonitoringInstanceLabels))
+	for i := range input.MonitoringInstanceLabels {
+		label := strings.TrimSpace(input.MonitoringInstanceLabels[i].Label)
 		if label == "" {
-			return OverrideRules{}, invalidSettings("node label override label is required")
+			return OverrideRules{}, invalidSettings("monitoringInstance label override label is required")
 		}
-		if _, ok := seenNodeLabels[label]; ok {
-			return OverrideRules{}, invalidSettings("duplicate node label override selector")
+		if _, ok := seenMonitoringInstanceLabels[label]; ok {
+			return OverrideRules{}, invalidSettings("duplicate monitoringInstance label override selector")
 		}
-		seenNodeLabels[label] = struct{}{}
-		overrides, err := validateSettingsOverrideFields(input.NodeLabels[i].Overrides)
+		seenMonitoringInstanceLabels[label] = struct{}{}
+		overrides, err := validateSettingsOverrideFields(input.MonitoringInstanceLabels[i].Overrides)
 		if err != nil {
 			return OverrideRules{}, err
 		}
-		input.NodeLabels[i].Label = label
-		input.NodeLabels[i].Overrides = overrides
+		input.MonitoringInstanceLabels[i].Label = label
+		input.MonitoringInstanceLabels[i].Overrides = overrides
 	}
 
 	if input.TargetTypes == nil {

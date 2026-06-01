@@ -12,17 +12,17 @@ import (
 
 const spaShell = "<!doctype html><title>houfeng-spa</title>"
 
-func TestRouterKeepsAPINodesOutOfSPAFallback(t *testing.T) {
+func TestRouterKeepsAPIMonitoringInstancesOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		NodesCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstancesCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"node_id":"nd_001"}]`))
+			_, _ = w.Write([]byte(`[{"monitoring_instance_id":"mi_001"}]`))
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -40,8 +40,8 @@ func TestRouterKeepsAPINodesOutOfSPAFallback(t *testing.T) {
 		t.Fatalf("expected API response, got SPA fallback body %q", string(body))
 	}
 
-	if !strings.Contains(string(body), `"node_id":"nd_001"`) {
-		t.Fatalf("expected node payload, got %q", string(body))
+	if !strings.Contains(string(body), `"monitoring_instance_id":"mi_001"`) {
+		t.Fatalf("expected monitoringInstance payload, got %q", string(body))
 	}
 }
 
@@ -231,16 +231,16 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"vps_id":"vps_001"}`))
 		}),
-		VPSNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		VPSMonitoringInstancesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"node_id":"nd_001"}]`))
+			_, _ = w.Write([]byte(`[{"monitoring_instance_id":"mi_001"}]`))
 		}),
-		VPSLinkNodeHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		VPSLinkMonitoringInstanceHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"link_id":"vnl_001"}`))
 		}),
-		VPSUnlinkNodeHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		VPSUnlinkMonitoringInstanceHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"link_id":"vnl_001"}`))
 		}),
@@ -278,9 +278,9 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 	}{
 		{name: "collection", path: "/api/vps", wantStatus: http.StatusOK, wantBodySnippet: `"vps_id":"vps_001"`},
 		{name: "item", path: "/api/vps/vps_001", wantStatus: http.StatusOK, wantBodySnippet: `"vps_id":"vps_001"`},
-		{name: "nodes", path: "/api/vps/vps_001/nodes", wantStatus: http.StatusOK, wantBodySnippet: `"node_id":"nd_001"`},
-		{name: "link node", path: "/api/vps/vps_001/link-node", wantStatus: http.StatusCreated, wantBodySnippet: `"link_id":"vnl_001"`},
-		{name: "unlink node", path: "/api/vps/vps_001/unlink-node", wantStatus: http.StatusOK, wantBodySnippet: `"link_id":"vnl_001"`},
+		{name: "monitoring_instances", path: "/api/vps/vps_001/monitoring-instances", wantStatus: http.StatusOK, wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
+		{name: "link monitoringInstance", path: "/api/vps/vps_001/link-monitoring-instance", wantStatus: http.StatusCreated, wantBodySnippet: `"link_id":"vnl_001"`},
+		{name: "unlink monitoringInstance", path: "/api/vps/vps_001/unlink-monitoring-instance", wantStatus: http.StatusOK, wantBodySnippet: `"link_id":"vnl_001"`},
 		{name: "timeline", path: "/api/vps/vps_001/timeline", wantStatus: http.StatusOK, wantBodySnippet: `"price_history_id":"ph_001"`},
 		{name: "experience logs", path: "/api/vps/vps_001/experience-logs", wantStatus: http.StatusOK, wantBodySnippet: `"experience_log_id":"elog_001"`},
 		{name: "domains", path: "/api/vps/vps_001/domains", wantStatus: http.StatusOK, wantBodySnippet: `"domain_id":"dom_001"`},
@@ -313,17 +313,17 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 	}
 }
 
-func TestRouterKeepsNodeVPSOutOfSPAFallback(t *testing.T) {
+func TestRouterKeepsMonitoringInstanceVPSOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		NodeVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"vps_id":"vps_001"}]`))
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/vps", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/vps", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -336,10 +336,10 @@ func TestRouterKeepsNodeVPSOutOfSPAFallback(t *testing.T) {
 		t.Fatalf("read response body: %v", err)
 	}
 	if strings.TrimSpace(string(body)) == spaShell {
-		t.Fatalf("expected node vps API response, got SPA fallback body %q", string(body))
+		t.Fatalf("expected monitoringInstance vps API response, got SPA fallback body %q", string(body))
 	}
 	if !strings.Contains(string(body), `"vps_id":"vps_001"`) {
-		t.Fatalf("expected node vps payload, got %q", string(body))
+		t.Fatalf("expected monitoringInstance vps payload, got %q", string(body))
 	}
 }
 
@@ -347,9 +347,9 @@ func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		AssetContextNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		AssetContextMonitoringInstancesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"node_id":"nd_001","cancellation_attention":true}]`))
+			_, _ = w.Write([]byte(`[{"monitoring_instance_id":"mi_001","cancellation_attention":true}]`))
 		}),
 		AssetContextTargetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -362,7 +362,7 @@ func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
 		path            string
 		wantBodySnippet string
 	}{
-		{name: "nodes", path: "/api/asset-context/nodes", wantBodySnippet: `"node_id":"nd_001"`},
+		{name: "monitoring_instances", path: "/api/asset-context/monitoring-instances", wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
 		{name: "targets", path: "/api/asset-context/targets", wantBodySnippet: `"target_id":"tg_001"`},
 	}
 
@@ -443,7 +443,7 @@ func TestRouterStillFallsBackForWebPath(t *testing.T) {
 		WebDistDir: "testdata/web",
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/nodes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/monitoring", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -493,7 +493,7 @@ func TestRouterKeepsDashboardAndEventsOutOfSPAFallback(t *testing.T) {
 		WebDistDir: "testdata/web",
 		DashboardHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"abnormal_node_count":1}`))
+			_, _ = w.Write([]byte(`{"abnormal_monitoring_instance_count":1}`))
 		}),
 		EventsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -520,17 +520,17 @@ func TestRouterKeepsDashboardAndEventsOutOfSPAFallback(t *testing.T) {
 	}
 }
 
-func TestRouterKeepsNodeSparklinesOutOfSPAFallback(t *testing.T) {
+func TestRouterKeepsMonitoringInstanceSparklinesOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
-		NodeSparklinesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceSparklinesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"nodes":{"nd_001":{"cpu_usage_pct":[12.5,13.0]}}}`))
+			_, _ = w.Write([]byte(`{"monitoring_instances":{"mi_001":{"cpu_usage_pct":[12.5,13.0]}}}`))
 		}),
 	})
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/nodes/sparklines?metrics=cpu_usage_pct&window=24h&downsample=24", nil)
+		"/api/monitoring-instances/sparklines?metrics=cpu_usage_pct&window=24h&downsample=24", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -540,7 +540,7 @@ func TestRouterKeepsNodeSparklinesOutOfSPAFallback(t *testing.T) {
 	}
 
 	body := recorder.Body.String()
-	if !strings.Contains(body, `"nodes"`) {
+	if !strings.Contains(body, `"monitoring_instances"`) {
 		t.Fatalf("expected sparklines payload, got %q", body)
 	}
 }
@@ -601,17 +601,17 @@ func TestRouterKeepsTargetSparklinesOutOfSPAFallback(t *testing.T) {
 	}
 }
 
-func TestRouterKeepsNodeRuntimeFactsOutOfSPAFallback(t *testing.T) {
+func TestRouterKeepsMonitoringInstanceRuntimeFactsOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		NodeRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"node_id":"nd_001","latest_host_sample":null}`))
+			_, _ = w.Write([]byte(`{"monitoring_instance_id":"mi_001","latest_host_sample":null}`))
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -629,36 +629,36 @@ func TestRouterKeepsNodeRuntimeFactsOutOfSPAFallback(t *testing.T) {
 		t.Fatalf("expected API response, got SPA fallback body %q", string(body))
 	}
 
-	if !strings.Contains(string(body), `"node_id":"nd_001"`) {
-		t.Fatalf("expected node runtime facts payload, got %q", string(body))
+	if !strings.Contains(string(body), `"monitoring_instance_id":"mi_001"`) {
+		t.Fatalf("expected monitoringInstance runtime facts payload, got %q", string(body))
 	}
 }
 
-func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
+func TestRouterKeepsMonitoringInstanceOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		NodeOnboardingHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceOnboardingHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"node_id":"nd_001","phase":"未开始接入"}`))
+			_, _ = w.Write([]byte(`{"monitoring_instance_id":"mi_001","phase":"未开始接入"}`))
 		}),
-		NodeEnrollmentTokenHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceEnrollmentTokenHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"token":"enroll_001"}`))
 		}),
-		NodeInstallCommandHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceInstallCommandHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"command":"curl -fsSL https://center.example.com/api/agent/install.sh"}`))
 		}),
-		NodeBindingConfirmRebindHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceBindingConfirmRebindHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"phase":"已绑定，等待稳定观测"}`))
 		}),
-		NodeBindingRejectPendingHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceBindingRejectPendingHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"phase":"已绑定，等待稳定观测"}`))
 		}),
-		NodeBindingResetHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceBindingResetHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"phase":"未开始接入"}`))
 		}),
@@ -670,12 +670,12 @@ func TestRouterKeepsNodeOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
 		path            string
 		wantBodySnippet string
 	}{
-		{name: "onboarding", method: http.MethodGet, path: "/api/nodes/nd_001/onboarding", wantBodySnippet: `"phase":"未开始接入"`},
-		{name: "issue token", method: http.MethodPost, path: "/api/nodes/nd_001/enrollment-token", wantBodySnippet: `"token":"enroll_001"`},
-		{name: "install command", method: http.MethodPost, path: "/api/nodes/nd_001/install-command", wantBodySnippet: `"command":"curl -fsSL https://center.example.com/api/agent/install.sh"`},
-		{name: "confirm rebind", method: http.MethodPost, path: "/api/nodes/nd_001/binding/confirm-rebind", wantBodySnippet: `"phase":"已绑定，等待稳定观测"`},
-		{name: "reject pending", method: http.MethodPost, path: "/api/nodes/nd_001/binding/reject-pending", wantBodySnippet: `"phase":"已绑定，等待稳定观测"`},
-		{name: "reset binding", method: http.MethodPost, path: "/api/nodes/nd_001/binding/reset", wantBodySnippet: `"phase":"未开始接入"`},
+		{name: "onboarding", method: http.MethodGet, path: "/api/monitoring-instances/mi_001/onboarding", wantBodySnippet: `"phase":"未开始接入"`},
+		{name: "issue token", method: http.MethodPost, path: "/api/monitoring-instances/mi_001/enrollment-token", wantBodySnippet: `"token":"enroll_001"`},
+		{name: "install command", method: http.MethodPost, path: "/api/monitoring-instances/mi_001/install-command", wantBodySnippet: `"command":"curl -fsSL https://center.example.com/api/agent/install.sh"`},
+		{name: "confirm rebind", method: http.MethodPost, path: "/api/monitoring-instances/mi_001/binding/confirm-rebind", wantBodySnippet: `"phase":"已绑定，等待稳定观测"`},
+		{name: "reject pending", method: http.MethodPost, path: "/api/monitoring-instances/mi_001/binding/reject-pending", wantBodySnippet: `"phase":"已绑定，等待稳定观测"`},
+		{name: "reset binding", method: http.MethodPost, path: "/api/monitoring-instances/mi_001/binding/reset", wantBodySnippet: `"phase":"未开始接入"`},
 	}
 
 	for _, tt := range tests {
@@ -740,17 +740,17 @@ func TestRouterServesInstallerScriptOutsideAuthMiddleware(t *testing.T) {
 	}
 }
 
-func TestRouterKeepsNodeActionsOutOfSPAFallback(t *testing.T) {
+func TestRouterKeepsMonitoringInstanceActionsOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		NodeActionsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceActionsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"action_id":"act_001","status":"pending"}`))
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/nodes/nd_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -763,26 +763,26 @@ func TestRouterKeepsNodeActionsOutOfSPAFallback(t *testing.T) {
 		t.Fatalf("read response body: %v", err)
 	}
 	if strings.TrimSpace(string(body)) == spaShell {
-		t.Fatalf("expected node action API response, got SPA fallback body %q", string(body))
+		t.Fatalf("expected monitoringInstance action API response, got SPA fallback body %q", string(body))
 	}
 	if !strings.Contains(string(body), `"action_id":"act_001"`) {
-		t.Fatalf("expected node action payload, got %q", string(body))
+		t.Fatalf("expected monitoringInstance action payload, got %q", string(body))
 	}
 }
 
-func TestRouterKeepsNodeLifecycleRoutesOutOfSPAFallback(t *testing.T) {
+func TestRouterKeepsMonitoringInstanceLifecycleRoutesOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		NodeLifecycleControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceLifecycleControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"node_id":"nd_001","lifecycle_status":"已退役"}`))
+			_, _ = w.Write([]byte(`{"monitoring_instance_id":"mi_001","lifecycle_status":"已退役"}`))
 		}),
 	})
 
 	for _, path := range []string{
-		"/api/nodes/nd_001/lifecycle/retire",
-		"/api/nodes/nd_001/lifecycle/restore-to-observing",
+		"/api/monitoring-instances/mi_001/lifecycle/retire",
+		"/api/monitoring-instances/mi_001/lifecycle/restore-to-observing",
 	} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)
 		recorder := httptest.NewRecorder()
@@ -799,8 +799,8 @@ func TestRouterKeepsNodeLifecycleRoutesOutOfSPAFallback(t *testing.T) {
 		if strings.TrimSpace(string(body)) == spaShell {
 			t.Fatalf("%s returned SPA fallback body %q", path, string(body))
 		}
-		if !strings.Contains(string(body), `"node_id":"nd_001"`) {
-			t.Fatalf("%s body = %q, want node payload", path, string(body))
+		if !strings.Contains(string(body), `"monitoring_instance_id":"mi_001"`) {
+			t.Fatalf("%s body = %q, want monitoringInstance payload", path, string(body))
 		}
 	}
 }
@@ -809,9 +809,9 @@ func TestRouterKeepsRuntimeControlRoutesOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		NodeRuntimeControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceRuntimeControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"node_id":"nd_001","monitoring_status":"暂停"}`))
+			_, _ = w.Write([]byte(`{"monitoring_instance_id":"mi_001","monitoring_status":"暂停"}`))
 		}),
 		TargetRuntimeControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -823,10 +823,10 @@ func TestRouterKeepsRuntimeControlRoutesOutOfSPAFallback(t *testing.T) {
 		path            string
 		wantBodySnippet string
 	}{
-		{path: "/api/nodes/nd_001/runtime/enter-maintenance", wantBodySnippet: `"node_id":"nd_001"`},
-		{path: "/api/nodes/nd_001/runtime/exit-maintenance", wantBodySnippet: `"node_id":"nd_001"`},
-		{path: "/api/nodes/nd_001/runtime/pause", wantBodySnippet: `"node_id":"nd_001"`},
-		{path: "/api/nodes/nd_001/runtime/resume", wantBodySnippet: `"node_id":"nd_001"`},
+		{path: "/api/monitoring-instances/mi_001/runtime/enter-maintenance", wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
+		{path: "/api/monitoring-instances/mi_001/runtime/exit-maintenance", wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
+		{path: "/api/monitoring-instances/mi_001/runtime/pause", wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
+		{path: "/api/monitoring-instances/mi_001/runtime/resume", wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
 		{path: "/api/targets/tg_001/runtime/enter-maintenance", wantBodySnippet: `"target_id":"tg_001"`},
 		{path: "/api/targets/tg_001/runtime/exit-maintenance", wantBodySnippet: `"target_id":"tg_001"`},
 		{path: "/api/targets/tg_001/runtime/pause", wantBodySnippet: `"target_id":"tg_001"`},

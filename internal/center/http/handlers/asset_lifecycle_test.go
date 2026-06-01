@@ -12,24 +12,24 @@ import (
 
 	"houfeng/internal/center/assetlifecycle"
 	"houfeng/internal/center/http/handlers"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
 
 type fakeAssetLifecycleRepository struct {
-	previewResult     assetlifecycle.CancellationPreview
-	previewErr        error
-	previewVPSID      string
-	applyResult       assetlifecycle.LifecycleActionResult
-	applyErr          error
-	applyVPSID        string
-	applyInput        assetlifecycle.ApplyCancellationInput
-	nodeContexts      []assetlifecycle.AssetContextForNode
-	nodeContextsErr   error
-	targetContexts    []assetlifecycle.AssetContextForTarget
-	targetContextsErr error
+	previewResult                 assetlifecycle.CancellationPreview
+	previewErr                    error
+	previewVPSID                  string
+	applyResult                   assetlifecycle.LifecycleActionResult
+	applyErr                      error
+	applyVPSID                    string
+	applyInput                    assetlifecycle.ApplyCancellationInput
+	monitoringInstanceContexts    []assetlifecycle.AssetContextForMonitoringInstance
+	monitoringInstanceContextsErr error
+	targetContexts                []assetlifecycle.AssetContextForTarget
+	targetContextsErr             error
 }
 
 func (f *fakeAssetLifecycleRepository) GetVPSCancellationPreview(_ context.Context, vpsID string) (assetlifecycle.CancellationPreview, error) {
@@ -49,8 +49,8 @@ func (f *fakeAssetLifecycleRepository) ApplyVPSCancellation(_ context.Context, v
 	return f.applyResult, nil
 }
 
-func (f *fakeAssetLifecycleRepository) ListNodeAssetContexts(context.Context) ([]assetlifecycle.AssetContextForNode, error) {
-	return f.nodeContexts, f.nodeContextsErr
+func (f *fakeAssetLifecycleRepository) ListMonitoringInstanceAssetContexts(context.Context) ([]assetlifecycle.AssetContextForMonitoringInstance, error) {
+	return f.monitoringInstanceContexts, f.monitoringInstanceContextsErr
 }
 
 func (f *fakeAssetLifecycleRepository) ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error) {
@@ -73,9 +73,9 @@ func TestVPSCancellationPreviewReturnsImpactGraph(t *testing.T) {
 			Record:            subscriptions.Record{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusExpired, CreatedAt: now, UpdatedAt: now},
 			Role:              "inactive",
 			RecommendedAction: "keep_inactive",
-			Message:           "订阅已处于非活跃状态，仍需处理 VPS、Node 与实例状态。",
+			Message:           "订阅已处于非活跃状态，仍需处理 VPS、MonitoringInstance 与实例状态。",
 		}},
-		Warnings: []string{"关联订阅已处于过期或取消状态；这不是“没有关联订阅”，仍需处理 VPS、Node 与实例状态。"},
+		Warnings: []string{"关联订阅已处于过期或取消状态；这不是“没有关联订阅”，仍需处理 VPS、MonitoringInstance 与实例状态。"},
 	}}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/cancellation-preview", nil)
@@ -125,7 +125,7 @@ func TestVPSCancellationAppliesConfirmedSelection(t *testing.T) {
 		"effective_date":"2026-05-30",
 		"subscription_ids":[" sub_001 "],
 		"vps_lifecycle_status":"cancelled",
-		"node_actions":[{"node_id":" nd_001 ","lifecycle_status":"已退役","monitoring_status":"暂停"}],
+		"monitoring_instance_actions":[{"monitoring_instance_id":" mi_001 ","lifecycle_status":"已退役","monitoring_status":"暂停"}],
 		"target_actions":[{"target_id":" tg_001 ","run_status":"已归档"}]
 	}`))
 	recorder := httptest.NewRecorder()
@@ -144,8 +144,8 @@ func TestVPSCancellationAppliesConfirmedSelection(t *testing.T) {
 	if len(repo.applyInput.SubscriptionIDs) != 1 || repo.applyInput.SubscriptionIDs[0] != "sub_001" {
 		t.Fatalf("subscription ids = %#v, want trimmed explicit selection", repo.applyInput.SubscriptionIDs)
 	}
-	if len(repo.applyInput.NodeActions) != 1 || repo.applyInput.NodeActions[0].NodeID != "nd_001" || repo.applyInput.NodeActions[0].LifecycleStatus != nodes.LifecycleRetired {
-		t.Fatalf("node actions = %#v, want normalized action", repo.applyInput.NodeActions)
+	if len(repo.applyInput.MonitoringInstanceActions) != 1 || repo.applyInput.MonitoringInstanceActions[0].MonitoringInstanceID != "mi_001" || repo.applyInput.MonitoringInstanceActions[0].LifecycleStatus != monitoringinstances.LifecycleRetired {
+		t.Fatalf("monitoringInstance actions = %#v, want normalized action", repo.applyInput.MonitoringInstanceActions)
 	}
 	if len(repo.applyInput.TargetActions) != 1 || repo.applyInput.TargetActions[0].TargetID != "tg_001" || repo.applyInput.TargetActions[0].RunStatus != targets.RunStatusArchived {
 		t.Fatalf("target actions = %#v, want normalized action", repo.applyInput.TargetActions)
@@ -174,7 +174,7 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 		{name: "preview missing vps", handler: handlers.VPSCancellationPreview(&fakeAssetLifecycleRepository{previewErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodGet, path: "/api/vps/vps_missing/cancellation-preview", want: http.StatusNotFound},
 		{name: "apply invalid json", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{`, want: http.StatusBadRequest},
 		{name: "apply missing reason", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"vps_lifecycle_status":"cancelled"}`, want: http.StatusBadRequest},
-		{name: "apply invalid node action", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","node_actions":[{"node_id":"nd_001","lifecycle_status":"online"}]}`, want: http.StatusBadRequest},
+		{name: "apply invalid monitoringInstance action", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","monitoring_instance_actions":[{"monitoring_instance_id":"mi_001","lifecycle_status":"online"}]}`, want: http.StatusBadRequest},
 		{name: "apply invalid associated object", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: assetlifecycle.ErrInvalidLifecycleActionInput}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled"}`, want: http.StatusBadRequest},
 		{name: "apply blocked lifecycle action", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_archived/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled"}`, want: http.StatusConflict},
 		{name: "apply missing vps", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled"}`, want: http.StatusNotFound},
@@ -197,8 +197,8 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 
 func TestAssetContextHandlersReturnBatchContexts(t *testing.T) {
 	repo := &fakeAssetLifecycleRepository{
-		nodeContexts: []assetlifecycle.AssetContextForNode{{
-			NodeID:                "nd_001",
+		monitoringInstanceContexts: []assetlifecycle.AssetContextForMonitoringInstance{{
+			MonitoringInstanceID:  "mi_001",
 			LinkedVPSCount:        1,
 			CancellationAttention: true,
 		}},
@@ -209,18 +209,18 @@ func TestAssetContextHandlersReturnBatchContexts(t *testing.T) {
 		}},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/nodes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/monitoring-instances", nil)
 	recorder := httptest.NewRecorder()
-	handlers.AssetContextNodes(repo).ServeHTTP(recorder, req)
+	handlers.AssetContextMonitoringInstances(repo).ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("node context status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+		t.Fatalf("monitoringInstance context status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
 	}
-	var nodeBody []assetlifecycle.AssetContextForNode
-	if err := json.Unmarshal(recorder.Body.Bytes(), &nodeBody); err != nil {
-		t.Fatalf("unmarshal node contexts: %v", err)
+	var monitoringInstanceBody []assetlifecycle.AssetContextForMonitoringInstance
+	if err := json.Unmarshal(recorder.Body.Bytes(), &monitoringInstanceBody); err != nil {
+		t.Fatalf("unmarshal monitoringInstance contexts: %v", err)
 	}
-	if len(nodeBody) != 1 || nodeBody[0].NodeID != "nd_001" || !nodeBody[0].CancellationAttention {
-		t.Fatalf("node contexts = %#v, want attention context", nodeBody)
+	if len(monitoringInstanceBody) != 1 || monitoringInstanceBody[0].MonitoringInstanceID != "mi_001" || !monitoringInstanceBody[0].CancellationAttention {
+		t.Fatalf("monitoringInstance contexts = %#v, want attention context", monitoringInstanceBody)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/asset-context/targets", nil)

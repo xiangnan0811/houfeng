@@ -76,7 +76,7 @@ func (r *PostgresIncidentRepository) ListActiveIncidents(ctx context.Context, fi
 		conditions = append(conditions, fmt.Sprintf("severity = $%d", len(args)))
 	}
 	// Default behavior keeps the current contract: only return rows whose status
-	// is "active". When IncludeResolved is true (e.g. node detail history drawer),
+	// is "active". When IncludeResolved is true (e.g. monitoringInstance detail history drawer),
 	// drop the status filter so historical/resolved rows are also returned.
 	// Note: with V1's "delete on resolve" persistence, the active_incidents table
 	// only contains active rows today; this contract change is forward-compatible
@@ -323,24 +323,24 @@ func projectObjectSummary(ctx context.Context, tx incidentStoreTx, objectType in
 	}
 
 	switch objectType {
-	case incidents.ObjectTypeNode:
+	case incidents.ObjectTypeMonitoringInstance:
 		tag, err := tx.Exec(ctx, `
-			update nodes
+			update monitoring_instances
 			set current_health_status = $2,
 				current_active_incident_count = $3,
 				current_primary_issue_summary = $4,
 				updated_at = now()
-			where node_id = $1`,
+			where monitoring_instance_id = $1`,
 			objectID,
 			severity,
 			count,
 			summary,
 		)
 		if err != nil {
-			return fmt.Errorf("update node summary %q: %w", objectID, err)
+			return fmt.Errorf("update monitoring instance summary %q: %w", objectID, err)
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("update node summary %q: node not found", objectID)
+			return fmt.Errorf("update monitoring instance summary %q: monitoring instance not found", objectID)
 		}
 	case incidents.ObjectTypeTarget:
 		tag, err := tx.Exec(ctx, `

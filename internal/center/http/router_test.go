@@ -13,7 +13,7 @@ import (
 
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/contracts/agentapi"
 )
 
@@ -52,7 +52,7 @@ func TestRouterHealthz(t *testing.T) {
 	}
 }
 
-func TestRouterPrefersNodesAPIOverSPAFallback(t *testing.T) {
+func TestRouterPrefersMonitoringInstancesAPIOverSPAFallback(t *testing.T) {
 	dir := t.TempDir()
 	indexPath := filepath.Join(dir, "index.html")
 	if err := os.WriteFile(indexPath, []byte("<html><body>spa</body></html>"), 0o644); err != nil {
@@ -60,30 +60,30 @@ func TestRouterPrefersNodesAPIOverSPAFallback(t *testing.T) {
 	}
 
 	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
-	repo := &fakeNodeRepository{
-		listNodesResult: []nodes.Record{{
-			NodeID:              "nd_001",
-			DisplayName:         "Tokyo Edge",
-			Region:              "ap-northeast-1",
-			City:                "Tokyo",
-			Provider:            "Vultr",
-			LifecycleStatus:     nodes.LifecyclePendingEnrollment,
-			MonitoringStatus:    nodes.MonitoringEnabled,
-			BindingStatus:       nodes.BindingUnbound,
-			CurrentHealthStatus: nodes.HealthNormal,
-			CreatedAt:           now,
-			UpdatedAt:           now,
+	repo := &fakeMonitoringInstanceRepository{
+		listMonitoringInstancesResult: []monitoringinstances.Record{{
+			MonitoringInstanceID: "mi_001",
+			DisplayName:          "Tokyo Edge",
+			Region:               "ap-northeast-1",
+			City:                 "Tokyo",
+			Provider:             "Vultr",
+			LifecycleStatus:      monitoringinstances.LifecyclePendingEnrollment,
+			MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+			BindingStatus:        monitoringinstances.BindingUnbound,
+			CurrentHealthStatus:  monitoringinstances.HealthNormal,
+			CreatedAt:            now,
+			UpdatedAt:            now,
 		}},
 	}
 
 	handler := centerhttp.New(centerhttp.RouterOptions{
-		Version:                "dev",
-		WebDistDir:             dir,
-		NodesCollectionHandler: handlers.NodesCollection(repo),
-		NodeItemHandler:        handlers.NodeItem(repo),
+		Version:                              "dev",
+		WebDistDir:                           dir,
+		MonitoringInstancesCollectionHandler: handlers.MonitoringInstancesCollection(repo),
+		MonitoringInstanceItemHandler:        handlers.MonitoringInstanceItem(repo),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -92,13 +92,13 @@ func TestRouterPrefersNodesAPIOverSPAFallback(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
 
-	var body []nodes.Record
+	var body []monitoringinstances.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
 
-	if len(body) != 1 || body[0].NodeID != "nd_001" {
-		t.Fatalf("expected nodes API response, got %#v", body)
+	if len(body) != 1 || body[0].MonitoringInstanceID != "mi_001" {
+		t.Fatalf("expected monitoringInstances API response, got %#v", body)
 	}
 }
 
@@ -219,16 +219,16 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 			called = "item"
 			w.WriteHeader(http.StatusOK)
 		}),
-		VPSNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called = "nodes"
+		VPSMonitoringInstancesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "monitoring-instances"
 			w.WriteHeader(http.StatusOK)
 		}),
-		VPSLinkNodeHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called = "link-node"
+		VPSLinkMonitoringInstanceHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "link-monitoring-instance"
 			w.WriteHeader(http.StatusCreated)
 		}),
-		VPSUnlinkNodeHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called = "unlink-node"
+		VPSUnlinkMonitoringInstanceHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "unlink-monitoring-instance"
 			w.WriteHeader(http.StatusOK)
 		}),
 		VPSCancellationPreviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -267,9 +267,9 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 		want   int
 		called string
 	}{
-		{method: http.MethodGet, path: "/api/vps/vps_001/nodes", want: http.StatusOK, called: "nodes"},
-		{method: http.MethodPost, path: "/api/vps/vps_001/link-node", want: http.StatusCreated, called: "link-node"},
-		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-node", want: http.StatusOK, called: "unlink-node"},
+		{method: http.MethodGet, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusOK, called: "monitoring-instances"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", want: http.StatusCreated, called: "link-monitoring-instance"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", want: http.StatusOK, called: "unlink-monitoring-instance"},
 		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusOK, called: "cancellation-preview"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/cancellation", want: http.StatusOK, called: "cancellation"},
 	} {
@@ -317,7 +317,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/nodes", "/api/vps/vps_001/link-node", "/api/vps/vps_001/unlink-node", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation"} {
+	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/monitoring-instances", "/api/vps/vps_001/link-monitoring-instance", "/api/vps/vps_001/unlink-monitoring-instance", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 
@@ -348,8 +348,8 @@ func TestRouterDispatchesAssetContextAPIs(t *testing.T) {
 	var called string
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
-		AssetContextNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called = "nodes"
+		AssetContextMonitoringInstancesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "monitoring-instances"
 			w.WriteHeader(http.StatusOK)
 		}),
 		AssetContextTargetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -358,14 +358,14 @@ func TestRouterDispatchesAssetContextAPIs(t *testing.T) {
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/nodes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/monitoring-instances", nil)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("node context status = %d, want %d", recorder.Code, http.StatusOK)
+		t.Fatalf("monitoringInstance context status = %d, want %d", recorder.Code, http.StatusOK)
 	}
-	if called != "nodes" {
-		t.Fatalf("called = %q, want nodes", called)
+	if called != "monitoring-instances" {
+		t.Fatalf("called = %q, want monitoringInstances", called)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/asset-context/targets", nil)
@@ -414,21 +414,21 @@ func TestRouterDispatchesSubscriptionAPIs(t *testing.T) {
 	}
 }
 
-func TestRouterDispatchesNodeVPSAPI(t *testing.T) {
+func TestRouterDispatchesMonitoringInstanceVPSAPI(t *testing.T) {
 	var called string
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
-		NodeItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "item"
 			w.WriteHeader(http.StatusOK)
 		}),
-		NodeVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "vps"
 			w.WriteHeader(http.StatusOK)
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/vps", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/vps", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -437,7 +437,7 @@ func TestRouterDispatchesNodeVPSAPI(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
 	if called != "vps" {
-		t.Fatalf("expected node vps handler, got %q", called)
+		t.Fatalf("expected monitoringInstance vps handler, got %q", called)
 	}
 }
 
@@ -484,41 +484,41 @@ func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 	}
 }
 
-type fakeNodeRepository struct {
-	listNodesResult  []nodes.Record
-	getNodeResult    nodes.Record
-	createNodeResult nodes.Record
+type fakeMonitoringInstanceRepository struct {
+	listMonitoringInstancesResult  []monitoringinstances.Record
+	getMonitoringInstanceResult    monitoringinstances.Record
+	createMonitoringInstanceResult monitoringinstances.Record
 }
 
-func (f *fakeNodeRepository) ListNodes(context.Context) ([]nodes.Record, error) {
-	return f.listNodesResult, nil
+func (f *fakeMonitoringInstanceRepository) ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error) {
+	return f.listMonitoringInstancesResult, nil
 }
 
-func (f *fakeNodeRepository) GetNode(context.Context, string) (nodes.Record, error) {
-	return f.getNodeResult, nil
+func (f *fakeMonitoringInstanceRepository) GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error) {
+	return f.getMonitoringInstanceResult, nil
 }
 
-func (f *fakeNodeRepository) CreateNode(context.Context, nodes.CreateInput) (nodes.Record, error) {
-	return f.createNodeResult, nil
+func (f *fakeMonitoringInstanceRepository) CreateMonitoringInstance(context.Context, monitoringinstances.CreateInput) (monitoringinstances.Record, error) {
+	return f.createMonitoringInstanceResult, nil
 }
 
-func (f *fakeNodeRepository) UpdateNodeMetadata(context.Context, string, nodes.UpdateMetadataInput) (nodes.Record, error) {
-	return nodes.Record{}, nil
+func (f *fakeMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(context.Context, string, monitoringinstances.UpdateMetadataInput) (monitoringinstances.Record, error) {
+	return monitoringinstances.Record{}, nil
 }
 
-func (f *fakeNodeRepository) SetPendingAction(context.Context, string, string, string) error {
+func (f *fakeMonitoringInstanceRepository) SetPendingAction(context.Context, string, string, string) error {
 	return nil
 }
 
-func (f *fakeNodeRepository) GetPendingAction(context.Context, string) (string, string, error) {
+func (f *fakeMonitoringInstanceRepository) GetPendingAction(context.Context, string) (string, string, error) {
 	return "", "", nil
 }
 
-func (f *fakeNodeRepository) ClearPendingAction(context.Context, string) error {
+func (f *fakeMonitoringInstanceRepository) ClearPendingAction(context.Context, string) error {
 	return nil
 }
 
-func (f *fakeNodeRepository) StoreActionResult(context.Context, string, []byte) error {
+func (f *fakeMonitoringInstanceRepository) StoreActionResult(context.Context, string, []byte) error {
 	return nil
 }
 
@@ -607,21 +607,21 @@ func TestRouterKeepsProbeItemsSubtreeOutOfTargetItemHandler(t *testing.T) {
 	}
 }
 
-func TestRouterDispatchesNodeRuntimeFactsAPI(t *testing.T) {
+func TestRouterDispatchesMonitoringInstanceRuntimeFactsAPI(t *testing.T) {
 	var called string
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
-		NodeItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "item"
 			w.WriteHeader(http.StatusOK)
 		}),
-		NodeRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		MonitoringInstanceRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "runtime-facts"
 			w.WriteHeader(http.StatusOK)
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/runtime-facts", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -726,8 +726,8 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	providerItemInnerCalled := false
 	vpsInnerCalled := false
 	vpsItemInnerCalled := false
-	vpsNodesInnerCalled := false
-	nodeVPSInnerCalled := false
+	vpsMonitoringInstancesInnerCalled := false
+	monitoringInstanceVPSInnerCalled := false
 	subscriptionsInnerCalled := false
 	subscriptionItemInnerCalled := false
 	mwCalled := false
@@ -753,12 +753,12 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 			vpsItemInnerCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
-		VPSNodesHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			vpsNodesInnerCalled = true
+		VPSMonitoringInstancesHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			vpsMonitoringInstancesInnerCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
-		NodeVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			nodeVPSInnerCalled = true
+		MonitoringInstanceVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			monitoringInstanceVPSInnerCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
 		SubscriptionsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -847,31 +847,31 @@ func TestRouterAppliesAuthMiddlewareToProtectedRoutes(t *testing.T) {
 	}
 
 	mwCalled = false
-	r = httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/nodes", nil)
+	r = httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/monitoring-instances", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("vps nodes status = %d, want 401 (middleware should block)", w.Code)
+		t.Fatalf("vps monitoringInstances status = %d, want 401 (middleware should block)", w.Code)
 	}
-	if vpsNodesInnerCalled {
-		t.Fatal("inner vps nodes handler must not be called when middleware blocks")
+	if vpsMonitoringInstancesInnerCalled {
+		t.Fatal("inner vps monitoringInstances handler must not be called when middleware blocks")
 	}
 	if !mwCalled {
-		t.Fatal("middleware not invoked for vps nodes route")
+		t.Fatal("middleware not invoked for vps monitoringInstances route")
 	}
 
 	mwCalled = false
-	r = httptest.NewRequest(http.MethodGet, "/api/nodes/nd_001/vps", nil)
+	r = httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/vps", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("node vps status = %d, want 401 (middleware should block)", w.Code)
+		t.Fatalf("monitoringInstance vps status = %d, want 401 (middleware should block)", w.Code)
 	}
-	if nodeVPSInnerCalled {
-		t.Fatal("inner node vps handler must not be called when middleware blocks")
+	if monitoringInstanceVPSInnerCalled {
+		t.Fatal("inner monitoringInstance vps handler must not be called when middleware blocks")
 	}
 	if !mwCalled {
-		t.Fatal("middleware not invoked for node vps route")
+		t.Fatal("middleware not invoked for monitoringInstance vps route")
 	}
 
 	mwCalled = false

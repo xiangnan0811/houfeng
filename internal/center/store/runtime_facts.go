@@ -10,19 +10,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/targets"
 )
 
-const runtimeFactsNodeExistsSQL = `
+const runtimeFactsMonitoringInstanceExistsSQL = `
 		select 1
-		from nodes
-		where node_id = $1`
+		from monitoring_instances
+		where monitoring_instance_id = $1`
 
 const runtimeFactsLatestHostSampleSQL = `
 		select
-			node_id,
+			monitoring_instance_id,
 			observed_at,
 			received_at,
 			agent_version,
@@ -51,13 +51,13 @@ const runtimeFactsLatestHostSampleSQL = `
 			sync_batch_id,
 			containers
 		from host_samples
-		where node_id = $1
+		where monitoring_instance_id = $1
 		order by observed_at desc, id desc
 		limit 1`
 
 const runtimeFactsRecentHostSamplesSQL = `
 		select
-			node_id,
+			monitoring_instance_id,
 			observed_at,
 			received_at,
 			agent_version,
@@ -86,7 +86,7 @@ const runtimeFactsRecentHostSamplesSQL = `
 			sync_batch_id,
 			containers
 		from host_samples
-		where node_id = $1
+		where monitoring_instance_id = $1
 			and observed_at >= $2
 		order by observed_at desc, id desc
 		limit $3`
@@ -98,7 +98,7 @@ const runtimeFactsTargetExistsSQL = `
 
 const runtimeFactsLatestProbeObservationsSQL = `
 		select
-			latest.node_id,
+			latest.monitoring_instance_id,
 			latest.target_id,
 			latest.probe_item_id,
 			latest.probe_kind,
@@ -116,8 +116,8 @@ const runtimeFactsLatestProbeObservationsSQL = `
 			latest.is_backfilled,
 			latest.sync_batch_id
 		from (
-			select distinct on (po.probe_item_id, po.node_id)
-				po.node_id,
+			select distinct on (po.probe_item_id, po.monitoring_instance_id)
+				po.monitoring_instance_id,
 				po.target_id,
 				po.probe_item_id,
 				pi.probe_kind,
@@ -138,13 +138,13 @@ const runtimeFactsLatestProbeObservationsSQL = `
 			from probe_observations po
 			join probe_items pi on pi.probe_item_id = po.probe_item_id
 			where po.target_id = $1
-			order by po.probe_item_id, po.node_id, po.observed_at desc, po.id desc
+			order by po.probe_item_id, po.monitoring_instance_id, po.observed_at desc, po.id desc
 		) latest
-		order by latest.observed_at desc, latest.probe_item_id, latest.node_id`
+		order by latest.observed_at desc, latest.probe_item_id, latest.monitoring_instance_id`
 
 const runtimeFactsRecentProbeObservationsSQL = `
 		select
-			po.node_id,
+			po.monitoring_instance_id,
 			po.target_id,
 			po.probe_item_id,
 			pi.probe_kind,
@@ -183,40 +183,40 @@ func NewPostgresRuntimeFactsRepository(db *pgxpool.Pool) *PostgresRuntimeFactsRe
 
 var _ runtimefacts.Repository = (*PostgresRuntimeFactsRepository)(nil)
 
-func (r *PostgresRuntimeFactsRepository) GetNodeRuntimeFacts(ctx context.Context, nodeID string, since time.Time, limit int) (runtimefacts.NodeRuntimeFacts, error) {
+func (r *PostgresRuntimeFactsRepository) GetMonitoringInstanceRuntimeFacts(ctx context.Context, monitoringInstanceID string, since time.Time, limit int) (runtimefacts.MonitoringInstanceRuntimeFacts, error) {
 	var exists int
-	if err := r.db.QueryRow(ctx, runtimeFactsNodeExistsSQL, nodeID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
-		return runtimefacts.NodeRuntimeFacts{}, nodes.ErrNodeNotFound
+	if err := r.db.QueryRow(ctx, runtimeFactsMonitoringInstanceExistsSQL, monitoringInstanceID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
+		return runtimefacts.MonitoringInstanceRuntimeFacts{}, monitoringinstances.ErrMonitoringInstanceNotFound
 	} else if err != nil {
-		return runtimefacts.NodeRuntimeFacts{}, fmt.Errorf("query node %q existence: %w", nodeID, err)
+		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("query monitoring instance %q existence: %w", monitoringInstanceID, err)
 	}
 
-	facts := runtimefacts.NodeRuntimeFacts{
-		NodeID:            nodeID,
-		RecentHostSamples: make([]runtimefacts.HostSample, 0),
+	facts := runtimefacts.MonitoringInstanceRuntimeFacts{
+		MonitoringInstanceID: monitoringInstanceID,
+		RecentHostSamples:    make([]runtimefacts.HostSample, 0),
 	}
 	var latest runtimefacts.HostSample
-	if err := scanHostSample(r.db.QueryRow(ctx, runtimeFactsLatestHostSampleSQL, nodeID), &latest); errors.Is(err, pgx.ErrNoRows) {
+	if err := scanHostSample(r.db.QueryRow(ctx, runtimeFactsLatestHostSampleSQL, monitoringInstanceID), &latest); errors.Is(err, pgx.ErrNoRows) {
 		return facts, nil
 	} else if err != nil {
-		return runtimefacts.NodeRuntimeFacts{}, fmt.Errorf("query latest host sample for node %q: %w", nodeID, err)
+		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("query latest host sample for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	facts.LatestHostSample = &latest
 
-	rows, err := r.db.Query(ctx, runtimeFactsRecentHostSamplesSQL, nodeID, since, limit)
+	rows, err := r.db.Query(ctx, runtimeFactsRecentHostSamplesSQL, monitoringInstanceID, since, limit)
 	if err != nil {
-		return runtimefacts.NodeRuntimeFacts{}, fmt.Errorf("query recent host samples for node %q: %w", nodeID, err)
+		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("query recent host samples for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var sample runtimefacts.HostSample
 		if err := scanHostSample(rows, &sample); err != nil {
-			return runtimefacts.NodeRuntimeFacts{}, fmt.Errorf("scan recent host sample for node %q: %w", nodeID, err)
+			return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("scan recent host sample for monitoring instance %q: %w", monitoringInstanceID, err)
 		}
 		facts.RecentHostSamples = append(facts.RecentHostSamples, sample)
 	}
 	if err := rows.Err(); err != nil {
-		return runtimefacts.NodeRuntimeFacts{}, fmt.Errorf("iterate recent host samples for node %q: %w", nodeID, err)
+		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("iterate recent host samples for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	return facts, nil
@@ -278,7 +278,7 @@ type runtimeFactsScanner interface {
 func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample) error {
 	var containersJSON []byte
 	if err := scanner.Scan(
-		&sample.NodeID,
+		&sample.MonitoringInstanceID,
 		&sample.ObservedAt,
 		&sample.ReceivedAt,
 		&sample.AgentVersion,
@@ -317,7 +317,7 @@ func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample
 
 func scanProbeObservation(scanner runtimeFactsScanner, observation *runtimefacts.ProbeObservation) error {
 	return scanner.Scan(
-		&observation.NodeID,
+		&observation.MonitoringInstanceID,
 		&observation.TargetID,
 		&observation.ProbeItemID,
 		&observation.ProbeKind,

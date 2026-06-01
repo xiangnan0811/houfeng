@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"houfeng/internal/center/assetlinks"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
@@ -137,20 +137,20 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				return
 			}
 			if linkRepo != nil {
-				nodeLinks, err := linkRepo.ListNodesForVPS(r.Context(), vpsID)
+				monitoringInstanceLinks, err := linkRepo.ListMonitoringInstancesForVPS(r.Context(), vpsID)
 				if err != nil {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
-				record.ActiveNodeLinkCount = len(nodeLinks)
-				record.RunningNodeCount = countRunningVPSNodes(record.LifecycleStatus, nodeLinks)
+				record.ActiveMonitoringInstanceLinkCount = len(monitoringInstanceLinks)
+				record.RunningMonitoringInstanceCount = countRunningVPSMonitoringInstances(record.LifecycleStatus, monitoringInstanceLinks)
 				runningTargetCount, countErr := countRunningVPSTargets(r.Context(), targetCounter, record.LifecycleStatus, record.VPSID)
 				if countErr != nil {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
 				record.RunningTargetCount = runningTargetCount
-				writeJSON(w, http.StatusOK, vpsDetailResponse{Record: record, NodeLinks: nodeLinks})
+				writeJSON(w, http.StatusOK, vpsDetailResponse{Record: record, MonitoringInstanceLinks: monitoringInstanceLinks})
 				return
 			}
 			writeJSON(w, http.StatusOK, record)
@@ -215,12 +215,12 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 }
 
 func enrichVPSAssetRuntimeSummary(ctx context.Context, linkRepo assetlinks.Repository, targetCounter vpsRunningTargetCounter, record *vpsassets.Record) error {
-	nodeLinks, err := linkRepo.ListNodesForVPS(ctx, record.VPSID)
+	monitoringInstanceLinks, err := linkRepo.ListMonitoringInstancesForVPS(ctx, record.VPSID)
 	if err != nil {
 		return err
 	}
-	record.ActiveNodeLinkCount = len(nodeLinks)
-	record.RunningNodeCount = countRunningVPSNodes(record.LifecycleStatus, nodeLinks)
+	record.ActiveMonitoringInstanceLinkCount = len(monitoringInstanceLinks)
+	record.RunningMonitoringInstanceCount = countRunningVPSMonitoringInstances(record.LifecycleStatus, monitoringInstanceLinks)
 	record.RunningTargetCount, err = countRunningVPSTargets(ctx, targetCounter, record.LifecycleStatus, record.VPSID)
 	if err != nil {
 		return err
@@ -228,13 +228,13 @@ func enrichVPSAssetRuntimeSummary(ctx context.Context, linkRepo assetlinks.Repos
 	return nil
 }
 
-func countRunningVPSNodes(lifecycle vpsassets.LifecycleStatus, nodeLinks []assetlinks.NodeSummary) int {
+func countRunningVPSMonitoringInstances(lifecycle vpsassets.LifecycleStatus, monitoringInstanceLinks []assetlinks.MonitoringInstanceSummary) int {
 	if lifecycle != vpsassets.LifecycleToCancel && lifecycle != vpsassets.LifecycleCancelled {
 		return 0
 	}
 	running := 0
-	for _, link := range nodeLinks {
-		if link.LifecycleStatus != nodes.LifecycleNoRenewal && link.LifecycleStatus != nodes.LifecycleRetired {
+	for _, link := range monitoringInstanceLinks {
+		if link.LifecycleStatus != monitoringinstances.LifecycleNoRenewal && link.LifecycleStatus != monitoringinstances.LifecycleRetired {
 			running++
 		}
 	}
@@ -253,7 +253,7 @@ func countRunningVPSTargets(ctx context.Context, targetCounter vpsRunningTargetC
 
 type vpsDetailResponse struct {
 	vpsassets.Record
-	NodeLinks []assetlinks.NodeSummary `json:"node_links"`
+	MonitoringInstanceLinks []assetlinks.MonitoringInstanceSummary `json:"monitoring_instance_links"`
 }
 
 func VPSTimeline(repo renewals.TimelineRepository) http.Handler {

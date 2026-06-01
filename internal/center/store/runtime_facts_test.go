@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/targets"
 )
@@ -24,21 +24,21 @@ func TestPostgresRuntimeFactsRepositoryImplementsRuntimeFactsRepository(t *testi
 	}
 }
 
-func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testing.T) {
+func TestGetMonitoringInstanceRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testing.T) {
 	t.Parallel()
 
 	observedAt := time.Date(2026, time.April, 24, 9, 0, 0, 0, time.UTC)
 	repo := &PostgresRuntimeFactsRepository{db: fakeRuntimeFactsQueryer{
 		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
 			switch sql {
-			case runtimeFactsNodeExistsSQL:
+			case runtimeFactsMonitoringInstanceExistsSQL:
 				return fakeRuntimeFactsRow{scan: func(dest ...any) error {
 					*(dest[0].(*int)) = 1
 					return nil
 				}}
 			case runtimeFactsLatestHostSampleSQL:
 				return fakeRuntimeFactsRow{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "nd_001"
+					*(dest[0].(*string)) = "mi_001"
 					*(dest[1].(*time.Time)) = observedAt
 					*(dest[2].(*time.Time)) = observedAt.Add(2 * time.Second)
 					*(dest[3].(*string)) = "agent/v0.1.0"
@@ -78,7 +78,7 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 			}
 			return &fakeRuntimeFactsRows{rows: []fakeRuntimeFactsScan{
 				{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "nd_001"
+					*(dest[0].(*string)) = "mi_001"
 					*(dest[1].(*time.Time)) = observedAt
 					*(dest[2].(*time.Time)) = observedAt.Add(2 * time.Second)
 					*(dest[3].(*string)) = "agent/v0.1.0"
@@ -110,7 +110,7 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 				}},
 				{scan: func(dest ...any) error {
 					older := observedAt.Add(-5 * time.Minute)
-					*(dest[0].(*string)) = "nd_001"
+					*(dest[0].(*string)) = "mi_001"
 					*(dest[1].(*time.Time)) = older
 					*(dest[2].(*time.Time)) = older.Add(2 * time.Second)
 					*(dest[3].(*string)) = "agent/v0.0.9"
@@ -144,12 +144,12 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 		},
 	}}
 
-	facts, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_001", time.Now().Add(-24*time.Hour), 288)
+	facts, err := repo.GetMonitoringInstanceRuntimeFacts(context.Background(), "mi_001", time.Now().Add(-24*time.Hour), 288)
 	if err != nil {
-		t.Fatalf("GetNodeRuntimeFacts() error = %v", err)
+		t.Fatalf("GetMonitoringInstanceRuntimeFacts() error = %v", err)
 	}
-	if facts.NodeID != "nd_001" {
-		t.Fatalf("NodeID = %q, want %q", facts.NodeID, "nd_001")
+	if facts.MonitoringInstanceID != "mi_001" {
+		t.Fatalf("MonitoringInstanceID = %q, want %q", facts.MonitoringInstanceID, "mi_001")
 	}
 	if facts.LatestHostSample == nil {
 		t.Fatal("LatestHostSample = nil, want non-nil")
@@ -177,13 +177,13 @@ func TestGetNodeRuntimeFactsReturnsLatestHostSampleAndRecentHostSamples(t *testi
 	}
 }
 
-func TestGetNodeRuntimeFactsReturnsNilHostSampleWhenNodeHasNoFactsYet(t *testing.T) {
+func TestGetMonitoringInstanceRuntimeFactsReturnsNilHostSampleWhenMonitoringInstanceHasNoFactsYet(t *testing.T) {
 	t.Parallel()
 
 	repo := &PostgresRuntimeFactsRepository{db: fakeRuntimeFactsQueryer{
 		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
 			switch sql {
-			case runtimeFactsNodeExistsSQL:
+			case runtimeFactsMonitoringInstanceExistsSQL:
 				return fakeRuntimeFactsRow{scan: func(dest ...any) error {
 					*(dest[0].(*int)) = 1
 					return nil
@@ -196,9 +196,9 @@ func TestGetNodeRuntimeFactsReturnsNilHostSampleWhenNodeHasNoFactsYet(t *testing
 		},
 	}}
 
-	facts, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_001", time.Now().Add(-24*time.Hour), 288)
+	facts, err := repo.GetMonitoringInstanceRuntimeFacts(context.Background(), "mi_001", time.Now().Add(-24*time.Hour), 288)
 	if err != nil {
-		t.Fatalf("GetNodeRuntimeFacts() error = %v", err)
+		t.Fatalf("GetMonitoringInstanceRuntimeFacts() error = %v", err)
 	}
 	if facts.LatestHostSample != nil {
 		t.Fatalf("LatestHostSample = %#v, want nil", facts.LatestHostSample)
@@ -211,7 +211,7 @@ func TestGetNodeRuntimeFactsReturnsNilHostSampleWhenNodeHasNoFactsYet(t *testing
 	}
 }
 
-func TestGetNodeRuntimeFactsReturnsNodeNotFound(t *testing.T) {
+func TestGetMonitoringInstanceRuntimeFactsReturnsMonitoringInstanceNotFound(t *testing.T) {
 	t.Parallel()
 
 	repo := &PostgresRuntimeFactsRepository{db: fakeRuntimeFactsQueryer{
@@ -220,9 +220,9 @@ func TestGetNodeRuntimeFactsReturnsNodeNotFound(t *testing.T) {
 		},
 	}}
 
-	_, err := repo.GetNodeRuntimeFacts(context.Background(), "nd_missing", time.Now().Add(-24*time.Hour), 288)
-	if !errors.Is(err, nodes.ErrNodeNotFound) {
-		t.Fatalf("GetNodeRuntimeFacts() error = %v, want ErrNodeNotFound", err)
+	_, err := repo.GetMonitoringInstanceRuntimeFacts(context.Background(), "mi_missing", time.Now().Add(-24*time.Hour), 288)
+	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+		t.Fatalf("GetMonitoringInstanceRuntimeFacts() error = %v, want ErrMonitoringInstanceNotFound", err)
 	}
 }
 
@@ -249,7 +249,7 @@ func TestGetTargetRuntimeFactsReturnsLatestProbeObservationsAndRecentProbeObserv
 			switch sql {
 			case runtimeFactsLatestProbeObservationsSQL:
 				return &fakeRuntimeFactsRows{rows: []fakeRuntimeFactsScan{{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "nd_001"
+					*(dest[0].(*string)) = "mi_001"
 					*(dest[1].(*string)) = "tg_001"
 					*(dest[2].(*string)) = "pb_001"
 					*(dest[3].(*string)) = "http"
@@ -271,7 +271,7 @@ func TestGetTargetRuntimeFactsReturnsLatestProbeObservationsAndRecentProbeObserv
 			case runtimeFactsRecentProbeObservationsSQL:
 				return &fakeRuntimeFactsRows{rows: []fakeRuntimeFactsScan{
 					{scan: func(dest ...any) error {
-						*(dest[0].(*string)) = "nd_001"
+						*(dest[0].(*string)) = "mi_001"
 						*(dest[1].(*string)) = "tg_001"
 						*(dest[2].(*string)) = "pb_001"
 						*(dest[3].(*string)) = "http"
@@ -295,7 +295,7 @@ func TestGetTargetRuntimeFactsReturnsLatestProbeObservationsAndRecentProbeObserv
 						olderLatency := 42
 						olderStatus := 200
 						olderTLS := 13
-						*(dest[0].(*string)) = "nd_002"
+						*(dest[0].(*string)) = "mi_002"
 						*(dest[1].(*string)) = "tg_001"
 						*(dest[2].(*string)) = "pb_002"
 						*(dest[3].(*string)) = "http"
@@ -350,8 +350,8 @@ func TestGetTargetRuntimeFactsReturnsLatestProbeObservationsAndRecentProbeObserv
 	if got := facts.RecentProbeObservations[0].ObservedAt; !got.Equal(observedAt) {
 		t.Fatalf("RecentProbeObservations[0].ObservedAt = %v, want %v", got, observedAt)
 	}
-	if got := facts.RecentProbeObservations[1].NodeID; got != "nd_002" {
-		t.Fatalf("RecentProbeObservations[1].NodeID = %q, want %q", got, "nd_002")
+	if got := facts.RecentProbeObservations[1].MonitoringInstanceID; got != "mi_002" {
+		t.Fatalf("RecentProbeObservations[1].MonitoringInstanceID = %q, want %q", got, "mi_002")
 	}
 }
 
@@ -417,11 +417,11 @@ func TestRuntimeFactSQLLocksLatestAndRecentOrderingAndProbeJoinShape(t *testing.
 	if !strings.Contains(runtimeFactsLatestProbeObservationsSQL, "join probe_items") {
 		t.Fatalf("runtimeFactsLatestProbeObservationsSQL = %q, want probe_items join", runtimeFactsLatestProbeObservationsSQL)
 	}
-	if !strings.Contains(runtimeFactsLatestProbeObservationsSQL, "distinct on (po.probe_item_id, po.node_id)") {
-		t.Fatalf("runtimeFactsLatestProbeObservationsSQL = %q, want distinct on probe_item_id,node_id", runtimeFactsLatestProbeObservationsSQL)
+	if !strings.Contains(runtimeFactsLatestProbeObservationsSQL, "distinct on (po.probe_item_id, po.monitoring_instance_id)") {
+		t.Fatalf("runtimeFactsLatestProbeObservationsSQL = %q, want distinct on probe_item_id,monitoring_instance_id", runtimeFactsLatestProbeObservationsSQL)
 	}
-	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "where node_id = $1") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "observed_at >= $2") {
-		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want node_id and observed_at lower bound filters", runtimeFactsRecentHostSamplesSQL)
+	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "where monitoring_instance_id = $1") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "observed_at >= $2") {
+		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want monitoring_instance_id and observed_at lower bound filters", runtimeFactsRecentHostSamplesSQL)
 	}
 	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "mem_total_bytes") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "disk_total_bytes") {
 		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want capacity columns", runtimeFactsRecentHostSamplesSQL)

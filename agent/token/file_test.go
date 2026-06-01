@@ -41,19 +41,19 @@ func TestFileSourceSavesAndReadsSyncCredentials(t *testing.T) {
 	}
 
 	source := token.FileSource{Path: path}
-	if err := source.SaveSyncCredentials(context.Background(), "nd_001", "sync_001"); err != nil {
+	if err := source.SaveSyncCredentials(context.Background(), "mi_001", "sync_001"); err != nil {
 		t.Fatalf("SaveSyncCredentials() error = %v", err)
 	}
 
-	nodeID, syncToken, ok, err := source.SyncCredentials(context.Background())
+	monitoringInstanceID, syncToken, ok, err := source.SyncCredentials(context.Background())
 	if err != nil {
 		t.Fatalf("SyncCredentials() error = %v", err)
 	}
 	if !ok {
 		t.Fatal("SyncCredentials() ok = false, want true")
 	}
-	if nodeID != "nd_001" {
-		t.Fatalf("nodeID = %q, want %q", nodeID, "nd_001")
+	if monitoringInstanceID != "mi_001" {
+		t.Fatalf("monitoringInstanceID = %q, want %q", monitoringInstanceID, "mi_001")
 	}
 	if syncToken != "sync_001" {
 		t.Fatalf("syncToken = %q, want %q", syncToken, "sync_001")
@@ -81,7 +81,7 @@ func TestFileSourceSavesAndReadsSyncCredentials(t *testing.T) {
 
 func TestFileSourceRejectsIncompleteSyncCredentials(t *testing.T) {
 	path := t.TempDir() + "/token"
-	if err := os.WriteFile(path, []byte(`{"node_id":"nd_001"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"monitoring_instance_id":"mi_001"}`), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
 

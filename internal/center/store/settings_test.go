@@ -67,7 +67,7 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 			NotifyOnRecovered:        true,
 		},
 		OverrideRules: centersettings.OverrideRules{
-			NodeLabels: []centersettings.NodeLabelOverrideRule{
+			MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{
 				{
 					Label: "core",
 					Overrides: centersettings.SettingsOverrideFields{
@@ -107,8 +107,8 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 	if got.RetentionPolicy.NotificationLayerDays != 365 {
 		t.Fatalf("NotificationLayerDays = %d, want 365", got.RetentionPolicy.NotificationLayerDays)
 	}
-	if len(got.OverrideRules.NodeLabels) != 1 {
-		t.Fatalf("len(NodeLabels) = %d, want 1", len(got.OverrideRules.NodeLabels))
+	if len(got.OverrideRules.MonitoringInstanceLabels) != 1 {
+		t.Fatalf("len(MonitoringInstanceLabels) = %d, want 1", len(got.OverrideRules.MonitoringInstanceLabels))
 	}
 	if len(seenArgs) != 11 {
 		t.Fatalf("len(args) = %d, want 11", len(seenArgs))
@@ -119,7 +119,7 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 	if got, ok := seenArgs[3].(bool); !ok || !got {
 		t.Fatalf("telegram_runtime_managed = %#v, want true", seenArgs[3])
 	}
-	assertJSONArgContains(t, seenArgs[9], `"node_labels":[{"label":"core"`)
+	assertJSONArgContains(t, seenArgs[9], `"monitoring_instance_labels":[{"label":"core"`)
 	assertJSONArgContains(t, seenArgs[10], `"raw_layer_days":14`)
 }
 

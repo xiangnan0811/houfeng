@@ -8,9 +8,9 @@ import (
 	"houfeng/internal/center/assetlinks"
 )
 
-func VPSNodes(repo assetlinks.Repository) http.Handler {
+func VPSMonitoringInstances(repo assetlinks.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "nodes")
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "monitoring-instances")
 		if !ok {
 			writeError(w, http.StatusNotFound, "vps asset not found")
 			return
@@ -20,7 +20,7 @@ func VPSNodes(repo assetlinks.Repository) http.Handler {
 			return
 		}
 
-		records, err := repo.ListNodesForVPS(r.Context(), vpsID)
+		records, err := repo.ListMonitoringInstancesForVPS(r.Context(), vpsID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -29,9 +29,9 @@ func VPSNodes(repo assetlinks.Repository) http.Handler {
 	})
 }
 
-func VPSLinkNode(repo assetlinks.Repository) http.Handler {
+func VPSLinkMonitoringInstance(repo assetlinks.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "link-node")
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "link-monitoring-instance")
 		if !ok {
 			writeError(w, http.StatusNotFound, "vps asset not found")
 			return
@@ -52,17 +52,17 @@ func VPSLinkNode(repo assetlinks.Repository) http.Handler {
 			return
 		}
 
-		record, err := repo.LinkNode(r.Context(), vpsID, input)
-		if errors.Is(err, assetlinks.ErrInvalidVPSNodeLinkInput) {
+		record, err := repo.LinkMonitoringInstance(r.Context(), vpsID, input)
+		if errors.Is(err, assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput) {
 			writeError(w, http.StatusBadRequest, "invalid input")
 			return
 		}
-		if errors.Is(err, assetlinks.ErrVPSNodeLinkNotFound) {
-			writeError(w, http.StatusNotFound, "vps or node not found")
+		if errors.Is(err, assetlinks.ErrVPSMonitoringInstanceLinkNotFound) {
+			writeError(w, http.StatusNotFound, "vps or monitoring instance not found")
 			return
 		}
-		if errors.Is(err, assetlinks.ErrVPSNodeLinkConflict) {
-			writeError(w, http.StatusConflict, "vps node link conflict")
+		if errors.Is(err, assetlinks.ErrVPSMonitoringInstanceLinkConflict) {
+			writeError(w, http.StatusConflict, "vps monitoring instance link conflict")
 			return
 		}
 		if err != nil {
@@ -73,9 +73,9 @@ func VPSLinkNode(repo assetlinks.Repository) http.Handler {
 	})
 }
 
-func VPSUnlinkNode(repo assetlinks.Repository) http.Handler {
+func VPSUnlinkMonitoringInstance(repo assetlinks.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "unlink-node")
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "unlink-monitoring-instance")
 		if !ok {
 			writeError(w, http.StatusNotFound, "vps asset not found")
 			return
@@ -96,13 +96,13 @@ func VPSUnlinkNode(repo assetlinks.Repository) http.Handler {
 			return
 		}
 
-		record, err := repo.UnlinkNode(r.Context(), vpsID, input)
-		if errors.Is(err, assetlinks.ErrInvalidVPSNodeLinkInput) {
+		record, err := repo.UnlinkMonitoringInstance(r.Context(), vpsID, input)
+		if errors.Is(err, assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput) {
 			writeError(w, http.StatusBadRequest, "invalid input")
 			return
 		}
-		if errors.Is(err, assetlinks.ErrVPSNodeLinkNotFound) {
-			writeError(w, http.StatusNotFound, "vps node link not found")
+		if errors.Is(err, assetlinks.ErrVPSMonitoringInstanceLinkNotFound) {
+			writeError(w, http.StatusNotFound, "vps monitoring instance link not found")
 			return
 		}
 		if err != nil {
@@ -113,11 +113,11 @@ func VPSUnlinkNode(repo assetlinks.Repository) http.Handler {
 	})
 }
 
-func NodeVPS(repo assetlinks.Repository) http.Handler {
+func MonitoringInstanceVPS(repo assetlinks.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nodeID, ok := parseNodeSubresourcePath(r.URL.Path, "vps")
+		monitoringInstanceID, ok := parseMonitoringInstanceSubresourcePath(r.URL.Path, "vps")
 		if !ok {
-			writeError(w, http.StatusNotFound, "node not found")
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -125,7 +125,7 @@ func NodeVPS(repo assetlinks.Repository) http.Handler {
 			return
 		}
 
-		records, err := repo.ListVPSForNode(r.Context(), nodeID)
+		records, err := repo.ListVPSForMonitoringInstance(r.Context(), monitoringInstanceID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -143,8 +143,8 @@ func parseVPSSubresourcePath(path, wantSubresource string) (string, bool) {
 	return segments[0], true
 }
 
-func parseNodeSubresourcePath(path, wantSubresource string) (string, bool) {
-	relative := strings.Trim(strings.TrimPrefix(path, "/api/nodes/"), "/")
+func parseMonitoringInstanceSubresourcePath(path, wantSubresource string) (string, bool) {
+	relative := strings.Trim(strings.TrimPrefix(path, "/api/monitoring-instances/"), "/")
 	segments := strings.Split(relative, "/")
 	if len(segments) != 2 || segments[0] == "" || segments[1] != wantSubresource {
 		return "", false

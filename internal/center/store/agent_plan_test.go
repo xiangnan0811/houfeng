@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/contracts/agentapi"
@@ -22,28 +22,28 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 	var seenLabels []string
 	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if sql != selectAgentPlanNodeLabelsSQL {
+			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
 			}
-			if args[0] != "nd_001" {
-				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected node id") }}
+			if args[0] != "mi_001" {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected monitoringInstance id") }}
 			}
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = []string{"edge", "核心"}
 				if len(dest) > 1 {
-					*(dest[1].(*string)) = nodes.LifecycleInUse
+					*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
 				}
 				if len(dest) > 2 {
-					*(dest[2].(*string)) = nodes.MonitoringEnabled
+					*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
 				}
 				if len(dest) > 3 {
 					*(dest[3].(*string)) = agentapi.FrequencyTier15m
 				}
 				if len(dest) > 4 {
 					*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
-						NodeLabels:   []centersettings.NodeLabelOverrideRule{},
-						TargetTypes:  []centersettings.TargetTypeOverrideRule{},
-						TargetLabels: []centersettings.TargetLabelOverrideRule{},
+						MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{},
+						TargetTypes:              []centersettings.TargetTypeOverrideRule{},
+						TargetLabels:             []centersettings.TargetLabelOverrideRule{},
 					})
 				}
 				if len(dest) > 5 {
@@ -88,7 +88,7 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 		},
 	}}
 
-	plan, err := repo.BuildSyncPlan(context.Background(), "nd_001")
+	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v", err)
 	}
@@ -131,26 +131,26 @@ func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
 
 	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if sql != selectAgentPlanNodeLabelsSQL {
+			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
 			}
-			if args[0] != "nd_001" {
-				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected node id") }}
+			if args[0] != "mi_001" {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected monitoringInstance id") }}
 			}
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = []string{"edge", "核心"}
 				if len(dest) > 1 {
-					*(dest[1].(*string)) = nodes.LifecycleInUse
+					*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
 				}
 				if len(dest) > 2 {
-					*(dest[2].(*string)) = nodes.MonitoringEnabled
+					*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
 				}
 				if len(dest) > 3 {
 					*(dest[3].(*string)) = agentapi.FrequencyTier15m
 				}
 				if len(dest) > 4 {
 					*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
-						NodeLabels: []centersettings.NodeLabelOverrideRule{{
+						MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{{
 							Label: "核心",
 							Overrides: centersettings.SettingsOverrideFields{
 								HostSampleFrequencyTier: &hostTier1m,
@@ -228,7 +228,7 @@ func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
 		},
 	}}
 
-	plan, err := repo.BuildSyncPlan(context.Background(), "nd_001")
+	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v", err)
 	}
@@ -252,25 +252,25 @@ func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
 
 	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if sql != selectAgentPlanNodeLabelsSQL {
+			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
 			}
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = []string{"edge", "核心"}
 				if len(dest) > 1 {
-					*(dest[1].(*string)) = nodes.LifecycleInUse
+					*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
 				}
 				if len(dest) > 2 {
-					*(dest[2].(*string)) = nodes.MonitoringEnabled
+					*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
 				}
 				if len(dest) > 3 {
 					*(dest[3].(*string)) = agentapi.FrequencyTier5m
 				}
 				if len(dest) > 4 {
 					*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
-						NodeLabels:   []centersettings.NodeLabelOverrideRule{},
-						TargetTypes:  []centersettings.TargetTypeOverrideRule{},
-						TargetLabels: []centersettings.TargetLabelOverrideRule{},
+						MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{},
+						TargetTypes:              []centersettings.TargetTypeOverrideRule{},
+						TargetLabels:             []centersettings.TargetLabelOverrideRule{},
 					})
 				}
 				if len(dest) > 5 {
@@ -307,7 +307,7 @@ func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
 		},
 	}}
 
-	plan, err := repo.BuildSyncPlan(context.Background(), "nd_001")
+	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v", err)
 	}
@@ -319,7 +319,7 @@ func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
 	}
 }
 
-func TestBuildSyncPlanReturnsNodeNotFound(t *testing.T) {
+func TestBuildSyncPlanReturnsMonitoringInstanceNotFound(t *testing.T) {
 	t.Parallel()
 
 	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
@@ -328,13 +328,13 @@ func TestBuildSyncPlanReturnsNodeNotFound(t *testing.T) {
 		},
 	}}
 
-	_, err := repo.BuildSyncPlan(context.Background(), "nd_missing")
-	if !errors.Is(err, nodes.ErrNodeNotFound) {
-		t.Fatalf("BuildSyncPlan() error = %v, want ErrNodeNotFound", err)
+	_, err := repo.BuildSyncPlan(context.Background(), "mi_missing")
+	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+		t.Fatalf("BuildSyncPlan() error = %v, want ErrMonitoringInstanceNotFound", err)
 	}
 }
 
-func TestBuildSyncPlanReturnsDefaultCadenceAndNoAssignmentsForLabelLessNode(t *testing.T) {
+func TestBuildSyncPlanReturnsDefaultCadenceAndNoAssignmentsForLabelLessMonitoringInstance(t *testing.T) {
 	t.Parallel()
 
 	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
@@ -342,17 +342,17 @@ func TestBuildSyncPlanReturnsDefaultCadenceAndNoAssignmentsForLabelLessNode(t *t
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = nil
 				if len(dest) > 1 {
-					*(dest[1].(*string)) = nodes.LifecycleInUse
+					*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
 				}
 				if len(dest) > 2 {
-					*(dest[2].(*string)) = nodes.MonitoringEnabled
+					*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
 				}
 				return nil
 			}}
 		},
 	}}
 
-	plan, err := repo.BuildSyncPlan(context.Background(), "nd_001")
+	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v", err)
 	}
@@ -373,7 +373,7 @@ func TestBuildSyncPlanSQLIncludesEnabledAndLabelOverlapFilters(t *testing.T) {
 	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "p.enabled = true") {
 		t.Fatalf("selectAgentPlanAssignmentsSQL = %q, want enabled filter", selectAgentPlanAssignmentsSQL)
 	}
-	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "t.execution_node_labels && $2") {
+	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "t.execution_monitoring_instance_labels && $2") {
 		t.Fatalf("selectAgentPlanAssignmentsSQL = %q, want label overlap filter", selectAgentPlanAssignmentsSQL)
 	}
 	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "t.run_status = any($1)") {
@@ -381,7 +381,7 @@ func TestBuildSyncPlanSQLIncludesEnabledAndLabelOverlapFilters(t *testing.T) {
 	}
 }
 
-func TestBuildSyncPlanSuppressesPausedAndRetiredNodes(t *testing.T) {
+func TestBuildSyncPlanSuppressesPausedAndRetiredMonitoringInstances(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
@@ -390,14 +390,14 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredNodes(t *testing.T) {
 		monitoringStatus string
 	}{
 		{
-			name:             "paused node",
-			lifecycleStatus:  nodes.LifecycleInUse,
-			monitoringStatus: nodes.MonitoringPaused,
+			name:             "paused monitoringInstance",
+			lifecycleStatus:  monitoringinstances.LifecycleInUse,
+			monitoringStatus: monitoringinstances.MonitoringPaused,
 		},
 		{
-			name:             "retired node",
-			lifecycleStatus:  nodes.LifecycleRetired,
-			monitoringStatus: nodes.MonitoringEnabled,
+			name:             "retired monitoringInstance",
+			lifecycleStatus:  monitoringinstances.LifecycleRetired,
+			monitoringStatus: monitoringinstances.MonitoringEnabled,
 		},
 	}
 
@@ -409,11 +409,11 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredNodes(t *testing.T) {
 			queryCalled := false
 			repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
 				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-					if sql != selectAgentPlanNodeLabelsSQL {
+					if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 						return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
 					}
-					if args[0] != "nd_001" {
-						return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected node id") }}
+					if args[0] != "mi_001" {
+						return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected monitoringInstance id") }}
 					}
 					return fakeAgentPlanRow{scan: func(dest ...any) error {
 						*(dest[0].(*[]string)) = []string{"edge"}
@@ -431,7 +431,7 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredNodes(t *testing.T) {
 				},
 			}}
 
-			plan, err := repo.BuildSyncPlan(context.Background(), "nd_001")
+			plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 			if err != nil {
 				t.Fatalf("BuildSyncPlan() error = %v", err)
 			}
@@ -445,27 +445,27 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredNodes(t *testing.T) {
 				t.Fatalf("len(ProbeAssignments) = %d, want 0", len(plan.ProbeAssignments))
 			}
 			if queryCalled {
-				t.Fatal("assignment query ran for suppressed node")
+				t.Fatal("assignment query ran for suppressed monitoringInstance")
 			}
 		})
 	}
 }
 
-func TestBuildSyncPlanMarksNodeMaintenanceContext(t *testing.T) {
+func TestBuildSyncPlanMarksMonitoringInstanceMaintenanceContext(t *testing.T) {
 	t.Parallel()
 
 	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if sql != selectAgentPlanNodeLabelsSQL {
+			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
 				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
 			}
-			if args[0] != "nd_001" {
-				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected node id") }}
+			if args[0] != "mi_001" {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected monitoringInstance id") }}
 			}
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = []string{"edge"}
-				*(dest[1].(*string)) = nodes.LifecycleInUse
-				*(dest[2].(*string)) = nodes.MonitoringMaintenance
+				*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
+				*(dest[2].(*string)) = monitoringinstances.MonitoringMaintenance
 				*(dest[3].(*string)) = agentapi.FrequencyTier15m
 				*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{})
 				*(dest[5].(*bool)) = true
@@ -510,7 +510,7 @@ func TestBuildSyncPlanMarksNodeMaintenanceContext(t *testing.T) {
 		},
 	}}
 
-	plan, err := repo.BuildSyncPlan(context.Background(), "nd_001")
+	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
 	if err != nil {
 		t.Fatalf("BuildSyncPlan() error = %v", err)
 	}

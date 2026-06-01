@@ -19,12 +19,12 @@ func TestPostgresSyncRepositoryRollsBackHeartbeatWhenObservationWriteFails(t *te
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus:      agentapi.BindingStatusBound,
-		nodeFingerprint:        "fp-001",
-		nodeSyncTokenHash:      hashSyncToken("sync-token-001"),
-		probeMetadataByItemID:  map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
-		execErrForSQLSubstring: "insert into probe_observations",
-		execErr:                errors.New("probe write boom"),
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+		execErrForSQLSubstring:          "insert into probe_observations",
+		execErr:                         errors.New("probe write boom"),
 	}
 	repo := &PostgresSyncRepository{
 		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
@@ -45,11 +45,11 @@ func TestPostgresSyncRepositoryRollsBackHeartbeatWhenObservationWriteFails(t *te
 	if tx.rollbackCalls == 0 {
 		t.Fatal("rollbackCalls = 0, want rollback on observation write failure")
 	}
-	if !containsSQL(tx.execSQL, "insert into node_heartbeats") {
+	if !containsSQL(tx.execSQL, "insert into monitoring_instance_heartbeats") {
 		t.Fatal("expected heartbeat insert before probe write failure")
 	}
-	if containsSQL(tx.execSQL, "update nodes") {
-		t.Fatal("node sync state should not update when probe write fails")
+	if containsSQL(tx.execSQL, "update monitoring_instances") {
+		t.Fatal("monitoringInstance sync state should not update when probe write fails")
 	}
 }
 
@@ -57,10 +57,10 @@ func TestPostgresSyncRepositoryRejectsProbeMetadataMismatchBeforeWritingBatch(t 
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus:     agentapi.BindingStatusBound,
-		nodeFingerprint:       "fp-001",
-		nodeSyncTokenHash:     hashSyncToken("sync-token-001"),
-		probeMetadataByItemID: map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_wrong", ProbeKind: agentapi.ProbeKindHTTP}},
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_wrong", ProbeKind: agentapi.ProbeKindHTTP}},
 	}
 	repo := &PostgresSyncRepository{
 		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
@@ -78,7 +78,7 @@ func TestPostgresSyncRepositoryRejectsProbeMetadataMismatchBeforeWritingBatch(t 
 	if tx.rollbackCalls == 0 {
 		t.Fatal("rollbackCalls = 0, want rollback on probe metadata mismatch")
 	}
-	if containsSQL(tx.execSQL, "insert into node_heartbeats") {
+	if containsSQL(tx.execSQL, "insert into monitoring_instance_heartbeats") {
 		t.Fatal("probe metadata mismatch should fail before writing heartbeats")
 	}
 }
@@ -87,10 +87,10 @@ func TestPostgresSyncRepositoryRejectsInvalidProbeObservationSemanticsBeforeWrit
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus:     agentapi.BindingStatusBound,
-		nodeFingerprint:       "fp-001",
-		nodeSyncTokenHash:     hashSyncToken("sync-token-001"),
-		probeMetadataByItemID: map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
 	}
 	repo := &PostgresSyncRepository{
 		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
@@ -111,7 +111,7 @@ func TestPostgresSyncRepositoryRejectsInvalidProbeObservationSemanticsBeforeWrit
 	if tx.rollbackCalls == 0 {
 		t.Fatal("rollbackCalls = 0, want rollback on invalid probe observation semantics")
 	}
-	if containsSQL(tx.execSQL, "insert into node_heartbeats") {
+	if containsSQL(tx.execSQL, "insert into monitoring_instance_heartbeats") {
 		t.Fatal("invalid probe observation semantics should fail before writing heartbeats")
 	}
 }
@@ -147,8 +147,8 @@ func TestPostgresSyncRepositoryRejectsObservationBatchWithoutHeartbeatCarrier(t 
 func testSyncBatch() syncing.Batch {
 	observedAt := time.Date(2026, time.April, 24, 8, 0, 0, 0, time.UTC)
 	return syncing.Batch{
-		NodeID:    "nd_001",
-		SyncToken: "sync-token-001",
+		MonitoringInstanceID: "mi_001",
+		SyncToken:            "sync-token-001",
 		Heartbeats: []syncing.HeartbeatPayload{{
 			ObservedAt:   observedAt,
 			AgentVersion: "agent/v0.1.0",
@@ -156,29 +156,29 @@ func testSyncBatch() syncing.Batch {
 			SyncBatchID:  "sync_001",
 		}},
 		Observations: observations.BatchWrite{
-			NodeID: "nd_001",
+			MonitoringInstanceID: "mi_001",
 			ProbeObservations: []observations.ProbeObservationWrite{{
-				NodeID:       "nd_001",
-				TargetID:     "tg_001",
-				ProbeItemID:  "pb_001",
-				ProbeKind:    agentapi.ProbeKindHTTP,
-				ObservedAt:   observedAt,
-				AgentVersion: "agent/v0.1.0",
-				Fingerprint:  "fp-001",
-				ResultKind:   agentapi.ProbeResultSuccess,
-				SyncBatchID:  "sync_001",
+				MonitoringInstanceID: "mi_001",
+				TargetID:             "tg_001",
+				ProbeItemID:          "pb_001",
+				ProbeKind:            agentapi.ProbeKindHTTP,
+				ObservedAt:           observedAt,
+				AgentVersion:         "agent/v0.1.0",
+				Fingerprint:          "fp-001",
+				ResultKind:           agentapi.ProbeResultSuccess,
+				SyncBatchID:          "sync_001",
 			}},
 		},
 	}
 }
 
 type fakeSyncBatchTx struct {
-	nodeBindingStatus string
-	nodeFingerprint   string
-	nodeSyncTokenHash string
-	nodeLabels        []string
-	pendingActionID   string
-	pendingCommandID  string
+	monitoringInstanceBindingStatus string
+	monitoringInstanceFingerprint   string
+	monitoringInstanceSyncTokenHash string
+	monitoringInstanceLabels        []string
+	pendingActionID                 string
+	pendingCommandID                string
 
 	probeMetadataByItemID map[string]observations.ProbeMetadata
 	probeMetadataErr      map[string]error
@@ -205,7 +205,7 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 		}
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
-	if strings.Contains(sql, "update nodes") {
+	if strings.Contains(sql, "update monitoring_instances") {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
 	return pgconn.CommandTag{}, nil
@@ -215,7 +215,7 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 	switch {
 	case strings.Contains(sql, "select labels"):
 		return fakeRow{scan: func(dest ...any) error {
-			*(dest[0].(*[]string)) = append([]string(nil), f.nodeLabels...)
+			*(dest[0].(*[]string)) = append([]string(nil), f.monitoringInstanceLabels...)
 			return nil
 		}}
 	case strings.Contains(sql, "pending_action_id"):
@@ -229,11 +229,11 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 			*(dest[1].(**string)) = &commandID
 			return nil
 		}}
-	case strings.Contains(sql, "from nodes"):
+	case strings.Contains(sql, "from monitoring_instances"):
 		return fakeRow{scan: func(dest ...any) error {
-			*(dest[0].(*string)) = f.nodeBindingStatus
-			*(dest[1].(*string)) = f.nodeFingerprint
-			*(dest[2].(*string)) = f.nodeSyncTokenHash
+			*(dest[0].(*string)) = f.monitoringInstanceBindingStatus
+			*(dest[1].(*string)) = f.monitoringInstanceFingerprint
+			*(dest[2].(*string)) = f.monitoringInstanceSyncTokenHash
 			return nil
 		}}
 	case strings.Contains(sql, "from probe_items"):
@@ -276,10 +276,10 @@ func TestPostgresSyncRepositoryPersistsBackfilledHeartbeatFlag(t *testing.T) {
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus: agentapi.BindingStatusBound,
-		nodeFingerprint:   "fp-001",
-		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
-		nodeLabels:        []string{"核心", "edge"},
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		monitoringInstanceLabels:        []string{"核心", "edge"},
 		probeMetadataByItemID: map[string]observations.ProbeMetadata{
 			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
 		},
@@ -312,7 +312,7 @@ func TestPostgresSyncRepositoryPersistsBackfilledHeartbeatFlag(t *testing.T) {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
-	heartbeatArgs := tx.argsForSQL("insert into node_heartbeats")
+	heartbeatArgs := tx.argsForSQL("insert into monitoring_instance_heartbeats")
 	if got, ok := heartbeatArgs[6].(bool); !ok || !got {
 		t.Fatalf("heartbeat is_backfilled arg = %#v, want true", heartbeatArgs[6])
 	}
@@ -322,10 +322,10 @@ func TestSyncBatchPlanReturnsAcceptedAtAndDerivedPlan(t *testing.T) {
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus: agentapi.BindingStatusBound,
-		nodeFingerprint:   "fp-001",
-		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
-		nodeLabels:        []string{"核心", "edge"},
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		monitoringInstanceLabels:        []string{"核心", "edge"},
 		probeMetadataByItemID: map[string]observations.ProbeMetadata{
 			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
 		},
@@ -376,11 +376,11 @@ func TestSyncBatchDispatchesPendingActionAsDurableLastAction(t *testing.T) {
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus: agentapi.BindingStatusBound,
-		nodeFingerprint:   "fp-001",
-		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
-		pendingActionID:   "act_001",
-		pendingCommandID:  "uptime",
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		pendingActionID:                 "act_001",
+		pendingCommandID:                "uptime",
 		probeMetadataByItemID: map[string]observations.ProbeMetadata{
 			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
 		},
@@ -404,7 +404,7 @@ func TestSyncBatchDispatchesPendingActionAsDurableLastAction(t *testing.T) {
 
 	args := tx.argsForSQL("pending_action_id = NULL")
 	if len(args) != 4 {
-		t.Fatalf("dispatch args = %#v, want node id, payload, action id, command id", args)
+		t.Fatalf("dispatch args = %#v, want monitoringInstance id, payload, action id, command id", args)
 	}
 	payload, ok := args[1].([]byte)
 	if !ok {
@@ -424,9 +424,9 @@ func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus: agentapi.BindingStatusBound,
-		nodeFingerprint:   "fp-001",
-		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
 		probeMetadataByItemID: map[string]observations.ProbeMetadata{
 			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
 		},
@@ -451,7 +451,7 @@ func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
 
 	args := tx.argsForSQL("last_action->>'status'")
 	if len(args) != 5 {
-		t.Fatalf("result args = %#v, want payload, node id, status, action id, command id", args)
+		t.Fatalf("result args = %#v, want payload, monitoringInstance id, status, action id, command id", args)
 	}
 	payload, ok := args[0].([]byte)
 	if !ok {
@@ -462,8 +462,8 @@ func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
 			t.Fatalf("result last_action = %s, missing %s", payload, want)
 		}
 	}
-	if args[1] != "nd_001" || args[2] != commandActionStatusPending || args[3] != "act_001" || args[4] != "uptime" {
-		t.Fatalf("result guard args = %#v, want node/status/action/command guard", args[1:5])
+	if args[1] != "mi_001" || args[2] != commandActionStatusPending || args[3] != "act_001" || args[4] != "uptime" {
+		t.Fatalf("result guard args = %#v, want monitoringInstance/status/action/command guard", args[1:5])
 	}
 }
 
@@ -472,10 +472,10 @@ func TestSyncBatchIgnoresMismatchedCommandResultRows(t *testing.T) {
 
 	zeroRows := 0
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus:         agentapi.BindingStatusBound,
-		nodeFingerprint:           "fp-001",
-		nodeSyncTokenHash:         hashSyncToken("sync-token-001"),
-		commandResultRowsAffected: &zeroRows,
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		commandResultRowsAffected:       &zeroRows,
 		probeMetadataByItemID: map[string]observations.ProbeMetadata{
 			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
 		},
@@ -506,11 +506,11 @@ func TestSyncBatchStoresCommandResultBeforeDispatchingQueuedAction(t *testing.T)
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
-		nodeBindingStatus: agentapi.BindingStatusBound,
-		nodeFingerprint:   "fp-001",
-		nodeSyncTokenHash: hashSyncToken("sync-token-001"),
-		pendingActionID:   "act_next",
-		pendingCommandID:  "df_h",
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		pendingActionID:                 "act_next",
+		pendingCommandID:                "df_h",
 		probeMetadataByItemID: map[string]observations.ProbeMetadata{
 			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
 		},

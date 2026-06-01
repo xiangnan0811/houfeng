@@ -41,10 +41,10 @@ func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(agentapi.EnrollmentResponse{
-			NodeID:        "nd-local-01",
-			BindingStatus: agentapi.BindingStatusPendingConfirmation,
-			Status:        "accepted",
-			SyncToken:     "sync-token-001",
+			MonitoringInstanceID: "nd-local-01",
+			BindingStatus:        agentapi.BindingStatusPendingConfirmation,
+			Status:               "accepted",
+			SyncToken:            "sync-token-001",
 		})
 	}))
 	defer ts.Close()
@@ -60,8 +60,8 @@ func TestClientEnrollReturnsDecodedPointer(t *testing.T) {
 	if response == nil {
 		t.Fatal("Enroll() response = nil, want non-nil")
 	}
-	if response.NodeID != "nd-local-01" {
-		t.Fatalf("NodeID = %q, want %q", response.NodeID, "nd-local-01")
+	if response.MonitoringInstanceID != "nd-local-01" {
+		t.Fatalf("MonitoringInstanceID = %q, want %q", response.MonitoringInstanceID, "nd-local-01")
 	}
 	if response.BindingStatus != agentapi.BindingStatusPendingConfirmation {
 		t.Fatalf("BindingStatus = %q, want %q", response.BindingStatus, agentapi.BindingStatusPendingConfirmation)
@@ -140,7 +140,7 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 	defer ts.Close()
 
 	client := enroll.NewClient(ts.URL)
-	response, err := client.Sync(context.Background(), agentapi.SyncRequest{NodeID: "nd-local-01", SyncToken: "sync-token-001"})
+	response, err := client.Sync(context.Background(), agentapi.SyncRequest{MonitoringInstanceID: "nd-local-01", SyncToken: "sync-token-001"})
 	if err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}

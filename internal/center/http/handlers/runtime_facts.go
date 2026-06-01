@@ -6,21 +6,21 @@ import (
 	"strings"
 	"time"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/targets"
 )
 
-func NodeRuntimeFacts(repo runtimefacts.Repository) http.Handler {
+func MonitoringInstanceRuntimeFacts(repo runtimefacts.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
-		nodeID, ok := nodeRuntimeFactsPath(r.URL.Path)
+		monitoringInstanceID, ok := monitoringInstanceRuntimeFactsPath(r.URL.Path)
 		if !ok {
-			writeError(w, http.StatusNotFound, "node not found")
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
 
@@ -31,9 +31,9 @@ func NodeRuntimeFacts(repo runtimefacts.Repository) http.Handler {
 		}
 		since := time.Now().Add(-window)
 
-		record, err := repo.GetNodeRuntimeFacts(r.Context(), nodeID, since, limit)
-		if errors.Is(err, nodes.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "node not found")
+		record, err := repo.GetMonitoringInstanceRuntimeFacts(r.Context(), monitoringInstanceID, since, limit)
+		if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
 		if err != nil {
@@ -79,8 +79,8 @@ func TargetRuntimeFacts(repo runtimefacts.Repository) http.Handler {
 	})
 }
 
-func nodeRuntimeFactsPath(path string) (nodeID string, ok bool) {
-	segments := strings.Split(strings.Trim(strings.TrimPrefix(path, "/api/nodes/"), "/"), "/")
+func monitoringInstanceRuntimeFactsPath(path string) (monitoringInstanceID string, ok bool) {
+	segments := strings.Split(strings.Trim(strings.TrimPrefix(path, "/api/monitoring-instances/"), "/"), "/")
 	if len(segments) != 2 || segments[0] == "" || segments[1] != "runtime-facts" {
 		return "", false
 	}

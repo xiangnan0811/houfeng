@@ -103,15 +103,15 @@ func TestListTargetsHandlerReturnsJSON(t *testing.T) {
 	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
 	repo := &fakeTargetRepository{
 		listTargetsResult: []targets.TargetRecord{{
-			TargetID:            "tg_001",
-			Name:                "Blog",
-			TargetType:          "service",
-			Host:                "blog.example.com",
-			ExecutionNodeLabels: []string{"edge"},
-			RunStatus:           targets.RunStatusEnabled,
-			CurrentHealthStatus: targets.HealthNormal,
-			CreatedAt:           now,
-			UpdatedAt:           now,
+			TargetID:                          "tg_001",
+			Name:                              "Blog",
+			TargetType:                        "service",
+			Host:                              "blog.example.com",
+			ExecutionMonitoringInstanceLabels: []string{"edge"},
+			RunStatus:                         targets.RunStatusEnabled,
+			CurrentHealthStatus:               targets.HealthNormal,
+			CreatedAt:                         now,
+			UpdatedAt:                         now,
 		}},
 	}
 
@@ -241,16 +241,16 @@ func TestTargetItemPatchMetadataReturnsUpdatedRecord(t *testing.T) {
 	expectedUpdatedAt := time.Date(2026, time.April, 27, 8, 55, 0, 123000000, time.UTC)
 	repo := &fakeTargetRepository{
 		updateTargetMetadataResult: targets.TargetRecord{
-			Name:                "Blog",
-			TargetType:          targets.TargetTypeService,
-			Host:                "blog.example.com",
-			ExecutionNodeLabels: []string{"edge"},
-			RunStatus:           targets.RunStatusEnabled,
-			Labels:              []string{"edge", "core"},
-			Note:                "updated",
-			CurrentHealthStatus: targets.HealthNormal,
-			CreatedAt:           now,
-			UpdatedAt:           now,
+			Name:                              "Blog",
+			TargetType:                        targets.TargetTypeService,
+			Host:                              "blog.example.com",
+			ExecutionMonitoringInstanceLabels: []string{"edge"},
+			RunStatus:                         targets.RunStatusEnabled,
+			Labels:                            []string{"edge", "core"},
+			Note:                              "updated",
+			CurrentHealthStatus:               targets.HealthNormal,
+			CreatedAt:                         now,
+			UpdatedAt:                         now,
 		},
 	}
 
@@ -361,17 +361,17 @@ func TestTargetItemMetadataValidationCountsUnicodeCharacters(t *testing.T) {
 	note := strings.Repeat("风", 2000)
 	repo := &fakeTargetRepository{
 		updateTargetMetadataResult: targets.TargetRecord{
-			TargetID:            "tg_001",
-			Name:                "Blog",
-			TargetType:          targets.TargetTypeService,
-			Host:                "blog.example.com",
-			ExecutionNodeLabels: []string{"edge"},
-			RunStatus:           targets.RunStatusEnabled,
-			Labels:              []string{label},
-			Note:                note,
-			CurrentHealthStatus: targets.HealthNormal,
-			CreatedAt:           now,
-			UpdatedAt:           now,
+			TargetID:                          "tg_001",
+			Name:                              "Blog",
+			TargetType:                        targets.TargetTypeService,
+			Host:                              "blog.example.com",
+			ExecutionMonitoringInstanceLabels: []string{"edge"},
+			RunStatus:                         targets.RunStatusEnabled,
+			Labels:                            []string{label},
+			Note:                              note,
+			CurrentHealthStatus:               targets.HealthNormal,
+			CreatedAt:                         now,
+			UpdatedAt:                         now,
 		},
 	}
 
@@ -431,11 +431,11 @@ func TestTargetItemMapsMetadataConflict(t *testing.T) {
 	}
 }
 
-func TestCreateTargetHandlerRejectsEmptyExecutionNodeLabels(t *testing.T) {
+func TestCreateTargetHandlerRejectsEmptyExecutionMonitoringInstanceLabels(t *testing.T) {
 	repo := &fakeTargetRepository{}
 
 	handler := handlers.TargetsCollection(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/targets", strings.NewReader(`{"name":"Blog","target_type":"service","host":"blog.example.com","execution_node_labels":[],"run_status":"启用","labels":[],"note":""}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/targets", strings.NewReader(`{"name":"Blog","target_type":"service","host":"blog.example.com","execution_monitoring_instance_labels":[],"run_status":"启用","labels":[],"note":""}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 

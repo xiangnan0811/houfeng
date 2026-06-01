@@ -10,7 +10,7 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-func EvaluateNodeHeartbeatMissing(previous *IncidentRecord, nodeID string, now time.Time, lastHeartbeatAt *time.Time, heartbeatInterval time.Duration) EvaluationResult {
+func EvaluateMonitoringInstanceHeartbeatMissing(previous *IncidentRecord, monitoringInstanceID string, now time.Time, lastHeartbeatAt *time.Time, heartbeatInterval time.Duration) EvaluationResult {
 	if lastHeartbeatAt == nil || heartbeatInterval <= 0 {
 		return noop(previous)
 	}
@@ -19,48 +19,48 @@ func EvaluateNodeHeartbeatMissing(previous *IncidentRecord, nodeID string, now t
 	if !active {
 		return recoverIfNeeded(previous, now, "心跳已恢复")
 	}
-	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeHeartbeatMissing, severity, now, summary)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceHeartbeatMissing, severity, now, summary)
 }
 
-func EvaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
+func EvaluateMonitoringInstanceDiskPressure(previous *IncidentRecord, monitoringInstanceID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
 	if sample == nil {
 		return noop(previous)
 	}
 	suppressed := sample.MaintenanceContext || sample.IsBackfilled
 	if suppressed {
-		result := evaluateNodeDiskPressure(previous, nodeID, sample, thresholds)
+		result := evaluateMonitoringInstanceDiskPressure(previous, monitoringInstanceID, sample, thresholds)
 		if result.Transition == TransitionRecovered {
 			return suppressNotification(result)
 		}
 		return skip(previous)
 	}
-	return evaluateNodeDiskPressure(previous, nodeID, sample, thresholds)
+	return evaluateMonitoringInstanceDiskPressure(previous, monitoringInstanceID, sample, thresholds)
 }
 
-func EvaluateNodeInodePressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
+func EvaluateMonitoringInstanceInodePressure(previous *IncidentRecord, monitoringInstanceID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
 	if sample == nil {
 		return noop(previous)
 	}
 	suppressed := sample.MaintenanceContext || sample.IsBackfilled
 	if suppressed {
-		result := evaluateNodeInodePressure(previous, nodeID, sample, thresholds)
+		result := evaluateMonitoringInstanceInodePressure(previous, monitoringInstanceID, sample, thresholds)
 		if result.Transition == TransitionRecovered {
 			return suppressNotification(result)
 		}
 		return skip(previous)
 	}
-	return evaluateNodeInodePressure(previous, nodeID, sample, thresholds)
+	return evaluateMonitoringInstanceInodePressure(previous, monitoringInstanceID, sample, thresholds)
 }
 
-func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, samples []NodeResourceSample, thresholds MetricThresholds) EvaluationResult {
-	samples = normalizeNodeResourceSamples(samples)
+func EvaluateMonitoringInstanceResourcePressure(previous *IncidentRecord, monitoringInstanceID string, samples []MonitoringInstanceResourceSample, thresholds MetricThresholds) EvaluationResult {
+	samples = normalizeMonitoringInstanceResourceSamples(samples)
 	if len(samples) == 0 {
 		return noop(previous)
 	}
 	suppressed := samples[0].MaintenanceContext || samples[0].IsBackfilled
 
 	referenceTime := samples[0].ObservedAt
-	activeSamples := unsuppressedNodeResourceSamples(samples)
+	activeSamples := unsuppressedMonitoringInstanceResourceSamples(samples)
 	window15 := nodeResourceSamplesWithin(activeSamples, referenceTime, 15*time.Minute)
 	window30 := nodeResourceSamplesWithin(activeSamples, referenceTime, 30*time.Minute)
 	severity, summary, active := resourcePressureSeverity(window15, window30, thresholds)
@@ -69,7 +69,7 @@ func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, sampl
 		if previous != nil && previous.Severity == SeverityCritical {
 			recoveryWindow = 30 * time.Minute
 		}
-		if previous != nil && !spansNodeResourceWindow(nodeResourceSamplesWithin(samples, referenceTime, recoveryWindow), recoveryWindow) {
+		if previous != nil && !spansMonitoringInstanceResourceWindow(nodeResourceSamplesWithin(samples, referenceTime, recoveryWindow), recoveryWindow) {
 			return noop(previous)
 		}
 		result := recoverIfNeeded(previous, referenceTime, "资源压力恢复到安全区间")
@@ -81,7 +81,7 @@ func EvaluateNodeResourcePressure(previous *IncidentRecord, nodeID string, sampl
 	if suppressed {
 		return skip(previous)
 	}
-	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeResourcePressure, severity, referenceTime, summary)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceResourcePressure, severity, referenceTime, summary)
 }
 
 func EvaluateTargetProbeFailure(previous *IncidentRecord, targetID string, recent []runtimefacts.ProbeObservation) EvaluationResult {
@@ -139,17 +139,17 @@ func EvaluateTargetTLSExpiry(previous *IncidentRecord, targetID string, recent [
 	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetTLSExpiry, severity, recent[0].ObservedAt, summary)
 }
 
-func EvaluateNodeTrendDegradation(previous *IncidentRecord, nodeID string, samples []NodeResourceSample, baselines []NodeHostDailyAggregate) EvaluationResult {
-	samples = normalizeNodeResourceSamples(samples)
+func EvaluateMonitoringInstanceTrendDegradation(previous *IncidentRecord, monitoringInstanceID string, samples []MonitoringInstanceResourceSample, baselines []MonitoringInstanceHostDailyAggregate) EvaluationResult {
+	samples = normalizeMonitoringInstanceResourceSamples(samples)
 	if len(samples) == 0 {
 		return noop(previous)
 	}
 	if samples[0].MaintenanceContext || samples[0].IsBackfilled {
 		return skip(previous)
 	}
-	usableCurrent := unsuppressedNodeResourceSamples(samples)
-	usableBaselines := usableNodeHostDailyAggregates(baselines)
-	if len(usableCurrent) < 3 || len(usableBaselines) == 0 || !spansNodeResourceWindow(usableCurrent, time.Second) {
+	usableCurrent := unsuppressedMonitoringInstanceResourceSamples(samples)
+	usableBaselines := usableMonitoringInstanceHostDailyAggregates(baselines)
+	if len(usableCurrent) < 3 || len(usableBaselines) == 0 || !spansMonitoringInstanceResourceWindow(usableCurrent, time.Second) {
 		if previous != nil {
 			return noop(previous)
 		}
@@ -157,10 +157,10 @@ func EvaluateNodeTrendDegradation(previous *IncidentRecord, nodeID string, sampl
 	}
 
 	referenceTime := usableCurrent[0].ObservedAt
-	loadBaseline, iowaitBaseline, stealBaseline := weightedNodeTrendBaselines(usableBaselines)
-	loadCurrent := averageNodeResourceMetric(usableCurrent, func(sample NodeResourceSample) float64 { return sample.NormalizedLoad5 })
-	iowaitCurrent := averageNodeResourceMetric(usableCurrent, func(sample NodeResourceSample) float64 { return sample.CPUIOWaitPct })
-	stealCurrent := averageNodeResourceMetric(usableCurrent, func(sample NodeResourceSample) float64 { return sample.CPUStealPct })
+	loadBaseline, iowaitBaseline, stealBaseline := weightedMonitoringInstanceTrendBaselines(usableBaselines)
+	loadCurrent := averageMonitoringInstanceResourceMetric(usableCurrent, func(sample MonitoringInstanceResourceSample) float64 { return sample.NormalizedLoad5 })
+	iowaitCurrent := averageMonitoringInstanceResourceMetric(usableCurrent, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUIOWaitPct })
+	stealCurrent := averageMonitoringInstanceResourceMetric(usableCurrent, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUStealPct })
 
 	degradedMetrics := make([]string, 0, 3)
 	if nodeTrendMetricDegraded(loadCurrent, loadBaseline, 1.6, 0.6) {
@@ -173,17 +173,17 @@ func EvaluateNodeTrendDegradation(previous *IncidentRecord, nodeID string, sampl
 		degradedMetrics = append(degradedMetrics, "steal")
 	}
 	if len(degradedMetrics) == 0 {
-		if previous != nil && !spansNodeResourceWindow(usableCurrent, 30*time.Minute) {
+		if previous != nil && !spansMonitoringInstanceResourceWindow(usableCurrent, 30*time.Minute) {
 			return noop(previous)
 		}
-		return recoverIfNeeded(previous, referenceTime, "节点趋势已恢复到安全区间")
+		return recoverIfNeeded(previous, referenceTime, "监控实例趋势已恢复到安全区间")
 	}
 
 	severity := SeverityNotice
 	if len(degradedMetrics) >= 2 {
 		severity = SeverityAlert
 	}
-	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeTrendDegradation, severity, referenceTime, fmt.Sprintf("节点趋势劣化：%s", joinMetricLabels(degradedMetrics)))
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceTrendDegradation, severity, referenceTime, fmt.Sprintf("监控实例趋势劣化：%s", joinMetricLabels(degradedMetrics)))
 }
 
 func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord, targetID string, observations []runtimefacts.ProbeObservation, baselines []TargetProbeDailyAggregate) EvaluationResult {
@@ -205,7 +205,7 @@ func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord,
 
 	referenceTime := observations[0].ObservedAt
 	degradedProbeItems := make([]string, 0)
-	degradedNodes := map[string]struct{}{}
+	degradedMonitoringInstances := map[string]struct{}{}
 	comparableSeries := 0
 	for probeItemID, currentSeries := range series {
 		baseline, ok := usableBaselines[probeItemID]
@@ -214,13 +214,13 @@ func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord,
 		}
 		comparableSeries++
 		currentAvg := averageProbeLatencyMS(currentSeries)
-		degradedNodesForProbe := degradedTargetLatencyNodes(currentSeries, baseline)
-		if !targetLatencySeriesDegraded(currentAvg, baseline) && len(degradedNodesForProbe) == 0 {
+		degradedMonitoringInstancesForProbe := degradedTargetLatencyMonitoringInstances(currentSeries, baseline)
+		if !targetLatencySeriesDegraded(currentAvg, baseline) && len(degradedMonitoringInstancesForProbe) == 0 {
 			continue
 		}
 		degradedProbeItems = append(degradedProbeItems, probeItemID)
-		for _, nodeID := range degradedNodesForProbe {
-			degradedNodes[nodeID] = struct{}{}
+		for _, monitoringInstanceID := range degradedMonitoringInstancesForProbe {
+			degradedMonitoringInstances[monitoringInstanceID] = struct{}{}
 		}
 	}
 	if comparableSeries == 0 {
@@ -234,7 +234,7 @@ func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord,
 	}
 
 	severity := SeverityNotice
-	if len(degradedProbeItems) >= 2 || len(degradedNodes) >= 2 {
+	if len(degradedProbeItems) >= 2 || len(degradedMonitoringInstances) >= 2 {
 		severity = SeverityAlert
 	}
 	sort.Strings(degradedProbeItems)
@@ -263,22 +263,22 @@ func suppressNotification(result EvaluationResult) EvaluationResult {
 	return result
 }
 
-func evaluateNodeDiskPressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
+func evaluateMonitoringInstanceDiskPressure(previous *IncidentRecord, monitoringInstanceID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
 	severity, active := fastThresholdSeverity(sample.DiskUsedPct, float64(thresholds.DiskWarningPct), float64(thresholds.DiskAlertPct), float64(thresholds.DiskCriticalPct))
 	if !active {
 		return recoverIfNeeded(previous, sample.ObservedAt, "磁盘使用率恢复到安全区间")
 	}
 	summary := fmt.Sprintf("磁盘使用率 %.1f%%", sample.DiskUsedPct)
-	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeDiskPressure, severity, sample.ObservedAt, summary)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceDiskPressure, severity, sample.ObservedAt, summary)
 }
 
-func evaluateNodeInodePressure(previous *IncidentRecord, nodeID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
+func evaluateMonitoringInstanceInodePressure(previous *IncidentRecord, monitoringInstanceID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
 	severity, active := fastThresholdSeverity(sample.InodeUsedPct, float64(thresholds.InodeWarningPct), float64(thresholds.InodeAlertPct), float64(thresholds.InodeCriticalPct))
 	if !active {
 		return recoverIfNeeded(previous, sample.ObservedAt, "inode 使用率恢复到安全区间")
 	}
 	summary := fmt.Sprintf("inode 使用率 %.1f%%", sample.InodeUsedPct)
-	return evaluateTransition(previous, ObjectTypeNode, nodeID, IncidentNodeInodePressure, severity, sample.ObservedAt, summary)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceInodePressure, severity, sample.ObservedAt, summary)
 }
 
 func recoverIfNeeded(previous *IncidentRecord, when time.Time, summary string) EvaluationResult {
@@ -385,25 +385,25 @@ func fastThresholdSeverity(value, notice, alert, critical float64) (Severity, bo
 	}
 }
 
-func resourcePressureSeverity(window15, window30 []NodeResourceSample, thresholds MetricThresholds) (Severity, string, bool) {
+func resourcePressureSeverity(window15, window30 []MonitoringInstanceResourceSample, thresholds MetricThresholds) (Severity, string, bool) {
 	if len(window15) == 0 {
 		return SeverityNormal, "", false
 	}
-	has15m := spansNodeResourceWindow(window15, 15*time.Minute)
-	has30m := spansNodeResourceWindow(window30, 30*time.Minute)
+	has15m := spansMonitoringInstanceResourceWindow(window15, 15*time.Minute)
+	has30m := spansMonitoringInstanceResourceWindow(window30, 30*time.Minute)
 
-	avg15CPU := averageNodeResourceMetric(window15, func(sample NodeResourceSample) float64 { return sample.CPUUsagePct })
-	avg15Load := averageNodeResourceMetric(window15, func(sample NodeResourceSample) float64 { return sample.NormalizedLoad5 })
-	avg15Mem := averageNodeResourceMetric(window15, func(sample NodeResourceSample) float64 { return sample.MemUsedPct })
-	avg15Swap := averageNodeResourceMetric(window15, func(sample NodeResourceSample) float64 { return sample.SwapUsedPct })
-	avg15Iowait := averageNodeResourceMetric(window15, func(sample NodeResourceSample) float64 { return sample.CPUIOWaitPct })
-	avg15Steal := averageNodeResourceMetric(window15, func(sample NodeResourceSample) float64 { return sample.CPUStealPct })
-	avg30CPU := averageNodeResourceMetric(window30, func(sample NodeResourceSample) float64 { return sample.CPUUsagePct })
-	avg30Load := averageNodeResourceMetric(window30, func(sample NodeResourceSample) float64 { return sample.NormalizedLoad5 })
-	avg30Mem := averageNodeResourceMetric(window30, func(sample NodeResourceSample) float64 { return sample.MemUsedPct })
-	avg30Iowait := averageNodeResourceMetric(window30, func(sample NodeResourceSample) float64 { return sample.CPUIOWaitPct })
-	avg30Steal := averageNodeResourceMetric(window30, func(sample NodeResourceSample) float64 { return sample.CPUStealPct })
-	min30MemAvailable := minimumNodeResourceMetric(window30, func(sample NodeResourceSample) float64 { return float64(sample.MemAvailableBytes) })
+	avg15CPU := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUUsagePct })
+	avg15Load := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.NormalizedLoad5 })
+	avg15Mem := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.MemUsedPct })
+	avg15Swap := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.SwapUsedPct })
+	avg15Iowait := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUIOWaitPct })
+	avg15Steal := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUStealPct })
+	avg30CPU := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUUsagePct })
+	avg30Load := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.NormalizedLoad5 })
+	avg30Mem := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.MemUsedPct })
+	avg30Iowait := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUIOWaitPct })
+	avg30Steal := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUStealPct })
+	min30MemAvailable := minimumMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return float64(sample.MemAvailableBytes) })
 
 	switch {
 	case has30m && avg30CPU >= float64(thresholds.CPUCriticalPct):
@@ -445,7 +445,7 @@ func probeFailureSeverity(failures []runtimefacts.ProbeObservation) (Severity, b
 	}
 	probeKind := failures[0].ProbeKind
 	failureCount := len(failures)
-	if probeKind == agentapi.ProbeKindTCP && uniqueNonEmptyNodeCount(failures) >= 2 {
+	if probeKind == agentapi.ProbeKindTCP && uniqueNonEmptyMonitoringInstanceCount(failures) >= 2 {
 		return SeverityCritical, true
 	}
 	if probeKind == agentapi.ProbeKindHTTP && uniqueNonEmptyProbeItemCount(failures) >= 2 {
@@ -505,13 +505,13 @@ func leadingUnsuppressedFailureObservations(observations []runtimefacts.ProbeObs
 	return window
 }
 
-func uniqueNonEmptyNodeCount(observations []runtimefacts.ProbeObservation) int {
+func uniqueNonEmptyMonitoringInstanceCount(observations []runtimefacts.ProbeObservation) int {
 	seen := map[string]struct{}{}
 	for _, observation := range observations {
-		if observation.NodeID == "" {
+		if observation.MonitoringInstanceID == "" {
 			continue
 		}
-		seen[observation.NodeID] = struct{}{}
+		seen[observation.MonitoringInstanceID] = struct{}{}
 	}
 	return len(seen)
 }
@@ -527,8 +527,8 @@ func uniqueNonEmptyProbeItemCount(observations []runtimefacts.ProbeObservation) 
 	return len(seen)
 }
 
-func unsuppressedNodeResourceSamples(samples []NodeResourceSample) []NodeResourceSample {
-	filtered := make([]NodeResourceSample, 0, len(samples))
+func unsuppressedMonitoringInstanceResourceSamples(samples []MonitoringInstanceResourceSample) []MonitoringInstanceResourceSample {
+	filtered := make([]MonitoringInstanceResourceSample, 0, len(samples))
 	for _, sample := range samples {
 		if sample.MaintenanceContext || sample.IsBackfilled {
 			continue
@@ -560,8 +560,8 @@ func normalizeProbeObservations(observations []runtimefacts.ProbeObservation) []
 	return filtered
 }
 
-func nodeResourceSamplesWithin(samples []NodeResourceSample, reference time.Time, window time.Duration) []NodeResourceSample {
-	out := make([]NodeResourceSample, 0, len(samples))
+func nodeResourceSamplesWithin(samples []MonitoringInstanceResourceSample, reference time.Time, window time.Duration) []MonitoringInstanceResourceSample {
+	out := make([]MonitoringInstanceResourceSample, 0, len(samples))
 	for _, sample := range samples {
 		if reference.Sub(sample.ObservedAt) <= window {
 			out = append(out, sample)
@@ -570,7 +570,7 @@ func nodeResourceSamplesWithin(samples []NodeResourceSample, reference time.Time
 	return out
 }
 
-func averageNodeResourceMetric(samples []NodeResourceSample, selector func(NodeResourceSample) float64) float64 {
+func averageMonitoringInstanceResourceMetric(samples []MonitoringInstanceResourceSample, selector func(MonitoringInstanceResourceSample) float64) float64 {
 	if len(samples) == 0 {
 		return 0
 	}
@@ -581,7 +581,7 @@ func averageNodeResourceMetric(samples []NodeResourceSample, selector func(NodeR
 	return total / float64(len(samples))
 }
 
-func minimumNodeResourceMetric(samples []NodeResourceSample, selector func(NodeResourceSample) float64) float64 {
+func minimumMonitoringInstanceResourceMetric(samples []MonitoringInstanceResourceSample, selector func(MonitoringInstanceResourceSample) float64) float64 {
 	if len(samples) == 0 {
 		return 0
 	}
@@ -595,8 +595,8 @@ func minimumNodeResourceMetric(samples []NodeResourceSample, selector func(NodeR
 	return minimum
 }
 
-func usableNodeHostDailyAggregates(baselines []NodeHostDailyAggregate) []NodeHostDailyAggregate {
-	usable := make([]NodeHostDailyAggregate, 0, len(baselines))
+func usableMonitoringInstanceHostDailyAggregates(baselines []MonitoringInstanceHostDailyAggregate) []MonitoringInstanceHostDailyAggregate {
+	usable := make([]MonitoringInstanceHostDailyAggregate, 0, len(baselines))
 	for _, baseline := range baselines {
 		usableSamples := baseline.SampleCount - baseline.BackfilledSampleCount - baseline.MaintenanceSampleCount
 		if usableSamples <= 0 {
@@ -607,7 +607,7 @@ func usableNodeHostDailyAggregates(baselines []NodeHostDailyAggregate) []NodeHos
 	return usable
 }
 
-func weightedNodeTrendBaselines(baselines []NodeHostDailyAggregate) (float64, float64, float64) {
+func weightedMonitoringInstanceTrendBaselines(baselines []MonitoringInstanceHostDailyAggregate) (float64, float64, float64) {
 	var totalWeight float64
 	var loadTotal float64
 	var iowaitTotal float64
@@ -671,26 +671,26 @@ func weightedTargetLatencyBaselines(baselines []TargetProbeDailyAggregate) map[s
 	return weighted
 }
 
-func degradedTargetLatencyNodes(observations []runtimefacts.ProbeObservation, baselineAvg float64) []string {
-	byNode := map[string][]runtimefacts.ProbeObservation{}
-	nodeIDs := make([]string, 0)
+func degradedTargetLatencyMonitoringInstances(observations []runtimefacts.ProbeObservation, baselineAvg float64) []string {
+	byMonitoringInstance := map[string][]runtimefacts.ProbeObservation{}
+	monitoringInstanceIDs := make([]string, 0)
 	for _, observation := range observations {
-		if observation.NodeID == "" {
+		if observation.MonitoringInstanceID == "" {
 			continue
 		}
-		if _, ok := byNode[observation.NodeID]; !ok {
-			nodeIDs = append(nodeIDs, observation.NodeID)
+		if _, ok := byMonitoringInstance[observation.MonitoringInstanceID]; !ok {
+			monitoringInstanceIDs = append(monitoringInstanceIDs, observation.MonitoringInstanceID)
 		}
-		byNode[observation.NodeID] = append(byNode[observation.NodeID], observation)
+		byMonitoringInstance[observation.MonitoringInstanceID] = append(byMonitoringInstance[observation.MonitoringInstanceID], observation)
 	}
-	degraded := make([]string, 0, len(nodeIDs))
-	for _, nodeID := range nodeIDs {
-		series := byNode[nodeID]
+	degraded := make([]string, 0, len(monitoringInstanceIDs))
+	for _, monitoringInstanceID := range monitoringInstanceIDs {
+		series := byMonitoringInstance[monitoringInstanceID]
 		if len(series) < 3 {
 			continue
 		}
 		if targetLatencySeriesDegraded(averageProbeLatencyMS(series), baselineAvg) {
-			degraded = append(degraded, nodeID)
+			degraded = append(degraded, monitoringInstanceID)
 		}
 	}
 	return degraded
@@ -766,7 +766,7 @@ func cloneIncident(record *IncidentRecord) *IncidentRecord {
 	return &clone
 }
 
-func spansNodeResourceWindow(samples []NodeResourceSample, window time.Duration) bool {
+func spansMonitoringInstanceResourceWindow(samples []MonitoringInstanceResourceSample, window time.Duration) bool {
 	if len(samples) == 0 {
 		return false
 	}
@@ -784,8 +784,8 @@ func spansProbeObservationWindow(observations []runtimefacts.ProbeObservation, w
 	return newest.Sub(oldest) >= window
 }
 
-func normalizeNodeResourceSamples(samples []NodeResourceSample) []NodeResourceSample {
-	filtered := make([]NodeResourceSample, 0, len(samples))
+func normalizeMonitoringInstanceResourceSamples(samples []MonitoringInstanceResourceSample) []MonitoringInstanceResourceSample {
+	filtered := make([]MonitoringInstanceResourceSample, 0, len(samples))
 	for _, sample := range samples {
 		filtered = append(filtered, sample)
 	}

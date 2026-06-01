@@ -10,25 +10,25 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// NodeSparklinesRepository provides downsampled metric time-series for all
-// active nodes, grouped by node_id. Each metric returns exactly downSample
+// MonitoringInstanceSparklinesRepository provides downsampled metric time-series for all
+// active monitoring instances, grouped by monitoring_instance_id. Each metric returns exactly downSample
 // bucket-level average values spanning the window [since, now].
-type NodeSparklinesRepository interface {
-	GetNodeSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]float64, error)
+type MonitoringInstanceSparklinesRepository interface {
+	GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]float64, error)
 }
 
 type sparklinesQueryer interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
-// PostgresNodeSparklinesRepository implements NodeSparklinesRepository against
+// PostgresMonitoringInstanceSparklinesRepository implements MonitoringInstanceSparklinesRepository against
 // the host_samples table.
-type PostgresNodeSparklinesRepository struct {
+type PostgresMonitoringInstanceSparklinesRepository struct {
 	db sparklinesQueryer
 }
 
-func NewPostgresNodeSparklinesRepository(db *pgxpool.Pool) *PostgresNodeSparklinesRepository {
-	return &PostgresNodeSparklinesRepository{db: db}
+func NewPostgresMonitoringInstanceSparklinesRepository(db *pgxpool.Pool) *PostgresMonitoringInstanceSparklinesRepository {
+	return &PostgresMonitoringInstanceSparklinesRepository{db: db}
 }
 
 // ValidSparklineMetrics contains every numeric column in host_samples that can
@@ -56,9 +56,9 @@ var ValidSparklineMetrics = map[string]bool{
 	"uptime_seconds":           true,
 }
 
-const getNodeSparklinesSQL = `
+const getMonitoringInstanceSparklinesSQL = `
 	select
-		node_id,
+		monitoring_instance_id,
 		observed_at,
 		cpu_usage_pct,
 		load_1,
@@ -81,14 +81,14 @@ const getNodeSparklinesSQL = `
 		uptime_seconds
 	from host_samples
 	where observed_at >= $1
-	order by node_id, observed_at asc`
+	order by monitoring_instance_id, observed_at asc`
 
-func (r *PostgresNodeSparklinesRepository) GetNodeSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]float64, error) {
+func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]float64, error) {
 	if downsample <= 0 {
 		return nil, fmt.Errorf("downsample must be positive, got %d", downsample)
 	}
 
-	rows, err := r.db.Query(ctx, getNodeSparklinesSQL, since)
+	rows, err := r.db.Query(ctx, getMonitoringInstanceSparklinesSQL, since)
 	if err != nil {
 		return nil, fmt.Errorf("query host_samples for sparklines: %w", err)
 	}
@@ -152,22 +152,22 @@ func (r *PostgresNodeSparklinesRepository) GetNodeSparklines(ctx context.Context
 		return map[string]map[string][]float64{}, nil
 	}
 
-	// Accumulators: per-node -> per-metric -> per-bucket -> (sum, count)
+	// Accumulators: per-monitoring instance -> per-metric -> per-bucket -> (sum, count)
 	type bucketAcc struct {
 		sum   float64
 		count int
 	}
 	type metricAcc map[string][]bucketAcc // metric name -> bucket slice
-	nodeAcc := make(map[string]metricAcc)
+	monitoringInstanceAcc := make(map[string]metricAcc)
 
 	for rows.Next() {
-		var nodeID string
+		var monitoringInstanceID string
 		var observedAt time.Time
 		// 19 numeric columns matching the SELECT order.
 		var vals [19]float64
 
 		if err := rows.Scan(
-			&nodeID,
+			&monitoringInstanceID,
 			&observedAt,
 			&vals[0],  // cpu_usage_pct
 			&vals[1],  // load_1
@@ -201,14 +201,14 @@ func (r *PostgresNodeSparklinesRepository) GetNodeSparklines(ctx context.Context
 			bucketIdx = downsample - 1
 		}
 
-		// Initialize per-node accumulator if needed.
-		ma, ok := nodeAcc[nodeID]
+		// Initialize per-monitoring instance accumulator if needed.
+		ma, ok := monitoringInstanceAcc[monitoringInstanceID]
 		if !ok {
 			ma = make(metricAcc, len(metrics))
 			for _, m := range metrics {
 				ma[m] = make([]bucketAcc, downsample)
 			}
-			nodeAcc[nodeID] = ma
+			monitoringInstanceAcc[monitoringInstanceID] = ma
 		}
 
 		// Accumulate each requested metric.
@@ -231,10 +231,10 @@ func (r *PostgresNodeSparklinesRepository) GetNodeSparklines(ctx context.Context
 		return nil, fmt.Errorf("iterate host_samples: %w", err)
 	}
 
-	// Build the result map. Nodes with no rows in the window are absent.
-	result := make(map[string]map[string][]float64, len(nodeAcc))
-	for nodeID, ma := range nodeAcc {
-		nodeResult := make(map[string][]float64, len(metrics))
+	// Build the result map. MonitoringInstances with no rows in the window are absent.
+	result := make(map[string]map[string][]float64, len(monitoringInstanceAcc))
+	for monitoringInstanceID, ma := range monitoringInstanceAcc {
+		monitoringInstanceResult := make(map[string][]float64, len(metrics))
 		for _, m := range metrics {
 			buckets := make([]float64, downsample)
 			acc := ma[m]
@@ -243,9 +243,9 @@ func (r *PostgresNodeSparklinesRepository) GetNodeSparklines(ctx context.Context
 					buckets[b] = math.Round(acc[b].sum/float64(acc[b].count)*10) / 10
 				}
 			}
-			nodeResult[m] = buckets
+			monitoringInstanceResult[m] = buckets
 		}
-		result[nodeID] = nodeResult
+		result[monitoringInstanceID] = monitoringInstanceResult
 	}
 
 	return result, nil

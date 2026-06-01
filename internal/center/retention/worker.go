@@ -89,12 +89,12 @@ func (w *Worker) runOnce(ctx context.Context) {
 
 	w.logger.Info(
 		"retention pass completed",
-		"node_aggregate_rows", result.NodeAggregateRows,
+		"monitoring_instance_aggregate_rows", result.MonitoringInstanceAggregateRows,
 		"target_aggregate_rows", result.TargetAggregateRows,
 		"deleted_heartbeats", result.DeletedHeartbeats,
 		"deleted_host_samples", result.DeletedHostSamples,
 		"deleted_probe_observations", result.DeletedProbeObservations,
-		"deleted_node_aggregates", result.DeletedNodeAggregates,
+		"deleted_monitoring_instance_aggregates", result.DeletedMonitoringInstanceAggregates,
 		"deleted_target_aggregates", result.DeletedTargetAggregates,
 		"deleted_events", result.DeletedEvents,
 		"deleted_notifications", result.DeletedNotifications,

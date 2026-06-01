@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 )
 
 var (
@@ -18,8 +18,8 @@ var (
 
 type Repository interface {
 	IssueEnrollmentToken(context.Context, string) (string, error)
-	ApplyEnrollment(context.Context, EnrollInput) (nodes.Record, string, error)
-	GetNode(context.Context, string) (nodes.Record, error)
+	ApplyEnrollment(context.Context, EnrollInput) (monitoringinstances.Record, string, error)
+	GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
 	RecordAcceptedHeartbeats(context.Context, string, []HeartbeatWrite) error
 }
 
@@ -36,23 +36,23 @@ func hashSyncToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *Service) IssueNodeEnrollmentToken(ctx context.Context, nodeID string) (string, error) {
-	return s.repo.IssueEnrollmentToken(ctx, nodeID)
+func (s *Service) IssueMonitoringInstanceEnrollmentToken(ctx context.Context, monitoringInstanceID string) (string, error) {
+	return s.repo.IssueEnrollmentToken(ctx, monitoringInstanceID)
 }
 
-func (s *Service) EnrollNode(ctx context.Context, input EnrollInput) (EnrollResult, error) {
+func (s *Service) EnrollMonitoringInstance(ctx context.Context, input EnrollInput) (EnrollResult, error) {
 	record, syncToken, err := s.repo.ApplyEnrollment(ctx, input)
 	if err != nil {
-		if errors.Is(err, nodes.ErrNodeNotFound) {
+		if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
 			return EnrollResult{}, ErrInvalidEnrollmentToken
 		}
 		return EnrollResult{}, err
 	}
 
 	return EnrollResult{
-		NodeID:        record.NodeID,
-		BindingStatus: record.BindingStatus,
-		SyncToken:     syncToken,
+		MonitoringInstanceID: record.MonitoringInstanceID,
+		BindingStatus:        record.BindingStatus,
+		SyncToken:            syncToken,
 	}, nil
 }
 
@@ -61,11 +61,11 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 		return ErrInvalidSyncToken
 	}
 
-	record, err := s.repo.GetNode(ctx, input.NodeID)
+	record, err := s.repo.GetMonitoringInstance(ctx, input.MonitoringInstanceID)
 	if err != nil {
 		return err
 	}
-	if record.BindingStatus != nodes.BindingBound {
+	if record.BindingStatus != monitoringinstances.BindingBound {
 		return ErrBindingNotAccepted
 	}
 	if record.SyncTokenHash == "" || record.SyncTokenHash != hashSyncToken(input.SyncToken) {
@@ -79,13 +79,13 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 			return ErrBindingNotAccepted
 		}
 		writes = append(writes, HeartbeatWrite{
-			NodeID:       input.NodeID,
-			ObservedAt:   heartbeat.ObservedAt,
-			ReceivedAt:   receivedAt,
-			AgentVersion: heartbeat.AgentVersion,
-			Fingerprint:  heartbeat.Fingerprint,
-			SyncBatchID:  heartbeat.SyncBatchID,
-			IsBackfilled: heartbeat.IsBackfilled,
+			MonitoringInstanceID: input.MonitoringInstanceID,
+			ObservedAt:           heartbeat.ObservedAt,
+			ReceivedAt:           receivedAt,
+			AgentVersion:         heartbeat.AgentVersion,
+			Fingerprint:          heartbeat.Fingerprint,
+			SyncBatchID:          heartbeat.SyncBatchID,
+			IsBackfilled:         heartbeat.IsBackfilled,
 		})
 	}
 

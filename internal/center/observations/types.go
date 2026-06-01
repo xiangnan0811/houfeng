@@ -7,7 +7,7 @@ import (
 )
 
 type HostSampleWrite struct {
-	NodeID               string
+	MonitoringInstanceID string
 	ObservedAt           time.Time
 	ReceivedAt           time.Time
 	AgentVersion         string
@@ -38,23 +38,23 @@ type HostSampleWrite struct {
 }
 
 type ProbeObservationWrite struct {
-	NodeID             string
-	TargetID           string
-	ProbeItemID        string
-	ProbeKind          string
-	ObservedAt         time.Time
-	ReceivedAt         time.Time
-	AgentVersion       string
-	Fingerprint        string
-	ResultKind         string
-	LatencyMS          *int
-	HTTPStatus         *int
-	TLSExpiryDays      *int
-	ErrorCode          string
-	ErrorSummary       string
-	MaintenanceContext bool
-	IsBackfilled       bool
-	SyncBatchID        string
+	MonitoringInstanceID string
+	TargetID             string
+	ProbeItemID          string
+	ProbeKind            string
+	ObservedAt           time.Time
+	ReceivedAt           time.Time
+	AgentVersion         string
+	Fingerprint          string
+	ResultKind           string
+	LatencyMS            *int
+	HTTPStatus           *int
+	TLSExpiryDays        *int
+	ErrorCode            string
+	ErrorSummary         string
+	MaintenanceContext   bool
+	IsBackfilled         bool
+	SyncBatchID          string
 }
 
 type ProbeMetadata struct {
@@ -63,7 +63,7 @@ type ProbeMetadata struct {
 }
 
 type BatchWrite struct {
-	NodeID            string
-	HostSamples       []HostSampleWrite
-	ProbeObservations []ProbeObservationWrite
+	MonitoringInstanceID string
+	HostSamples          []HostSampleWrite
+	ProbeObservations    []ProbeObservationWrite
 }

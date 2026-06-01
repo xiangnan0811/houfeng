@@ -17,15 +17,15 @@ type Policy struct {
 }
 
 type Result struct {
-	NodeAggregateRows        int64
-	TargetAggregateRows      int64
-	DeletedHeartbeats        int64
-	DeletedHostSamples       int64
-	DeletedProbeObservations int64
-	DeletedNodeAggregates    int64
-	DeletedTargetAggregates  int64
-	DeletedEvents            int64
-	DeletedNotifications     int64
+	MonitoringInstanceAggregateRows     int64
+	TargetAggregateRows                 int64
+	DeletedHeartbeats                   int64
+	DeletedHostSamples                  int64
+	DeletedProbeObservations            int64
+	DeletedMonitoringInstanceAggregates int64
+	DeletedTargetAggregates             int64
+	DeletedEvents                       int64
+	DeletedNotifications                int64
 }
 
 type Repository interface {

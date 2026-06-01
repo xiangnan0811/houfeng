@@ -64,8 +64,8 @@ const vpsAssetSelectColumns = `
 	importance,
 		labels,
 		note,
-		0::int as active_node_link_count,
-		0::int as running_node_count,
+		0::int as active_monitoring_instance_link_count,
+		0::int as running_monitoring_instance_count,
 		0::int as running_target_count,
 		created_at,
 		updated_at,
@@ -101,8 +101,8 @@ func scanVPSAsset(row vpsAssetScanner) (vpsassets.Record, error) {
 		&record.Importance,
 		&record.Labels,
 		&record.Note,
-		&record.ActiveNodeLinkCount,
-		&record.RunningNodeCount,
+		&record.ActiveMonitoringInstanceLinkCount,
+		&record.RunningMonitoringInstanceCount,
 		&record.RunningTargetCount,
 		&record.CreatedAt,
 		&record.UpdatedAt,
@@ -447,7 +447,7 @@ func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vps
 	if len(activeRecords) == 0 {
 		message := "缺少生效中的订阅记录，续费决策已保存但没有自动取消订阅自动续费。"
 		if len(records) > 0 {
-			message = "关联订阅已处于非活跃状态，续费决策已保存；仍需通过取消/退役工作台处理 VPS、节点与实例状态。"
+			message = "关联订阅已处于非活跃状态，续费决策已保存；仍需通过取消/退役工作台处理 VPS、监控实例与入口探测状态。"
 		}
 		return vpsassets.RenewalSubscriptionLinkage{
 			Status:         vpsassets.RenewalSubscriptionLinkageNoActiveSubscription,

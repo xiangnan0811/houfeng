@@ -8,7 +8,7 @@ import (
 )
 
 type HostSample struct {
-	NodeID               string                   `json:"node_id"`
+	MonitoringInstanceID string                   `json:"monitoring_instance_id"`
 	ObservedAt           time.Time                `json:"observed_at"`
 	ReceivedAt           time.Time                `json:"received_at"`
 	AgentVersion         string                   `json:"agent_version"`
@@ -39,29 +39,29 @@ type HostSample struct {
 }
 
 type ProbeObservation struct {
-	NodeID             string    `json:"node_id"`
-	TargetID           string    `json:"target_id"`
-	ProbeItemID        string    `json:"probe_item_id"`
-	ProbeKind          string    `json:"probe_kind"`
-	ObservedAt         time.Time `json:"observed_at"`
-	ReceivedAt         time.Time `json:"received_at"`
-	AgentVersion       string    `json:"agent_version"`
-	Fingerprint        string    `json:"fingerprint"`
-	ResultKind         string    `json:"result_kind"`
-	LatencyMS          *int      `json:"latency_ms"`
-	HTTPStatus         *int      `json:"http_status"`
-	TLSExpiryDays      *int      `json:"tls_expiry_days"`
-	ErrorCode          string    `json:"error_code,omitempty"`
-	ErrorSummary       string    `json:"error_summary,omitempty"`
-	MaintenanceContext bool      `json:"maintenance_context"`
-	IsBackfilled       bool      `json:"is_backfilled"`
-	SyncBatchID        string    `json:"sync_batch_id"`
+	MonitoringInstanceID string    `json:"monitoring_instance_id"`
+	TargetID             string    `json:"target_id"`
+	ProbeItemID          string    `json:"probe_item_id"`
+	ProbeKind            string    `json:"probe_kind"`
+	ObservedAt           time.Time `json:"observed_at"`
+	ReceivedAt           time.Time `json:"received_at"`
+	AgentVersion         string    `json:"agent_version"`
+	Fingerprint          string    `json:"fingerprint"`
+	ResultKind           string    `json:"result_kind"`
+	LatencyMS            *int      `json:"latency_ms"`
+	HTTPStatus           *int      `json:"http_status"`
+	TLSExpiryDays        *int      `json:"tls_expiry_days"`
+	ErrorCode            string    `json:"error_code,omitempty"`
+	ErrorSummary         string    `json:"error_summary,omitempty"`
+	MaintenanceContext   bool      `json:"maintenance_context"`
+	IsBackfilled         bool      `json:"is_backfilled"`
+	SyncBatchID          string    `json:"sync_batch_id"`
 }
 
-type NodeRuntimeFacts struct {
-	NodeID            string       `json:"node_id"`
-	LatestHostSample  *HostSample  `json:"latest_host_sample"`
-	RecentHostSamples []HostSample `json:"recent_host_samples"`
+type MonitoringInstanceRuntimeFacts struct {
+	MonitoringInstanceID string       `json:"monitoring_instance_id"`
+	LatestHostSample     *HostSample  `json:"latest_host_sample"`
+	RecentHostSamples    []HostSample `json:"recent_host_samples"`
 }
 
 type TargetRuntimeFacts struct {
@@ -71,6 +71,6 @@ type TargetRuntimeFacts struct {
 }
 
 type Repository interface {
-	GetNodeRuntimeFacts(context.Context, string, time.Time, int) (NodeRuntimeFacts, error)
+	GetMonitoringInstanceRuntimeFacts(context.Context, string, time.Time, int) (MonitoringInstanceRuntimeFacts, error)
 	GetTargetRuntimeFacts(context.Context, string, time.Time, int) (TargetRuntimeFacts, error)
 }

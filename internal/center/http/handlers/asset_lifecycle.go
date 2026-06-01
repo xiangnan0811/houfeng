@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"houfeng/internal/center/assetlifecycle"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
@@ -16,7 +16,7 @@ import (
 type AssetLifecycleRepository interface {
 	GetVPSCancellationPreview(context.Context, string) (assetlifecycle.CancellationPreview, error)
 	ApplyVPSCancellation(context.Context, string, assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionResult, error)
-	ListNodeAssetContexts(context.Context) ([]assetlifecycle.AssetContextForNode, error)
+	ListMonitoringInstanceAssetContexts(context.Context) ([]assetlifecycle.AssetContextForMonitoringInstance, error)
 	ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error)
 }
 
@@ -77,9 +77,9 @@ func VPSCancellation(repo AssetLifecycleRepository) http.Handler {
 	})
 }
 
-func AssetContextNodes(repo AssetLifecycleRepository) http.Handler {
+func AssetContextMonitoringInstances(repo AssetLifecycleRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Trim(r.URL.Path, "/") != "api/asset-context/nodes" {
+		if strings.Trim(r.URL.Path, "/") != "api/asset-context/monitoring-instances" {
 			writeError(w, http.StatusNotFound, "asset context not found")
 			return
 		}
@@ -88,7 +88,7 @@ func AssetContextNodes(repo AssetLifecycleRepository) http.Handler {
 			return
 		}
 
-		records, err := repo.ListNodeAssetContexts(r.Context())
+		records, err := repo.ListMonitoringInstanceAssetContexts(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -129,8 +129,8 @@ func writeAssetLifecycleError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusNotFound, "vps asset not found")
 	case errors.Is(err, subscriptions.ErrSubscriptionNotFound):
 		writeError(w, http.StatusNotFound, "subscription not found")
-	case errors.Is(err, nodes.ErrNodeNotFound):
-		writeError(w, http.StatusNotFound, "node not found")
+	case errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound):
+		writeError(w, http.StatusNotFound, "monitoring instance not found")
 	case errors.Is(err, targets.ErrTargetNotFound):
 		writeError(w, http.StatusNotFound, "target not found")
 	case errors.Is(err, vpsassets.ErrInvalidVPSAssetInput), errors.Is(err, subscriptions.ErrInvalidSubscriptionInput):

@@ -8,8 +8,8 @@ import (
 	"houfeng/internal/center/store"
 )
 
-// NodeSparklines returns an HTTP handler for GET /api/nodes/sparklines.
-func NodeSparklines(repo store.NodeSparklinesRepository) http.Handler {
+// MonitoringInstanceSparklines returns an HTTP handler for GET /api/monitoring-instances/sparklines.
+func MonitoringInstanceSparklines(repo store.MonitoringInstanceSparklinesRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -44,23 +44,23 @@ func NodeSparklines(repo store.NodeSparklinesRepository) http.Handler {
 
 		since := time.Now().Add(-window)
 
-		result, err := repo.GetNodeSparklines(r.Context(), metrics, since, downsample)
+		result, err := repo.GetMonitoringInstanceSparklines(r.Context(), metrics, since, downsample)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
-		// Ensure non-nil map for JSON "nodes": {}
+		// Ensure non-nil map for JSON "monitoring_instances": {}
 		if result == nil {
 			result = map[string]map[string][]float64{}
 		}
 
-		writeJSON(w, http.StatusOK, sparklinesResponse{Nodes: result})
+		writeJSON(w, http.StatusOK, sparklinesResponse{MonitoringInstances: result})
 	})
 }
 
 type sparklinesResponse struct {
-	Nodes map[string]map[string][]float64 `json:"nodes"`
+	MonitoringInstances map[string]map[string][]float64 `json:"monitoring_instances"`
 }
 
 // parseMetricList splits a comma-separated metrics string and validates each

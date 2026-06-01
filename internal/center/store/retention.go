@@ -46,7 +46,7 @@ func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy
 	notificationCutoff := now.UTC().AddDate(0, 0, -policy.NotificationLayerDays)
 
 	var result retention.Result
-	if result.NodeAggregateRows, err = execRows(ctx, tx, upsertNodeHostDailyAggregatesSQL, "upsert node host daily aggregates", stableBefore); err != nil {
+	if result.MonitoringInstanceAggregateRows, err = execRows(ctx, tx, upsertMonitoringInstanceHostDailyAggregatesSQL, "upsert monitoringInstance host daily aggregates", stableBefore); err != nil {
 		return retention.Result{}, err
 	}
 	if result.TargetAggregateRows, err = execRows(ctx, tx, upsertTargetProbeDailyAggregatesSQL, "upsert target probe daily aggregates", stableBefore); err != nil {
@@ -61,7 +61,7 @@ func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy
 	if result.DeletedProbeObservations, err = execRows(ctx, tx, deleteExpiredProbeObservationsSQL, "delete expired probe observations", rawCutoff); err != nil {
 		return retention.Result{}, err
 	}
-	if result.DeletedNodeAggregates, err = execRows(ctx, tx, deleteExpiredNodeAggregatesSQL, "delete expired node aggregates", aggregateCutoff); err != nil {
+	if result.DeletedMonitoringInstanceAggregates, err = execRows(ctx, tx, deleteExpiredMonitoringInstanceAggregatesSQL, "delete expired monitoringInstance aggregates", aggregateCutoff); err != nil {
 		return retention.Result{}, err
 	}
 	if result.DeletedTargetAggregates, err = execRows(ctx, tx, deleteExpiredTargetAggregatesSQL, "delete expired target aggregates", aggregateCutoff); err != nil {
@@ -94,9 +94,9 @@ func startOfUTCDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-const upsertNodeHostDailyAggregatesSQL = `
-	insert into node_host_sample_daily_aggregates (
-		node_id, bucket_date, sample_count,
+const upsertMonitoringInstanceHostDailyAggregatesSQL = `
+	insert into monitoring_instance_host_sample_daily_aggregates (
+		monitoring_instance_id, bucket_date, sample_count,
 		avg_cpu_usage_pct, max_cpu_usage_pct,
 		avg_load_5, max_load_5,
 		avg_mem_used_pct, max_mem_used_pct,
@@ -106,7 +106,7 @@ const upsertNodeHostDailyAggregatesSQL = `
 		backfilled_sample_count, maintenance_sample_count, updated_at
 	)
 	select
-		node_id,
+		monitoring_instance_id,
 		(observed_at at time zone 'UTC')::date as bucket_date,
 		count(*)::integer,
 		avg(cpu_usage_pct), max(cpu_usage_pct),
@@ -120,8 +120,8 @@ const upsertNodeHostDailyAggregatesSQL = `
 		now()
 	from host_samples
 	where observed_at < $1
-	group by node_id, (observed_at at time zone 'UTC')::date
-	on conflict (node_id, bucket_date) do update set
+	group by monitoring_instance_id, (observed_at at time zone 'UTC')::date
+	on conflict (monitoring_instance_id, bucket_date) do update set
 		sample_count = excluded.sample_count,
 		avg_cpu_usage_pct = excluded.avg_cpu_usage_pct,
 		max_cpu_usage_pct = excluded.max_cpu_usage_pct,
@@ -173,10 +173,10 @@ const upsertTargetProbeDailyAggregatesSQL = `
 		maintenance_observation_count = excluded.maintenance_observation_count,
 		updated_at = now()`
 
-const deleteExpiredHeartbeatsSQL = `delete from node_heartbeats where observed_at < $1`
+const deleteExpiredHeartbeatsSQL = `delete from monitoring_instance_heartbeats where observed_at < $1`
 const deleteExpiredHostSamplesSQL = `delete from host_samples where observed_at < $1`
 const deleteExpiredProbeObservationsSQL = `delete from probe_observations where observed_at < $1`
-const deleteExpiredNodeAggregatesSQL = `delete from node_host_sample_daily_aggregates where bucket_date < $1::date`
+const deleteExpiredMonitoringInstanceAggregatesSQL = `delete from monitoring_instance_host_sample_daily_aggregates where bucket_date < $1::date`
 const deleteExpiredTargetAggregatesSQL = `delete from target_probe_daily_aggregates where bucket_date < $1::date`
 const deleteExpiredEventsSQL = `delete from state_change_events where created_at < $1`
 const deleteExpiredNotificationsSQL = `delete from notification_records where created_at < $1`

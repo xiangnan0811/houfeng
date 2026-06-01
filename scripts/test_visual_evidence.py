@@ -59,7 +59,7 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
                 "--mock-api",
                 "observability-support",
                 "--route",
-                "/nodes",
+                "/monitoring",
             ]
         )
         self.assertEqual(args.mock_api, "observability-support")
@@ -71,16 +71,16 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
 
         status, dashboard = call_observability_api("/api/dashboard")
         self.assertEqual(status, 200)
-        self.assertGreaterEqual(dashboard["abnormal_node_count"], 2)
+        self.assertGreaterEqual(dashboard["abnormal_monitoring_instance_count"], 2)
         self.assertGreaterEqual(dashboard["abnormal_target_count"], 2)
 
-        status, nodes = call_observability_api("/api/nodes")
+        status, monitoring = call_observability_api("/api/monitoring-instances")
         self.assertEqual(status, 200)
-        node_ids = {node["node_id"] for node in nodes}
-        self.assertIn("node_hkg_edge_01", node_ids)
-        self.assertIn("node_pending_sfo_02", node_ids)
-        self.assertIn("node_ams_conflict_03", node_ids)
-        self.assertIn("node_fra_maint_04", node_ids)
+        monitoring_instance_ids = {monitoring_instance["monitoring_instance_id"] for monitoring_instance in monitoring}
+        self.assertIn("mi_hkg_edge_01", monitoring_instance_ids)
+        self.assertIn("mi_pending_sfo_02", monitoring_instance_ids)
+        self.assertIn("mi_ams_conflict_03", monitoring_instance_ids)
+        self.assertIn("mi_fra_maint_04", monitoring_instance_ids)
 
         status, targets = call_observability_api("/api/targets")
         self.assertEqual(status, 200)
@@ -90,15 +90,15 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertIn("target_legacy_archived", target_ids)
 
     def test_observability_profile_serves_sparklines(self) -> None:
-        status, node_sparklines = call_observability_api(
-            "/api/nodes/sparklines",
+        status, monitoring_instance_sparklines = call_observability_api(
+            "/api/monitoring-instances/sparklines",
             "metrics=cpu_usage_pct,mem_used_pct,disk_used_pct",
         )
         self.assertEqual(status, 200)
-        self.assertIn("node_hkg_edge_01", node_sparklines["nodes"])
+        self.assertIn("mi_hkg_edge_01", monitoring_instance_sparklines["monitoring_instances"])
         self.assertIn(
             "cpu_usage_pct",
-            node_sparklines["nodes"]["node_hkg_edge_01"],
+            monitoring_instance_sparklines["monitoring_instances"]["mi_hkg_edge_01"],
         )
 
         status, target_sparklines = call_observability_api("/api/targets/sparklines")
@@ -113,8 +113,8 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         status, default_events = call_observability_api("/api/events", "limit=100")
         self.assertEqual(status, 200)
         default_ids = {event["event_id"] for event in default_events["items"]}
-        self.assertIn("event_node_severe_started", default_ids)
-        self.assertNotIn("event_backfilled_node", default_ids)
+        self.assertIn("event_monitoring_instance_severe_started", default_ids)
+        self.assertNotIn("event_backfilled_monitoring_instance", default_ids)
 
         status, with_backfilled = call_observability_api(
             "/api/events",
@@ -122,7 +122,7 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         with_backfilled_ids = {event["event_id"] for event in with_backfilled["items"]}
-        self.assertIn("event_backfilled_node", with_backfilled_ids)
+        self.assertIn("event_backfilled_monitoring_instance", with_backfilled_ids)
 
         status, severe = call_observability_api("/api/events", "severity=%E4%B8%A5%E9%87%8D")
         self.assertEqual(status, 200)
@@ -167,16 +167,16 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         status, detail = call_asset_workflow_api("/api/vps/vps_fra_legacy")
         self.assertEqual(status, 200)
         self.assertEqual(detail["vps_id"], "vps_fra_legacy")
-        self.assertTrue(detail["node_links"])
+        self.assertTrue(detail["monitoring_instance_links"])
 
         status, preview = call_asset_workflow_api("/api/vps/vps_fra_legacy/cancellation-preview")
         self.assertEqual(status, 200)
         self.assertEqual(preview["vps"]["vps_id"], "vps_fra_legacy")
         self.assertTrue(preview["target_links"])
 
-        status, nodes = call_asset_workflow_api("/api/nodes")
+        status, monitoring = call_asset_workflow_api("/api/monitoring-instances")
         self.assertEqual(status, 200)
-        self.assertIn("node_hkg_edge_01", {node["node_id"] for node in nodes})
+        self.assertIn("mi_hkg_edge_01", {monitoring_instance["monitoring_instance_id"] for monitoring_instance in monitoring})
 
         status, targets = call_asset_workflow_api("/api/targets")
         self.assertEqual(status, 200)

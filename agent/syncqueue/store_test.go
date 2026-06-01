@@ -103,7 +103,7 @@ func TestFileStoreFallbackEntryIDUsesCurrentTime(t *testing.T) {
 		t.Fatalf("Enqueue(existing) error = %v", err)
 	}
 
-	fallbackID, err := store.Enqueue(ctx, agentapi.SyncRequest{NodeID: "nd_001", SyncToken: "sync-token-001"})
+	fallbackID, err := store.Enqueue(ctx, agentapi.SyncRequest{MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001"})
 	if err != nil {
 		t.Fatalf("Enqueue(fallback) error = %v", err)
 	}
@@ -120,11 +120,11 @@ func TestFileStoreFallbackEntryIDAddsSuffixOnCollision(t *testing.T) {
 	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
 	store.SetNowForTest(func() time.Time { return now })
 
-	firstID, err := store.Enqueue(ctx, agentapi.SyncRequest{NodeID: "nd_001", SyncToken: "sync-token-001"})
+	firstID, err := store.Enqueue(ctx, agentapi.SyncRequest{MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001"})
 	if err != nil {
 		t.Fatalf("first Enqueue() error = %v", err)
 	}
-	secondID, err := store.Enqueue(ctx, agentapi.SyncRequest{NodeID: "nd_001", SyncToken: "sync-token-001"})
+	secondID, err := store.Enqueue(ctx, agentapi.SyncRequest{MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001"})
 	if err != nil {
 		t.Fatalf("second Enqueue() error = %v", err)
 	}
@@ -317,9 +317,9 @@ func TestFileStorePrunesByMaxEntriesAndAge(t *testing.T) {
 func syncRequest(batchID string, backfilled bool) agentapi.SyncRequest {
 	observedAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
 	return agentapi.SyncRequest{
-		NodeID:    "nd_001",
-		SyncToken: "sync-token-001",
-		Heartbeats: []agentapi.NodeHeartbeat{{
+		MonitoringInstanceID: "mi_001",
+		SyncToken:            "sync-token-001",
+		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
 			ObservedAt:   observedAt,
 			AgentVersion: "dev",
 			Fingerprint:  "fp-001",

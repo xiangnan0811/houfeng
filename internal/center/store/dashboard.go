@@ -76,9 +76,9 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard asset summary: %w", err)
 	}
-	overview.AbnormalNodes, err = loadAbnormalNodeSummaries(ctx, r.db, limit)
+	overview.AbnormalMonitoringInstances, err = loadAbnormalMonitoringInstanceSummaries(ctx, r.db, limit)
 	if err != nil {
-		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard abnormal nodes: %w", err)
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard abnormal monitoring instances: %w", err)
 	}
 	overview.AbnormalTargets, err = loadAbnormalTargetSummaries(ctx, r.db, limit)
 	if err != nil {
@@ -108,10 +108,10 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 	return overview, nil
 }
 
-func loadAbnormalNodeSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardNodeSummary, error) {
+func loadAbnormalMonitoringInstanceSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardMonitoringInstanceSummary, error) {
 	rows, err := queryer.Query(ctx, `
 		select
-			node_id,
+			monitoring_instance_id,
 			display_name,
 			"group",
 			region,
@@ -123,7 +123,7 @@ func loadAbnormalNodeSummaries(ctx context.Context, queryer dashboardQueryer, li
 			last_heartbeat_at,
 			current_active_incident_count,
 			current_primary_issue_summary
-		from nodes
+		from monitoring_instances
 		where current_health_status <> '正常'
 		order by case current_health_status
 			when '严重' then 3
@@ -133,18 +133,18 @@ func loadAbnormalNodeSummaries(ctx context.Context, queryer dashboardQueryer, li
 		end desc,
 		current_active_incident_count desc,
 		updated_at desc,
-		node_id asc
+		monitoring_instance_id asc
 		limit $1`, limit)
 	if err != nil {
-		return nil, fmt.Errorf("query dashboard abnormal nodes: %w", err)
+		return nil, fmt.Errorf("query dashboard abnormal monitoring instances: %w", err)
 	}
 	defer rows.Close()
 
-	records := make([]incidents.DashboardNodeSummary, 0)
+	records := make([]incidents.DashboardMonitoringInstanceSummary, 0)
 	for rows.Next() {
-		var record incidents.DashboardNodeSummary
+		var record incidents.DashboardMonitoringInstanceSummary
 		if err := rows.Scan(
-			&record.NodeID,
+			&record.MonitoringInstanceID,
 			&record.DisplayName,
 			&record.Group,
 			&record.Region,
@@ -157,12 +157,12 @@ func loadAbnormalNodeSummaries(ctx context.Context, queryer dashboardQueryer, li
 			&record.CurrentActiveIncidentCount,
 			&record.CurrentPrimaryIssueSummary,
 		); err != nil {
-			return nil, fmt.Errorf("scan dashboard abnormal node row: %w", err)
+			return nil, fmt.Errorf("scan dashboard abnormal monitoring instance row: %w", err)
 		}
 		records = append(records, record)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate dashboard abnormal nodes: %w", err)
+		return nil, fmt.Errorf("iterate dashboard abnormal monitoring instances: %w", err)
 	}
 	return records, nil
 }
@@ -279,33 +279,33 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 	var overview incidents.DashboardOverview
 	if err := queryer.QueryRow(ctx, `
 		select
-			(select count(*)::int from nodes),
+			(select count(*)::int from monitoring_instances),
 			(select count(*)::int from targets),
-			(select count(*)::int from nodes where current_health_status <> '正常'),
+			(select count(*)::int from monitoring_instances where current_health_status <> '正常'),
 			(select count(*)::int from targets where current_health_status <> '正常'),
-			(select count(*)::int from nodes where current_health_status = '严重'),
+			(select count(*)::int from monitoring_instances where current_health_status = '严重'),
 			(select count(*)::int from targets where current_health_status = '严重'),
-			(select count(*)::int from nodes where monitoring_status = '维护中'),
+			(select count(*)::int from monitoring_instances where monitoring_status = '维护中'),
 			(select count(*)::int from targets where run_status = '维护中'),
-			(select count(*)::int from nodes where lifecycle_status = '待接入' or binding_status in ('未绑定', '指纹变更待确认')),
-			(select count(*)::int from nodes where monitoring_status = '暂停'),
-			(select count(*)::int from nodes where lifecycle_status = '已退役'),
+			(select count(*)::int from monitoring_instances where lifecycle_status = '待接入' or binding_status in ('未绑定', '指纹变更待确认')),
+			(select count(*)::int from monitoring_instances where monitoring_status = '暂停'),
+			(select count(*)::int from monitoring_instances where lifecycle_status = '已退役'),
 			(select count(*)::int from targets where run_status = '暂停'),
 			(select count(*)::int from targets where run_status = '已归档'),
 			(select count(*)::int from state_change_events where event_type = 'incident_started' and created_at >= now() - interval '24 hours'),
 			(select count(*)::int from state_change_events where event_type = 'incident_recovered' and created_at >= now() - interval '24 hours')
 	`).Scan(
-		&overview.TotalNodeCount,
+		&overview.TotalMonitoringInstanceCount,
 		&overview.TotalTargetCount,
-		&overview.AbnormalNodeCount,
+		&overview.AbnormalMonitoringInstanceCount,
 		&overview.AbnormalTargetCount,
-		&overview.SevereNodeCount,
+		&overview.SevereMonitoringInstanceCount,
 		&overview.SevereTargetCount,
-		&overview.MaintenanceNodeCount,
+		&overview.MaintenanceMonitoringInstanceCount,
 		&overview.MaintenanceTargetCount,
-		&overview.PendingOnboardingNodeCount,
-		&overview.PausedNodeCount,
-		&overview.RetiredNodeCount,
+		&overview.PendingOnboardingMonitoringInstanceCount,
+		&overview.PausedMonitoringInstanceCount,
+		&overview.RetiredMonitoringInstanceCount,
 		&overview.PausedTargetCount,
 		&overview.ArchivedTargetCount,
 		&overview.RecentNewIncidentCount,
@@ -318,14 +318,14 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 
 func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) ([]incidents.DashboardGroupSummary, error) {
 	rows, err := queryer.Query(ctx, `
-		with node_groups as (
+		with monitoring_instance_groups as (
 			select
 				coalesce(nullif(btrim("group"), ''), '未分组') as group_name,
-				count(*)::int as node_count,
-				(count(*) filter (where current_health_status <> '正常'))::int as abnormal_node_count,
-				(count(*) filter (where current_health_status = '严重'))::int as severe_node_count,
-				(count(*) filter (where monitoring_status = '维护中'))::int as maintenance_node_count
-			from nodes
+				count(*)::int as monitoring_instance_count,
+				(count(*) filter (where current_health_status <> '正常'))::int as abnormal_monitoring_instance_count,
+				(count(*) filter (where current_health_status = '严重'))::int as severe_monitoring_instance_count,
+				(count(*) filter (where monitoring_status = '维护中'))::int as maintenance_monitoring_instance_count
+			from monitoring_instances
 			group by 1
 		),
 		target_groups as (
@@ -340,20 +340,20 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 		)
 		select
 			coalesce(ng.group_name, tg.group_name) as group_name,
-			coalesce(ng.node_count, 0),
+			coalesce(ng.monitoring_instance_count, 0),
 			coalesce(tg.target_count, 0),
-			coalesce(ng.abnormal_node_count, 0),
+			coalesce(ng.abnormal_monitoring_instance_count, 0),
 			coalesce(tg.abnormal_target_count, 0),
-			coalesce(ng.severe_node_count, 0),
+			coalesce(ng.severe_monitoring_instance_count, 0),
 			coalesce(tg.severe_target_count, 0),
-			coalesce(ng.maintenance_node_count, 0),
+			coalesce(ng.maintenance_monitoring_instance_count, 0),
 			coalesce(tg.maintenance_target_count, 0)
-		from node_groups ng
+		from monitoring_instance_groups ng
 		full outer join target_groups tg on tg.group_name = ng.group_name
 		order by
-			(coalesce(ng.abnormal_node_count, 0) + coalesce(tg.abnormal_target_count, 0)) desc,
-			(coalesce(ng.severe_node_count, 0) + coalesce(tg.severe_target_count, 0)) desc,
-			(coalesce(ng.node_count, 0) + coalesce(tg.target_count, 0)) desc,
+			(coalesce(ng.abnormal_monitoring_instance_count, 0) + coalesce(tg.abnormal_target_count, 0)) desc,
+			(coalesce(ng.severe_monitoring_instance_count, 0) + coalesce(tg.severe_target_count, 0)) desc,
+			(coalesce(ng.monitoring_instance_count, 0) + coalesce(tg.target_count, 0)) desc,
 			group_name asc`)
 	if err != nil {
 		return nil, fmt.Errorf("query dashboard group summaries: %w", err)
@@ -365,13 +365,13 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 		var record incidents.DashboardGroupSummary
 		if err := rows.Scan(
 			&record.Group,
-			&record.NodeCount,
+			&record.MonitoringInstanceCount,
 			&record.TargetCount,
-			&record.AbnormalNodeCount,
+			&record.AbnormalMonitoringInstanceCount,
 			&record.AbnormalTargetCount,
-			&record.SevereNodeCount,
+			&record.SevereMonitoringInstanceCount,
 			&record.SevereTargetCount,
-			&record.MaintenanceNodeCount,
+			&record.MaintenanceMonitoringInstanceCount,
 			&record.MaintenanceTargetCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan dashboard group summary row: %w", err)
@@ -422,8 +422,8 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 			where lifecycle_status <> 'cancelled'
 		),
 		active_links as (
-			select distinct vps_id, node_id
-			from vps_node_links
+			select distinct vps_id, monitoring_instance_id
+			from vps_monitoring_instance_links
 			where unlinked_at is null
 		),
 		subscription_rollup as (
@@ -436,10 +436,10 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 			group by v.vps_id
 		),
 		cancelled_asset_runtime as (
-			select v.vps_id, l.node_id::text as object_id
+			select v.vps_id, l.monitoring_instance_id::text as object_id
 			from inventory_vps v
-			join vps_node_links l on l.vps_id = v.vps_id and l.unlinked_at is null
-			join nodes n on n.node_id = l.node_id
+			join vps_monitoring_instance_links l on l.vps_id = v.vps_id and l.unlinked_at is null
+			join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
 			where v.lifecycle_status in ('to_cancel', 'cancelled')
 			  and n.lifecycle_status not in ('不续费', '已退役')
 			union
@@ -488,7 +488,7 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 			(select count(distinct l.vps_id)::int
 				from active_links l
 				join active_vps v on v.vps_id = l.vps_id
-				join nodes n on n.node_id = l.node_id
+				join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
 				where n.current_health_status <> '正常')
 	`).Scan(
 		&summary.RenewalDue30dSubscriptionCount,
@@ -582,8 +582,8 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 		args = append(args, filter.Label)
 		labelArg := len(args)
 		conditions = append(conditions, fmt.Sprintf(`(
-			(e.object_type = 'node' and exists (
-				select 1 from nodes n where n.node_id = e.object_id and n.labels @> array[$%d]::text[]
+			(e.object_type = 'monitoring_instance' and exists (
+				select 1 from monitoring_instances n where n.monitoring_instance_id = e.object_id and n.labels @> array[$%d]::text[]
 			))
 			or
 			(e.object_type = 'target' and exists (
@@ -605,8 +605,8 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 	}
 	if filter.MaintenanceOnly {
 		conditions = append(conditions, fmt.Sprintf("e.event_type in ('%s', '%s', '%s', '%s')",
-			incidents.EventNodeMonitoringMaintenanceEntered,
-			incidents.EventNodeMonitoringMaintenanceExited,
+			incidents.EventMonitoringInstanceMonitoringMaintenanceEntered,
+			incidents.EventMonitoringInstanceMonitoringMaintenanceExited,
 			incidents.EventTargetMaintenanceEntered,
 			incidents.EventTargetMaintenanceExited,
 		))
@@ -672,18 +672,18 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 
 func backfilledEventConditionSQL() string {
 	return `(
-		(e.object_type = 'node' and (
+		(e.object_type = 'monitoring_instance' and (
 			exists (
 				select 1
-				from node_heartbeats nh
-				where nh.node_id = e.object_id
+				from monitoring_instance_heartbeats nh
+				where nh.monitoring_instance_id = e.object_id
 					and nh.is_backfilled
 					and nh.observed_at = e.created_at
 			)
 			or exists (
 				select 1
 				from host_samples hs
-				where hs.node_id = e.object_id
+				where hs.monitoring_instance_id = e.object_id
 					and hs.is_backfilled
 					and hs.observed_at = e.created_at
 			)

@@ -14,7 +14,7 @@ import (
 
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/incidents"
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 )
 
 func TestBindingTransitionStoresPendingFingerprintMetadataOnCollision(t *testing.T) {
@@ -22,13 +22,13 @@ func TestBindingTransitionStoresPendingFingerprintMetadataOnCollision(t *testing
 
 	now := time.Date(2026, time.April, 26, 7, 30, 0, 0, time.UTC)
 
-	record := resolveEnrollmentBindingTransition(nodes.Record{
-		BindingStatus:      nodes.BindingBound,
+	record := resolveEnrollmentBindingTransition(monitoringinstances.Record{
+		BindingStatus:      monitoringinstances.BindingBound,
 		BindingFingerprint: "fp-old",
 	}, "fp-new", now)
 
-	if record.BindingStatus != nodes.BindingPendingConfirmation {
-		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, nodes.BindingPendingConfirmation)
+	if record.BindingStatus != monitoringinstances.BindingPendingConfirmation {
+		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, monitoringinstances.BindingPendingConfirmation)
 	}
 	if record.BindingFingerprint != "fp-old" {
 		t.Fatalf("BindingFingerprint = %q, want %q", record.BindingFingerprint, "fp-old")
@@ -53,8 +53,8 @@ func TestBindingTransitionRefreshesPendingAttemptMetadata(t *testing.T) {
 	firstSeenAt := time.Date(2026, time.April, 26, 7, 0, 0, 0, time.UTC)
 	now := firstSeenAt.Add(30 * time.Minute)
 
-	record := resolveEnrollmentBindingTransition(nodes.Record{
-		BindingStatus:              nodes.BindingPendingConfirmation,
+	record := resolveEnrollmentBindingTransition(monitoringinstances.Record{
+		BindingStatus:              monitoringinstances.BindingPendingConfirmation,
 		BindingFingerprint:         "fp-active",
 		PendingBindingFingerprint:  "fp-pending",
 		PendingBindingFirstSeenAt:  &firstSeenAt,
@@ -62,8 +62,8 @@ func TestBindingTransitionRefreshesPendingAttemptMetadata(t *testing.T) {
 		PendingBindingAttemptCount: 2,
 	}, "fp-pending", now)
 
-	if record.BindingStatus != nodes.BindingPendingConfirmation {
-		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, nodes.BindingPendingConfirmation)
+	if record.BindingStatus != monitoringinstances.BindingPendingConfirmation {
+		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, monitoringinstances.BindingPendingConfirmation)
 	}
 	if record.PendingBindingFingerprint != "fp-pending" {
 		t.Fatalf("PendingBindingFingerprint = %q, want %q", record.PendingBindingFingerprint, "fp-pending")
@@ -84,60 +84,60 @@ func TestBindingTransitionStartsNewBindingEpochOnInitialBind(t *testing.T) {
 
 	now := time.Date(2026, time.April, 26, 7, 45, 0, 0, time.UTC)
 
-	record := resolveEnrollmentBindingTransition(nodes.Record{
-		BindingStatus: nodes.BindingUnbound,
+	record := resolveEnrollmentBindingTransition(monitoringinstances.Record{
+		BindingStatus: monitoringinstances.BindingUnbound,
 	}, "fp-new", now)
 
-	if record.BindingStatus != nodes.BindingBound {
-		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, nodes.BindingBound)
+	if record.BindingStatus != monitoringinstances.BindingBound {
+		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, monitoringinstances.BindingBound)
 	}
 	if record.BindingEpochStartedAt == nil || !record.BindingEpochStartedAt.Equal(now) {
 		t.Fatalf("BindingEpochStartedAt = %v, want %s", record.BindingEpochStartedAt, now.Format(time.RFC3339))
 	}
 }
 
-func TestNodeOnboardingPhaseDerivation(t *testing.T) {
+func TestMonitoringInstanceOnboardingPhaseDerivation(t *testing.T) {
 	t.Parallel()
 
 	heartbeatAt := time.Date(2026, time.April, 26, 8, 0, 0, 0, time.UTC)
 
 	tests := []struct {
 		name                   string
-		record                 nodes.Record
+		record                 monitoringinstances.Record
 		hasHostSample          bool
 		hasAcceptedObservation bool
 		want                   string
 	}{
 		{
-			name: "unbound nodes have not started onboarding",
-			record: nodes.Record{
-				BindingStatus: nodes.BindingUnbound,
+			name: "unbound monitoringInstances have not started onboarding",
+			record: monitoringinstances.Record{
+				BindingStatus: monitoringinstances.BindingUnbound,
 			},
-			want: nodes.OnboardingPhaseNotStarted,
+			want: monitoringinstances.OnboardingPhaseNotStarted,
 		},
 		{
-			name: "bound nodes without runtime facts await stable observation",
-			record: nodes.Record{
-				BindingStatus: nodes.BindingBound,
+			name: "bound monitoringInstances without runtime facts await stable observation",
+			record: monitoringinstances.Record{
+				BindingStatus: monitoringinstances.BindingBound,
 			},
-			want: nodes.OnboardingPhaseBoundAwaitingObservation,
+			want: monitoringinstances.OnboardingPhaseBoundAwaitingObservation,
 		},
 		{
-			name: "bound nodes with heartbeat and host sample are completed",
-			record: nodes.Record{
-				BindingStatus:   nodes.BindingBound,
+			name: "bound monitoringInstances with heartbeat and host sample are completed",
+			record: monitoringinstances.Record{
+				BindingStatus:   monitoringinstances.BindingBound,
 				LastHeartbeatAt: &heartbeatAt,
 			},
 			hasHostSample: true,
-			want:          nodes.OnboardingPhaseCompleted,
+			want:          monitoringinstances.OnboardingPhaseCompleted,
 		},
 		{
 			name: "pending confirmation surfaces binding conflict phase",
-			record: nodes.Record{
-				BindingStatus:             nodes.BindingPendingConfirmation,
+			record: monitoringinstances.Record{
+				BindingStatus:             monitoringinstances.BindingPendingConfirmation,
 				PendingBindingFingerprint: "fp-pending",
 			},
-			want: nodes.OnboardingPhaseBindingConflict,
+			want: monitoringinstances.OnboardingPhaseBindingConflict,
 		},
 	}
 
@@ -145,7 +145,7 @@ func TestNodeOnboardingPhaseDerivation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := nodes.DeriveOnboardingPhase(tt.record, tt.hasHostSample, tt.hasAcceptedObservation)
+			got := monitoringinstances.DeriveOnboardingPhase(tt.record, tt.hasHostSample, tt.hasAcceptedObservation)
 			if got != tt.want {
 				t.Fatalf("DeriveOnboardingPhase() = %q, want %q", got, tt.want)
 			}
@@ -153,7 +153,7 @@ func TestNodeOnboardingPhaseDerivation(t *testing.T) {
 	}
 }
 
-func TestNodeOnboardingMigrationAddsPersistenceColumns(t *testing.T) {
+func TestMonitoringInstanceOnboardingMigrationAddsPersistenceColumns(t *testing.T) {
 	t.Parallel()
 
 	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0004_add_node_onboarding_binding_state.sql"))
@@ -203,7 +203,7 @@ func TestSetPendingActionStoresDurablePendingLastAction(t *testing.T) {
 		execSQL  string
 		execArgs []any
 	)
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 			execSQL = sql
 			execArgs = append([]any(nil), args...)
@@ -211,7 +211,7 @@ func TestSetPendingActionStoresDurablePendingLastAction(t *testing.T) {
 		},
 	}}
 
-	if err := repo.SetPendingAction(context.Background(), "nd_001", "act_001", "uptime"); err != nil {
+	if err := repo.SetPendingAction(context.Background(), "mi_001", "act_001", "uptime"); err != nil {
 		t.Fatalf("SetPendingAction() error = %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestSetPendingActionStoresDurablePendingLastAction(t *testing.T) {
 		t.Fatalf("exec SQL = %q, want last_action write", execSQL)
 	}
 	if len(execArgs) != 4 {
-		t.Fatalf("exec args = %#v, want action id, command id, payload, node id", execArgs)
+		t.Fatalf("exec args = %#v, want action id, command id, payload, monitoringInstance id", execArgs)
 	}
 	raw, ok := execArgs[2].([]byte)
 	if !ok {
@@ -233,7 +233,7 @@ func TestSetPendingActionStoresDurablePendingLastAction(t *testing.T) {
 	}
 }
 
-func TestNodeBindingEpochMigrationAddsBoundaryColumn(t *testing.T) {
+func TestMonitoringInstanceBindingEpochMigrationAddsBoundaryColumn(t *testing.T) {
 	t.Parallel()
 
 	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0005_add_node_binding_epoch.sql"))
@@ -255,7 +255,7 @@ func TestNodeBindingEpochMigrationAddsBoundaryColumn(t *testing.T) {
 	}
 }
 
-func TestNodeOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testing.T) {
+func TestMonitoringInstanceOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testing.T) {
 	t.Parallel()
 
 	issuedAt := time.Date(2026, time.April, 26, 8, 15, 0, 0, time.UTC)
@@ -263,68 +263,68 @@ func TestNodeOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testing.T) {
 		gotSQL  string
 		gotArgs []any
 	)
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
 			gotArgs = append([]any(nil), args...)
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				*(dest[0].(*time.Time)) = issuedAt
 				return nil
 			}}
 		},
 	}}
 
-	result, err := repo.IssueNodeEnrollmentToken(context.Background(), "nd_001")
+	result, err := repo.IssueMonitoringInstanceEnrollmentToken(context.Background(), "mi_001")
 	if err != nil {
-		t.Fatalf("IssueNodeEnrollmentToken() error = %v", err)
+		t.Fatalf("IssueMonitoringInstanceEnrollmentToken() error = %v", err)
 	}
 
 	if result.Token == "" {
-		t.Fatal("IssueNodeEnrollmentToken().Token = empty, want generated plaintext token")
+		t.Fatal("IssueMonitoringInstanceEnrollmentToken().Token = empty, want generated plaintext token")
 	}
 	if !result.IssuedAt.Equal(issuedAt) {
-		t.Fatalf("IssueNodeEnrollmentToken().IssuedAt = %s, want %s", result.IssuedAt.Format(time.RFC3339), issuedAt.Format(time.RFC3339))
+		t.Fatalf("IssueMonitoringInstanceEnrollmentToken().IssuedAt = %s, want %s", result.IssuedAt.Format(time.RFC3339), issuedAt.Format(time.RFC3339))
 	}
-	wantExpiresAt := issuedAt.Add(nodes.EnrollmentTokenTTL)
+	wantExpiresAt := issuedAt.Add(monitoringinstances.EnrollmentTokenTTL)
 	if !result.ExpiresAt.Equal(wantExpiresAt) {
-		t.Fatalf("IssueNodeEnrollmentToken().ExpiresAt = %s, want %s", result.ExpiresAt.Format(time.RFC3339), wantExpiresAt.Format(time.RFC3339))
+		t.Fatalf("IssueMonitoringInstanceEnrollmentToken().ExpiresAt = %s, want %s", result.ExpiresAt.Format(time.RFC3339), wantExpiresAt.Format(time.RFC3339))
 	}
 	if len(gotArgs) != 2 {
 		t.Fatalf("len(gotArgs) = %d, want 2", len(gotArgs))
 	}
-	if gotArgs[0] != "nd_001" {
-		t.Fatalf("gotArgs[0] = %#v, want nd_001", gotArgs[0])
+	if gotArgs[0] != "mi_001" {
+		t.Fatalf("gotArgs[0] = %#v, want mi_001", gotArgs[0])
 	}
 	if gotArgs[1] != hashEnrollmentToken(result.Token) {
 		t.Fatalf("gotArgs[1] = %#v, want enrollment token hash", gotArgs[1])
 	}
 	if !strings.Contains(gotSQL, "enrollment_token_issued_at = now()") {
-		t.Fatalf("IssueNodeEnrollmentToken() SQL = %q, want enrollment_token_issued_at update", gotSQL)
+		t.Fatalf("IssueMonitoringInstanceEnrollmentToken() SQL = %q, want enrollment_token_issued_at update", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "enrollment_token_consumed_at = null") {
-		t.Fatalf("IssueNodeEnrollmentToken() SQL = %q, want consumed marker reset", gotSQL)
+		t.Fatalf("IssueMonitoringInstanceEnrollmentToken() SQL = %q, want consumed marker reset", gotSQL)
 	}
 }
 
-func TestFindNodeByEnrollmentTokenRequiresActiveUnexpiredToken(t *testing.T) {
+func TestFindMonitoringInstanceByEnrollmentTokenRequiresActiveUnexpiredToken(t *testing.T) {
 	t.Parallel()
 
 	var gotSQL string
 	var gotArgs []any
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
 			gotArgs = append([]any(nil), args...)
-			return fakeNodeRow{scan: func(dest ...any) error {
-				scanNodeRecordDestinations(dest, nodes.Record{NodeID: "nd_001"})
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{MonitoringInstanceID: "mi_001"})
 				return nil
 			}}
 		},
 	}}
 
-	_, err := repo.FindNodeByEnrollmentToken(context.Background(), "enroll_001")
+	_, err := repo.FindMonitoringInstanceByEnrollmentToken(context.Background(), "enroll_001")
 	if err != nil {
-		t.Fatalf("FindNodeByEnrollmentToken() error = %v", err)
+		t.Fatalf("FindMonitoringInstanceByEnrollmentToken() error = %v", err)
 	}
 	if len(gotArgs) != 1 || gotArgs[0] != hashEnrollmentToken("enroll_001") {
 		t.Fatalf("QueryRow args = %#v, want enrollment token hash only", gotArgs)
@@ -334,7 +334,7 @@ func TestFindNodeByEnrollmentTokenRequiresActiveUnexpiredToken(t *testing.T) {
 		"enrollment_token_issued_at >= now() - interval '30 minutes'",
 	} {
 		if !strings.Contains(gotSQL, snippet) {
-			t.Fatalf("FindNodeByEnrollmentToken() SQL = %q, missing %q", gotSQL, snippet)
+			t.Fatalf("FindMonitoringInstanceByEnrollmentToken() SQL = %q, missing %q", gotSQL, snippet)
 		}
 	}
 }
@@ -350,15 +350,15 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 		committed  bool
 		call       int
 	)
-	tx := &fakeNodeTx{
+	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			call++
 			if call == 1 {
 				selectSQL = sql
 				selectArgs = append([]any(nil), args...)
-				return fakeNodeRow{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "nd_001"
-					*(dest[1].(*string)) = nodes.BindingUnbound
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "mi_001"
+					*(dest[1].(*string)) = monitoringinstances.BindingUnbound
 					*(dest[2].(*string)) = ""
 					*(dest[3].(**time.Time)) = nil
 					*(dest[4].(*string)) = ""
@@ -370,11 +370,11 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 			}
 			updateSQL = sql
 			updateArgs = append([]any(nil), args...)
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				now := time.Date(2026, time.May, 15, 8, 0, 0, 0, time.UTC)
-				scanNodeRecordDestinations(dest, nodes.Record{
-					NodeID:                "nd_001",
-					BindingStatus:         nodes.BindingBound,
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+					MonitoringInstanceID:  "mi_001",
+					BindingStatus:         monitoringinstances.BindingBound,
 					BindingFingerprint:    "fp_001",
 					BindingEpochStartedAt: &now,
 				})
@@ -386,14 +386,14 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 			return nil
 		},
 	}
-	repo := &PostgresNodeRepository{db: fakeNodeDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
 
 	record, syncToken, err := repo.ApplyEnrollment(context.Background(), enrollment.EnrollInput{Token: "enroll_001", Fingerprint: "fp_001"})
 	if err != nil {
 		t.Fatalf("ApplyEnrollment() error = %v", err)
 	}
-	if record.NodeID != "nd_001" || record.BindingStatus != nodes.BindingBound {
-		t.Fatalf("record = %#v, want bound nd_001", record)
+	if record.MonitoringInstanceID != "mi_001" || record.BindingStatus != monitoringinstances.BindingBound {
+		t.Fatalf("record = %#v, want bound mi_001", record)
 	}
 	if syncToken == "" {
 		t.Fatal("syncToken = empty, want generated sync token for bound enrollment")
@@ -427,7 +427,7 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 	}
 }
 
-func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.T) {
+func TestMonitoringInstanceOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.T) {
 	t.Parallel()
 
 	issuedAt := time.Date(2026, time.April, 26, 8, 20, 0, 0, time.UTC)
@@ -436,19 +436,19 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 	heartbeatAt := issuedAt.Add(10 * time.Minute)
 	activeFingerprint := "sha256:curr1234567890abcdef"
 	var gotSQL string
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
-			if len(args) != 1 || args[0] != "nd_001" {
-				t.Fatalf("QueryRow args = %#v, want node id", args)
+			if len(args) != 1 || args[0] != "mi_001" {
+				t.Fatalf("QueryRow args = %#v, want monitoringInstance id", args)
 			}
-			return fakeNodeRow{scan: func(dest ...any) error {
-				scanNodeRecordDestinations(dest, nodes.Record{
-					NodeID:                     "nd_001",
-					DisplayName:                "Node 001",
-					LifecycleStatus:            nodes.LifecyclePendingEnrollment,
-					MonitoringStatus:           nodes.MonitoringEnabled,
-					BindingStatus:              nodes.BindingPendingConfirmation,
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+					MonitoringInstanceID:       "mi_001",
+					DisplayName:                "MonitoringInstance 001",
+					LifecycleStatus:            monitoringinstances.LifecyclePendingEnrollment,
+					MonitoringStatus:           monitoringinstances.MonitoringEnabled,
+					BindingStatus:              monitoringinstances.BindingPendingConfirmation,
 					BindingFingerprint:         activeFingerprint,
 					BindingEpochStartedAt:      &issuedAt,
 					PendingBindingFingerprint:  "fp-pending",
@@ -456,7 +456,7 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 					PendingBindingLastSeenAt:   &lastSeenAt,
 					PendingBindingAttemptCount: 4,
 					EnrollmentTokenIssuedAt:    &issuedAt,
-					CurrentHealthStatus:        nodes.HealthNormal,
+					CurrentHealthStatus:        monitoringinstances.HealthNormal,
 					LastHeartbeatAt:            &heartbeatAt,
 				})
 				*(dest[30].(*bool)) = true
@@ -466,13 +466,13 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 		},
 	}}
 
-	state, err := repo.GetNodeOnboarding(context.Background(), "nd_001")
+	state, err := repo.GetMonitoringInstanceOnboarding(context.Background(), "mi_001")
 	if err != nil {
-		t.Fatalf("GetNodeOnboarding() error = %v", err)
+		t.Fatalf("GetMonitoringInstanceOnboarding() error = %v", err)
 	}
 
-	if state.Phase != nodes.OnboardingPhaseBindingConflict {
-		t.Fatalf("Phase = %q, want %q", state.Phase, nodes.OnboardingPhaseBindingConflict)
+	if state.Phase != monitoringinstances.OnboardingPhaseBindingConflict {
+		t.Fatalf("Phase = %q, want %q", state.Phase, monitoringinstances.OnboardingPhaseBindingConflict)
 	}
 	if state.PendingBinding == nil {
 		t.Fatal("PendingBinding = nil, want metadata")
@@ -496,26 +496,26 @@ func TestNodeOnboardingGetStateReturnsDerivedPhaseAndPendingMetadata(t *testing.
 		t.Fatal("HasAcceptedObservation = true, want false")
 	}
 	if !strings.Contains(gotSQL, "pending_binding_fingerprint") {
-		t.Fatalf("GetNodeOnboarding() SQL = %q, want pending binding columns", gotSQL)
+		t.Fatalf("GetMonitoringInstanceOnboarding() SQL = %q, want pending binding columns", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "from host_samples hs") {
-		t.Fatalf("GetNodeOnboarding() SQL = %q, want host sample existence check", gotSQL)
+		t.Fatalf("GetMonitoringInstanceOnboarding() SQL = %q, want host sample existence check", gotSQL)
 	}
 }
 
-func TestNodeOnboardingGetStateScopesEvidenceToCurrentBindingGeneration(t *testing.T) {
+func TestMonitoringInstanceOnboardingGetStateScopesEvidenceToCurrentBindingGeneration(t *testing.T) {
 	t.Parallel()
 
 	staleHeartbeatAt := time.Date(2026, time.April, 26, 6, 0, 0, 0, time.UTC)
 	bindingEpochStartedAt := time.Date(2026, time.April, 26, 9, 0, 0, 0, time.UTC)
 	var gotSQL string
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
-			return fakeNodeRow{scan: func(dest ...any) error {
-				scanNodeRecordDestinations(dest, nodes.Record{
-					NodeID:                "nd_rebind",
-					BindingStatus:         nodes.BindingBound,
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+					MonitoringInstanceID:  "mi_rebind",
+					BindingStatus:         monitoringinstances.BindingBound,
 					BindingFingerprint:    "fp-current",
 					BindingEpochStartedAt: &bindingEpochStartedAt,
 					LastHeartbeatAt:       &staleHeartbeatAt,
@@ -527,29 +527,29 @@ func TestNodeOnboardingGetStateScopesEvidenceToCurrentBindingGeneration(t *testi
 		},
 	}}
 
-	state, err := repo.GetNodeOnboarding(context.Background(), "nd_rebind")
+	state, err := repo.GetMonitoringInstanceOnboarding(context.Background(), "mi_rebind")
 	if err != nil {
-		t.Fatalf("GetNodeOnboarding() error = %v", err)
+		t.Fatalf("GetMonitoringInstanceOnboarding() error = %v", err)
 	}
 
-	if state.Phase != nodes.OnboardingPhaseBoundAwaitingObservation {
-		t.Fatalf("Phase = %q, want %q", state.Phase, nodes.OnboardingPhaseBoundAwaitingObservation)
+	if state.Phase != monitoringinstances.OnboardingPhaseBoundAwaitingObservation {
+		t.Fatalf("Phase = %q, want %q", state.Phase, monitoringinstances.OnboardingPhaseBoundAwaitingObservation)
 	}
-	if !strings.Contains(gotSQL, "hs.fingerprint = nodes.binding_fingerprint") {
-		t.Fatalf("GetNodeOnboarding() SQL = %q, want host sample fingerprint scope", gotSQL)
+	if !strings.Contains(gotSQL, "hs.fingerprint = mi.binding_fingerprint") {
+		t.Fatalf("GetMonitoringInstanceOnboarding() SQL = %q, want host sample fingerprint scope", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "hs.received_at >= nodes.binding_epoch_started_at") {
-		t.Fatalf("GetNodeOnboarding() SQL = %q, want host sample binding epoch scope", gotSQL)
+	if !strings.Contains(gotSQL, "hs.received_at >= mi.binding_epoch_started_at") {
+		t.Fatalf("GetMonitoringInstanceOnboarding() SQL = %q, want host sample binding epoch scope", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "po.fingerprint = nodes.binding_fingerprint") {
-		t.Fatalf("GetNodeOnboarding() SQL = %q, want probe observation fingerprint scope", gotSQL)
+	if !strings.Contains(gotSQL, "po.fingerprint = mi.binding_fingerprint") {
+		t.Fatalf("GetMonitoringInstanceOnboarding() SQL = %q, want probe observation fingerprint scope", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "po.received_at >= nodes.binding_epoch_started_at") {
-		t.Fatalf("GetNodeOnboarding() SQL = %q, want probe observation binding epoch scope", gotSQL)
+	if !strings.Contains(gotSQL, "po.received_at >= mi.binding_epoch_started_at") {
+		t.Fatalf("GetMonitoringInstanceOnboarding() SQL = %q, want probe observation binding epoch scope", gotSQL)
 	}
 }
 
-func TestUpdateNodeMetadata(t *testing.T) {
+func TestUpdateMonitoringInstanceMetadata(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
@@ -558,23 +558,23 @@ func TestUpdateNodeMetadata(t *testing.T) {
 		gotSQL  string
 		gotArgs []any
 	)
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
 			gotArgs = append([]any(nil), args...)
-			return fakeNodeRow{scan: func(dest ...any) error {
-				scanNodeRecordDestinations(dest, nodes.Record{
-					NodeID:                     "nd_001",
-					DisplayName:                "Node 001",
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+					MonitoringInstanceID:       "mi_001",
+					DisplayName:                "MonitoringInstance 001",
 					Region:                     "ap-northeast-1",
 					City:                       "Tokyo",
 					Provider:                   "Vultr",
-					LifecycleStatus:            nodes.LifecyclePendingEnrollment,
-					MonitoringStatus:           nodes.MonitoringEnabled,
-					BindingStatus:              nodes.BindingUnbound,
+					LifecycleStatus:            monitoringinstances.LifecyclePendingEnrollment,
+					MonitoringStatus:           monitoringinstances.MonitoringEnabled,
+					BindingStatus:              monitoringinstances.BindingUnbound,
 					Labels:                     []string{"edge", "core"},
 					Note:                       "updated",
-					CurrentHealthStatus:        nodes.HealthNormal,
+					CurrentHealthStatus:        monitoringinstances.HealthNormal,
 					CurrentActiveIncidentCount: 2,
 					CurrentPrimaryIssueSummary: "packet loss",
 					CreatedAt:                  now.Add(-time.Hour),
@@ -585,20 +585,20 @@ func TestUpdateNodeMetadata(t *testing.T) {
 		},
 	}}
 
-	record, err := repo.UpdateNodeMetadata(context.Background(), "nd_001", nodes.UpdateMetadataInput{
+	record, err := repo.UpdateMonitoringInstanceMetadata(context.Background(), "mi_001", monitoringinstances.UpdateMetadataInput{
 		Labels:            []string{"edge", "core"},
 		Note:              "updated",
 		ExpectedUpdatedAt: &expectedUpdatedAt,
 	})
 	if err != nil {
-		t.Fatalf("UpdateNodeMetadata() error = %v", err)
+		t.Fatalf("UpdateMonitoringInstanceMetadata() error = %v", err)
 	}
 
 	if len(gotArgs) != 5 {
 		t.Fatalf("len(gotArgs) = %d, want 5", len(gotArgs))
 	}
-	if gotArgs[0] != "nd_001" {
-		t.Fatalf("gotArgs[0] = %#v, want %q", gotArgs[0], "nd_001")
+	if gotArgs[0] != "mi_001" {
+		t.Fatalf("gotArgs[0] = %#v, want %q", gotArgs[0], "mi_001")
 	}
 	if labels, ok := gotArgs[2].([]string); !ok || len(labels) != 2 || labels[0] != "edge" || labels[1] != "core" {
 		t.Fatalf("gotArgs[2] = %#v, want %#v", gotArgs[2], []string{"edge", "core"})
@@ -609,29 +609,29 @@ func TestUpdateNodeMetadata(t *testing.T) {
 	if gotUpdatedAt, ok := gotArgs[4].(time.Time); !ok || !gotUpdatedAt.Equal(expectedUpdatedAt) {
 		t.Fatalf("gotArgs[4] = %#v, want %s", gotArgs[4], expectedUpdatedAt.Format(time.RFC3339Nano))
 	}
-	if !strings.Contains(gotSQL, "update nodes") {
-		t.Fatalf("UpdateNodeMetadata() SQL = %q, want update nodes", gotSQL)
+	if !strings.Contains(gotSQL, "update monitoring_instances") {
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want update monitoring_instances", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "labels") {
-		t.Fatalf("UpdateNodeMetadata() SQL = %q, want labels update", gotSQL)
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want labels update", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "note") {
-		t.Fatalf("UpdateNodeMetadata() SQL = %q, want note update", gotSQL)
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want note update", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "updated_at = now()") {
-		t.Fatalf("UpdateNodeMetadata() SQL = %q, want updated_at refresh", gotSQL)
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want updated_at refresh", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "updated_at = $5") {
-		t.Fatalf("UpdateNodeMetadata() SQL = %q, want optimistic updated_at precondition", gotSQL)
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want optimistic updated_at precondition", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "returning "+nodeSelectColumns) {
-		t.Fatalf("UpdateNodeMetadata() SQL = %q, want returning nodeSelectColumns", gotSQL)
+	if !strings.Contains(gotSQL, "returning "+monitoringInstanceSelectColumns) {
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want returning monitoringInstanceSelectColumns", gotSQL)
 	}
-	if record.NodeID != "nd_001" {
-		t.Fatalf("record.NodeID = %q, want %q", record.NodeID, "nd_001")
+	if record.MonitoringInstanceID != "mi_001" {
+		t.Fatalf("record.MonitoringInstanceID = %q, want %q", record.MonitoringInstanceID, "mi_001")
 	}
-	if record.DisplayName != "Node 001" {
-		t.Fatalf("record.DisplayName = %q, want %q", record.DisplayName, "Node 001")
+	if record.DisplayName != "MonitoringInstance 001" {
+		t.Fatalf("record.DisplayName = %q, want %q", record.DisplayName, "MonitoringInstance 001")
 	}
 	if len(record.Labels) != 2 || record.Labels[0] != "edge" || record.Labels[1] != "core" {
 		t.Fatalf("record.Labels = %#v, want %#v", record.Labels, []string{"edge", "core"})
@@ -644,29 +644,29 @@ func TestUpdateNodeMetadata(t *testing.T) {
 	}
 }
 
-func TestUpdateNodeMetadataMapsNotFound(t *testing.T) {
+func TestUpdateMonitoringInstanceMetadataMapsNotFound(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(context.Context, string, ...any) pgx.Row {
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				return pgx.ErrNoRows
 			}}
 		},
 	}}
 
-	_, err := repo.UpdateNodeMetadata(context.Background(), "nd_missing", nodes.UpdateMetadataInput{})
-	if !errors.Is(err, nodes.ErrNodeNotFound) {
-		t.Fatalf("UpdateNodeMetadata() error = %v, want ErrNodeNotFound", err)
+	_, err := repo.UpdateMonitoringInstanceMetadata(context.Background(), "mi_missing", monitoringinstances.UpdateMetadataInput{})
+	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+		t.Fatalf("UpdateMonitoringInstanceMetadata() error = %v, want ErrMonitoringInstanceNotFound", err)
 	}
 }
 
-func TestUpdateNodeMetadataMapsPreconditionMissToConflictWhenNodeExists(t *testing.T) {
+func TestUpdateMonitoringInstanceMetadataMapsPreconditionMissToConflictWhenMonitoringInstanceExists(t *testing.T) {
 	t.Parallel()
 
 	expectedUpdatedAt := time.Date(2026, time.April, 27, 9, 55, 0, 0, time.UTC)
 	queryCount := 0
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			queryCount++
 			switch queryCount {
@@ -675,36 +675,36 @@ func TestUpdateNodeMetadataMapsPreconditionMissToConflictWhenNodeExists(t *testi
 					t.Fatalf("update SQL = %q, want updated_at precondition", sql)
 				}
 				if len(args) != 5 {
-					t.Fatalf("update args = %#v, want five args (node_id, group, labels, note, expected_updated_at)", args)
+					t.Fatalf("update args = %#v, want five args (monitoring_instance_id, group, labels, note, expected_updated_at)", args)
 				}
-				return fakeNodeRow{scan: func(dest ...any) error {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 					return pgx.ErrNoRows
 				}}
 			case 2:
-				if !strings.Contains(sql, "select exists") || !strings.Contains(sql, "from nodes") {
-					t.Fatalf("existence SQL = %q, want node existence check", sql)
+				if !strings.Contains(sql, "select exists") || !strings.Contains(sql, "from monitoring_instances") {
+					t.Fatalf("existence SQL = %q, want monitoringInstance existence check", sql)
 				}
-				if len(args) != 1 || args[0] != "nd_001" {
-					t.Fatalf("existence args = %#v, want node id", args)
+				if len(args) != 1 || args[0] != "mi_001" {
+					t.Fatalf("existence args = %#v, want monitoringInstance id", args)
 				}
-				return fakeNodeRow{scan: func(dest ...any) error {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 					*(dest[0].(*bool)) = true
 					return nil
 				}}
 			default:
 				t.Fatalf("unexpected QueryRow call %d", queryCount)
-				return fakeNodeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 			}
 		},
 	}}
 
-	_, err := repo.UpdateNodeMetadata(context.Background(), "nd_001", nodes.UpdateMetadataInput{
+	_, err := repo.UpdateMonitoringInstanceMetadata(context.Background(), "mi_001", monitoringinstances.UpdateMetadataInput{
 		Labels:            []string{"edge"},
 		Note:              "updated",
 		ExpectedUpdatedAt: &expectedUpdatedAt,
 	})
-	if !errors.Is(err, nodes.ErrNodeMetadataConflict) {
-		t.Fatalf("UpdateNodeMetadata() error = %v, want ErrNodeMetadataConflict", err)
+	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceMetadataConflict) {
+		t.Fatalf("UpdateMonitoringInstanceMetadata() error = %v, want ErrMonitoringInstanceMetadataConflict", err)
 	}
 	if queryCount != 2 {
 		t.Fatalf("QueryRow calls = %d, want 2", queryCount)
@@ -720,17 +720,17 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 		execArgs  []any
 		committed bool
 	)
-	tx := &fakeNodeTx{
+	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
-			if len(args) != 1 || args[0] != "nd_002" {
-				t.Fatalf("QueryRow args = %#v, want node id", args)
+			if len(args) != 1 || args[0] != "mi_002" {
+				t.Fatalf("QueryRow args = %#v, want monitoringInstance id", args)
 			}
-			return fakeNodeRow{scan: func(dest ...any) error {
-				scanNodeRecordDestinations(dest, nodes.Record{
-					NodeID:             "nd_002",
-					BindingStatus:      nodes.BindingBound,
-					BindingFingerprint: "fp-pending",
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+					MonitoringInstanceID: "mi_002",
+					BindingStatus:        monitoringinstances.BindingBound,
+					BindingFingerprint:   "fp-pending",
 				})
 				return nil
 			}}
@@ -745,17 +745,17 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 			return nil
 		},
 	}
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
 	}}
 
-	record, err := repo.ConfirmNodeRebind(context.Background(), "nd_002")
+	record, err := repo.ConfirmMonitoringInstanceRebind(context.Background(), "mi_002")
 	if err != nil {
-		t.Fatalf("ConfirmNodeRebind() error = %v", err)
+		t.Fatalf("ConfirmMonitoringInstanceRebind() error = %v", err)
 	}
 
-	if record.BindingStatus != nodes.BindingBound {
-		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, nodes.BindingBound)
+	if record.BindingStatus != monitoringinstances.BindingBound {
+		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, monitoringinstances.BindingBound)
 	}
 	if record.BindingFingerprint != "fp-pending" {
 		t.Fatalf("BindingFingerprint = %q, want %q", record.BindingFingerprint, "fp-pending")
@@ -773,23 +773,23 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 		"last_sync_at = null",
 	} {
 		if !strings.Contains(gotSQL, snippet) {
-			t.Fatalf("ConfirmNodeRebind() SQL missing %q", snippet)
+			t.Fatalf("ConfirmMonitoringInstanceRebind() SQL missing %q", snippet)
 		}
 	}
 	if !strings.Contains(execSQL, "insert into state_change_events") {
-		t.Fatalf("ConfirmNodeRebind() event SQL = %q, want state_change_events insert", execSQL)
+		t.Fatalf("ConfirmMonitoringInstanceRebind() event SQL = %q, want state_change_events insert", execSQL)
 	}
 	if len(execArgs) != 8 {
 		t.Fatalf("len(execArgs) = %d, want 8", len(execArgs))
 	}
-	if execArgs[1] != string(incidents.ObjectTypeNode) {
-		t.Fatalf("event object_type = %#v, want %q", execArgs[1], incidents.ObjectTypeNode)
+	if execArgs[1] != string(incidents.ObjectTypeMonitoringInstance) {
+		t.Fatalf("event object_type = %#v, want %q", execArgs[1], incidents.ObjectTypeMonitoringInstance)
 	}
-	if execArgs[2] != "nd_002" {
-		t.Fatalf("event object_id = %#v, want %q", execArgs[2], "nd_002")
+	if execArgs[2] != "mi_002" {
+		t.Fatalf("event object_id = %#v, want %q", execArgs[2], "mi_002")
 	}
-	if execArgs[3] != string(incidents.EventNodeBindingRebindConfirmed) {
-		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventNodeBindingRebindConfirmed)
+	if execArgs[3] != string(incidents.EventMonitoringInstanceBindingRebindConfirmed) {
+		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventMonitoringInstanceBindingRebindConfirmed)
 	}
 	if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, "确认") {
 		t.Fatalf("event summary = %#v, want confirm wording", execArgs[5])
@@ -803,49 +803,49 @@ func TestBindingConfirmRebindRejectsRetryWithoutPendingFingerprint(t *testing.T)
 	t.Parallel()
 
 	callCount := 0
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			callCount++
 			if callCount == 1 {
-				return fakeNodeRow{scan: func(dest ...any) error {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 					return pgx.ErrNoRows
 				}}
 			}
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				*(dest[0].(*bool)) = true
 				return nil
 			}}
 		},
 	}}
 
-	_, err := repo.ConfirmNodeRebind(context.Background(), "nd_retry")
-	if !errors.Is(err, nodes.ErrInvalidBindingTransition) {
-		t.Fatalf("ConfirmNodeRebind() error = %v, want ErrInvalidBindingTransition", err)
+	_, err := repo.ConfirmMonitoringInstanceRebind(context.Background(), "mi_retry")
+	if !errors.Is(err, monitoringinstances.ErrInvalidBindingTransition) {
+		t.Fatalf("ConfirmMonitoringInstanceRebind() error = %v, want ErrInvalidBindingTransition", err)
 	}
 }
 
-func TestBindingConfirmRebindReturnsNodeNotFoundWhenNodeIsMissing(t *testing.T) {
+func TestBindingConfirmRebindReturnsMonitoringInstanceNotFoundWhenMonitoringInstanceIsMissing(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			callCount++
 			if callCount == 1 {
-				return fakeNodeRow{scan: func(dest ...any) error {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 					return pgx.ErrNoRows
 				}}
 			}
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				*(dest[0].(*bool)) = false
 				return nil
 			}}
 		},
 	}}
 
-	_, err := repo.ConfirmNodeRebind(context.Background(), "nd_missing")
-	if !errors.Is(err, nodes.ErrNodeNotFound) {
-		t.Fatalf("ConfirmNodeRebind() error = %v, want ErrNodeNotFound", err)
+	_, err := repo.ConfirmMonitoringInstanceRebind(context.Background(), "mi_missing")
+	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+		t.Fatalf("ConfirmMonitoringInstanceRebind() error = %v, want ErrMonitoringInstanceNotFound", err)
 	}
 }
 
@@ -858,13 +858,13 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 		execArgs  []any
 		committed bool
 	)
-	tx := &fakeNodeTx{
+	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
-			return fakeNodeRow{scan: func(dest ...any) error {
-				scanNodeRecordDestinations(dest, nodes.Record{
-					NodeID:                     "nd_003",
-					BindingStatus:              nodes.BindingBound,
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+					MonitoringInstanceID:       "mi_003",
+					BindingStatus:              monitoringinstances.BindingBound,
 					BindingFingerprint:         "fp-active",
 					PendingBindingAttemptCount: 0,
 				})
@@ -881,11 +881,11 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 			return nil
 		},
 	}
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
 	}}
 
-	record, err := repo.RejectPendingFingerprint(context.Background(), "nd_003")
+	record, err := repo.RejectPendingFingerprint(context.Background(), "mi_003")
 	if err != nil {
 		t.Fatalf("RejectPendingFingerprint() error = %v", err)
 	}
@@ -907,8 +907,8 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 	if !strings.Contains(execSQL, "insert into state_change_events") {
 		t.Fatalf("RejectPendingFingerprint() event SQL = %q, want state_change_events insert", execSQL)
 	}
-	if execArgs[3] != string(incidents.EventNodeBindingPendingRejected) {
-		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventNodeBindingPendingRejected)
+	if execArgs[3] != string(incidents.EventMonitoringInstanceBindingPendingRejected) {
+		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventMonitoringInstanceBindingPendingRejected)
 	}
 	if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, "拒绝") {
 		t.Fatalf("event summary = %#v, want reject wording", execArgs[5])
@@ -922,49 +922,49 @@ func TestBindingRejectPendingRejectsWhenNoPendingFingerprintExists(t *testing.T)
 	t.Parallel()
 
 	callCount := 0
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			callCount++
 			if callCount == 1 {
-				return fakeNodeRow{scan: func(dest ...any) error {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 					return pgx.ErrNoRows
 				}}
 			}
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				*(dest[0].(*bool)) = true
 				return nil
 			}}
 		},
 	}}
 
-	_, err := repo.RejectPendingFingerprint(context.Background(), "nd_retry")
-	if !errors.Is(err, nodes.ErrInvalidBindingTransition) {
+	_, err := repo.RejectPendingFingerprint(context.Background(), "mi_retry")
+	if !errors.Is(err, monitoringinstances.ErrInvalidBindingTransition) {
 		t.Fatalf("RejectPendingFingerprint() error = %v, want ErrInvalidBindingTransition", err)
 	}
 }
 
-func TestBindingRejectPendingReturnsNodeNotFoundWhenNodeIsMissing(t *testing.T) {
+func TestBindingRejectPendingReturnsMonitoringInstanceNotFoundWhenMonitoringInstanceIsMissing(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			callCount++
 			if callCount == 1 {
-				return fakeNodeRow{scan: func(dest ...any) error {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 					return pgx.ErrNoRows
 				}}
 			}
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				*(dest[0].(*bool)) = false
 				return nil
 			}}
 		},
 	}}
 
-	_, err := repo.RejectPendingFingerprint(context.Background(), "nd_missing")
-	if !errors.Is(err, nodes.ErrNodeNotFound) {
-		t.Fatalf("RejectPendingFingerprint() error = %v, want ErrNodeNotFound", err)
+	_, err := repo.RejectPendingFingerprint(context.Background(), "mi_missing")
+	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+		t.Fatalf("RejectPendingFingerprint() error = %v, want ErrMonitoringInstanceNotFound", err)
 	}
 }
 
@@ -977,13 +977,13 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 		execArgs  []any
 		committed bool
 	)
-	tx := &fakeNodeTx{
+	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
-			return fakeNodeRow{scan: func(dest ...any) error {
-				scanNodeRecordDestinations(dest, nodes.Record{
-					NodeID:        "nd_004",
-					BindingStatus: nodes.BindingUnbound,
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+					MonitoringInstanceID: "mi_004",
+					BindingStatus:        monitoringinstances.BindingUnbound,
 				})
 				return nil
 			}}
@@ -998,17 +998,17 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 			return nil
 		},
 	}
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
 	}}
 
-	record, err := repo.ResetNodeBinding(context.Background(), "nd_004")
+	record, err := repo.ResetMonitoringInstanceBinding(context.Background(), "mi_004")
 	if err != nil {
-		t.Fatalf("ResetNodeBinding() error = %v", err)
+		t.Fatalf("ResetMonitoringInstanceBinding() error = %v", err)
 	}
 
-	if record.BindingStatus != nodes.BindingUnbound {
-		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, nodes.BindingUnbound)
+	if record.BindingStatus != monitoringinstances.BindingUnbound {
+		t.Fatalf("BindingStatus = %q, want %q", record.BindingStatus, monitoringinstances.BindingUnbound)
 	}
 	for _, snippet := range []string{
 		"binding_status = '未绑定'",
@@ -1021,14 +1021,14 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 		"last_sync_at = null",
 	} {
 		if !strings.Contains(gotSQL, snippet) {
-			t.Fatalf("ResetNodeBinding() SQL missing %q", snippet)
+			t.Fatalf("ResetMonitoringInstanceBinding() SQL missing %q", snippet)
 		}
 	}
 	if !strings.Contains(execSQL, "insert into state_change_events") {
-		t.Fatalf("ResetNodeBinding() event SQL = %q, want state_change_events insert", execSQL)
+		t.Fatalf("ResetMonitoringInstanceBinding() event SQL = %q, want state_change_events insert", execSQL)
 	}
-	if execArgs[3] != string(incidents.EventNodeBindingReset) {
-		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventNodeBindingReset)
+	if execArgs[3] != string(incidents.EventMonitoringInstanceBindingReset) {
+		t.Fatalf("event_type = %#v, want %q", execArgs[3], incidents.EventMonitoringInstanceBindingReset)
 	}
 	if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, "重置") {
 		t.Fatalf("event summary = %#v, want reset wording", execArgs[5])
@@ -1041,12 +1041,12 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 func TestApplyEnrollmentDoesNotAdvanceLastSyncAt(t *testing.T) {
 	t.Parallel()
 
-	source, err := os.ReadFile("nodes.go")
+	source, err := os.ReadFile("monitoring_instances.go")
 	if err != nil {
-		t.Fatalf("ReadFile(nodes.go) error = %v", err)
+		t.Fatalf("ReadFile(monitoring_instances.go) error = %v", err)
 	}
 
-	applyEnrollment := sourceBetween(t, string(source), "func (r *PostgresNodeRepository) ApplyEnrollment", "func (r *PostgresNodeRepository) RecordAcceptedHeartbeats")
+	applyEnrollment := sourceBetween(t, string(source), "func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment", "func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats")
 	if strings.Contains(applyEnrollment, "last_sync_at") {
 		t.Fatalf("ApplyEnrollment() unexpectedly updates last_sync_at:\n%s", applyEnrollment)
 	}
@@ -1057,7 +1057,7 @@ func TestApplyEnrollmentDoesNotAdvanceLastSyncAt(t *testing.T) {
 		t.Fatal("ApplyEnrollment() should persist binding_epoch_started_at with the current trust generation")
 	}
 
-	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresNodeRepository) RecordAcceptedHeartbeats", "")
+	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats", "")
 	if !strings.Contains(heartbeatPath, "last_sync_at = greatest(coalesce(last_sync_at, $3), $3)") {
 		t.Fatal("RecordAcceptedHeartbeats() should remain the path that advances last_sync_at")
 	}
@@ -1066,12 +1066,12 @@ func TestApplyEnrollmentDoesNotAdvanceLastSyncAt(t *testing.T) {
 func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) {
 	t.Parallel()
 
-	source, err := os.ReadFile("nodes.go")
+	source, err := os.ReadFile("monitoring_instances.go")
 	if err != nil {
-		t.Fatalf("ReadFile(nodes.go) error = %v", err)
+		t.Fatalf("ReadFile(monitoring_instances.go) error = %v", err)
 	}
 
-	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresNodeRepository) RecordAcceptedHeartbeats", "")
+	heartbeatPath := sourceBetween(t, string(source), "func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats", "")
 	if !strings.Contains(heartbeatPath, "coalesce(sync_token_hash, '')") {
 		t.Fatal("RecordAcceptedHeartbeats() should load sync_token_hash inside the heartbeat transaction")
 	}
@@ -1083,12 +1083,12 @@ func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) 
 	}
 }
 
-func TestNodeLifecycleTransitionsWriteEvents(t *testing.T) {
+func TestMonitoringInstanceLifecycleTransitionsWriteEvents(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name             string
-		method           func(*PostgresNodeRepository, context.Context, string) (nodes.Record, error)
+		method           func(*PostgresMonitoringInstanceRepository, context.Context, string) (monitoringinstances.Record, error)
 		initialLifecycle string
 		returnLifecycle  string
 		wantEventType    incidents.EventType
@@ -1097,20 +1097,20 @@ func TestNodeLifecycleTransitionsWriteEvents(t *testing.T) {
 	}{
 		{
 			name:             "retire",
-			method:           (*PostgresNodeRepository).RetireNode,
-			initialLifecycle: nodes.LifecycleInUse,
-			returnLifecycle:  nodes.LifecycleRetired,
-			wantEventType:    incidents.EventNodeRetired,
-			wantSummary:      "节点已退役并退出活跃舰队，历史记录保留",
+			method:           (*PostgresMonitoringInstanceRepository).RetireMonitoringInstance,
+			initialLifecycle: monitoringinstances.LifecycleInUse,
+			returnLifecycle:  monitoringinstances.LifecycleRetired,
+			wantEventType:    incidents.EventMonitoringInstanceRetired,
+			wantSummary:      "监控实例已退役并退出活跃观测集，历史记录保留",
 			wantSQLSnippet:   "lifecycle_status <> '已退役'",
 		},
 		{
 			name:             "restore retired to observing",
-			method:           (*PostgresNodeRepository).RestoreRetiredNodeToObserving,
-			initialLifecycle: nodes.LifecycleRetired,
-			returnLifecycle:  nodes.LifecycleObserving,
-			wantEventType:    incidents.EventNodeRestoredToObserving,
-			wantSummary:      "节点已从退役恢复到观察中",
+			method:           (*PostgresMonitoringInstanceRepository).RestoreRetiredMonitoringInstanceToObserving,
+			initialLifecycle: monitoringinstances.LifecycleRetired,
+			returnLifecycle:  monitoringinstances.LifecycleObserving,
+			wantEventType:    incidents.EventMonitoringInstanceRestoredToObserving,
+			wantSummary:      "监控实例已从退役恢复到观察中",
 			wantSQLSnippet:   "lifecycle_status = '已退役'",
 		},
 	}
@@ -1123,21 +1123,21 @@ func TestNodeLifecycleTransitionsWriteEvents(t *testing.T) {
 			var execSQL string
 			var execArgs []any
 			committed := false
-			repo := &PostgresNodeRepository{db: fakeNodeDB{
+			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 				beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-					return &fakeNodeTx{
+					return &fakeMonitoringInstanceTx{
 						queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 							gotSQL = sql
-							if len(args) != 1 || args[0] != "nd_001" {
-								t.Fatalf("QueryRow args = %#v, want node id", args)
+							if len(args) != 1 || args[0] != "mi_001" {
+								t.Fatalf("QueryRow args = %#v, want monitoringInstance id", args)
 							}
-							return fakeNodeRow{scan: func(dest ...any) error {
-								scanNodeRecordDestinations(dest, nodes.Record{
-									NodeID:           "nd_001",
-									DisplayName:      "Tokyo Edge",
-									LifecycleStatus:  tt.returnLifecycle,
-									MonitoringStatus: nodes.MonitoringEnabled,
-									BindingStatus:    nodes.BindingBound,
+							return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+								scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+									MonitoringInstanceID: "mi_001",
+									DisplayName:          "Tokyo Edge",
+									LifecycleStatus:      tt.returnLifecycle,
+									MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+									BindingStatus:        monitoringinstances.BindingBound,
 								})
 								return nil
 							}}
@@ -1155,7 +1155,7 @@ func TestNodeLifecycleTransitionsWriteEvents(t *testing.T) {
 				},
 			}}
 
-			got, err := tt.method(repo, context.Background(), "nd_001")
+			got, err := tt.method(repo, context.Background(), "mi_001")
 			if err != nil {
 				t.Fatalf("%s error = %v", tt.name, err)
 			}
@@ -1171,11 +1171,11 @@ func TestNodeLifecycleTransitionsWriteEvents(t *testing.T) {
 			if len(execArgs) < 8 {
 				t.Fatalf("event args = %#v, want full insert args", execArgs)
 			}
-			if execArgs[1] != string(incidents.ObjectTypeNode) {
-				t.Fatalf("event object_type arg = %#v, want node", execArgs[1])
+			if execArgs[1] != string(incidents.ObjectTypeMonitoringInstance) {
+				t.Fatalf("event object_type arg = %#v, want monitoringInstance", execArgs[1])
 			}
-			if execArgs[2] != "nd_001" {
-				t.Fatalf("event object_id arg = %#v, want nd_001", execArgs[2])
+			if execArgs[2] != "mi_001" {
+				t.Fatalf("event object_id arg = %#v, want mi_001", execArgs[2])
 			}
 			if execArgs[3] != string(tt.wantEventType) {
 				t.Fatalf("event type arg = %#v, want %q", execArgs[3], tt.wantEventType)
@@ -1194,20 +1194,20 @@ func TestNodeLifecycleTransitionsWriteEvents(t *testing.T) {
 	}
 }
 
-func TestNodeLifecycleRejectsInvalidTransitions(t *testing.T) {
+func TestMonitoringInstanceLifecycleRejectsInvalidTransitions(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name   string
-		method func(*PostgresNodeRepository, context.Context, string) (nodes.Record, error)
+		method func(*PostgresMonitoringInstanceRepository, context.Context, string) (monitoringinstances.Record, error)
 	}{
 		{
-			name:   "retire already retired node",
-			method: (*PostgresNodeRepository).RetireNode,
+			name:   "retire already retired monitoringInstance",
+			method: (*PostgresMonitoringInstanceRepository).RetireMonitoringInstance,
 		},
 		{
-			name:   "restore non-retired node",
-			method: (*PostgresNodeRepository).RestoreRetiredNodeToObserving,
+			name:   "restore non-retired monitoringInstance",
+			method: (*PostgresMonitoringInstanceRepository).RestoreRetiredMonitoringInstanceToObserving,
 		},
 	}
 
@@ -1215,154 +1215,154 @@ func TestNodeLifecycleRejectsInvalidTransitions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			repo := &PostgresNodeRepository{db: fakeNodeDB{
+			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 				beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-					return &fakeNodeTx{
+					return &fakeMonitoringInstanceTx{
 						queryRow: func(context.Context, string, ...any) pgx.Row {
-							return fakeNodeRow{scan: func(...any) error { return pgx.ErrNoRows }}
+							return fakeMonitoringInstanceRow{scan: func(...any) error { return pgx.ErrNoRows }}
 						},
 					}, nil
 				},
 				queryRow: func(context.Context, string, ...any) pgx.Row {
-					return fakeNodeRow{scan: func(dest ...any) error {
+					return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 						*(dest[0].(*bool)) = true
 						return nil
 					}}
 				},
 			}}
 
-			_, err := tt.method(repo, context.Background(), "nd_001")
-			if !errors.Is(err, ErrInvalidNodeLifecycleTransition) {
-				t.Fatalf("%s error = %v, want ErrInvalidNodeLifecycleTransition", tt.name, err)
+			_, err := tt.method(repo, context.Background(), "mi_001")
+			if !errors.Is(err, ErrInvalidMonitoringInstanceLifecycleTransition) {
+				t.Fatalf("%s error = %v, want ErrInvalidMonitoringInstanceLifecycleTransition", tt.name, err)
 			}
-			if errors.Is(err, ErrInvalidNodeRuntimeTransition) {
+			if errors.Is(err, ErrInvalidMonitoringInstanceRuntimeTransition) {
 				t.Fatalf("%s error = %v, must not use runtime transition sentinel", tt.name, err)
 			}
 		})
 	}
 }
 
-func TestNodeLifecycleReturnsNotFoundForMissingNode(t *testing.T) {
+func TestMonitoringInstanceLifecycleReturnsNotFoundForMissingMonitoringInstance(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-			return &fakeNodeTx{
+			return &fakeMonitoringInstanceTx{
 				queryRow: func(context.Context, string, ...any) pgx.Row {
-					return fakeNodeRow{scan: func(...any) error { return pgx.ErrNoRows }}
+					return fakeMonitoringInstanceRow{scan: func(...any) error { return pgx.ErrNoRows }}
 				},
 			}, nil
 		},
 		queryRow: func(context.Context, string, ...any) pgx.Row {
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				*(dest[0].(*bool)) = false
 				return nil
 			}}
 		},
 	}}
 
-	_, err := repo.RestoreRetiredNodeToObserving(context.Background(), "nd_missing")
-	if !errors.Is(err, nodes.ErrNodeNotFound) {
-		t.Fatalf("RestoreRetiredNodeToObserving() error = %v, want nodes.ErrNodeNotFound", err)
+	_, err := repo.RestoreRetiredMonitoringInstanceToObserving(context.Background(), "mi_missing")
+	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+		t.Fatalf("RestoreRetiredMonitoringInstanceToObserving() error = %v, want monitoringinstances.ErrMonitoringInstanceNotFound", err)
 	}
 }
 
-func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
+func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		action          func(context.Context, *PostgresNodeRepository, string) (nodes.Record, error)
-		nodeID          string
-		sourceStatus    string
-		returnedStatus  string
-		wantEventType   incidents.EventType
-		wantSummary     string
-		wantPayload     string
-		wantSQLSnippets []string
+		name                 string
+		action               func(context.Context, *PostgresMonitoringInstanceRepository, string) (monitoringinstances.Record, error)
+		monitoringInstanceID string
+		sourceStatus         string
+		returnedStatus       string
+		wantEventType        incidents.EventType
+		wantSummary          string
+		wantPayload          string
+		wantSQLSnippets      []string
 	}{
 		{
 			name: "enabled to maintenance",
-			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
-				return repo.SetNodeMonitoringMaintenance(ctx, nodeID)
+			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
+				return repo.SetMonitoringInstanceMonitoringMaintenance(ctx, monitoringInstanceID)
 			},
-			nodeID:         "nd_maintenance",
-			sourceStatus:   nodes.MonitoringEnabled,
-			returnedStatus: nodeMonitoringStatusMaintenance,
-			wantEventType:  incidents.EventNodeMonitoringMaintenanceEntered,
-			wantSummary:    "进入维护",
-			wantPayload:    nodeMonitoringStatusMaintenance,
+			monitoringInstanceID: "mi_maintenance",
+			sourceStatus:         monitoringinstances.MonitoringEnabled,
+			returnedStatus:       monitoringInstanceMonitoringStatusMaintenance,
+			wantEventType:        incidents.EventMonitoringInstanceMonitoringMaintenanceEntered,
+			wantSummary:          "进入维护",
+			wantPayload:          monitoringInstanceMonitoringStatusMaintenance,
 			wantSQLSnippets: []string{
 				"set monitoring_status = '维护中'",
-				"where node_id = $1",
+				"where monitoring_instance_id = $1",
 				"monitoring_status = '启用'",
 			},
 		},
 		{
 			name: "maintenance to enabled",
-			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
-				return repo.ResumeNodeMonitoring(ctx, nodeID)
+			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
+				return repo.ResumeMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
 			},
-			nodeID:         "nd_resume_maintenance",
-			sourceStatus:   nodeMonitoringStatusMaintenance,
-			returnedStatus: nodes.MonitoringEnabled,
-			wantEventType:  incidents.EventNodeMonitoringMaintenanceExited,
-			wantSummary:    "退出维护",
-			wantPayload:    nodes.MonitoringEnabled,
+			monitoringInstanceID: "mi_resume_maintenance",
+			sourceStatus:         monitoringInstanceMonitoringStatusMaintenance,
+			returnedStatus:       monitoringinstances.MonitoringEnabled,
+			wantEventType:        incidents.EventMonitoringInstanceMonitoringMaintenanceExited,
+			wantSummary:          "退出维护",
+			wantPayload:          monitoringinstances.MonitoringEnabled,
 			wantSQLSnippets: []string{
 				"set monitoring_status = '启用'",
-				"where node_id = $1",
+				"where monitoring_instance_id = $1",
 				"monitoring_status in ('维护中', '暂停')",
 			},
 		},
 		{
 			name: "enabled to paused",
-			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
-				return repo.PauseNodeMonitoring(ctx, nodeID)
+			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
+				return repo.PauseMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
 			},
-			nodeID:         "nd_pause_enabled",
-			sourceStatus:   nodes.MonitoringEnabled,
-			returnedStatus: nodeMonitoringStatusPaused,
-			wantEventType:  incidents.EventNodeMonitoringPaused,
-			wantSummary:    "暂停",
-			wantPayload:    nodeMonitoringStatusPaused,
+			monitoringInstanceID: "mi_pause_enabled",
+			sourceStatus:         monitoringinstances.MonitoringEnabled,
+			returnedStatus:       monitoringInstanceMonitoringStatusPaused,
+			wantEventType:        incidents.EventMonitoringInstanceMonitoringPaused,
+			wantSummary:          "暂停",
+			wantPayload:          monitoringInstanceMonitoringStatusPaused,
 			wantSQLSnippets: []string{
 				"set monitoring_status = '暂停'",
-				"where node_id = $1",
+				"where monitoring_instance_id = $1",
 				"monitoring_status in ('启用', '维护中')",
 			},
 		},
 		{
 			name: "paused to enabled",
-			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
-				return repo.ResumeNodeMonitoring(ctx, nodeID)
+			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
+				return repo.ResumeMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
 			},
-			nodeID:         "nd_resume_paused",
-			sourceStatus:   nodeMonitoringStatusPaused,
-			returnedStatus: nodes.MonitoringEnabled,
-			wantEventType:  incidents.EventNodeMonitoringResumed,
-			wantSummary:    "恢复",
-			wantPayload:    nodes.MonitoringEnabled,
+			monitoringInstanceID: "mi_resume_paused",
+			sourceStatus:         monitoringInstanceMonitoringStatusPaused,
+			returnedStatus:       monitoringinstances.MonitoringEnabled,
+			wantEventType:        incidents.EventMonitoringInstanceMonitoringResumed,
+			wantSummary:          "恢复",
+			wantPayload:          monitoringinstances.MonitoringEnabled,
 			wantSQLSnippets: []string{
 				"set monitoring_status = '启用'",
-				"where node_id = $1",
+				"where monitoring_instance_id = $1",
 				"monitoring_status in ('维护中', '暂停')",
 			},
 		},
 		{
 			name: "maintenance to paused",
-			action: func(ctx context.Context, repo *PostgresNodeRepository, nodeID string) (nodes.Record, error) {
-				return repo.PauseNodeMonitoring(ctx, nodeID)
+			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
+				return repo.PauseMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
 			},
-			nodeID:         "nd_pause_maintenance",
-			sourceStatus:   nodeMonitoringStatusMaintenance,
-			returnedStatus: nodeMonitoringStatusPaused,
-			wantEventType:  incidents.EventNodeMonitoringPaused,
-			wantSummary:    "暂停",
-			wantPayload:    nodeMonitoringStatusPaused,
+			monitoringInstanceID: "mi_pause_maintenance",
+			sourceStatus:         monitoringInstanceMonitoringStatusMaintenance,
+			returnedStatus:       monitoringInstanceMonitoringStatusPaused,
+			wantEventType:        incidents.EventMonitoringInstanceMonitoringPaused,
+			wantSummary:          "暂停",
+			wantPayload:          monitoringInstanceMonitoringStatusPaused,
 			wantSQLSnippets: []string{
 				"set monitoring_status = '暂停'",
-				"where node_id = $1",
+				"where monitoring_instance_id = $1",
 				"monitoring_status in ('启用', '维护中')",
 			},
 		},
@@ -1378,14 +1378,14 @@ func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				execArgs  []any
 				committed bool
 			)
-			tx := &fakeNodeTx{
+			tx := &fakeMonitoringInstanceTx{
 				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 					gotSQL = sql
-					if len(args) != 1 || args[0] != tt.nodeID {
-						t.Fatalf("QueryRow args = %#v, want node id %q", args, tt.nodeID)
+					if len(args) != 1 || args[0] != tt.monitoringInstanceID {
+						t.Fatalf("QueryRow args = %#v, want monitoringInstance id %q", args, tt.monitoringInstanceID)
 					}
-					return fakeNodeRow{scan: func(dest ...any) error {
-						scanNodeRecordDestinations(dest, nodes.Record{NodeID: tt.nodeID, MonitoringStatus: tt.returnedStatus})
+					return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+						scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{MonitoringInstanceID: tt.monitoringInstanceID, MonitoringStatus: tt.returnedStatus})
 						if len(dest) > 30 {
 							*(dest[30].(*string)) = tt.sourceStatus
 						}
@@ -1402,9 +1402,9 @@ func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
 					return nil
 				},
 			}
-			repo := &PostgresNodeRepository{db: fakeNodeDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
 
-			record, err := tt.action(context.Background(), repo, tt.nodeID)
+			record, err := tt.action(context.Background(), repo, tt.monitoringInstanceID)
 			if err != nil {
 				t.Fatalf("runtime control action error = %v", err)
 			}
@@ -1422,11 +1422,11 @@ func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			if len(execArgs) != 8 {
 				t.Fatalf("len(execArgs) = %d, want 8", len(execArgs))
 			}
-			if execArgs[1] != string(incidents.ObjectTypeNode) {
-				t.Fatalf("object_type = %#v, want %q", execArgs[1], incidents.ObjectTypeNode)
+			if execArgs[1] != string(incidents.ObjectTypeMonitoringInstance) {
+				t.Fatalf("object_type = %#v, want %q", execArgs[1], incidents.ObjectTypeMonitoringInstance)
 			}
-			if execArgs[2] != tt.nodeID {
-				t.Fatalf("object_id = %#v, want %q", execArgs[2], tt.nodeID)
+			if execArgs[2] != tt.monitoringInstanceID {
+				t.Fatalf("object_id = %#v, want %q", execArgs[2], tt.monitoringInstanceID)
 			}
 			if execArgs[3] != string(tt.wantEventType) {
 				t.Fatalf("event_type = %#v, want %q", execArgs[3], tt.wantEventType)
@@ -1445,17 +1445,17 @@ func TestNodeRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeControlResumePreservesNullSafeSelectColumns(t *testing.T) {
+func TestMonitoringInstanceRuntimeControlResumePreservesNullSafeSelectColumns(t *testing.T) {
 	t.Parallel()
 
 	var gotSQL string
-	tx := &fakeNodeTx{
+	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
-			if len(args) != 1 || args[0] != "nd_resume_nulls" {
-				t.Fatalf("QueryRow args = %#v, want node id %q", args, "nd_resume_nulls")
+			if len(args) != 1 || args[0] != "mi_resume_nulls" {
+				t.Fatalf("QueryRow args = %#v, want monitoringInstance id %q", args, "mi_resume_nulls")
 			}
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				for _, snippet := range []string{
 					"coalesce(updated.enrollment_token_hash, '')",
 					"coalesce(updated.sync_token_hash, '')",
@@ -1466,8 +1466,8 @@ func TestNodeRuntimeControlResumePreservesNullSafeSelectColumns(t *testing.T) {
 						return errors.New("missing null-safe qualified select columns")
 					}
 				}
-				scanNodeRecordDestinations(dest, nodes.Record{NodeID: "nd_resume_nulls", MonitoringStatus: nodes.MonitoringEnabled})
-				*(dest[30].(*string)) = nodeMonitoringStatusMaintenance
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{MonitoringInstanceID: "mi_resume_nulls", MonitoringStatus: monitoringinstances.MonitoringEnabled})
+				*(dest[30].(*string)) = monitoringInstanceMonitoringStatusMaintenance
 				return nil
 			}}
 		},
@@ -1475,40 +1475,40 @@ func TestNodeRuntimeControlResumePreservesNullSafeSelectColumns(t *testing.T) {
 			return pgconn.NewCommandTag("INSERT 1"), nil
 		},
 	}
-	repo := &PostgresNodeRepository{db: fakeNodeDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
 
-	record, err := repo.ResumeNodeMonitoring(context.Background(), "nd_resume_nulls")
+	record, err := repo.ResumeMonitoringInstanceMonitoring(context.Background(), "mi_resume_nulls")
 	if err != nil {
-		t.Fatalf("ResumeNodeMonitoring() error = %v", err)
+		t.Fatalf("ResumeMonitoringInstanceMonitoring() error = %v", err)
 	}
-	if record.NodeID != "nd_resume_nulls" {
-		t.Fatalf("NodeID = %q, want %q", record.NodeID, "nd_resume_nulls")
+	if record.MonitoringInstanceID != "mi_resume_nulls" {
+		t.Fatalf("MonitoringInstanceID = %q, want %q", record.MonitoringInstanceID, "mi_resume_nulls")
 	}
 	if record.EnrollmentTokenHash != "" || record.SyncTokenHash != "" || record.BindingFingerprint != "" || record.PendingBindingFingerprint != "" {
 		t.Fatalf("expected empty coalesced token/binding strings, got %#v", record)
 	}
 }
 
-func TestNodeRuntimeControlRejectsInvalidTransition(t *testing.T) {
+func TestMonitoringInstanceRuntimeControlRejectsInvalidTransition(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresNodeRepository{db: fakeNodeDB{
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeNodeRow{scan: func(dest ...any) error {
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				*(dest[0].(*bool)) = true
 				return nil
 			}}
 		},
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-			return &fakeNodeTx{queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
-				return fakeNodeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			return &fakeMonitoringInstanceTx{queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 			}}, nil
 		},
 	}}
 
-	_, err := repo.SetNodeMonitoringMaintenance(context.Background(), "nd_paused")
-	if !errors.Is(err, ErrInvalidNodeRuntimeTransition) {
-		t.Fatalf("SetNodeMonitoringMaintenance() error = %v, want ErrInvalidNodeRuntimeTransition", err)
+	_, err := repo.SetMonitoringInstanceMonitoringMaintenance(context.Background(), "mi_paused")
+	if !errors.Is(err, ErrInvalidMonitoringInstanceRuntimeTransition) {
+		t.Fatalf("SetMonitoringInstanceMonitoringMaintenance() error = %v, want ErrInvalidMonitoringInstanceRuntimeTransition", err)
 	}
 }
 
@@ -1530,37 +1530,37 @@ func sourceBetween(t *testing.T, source, start, end string) string {
 	return section[:endIndex]
 }
 
-type fakeNodeDB struct {
+type fakeMonitoringInstanceDB struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 	query    func(context.Context, string, ...any) (pgx.Rows, error)
 	exec     func(context.Context, string, ...any) (pgconn.CommandTag, error)
 	beginTx  func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
-func (f fakeNodeDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+func (f fakeMonitoringInstanceDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	if f.queryRow == nil {
-		return fakeNodeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+		return fakeMonitoringInstanceRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 	}
 	return f.queryRow(ctx, sql, args...)
 }
 
-func (f fakeNodeDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+func (f fakeMonitoringInstanceDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	if f.query == nil {
 		return nil, nil
 	}
 	return f.query(ctx, sql, args...)
 }
 
-func (f fakeNodeDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+func (f fakeMonitoringInstanceDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	if f.exec == nil {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
 	return f.exec(ctx, sql, args...)
 }
 
-func (f fakeNodeDB) BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error) {
+func (f fakeMonitoringInstanceDB) BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error) {
 	if f.beginTx == nil {
-		return &fakeNodeTx{
+		return &fakeMonitoringInstanceTx{
 			queryRow: f.queryRow,
 			exec:     f.exec,
 		}, nil
@@ -1568,59 +1568,63 @@ func (f fakeNodeDB) BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.T
 	return f.beginTx(ctx, txOptions)
 }
 
-type fakeNodeRow struct {
+type fakeMonitoringInstanceRow struct {
 	scan func(dest ...any) error
 }
 
-func (r fakeNodeRow) Scan(dest ...any) error {
+func (r fakeMonitoringInstanceRow) Scan(dest ...any) error {
 	return r.scan(dest...)
 }
 
-type fakeNodeTx struct {
+type fakeMonitoringInstanceTx struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 	exec     func(context.Context, string, ...any) (pgconn.CommandTag, error)
 	commit   func(context.Context) error
 	rollback func(context.Context) error
 }
 
-func (f *fakeNodeTx) Begin(context.Context) (pgx.Tx, error) { return f, nil }
-func (f *fakeNodeTx) Commit(ctx context.Context) error {
+func (f *fakeMonitoringInstanceTx) Begin(context.Context) (pgx.Tx, error) { return f, nil }
+func (f *fakeMonitoringInstanceTx) Commit(ctx context.Context) error {
 	if f.commit != nil {
 		return f.commit(ctx)
 	}
 	return nil
 }
-func (f *fakeNodeTx) Rollback(ctx context.Context) error {
+func (f *fakeMonitoringInstanceTx) Rollback(ctx context.Context) error {
 	if f.rollback != nil {
 		return f.rollback(ctx)
 	}
 	return nil
 }
-func (f *fakeNodeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+func (f *fakeMonitoringInstanceTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
 	return 0, nil
 }
-func (f *fakeNodeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
-func (f *fakeNodeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
-func (f *fakeNodeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+func (f *fakeMonitoringInstanceTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults {
+	return nil
+}
+func (f *fakeMonitoringInstanceTx) LargeObjects() pgx.LargeObjects { return pgx.LargeObjects{} }
+func (f *fakeMonitoringInstanceTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }
-func (f *fakeNodeTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+func (f *fakeMonitoringInstanceTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	if f.exec != nil {
 		return f.exec(ctx, sql, args...)
 	}
 	return pgconn.NewCommandTag("INSERT 1"), nil
 }
-func (f *fakeNodeTx) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
-func (f *fakeNodeTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+func (f *fakeMonitoringInstanceTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, nil
+}
+func (f *fakeMonitoringInstanceTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	if f.queryRow != nil {
 		return f.queryRow(ctx, sql, args...)
 	}
-	return fakeNodeRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+	return fakeMonitoringInstanceRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 }
-func (f *fakeNodeTx) Conn() *pgx.Conn { return nil }
+func (f *fakeMonitoringInstanceTx) Conn() *pgx.Conn { return nil }
 
-func scanNodeRecordDestinations(dest []any, record nodes.Record) {
-	*(dest[0].(*string)) = record.NodeID
+func scanMonitoringInstanceRecordDestinations(dest []any, record monitoringinstances.Record) {
+	*(dest[0].(*string)) = record.MonitoringInstanceID
 	*(dest[1].(*string)) = record.DisplayName
 	*(dest[2].(*string)) = record.Group
 	*(dest[3].(*string)) = record.Region

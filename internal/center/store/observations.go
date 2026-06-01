@@ -58,7 +58,7 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 		}
 		if _, err := exec.Exec(ctx, `
 			insert into host_samples (
-				node_id,
+				monitoring_instance_id,
 				observed_at,
 				received_at,
 				agent_version,
@@ -89,7 +89,7 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 			) values (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
 			)`,
-			sample.NodeID,
+			sample.MonitoringInstanceID,
 			sample.ObservedAt,
 			sample.ReceivedAt,
 			sample.AgentVersion,
@@ -125,7 +125,7 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 	for _, observation := range batch.ProbeObservations {
 		if _, err := exec.Exec(ctx, `
 			insert into probe_observations (
-				node_id,
+				monitoring_instance_id,
 				target_id,
 				probe_item_id,
 				observed_at,
@@ -144,7 +144,7 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 			) values (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 			)`,
-			observation.NodeID,
+			observation.MonitoringInstanceID,
 			observation.TargetID,
 			observation.ProbeItemID,
 			observation.ObservedAt,

@@ -5,21 +5,21 @@ import (
 	"net/http"
 	"strings"
 
-	"houfeng/internal/center/nodes"
+	"houfeng/internal/center/monitoringinstances"
 )
 
-func NodesCollection(repo nodes.Repository) http.Handler {
+func MonitoringInstancesCollection(repo monitoringinstances.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			records, err := repo.ListNodes(r.Context())
+			records, err := repo.ListMonitoringInstances(r.Context())
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
 			writeJSON(w, http.StatusOK, records)
 		case http.MethodPost:
-			var input nodes.CreateInput
+			var input monitoringinstances.CreateInput
 			if err := decodeJSON(r, &input); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
@@ -31,7 +31,7 @@ func NodesCollection(repo nodes.Repository) http.Handler {
 				return
 			}
 
-			record, err := repo.CreateNode(r.Context(), input)
+			record, err := repo.CreateMonitoringInstance(r.Context(), input)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
@@ -43,20 +43,20 @@ func NodesCollection(repo nodes.Repository) http.Handler {
 	})
 }
 
-func NodeItem(repo nodes.Repository) http.Handler {
+func MonitoringInstanceItem(repo monitoringinstances.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nodeID := strings.TrimPrefix(r.URL.Path, "/api/nodes/")
-		nodeID = strings.Trim(nodeID, "/")
-		if nodeID == "" || strings.Contains(nodeID, "/") {
-			writeError(w, http.StatusNotFound, "node not found")
+		monitoringInstanceID := strings.TrimPrefix(r.URL.Path, "/api/monitoring-instances/")
+		monitoringInstanceID = strings.Trim(monitoringInstanceID, "/")
+		if monitoringInstanceID == "" || strings.Contains(monitoringInstanceID, "/") {
+			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
 
 		switch r.Method {
 		case http.MethodGet:
-			record, err := repo.GetNode(r.Context(), nodeID)
-			if errors.Is(err, nodes.ErrNodeNotFound) {
-				writeError(w, http.StatusNotFound, "node not found")
+			record, err := repo.GetMonitoringInstance(r.Context(), monitoringInstanceID)
+			if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+				writeError(w, http.StatusNotFound, "monitoring instance not found")
 				return
 			}
 			if err != nil {
@@ -76,7 +76,7 @@ func NodeItem(repo nodes.Repository) http.Handler {
 				return
 			}
 
-			input := nodes.UpdateMetadataInput{Group: group, Labels: labels, Note: note}
+			input := monitoringinstances.UpdateMetadataInput{Group: group, Labels: labels, Note: note}
 			expectedUpdatedAt, ok := parseMetadataPrecondition(r.Header.Get("If-Match"))
 			if !ok {
 				writeError(w, http.StatusBadRequest, "invalid input")
@@ -89,12 +89,12 @@ func NodeItem(repo nodes.Repository) http.Handler {
 				return
 			}
 
-			record, err := repo.UpdateNodeMetadata(r.Context(), nodeID, input)
-			if errors.Is(err, nodes.ErrNodeNotFound) {
-				writeError(w, http.StatusNotFound, "node not found")
+			record, err := repo.UpdateMonitoringInstanceMetadata(r.Context(), monitoringInstanceID, input)
+			if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+				writeError(w, http.StatusNotFound, "monitoring instance not found")
 				return
 			}
-			if errors.Is(err, nodes.ErrNodeMetadataConflict) {
+			if errors.Is(err, monitoringinstances.ErrMonitoringInstanceMetadataConflict) {
 				writeError(w, http.StatusConflict, "metadata conflict")
 				return
 			}
@@ -110,25 +110,25 @@ func NodeItem(repo nodes.Repository) http.Handler {
 	})
 }
 
-func normalizeCreateInput(input nodes.CreateInput) nodes.CreateInput {
+func normalizeCreateInput(input monitoringinstances.CreateInput) monitoringinstances.CreateInput {
 	input.DisplayName = strings.TrimSpace(input.DisplayName)
 	input.Group = strings.TrimSpace(input.Group)
 	input.Region = strings.TrimSpace(input.Region)
 	input.City = strings.TrimSpace(input.City)
 	input.Provider = strings.TrimSpace(input.Provider)
 	input.Note = strings.TrimSpace(input.Note)
-	input.LifecycleStatus = nodes.LifecyclePendingEnrollment
+	input.LifecycleStatus = monitoringinstances.LifecyclePendingEnrollment
 	return input
 }
 
-func isValidCreateInput(input nodes.CreateInput) bool {
+func isValidCreateInput(input monitoringinstances.CreateInput) bool {
 	if input.DisplayName == "" || input.Region == "" || input.City == "" || input.Provider == "" || input.LifecycleStatus == "" {
 		return false
 	}
-	return nodes.IsValidLifecycleStatus(input.LifecycleStatus)
+	return monitoringinstances.IsValidLifecycleStatus(input.LifecycleStatus)
 }
 
-func normalizeUpdateMetadataInput(input nodes.UpdateMetadataInput) nodes.UpdateMetadataInput {
+func normalizeUpdateMetadataInput(input monitoringinstances.UpdateMetadataInput) monitoringinstances.UpdateMetadataInput {
 	if input.Group != nil {
 		v := strings.TrimSpace(*input.Group)
 		input.Group = &v
@@ -137,6 +137,6 @@ func normalizeUpdateMetadataInput(input nodes.UpdateMetadataInput) nodes.UpdateM
 	return input
 }
 
-func isValidUpdateMetadataInput(input nodes.UpdateMetadataInput) bool {
+func isValidUpdateMetadataInput(input monitoringinstances.UpdateMetadataInput) bool {
 	return isValidMetadata(input.Labels, input.Note)
 }

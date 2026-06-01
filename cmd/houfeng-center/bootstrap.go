@@ -69,7 +69,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		return nil, nil, fmt.Errorf("apply migrations: %w", err)
 	}
 
-	nodeRepo := store.NewPostgresNodeRepository(db.Pool())
+	monitoringInstanceRepo := store.NewPostgresMonitoringInstanceRepository(db.Pool())
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
 	providerRepo := store.NewPostgresProviderRepository(db.Pool())
 	vpsAssetRepo := store.NewPostgresVPSAssetRepository(db.Pool())
@@ -77,7 +77,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	assetServiceRepo := store.NewPostgresAssetServiceRepository(db.Pool())
 	assetLifecycleRepo := store.NewPostgresAssetLifecycleRepository(db.Pool())
 	subscriptionRepo := store.NewPostgresSubscriptionRepository(db.Pool())
-	vpsNodeLinkRepo := store.NewPostgresVPSNodeLinkRepository(db.Pool())
+	vpsMonitoringInstanceLinkRepo := store.NewPostgresVPSMonitoringInstanceLinkRepository(db.Pool())
 	renewalDecisionRepo := store.NewPostgresRenewalDecisionRepository(db.Pool())
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
@@ -85,7 +85,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	settingsRepo := store.NewPostgresSettingsRepository(db.Pool())
 	retentionRepo := store.NewPostgresRetentionRepository(db.Pool())
 	retentionWorker := retention.NewWorker(retentionRepo, settingsRepo, slog.Default(), retention.DefaultWorkerInterval)
-	sparklinesRepo := store.NewPostgresNodeSparklinesRepository(db.Pool())
+	sparklinesRepo := store.NewPostgresMonitoringInstanceSparklinesRepository(db.Pool())
 	targetSparklinesRepo := store.NewPostgresTargetSparklinesRepository(db.Pool())
 	notifierSettingsRepo := notifierSettingsRepository{repo: settingsRepo, db: db.Pool()}
 	settingsHandlerRepo := settingsPresentationRepository{
@@ -94,11 +94,11 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		incidentSweepInterval: cfg.IncidentSweepInterval,
 	}
 	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
-	enrollmentSvc := enrollment.NewService(nodeRepo)
+	enrollmentSvc := enrollment.NewService(monitoringInstanceRepo)
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
 	notifier := deps.newIncidentNotifier(cfg, notifierSettingsRepo)
 	incidentSvc := incidentservice.NewSettingsBackedService(
-		nodeRepo,
+		monitoringInstanceRepo,
 		targetRepo,
 		snapshotReader,
 		incidentRepo,
@@ -124,63 +124,63 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	authMW := centerhttp.RequireSession(authSvc)
 
 	router := deps.newRouter(centerhttp.RouterOptions{
-		Version:                        version,
-		WebDistDir:                     cfg.WebDistDir,
-		DashboardHandler:               handlers.Dashboard(dashboardRepo),
-		EventsHandler:                  handlers.Events(dashboardRepo),
-		IncidentsHandler:               handlers.Incidents(incidentRepo),
-		SettingsHandler:                handlers.Settings(settingsHandlerRepo),
-		AssetDomainsCollectionHandler:  handlers.AssetDomainsCollection(assetDomainRepo),
-		AssetServicesCollectionHandler: handlers.AssetServicesCollection(assetServiceRepo),
-		ProvidersCollectionHandler:     handlers.ProvidersCollection(providerRepo),
-		ProviderItemHandler:            handlers.ProviderItem(providerRepo),
-		VPSCollectionHandler:           handlers.VPSCollection(vpsAssetRepo, vpsNodeLinkRepo, assetLifecycleRepo),
-		VPSItemHandler:                 handlers.VPSItem(vpsAssetRepo, vpsNodeLinkRepo, assetLifecycleRepo),
-		VPSNodesHandler:                handlers.VPSNodes(vpsNodeLinkRepo),
-		VPSLinkNodeHandler:             handlers.VPSLinkNode(vpsNodeLinkRepo),
-		VPSUnlinkNodeHandler:           handlers.VPSUnlinkNode(vpsNodeLinkRepo),
-		VPSTimelineHandler:             handlers.VPSTimeline(renewalDecisionRepo),
-		VPSExperienceLogsHandler:       handlers.VPSExperienceLogs(renewalDecisionRepo),
-		VPSDomainsHandler:              handlers.VPSDomains(assetDomainRepo),
-		VPSServicesHandler:             handlers.VPSServices(assetServiceRepo),
-		VPSCancellationPreviewHandler:  handlers.VPSCancellationPreview(assetLifecycleRepo),
-		VPSCancellationHandler:         handlers.VPSCancellation(assetLifecycleRepo),
-		AssetContextNodesHandler:       handlers.AssetContextNodes(assetLifecycleRepo),
-		AssetContextTargetsHandler:     handlers.AssetContextTargets(assetLifecycleRepo),
-		SubscriptionsCollectionHandler: handlers.SubscriptionsCollection(subscriptionRepo),
-		SubscriptionItemHandler:        handlers.SubscriptionItem(subscriptionRepo),
-		NodesCollectionHandler:         handlers.NodesCollection(nodeRepo),
-		NodeItemHandler:                handlers.NodeItem(nodeRepo),
-		NodeVPSHandler:                 handlers.NodeVPS(vpsNodeLinkRepo),
-		NodeRuntimeFactsHandler:        handlers.NodeRuntimeFacts(runtimeFactsRepo),
-		NodeRuntimeControlHandler:      handlers.NodeRuntimeControls(nodeRepo),
-		NodeLifecycleControlHandler:    handlers.NodeLifecycleControls(nodeRepo),
-		NodeOnboardingHandler:          handlers.NodeOnboarding(nodeRepo),
-		NodeEnrollmentTokenHandler:     handlers.NodeEnrollmentToken(nodeRepo),
-		NodeInstallCommandHandler: handlers.NodeInstallCommand(nodeRepo, handlers.InstallCommandOptions{
+		Version:                                   version,
+		WebDistDir:                                cfg.WebDistDir,
+		DashboardHandler:                          handlers.Dashboard(dashboardRepo),
+		EventsHandler:                             handlers.Events(dashboardRepo),
+		IncidentsHandler:                          handlers.Incidents(incidentRepo),
+		SettingsHandler:                           handlers.Settings(settingsHandlerRepo),
+		AssetDomainsCollectionHandler:             handlers.AssetDomainsCollection(assetDomainRepo),
+		AssetServicesCollectionHandler:            handlers.AssetServicesCollection(assetServiceRepo),
+		ProvidersCollectionHandler:                handlers.ProvidersCollection(providerRepo),
+		ProviderItemHandler:                       handlers.ProviderItem(providerRepo),
+		VPSCollectionHandler:                      handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo),
+		VPSItemHandler:                            handlers.VPSItem(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo),
+		VPSMonitoringInstancesHandler:             handlers.VPSMonitoringInstances(vpsMonitoringInstanceLinkRepo),
+		VPSLinkMonitoringInstanceHandler:          handlers.VPSLinkMonitoringInstance(vpsMonitoringInstanceLinkRepo),
+		VPSUnlinkMonitoringInstanceHandler:        handlers.VPSUnlinkMonitoringInstance(vpsMonitoringInstanceLinkRepo),
+		VPSTimelineHandler:                        handlers.VPSTimeline(renewalDecisionRepo),
+		VPSExperienceLogsHandler:                  handlers.VPSExperienceLogs(renewalDecisionRepo),
+		VPSDomainsHandler:                         handlers.VPSDomains(assetDomainRepo),
+		VPSServicesHandler:                        handlers.VPSServices(assetServiceRepo),
+		VPSCancellationPreviewHandler:             handlers.VPSCancellationPreview(assetLifecycleRepo),
+		VPSCancellationHandler:                    handlers.VPSCancellation(assetLifecycleRepo),
+		AssetContextMonitoringInstancesHandler:    handlers.AssetContextMonitoringInstances(assetLifecycleRepo),
+		AssetContextTargetsHandler:                handlers.AssetContextTargets(assetLifecycleRepo),
+		SubscriptionsCollectionHandler:            handlers.SubscriptionsCollection(subscriptionRepo),
+		SubscriptionItemHandler:                   handlers.SubscriptionItem(subscriptionRepo),
+		MonitoringInstancesCollectionHandler:      handlers.MonitoringInstancesCollection(monitoringInstanceRepo),
+		MonitoringInstanceItemHandler:             handlers.MonitoringInstanceItem(monitoringInstanceRepo),
+		MonitoringInstanceVPSHandler:              handlers.MonitoringInstanceVPS(vpsMonitoringInstanceLinkRepo),
+		MonitoringInstanceRuntimeFactsHandler:     handlers.MonitoringInstanceRuntimeFacts(runtimeFactsRepo),
+		MonitoringInstanceRuntimeControlHandler:   handlers.MonitoringInstanceRuntimeControls(monitoringInstanceRepo),
+		MonitoringInstanceLifecycleControlHandler: handlers.MonitoringInstanceLifecycleControls(monitoringInstanceRepo),
+		MonitoringInstanceOnboardingHandler:       handlers.MonitoringInstanceOnboarding(monitoringInstanceRepo),
+		MonitoringInstanceEnrollmentTokenHandler:  handlers.MonitoringInstanceEnrollmentToken(monitoringInstanceRepo),
+		MonitoringInstanceInstallCommandHandler: handlers.MonitoringInstanceInstallCommand(monitoringInstanceRepo, handlers.InstallCommandOptions{
 			PublicBaseURL: cfg.PublicBaseURL,
 			AgentVersion:  version,
 		}),
-		NodeBindingConfirmRebindHandler: handlers.NodeBindingConfirmRebind(nodeRepo),
-		NodeBindingRejectPendingHandler: handlers.NodeBindingRejectPending(nodeRepo),
-		NodeBindingResetHandler:         handlers.NodeBindingReset(nodeRepo),
-		NodeSparklinesHandler:           handlers.NodeSparklines(sparklinesRepo),
-		NodeActionsHandler:              handlers.NodeActions(nodeRepo),
-		NodeBatchHandler:                handlers.NodeBatch(nodeRepo),
-		TargetsCollectionHandler:        handlers.TargetsCollection(targetRepo),
-		TargetItemHandler:               handlers.TargetItem(targetRepo),
-		TargetProbeItemsHandler:         handlers.TargetProbeItems(targetRepo),
-		TargetRuntimeFactsHandler:       handlers.TargetRuntimeFacts(runtimeFactsRepo),
-		TargetRuntimeControlHandler:     handlers.TargetRuntimeControls(targetRepo),
-		TargetSparklinesHandler:         handlers.TargetSparklines(targetSparklinesRepo),
-		AgentEnrollHandler:              handlers.AgentEnroll(enrollmentSvc),
-		AgentSyncHandler:                handlers.AgentSync(syncSvc),
-		InstallerScriptHandler:          handlers.InstallerScript(installer.Script),
-		AuthLoginHandler:                handlers.Login(authSvc),
-		AuthLogoutHandler:               handlers.Logout(authSvc),
-		AuthMeHandler:                   handlers.Me(authSvc),
-		AuthChangePasswordHandler:       handlers.ChangePassword(authSvc),
-		AuthMiddleware:                  authMW,
+		MonitoringInstanceBindingConfirmRebindHandler: handlers.MonitoringInstanceBindingConfirmRebind(monitoringInstanceRepo),
+		MonitoringInstanceBindingRejectPendingHandler: handlers.MonitoringInstanceBindingRejectPending(monitoringInstanceRepo),
+		MonitoringInstanceBindingResetHandler:         handlers.MonitoringInstanceBindingReset(monitoringInstanceRepo),
+		MonitoringInstanceSparklinesHandler:           handlers.MonitoringInstanceSparklines(sparklinesRepo),
+		MonitoringInstanceActionsHandler:              handlers.MonitoringInstanceActions(monitoringInstanceRepo),
+		MonitoringInstanceBatchHandler:                handlers.MonitoringInstanceBatch(monitoringInstanceRepo),
+		TargetsCollectionHandler:                      handlers.TargetsCollection(targetRepo),
+		TargetItemHandler:                             handlers.TargetItem(targetRepo),
+		TargetProbeItemsHandler:                       handlers.TargetProbeItems(targetRepo),
+		TargetRuntimeFactsHandler:                     handlers.TargetRuntimeFacts(runtimeFactsRepo),
+		TargetRuntimeControlHandler:                   handlers.TargetRuntimeControls(targetRepo),
+		TargetSparklinesHandler:                       handlers.TargetSparklines(targetSparklinesRepo),
+		AgentEnrollHandler:                            handlers.AgentEnroll(enrollmentSvc),
+		AgentSyncHandler:                              handlers.AgentSync(syncSvc),
+		InstallerScriptHandler:                        handlers.InstallerScript(installer.Script),
+		AuthLoginHandler:                              handlers.Login(authSvc),
+		AuthLogoutHandler:                             handlers.Logout(authSvc),
+		AuthMeHandler:                                 handlers.Me(authSvc),
+		AuthChangePasswordHandler:                     handlers.ChangePassword(authSvc),
+		AuthMiddleware:                                authMW,
 	})
 
 	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker, sessionCleanup), db.Close, nil
@@ -288,7 +288,7 @@ func (r settingsPresentationRepository) hasPersistedSettings(ctx context.Context
 
 func applyEffectiveFreshInstallSettings(record centersettings.CenterSettings, incidentSweepInterval time.Duration) centersettings.CenterSettings {
 	record.IncidentDefaults.SweepIntervalSeconds = incidentSweepIntervalSeconds(incidentSweepInterval)
-	record.OverrideRules.NodeLabels = ensureLegacyCoreHostSampleOverride(record.OverrideRules.NodeLabels)
+	record.OverrideRules.MonitoringInstanceLabels = ensureLegacyCoreHostSampleOverride(record.OverrideRules.MonitoringInstanceLabels)
 	return record
 }
 
@@ -303,31 +303,31 @@ func incidentSweepIntervalSeconds(interval time.Duration) int {
 	return seconds
 }
 
-func ensureLegacyCoreHostSampleOverride(rules []centersettings.NodeLabelOverrideRule) []centersettings.NodeLabelOverrideRule {
-	const coreNodeLabel = "核心"
+func ensureLegacyCoreHostSampleOverride(rules []centersettings.MonitoringInstanceLabelOverrideRule) []centersettings.MonitoringInstanceLabelOverrideRule {
+	const coreMonitoringInstanceLabel = "核心"
 	coreTier := targets.FrequencyTier5s
 
 	for i, rule := range rules {
-		if rule.Label != coreNodeLabel {
+		if rule.Label != coreMonitoringInstanceLabel {
 			continue
 		}
-		if rule.Label == coreNodeLabel && rule.Overrides.HostSampleFrequencyTier != nil {
+		if rule.Label == coreMonitoringInstanceLabel && rule.Overrides.HostSampleFrequencyTier != nil {
 			return rules
 		}
 
-		next := append([]centersettings.NodeLabelOverrideRule(nil), rules...)
+		next := append([]centersettings.MonitoringInstanceLabelOverrideRule(nil), rules...)
 		next[i].Overrides.HostSampleFrequencyTier = &coreTier
 		return next
 	}
 
-	legacyRule := centersettings.NodeLabelOverrideRule{
-		Label: coreNodeLabel,
+	legacyRule := centersettings.MonitoringInstanceLabelOverrideRule{
+		Label: coreMonitoringInstanceLabel,
 		Overrides: centersettings.SettingsOverrideFields{
 			HostSampleFrequencyTier: &coreTier,
 		},
 	}
 
-	return append([]centersettings.NodeLabelOverrideRule{legacyRule}, rules...)
+	return append([]centersettings.MonitoringInstanceLabelOverrideRule{legacyRule}, rules...)
 }
 
 type notifierSettingsRepository struct {

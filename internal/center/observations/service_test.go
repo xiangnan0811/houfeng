@@ -47,9 +47,9 @@ func TestIngestRuntimeFactsWritesHostSamplesAndProbeObservations(t *testing.T) {
 	}
 	service := NewService(repo, repo)
 	batch := BatchWrite{
-		NodeID: "nd_batch_should_not_drive_store_writes",
+		MonitoringInstanceID: "mi_batch_should_not_drive_store_writes",
 		HostSamples: []HostSampleWrite{{
-			NodeID:               "nd_001",
+			MonitoringInstanceID: "mi_001",
 			ObservedAt:           observedAt,
 			ReceivedAt:           receivedAt,
 			AgentVersion:         "agent/v0.1.0",
@@ -76,20 +76,20 @@ func TestIngestRuntimeFactsWritesHostSamplesAndProbeObservations(t *testing.T) {
 			SyncBatchID:          "sync_001",
 		}},
 		ProbeObservations: []ProbeObservationWrite{{
-			NodeID:             "nd_001",
-			TargetID:           "tg_001",
-			ProbeItemID:        "pb_001",
-			ProbeKind:          "http",
-			ObservedAt:         observedAt,
-			ReceivedAt:         receivedAt,
-			AgentVersion:       "agent/v0.1.0",
-			Fingerprint:        "fp_probe_001",
-			ResultKind:         "success",
-			LatencyMS:          &latencyMS,
-			HTTPStatus:         &httpStatus,
-			MaintenanceContext: false,
-			IsBackfilled:       false,
-			SyncBatchID:        "sync_001",
+			MonitoringInstanceID: "mi_001",
+			TargetID:             "tg_001",
+			ProbeItemID:          "pb_001",
+			ProbeKind:            "http",
+			ObservedAt:           observedAt,
+			ReceivedAt:           receivedAt,
+			AgentVersion:         "agent/v0.1.0",
+			Fingerprint:          "fp_probe_001",
+			ResultKind:           "success",
+			LatencyMS:            &latencyMS,
+			HTTPStatus:           &httpStatus,
+			MaintenanceContext:   false,
+			IsBackfilled:         false,
+			SyncBatchID:          "sync_001",
 		}},
 	}
 
@@ -103,8 +103,8 @@ func TestIngestRuntimeFactsWritesHostSamplesAndProbeObservations(t *testing.T) {
 	if !reflect.DeepEqual(repo.calls[0], batch) {
 		t.Fatalf("repo.calls[0] = %#v, want %#v", repo.calls[0], batch)
 	}
-	if repo.calls[0].HostSamples[0].NodeID != "nd_001" {
-		t.Fatalf("HostSamples[0].NodeID = %q, want %q", repo.calls[0].HostSamples[0].NodeID, "nd_001")
+	if repo.calls[0].HostSamples[0].MonitoringInstanceID != "mi_001" {
+		t.Fatalf("HostSamples[0].MonitoringInstanceID = %q, want %q", repo.calls[0].HostSamples[0].MonitoringInstanceID, "mi_001")
 	}
 	if repo.calls[0].HostSamples[0].AgentVersion != "agent/v0.1.0" {
 		t.Fatalf("HostSamples[0].AgentVersion = %q, want %q", repo.calls[0].HostSamples[0].AgentVersion, "agent/v0.1.0")
@@ -112,8 +112,8 @@ func TestIngestRuntimeFactsWritesHostSamplesAndProbeObservations(t *testing.T) {
 	if repo.calls[0].HostSamples[0].Fingerprint != "fp_host_001" {
 		t.Fatalf("HostSamples[0].Fingerprint = %q, want %q", repo.calls[0].HostSamples[0].Fingerprint, "fp_host_001")
 	}
-	if repo.calls[0].ProbeObservations[0].NodeID != "nd_001" {
-		t.Fatalf("ProbeObservations[0].NodeID = %q, want %q", repo.calls[0].ProbeObservations[0].NodeID, "nd_001")
+	if repo.calls[0].ProbeObservations[0].MonitoringInstanceID != "mi_001" {
+		t.Fatalf("ProbeObservations[0].MonitoringInstanceID = %q, want %q", repo.calls[0].ProbeObservations[0].MonitoringInstanceID, "mi_001")
 	}
 	if repo.calls[0].ProbeObservations[0].AgentVersion != "agent/v0.1.0" {
 		t.Fatalf("ProbeObservations[0].AgentVersion = %q, want %q", repo.calls[0].ProbeObservations[0].AgentVersion, "agent/v0.1.0")

@@ -21,31 +21,34 @@ import (
 func TestPostgresAssetLifecycleMigrationDefinesAuditTablesAndIndexes(t *testing.T) {
 	t.Parallel()
 
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0028_create_asset_lifecycle_actions.sql"))
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0029_rename_nodes_to_monitoring_instances.sql"))
 	if err != nil {
 		t.Fatalf("ReadFile(asset lifecycle migration) error = %v", err)
 	}
 	text := string(source)
 	for _, snippet := range []string{
-		"create table if not exists asset_lifecycle_actions",
-		"action_id text primary key",
-		"vps_id text not null references vps_assets(vps_id) on delete cascade",
-		"action_type in ('cancel_vps')",
-		"status in ('pending', 'completed', 'failed')",
-		"summary jsonb not null default '{}'::jsonb",
-		"create table if not exists asset_lifecycle_action_steps",
-		"action_id text not null references asset_lifecycle_actions(action_id) on delete cascade",
-		"object_type in ('vps', 'subscription', 'node', 'target')",
-		"step_type in ('vps_lifecycle', 'subscription_status', 'node_lifecycle', 'node_monitoring', 'target_run_status')",
-		"status in ('completed', 'skipped', 'failed')",
-		"idx_asset_lifecycle_actions_vps_time",
-		"idx_asset_lifecycle_actions_status",
-		"idx_asset_lifecycle_action_steps_action",
-		"idx_asset_lifecycle_action_steps_object",
+		"update asset_lifecycle_action_steps",
+		"where object_type = 'node'",
+		"when 'node_lifecycle' then 'monitoring_instance_lifecycle'",
+		"when 'node_monitoring' then 'monitoring_instance_monitoring'",
+		"drop constraint if exists asset_lifecycle_action_steps_object_type_allowed",
+		"object_type in ('vps', 'subscription', 'monitoring_instance', 'target')",
+		"drop constraint if exists asset_lifecycle_action_steps_step_type_allowed",
+		"step_type in ('vps_lifecycle', 'subscription_status', 'monitoring_instance_lifecycle', 'monitoring_instance_monitoring', 'target_run_status')",
 	} {
 		if !strings.Contains(text, snippet) {
 			t.Fatalf("asset lifecycle migration missing %q", snippet)
 		}
+	}
+	objectDrop := strings.Index(text, "drop constraint if exists asset_lifecycle_action_steps_object_type_allowed")
+	objectUpdate := strings.Index(text, "update asset_lifecycle_action_steps\nset object_type = 'monitoring_instance'")
+	if objectDrop < 0 || objectUpdate < 0 || objectDrop > objectUpdate {
+		t.Fatalf("asset lifecycle migration must drop object_type constraint before rewriting node object_type")
+	}
+	stepDrop := strings.Index(text, "drop constraint if exists asset_lifecycle_action_steps_step_type_allowed")
+	stepUpdate := strings.Index(text, "when 'node_lifecycle' then 'monitoring_instance_lifecycle'")
+	if stepDrop < 0 || stepUpdate < 0 || stepDrop > stepUpdate {
+		t.Fatalf("asset lifecycle migration must drop step_type constraint before rewriting node step_type")
 	}
 }
 
@@ -121,11 +124,11 @@ func TestApplyVPSCancellationPersistsFailedAuditAfterRollback(t *testing.T) {
 	repo := &PostgresAssetLifecycleRepository{db: db}
 
 	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
-		Reason:             "expired and no renewal",
-		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
-		SubscriptionIDs:    []string{"sub_missing"},
-		NodeActions:        []assetlifecycle.NodeActionInput{},
-		TargetActions:      []assetlifecycle.TargetActionInput{},
+		Reason:                    "expired and no renewal",
+		VPSLifecycleStatus:        vpsassets.LifecycleCancelled,
+		SubscriptionIDs:           []string{"sub_missing"},
+		MonitoringInstanceActions: []assetlifecycle.MonitoringInstanceActionInput{},
+		TargetActions:             []assetlifecycle.TargetActionInput{},
 	})
 
 	if !errors.Is(err, assetlifecycle.ErrInvalidLifecycleActionInput) {

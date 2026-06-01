@@ -1,4 +1,4 @@
-package nodes
+package monitoringinstances
 
 import (
 	"context"
@@ -30,9 +30,9 @@ const (
 	OnboardingPhaseBindingConflict          = "绑定冲突待处理"
 )
 
-var ErrNodeNotFound = errors.New("node not found")
+var ErrMonitoringInstanceNotFound = errors.New("monitoring instance not found")
 var ErrInvalidBindingTransition = errors.New("invalid binding transition")
-var ErrNodeMetadataConflict = errors.New("node metadata conflict")
+var ErrMonitoringInstanceMetadataConflict = errors.New("monitoring instance metadata conflict")
 
 var allowedLifecycleStatuses = map[string]struct{}{
 	LifecyclePendingEnrollment: {},
@@ -43,7 +43,7 @@ var allowedLifecycleStatuses = map[string]struct{}{
 }
 
 // LastAction describes the queued, in-flight, or completed command action for
-// the node. It is nil when no action has ever been requested.
+// the monitoring instance. It is nil when no action has ever been requested.
 type LastAction struct {
 	ActionID  string `json:"action_id"`
 	CommandID string `json:"command_id"`
@@ -54,7 +54,7 @@ type LastAction struct {
 }
 
 type Record struct {
-	NodeID                     string          `json:"node_id"`
+	MonitoringInstanceID       string          `json:"monitoring_instance_id"`
 	DisplayName                string          `json:"display_name"`
 	Group                      string          `json:"group"`
 	Region                     string          `json:"region"`
@@ -104,10 +104,10 @@ type UpdateMetadataInput struct {
 }
 
 type Repository interface {
-	ListNodes(context.Context) ([]Record, error)
-	GetNode(context.Context, string) (Record, error)
-	CreateNode(context.Context, CreateInput) (Record, error)
-	UpdateNodeMetadata(context.Context, string, UpdateMetadataInput) (Record, error)
+	ListMonitoringInstances(context.Context) ([]Record, error)
+	GetMonitoringInstance(context.Context, string) (Record, error)
+	CreateMonitoringInstance(context.Context, CreateInput) (Record, error)
+	UpdateMonitoringInstanceMetadata(context.Context, string, UpdateMetadataInput) (Record, error)
 	SetPendingAction(context.Context, string, string, string) error
 	GetPendingAction(context.Context, string) (actionID, commandID string, err error)
 	ClearPendingAction(context.Context, string) error
@@ -158,11 +158,11 @@ func MaskFingerprintSummary(fingerprint string) string {
 }
 
 type OnboardingRepository interface {
-	IssueNodeEnrollmentToken(context.Context, string) (EnrollmentTokenIssue, error)
-	GetNodeOnboarding(context.Context, string) (OnboardingState, error)
-	ConfirmNodeRebind(context.Context, string) (Record, error)
+	IssueMonitoringInstanceEnrollmentToken(context.Context, string) (EnrollmentTokenIssue, error)
+	GetMonitoringInstanceOnboarding(context.Context, string) (OnboardingState, error)
+	ConfirmMonitoringInstanceRebind(context.Context, string) (Record, error)
 	RejectPendingFingerprint(context.Context, string) (Record, error)
-	ResetNodeBinding(context.Context, string) (Record, error)
+	ResetMonitoringInstanceBinding(context.Context, string) (Record, error)
 }
 
 func IsValidLifecycleStatus(status string) bool {

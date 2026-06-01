@@ -24,12 +24,12 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 		t.Fatalf("ApplyRetention() error = %v", err)
 	}
 	for _, want := range []string{
-		"insert into node_host_sample_daily_aggregates",
+		"insert into monitoring_instance_host_sample_daily_aggregates",
 		"insert into target_probe_daily_aggregates",
-		"delete from node_heartbeats",
+		"delete from monitoring_instance_heartbeats",
 		"delete from host_samples",
 		"delete from probe_observations",
-		"delete from node_host_sample_daily_aggregates",
+		"delete from monitoring_instance_host_sample_daily_aggregates",
 		"delete from target_probe_daily_aggregates",
 		"delete from state_change_events",
 		"delete from notification_records",
@@ -44,7 +44,7 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 	if tx.commitCalls != 1 || tx.rollbackCalls == 0 {
 		t.Fatalf("commitCalls=%d rollbackCalls=%d, want commit and deferred rollback", tx.commitCalls, tx.rollbackCalls)
 	}
-	if result.NodeAggregateRows != 1 || result.TargetAggregateRows != 1 || result.DeletedHeartbeats != 1 || result.DeletedNotifications != 1 {
+	if result.MonitoringInstanceAggregateRows != 1 || result.TargetAggregateRows != 1 || result.DeletedHeartbeats != 1 || result.DeletedNotifications != 1 {
 		t.Fatalf("result = %#v, want command-tag counts", result)
 	}
 }
@@ -80,10 +80,10 @@ func TestPostgresRetentionRepositoryUsesExpectedCutoffs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyRetention() error = %v", err)
 	}
-	if got := tx.argsForSQL("insert into node_host_sample_daily_aggregates")[0].(time.Time); !got.Equal(time.Date(2026, time.April, 28, 0, 0, 0, 0, time.UTC)) {
+	if got := tx.argsForSQL("insert into monitoring_instance_host_sample_daily_aggregates")[0].(time.Time); !got.Equal(time.Date(2026, time.April, 28, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("aggregate stable cutoff = %s, want start of current UTC day", got)
 	}
-	if got := tx.argsForSQL("delete from node_heartbeats")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -7)) {
+	if got := tx.argsForSQL("delete from monitoring_instance_heartbeats")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -7)) {
 		t.Fatalf("raw cutoff = %s, want %s", got, now.AddDate(0, 0, -7))
 	}
 	if got := tx.argsForSQL("delete from state_change_events")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -90)) {

@@ -29,9 +29,9 @@ func TestEventsHandlerReturnsListWithFilters(t *testing.T) {
 	repo := &fakeEventsRepository{result: []store.EventListItem{{
 		EventID:       "evt_001",
 		IncidentID:    "inc_001",
-		IncidentClass: incidents.IncidentNodeDiskPressure,
-		ObjectType:    incidents.ObjectTypeNode,
-		ObjectID:      "nd_001",
+		IncidentClass: incidents.IncidentMonitoringInstanceDiskPressure,
+		ObjectType:    incidents.ObjectTypeMonitoringInstance,
+		ObjectID:      "mi_001",
 		EventType:     incidents.EventIncidentStarted,
 		Severity:      incidents.SeverityAlert,
 		Summary:       "磁盘使用率 92.0%",
@@ -39,14 +39,14 @@ func TestEventsHandlerReturnsListWithFilters(t *testing.T) {
 	}}}
 
 	handler := handlers.Events(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/events?object_type=node&object_id=nd_001&severity=告警&event_type=incident_started&limit=25", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/events?object_type=monitoring_instance&object_id=mi_001&severity=告警&event_type=incident_started&limit=25", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
-	if repo.filter.ObjectType != incidents.ObjectTypeNode || repo.filter.ObjectID != "nd_001" || repo.filter.EventType != incidents.EventIncidentStarted || repo.filter.Limit != 25 {
+	if repo.filter.ObjectType != incidents.ObjectTypeMonitoringInstance || repo.filter.ObjectID != "mi_001" || repo.filter.EventType != incidents.EventIncidentStarted || repo.filter.Limit != 25 {
 		t.Fatalf("filter = %#v, want parsed filters", repo.filter)
 	}
 	var body struct {
