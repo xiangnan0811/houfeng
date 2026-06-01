@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/xiangnan0811/houfeng/compare/v0.25.1...v0.26.0) (2026-06-01)
+
+
+### Features
+
+* make VPS the control plane root ([59b56d0](https://github.com/xiangnan0811/houfeng/commit/59b56d05e6a23d0f854326cbdff4f3e2e67144a8))
+
 ## [0.25.1](https://github.com/xiangnan0811/houfeng/compare/v0.25.0...v0.25.1) (2026-06-01)
 
 
