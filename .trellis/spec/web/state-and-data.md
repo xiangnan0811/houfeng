@@ -23,29 +23,29 @@
 
 - **业务 `/api/*` 调用一律走 `web/src/lib/api.ts`**。该文件实现：
   - 一个 `request(path, init)` 内部函数（`web/src/lib/api.ts:39-68`）封装通用 fetch 行为：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store`，对 401 调用 `onUnauthorized()` 钩子并抛 `ApiError(401)`，对非 2xx 解析 `error` / `message` 字段后包成 `ApiError(status, message)`。
-  - 业务函数使用动词 + 资源命名（`listNodes` / `getNode` / `createTarget` / `updateNodeMetadata` / `enterNodeMaintenance` / `getDashboard` 等），返回 `Promise<T>`，T 来自 `lib/types.ts`。
+  - 业务函数使用动词 + 资源命名（`listMonitoringInstances` / `getMonitoringInstance` / `createTarget` / `updateMonitoringInstanceMetadata` / `enterMonitoringInstanceMaintenance` / `getDashboard` 等），返回 `Promise<T>`，T 来自 `lib/types.ts`。
   - `If-Match` 乐观锁通过 `patchJSONBody(path, body, { ifMatch })` 表达（`web/src/lib/api.ts:98-112`），传入的是上一次拿到的 `updated_at`。
 - **`/api/auth/*` 走 `web/src/lib/auth-client.ts`**，并复用 `web/src/lib/api.ts` 的 request helpers 与 401 hook。不要新增第二套 fetch 包装。
-- **不要在 page / component 里直接 `fetch()`**。业务请求必须加到 `web/src/lib/api.ts` 再由 page / component 调用；`NodesPage` 的历史直连 `fetch('/api/nodes')` 已偿还为 `createNode` API helper，新代码不要恢复这条路径。
+- **不要在 page / component 里直接 `fetch()`**。业务请求必须加到 `web/src/lib/api.ts` 再由 page / component 调用；`MonitoringPage` 的历史直连 `fetch('/api/monitoring-instances')` 已偿还为 `createMonitoringInstance` API helper，新代码不要恢复这条路径。
 
 ### 类型对齐
 
-- 与 center 响应 / 请求体一一对应的类型集中在 `web/src/lib/types.ts`：`NodeRecord`、`TargetRecord`、`ProbeItemRecord`、`StateChangeEventRecord`、`DashboardOverview`、`SettingsRecord` 等；命名遵循 `<Aggregate>Record`（响应行）/ `<Aggregate>Input` / `<Aggregate>Override` 后缀。
-- 字段名**完全镜像 center JSON**（snake_case，如 `node_id` / `current_health_status` / `last_heartbeat_at`）。**不要在前端再驼峰化一遍**——保持 grep 友好，便于和 Go 侧 `internal/center/http/handlers/*` 对齐。
+- 与 center 响应 / 请求体一一对应的类型集中在 `web/src/lib/types.ts`：`MonitoringInstanceRecord`、`TargetRecord`、`ProbeItemRecord`、`StateChangeEventRecord`、`DashboardOverview`、`SettingsRecord` 等；命名遵循 `<Aggregate>Record`（响应行）/ `<Aggregate>Input` / `<Aggregate>Override` 后缀。
+- 字段名**完全镜像 center JSON**（snake_case，如 `monitoring_instance_id` / `current_health_status` / `last_heartbeat_at`）。**不要在前端再驼峰化一遍**——保持 grep 友好，便于和 Go 侧 `internal/center/http/handlers/*` 对齐。
 - 中文枚举（如 `IncidentSeverity = '正常' | '关注' | '告警' | '严重'`、`OnboardingPhase` 等）来自 center，前端原样保留中文字面量；展示标签通过 `STATE_CHANGE_EVENT_TYPE_LABELS` (`web/src/lib/types.ts:202-221`) 这种 const map 二次映射，**不要散落到组件文件**。
 - **当前类型是手写**，与 Go contract 没有自动生成机制。新增字段时按以下顺序：1) center handler / contract 改完；2) 在 `lib/types.ts` 加字段（保持 snake_case、保持可选性与后端一致）；3) 在 `lib/api.ts` 引用；4) page / component 消费。
 
-### Node onboarding 一键安装数据流
+### MonitoringInstance onboarding 一键安装数据流
 
 #### 1. Scope / Trigger
 
-- Trigger: 修改 `NodeOnboardingPage`、`NodeInstallCommandIssue`、`issueNodeInstallCommand`、Node 创建后跳转 onboarding 的流程，或任何安装命令展示/复制行为。
+- Trigger: 修改 `MonitoringDetailPage`、`MonitoringInstanceInstallCommandIssue`、`issueMonitoringInstanceInstallCommand`、MonitoringInstance 创建后跳转 onboarding 的流程，或任何安装命令展示/复制行为。
 
 #### 2. Signatures
 
-- Frontend type: `NodeInstallCommandIssue` fields mirror center JSON snake_case: `command`, `issued_at`, `expires_at`, `installer_url`, `public_base_url`, `agent_version`, `release_repo`。
-- Frontend API: `issueNodeInstallCommand(nodeId)` -> `POST /api/nodes/{node_id}/install-command`。
-- Page flow: `NodesPage` 创建 Node 后跳转 onboarding；`NodeOnboardingPage` 按用户操作生成/重新生成 center command，不再依赖 create flow 预发 plaintext token。
+- Frontend type: `MonitoringInstanceInstallCommandIssue` fields mirror center JSON snake_case: `command`, `issued_at`, `expires_at`, `installer_url`, `public_base_url`, `agent_version`, `release_repo`。
+- Frontend API: `issueMonitoringInstanceInstallCommand(monitoringInstanceId)` -> `POST /api/monitoring-instances/{monitoring_instance_id}/install-command`。
+- Page flow: `MonitoringPage` 创建 MonitoringInstance 后跳转 onboarding；`MonitoringDetailPage` 按用户操作生成/重新生成 center command，不再依赖 create flow 预发 plaintext token。
 
 #### 3. Contracts
 
@@ -63,7 +63,7 @@
 | User regenerates command | old visible command is replaced by new center response |
 | 409 public URL/version config error | page shows backend message and does not synthesize fallback command |
 | Binding conflict displayed | copy explains one-time token may be consumed and regeneration may be required |
-| Create Node succeeds | navigate to onboarding page instead of caching a plaintext token in module global state |
+| Create MonitoringInstance succeeds | navigate to onboarding page instead of caching a plaintext token in module global state |
 
 #### 5. Good/Base/Bad Cases
 
@@ -74,9 +74,9 @@
 
 #### 6. Tests Required
 
-- `web/src/lib/api.test.ts`: `issueNodeInstallCommand` posts to `/api/nodes/{id}/install-command`.
-- `NodeOnboardingPage.test.tsx`: generate success, regenerate, reveal/hide/copy, config errors, metadata display, and conflict copy warning about consumed one-time tokens.
-- `NodesPage.test.tsx`: create flow navigates to onboarding without pre-issuing or caching an enrollment token.
+- `web/src/lib/api.test.ts`: `issueMonitoringInstanceInstallCommand` posts to `/api/monitoring-instances/{id}/install-command`.
+- `MonitoringDetailPage.test.tsx`: generate success, regenerate, reveal/hide/copy, config errors, metadata display, and conflict copy warning about consumed one-time tokens.
+- `MonitoringPage.test.tsx`: create flow navigates to onboarding without pre-issuing or caching an enrollment token.
 
 #### 7. Wrong vs Correct
 
@@ -87,7 +87,7 @@ const command = `curl -fsSL ${window.location.origin}/api/agent/install.sh | sud
 
 ```tsx
 // 正确：只展示后端返回的命令。
-const issue = await issueNodeInstallCommand(nodeId)
+const issue = await issueMonitoringInstanceInstallCommand(monitoringInstanceId)
 setInstallIssue(issue)
 ```
 
@@ -101,21 +101,21 @@ setInstallIssue(issue)
 
 ### Dashboard 数据可信度
 
-- `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实，并且**不得默认展示所有 contract 字段**。当前可用事实来自 `DashboardOverview`：dashboard 生成时间、总节点/目标数、异常/严重/维护计数、库存完整度计数、24h 新异常/恢复趋势、真实全量 `group_summaries`、通知配置布尔摘要、异常节点/目标摘要、最近事件；这些字段是可用事实池，不是首页全部展示清单。
+- `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实，并且**不得默认展示所有 contract 字段**。当前可用事实来自 `DashboardOverview`：dashboard 生成时间、总监控实例/目标数、异常/严重/维护计数、库存完整度计数、24h 新异常/恢复趋势、真实全量 `group_summaries`、通知配置布尔摘要、异常监控实例/目标摘要、最近事件；这些字段是可用事实池，不是首页全部展示清单。
 - Dashboard 首屏按 asset-decision-first command surface 做渐进披露：顶部只展示一个 `工作台 command surface`，并把现有优先级决策收敛成一个主行动块 `今日第一步`。资产决策与观测异常事实可以作为同一 surface 内的证据 lane 支撑主行动；刷新、自动刷新、管理入口和非主行动链接必须降为低权重控制或 `次级动作`，不得恢复成与主 CTA 同权的第三 lane。异常态下方继续展示统一异常处理队列、工作台内 `运行上下文` 和紧凑 `管理入口`；其中处理队列仍是主任务，运行上下文与管理入口只能作为队列下方的辅助跳转，不得拆成独立 page section。正常 / 维护态下方展示运行概览、运行上下文与紧凑管理入口；首次接入态下方只展示 onboarding。不要为了“contract 已返回”而渲染 API loaded facts、独立 KPI/summary strip、`系统快捷入口` 详情列表、`Group 摘要` 列表或 `最近事件摘要` 列表。
 - Command surface 的顶部可以展示一个低高度 `今日判断摘要` 轨道，但它只能汇总当前最高优先级判断：资产压力 / 资产主线、严重异常 / 观测异常 / 维护观察 / 观测稳定、以及第一条下一步动作。它不是 KPI strip，不得扩展为全量 dashboard metric 列表；每项必须链接到已有 Dashboard 深链承接页，且 390px 视口下折叠为单列。
 - `snapshot_generated_at` 只能写成 `生成时间`、`摘要生成` 这类接口生成时间提示。它不是 Center health、agent heartbeat、sync freshness 或全链路实时性证明，不要写 `中心运行正常` / `同步于` / `健康检查通过` 之类文案。
-- `abnormal_nodes` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。`group_summaries` 必须来自后端全量聚合，但它默认不在 Dashboard 首屏展开；如果未来重新展示 Group 上下文，必须保持轻量、服务当前状态决策，数组为空时只显示轻量说明，不在前端制造 `未分组 0` 行。
+- `abnormal_monitoring_instances` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。`group_summaries` 必须来自后端全量聚合，但它默认不在 Dashboard 首屏展开；如果未来重新展示 Group 上下文，必须保持轻量、服务当前状态决策，数组为空时只显示轻量说明，不在前端制造 `未分组 0` 行。
 - `recent_events` 默认不在 Dashboard 首屏展开成事件列表。Dashboard 只保留 `查看事件流` / `/events?time_range=24h` 这类入口；复杂历史筛选、事件列表和上下文展开交给 EventsPage。
 - Dashboard 可以在主工作台内部展示一个低权重 `运行上下文` strip，用于补充同类服务器管理系统常见的影响范围、库存状态、最近活动。该 strip 最多 3 个 link item：不得恢复独立 KPI/summary strip，不得使用 `Group 摘要` / `最近事件摘要` heading，不得展示完整 group list 或 recent event summary 列表。最近活动只展示事件类型、严重度、对象和时间语义入口，具体事件摘要交给 EventsPage。视觉上它应是工作台内的 compact context rail，而不是三个同权摘要卡片。
 - `notification_status` 只能展示配置布尔摘要，例如 Telegram / Feishu 是否已配置、Telegram runtime apply 是否生效。前端不得要求或展示 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url` 等敏感配置值；需要编辑真实配置时跳转 SettingsPage。
-- `asset_summary` 只能展示 VPS Asset Ledger 的少量决策入口：30 天续费、待决策、待取消/迁移、未关联 Node、关联异常 VPS、按币种月付成本。它应集中出现在 Dashboard 首屏 `资产决策队列` lane 中，避免在下方工作台重复出现同权资产卡片。它不能展开资产明细，不能替代 VPS / 订阅页面，也不能把 Dashboard 变成资产字段总表。第一版没有未关联 VPS 专用筛选时，可以链接 `/vps` 作为人工核对入口。
-- 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入节点、暂停节点、退役节点、暂停目标、归档目标。PR4 后，Dashboard 深链是受支持 contract：`/nodes?onboarding=pending` 表示待接入或绑定待处理节点，`/nodes?abnormal=1` 表示异常节点，`/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档` 表示对应目标列表筛选，`/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1` 表示事件页筛选；新增深链必须先在目标页面用 URL-state 和可见 chip/toggle 承接。
-- AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的节点/目标 count 可以来自 `abnormal_node_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
+- `asset_summary` 只能展示 VPS Asset Ledger 的少量决策入口：30 天续费、待决策、待取消/迁移、未关联监控实例、关联异常 VPS、按币种月付成本。它应集中出现在 Dashboard 首屏 `资产决策队列` lane 中，避免在下方工作台重复出现同权资产卡片。它不能展开资产明细，不能替代 VPS / 订阅页面，也不能把 Dashboard 变成资产字段总表。第一版没有未关联 VPS 专用筛选时，可以链接 `/vps` 作为人工核对入口。
+- 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入监控实例、暂停监控实例、退役监控实例、暂停目标、归档目标。Dashboard 深链是受支持 contract：`/monitoring?onboarding=pending` 表示待接入或绑定待处理监控实例，`/monitoring?abnormal=1` 表示异常监控实例，`/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档` 表示对应目标列表筛选，`/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1` 表示事件页筛选；新增深链必须先在目标页面用 URL-state 和可见 chip/toggle 承接。
+- AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的监控实例/目标 count 可以来自 `abnormal_monitoring_instance_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
 
 ```tsx
 // 错误：从异常摘要伪装成全量分布
-const groupSummaries = overview.abnormal_nodes.reduce(...)
+const groupSummaries = overview.abnormal_monitoring_instances.reduce(...)
 <GroupContextSummary groups={groupSummaries} />
 
 // 错误：把 dashboard 生成时间写成同步/健康状态
@@ -131,7 +131,7 @@ overview.asset_summary.vps_assets.map(...)
 <SyncStatus state="ok" label="中心运行正常" meta={`v1.0 · sync ${new Date().toISOString()}`} />
 
 // 错误：把 dashboard contract 当作首屏展示清单
-<GlobalKpiStrip items={['节点', '目标', '严重', '维护', '24h 变化']} />
+<GlobalKpiStrip items={['监控实例', '目标', '严重', '维护', '24h 变化']} />
 <ShortcutRail title="系统快捷入口" entries={allEntryDescriptions} />
 <GroupContextSummary groups={overview.group_summaries} />
 <RecentEventsContext events={overview.recent_events} />
@@ -144,17 +144,17 @@ overview.asset_summary.vps_assets.map(...)
 <SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
 ```
 
-### Nodes 列表工作台状态
+### Monitoring 列表工作台状态
 
-NodesPage 是运行证据扫描页，不应把筛选、批量操作、趋势开关和刷新控制全部平铺成首屏同权入口。主路径是 quick view → 节点列表 → 行级处理；高级字段筛选和批量操作是次级控制。
+MonitoringPage 是运行证据扫描页，不应把筛选、批量操作、趋势开关和刷新控制全部平铺成首屏同权入口。主路径是 quick view → 监控实例列表 → 行级处理；高级字段筛选和批量操作是次级控制。
 
 #### Contracts
 
 - Quick view 负责表达当前扫描主线，至少覆盖全部、异常、待接入、维护/暂停、绑定异常；维护/暂停视图必须同时包含 `monitoring_status === '维护中'` 与 `monitoring_status === '暂停'`，不要用单个 `run_status` 推断。
 - 高级筛选使用 Drawer 的 applied/draft 分离：打开时从当前已应用筛选初始化草稿；只有点击完成/应用才提交到列表状态；取消、Esc、overlay 和头部关闭必须丢弃草稿，不能改变列表或触发隐式请求。
 - 高级筛选计数只统计已应用字段筛选，必须覆盖 lifecycle、health、monitoring/run status、group、region、labels、search 等会改变列表的维度；quick view 本身不混入字段筛选计数。
-- 批量操作区默认隐藏；只有用户显式打开批量操作、已经选择全量/部分节点、存在待确认批量动作、提交中或错误需要展示时才出现。批量动作按钮仍必须以明确选择为前提，不因列表有数据而默认高亮。
-- NodesSupportSurface 只作为资产判断支撑，不作为第二个主工作台；文案要压缩，support lane 数量保持克制，资产侧问题应导向 VPS 库存或资产决策队列。
+- 批量操作区默认隐藏；只有用户显式打开批量操作、已经选择全量/部分监控实例、存在待确认批量动作、提交中或错误需要展示时才出现。批量动作按钮仍必须以明确选择为前提，不因列表有数据而默认高亮。
+- MonitoringSupportSurface 只作为资产判断支撑，不作为第二个主工作台；文案要压缩，support lane 数量保持克制，资产侧问题应导向 VPS 库存或资产决策队列。
 
 #### Validation & Error Matrix
 
@@ -162,7 +162,7 @@ NodesPage 是运行证据扫描页，不应把筛选、批量操作、趋势开�
 | --- | --- |
 | Drawer 内修改筛选后取消 / Esc / overlay 关闭 | 列表不变；重新打开 Drawer 恢复当前 applied filters |
 | 点击完成 / 应用筛选 | Drawer 关闭，列表和 visible chips 使用新筛选 |
-| runtime attention quick view | 同时显示维护中与暂停节点；空态不得误报为全局无节点 |
+| runtime attention quick view | 同时显示维护中与暂停监控实例；空态不得误报为全局无监控实例 |
 | 无选择且未打开批量操作 | 批量 bar 不渲染 |
 | 打开批量操作但未全选 | 显示范围/选择入口，不显示实际批量动作按钮 |
 
@@ -176,7 +176,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 2. Signatures
 
-- Frontend API: `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listNodeAssetContexts()`、`listTargetAssetContexts()`，不得在页面里直接 `fetch()`。
+- Frontend API: `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listMonitoringInstanceAssetContexts()`、`listTargetAssetContexts()`，不得在页面里直接 `fetch()`。
 - Decision queue data: `AssetDecisionsPage` 拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
 - VPS inventory data: `VPSPage` 拉取全量 `listVPSAssets()`、`listProviders()` 和 `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views。
 - URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|archived|cancellation_attention`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
@@ -185,14 +185,14 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 - Asset Decisions 首屏主 surface 必须是一个统一工作队列；不得恢复三张同权 VPS queue table。
 - 决策编辑必须在 drawer 或同等次级 surface 中完成；保存成功 notice 应在队列 surface 可见。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
-- 当订阅为 `expired` / `cancelled` / `paused` 而 VPS、Node 或 Target 仍表现为 active/running，页面必须把它归入 `cancellation_attention` 或等价的联动处理入口；入口应打开 `/vps/{id}?workbench=cancellation`，由统一工作台提交用户确认的步骤。
-- 统一取消 / 退役工作台必须展示 preview 返回的 subscription、VPS、Node、Target 影响范围；Node/Target 默认只展示为待确认项，只有用户在工作台勾选并提交的 `node_actions` / `target_actions` 才能修改运行状态。
-- Node 列表 / 详情、Target 列表 / 详情必须消费批量 asset-context API 显示关联 VPS 的取消 / 过期 / 状态割裂上下文；不得只显示自身运行状态而隐藏宿主 VPS 已取消或待取消的事实。
-- `VPSAssetRecord.active_node_link_count` 只能展示 Node 关联数量或未关联状态，**不得**展示 linked node health、最近心跳或异常，除非后端 contract 新增并同步类型/测试。
-- 资料质量提示只能来自已有字段：缺订阅、`active_node_link_count <= 0`、缺 provider、缺 location、缺 SSH/IP access。不要从 provider 名称、region 文案或标签推断风险。
+- 当订阅为 `expired` / `cancelled` / `paused` 而 VPS、MonitoringInstance 或 Target 仍表现为 active/running，页面必须把它归入 `cancellation_attention` 或等价的联动处理入口；入口应打开 `/vps/{id}?workbench=cancellation`，由统一工作台提交用户确认的步骤。
+- 统一取消 / 退役工作台必须展示 preview 返回的 subscription、VPS、MonitoringInstance、Target 影响范围；MonitoringInstance/Target 默认只展示为待确认项，只有用户在工作台勾选并提交的 `monitoring_instance_actions` / `target_actions` 才能修改运行状态。
+- MonitoringInstance 列表 / 详情、Target 列表 / 详情必须消费批量 asset-context API 显示关联 VPS 的取消 / 过期 / 状态割裂上下文；不得只显示自身运行状态而隐藏宿主 VPS 已取消或待取消的事实。
+- `VPSAssetRecord.active_monitoring_instance_link_count` 只能展示 MonitoringInstance 关联数量或未关联状态，**不得**展示 linked monitoring instance health、最近心跳或异常，除非后端 contract 新增并同步类型/测试。
+- 资料质量提示只能来自已有字段：缺订阅、`active_monitoring_instance_link_count <= 0`、缺 provider、缺 location、缺 SSH/IP access。不要从 provider 名称、region 文案或标签推断风险。
 - VPS inventory quick views 中 derived filters 在前端执行即可；40+ VPS 量级不引入新缓存/状态库，不新增 API 字段。
 - Dashboard 深链进入 VPS 页时，query 必须被页面首屏可见的 tab/chip/drawer 状态承接；不能静默丢弃。
-- 常规业务对象关联输入不得要求用户复制内部 ID：VPS facts 的 Provider、VPS↔Node link 的 Node、VPS service/domain 的 Target、domain 的 Service 都应使用页面加载的数据选择器，并保留“未关联/不关联”选项。选择器为空或加载失败时必须给出明确说明和到对应列表/创建流程的入口；选择 Node/Target 只创建资产引用或链接，不隐式修改 Node/Target/Agent/ProbeItem 语义。
+- 常规业务对象关联输入不得要求用户复制内部 ID：VPS facts 的 Provider、VPS↔MonitoringInstance link 的 MonitoringInstance、VPS service/domain 的 Target、domain 的 Service 都应使用页面加载的数据选择器，并保留“未关联/不关联”选项。选择器为空或加载失败时必须给出明确说明和到对应列表/创建流程的入口；选择监控实例/Target 只创建资产引用或链接，不隐式修改 MonitoringInstance/Target/Agent/ProbeItem 语义。
 - `/subscriptions?vps_id=<id>&create=1` 是可落地上下文：订阅页必须显示当前 VPS 筛选/上下文，创建表单预填该 VPS，用户仍可切换或清除筛选。
 
 #### 4. Validation & Error Matrix
@@ -214,33 +214,37 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: `/vps?view=unlinked&renewal_decision=unreviewed` 首屏显示 `视图: 未关联` 和 `续费: 未评估` chips，列表只显示同时满足条件的 rows。
 - Good: 资产决策保存 `migrate` 后，VPS 从 `待评估` tab 消失并出现在 `迁移` tab，notice 留在队列 surface。
 - Good: 资产决策保存 `cancel` 后，notice 继续展示 `VPS -> 取消`，并追加 API 返回的订阅联动消息 / 订阅页 action。
-- Good: VPS 详情打开 Node link Drawer 时懒加载 `listNodes()`，用 `选择 Node` selector 展示名称、ID、provider、生命周期和健康状态。
+- Good: VPS 详情打开 MonitoringInstance link Drawer 时懒加载 `listMonitoringInstances()`，用 `选择监控实例` selector 展示名称、ID、provider、生命周期和健康状态。
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
-- Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked node health。
+- Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked monitoring instance health。
 - Bad: Page 直接 `fetch('/api/vps')` 或在组件层调 API；业务请求必须走 `lib/api.ts`。
-- Bad: 在 VPS 详情表单里让用户输入 `nd_...`、`tg_...`、`svc_...` 作为常规路径，且不给候选列表或落地入口。
+- Bad: 在 VPS 详情表单里让用户输入 `mi_...`、`tg_...`、`svc_...` 作为常规路径，且不给候选列表或落地入口。
 
 #### 6. Tests Required
 
 - `AssetDecisionsPage.test.tsx`: 续费窗口请求、统一工作队列渲染、drawer 更新决策、保存后队列移动/移除、取消类联动 message/action、错误/空态。
-- `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/Node/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
+- `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
-- `VPSDetailPage.test.tsx`: Provider/Node/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。
+- `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。
 
 #### 7. Wrong vs Correct
 
 ```tsx
 // 错误：常规关联让用户复制内部 ID，且加载失败时只能猜。
-<Input label="Node ID" value={draft.nodeId} onChange={...} placeholder="nd_..." />
+<Input label="MonitoringInstance ID" value={draft.monitoringInstanceId} onChange={...} placeholder="mi_..." />
 ```
 
 ```tsx
 // 正确：页面加载候选，选择器展示可辨识信息；无候选时给出落地入口。
-<select aria-label="选择 Node" value={draft.nodeId} onChange={...}>
-  <option value="">选择现有 Node</option>
-  {nodes.map((node) => <option value={node.node_id}>{node.display_name} · {node.node_id}</option>)}
+<select aria-label="选择监控实例" value={draft.monitoringInstanceId} onChange={...}>
+  <option value="">选择现有监控实例</option>
+  {monitoringInstances.map((monitoringInstance) => (
+    <option value={monitoringInstance.monitoring_instance_id}>
+      {monitoringInstance.display_name} · {monitoringInstance.monitoring_instance_id}
+    </option>
+  ))}
 </select>
-<Link to="/nodes">Node 列表</Link>
+<Link to="/monitoring">监控实例列表</Link>
 ```
 
 ```tsx
@@ -293,7 +297,7 @@ VPS 服务资产是 VPS 详情页内的独立手工记录区块，前端必须�
 #### 5. Good/Base/Bad Cases
 
 - Good: 创建服务成功后显示 `服务记录已创建`，表格出现新服务，并且只追加一次 `/api/vps/{id}/services` refresh。
-- Base: 初始 services 为空时，页面仍正常展示 VPS facts、Node links、timeline 和连接摘要。
+- Base: 初始 services 为空时，页面仍正常展示 VPS facts、MonitoringInstance links、timeline 和连接摘要。
 - Bad: 页面直接 `fetch('/api/vps/.../services')`，绕过 `api.ts` 和 `ApiError`。
 - Bad: 把服务数量写进 Dashboard asset summary，或从 Target 列表自动反推 services。
 
@@ -352,12 +356,12 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 
 #### Contracts
 
-- `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。Provider/Node/Target selector 数据可在对应 Drawer 打开时懒加载，避免主详情首屏为选择器阻塞。
+- `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。Provider/MonitoringInstance/Target selector 数据可在对应 Drawer 打开时懒加载，避免主详情首屏为选择器阻塞。
 - VPS scoped subscription 只作为续费/成本 evidence。订阅请求失败时显示请求错误和未知状态，不得把 failure 当成真实 `缺订阅`。
 - VPS 详情页必须可加载 `getVPSCancellationPreview(vpsId)` 并在资产判断 workbench 显示取消 / 过期影响范围；URL `?workbench=cancellation` 应直接打开统一取消 / 退役工作台。
-- 如果 preview 显示 subscription 已非活跃但 VPS 仍未取消，页面不得引导“创建订阅”作为主路径，而应引导用户处理 VPS、Node 与 Target/实例的 lifecycle action。
-- `VPSAssetDetail.node_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_node_link_count` 在列表页只能代表数量的限制。
-- 决策、facts、Node link、experience log、service create、domain create、取消 / 退役 action 的复杂输入使用 Drawer。关闭 Drawer 后，保存成功 notice 必须留在主页面可见 surface 内。
+- 如果 preview 显示 subscription 已非活跃但 VPS 仍未取消，页面不得引导“创建订阅”作为主路径，而应引导用户处理 VPS、MonitoringInstance 与 Target/实例的 lifecycle action。
+- `VPSAssetDetail.monitoring_instance_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_monitoring_instance_link_count` 在列表页只能代表数量的限制。
+- 决策、facts、MonitoringInstance link、experience log、service create、domain create、取消 / 退役 action 的复杂输入使用 Drawer。关闭 Drawer 后，保存成功 notice 必须留在主页面可见 surface 内。
 - Facts Drawer 只编辑基础事实和用途状态；不得包含 lifecycle status，也不得在 facts PATCH payload 中发送 `lifecycle_status`。
 - Archive/restore 仍是 lifecycle 危险操作，使用独立 confirmation，不放入 routine edit Drawer。
 
@@ -386,7 +390,7 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 #### 5. Good/Base/Bad Cases
 
 - Good: 创建域名成功后显示 `域名记录已创建`，表格出现新域名，并且只追加一次 `/api/vps/{id}/domains` refresh。
-- Base: 初始 domains 为空时，页面仍正常展示 VPS facts、Node links、services、timeline 和连接摘要。
+- Base: 初始 domains 为空时，页面仍正常展示 VPS facts、MonitoringInstance links、services、timeline 和连接摘要。
 - Bad: 页面直接 `fetch('/api/vps/.../domains')`，绕过 `api.ts` 和 `ApiError`。
 - Bad: 把域名数量写进 Dashboard asset summary，或从 Target / service 列表自动反推 domains。
 
@@ -432,12 +436,12 @@ postJSONBody(`/api/vps/${vpsId}/domains`, body)
 
 #### 3. Contracts
 
-- `limit` 只限制 `abnormal_nodes`、`abnormal_targets` 和 `recent_events`；不得限制全局计数、`group_summaries` 或 `notification_status`。
+- `limit` 只限制 `abnormal_monitoring_instances`、`abnormal_targets` 和 `recent_events`；不得限制全局计数、`group_summaries` 或 `notification_status`。
 - `snapshot_generated_at` 是 Center 生成 overview 的时间，只能被展示为 dashboard 生成时间。
-- `group_summaries` 必须由后端基于全量 `nodes` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce。
+- `group_summaries` 必须由后端基于全量 `monitoring_instances` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce。
 - `notification_status` 只能包含配置布尔摘要，不包含 Telegram token/chat id 或 Feishu webhook URL。
 - `asset_summary` 只能包含聚合摘要：`renewal_due_30d_subscription_count`、`renewal_due_30d_vps_count`、`unreviewed_vps_count`、`to_cancel_vps_count`、`to_migrate_vps_count`、`unlinked_vps_count`、`abnormal_linked_vps_count`、`cost_by_currency[]`。`cost_by_currency[]` 只包含 `currency`、`monthly_total`、`yearly_total`。
-- 库存完整度计数必须来自后端 contract：待接入节点、暂停节点、退役节点、暂停目标、归档目标。
+- 库存完整度计数必须来自后端 contract：待接入监控实例、暂停监控实例、退役监控实例、暂停目标、归档目标。
 
 #### 4. Validation & Error Matrix
 
@@ -452,10 +456,10 @@ postJSONBody(`/api/vps/${vpsId}/domains`, body)
 
 #### 5. Good/Base/Bad Cases
 
-- Good: group 只存在于 targets 时仍出现在 `group_summaries`，节点计数为 0、目标计数为真实值。
-- Base: 无节点无目标时 dashboard 仍返回 200，计数为 0，首次接入工作台显示，Group 区为空态。
-- Good: 资产摘要显示为工作台内低权重入口，链接到 VPS / 订阅 / 节点筛选页，不新增资产明细表。
-- Bad: 从 `abnormal_nodes` 推导 `按 Group 分布`；把 `snapshot_generated_at` 写成同步完成；把通知 token 暴露给 Dashboard。
+- Good: group 只存在于 targets 时仍出现在 `group_summaries`，监控实例计数为 0、目标计数为真实值。
+- Base: 无监控实例无目标时 dashboard 仍返回 200，计数为 0，首次接入工作台显示，Group 区为空态。
+- Good: 资产摘要显示为工作台内低权重入口，链接到 VPS / 订阅 / 监控筛选页，不新增资产明细表。
+- Bad: 从 `abnormal_monitoring_instances` 推导 `按 Group 分布`；把 `snapshot_generated_at` 写成同步完成；把通知 token 暴露给 Dashboard。
 - Bad: 把 `asset_summary` 扩展成 `vps_assets` / `subscriptions` 明细数组，或在 Dashboard 首屏展示所有资产字段。
 
 #### 6. Tests Required
@@ -470,10 +474,10 @@ postJSONBody(`/api/vps/${vpsId}/domains`, body)
 
 ```tsx
 // 错误：PR4 前从 Dashboard 拼筛选深链，并且筛选语义不由 API contract 支撑
-<Link to={`/nodes?monitoring_status=${overview.paused_node_count > 0 ? '暂停' : ''}`}>暂停节点</Link>
+<Link to={`/monitoring?monitoring_status=${overview.paused_monitoring_instance_count > 0 ? '暂停' : ''}`}>暂停监控实例</Link>
 
 // 正确：PR3 只展示 contract 支撑的状态摘要，入口仍去列表页
-<Link to="/nodes">暂停 <MonoDigits>{overview.paused_node_count}</MonoDigits></Link>
+<Link to="/monitoring">暂停 <MonoDigits>{overview.paused_monitoring_instance_count}</MonoDigits></Link>
 
 // 错误：要求 settings secret 出现在 dashboard contract
 overview.notification_status.feishu_webhook_url
@@ -601,10 +605,10 @@ include_backfilled: filters.include_backfilled
 
 ## 本地组件状态
 
-- **`useState` 是默认选择**。同一 page 内多块独立 state 倾向于多个 `useState`，不强行合并（参考 `web/src/pages/NodesPage.tsx:144-163` 内 ~14 个 `useState`，各自语义清晰）。
-- **`useRef` 用于不触发 render 的可变值**（DOM 引用、focus 还原 token、回调最新值）。典型例子：`web/src/pages/NodesPage.tsx:162-163` 的 `actionButtonRefs` / `pendingFocusRestoreRef`。
+- **`useState` 是默认选择**。同一 page 内多块独立 state 倾向于多个 `useState`，不强行合并（参考 `web/src/pages/MonitoringPage.tsx:144-163` 内 ~14 个 `useState`，各自语义清晰）。
+- **`useRef` 用于不触发 render 的可变值**（DOM 引用、focus 还原 token、回调最新值）。典型例子：`web/src/pages/MonitoringPage.tsx:162-163` 的 `actionButtonRefs` / `pendingFocusRestoreRef`。
 - **`useReducer` 当前未使用**。如某个 page 状态机分支 ≥ 4 个动作 + state 之间相互依赖，可以考虑引入；目前的页面用多个 `useState` + 描述性的 update 函数已经够。
-- **派生状态不要存 state**：能用 `nodes.filter(isBindingConflictNode)` 现算的就别 `useEffect` 同步进 state（参考 `NodesPage.tsx:369`）。
+- **派生状态不要存 state**：能用 `monitoringInstances.filter(isBindingConflictMonitoringInstance)` 现算的就别 `useEffect` 同步进 state（参考 `MonitoringPage.tsx`）。
 
 ---
 
@@ -621,7 +625,7 @@ include_backfilled: filters.include_backfilled
 
 **新增第三个 Context 的判断标准**：
 
-1. 数据真的需要被树形多个节点消费（如多 page、多 layout 子树）。
+1. 数据真的需要被树形多个子树消费（如多 page、多 layout 子树）。
 2. 不是纯服务端数据缓存（那种应在引入 React Query 之类时再统一）。
 3. 写入路径有限且语义清晰（如全局开关、当前组织 ID）。
 
@@ -631,9 +635,9 @@ include_backfilled: filters.include_backfilled
 
 ## 数据拉取时机（实读约束）
 
-- 当前所有数据拉取都是 **mount 时拉一次** + **用户操作触发重拉**。`useEffect` 触发条件主要是 page 入参（`useParams` 拿到的 `nodeId` / `targetId`）或筛选条件（如 `EventsPage` 的 `appliedFilters`）。
+- 当前所有数据拉取都是 **mount 时拉一次** + **用户操作触发重拉**。`useEffect` 触发条件主要是 page 入参（`useParams` 拿到的 `monitoringInstanceId` / `targetId`）或筛选条件（如 `EventsPage` 的 `appliedFilters`）。
 - **没有 SSE / WebSocket / 轮询**。center 也不主动推；交互式重刷由用户点击 / 提交触发。
-- **没有跨 page 的请求缓存**：从 `/nodes` 进 `/nodes/:id` 会再发一次 `getNode`。当前体量可以接受；如果未来要去抖 / 缓存，再考虑 React Query。
+- **没有跨 page 的请求缓存**：从 `/monitoring` 进 `/monitoring/:id` 会再发一次 `getMonitoringInstance`。当前体量可以接受；如果未来要去抖 / 缓存，再考虑 React Query。
 
 ---
 
@@ -643,8 +647,8 @@ include_backfilled: filters.include_backfilled
 
 - ❌ **page / component 里直接 `fetch()`**：业务请求必须走 `web/src/lib/api.ts`，认证请求走 `web/src/lib/auth-client.ts`。
 - ❌ **手抄后端字段名 / 自己拼 URL 格式化**：从 `lib/types.ts` import 类型 + 用 `lib/api.ts` 里的 `withQuery` 模式构造查询参数。
-- ❌ **驼峰化后端字段**：保持 snake_case（`node_id`、`current_health_status`），便于和 center 端 grep 对齐。
-- ❌ **跨 page 共享 mutable 全局变量**：不要用模块级 `let` / Map 缓存业务数据或 plaintext token；节点安装命令只从 center 生成并在当前 onboarding page 状态中展示。
+- ❌ **驼峰化后端字段**：保持 snake_case（`monitoring_instance_id`、`current_health_status`），便于和 center 端 grep 对齐。
+- ❌ **跨 page 共享 mutable 全局变量**：不要用模块级 `let` / Map 缓存业务数据或 plaintext token；监控实例安装命令只从 center 生成并在当前 onboarding page 状态中展示。
 - ❌ **绕过 ApiError 直接 throw 字符串**：`lib/api.ts` 已统一错 `ApiError(status, message)`，page 用 `instanceof ApiError` 判别后挑 `.message` 展示。
 - ❌ **在 `useEffect` 里写 state 不带 `cancelled` 旗标**：StrictMode 下 effect 会触发两次，不防护会出现 setState on unmounted。
 - ❌ **把派生数据存 `useState`**：能现算就不要二次同步。
@@ -668,6 +672,6 @@ include_backfilled: filters.include_backfilled
 仓库内"数据获取写得好"的真实参考点：
 
 - **标准 page 数据流（loading / error / data 三态 + cancelled 旗标）**：`web/src/pages/EventsPage.tsx:63-108`，配合 `web/src/lib/api.ts:304-325` 的 `listEvents(filter)`。
-- **乐观锁更新**：`web/src/pages/NodesPage.tsx:283-325` 的 `handleSaveLabels` → `updateNodeMetadata(nodeId, input, { expectedUpdatedAt })`，其内部由 `web/src/lib/api.ts:145-153` 走 `If-Match` 头实现。
+- **乐观锁更新**：`web/src/pages/MonitoringPage.tsx:283-325` 的 `handleSaveLabels` → `updateMonitoringInstanceMetadata(monitoringInstanceId, input, { expectedUpdatedAt })`，其内部由 `web/src/lib/api.ts:145-153` 走 `If-Match` 头实现。
 - **Provider + Hook 配对**：`web/src/lib/auth-context.tsx`（`AuthProvider` 内 `useEffect` 挂 401 钩子 → 用 `useAuth()` 暴露 `{ user, loading, login, logout, refresh }`）。
 - **类型驱动的 API 函数集**：`web/src/lib/api.ts:1-21` 顶部从 `./types` 一次性 import 所有领域类型，下方所有 `requestJSON<T>` 都直接复用。

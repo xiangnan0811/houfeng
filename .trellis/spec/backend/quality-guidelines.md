@@ -36,7 +36,7 @@
 
 - `make test-go` **不带 `-race`**。新加并发原语时如果担心 race condition，可以本地手工跑 `go test -race ./...`，但默认 verify 链路不开。
 - `verify-go` 的范围是 `./agent/... ./cmd/... ./db/... ./internal/...`，不包括 `web/`、`docs/`、`scripts/`。新增 Go 顶层目录时记得改 Makefile 第 7 行 `GO_VERIFY_PATTERNS`。
-- 单测可用 `go test ./internal/center/store -run TestPostgresNodeRepository` 这种点对点形式（`CLAUDE.md` 第 37-38 行）。
+- 单测可用 `go test ./internal/center/store -run TestPostgresMonitoringInstanceRepository` 这种点对点形式（`CLAUDE.md` 第 37-38 行）。
 
 ---
 
@@ -109,13 +109,13 @@ web:
 ### 测试文件位置 / 命名
 
 - 单元测试与被测文件**同目录同包**：`store/sync_batches.go` ↔ `store/sync_batches_test.go`。
-- 跨包黑盒测试用 `<package>_test` 包名：`internal/center/http/handlers/nodes_test.go` 第 1 行 `package handlers_test`。
+- 跨包黑盒测试用 `<package>_test` 包名：`internal/center/http/handlers/monitoring_instances_test.go` 第 1 行 `package handlers_test`。
 - 端到端测试加 `_e2e_test.go` 后缀：唯一例子 `internal/center/http/auth_e2e_test.go`，配套 helper `auth_e2e_helpers_test.go`。
 - 路由级集成测试单独文件：`internal/center/http/router_api_test.go`、`router_test.go`。
 
 ### Table-driven 测试
 
-约定为**主流**写法（凡是有 ≥3 个相似 case 的场景）。模板（来自 `internal/center/http/handlers/nodes_test.go:302-339`）：
+约定为**主流**写法（凡是有 ≥3 个相似 case 的场景）。模板（来自 `internal/center/http/handlers/monitoring_instances_test.go:302-339`）：
 
 ```go
 tests := []struct {
@@ -137,18 +137,18 @@ for _, tt := range tests {
 变量名约定：
 
 - 切片变量名 `tests`（或 `testCases`，见 `targets_test.go:514`）。
-- 循环变量 `tt`（主流，`nodes_test.go`、`targets_test.go`、`node_onboarding_test.go`）或 `tc`（见 `targets_test.go:514`）。新代码沿用 `tt`。
+- 循环变量 `tt`（主流，`monitoring_instances_test.go`、`targets_test.go`、`monitoring_instance_onboarding_test.go`）或 `tc`（见 `targets_test.go:514`）。新代码沿用 `tt`。
 - 用 `t.Run(tt.name, func(t *testing.T) { ... })` 子测试，便于 `-run TestX/case_name` 精准触发。
 
 ### `t.Parallel()`
 
-**纯函数 / 无共享状态**的测试可以加 `t.Parallel()`：参见 `internal/center/settings/types_test.go:13`、`internal/center/store/nodes_test.go:20`、`internal/center/enrollment/service_test.go:13`。
+**纯函数 / 无共享状态**的测试可以加 `t.Parallel()`：参见 `internal/center/settings/types_test.go:13`、`internal/center/store/monitoring_instances_test.go:20`、`internal/center/enrollment/service_test.go:13`。
 
 涉及 `httptest.NewRecorder` + 内存 fake repository 的 handler 测试**当前没有用 `t.Parallel()`**——保持现状即可，不要为了快几毫秒强加 parallel。
 
 ### Handler 测试
 
-模式 = `httptest.NewRequest` + `httptest.NewRecorder` + `handler.ServeHTTP(recorder, req)` + 直接断言 `recorder.Code` / `recorder.Body`。**不启动真实 HTTP server**。仓库依赖通过手写 `fake<X>Repository` struct 实现领域接口，例如 `internal/center/http/handlers/nodes_test.go:17-57` 的 `fakeNodeRepository`。
+模式 = `httptest.NewRequest` + `httptest.NewRecorder` + `handler.ServeHTTP(recorder, req)` + 直接断言 `recorder.Code` / `recorder.Body`。**不启动真实 HTTP server**。仓库依赖通过手写 `fake<X>Repository` struct 实现领域接口，例如 `internal/center/http/handlers/monitoring_instances_test.go:17-57` 的 `fakeMonitoringInstanceRepository`。
 
 **路由级**测试用 `centerhttp.New(centerhttp.RouterOptions{...})` 真实拼装 mux，但所有 handler 字段塞 `http.HandlerFunc(...)` 假实现，仅校验 SPA fallback / 路由优先级（参见 `router_api_test.go` 全文）。给既有 subtree 增加 handler 时，必须同时检查 `/api/<resource>/` 外层注册条件、`<resource>SubtreePath` classifier 和 `switch subtree` dispatch 三处；只让 classifier 返回新 enum 但不在 switch 里转发 handler，会让已实现 endpoint 继续 404。
 
@@ -239,8 +239,8 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 | 新增/修改 agent ↔ center 字段 | 1) `internal/contracts/agentapi/types.go` 改 DTO；2) center 端在 `internal/center/syncing/` 或对应 handler 处理；3) **agent 端在 `agent/runtime/` 或采集子包同 PR 内改完**；4) 两侧测试同 PR 通过 |
 | 新增领域 sentinel error | 1) `internal/center/<domain>/types.go` 加 `Err...`；2) handler 加 `errors.Is` case + `agentapi.ErrorCode*` 映射（如属 agent endpoint） |
 | 新增持久化字段 / 表 | 走 `database-guidelines.md` 的 4 步流程；reviewer 在 PR 内确认迁移序号未撞车 |
-| 新增 VPS ↔ Node 关联能力 | 1) store 测试证明 link/unlink 只写 `vps_node_links` 且保留历史；2) handler 测试覆盖 duplicate conflict、missing VPS/Node、invalid `node_id`、query summaries；3) router 测试覆盖 `/api/vps/{id}/nodes`、`link-node`、`unlink-node`、`/api/nodes/{id}/vps` 不落到 item handler / SPA；4) bootstrap_test 增 nil 断言；5) 验证不改 Agent / Target / Node 状态写路径 |
-| 新增 VPS timeline / Asset Ledger 历史 | 1) migration 测试证明 `renewal_decisions`、`price_histories`、`ip_histories`、`vps_spec_snapshots` 约束、索引、枚举；2) store 测试证明 VPS / subscription PATCH 在事务中 `select ... for update`、更新当前状态并只按真实变化插入历史；3) handler 测试覆盖 `/api/vps/{id}/timeline` success、missing VPS、invalid input、method，并断言所有历史数组；4) router 测试证明 timeline 不落到 item handler / SPA；5) bootstrap_test 增 nil 断言；6) 验证不改 Node / Target / Agent 状态写路径 |
+| 新增 VPS ↔ MonitoringInstance 关联能力 | 1) store 测试证明 link/unlink 只写 `vps_monitoring_instance_links` 且保留历史；2) handler 测试覆盖 duplicate conflict、missing VPS/MonitoringInstance、invalid `monitoring_instance_id`、query summaries；3) router 测试覆盖 `/api/vps/{id}/monitoring-instances`、`link-monitoring-instance`、`unlink-monitoring-instance`、`/api/monitoring-instances/{id}/vps` 不落到 item handler / SPA；4) bootstrap_test 增 nil 断言；5) 验证不改 Agent / Target / MonitoringInstance 状态写路径 |
+| 新增 VPS timeline / Asset Ledger 历史 | 1) migration 测试证明 `renewal_decisions`、`price_histories`、`ip_histories`、`vps_spec_snapshots` 约束、索引、枚举；2) store 测试证明 VPS / subscription PATCH 在事务中 `select ... for update`、更新当前状态并只按真实变化插入历史；3) handler 测试覆盖 `/api/vps/{id}/timeline` success、missing VPS、invalid input、method，并断言所有历史数组；4) router 测试证明 timeline 不落到 item handler / SPA；5) bootstrap_test 增 nil 断言；6) 验证不改 MonitoringInstance / Target / Agent 状态写路径 |
 | 新增运维型 CLI / import 命令 | 1) `cmd/<binary>/main.go` 只测 flag / 模式互斥 / 基础错误；2) 业务逻辑包增加纯 Go table-driven tests；3) 至少跑一次 `go run ./cmd/<binary> ... -dry-run` 样例命令；4) 涉及写库时确认事务边界与 dry-run 不写库 |
 | 引入新 worker | 1) `internal/center/<x>/worker.go` 实现 `Worker.Run(ctx) error`；2) `cmd/houfeng-center/bootstrap.go` 添加构造与传给 `centerapp.New(...)`；3) `bootstrap_test.go` 的 `TestBootstrapCenterBuildsAppOnSuccess` 把 `len(workers)` 期望值从 N 改为 N+1（**当前为 3**：incident、retention、session cleanup） |
 | agent 端新采集 / 新探针 | 1) `agent/hostsample/` 或 `agent/probe/` 实现采集；2) 通过 `agent/runtime/runtime.go` 的 `buildSyncRequest` 串接；3) 必要时改 `internal/contracts/agentapi/` DTO（不可单边） |

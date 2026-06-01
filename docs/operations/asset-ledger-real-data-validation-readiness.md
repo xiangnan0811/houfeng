@@ -6,7 +6,7 @@
 >
 > Status: current readiness workflow; local sample evidence exists, while real 40+ VPS execution still requires a user-provided or explicitly authorized data source.
 >
-> Public navigation: this is the current place for Asset Ledger sample/real-data validation boundaries. Do not convert it into a claim that real provider billing, provider account truth, exchange rates, linked Node health, or the user's real inventory have been verified.
+> Public navigation: this is the current place for Asset Ledger sample/real-data validation boundaries. Do not convert it into a claim that real provider billing, provider account truth, exchange rates, linked monitoring instance health, or the user's real inventory have been verified.
 
 ## Purpose
 
@@ -45,7 +45,7 @@ The sample uses fake provider names, fake order refs, reserved documentation IP 
 - one missing-subscription VPS;
 - one missing-facts / cancellation-oriented VPS;
 - one idle paid VPS;
-- node/target association hints that require manual confirmation.
+- monitoring instance/target association hints that require manual confirmation.
 
 If this sample is reused long after May 2026 and the renewal-window UI is the evidence target, update the `renew_at` dates in a temporary copy rather than changing the committed historical sample without a separate reason.
 
@@ -66,7 +66,7 @@ Expected high-level result:
 - provider, VPS, and subscription candidates are present;
 - no validation errors;
 - no duplicate candidates in an empty/file-only dry-run;
-- node association candidates require manual confirmation;
+- monitoring instance association candidates require manual confirmation;
 - the missing-subscription VPS appears as a VPS candidate but not a subscription candidate.
 
 This command does not prove database duplicate checks unless `HOUFENG_DATABASE_URL` is set and reachable.
@@ -171,12 +171,12 @@ Before using the user's real 40+ VPS data:
 - Keep the real source file out of git unless the user explicitly wants a redacted fixture committed.
 - Remove secrets: SSH private keys, API tokens, provider passwords, one-time recovery codes, session cookies, billing portal credentials, agent tokens, webhook URLs, and private notes unrelated to asset operation.
 - Replace or redact account identifiers that are not useful for product validation.
-- Keep only operational fields needed by the current importer: provider identity, VPS display name, product/location/access facts, lifecycle/usage/renewal decision, labels, notes, subscription price/currency/billing/renewal/status, and optional node/target hints.
+- Keep only operational fields needed by the current importer: provider identity, VPS display name, product/location/access facts, lifecycle/usage/renewal decision, labels, notes, subscription price/currency/billing/renewal/status, and optional monitoring instance/target hints.
 - Use `null` or omit unknown optional facts; do not invent fake dates or prices for real-data validation.
-- Run `-dry-run -format json` first and review `validation_errors`, `duplicate_candidates`, `missing_provider_rows`, `missing_renew_date_rows`, `node_association_candidates`, `renewal_candidates`, and `idle_paid_candidates`.
+- Run `-dry-run -format json` first and review `validation_errors`, `duplicate_candidates`, `missing_provider_rows`, `missing_renew_date_rows`, `monitoring_instance_association_candidates`, `renewal_candidates`, and `idle_paid_candidates`.
 - Decide whether to import into a disposable local database or do manual entry for the first pass.
 - Record evidence date, data source, redaction status, row counts, route list, viewport list, and any blocked checks.
-- Do not claim provider account truth, exchange rates, real linked-node health, or billing accuracy unless those facts were independently verified.
+- Do not claim provider account truth, exchange rates, real linked-monitoring instance health, or billing accuracy unless those facts were independently verified.
 
 ## UI Review Focus
 
@@ -246,7 +246,7 @@ Result summary:
 - `subscription_candidates: 4`
 - `validation_errors: 0`
 - `duplicate_candidates: 0`
-- `node_association_candidates: 3`
+- `monitoring_instance_association_candidates: 3`
 - `renewal_candidates: 2`
 - `idle_paid_candidates: 1`
 
@@ -323,5 +323,5 @@ docker rm -f houfeng-local-sample-postgres
 
 - No screenshots were committed; screenshot directories and manifests are intentionally not tracked by default.
 - This proves the local center sample path, not the user's real 40+ VPS inventory.
-- Node association hints correctly remained manual evidence; the import did not create `vps_node_links`.
-- Provider account truth, external billing truth, linked Node health, exchange rates, and production deployment behavior were not validated.
+- MonitoringInstance association hints correctly remained manual evidence; the import did not create `vps_monitoring_instance_links`.
+- Provider account truth, external billing truth, linked monitoring instance health, exchange rates, and production deployment behavior were not validated.

@@ -60,9 +60,9 @@ web/
     │       └── layout.css      # 仅服务于本目录组件
     ├── pages/                  # 一文件一路由页
     │   ├── DashboardPage.tsx + DashboardPage.test.tsx
-    │   ├── NodesPage.tsx + NodesPage.test.tsx
-    │   ├── NodeDetailPage.tsx + NodeDetailPage.test.tsx
-    │   ├── NodeOnboardingPage.tsx + NodeOnboardingPage.test.tsx
+    │   ├── MonitoringPage.tsx + MonitoringPage.test.tsx
+    │   ├── MonitoringDetailPage.tsx + MonitoringDetailPage.test.tsx
+    │   ├── MonitoringDetailPage.tsx + MonitoringDetailPage.test.tsx
     │   ├── TargetsPage.tsx + TargetsPage.test.tsx
     │   ├── TargetDetailPage.tsx + TargetDetailPage.test.tsx
     │   ├── EventsPage.tsx + EventsPage.test.tsx
@@ -106,7 +106,7 @@ web/
 
 - `router.tsx` 是路由唯一入口：所有 `path / element` 在这里集中声明，绝大多数业务路由都嵌在 `<RequireAuth />` → `<AppShell />` 之下。`/login` 是唯一的免登录路由。
 - 业务页面模块在 `router.tsx` 里用 `React.lazy` 按路由拆包，并通过 `RouteModuleFallback` 包进 `Suspense`。这样 `npm run build` 不会把所有页面塞进首个 app chunk；`RouteModuleFallback` 负责加载中文文案与 `page-panel` surface。
-- `router.tsx` 仍需要导出 `appRoutes` 供 `matchRoutes(appRoutes, ...)` 测试。为满足 `react-refresh/only-export-components`，`router.tsx` 中的 lazy 变量使用 lower camelCase（如 `nodesPage`），不要定义 PascalCase 组件常量；需要渲染时用小 helper 接收 `ComponentType` 并 `createElement(Component)`。
+- `router.tsx` 仍需要导出 `appRoutes` 供 `matchRoutes(appRoutes, ...)` 测试。为满足 `react-refresh/only-export-components`，`router.tsx` 中的 lazy 变量使用 lower camelCase（如 `monitoringPage`），不要定义 PascalCase 组件常量；需要渲染时用小 helper 接收 `ComponentType` 并 `createElement(Component)`。
 - `RequireAuth.tsx` 承担 401 / 未登录跳转；新增需要登录的页面**只需挂到 RequireAuth 子节点**，不要重写认证逻辑。
 - `layout/` 下是 AppShell 的可视组成（侧边栏、顶部栏、面包屑、全局搜索、同步状态等）；它们仅被 `AppShell.tsx` 组合，**不应被 `pages/` 直接导入**。
 - `metadata.ts` 放路由 / 应用级常量（如 `PRODUCT_FULL_NAME_ZH`），供 AppShell 与 LoginPage 共享。
@@ -130,7 +130,7 @@ web/
 
 无 UI 的数据 / 工具层：
 
-- `api.ts`：统一 API client。**所有 `/api/*` 请求必须经此处的 request helpers 或导出业务函数**。导出函数式 API（`listNodes()`、`getDashboard()` 等），返回 `Promise<T>`，T 直接来自 `types.ts`。
+- `api.ts`：统一 API client。**所有 `/api/*` 请求必须经此处的 request helpers 或导出业务函数**。导出函数式 API（`listMonitoringInstances()`、`getDashboard()` 等），返回 `Promise<T>`，T 直接来自 `types.ts`。
 - `auth-client.ts`：`/api/auth/*` 的薄封装（`login`、`logout`、`me`、`changePassword`），复用 `api.ts` 的 `requestJSON` / `postJSONBody` / `requestEmpty` 与同一套 401 hook。
 - `auth-context.tsx` / `theme-context.tsx`：唯二的 React Context Provider，分别在 `main.tsx` 顶层一次性挂载。
 - `format.ts`：所有面向用户的格式化（时间、字节、百分比、标签拼接）；**新格式化函数都加到这里**，不要散落到组件文件。
@@ -150,14 +150,14 @@ web/
 
 | 对象 | 规则 | 例子 |
 |------|------|------|
-| 路由页文件 | `<Name>Page.tsx`（PascalCase + `Page` 后缀） | `NodesPage.tsx`、`NodeOnboardingPage.tsx` |
-| 路由页组件 | 与文件同名命名导出 `export function <Name>Page()` | `export function NodesPage()` |
+| 路由页文件 | `<Name>Page.tsx`（PascalCase + `Page` 后缀） | `MonitoringPage.tsx`、`MonitoringDetailPage.tsx` |
+| 路由页组件 | 与文件同名命名导出 `export function <Name>Page()` | `export function MonitoringPage()` |
 | 共享组件文件 | `<ComponentName>.tsx`（PascalCase，与组件同名） | `IncidentList.tsx`、`atoms/Sparkline.tsx` |
-| 测试文件 | 与被测同目录、同名 + `.test.tsx` / `.test.ts` | `NodesPage.test.tsx`、`api.test.ts` |
+| 测试文件 | 与被测同目录、同名 + `.test.tsx` / `.test.ts` | `MonitoringPage.test.tsx`、`api.test.ts` |
 | Hook 文件 | 当前未单独建 `hooks/` 目录；本地 hook 就近放在使用文件内 | — |
 | Context Provider | `<Name>Provider`，对应 hook `use<Name>` | `AuthProvider` + `useAuth` |
-| API client 函数 | 动词 + 资源驼峰；GET 用 `list/get`、POST 用 `create/issue/...` | `listNodes`、`getNode`、`createTarget`、`issueNodeEnrollmentToken` |
-| 类型 | 与 center 响应同名的领域记录用 `<Aggregate>Record` / `<Aggregate>Input` 后缀 | `NodeRecord`、`UpdateNodeMetadataInput` |
+| API client 函数 | 动词 + 资源驼峰；GET 用 `list/get`、POST 用 `create/issue/...` | `listMonitoringInstances`、`getMonitoringInstance`、`createTarget`、`issueMonitoringInstanceEnrollmentToken` |
+| 类型 | 与 center 响应同名的领域记录用 `<Aggregate>Record` / `<Aggregate>Input` 后缀 | `MonitoringInstanceRecord`、`UpdateMonitoringInstanceMetadataInput` |
 | CSS class | BEM 风（`block__element--modifier`），见 `styles/pages.css` 与 `atoms.css` | `page-panel__title`、`btn--primary` |
 
 ---
@@ -208,7 +208,7 @@ web/
 
 仓库内"组织到位"的真实参考点：
 
-- **完整一条路由线**：`web/src/app/router.tsx` lazy 注册 `/nodes` → `web/src/pages/NodesPage.tsx`（页面装配） + `web/src/pages/NodesPage.test.tsx`（colocated 测试） + `web/src/lib/api.ts`（业务 API client） + `web/src/lib/types.ts`（`NodeRecord` 类型）。
+- **完整一条路由线**：`web/src/app/router.tsx` lazy 注册 `/monitoring` → `web/src/pages/MonitoringPage.tsx`（页面装配） + `web/src/pages/MonitoringPage.test.tsx`（colocated 测试） + `web/src/lib/api.ts`（业务 API client） + `web/src/lib/types.ts`（`MonitoringInstanceRecord` 类型）。
 - **设计系统原子使用**：`web/src/components/IncidentList.tsx:1` `import { Hostname, StatusGlyph, Timestamp } from './atoms'`，体现"组合组件按需引用 atoms barrel"的范式。
 - **应用壳分层**：`web/src/app/layout/AppShell.tsx` 引用 `Sidebar`、`TopBar`、`ChangePasswordModal`，并通过 `<Outlet />` 渲染当前路由页（`web/src/app/router.tsx:23` 处的子路由）。
 - **数据获取分层**：`web/src/pages/EventsPage.tsx:63-94` 完整体现 "page 调 `lib/api.ts` → `loading/error/data` 三态 → 渲染 `components/EventList`" 的标准结构。

@@ -15,7 +15,7 @@ tags:
 
 ## 0. 前言：这份文档解决什么
 
-V1 的 token 系统本身质量很高（4 主题、状态色齐全、字体三套、8pt 间距），但 V1 实现层与基线文档严重漂移：浅色主题主导、mono 字体未启用、节点列表是卡片堆而不是高密度表格、首页是单值 KPI 阵列、无 sparkline、`bg-aurora` 定义了未启用。
+V1 的 token 系统本身质量很高（4 主题、状态色齐全、字体三套、8pt 间距），但 V1 实现层与基线文档严重漂移：浅色主题主导、mono 字体未启用、监控实例列表是卡片堆而不是高密度表格、首页是单值 KPI 阵列、无 sparkline、`bg-aurora` 定义了未启用。
 
 v2 不是"换一层皮"，而是把**已经写好的设计语言真正贯彻到所有页面**，并且重新提炼"候风"意象，让产品具备一个**东方观象台气质的工程工具**形象。
 
@@ -131,7 +131,7 @@ light 主题不是次要主题。它必须独立打磨到同等可用：
 | 品牌 | serif | 侧栏 `候风` logo、页面装饰性 eyebrow |
 | 标题 / 正文 | sans | 页面标题、区块标题、说明文案、按钮文案 |
 | **数字度量** | mono `tabular-nums` | KPI 大数字、表格数字列、duration、百分比、毫秒 |
-| **技术 ID** | mono | hostname、`nd_xxx` 节点 ID、IP、token、SHA、UA |
+| **技术 ID** | mono | hostname、`mi_xxx` 监控实例 ID、IP、token、SHA、UA |
 | **时间戳** | mono | 全部绝对时间戳（YYYY/MM/DD HH:mm:ss） |
 | 状态徽标 | serif | `Badge` 的 state 变体保留宋体 + small caps tracking |
 
@@ -142,7 +142,7 @@ light 主题不是次要主题。它必须独立打磨到同等可用：
 - `<Hostname>{'nd_89b8...'}</Hostname>` — ID / hostname / IP
 - `<Timestamp value={iso} mode="absolute|relative" />` — 时间戳（hover 切显另一面）
 
-实施期 grep 标准：搜索"`%` `ms` `KB/s` `MB`"以及节点 ID 字符串，确保它们都被 `MonoDigits` / `Hostname` 包裹。
+实施期 grep 标准：搜索"`%` `ms` `KB/s` `MB`"以及监控实例 ID 字符串，确保它们都被 `MonoDigits` / `Hostname` 包裹。
 
 ## 4. 密度与节奏
 
@@ -251,10 +251,10 @@ light 主题不是次要主题。它必须独立打磨到同等可用：
 
 | 场景 | 文案 | CTA |
 |---|---|---|
-| 无 Node | 候风尚未接入任何节点 | 「新建第一个节点」 |
-| Node 未绑定 Agent | 节点已创建但 Agent 未上线 | 「查看接入指引」 |
+| 无监控实例 | 候风尚未接入任何监控实例 | 「接入第一个监控实例」 |
+| 监控实例未绑定 Agent | 监控实例已创建但 Agent 未上线 | 「查看接入指引」 |
 | Dashboard 异常目标块空 | 当前没有异常目标 | 无 CTA |
-| Node Detail 当前异常块空 | 节点当前没有活跃异常 | 无 CTA |
+| Monitoring Detail 当前异常块空 | 监控实例当前没有活跃异常 | 无 CTA |
 | Events 主页空查询 | 没有匹配的事件 | 「重置筛选」 |
 | 无目标 | 候风尚未配置任何观测目标 | 「新建第一个目标」 |
 | Probe 列表空 | 目标尚未配置 ProbeItem | 「添加 Probe」 |
@@ -326,7 +326,7 @@ light 主题不是次要主题。它必须独立打磨到同等可用：
 
 ### 12.x 监控视图与图表自研路径（2026-05-05 更新）
 
-候风的"不引图表库"约束**仍然保留**。但因 watchtower 视图（节点详情主视图 8 张时序大图）需要更完整的时序图能力，新建 `<MetricChart>` 原子（纯 SVG，含 X/Y 轴 / 阈值线 / 维护窗口阴影 / 十字线 hover tooltip / 0-sample / 1-sample 边界态），与既有 `<Sparkline>`（240×60 配角，仍由其他页面消费）并行存在不互相替代。
+候风的"不引图表库"约束**仍然保留**。但因 watchtower 视图（监控实例详情主视图 8 张时序大图）需要更完整的时序图能力，新建 `<MetricChart>` 原子（纯 SVG，含 X/Y 轴 / 阈值线 / 维护窗口阴影 / 十字线 hover tooltip / 0-sample / 1-sample 边界态），与既有 `<Sparkline>`（240×60 配角，仍由其他页面消费）并行存在不互相替代。
 
 未来如出现"读不准 / 缺缩放刷选 / 多线 overlay 对比 / event 标记叠加在趋势线"等真实需求，再单独发起 task 评估升级到 visx（@visx/* 按需引入约 30-50KB），不当下松动；自研 `<MetricChart>` 在那之前作为统一时序图入口。
 
