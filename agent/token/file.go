@@ -14,6 +14,7 @@ type FileSource struct {
 
 type fileCredentials struct {
 	MonitoringInstanceID string `json:"monitoring_instance_id"`
+	LegacyNodeID         string `json:"node_id"`
 	SyncToken            string `json:"sync_token"`
 }
 
@@ -95,8 +96,12 @@ func (s FileSource) load(context.Context) (credentials, error) {
 		if err := json.Unmarshal([]byte(value), &stored); err != nil {
 			return credentials{}, fmt.Errorf("parse token file %q sync credentials: %w", s.Path, err)
 		}
+		monitoringInstanceID := strings.TrimSpace(stored.MonitoringInstanceID)
+		if monitoringInstanceID == "" {
+			monitoringInstanceID = strings.TrimSpace(stored.LegacyNodeID)
+		}
 		return credentials{
-			MonitoringInstanceID: strings.TrimSpace(stored.MonitoringInstanceID),
+			MonitoringInstanceID: monitoringInstanceID,
 			SyncToken:            strings.TrimSpace(stored.SyncToken),
 		}, nil
 	}

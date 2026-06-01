@@ -151,7 +151,7 @@ EOF_ENV
 chown root:houfeng-agent /etc/houfeng-agent/agent.env
 chmod 0640 /etc/houfeng-agent/agent.env
 
-if [ -f /etc/houfeng-agent/token ] && grep -q '"monitoring_instance_id"' /etc/houfeng-agent/token 2>/dev/null && grep -q '"sync_token"' /etc/houfeng-agent/token 2>/dev/null; then
+if [ -f /etc/houfeng-agent/token ] && grep -Eq '"(monitoring_instance_id|node_id)"' /etc/houfeng-agent/token 2>/dev/null && grep -q '"sync_token"' /etc/houfeng-agent/token 2>/dev/null; then
   info "preserving existing post-enrollment token file"
   chown houfeng-agent:houfeng-agent /etc/houfeng-agent/token
   chmod 0600 /etc/houfeng-agent/token

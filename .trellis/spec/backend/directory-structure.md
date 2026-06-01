@@ -152,6 +152,60 @@ agent 子包扁平化拆分，每个职责一个包：
 - `runtime/` 是装配中心，把其余子包按 `collect → buffer → sync → apply plan` 串起来
 - agent 必须保持"thin"：不接受任意脚本 / 用户自定义参数、不本地评估规则；当前仅允许 `exec/` 中编译期白名单命令，以及 `containersample/` 对本机 Docker CLI 的 best-effort 事实采样（Docker 不存在或 daemon 不可用时静默跳过）。`exec.Lookup` 必须返回参数副本，避免调用方篡改编译期白名单；`exec.Run` 必须使用 `exec.CommandContext` 而不是 shell；Docker 采样只能调用固定参数形状的 `docker ps --all --no-trunc --format ...` 与 `docker stats --no-stream --format ...`，不得扩展为 Docker 控制、编排或容器生命周期操作。
 
+#### Scenario: agent local state upgrade compatibility
+
+1. **Scope / Trigger**
+   - 触发：重命名 agent ↔ center 契约字段、修改 `agent/token/`、`agent/syncqueue/`、installer token-preserve 分支，或发布需要从旧 agent 本地状态平滑升级的新版本。
+   - 目标：新版本 agent 能读取旧版本已经落盘的本地状态，避免 upgrade 后卡在不可发送的旧队列 entry 或覆盖已绑定 token。
+
+2. **Signatures**
+   - token 文件当前写入格式：`{"monitoring_instance_id":"<id>","sync_token":"<token>"}`。
+   - token 文件 legacy 读取格式：`{"node_id":"<id>","sync_token":"<token>"}`。
+   - sync queue entry 当前写入格式：`Entry{Request: agentapi.SyncRequest{MonitoringInstanceID, SyncToken, Heartbeats...}}`，JSON 字段为 `request.monitoring_instance_id`。
+   - sync queue entry legacy 读取格式：`request.node_id`。
+   - installer preserve 条件：已有 `/etc/houfeng-agent/token` 同时包含 `sync_token`，且包含 `monitoring_instance_id` 或 legacy `node_id`。
+
+3. **Contracts**
+   - 新写入一律使用 current `monitoring_instance_id`，不得重新对外发送或写入 `node_id`。
+   - 读取 legacy `node_id` 时，仅把它映射为内存中的 MonitoringInstance ID；如果 current 与 legacy 字段同时存在，current 字段优先。
+   - `sync_token` 仍然必需；只有 ID 字段但没有 `sync_token` 的 token 文件必须继续被判定为 incomplete credentials。
+   - installer 只做存在性检查和权限收敛，不解析、不打印 token 内容。
+
+4. **Validation & Error Matrix**
+   - token JSON 含 `monitoring_instance_id` + `sync_token` -> sync credentials ok。
+   - token JSON 含 `node_id` + `sync_token` -> sync credentials ok，返回 MonitoringInstance ID = legacy node id。
+   - token JSON 含 `node_id` 但缺 `sync_token` -> incomplete sync credentials error。
+   - sync queue JSON 含 `request.node_id` -> `List` 返回的 request 必须填充 `MonitoringInstanceID`。
+   - legacy queue entry 缺 heartbeat / agent_version / fingerprint / sync_batch_id -> 不在 queue 层吞掉，仍由 center contract 校验拒绝。
+
+5. **Good / Base / Bad Cases**
+   - Good: v0.24.x agent 已有 `sync-buffer.json`，v0.25.x agent 启动后读出 legacy `node_id`，flush 时发送 current `monitoring_instance_id` carrier。
+   - Good: 旧 token 文件存在 `node_id` + `sync_token`，installer upgrade 保留该文件并只修正 owner/mode。
+   - Base: 新 enrollment 后 token 文件只包含 `monitoring_instance_id` + `sync_token`。
+   - Bad: installer 只识别 current token 字段，导致 upgrade 时覆盖旧 post-enrollment sync credentials。
+   - Bad: `agentapi.SyncRequest` 新写 JSON 同时携带 `node_id`，把内部兼容泄漏成新 public contract。
+
+6. **Tests Required**
+   - `agent/token/file_test.go`：覆盖 legacy `node_id` token、current 字段优先、缺 `sync_token` 仍失败、保存后只写 current 字段。
+   - `agent/syncqueue/store_test.go`：覆盖 legacy `request.node_id` 被映射为 `MonitoringInstanceID`。
+   - `internal/center/installer/embed_test.go`：覆盖 installer preserve 条件同时接受 current 与 legacy ID 字段，并要求 `sync_token`。
+
+7. **Wrong vs Correct**
+
+```go
+// 错误：只认 current 字段会把 legacy queue entry 反序列化成空 ID。
+type SyncRequest struct {
+	MonitoringInstanceID string `json:"monitoring_instance_id"`
+}
+```
+
+```go
+// 正确：在本地持久化 reader 里兼容 legacy 字段，内存和新写入仍使用 current 字段。
+if request.MonitoringInstanceID == "" {
+	request.MonitoringInstanceID = legacyNodeID
+}
+```
+
 #### Scenario: agent command / Docker 边界
 
 1. **Scope / Trigger**

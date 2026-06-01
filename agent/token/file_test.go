@@ -79,6 +79,47 @@ func TestFileSourceSavesAndReadsSyncCredentials(t *testing.T) {
 	}
 }
 
+func TestFileSourceReadsLegacyNodeSyncCredentials(t *testing.T) {
+	path := t.TempDir() + "/token"
+	if err := os.WriteFile(path, []byte(`{"node_id":" node-legacy-001 ","sync_token":" sync_legacy "}`), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+
+	source := token.FileSource{Path: path}
+	monitoringInstanceID, syncToken, ok, err := source.SyncCredentials(context.Background())
+	if err != nil {
+		t.Fatalf("SyncCredentials() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("SyncCredentials() ok = false, want true")
+	}
+	if monitoringInstanceID != "node-legacy-001" {
+		t.Fatalf("monitoringInstanceID = %q, want legacy node id", monitoringInstanceID)
+	}
+	if syncToken != "sync_legacy" {
+		t.Fatalf("syncToken = %q, want sync_legacy", syncToken)
+	}
+}
+
+func TestFileSourcePrefersMonitoringInstanceIDOverLegacyNodeID(t *testing.T) {
+	path := t.TempDir() + "/token"
+	if err := os.WriteFile(path, []byte(`{"monitoring_instance_id":"mi_current","node_id":"node_legacy","sync_token":"sync_001"}`), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+
+	source := token.FileSource{Path: path}
+	monitoringInstanceID, _, ok, err := source.SyncCredentials(context.Background())
+	if err != nil {
+		t.Fatalf("SyncCredentials() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("SyncCredentials() ok = false, want true")
+	}
+	if monitoringInstanceID != "mi_current" {
+		t.Fatalf("monitoringInstanceID = %q, want current monitoring instance id", monitoringInstanceID)
+	}
+}
+
 func TestFileSourceRejectsIncompleteSyncCredentials(t *testing.T) {
 	path := t.TempDir() + "/token"
 	if err := os.WriteFile(path, []byte(`{"monitoring_instance_id":"mi_001"}`), 0o600); err != nil {
