@@ -380,6 +380,11 @@ export type DashboardAssetSummary = {
   unlinked_vps_count: number
   abnormal_linked_vps_count: number
   cost_by_currency: DashboardAssetCostByCurrency[]
+  base_currency?: string
+  monthly_cost_base?: number
+  yearly_cost_base?: number
+  budget_risk_count?: number
+  exchange_rate_stale_count?: number
 }
 
 export type DashboardAssetCostByCurrency = {
@@ -571,6 +576,25 @@ export type RetentionPolicy = {
   notification_layer_days: number
 }
 
+export type SubscriptionCostSettings = {
+  base_currency: string
+  exchange_rate_provider: 'frankfurter' | 'fixer' | string
+  fixer_configured: boolean
+  fixer_masked_summary?: string
+  default_reminder_offsets_days: number[]
+  max_reminder_lead_days: number
+  exchange_rate_stale_after_hours: number
+}
+
+export type SubscriptionCostSettingsUpdateInput = {
+  base_currency?: string
+  exchange_rate_provider?: 'frankfurter' | 'fixer' | string
+  fixer_api_key?: string
+  default_reminder_offsets_days?: number[]
+  max_reminder_lead_days?: number
+  exchange_rate_stale_after_hours?: number
+}
+
 export type SettingsRecord = {
   telegram: SettingsTelegramResponse
   feishu: FeishuSettingsResponse
@@ -579,6 +603,7 @@ export type SettingsRecord = {
   incident_defaults: IncidentDefaults
   override_rules: OverrideRules
   retention_policy: RetentionPolicy
+  subscription_cost_settings: SubscriptionCostSettings
 }
 
 export type MonitoringInstanceSparklinesResponse = {
@@ -1242,10 +1267,25 @@ export type SubscriptionRecord = {
   renewal_mode?: RenewalMode | string
   status: SubscriptionStatus
   payment_method: string
+  display_name?: string
+  cost_category?: string
+  labels?: string[]
+  trial_ends_at?: string | null
+  ends_at?: string | null
   note: string
+  monthly_price_base?: number | null
+  yearly_price_base?: number | null
+  base_currency?: string
+  exchange_rate?: number | null
+  exchange_rate_date?: string | null
+  exchange_rate_stale?: boolean
+  budget_status?: SubscriptionBudgetStatus | string
+  next_reminder_at?: string | null
   created_at: string
   updated_at: string
 }
+
+export type SubscriptionBudgetStatus = 'disabled' | 'ok' | 'warning' | 'over' | 'unknown'
 
 export type CreateSubscriptionInput = {
   vps_id: string
@@ -1262,6 +1302,11 @@ export type CreateSubscriptionInput = {
   renewal_mode?: RenewalMode | string
   status?: SubscriptionStatus
   payment_method: string
+  display_name?: string
+  cost_category?: string
+  labels?: string[]
+  trial_ends_at?: string | null
+  ends_at?: string | null
   note: string
 }
 
@@ -1275,8 +1320,164 @@ export type SubscriptionListFilter = {
   renew_before?: string | null
   renew_after?: string | null
   renew_within_days?: number | null
+  currency?: string | null
+  provider_id?: string | null
+  budget_status?: SubscriptionBudgetStatus | '' | null
+  auto_renew?: boolean | null
+  payment_method?: string | null
+  label?: string | null
+  renewal_decision?: string | null
   sort?: 'renew_at' | '' | null
   order?: 'asc' | 'desc' | '' | null
+}
+
+export type SubscriptionBreakdownItem = {
+  key: string
+  label: string
+  monthly_cost: number
+  yearly_cost: number
+  subscription_count: number
+}
+
+export type SubscriptionRenewalQueueItem = {
+  subscription_id: string
+  vps_id: string
+  vps_display_name: string
+  display_name: string
+  provider_name: string
+  renew_at?: string | null
+  monthly_price_base?: number | null
+  yearly_price_base?: number | null
+  base_currency: string
+  currency: string
+  renewal_decision: string
+  lifecycle_status: string
+  exchange_rate_stale: boolean
+}
+
+export type MissingSubscriptionAsset = {
+  vps_id: string
+  display_name: string
+  provider_id?: string
+  provider_name: string
+  lifecycle_status: string
+  renewal_decision: string
+}
+
+export type SubscriptionCostRow = {
+  subscription_id: string
+  vps_id: string
+  vps_display_name: string
+  provider_id: string
+  provider_name: string
+  display_name: string
+  cost_category: string
+  labels: string[]
+  price: number
+  currency: string
+  monthly_price: number
+  monthly_price_base?: number | null
+  yearly_price_base?: number | null
+  base_currency: string
+  exchange_rate?: number | null
+  exchange_rate_date?: string | null
+  exchange_rate_stale: boolean
+  renew_at?: string | null
+  next_reminder_at?: string | null
+  status: string
+  payment_method: string
+  lifecycle_status: string
+  renewal_decision: string
+  budget_status: SubscriptionBudgetStatus | string
+}
+
+export type SubscriptionBudgetRecord = {
+  budget_id: string
+  scope_type: 'global' | 'provider' | 'label' | 'category' | 'vps' | string
+  scope_id: string
+  name: string
+  base_currency: string
+  monthly_limit?: number | null
+  yearly_limit?: number | null
+  warning_pct: number
+  enabled: boolean
+  note: string
+  current_monthly_spend: number
+  current_yearly_spend: number
+  status: SubscriptionBudgetStatus
+  created_at: string
+  updated_at: string
+}
+
+export type CreateSubscriptionBudgetInput = {
+  scope_type: string
+  scope_id: string
+  name: string
+  base_currency: string
+  monthly_limit?: number | null
+  yearly_limit?: number | null
+  warning_pct: number
+  enabled: boolean
+  note: string
+}
+
+export type PatchSubscriptionBudgetInput = Partial<CreateSubscriptionBudgetInput> & {
+  budget_id: string
+}
+
+export type SubscriptionOverview = {
+  snapshot_generated_at: string
+  base_currency: string
+  total_monthly_cost: number
+  total_yearly_cost: number
+  active_subscription_count: number
+  renewal_due_14d_count: number
+  renewal_due_30d_count: number
+  budget_risk_count: number
+  exchange_rate_stale_count: number
+  decision_attention_count: number
+  missing_subscription_vps_count: number
+  upcoming_renewals: SubscriptionRenewalQueueItem[]
+  provider_breakdown: SubscriptionBreakdownItem[]
+  currency_breakdown: SubscriptionBreakdownItem[]
+  category_breakdown: SubscriptionBreakdownItem[]
+  budget_risks: SubscriptionBudgetRecord[]
+  vps_costs: SubscriptionCostRow[]
+  missing_subscription_assets: MissingSubscriptionAsset[]
+}
+
+export type SubscriptionSeriesPoint = {
+  bucket: string
+  monthly_cost: number
+  renewal_count: number
+}
+
+export type SubscriptionStatistics = {
+  window: 'month' | 'quarter' | 'year' | string
+  base_currency: string
+  total_monthly_cost: number
+  total_yearly_cost: number
+  provider_breakdown: SubscriptionBreakdownItem[]
+  currency_breakdown: SubscriptionBreakdownItem[]
+  category_breakdown: SubscriptionBreakdownItem[]
+  renewal_month_buckets: SubscriptionSeriesPoint[]
+  budget_statuses: SubscriptionBudgetRecord[]
+}
+
+export type ExchangeRateFetchResult = {
+  quote_currency: string
+  base_currency: string
+  rate: number
+  rate_date?: string
+  error?: string
+}
+
+export type ExchangeRateRefreshResult = {
+  provider: string
+  base_currency: string
+  fetched_at: string
+  succeeded: ExchangeRateFetchResult[]
+  failed: ExchangeRateFetchResult[]
 }
 
 export type SettingsUpdateInput = {
@@ -1287,4 +1488,5 @@ export type SettingsUpdateInput = {
   incident_defaults: IncidentDefaults
   override_rules: OverrideRules
   retention_policy: RetentionPolicy
+  subscription_cost_settings?: SubscriptionCostSettingsUpdateInput
 }

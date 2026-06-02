@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
-import { ApiError, getDashboard, listVPSAssets } from '../lib/api'
-import type { DashboardOverview, VPSAssetRecord, StateChangeEventRecord } from '../lib/types'
+import { ApiError, getDashboard, getSubscriptionOverview, listVPSAssets } from '../lib/api'
+import { formatMoney } from '../lib/format'
+import type { DashboardOverview, VPSAssetRecord, StateChangeEventRecord, SubscriptionOverview } from '../lib/types'
 
 type State = {
   loading: boolean
   error: string | null
   overview: DashboardOverview | null
+  subscriptionOverview: SubscriptionOverview | null
   vpsAssets: VPSAssetRecord[]
 }
 
@@ -78,21 +80,26 @@ export function DashboardPage() {
     loading: true,
     error: null,
     overview: null,
+    subscriptionOverview: null,
     vpsAssets: [],
   })
   const mountedRef = useRef(true)
 
   useEffect(() => {
     mountedRef.current = true
-    Promise.all([getDashboard(), listVPSAssets().catch(() => [] as VPSAssetRecord[])])
-      .then(([overview, vpsAssets]) => {
+    Promise.all([
+      getDashboard(),
+      listVPSAssets().catch(() => [] as VPSAssetRecord[]),
+      getSubscriptionOverview().catch(() => null),
+    ])
+      .then(([overview, vpsAssets, subscriptionOverview]) => {
         if (!mountedRef.current) return
-        setState({ loading: false, error: null, overview, vpsAssets })
+        setState({ loading: false, error: null, overview, subscriptionOverview, vpsAssets })
       })
       .catch((error: unknown) => {
         if (!mountedRef.current) return
         const message = error instanceof ApiError ? error.message : '加载工作台失败'
-        setState({ loading: false, error: message, overview: null, vpsAssets: [] })
+        setState({ loading: false, error: message, overview: null, subscriptionOverview: null, vpsAssets: [] })
       })
     return () => { mountedRef.current = false }
   }, [])
@@ -128,14 +135,23 @@ export function DashboardPage() {
     totalMonitoringInstances === 0 &&
     overview.total_target_count === 0
 
-  // Cost: aggregate from cost_by_currency
+  const subscriptionOverview = state.subscriptionOverview
+
   const costEntries = overview.asset_summary.cost_by_currency
-  const monthlyCostStr = costEntries.length > 0
-    ? costEntries.map(c => `${c.currency === 'USD' ? '$' : c.currency}${Math.round(c.monthly_total)}`).join(' + ')
-    : '—'
-  const yearlyCostStr = costEntries.length > 0
-    ? costEntries.map(c => `${c.currency === 'USD' ? '$' : c.currency}${Math.round(c.yearly_total)}`).join(' + ')
-    : '—'
+  const baseCurrency = subscriptionOverview?.base_currency ?? overview.asset_summary.base_currency ?? 'CNY'
+  const monthlyCostStr = subscriptionOverview
+    ? formatMoney(subscriptionOverview.total_monthly_cost, baseCurrency)
+    : costEntries.length > 0
+      ? costEntries.map(c => formatMoney(Math.round(c.monthly_total), c.currency)).join(' + ')
+      : '—'
+  const yearlyCostStr = subscriptionOverview
+    ? formatMoney(subscriptionOverview.total_yearly_cost, baseCurrency)
+    : costEntries.length > 0
+      ? costEntries.map(c => formatMoney(Math.round(c.yearly_total), c.currency)).join(' + ')
+      : '—'
+  const renewalSummaryCount = subscriptionOverview?.renewal_due_14d_count ?? renewal30d
+  const budgetRiskCount = subscriptionOverview?.budget_risk_count ?? overview.asset_summary.budget_risk_count ?? 0
+  const exchangeRateStaleCount = subscriptionOverview?.exchange_rate_stale_count ?? overview.asset_summary.exchange_rate_stale_count ?? 0
 
   // Events (recent)
   const recentEvents = overview.recent_events.slice(0, 4)
@@ -162,24 +178,24 @@ export function DashboardPage() {
         </div>
         <div className="wb-card">
           <div className="wb-card-primary">
-            <span className={`wb-card-num ${renewal30d > 0 ? 'warn' : ''}`}>{renewal30d}</span>
-            <span className="wb-card-label">30天内续费</span>
+            <span className={`wb-card-num ${renewalSummaryCount > 0 ? 'warn' : ''}`}>{renewalSummaryCount}</span>
+            <span className="wb-card-label">14天内续费</span>
           </div>
-          <div className="wb-card-secondary">VPS 到期 · 联动待处理 {cancellationAttention}</div>
+          <div className="wb-card-secondary">30 天 {subscriptionOverview?.renewal_due_30d_count ?? renewal30d} · 联动待处理 {cancellationAttention}</div>
         </div>
         <div className="wb-card">
           <div className="wb-card-primary">
             <span className="wb-card-num">{monthlyCostStr}</span>
             <span className="wb-card-label">月均成本</span>
           </div>
-          <div className="wb-card-secondary">今年累计 {yearlyCostStr}</div>
+          <div className="wb-card-secondary">年化 {yearlyCostStr}</div>
         </div>
         <div className="wb-card">
           <div className="wb-card-primary">
-            <span className="wb-card-num">{overview.recent_new_incident_count}</span>
-            <span className="wb-card-label">近期异常</span>
+            <span className={`wb-card-num ${budgetRiskCount > 0 || exchangeRateStaleCount > 0 ? 'warn' : ''}`}>{budgetRiskCount}</span>
+            <span className="wb-card-label">预算风险</span>
           </div>
-          <div className="wb-card-secondary">恢复 {overview.recent_recovery_count} 条</div>
+          <div className="wb-card-secondary">汇率异常 {exchangeRateStaleCount} · 近期异常 {overview.recent_new_incident_count}</div>
         </div>
       </div>
 
@@ -209,6 +225,15 @@ export function DashboardPage() {
                 <div className="wb-att-body">
                   <span className="wb-att-text">取消/过期资产状态不一致</span>
                   <span className="wb-att-meta">VPS {cancellationAttention} · 仍运行 {runningCancelledAssets}</span>
+                </div>
+              </div>
+            ) : null}
+            {subscriptionOverview && subscriptionOverview.budget_risk_count > 0 ? (
+              <div className="wb-att-item" onClick={() => navigate('/subscriptions?budget_status=warning')}>
+                <span className="alert-dot warn"></span>
+                <div className="wb-att-body">
+                  <span className="wb-att-text">订阅预算接近或超过上限</span>
+                  <span className="wb-att-meta">风险 {subscriptionOverview.budget_risk_count} · 汇率异常 {subscriptionOverview.exchange_rate_stale_count}</span>
                 </div>
               </div>
             ) : null}
@@ -283,13 +308,33 @@ export function DashboardPage() {
             <span className="wb-col-link" onClick={() => navigate('/vps?view=missing_subscription')}>缺口 →</span>
           </div>
           <div className="wb-col-list">
-            {costEntries.length === 0 && (
+            {!subscriptionOverview && costEntries.length === 0 && (
               <div className="wb-kv"><span className="text-muted">暂无账单事实</span></div>
             )}
+            {subscriptionOverview ? (
+              <>
+                <div className="wb-kv">
+                  <span>基准月成本</span>
+                  <span className="mono">{formatMoney(subscriptionOverview.total_monthly_cost, subscriptionOverview.base_currency)}</span>
+                </div>
+                <div className="wb-kv">
+                  <span>未来 30 天续费</span>
+                  <span className="mono">{subscriptionOverview.renewal_due_30d_count}</span>
+                </div>
+                <div className="wb-kv">
+                  <span>预算风险</span>
+                  <span className="mono">{subscriptionOverview.budget_risk_count}</span>
+                </div>
+                <div className="wb-kv">
+                  <span>汇率异常</span>
+                  <span className="mono">{subscriptionOverview.exchange_rate_stale_count}</span>
+                </div>
+              </>
+            ) : null}
             {costEntries.map((c, i) => (
               <div className="wb-kv" key={i}>
                 <span>{c.currency}</span>
-                <span className="mono">${Math.round(c.monthly_total)}/月</span>
+                <span className="mono">{formatMoney(Math.round(c.monthly_total), c.currency)}/月</span>
               </div>
             ))}
           </div>

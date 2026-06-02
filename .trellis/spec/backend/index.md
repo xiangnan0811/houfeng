@@ -21,6 +21,7 @@
 | [Error Handling](./error-handling.md) | sentinel error、`errors.Is`、HTTP/agent 错误转换与 panic 政策 | 已填实 |
 | [Quality Guidelines](./quality-guidelines.md) | Makefile 质量门、测试约定、review checklist 与禁止模式 | 已填实 |
 | [Logging Guidelines](./logging-guidelines.md) | `log/slog` 使用、level、结构化字段、敏感信息与 agent/center 差异 | 已填实 |
+| [Subscription Cost Center](./subscription-cost-center.md) | 订阅成本中枢、汇率、预算、续费提醒、通知审计与 Dashboard 边界 | 已填实 |
 
 ---
 

@@ -17,13 +17,14 @@ type SettingsRepository interface {
 }
 
 type settingsResponse struct {
-	Telegram                telegramSettingsResponse              `json:"telegram"`
-	Feishu                  feishuSettingsResponse                `json:"feishu"`
-	HostSampleFrequencyTier string                                `json:"host_sample_frequency_tier"`
-	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
-	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
-	OverrideRules           centersettings.OverrideRules          `json:"override_rules"`
-	RetentionPolicy         centersettings.RetentionPolicy        `json:"retention_policy"`
+	Telegram                 telegramSettingsResponse              `json:"telegram"`
+	Feishu                   feishuSettingsResponse                `json:"feishu"`
+	HostSampleFrequencyTier  string                                `json:"host_sample_frequency_tier"`
+	ProbeFrequencyDefaults   centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
+	IncidentDefaults         centersettings.IncidentDefaults       `json:"incident_defaults"`
+	OverrideRules            centersettings.OverrideRules          `json:"override_rules"`
+	RetentionPolicy          centersettings.RetentionPolicy        `json:"retention_policy"`
+	SubscriptionCostSettings subscriptionCostSettingsResponse      `json:"subscription_cost_settings"`
 }
 
 type telegramSettingsResponse struct {
@@ -35,13 +36,14 @@ type telegramSettingsResponse struct {
 }
 
 type settingsUpdateRequest struct {
-	Telegram                telegramSettingsUpdateRequest         `json:"telegram"`
-	Feishu                  feishuSettingsUpdateRequest           `json:"feishu"`
-	HostSampleFrequencyTier string                                `json:"host_sample_frequency_tier"`
-	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
-	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
-	OverrideRules           centersettings.OverrideRules          `json:"override_rules"`
-	RetentionPolicy         centersettings.RetentionPolicy        `json:"retention_policy"`
+	Telegram                 telegramSettingsUpdateRequest          `json:"telegram"`
+	Feishu                   feishuSettingsUpdateRequest            `json:"feishu"`
+	HostSampleFrequencyTier  string                                 `json:"host_sample_frequency_tier"`
+	ProbeFrequencyDefaults   centersettings.ProbeFrequencyDefaults  `json:"probe_frequency_defaults"`
+	IncidentDefaults         centersettings.IncidentDefaults        `json:"incident_defaults"`
+	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
+	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
+	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
 }
 
 type feishuSettingsResponse struct {
@@ -58,6 +60,27 @@ type telegramSettingsUpdateRequest struct {
 	BotToken       *string `json:"bot_token,omitempty"`
 	ChatID         string  `json:"chat_id"`
 	RuntimeManaged *bool   `json:"runtime_managed,omitempty"`
+}
+
+type subscriptionCostSettingsResponse struct {
+	BaseCurrency                string `json:"base_currency"`
+	ExchangeRateProvider        string `json:"exchange_rate_provider"`
+	FixerConfigured             bool   `json:"fixer_configured"`
+	FixerMaskedSummary          string `json:"fixer_masked_summary,omitempty"`
+	DefaultReminderOffsetsDays  []int  `json:"default_reminder_offsets_days"`
+	MaxReminderLeadDays         int    `json:"max_reminder_lead_days"`
+	ExchangeRateStaleAfterHours int    `json:"exchange_rate_stale_after_hours"`
+}
+
+type subscriptionCostSettingsUpdateRequest struct {
+	BaseCurrency                *string `json:"base_currency,omitempty"`
+	ExchangeRateProvider        *string `json:"exchange_rate_provider,omitempty"`
+	FixerAPIKey                 *string `json:"fixer_api_key,omitempty"`
+	FixerConfigured             *bool   `json:"fixer_configured,omitempty"`
+	FixerMaskedSummary          *string `json:"fixer_masked_summary,omitempty"`
+	DefaultReminderOffsetsDays  *[]int  `json:"default_reminder_offsets_days,omitempty"`
+	MaxReminderLeadDays         *int    `json:"max_reminder_lead_days,omitempty"`
+	ExchangeRateStaleAfterHours *int    `json:"exchange_rate_stale_after_hours,omitempty"`
 }
 
 func Settings(repo SettingsRepository) http.Handler {
@@ -117,6 +140,7 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 		IncidentDefaults:        input.IncidentDefaults,
 		OverrideRules:           input.OverrideRules,
 		RetentionPolicy:         input.RetentionPolicy,
+		SubscriptionCost:        current.SubscriptionCost,
 	}
 
 	if input.Telegram.BotToken != nil {
@@ -133,6 +157,9 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 	}
 	if input.Feishu.WebhookURL != nil {
 		merged.FeishuWebhookURL = strings.TrimSpace(*input.Feishu.WebhookURL)
+	}
+	if input.SubscriptionCostSettings != nil {
+		merged.SubscriptionCost = mergeSubscriptionCostSettingsUpdate(current.SubscriptionCost, *input.SubscriptionCostSettings)
 	}
 
 	return merged
@@ -152,12 +179,60 @@ func newSettingsResponse(record centersettings.CenterSettings) settingsResponse 
 			Enabled:    record.FeishuEnabled,
 			WebhookURL: record.FeishuWebhookURL,
 		},
-		HostSampleFrequencyTier: record.HostSampleFrequencyTier,
-		ProbeFrequencyDefaults:  record.ProbeFrequencyDefaults,
-		IncidentDefaults:        record.IncidentDefaults,
-		OverrideRules:           record.OverrideRules,
-		RetentionPolicy:         record.RetentionPolicy,
+		HostSampleFrequencyTier:  record.HostSampleFrequencyTier,
+		ProbeFrequencyDefaults:   record.ProbeFrequencyDefaults,
+		IncidentDefaults:         record.IncidentDefaults,
+		OverrideRules:            record.OverrideRules,
+		RetentionPolicy:          record.RetentionPolicy,
+		SubscriptionCostSettings: newSubscriptionCostSettingsResponse(record.SubscriptionCost),
 	}
+}
+
+func mergeSubscriptionCostSettingsUpdate(current centersettings.SubscriptionCostSettings, input subscriptionCostSettingsUpdateRequest) centersettings.SubscriptionCostSettings {
+	merged := current
+	if input.BaseCurrency != nil {
+		merged.BaseCurrency = strings.TrimSpace(*input.BaseCurrency)
+	}
+	if input.ExchangeRateProvider != nil {
+		merged.ExchangeRateProvider = strings.TrimSpace(*input.ExchangeRateProvider)
+	}
+	if input.FixerAPIKey != nil {
+		merged.FixerAPIKey = strings.TrimSpace(*input.FixerAPIKey)
+	}
+	if input.DefaultReminderOffsetsDays != nil {
+		merged.DefaultReminderOffsetsDays = append([]int(nil), (*input.DefaultReminderOffsetsDays)...)
+	}
+	if input.MaxReminderLeadDays != nil {
+		merged.MaxReminderLeadDays = *input.MaxReminderLeadDays
+	}
+	if input.ExchangeRateStaleAfterHours != nil {
+		merged.ExchangeRateStaleAfterHours = *input.ExchangeRateStaleAfterHours
+	}
+	return merged
+}
+
+func newSubscriptionCostSettingsResponse(record centersettings.SubscriptionCostSettings) subscriptionCostSettingsResponse {
+	key := strings.TrimSpace(record.FixerAPIKey)
+	return subscriptionCostSettingsResponse{
+		BaseCurrency:                record.BaseCurrency,
+		ExchangeRateProvider:        record.ExchangeRateProvider,
+		FixerConfigured:             key != "",
+		FixerMaskedSummary:          maskSecretTail(key),
+		DefaultReminderOffsetsDays:  append([]int(nil), record.DefaultReminderOffsetsDays...),
+		MaxReminderLeadDays:         record.MaxReminderLeadDays,
+		ExchangeRateStaleAfterHours: record.ExchangeRateStaleAfterHours,
+	}
+}
+
+func maskSecretTail(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 4 {
+		return strings.Repeat("*", len(value))
+	}
+	return strings.Repeat("*", len(value)-4) + value[len(value)-4:]
 }
 
 func maskTelegramBotToken(token string) string {

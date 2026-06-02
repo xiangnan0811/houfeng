@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"houfeng/internal/center/targets"
@@ -19,14 +20,15 @@ type Repository interface {
 }
 
 type CenterSettings struct {
-	Telegram                TelegramSettings       `json:"telegram"`
-	FeishuEnabled           bool                   `json:"feishu_enabled"`
-	FeishuWebhookURL        string                 `json:"feishu_webhook_url"`
-	HostSampleFrequencyTier string                 `json:"host_sample_frequency_tier"`
-	ProbeFrequencyDefaults  ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
-	IncidentDefaults        IncidentDefaults       `json:"incident_defaults"`
-	OverrideRules           OverrideRules          `json:"override_rules"`
-	RetentionPolicy         RetentionPolicy        `json:"retention_policy"`
+	Telegram                TelegramSettings         `json:"telegram"`
+	FeishuEnabled           bool                     `json:"feishu_enabled"`
+	FeishuWebhookURL        string                   `json:"feishu_webhook_url"`
+	HostSampleFrequencyTier string                   `json:"host_sample_frequency_tier"`
+	ProbeFrequencyDefaults  ProbeFrequencyDefaults   `json:"probe_frequency_defaults"`
+	IncidentDefaults        IncidentDefaults         `json:"incident_defaults"`
+	OverrideRules           OverrideRules            `json:"override_rules"`
+	RetentionPolicy         RetentionPolicy          `json:"retention_policy"`
+	SubscriptionCost        SubscriptionCostSettings `json:"subscription_cost_settings"`
 }
 
 type TelegramSettings struct {
@@ -139,6 +141,22 @@ type RetentionPolicy struct {
 	NotificationLayerDays int `json:"notification_layer_days"`
 }
 
+type SubscriptionExchangeRateProvider string
+
+const (
+	SubscriptionExchangeRateProviderFrankfurter SubscriptionExchangeRateProvider = "frankfurter"
+	SubscriptionExchangeRateProviderFixer       SubscriptionExchangeRateProvider = "fixer"
+)
+
+type SubscriptionCostSettings struct {
+	BaseCurrency                string `json:"base_currency"`
+	ExchangeRateProvider        string `json:"exchange_rate_provider"`
+	FixerAPIKey                 string `json:"fixer_api_key"`
+	DefaultReminderOffsetsDays  []int  `json:"default_reminder_offsets_days"`
+	MaxReminderLeadDays         int    `json:"max_reminder_lead_days"`
+	ExchangeRateStaleAfterHours int    `json:"exchange_rate_stale_after_hours"`
+}
+
 func Default() CenterSettings {
 	return CenterSettings{
 		HostSampleFrequencyTier: targets.FrequencyTier5s,
@@ -182,6 +200,14 @@ func Default() CenterSettings {
 			EventLayerDays:        90,
 			NotificationLayerDays: 180,
 		},
+		SubscriptionCost: SubscriptionCostSettings{
+			BaseCurrency:                "CNY",
+			ExchangeRateProvider:        string(SubscriptionExchangeRateProviderFrankfurter),
+			FixerAPIKey:                 "",
+			DefaultReminderOffsetsDays:  []int{14, 7, 1},
+			MaxReminderLeadDays:         30,
+			ExchangeRateStaleAfterHours: 36,
+		},
 	}
 }
 
@@ -221,6 +247,12 @@ func Validate(input CenterSettings) (CenterSettings, error) {
 		return CenterSettings{}, err
 	}
 	input.RetentionPolicy = retentionPolicy
+
+	subscriptionCost, err := validateSubscriptionCostSettings(input.SubscriptionCost)
+	if err != nil {
+		return CenterSettings{}, err
+	}
+	input.SubscriptionCost = subscriptionCost
 
 	return input, nil
 }
@@ -521,6 +553,87 @@ func validateRetentionPolicy(input RetentionPolicy) (RetentionPolicy, error) {
 		return RetentionPolicy{}, invalidSettings("notification retention days must be positive")
 	}
 	return input, nil
+}
+
+func validateSubscriptionCostSettings(input SubscriptionCostSettings) (SubscriptionCostSettings, error) {
+	defaults := Default().SubscriptionCost
+
+	input.BaseCurrency = strings.ToUpper(strings.TrimSpace(input.BaseCurrency))
+	if input.BaseCurrency == "" {
+		input.BaseCurrency = defaults.BaseCurrency
+	}
+	if !isCurrencyCode(input.BaseCurrency) {
+		return SubscriptionCostSettings{}, invalidSettings("subscription base currency must be a 3-letter uppercase code")
+	}
+
+	input.ExchangeRateProvider = strings.ToLower(strings.TrimSpace(input.ExchangeRateProvider))
+	if input.ExchangeRateProvider == "" {
+		input.ExchangeRateProvider = defaults.ExchangeRateProvider
+	}
+	switch SubscriptionExchangeRateProvider(input.ExchangeRateProvider) {
+	case SubscriptionExchangeRateProviderFrankfurter, SubscriptionExchangeRateProviderFixer:
+	default:
+		return SubscriptionCostSettings{}, invalidSettings("subscription exchange rate provider is invalid")
+	}
+
+	input.FixerAPIKey = strings.TrimSpace(input.FixerAPIKey)
+	if input.MaxReminderLeadDays == 0 {
+		input.MaxReminderLeadDays = defaults.MaxReminderLeadDays
+	}
+	if input.MaxReminderLeadDays < 1 || input.MaxReminderLeadDays > 365 {
+		return SubscriptionCostSettings{}, invalidSettings("subscription max reminder lead days must be between 1 and 365")
+	}
+
+	input.DefaultReminderOffsetsDays = normalizeReminderOffsets(input.DefaultReminderOffsetsDays)
+	if len(input.DefaultReminderOffsetsDays) == 0 {
+		input.DefaultReminderOffsetsDays = append([]int(nil), defaults.DefaultReminderOffsetsDays...)
+	}
+	for _, offset := range input.DefaultReminderOffsetsDays {
+		if offset < 0 {
+			return SubscriptionCostSettings{}, invalidSettings("subscription reminder offsets must be non-negative")
+		}
+		if offset > input.MaxReminderLeadDays {
+			return SubscriptionCostSettings{}, invalidSettings("subscription reminder offsets cannot exceed max reminder lead days")
+		}
+	}
+
+	if input.ExchangeRateStaleAfterHours == 0 {
+		input.ExchangeRateStaleAfterHours = defaults.ExchangeRateStaleAfterHours
+	}
+	if input.ExchangeRateStaleAfterHours < 1 || input.ExchangeRateStaleAfterHours > 24*14 {
+		return SubscriptionCostSettings{}, invalidSettings("subscription exchange rate stale hours must be between 1 and 336")
+	}
+
+	return input, nil
+}
+
+func normalizeReminderOffsets(values []int) []int {
+	if values == nil {
+		return nil
+	}
+	seen := make(map[int]struct{}, len(values))
+	normalized := make([]int, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(normalized)))
+	return normalized
+}
+
+func isCurrencyCode(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, ch := range value {
+		if ch < 'A' || ch > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 func invalidSettings(message string) error {

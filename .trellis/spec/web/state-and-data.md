@@ -427,6 +427,84 @@ const { vps_id: _ignored, ...body } = input
 postJSONBody(`/api/vps/${vpsId}/domains`, body)
 ```
 
+### Subscription Cost Workbench 数据流
+
+订阅成本工作台是 VPS-first 成本中枢的主操作入口。它可以聚合订阅、预算、汇率、续费提醒和 VPS 证据，但不能替代 VPS 业务状态机。
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `SubscriptionsPage.tsx`、`VPSDetailPage.tsx` 成本卡、`AssetDecisionsPage.tsx` 成本信号、`DashboardPage.tsx` 订阅摘要、`web/src/lib/api.ts` 订阅成本 API，或 `web/src/lib/types.ts` 订阅成本类型。
+
+#### 2. Signatures
+
+- Frontend APIs: `getSubscriptionOverview()`、`getSubscriptionStatistics(window)`、`getSubscriptionSettings()`、`updateSubscriptionSettings(input)`、`refreshSubscriptionExchangeRates()`、`listSubscriptionBudgets(filter?)`、`createSubscriptionBudget(input)`、`patchSubscriptionBudget(input)`、`listSubscriptions(filter?)`。
+- Frontend types mirror center JSON snake_case: `monthly_price_base`、`yearly_price_base`、`base_currency`、`exchange_rate`、`exchange_rate_date`、`exchange_rate_stale`、`budget_status`、`next_reminder_at`。
+- Routes: `/subscriptions` 是完整工作台；`/vps/:id` 只展示单台成本卡；`/asset-decisions` 只展示成本信号；Dashboard 只展示高信号摘要。
+
+#### 3. Contracts
+
+- `/subscriptions` 初始加载 overview、statistics、budgets、settings、subscriptions、VPS 列表。局部请求失败必须显示局部错误，不得把失败当成真实空态。
+- 订阅列表的 derived cost 字段只读展示。创建/编辑订阅仍只提交账单事实，不提交 `monthly_price_base`、`budget_status`、`exchange_rate_stale` 或 `next_reminder_at`。
+- Settings 表单不显示 Fixer key 明文；空 key 输入在 UI 中默认表示不修改，显式清除需要单独确认或后续专用动作。
+- 预算 UI 可先支持创建和总览；如果新增编辑/禁用交互，必须使用 PATCH，并保持 omitted 和 `null` limit 语义。
+- VPS 成本卡只展示当前订阅证据：原币种价格、base 月/年成本、续费日、预算状态、提醒状态、汇率状态。订阅读取失败时显示未知/错误，不得标成真实缺订阅。
+- Asset Decisions 成本信号只能作为 VPS 决策证据：临近续费、超预算、缺订阅、取消/迁移但仍可能续费。主操作仍回到 VPS 详情或 VPS 决策 drawer。
+- Dashboard 只显示总成本、未来续费、预算风险、汇率异常等高信号入口；不得加入预算编辑、汇率设置、订阅明细表或完整图表。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| overview failed, subscriptions loaded | 工作台显示 overview 局部错误，明细仍可操作 |
+| settings failed | 汇率与提醒设置区显示错误，订阅明细不被清空 |
+| exchange refresh failed | 显示失败结果或错误，不泄露 provider secret |
+| budget list empty | 显示可创建预算的空态，不标记所有订阅超预算 |
+| subscription has stale exchange | 行内和摘要显示汇率异常，成本字段可为 stale/null |
+| VPS scoped subscriptions failed | VPS 成本卡显示读取失败，不显示真实缺订阅 |
+| Dashboard subscription summary failed | Dashboard 降级为摘要不可用，完整操作仍在 `/subscriptions` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: 用户在 `/subscriptions` 查看 CNY 总月成本、续费队列、供应商拆分、预算风险，并刷新汇率。
+- Good: VPS 详情成本卡显示 USD 原价、CNY 月/年成本、下一次续费和预算状态，并链接回订阅工作台。
+- Good: Asset Decisions 在取消/迁移队列里显示“仍有临近续费风险”，但保存决策仍调用 VPS 决策 API。
+- Base: CNY 订阅显示汇率 `1` 且不提示 stale。
+- Bad: 前端把 `budget_status='over'` 自动改写 VPS `renewal_decision='cancel'`。
+- Bad: Dashboard 放入完整预算 CRUD 或 Fixer key 配置表单。
+- Bad: 页面直接 `fetch('/api/subscriptions/overview')`；必须走 `web/src/lib/api.ts`。
+
+#### 6. Tests Required
+
+- `web/src/lib/api.test.ts`: 新订阅成本 API 路径、方法、body 和 query。
+- `SubscriptionsPage.test.tsx`: 工作台主加载、空态、多币种、预算风险、汇率异常、设置保存、刷新汇率、创建预算。
+- `VPSDetailPage.test.tsx`: scoped 订阅成本卡、缺订阅、读取失败。
+- `AssetDecisionsPage.test.tsx`: 临近续费、超预算、缺订阅、取消/迁移续费风险信号。
+- `DashboardPage.test.tsx`: 高信号订阅摘要存在，且不展开完整订阅工作台。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：把成本风险直接升级成 VPS 业务决策。
+if (subscription.budget_status === 'over') {
+  await updateVPSAsset(subscription.vps_id, { renewal_decision: 'cancel' })
+}
+```
+
+```tsx
+// 正确：只展示成本信号，让用户在 VPS 决策入口确认。
+<Link to={`/vps/${subscription.vps_id}`}>查看成本风险</Link>
+```
+
+```tsx
+// 错误：组件内绕过统一 API client。
+await fetch('/api/subscriptions/overview')
+```
+
+```tsx
+// 正确：通过 `lib/api.ts` 保持 credentials、错误处理和类型统一。
+const overview = await getSubscriptionOverview()
+```
+
 ### Scenario: Dashboard Overview Contract
 
 #### 1. Scope / Trigger

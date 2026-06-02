@@ -28,6 +28,7 @@ const getCenterSettingsSQL = `
 			incident_defaults,
 			override_rules,
 			retention_policy,
+			subscription_cost_settings,
 			created_at,
 			updated_at
 		from center_settings
@@ -45,8 +46,9 @@ const upsertCenterSettingsSQL = `
 			probe_frequency_defaults,
 			incident_defaults,
 			override_rules,
-			retention_policy
-		) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb)
+			retention_policy,
+			subscription_cost_settings
+		) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb)
 		on conflict (settings_id) do update
 		set telegram_bot_token = excluded.telegram_bot_token,
 			telegram_chat_id = excluded.telegram_chat_id,
@@ -58,6 +60,7 @@ const upsertCenterSettingsSQL = `
 			incident_defaults = excluded.incident_defaults,
 			override_rules = excluded.override_rules,
 			retention_policy = excluded.retention_policy,
+			subscription_cost_settings = excluded.subscription_cost_settings,
 			updated_at = now()
 		returning
 			settings_id,
@@ -71,6 +74,7 @@ const upsertCenterSettingsSQL = `
 			incident_defaults,
 			override_rules,
 			retention_policy,
+			subscription_cost_settings,
 			created_at,
 			updated_at`
 
@@ -129,6 +133,10 @@ func (r *PostgresSettingsRepository) putSettings(ctx context.Context, input cent
 	if err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("marshal retention policy: %w", err)
 	}
+	subscriptionCostSettings, err := json.Marshal(normalized.SubscriptionCost)
+	if err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("marshal subscription cost settings: %w", err)
+	}
 
 	record, err := r.scanSettingsRow(
 		ctx,
@@ -144,6 +152,7 @@ func (r *PostgresSettingsRepository) putSettings(ctx context.Context, input cent
 		incidentDefaults,
 		overrideRules,
 		retentionPolicy,
+		subscriptionCostSettings,
 	)
 	if err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("upsert center settings: %w", err)
@@ -153,19 +162,20 @@ func (r *PostgresSettingsRepository) putSettings(ctx context.Context, input cent
 
 func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql string, args ...any) (centersettings.CenterSettings, error) {
 	var (
-		settingsID              string
-		telegramBotToken        string
-		telegramChatID          string
-		telegramRuntimeManaged  bool
-		feishuEnabled           bool
-		feishuWebhookURL        string
-		hostSampleFrequencyTier string
-		probeFrequencyDefaults  []byte
-		incidentDefaults        []byte
-		overrideRules           []byte
-		retentionPolicy         []byte
-		createdAt               time.Time
-		updatedAt               time.Time
+		settingsID               string
+		telegramBotToken         string
+		telegramChatID           string
+		telegramRuntimeManaged   bool
+		feishuEnabled            bool
+		feishuWebhookURL         string
+		hostSampleFrequencyTier  string
+		probeFrequencyDefaults   []byte
+		incidentDefaults         []byte
+		overrideRules            []byte
+		retentionPolicy          []byte
+		subscriptionCostSettings []byte
+		createdAt                time.Time
+		updatedAt                time.Time
 	)
 
 	if err := r.db.QueryRow(ctx, sql, args...).Scan(
@@ -180,6 +190,7 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 		&incidentDefaults,
 		&overrideRules,
 		&retentionPolicy,
+		&subscriptionCostSettings,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -212,6 +223,11 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 	}
 	if err := decodeSettingsJSON(retentionPolicy, &record.RetentionPolicy); err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("decode retention policy: %w", err)
+	}
+	if len(subscriptionCostSettings) == 0 {
+		record.SubscriptionCost = centersettings.Default().SubscriptionCost
+	} else if err := decodeSettingsJSON(subscriptionCostSettings, &record.SubscriptionCost); err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("decode subscription cost settings: %w", err)
 	}
 
 	validated, err := centersettings.Validate(record)

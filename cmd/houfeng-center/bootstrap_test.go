@@ -148,8 +148,8 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		newApp: func(addr string, handler http.Handler, workers ...centerapp.Worker) appRunner {
 			gotAddr = addr
 			gotHandler = handler
-			if len(workers) != 3 {
-				t.Fatalf("len(workers) = %d, want 3", len(workers))
+			if len(workers) != 5 {
+				t.Fatalf("len(workers) = %d, want 5", len(workers))
 			}
 			for i, worker := range workers {
 				if worker == nil {

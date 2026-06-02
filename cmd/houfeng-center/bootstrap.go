@@ -27,6 +27,7 @@ import (
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
+	"houfeng/internal/center/subscriptioncosts"
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/center/targets"
 )
@@ -78,6 +79,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	assetServiceRepo := store.NewPostgresAssetServiceRepository(db.Pool())
 	assetLifecycleRepo := store.NewPostgresAssetLifecycleRepository(db.Pool())
 	subscriptionRepo := store.NewPostgresSubscriptionRepository(db.Pool())
+	subscriptionCostRepo := store.NewPostgresSubscriptionCostRepository(db.Pool())
 	vpsMonitoringInstanceLinkRepo := store.NewPostgresVPSMonitoringInstanceLinkRepository(db.Pool())
 	renewalDecisionRepo := store.NewPostgresRenewalDecisionRepository(db.Pool())
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
@@ -99,6 +101,23 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
 	streamHub := runtimefacts.NewStreamHub()
 	notifier := deps.newIncidentNotifier(cfg, notifierSettingsRepo)
+	subscriptionDispatcher := incidentservice.NewSettingsAwareNotificationDispatcher(
+		notifierSettingsRepo,
+		func(botToken, chatID string) incidentservice.Notifier {
+			return notify.NewTelegramNotifier(botToken, chatID)
+		},
+		func(webhookURL string) incidentservice.Notifier {
+			return notify.NewFeishuNotifier(webhookURL)
+		},
+		nil,
+	)
+	subscriptionCostSvc := subscriptioncosts.NewService(subscriptionCostRepo, settingsRepo, map[string]subscriptioncosts.ExchangeRateProvider{
+		string(centersettings.SubscriptionExchangeRateProviderFrankfurter): subscriptioncosts.NewFrankfurterProvider(nil),
+		string(centersettings.SubscriptionExchangeRateProviderFixer):       subscriptioncosts.NewSettingsAwareFixerProvider(nil, settingsRepo),
+	})
+	exchangeRateWorker := subscriptioncosts.NewExchangeRateWorker(subscriptionCostSvc, slog.Default(), subscriptioncosts.DefaultExchangeRateWorkerInterval)
+	subscriptionReminderSvc := subscriptioncosts.NewReminderService(subscriptionCostRepo, settingsRepo, subscriptionDispatcher, incidentRepo, slog.Default())
+	subscriptionReminderWorker := subscriptioncosts.NewReminderWorker(subscriptionReminderSvc, subscriptioncosts.DefaultReminderWorkerInterval)
 	incidentSvc := incidentservice.NewSettingsBackedService(
 		monitoringInstanceRepo,
 		targetRepo,
@@ -151,8 +170,13 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSExtendValidityHandler:                 handlers.VPSExtendValidity(assetLifecycleRepo),
 		AssetContextMonitoringInstancesHandler:   handlers.AssetContextMonitoringInstances(assetLifecycleRepo),
 		AssetContextTargetsHandler:               handlers.AssetContextTargets(assetLifecycleRepo),
-		SubscriptionsCollectionHandler:           handlers.SubscriptionsCollection(subscriptionRepo),
+		SubscriptionsCollectionHandler:           handlers.SubscriptionsCollection(subscriptionRepo, subscriptionCostSvc),
 		SubscriptionItemHandler:                  handlers.SubscriptionItem(subscriptionRepo),
+		SubscriptionOverviewHandler:              handlers.SubscriptionOverview(subscriptionCostSvc),
+		SubscriptionStatisticsHandler:            handlers.SubscriptionStatistics(subscriptionCostSvc),
+		SubscriptionSettingsHandler:              handlers.SubscriptionSettings(subscriptionCostSvc),
+		SubscriptionExchangeRateRefreshHandler:   handlers.SubscriptionExchangeRateRefresh(subscriptionCostSvc),
+		SubscriptionBudgetsHandler:               handlers.SubscriptionBudgets(subscriptionCostSvc),
 		MonitoringInstancesCollectionHandler:     handlers.MonitoringInstancesCollection(monitoringInstanceRepo),
 		MonitoringInstanceItemHandler:            handlers.MonitoringInstanceItem(monitoringInstanceRepo),
 		MonitoringInstanceVPSHandler:             handlers.MonitoringInstanceVPS(vpsMonitoringInstanceLinkRepo),
@@ -187,7 +211,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AuthMiddleware:                                authMW,
 	})
 
-	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker, sessionCleanup), db.Close, nil
+	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker, sessionCleanup, exchangeRateWorker, subscriptionReminderWorker), db.Close, nil
 }
 
 func (d bootstrapDeps) withDefaults() bootstrapDeps {

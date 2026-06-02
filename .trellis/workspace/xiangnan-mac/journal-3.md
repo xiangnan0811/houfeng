@@ -1289,3 +1289,36 @@ Implemented VPS asset entry, subscription, validity extension, monitoring onboar
 ### Next Steps
 
 - None - task complete
+
+
+## Session 156: Subscription VPS cost center
+
+**Date**: 2026-06-02
+**Task**: Subscription VPS cost center
+**Branch**: `worktree/subscription-cost-center`
+
+### Summary
+
+Implemented the VPS-first subscription cost center: settings, exchange rates, budgets, renewal reminders, workbench integrations, verification evidence, and Trellis spec contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9983149` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

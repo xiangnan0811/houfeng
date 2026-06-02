@@ -231,6 +231,8 @@ const (
 const (
 	ObjectTypeMonitoringInstance ObjectType = "monitoring_instance"
 	ObjectTypeTarget             ObjectType = "target"
+	ObjectTypeSubscription       ObjectType = "subscription"
+	ObjectTypeVPS                ObjectType = "vps"
 )
 
 const (
