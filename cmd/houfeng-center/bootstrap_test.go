@@ -261,6 +261,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.MonitoringInstanceRuntimeFactsHandler == nil {
 		t.Fatal("router monitoringInstance runtime facts handler = nil, want non-nil")
 	}
+	if gotOpts.MonitoringInstanceRuntimeStreamHandler == nil {
+		t.Fatal("router monitoringInstance runtime stream handler = nil, want non-nil")
+	}
 	if gotOpts.MonitoringInstanceRuntimeControlHandler == nil {
 		t.Fatal("router monitoringInstance runtime control handler = nil, want non-nil")
 	}
@@ -402,22 +405,22 @@ func TestSettingsPresentationRepositoryReturnsPersistedSettingsUnchanged(t *test
 
 func TestSettingsPresentationRepositoryDelegatesPutSettings(t *testing.T) {
 	input := centersettings.Default()
-	input.RetentionPolicy.RawLayerDays = 14
+	input.RetentionPolicy.RawLayerDays = 30
 	repo := &fakeCenterSettingsRepository{putSettingsResult: input}
 
 	got, err := (settingsPresentationRepository{repo: repo}).PutSettings(context.Background(), input)
 	if err != nil {
 		t.Fatalf("PutSettings() error = %v", err)
 	}
-	if repo.putSettingsInput.RetentionPolicy.RawLayerDays != 14 {
+	if repo.putSettingsInput.RetentionPolicy.RawLayerDays != 30 {
 		t.Fatalf(
 			"delegated RawLayerDays = %d, want %d",
 			repo.putSettingsInput.RetentionPolicy.RawLayerDays,
-			14,
+			30,
 		)
 	}
-	if got.RetentionPolicy.RawLayerDays != 14 {
-		t.Fatalf("returned RawLayerDays = %d, want %d", got.RetentionPolicy.RawLayerDays, 14)
+	if got.RetentionPolicy.RawLayerDays != 30 {
+		t.Fatalf("returned RawLayerDays = %d, want %d", got.RetentionPolicy.RawLayerDays, 30)
 	}
 }
 

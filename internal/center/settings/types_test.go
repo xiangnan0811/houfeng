@@ -75,7 +75,7 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 			},
 		},
 		RetentionPolicy: RetentionPolicy{
-			RawLayerDays:          7,
+			RawLayerDays:          30,
 			AggregateLayerDays:    30,
 			EventLayerDays:        90,
 			NotificationLayerDays: 180,
@@ -108,7 +108,7 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	if string(body) != `{"raw_layer_days":7,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}` {
+	if string(body) != `{"raw_layer_days":30,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}` {
 		t.Fatalf("RetentionPolicy JSON = %s", body)
 	}
 }

@@ -6,23 +6,31 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/monitoringinstances"
+	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
+	"houfeng/internal/center/syncing"
 	"houfeng/internal/center/targets"
 )
 
 type fakeRuntimeFactsRepository struct {
 	getMonitoringInstanceRuntimeFactsResult runtimefacts.MonitoringInstanceRuntimeFacts
 	getMonitoringInstanceRuntimeFactsErr    error
+	getMonitoringInstanceRuntimeFactsWindow runtimefacts.WindowRequest
 	getTargetRuntimeFactsResult             runtimefacts.TargetRuntimeFacts
 	getTargetRuntimeFactsErr                error
 }
 
-func (f *fakeRuntimeFactsRepository) GetMonitoringInstanceRuntimeFacts(_ context.Context, _ string, _ time.Time, _ int) (runtimefacts.MonitoringInstanceRuntimeFacts, error) {
+func (f *fakeRuntimeFactsRepository) GetMonitoringInstanceRuntimeFacts(_ context.Context, _ string, window runtimefacts.WindowRequest) (runtimefacts.MonitoringInstanceRuntimeFacts, error) {
+	f.getMonitoringInstanceRuntimeFactsWindow = window
 	if f.getMonitoringInstanceRuntimeFactsErr != nil {
 		return runtimefacts.MonitoringInstanceRuntimeFacts{}, f.getMonitoringInstanceRuntimeFactsErr
 	}
@@ -228,6 +236,9 @@ func TestMonitoringInstanceRuntimeFactsDefaultWindowIs24h(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d; body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
 	}
+	if repo.getMonitoringInstanceRuntimeFactsWindow.Key != "24h" || repo.getMonitoringInstanceRuntimeFactsWindow.BucketCount != 288 {
+		t.Fatalf("window = %#v, want 24h/288 buckets", repo.getMonitoringInstanceRuntimeFactsWindow)
+	}
 }
 
 func TestMonitoringInstanceRuntimeFactsWith7dWindow(t *testing.T) {
@@ -254,6 +265,9 @@ func TestMonitoringInstanceRuntimeFactsWith7dWindow(t *testing.T) {
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d; body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if repo.getMonitoringInstanceRuntimeFactsWindow.Key != "7d" || repo.getMonitoringInstanceRuntimeFactsWindow.BucketCount != 336 {
+		t.Fatalf("window = %#v, want 7d/336 buckets", repo.getMonitoringInstanceRuntimeFactsWindow)
 	}
 }
 
@@ -282,6 +296,9 @@ func TestMonitoringInstanceRuntimeFactsWith30dWindow(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d; body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
 	}
+	if repo.getMonitoringInstanceRuntimeFactsWindow.Key != "30d" || repo.getMonitoringInstanceRuntimeFactsWindow.BucketCount != 720 {
+		t.Fatalf("window = %#v, want 30d/720 buckets", repo.getMonitoringInstanceRuntimeFactsWindow)
+	}
 }
 
 func TestMonitoringInstanceRuntimeFactsRejectsInvalidWindow(t *testing.T) {
@@ -309,4 +326,86 @@ func TestMonitoringInstanceRuntimeFactsRejectsInvalidWindow(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
+	hub := runtimefacts.NewStreamHub()
+	repo := &fakeMonitoringInstanceRepository{
+		getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001"},
+	}
+	server := httptest.NewServer(handlers.MonitoringInstanceRuntimeStream(repo, hub))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/monitoring-instances/mi_001/runtime-stream"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{server.URL}},
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	if err := hub.AfterSuccessfulSync(ctx, syncingBatchWithHostSample("mi_001", 42), runtimefactsTestResult()); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+
+	var message runtimefacts.HostSampleStreamMessage
+	if err := wsjson.Read(ctx, conn, &message); err != nil {
+		t.Fatalf("wsjson.Read() error = %v", err)
+	}
+	if message.Type != "host_sample" || message.MonitoringInstanceID != "mi_001" {
+		t.Fatalf("message = %#v, want mi_001 host sample", message)
+	}
+	if message.Sample.CPUUsagePct != 42 {
+		t.Fatalf("CPUUsagePct = %v, want 42", message.Sample.CPUUsagePct)
+	}
+}
+
+func TestMonitoringInstanceRuntimeStreamMapsMonitoringInstanceNotFound(t *testing.T) {
+	handler := handlers.MonitoringInstanceRuntimeStream(
+		&fakeMonitoringInstanceRepository{getMonitoringInstanceErr: monitoringinstances.ErrMonitoringInstanceNotFound},
+		runtimefacts.NewStreamHub(),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_missing/runtime-stream", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+}
+
+func TestMonitoringInstanceRuntimeStreamRejectsUnsupportedMethod(t *testing.T) {
+	handler := handlers.MonitoringInstanceRuntimeStream(&fakeMonitoringInstanceRepository{}, runtimefacts.NewStreamHub())
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/runtime-stream", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func syncingBatchWithHostSample(monitoringInstanceID string, cpuUsagePct float64) syncing.Batch {
+	observedAt := time.Date(2026, time.April, 24, 9, 0, 0, 0, time.UTC)
+	return syncing.Batch{
+		MonitoringInstanceID: monitoringInstanceID,
+		Observations: observations.BatchWrite{
+			HostSamples: []observations.HostSampleWrite{{
+				MonitoringInstanceID: monitoringInstanceID,
+				ObservedAt:           observedAt,
+				ReceivedAt:           observedAt.Add(time.Second),
+				AgentVersion:         "agent/v0.1.0",
+				CPUUsagePct:          cpuUsagePct,
+			}},
+		},
+	}
+}
+
+func runtimefactsTestResult() syncing.Result {
+	return syncing.Result{AcceptedAt: time.Date(2026, time.April, 24, 9, 0, 1, 0, time.UTC)}
 }

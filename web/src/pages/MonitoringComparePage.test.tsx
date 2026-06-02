@@ -71,7 +71,29 @@ function runtimeFacts(monitoringInstanceId: string) {
   return {
     monitoring_instance_id: monitoringInstanceId,
     latest_host_sample: sample,
-    recent_host_samples: [sample],
+    window: {
+      key: '24h',
+      started_at: '2026-05-14T08:05:00Z',
+      ended_at: '2026-05-15T08:05:00Z',
+      bucket_count: 288,
+      available_started_at: sample.observed_at,
+      available_ended_at: sample.observed_at,
+      sample_count: 1,
+    },
+    host_metric_points: [
+      {
+        observed_at: sample.observed_at,
+        sample_count: 1,
+        cpu_usage_pct: sample.cpu_usage_pct,
+        mem_used_pct: sample.mem_used_pct,
+        disk_used_pct: sample.disk_used_pct,
+        inode_used_pct: sample.inode_used_pct,
+        load_5: sample.load_5,
+        cpu_iowait_pct: sample.cpu_iowait_pct,
+        net_in_bytes_per_sec: sample.net_in_bytes_per_sec,
+        net_out_bytes_per_sec: sample.net_out_bytes_per_sec,
+      },
+    ],
   }
 }
 
@@ -112,7 +134,20 @@ describe('MonitoringComparePage', () => {
         city: 'Osaka',
         provider: 'AWS',
       })))
-      .mockResolvedValueOnce(mockJSONResponse({ monitoring_instance_id: 'mi_b', latest_host_sample: null, recent_host_samples: [] }))
+      .mockResolvedValueOnce(mockJSONResponse({
+        monitoring_instance_id: 'mi_b',
+        latest_host_sample: null,
+        window: {
+          key: '24h',
+          started_at: '2026-05-14T08:05:00Z',
+          ended_at: '2026-05-15T08:05:00Z',
+          bucket_count: 288,
+          available_started_at: null,
+          available_ended_at: null,
+          sample_count: 0,
+        },
+        host_metric_points: [],
+      }))
     vi.stubGlobal('fetch', fetchMock)
 
     renderMonitoringCompare('/monitoring/compare?id=mi_a&id=mi_b')

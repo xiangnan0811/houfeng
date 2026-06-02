@@ -9,7 +9,7 @@ export function RetentionPolicySection({ value, onChange }: RetentionPolicySecti
   return (
     <>
       <div className="ss-title">数据保留策略</div>
-      <div className="ss-desc">历史数据自动清理周期</div>
+      <div className="ss-desc">历史数据自动清理周期；原始层至少保留 30 天以支撑 30d 监控趋势</div>
       <div className="settings-row">
         <span className="sr-label">原始层保留</span>
         <span className="sr-value">
@@ -17,6 +17,7 @@ export function RetentionPolicySection({ value, onChange }: RetentionPolicySecti
             className="input input--compact"
             aria-label="原始层保留天数"
             inputMode="numeric"
+            min={30}
             value={value.rawLayerDays}
             onChange={(e) => onChange({ rawLayerDays: e.target.value })}
           /> 天

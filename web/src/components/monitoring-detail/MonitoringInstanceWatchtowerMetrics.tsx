@@ -8,14 +8,31 @@ import {
   formatNumber,
   formatPercent,
 } from '../../lib/format'
-import type { HostSample } from '../../lib/types'
+import type { HostMetricPoint, HostSample, MonitoringRuntimeWindow } from '../../lib/types'
 import { DEFAULT_THRESHOLDS } from '../../config/thresholds'
 
 type Props = {
   sample: HostSample | null
-  samples: HostSample[]
+  metricPoints: HostMetricSeriesPoint[]
+  timeWindow: MetricTimeWindow
+  window?: MonitoringRuntimeWindow
   isMaintenance?: boolean
 }
+
+type MetricTimeWindow = 'realtime' | '24h' | '7d' | '30d'
+
+export type HostMetricSeriesPoint = Pick<
+  HostMetricPoint,
+  | 'observed_at'
+  | 'cpu_usage_pct'
+  | 'mem_used_pct'
+  | 'disk_used_pct'
+  | 'inode_used_pct'
+  | 'load_5'
+  | 'cpu_iowait_pct'
+  | 'net_in_bytes_per_sec'
+  | 'net_out_bytes_per_sec'
+>
 
 type MetricPriority = 0 | 2 | 3 // 0=normal, 2=notice, 3=critical
 type MetricTone = 'normal' | 'notice' | 'critical'
@@ -45,15 +62,15 @@ function priorityTone(p: MetricPriority): MetricTone {
   return 'normal'
 }
 
-function toAscending(samples: HostSample[]): HostSample[] {
+function toAscending(samples: HostMetricSeriesPoint[]): HostMetricSeriesPoint[] {
   return [...samples].sort(
     (a, b) => new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime(),
   )
 }
 
 function toSeries(
-  samples: HostSample[],
-  pick: (s: HostSample) => number,
+  samples: HostMetricSeriesPoint[],
+  pick: (s: HostMetricSeriesPoint) => number,
 ): MetricChartSample[] {
   return samples.map((s) => ({ value: pick(s), observedAt: s.observed_at }))
 }
@@ -69,7 +86,25 @@ function formatCapacityBytes(value?: number | null): string {
   return formatBytes(value)
 }
 
-export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMaintenance = false }: Props) {
+function timeWindowLabel(timeWindow: MetricTimeWindow): string {
+  if (timeWindow === 'realtime') return '实时'
+  if (timeWindow === '24h') return '近 24h'
+  if (timeWindow === '7d') return '近 7d'
+  return '近 30d'
+}
+
+function availableWindowLabel(window?: MonitoringRuntimeWindow): string {
+  if (!window?.available_started_at || !window.available_ended_at) return '暂无可用历史跨度'
+  return `${new Date(window.available_started_at).toLocaleString()} - ${new Date(window.available_ended_at).toLocaleString()}`
+}
+
+export function MonitoringInstanceWatchtowerMetrics({
+  sample,
+  metricPoints,
+  timeWindow,
+  window,
+  isMaintenance = false,
+}: Props) {
   if (!sample) {
     return (
       <div className="empty-state">
@@ -79,7 +114,8 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
     )
   }
 
-  const ascending = toAscending(samples)
+  const ascending = toAscending(metricPoints)
+  const labelPrefix = timeWindowLabel(timeWindow)
   const baseTone = isMaintenance ? 'maintenance' : 'accent'
   const altTone = isMaintenance ? 'maintenance' : 'accent-2'
 
@@ -132,7 +168,7 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
               { value: t.cpu.critical, tone: 'critical', label: `${t.cpu.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
-            ariaLabel="CPU 使用率近 24h 趋势"
+            ariaLabel={`CPU 使用率${labelPrefix}趋势`}
           />
           <dl className="watchtower-metric-card__sub">
             <div>
@@ -169,7 +205,7 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
               { value: t.mem.critical, tone: 'critical', label: `${t.mem.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
-            ariaLabel="内存使用率近 24h 趋势"
+            ariaLabel={`内存使用率${labelPrefix}趋势`}
           />
           <dl className="watchtower-metric-card__sub">
             <div>
@@ -218,7 +254,7 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
               { value: t.disk.critical, tone: 'critical', label: `${t.disk.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
-            ariaLabel="磁盘使用率近 24h 趋势"
+            ariaLabel={`磁盘使用率${labelPrefix}趋势`}
           />
           <dl className="watchtower-metric-card__sub">
             <div>
@@ -270,7 +306,7 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
               { value: t.inode.critical, tone: 'critical', label: `${t.inode.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
-            ariaLabel="Inode 使用率近 24h 趋势"
+            ariaLabel={`Inode 使用率${labelPrefix}趋势`}
           />
         </article>
       ),
@@ -298,7 +334,7 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
               { value: t.load5.critical, tone: 'critical', label: String(t.load5.critical) },
             ]}
             formatValue={(v) => formatNumber(v)}
-            ariaLabel="Load5 近 24h 趋势"
+            ariaLabel={`Load5 ${labelPrefix}趋势`}
           />
           <dl className="watchtower-metric-card__sub">
             <div>
@@ -336,7 +372,7 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
               { value: t.iowait.critical, tone: 'critical', label: `${t.iowait.critical}%` },
             ]}
             formatValue={(v) => formatPercent(v)}
-            ariaLabel="CPU IOWait 近 24h 趋势"
+            ariaLabel={`CPU IOWait ${labelPrefix}趋势`}
           />
         </article>
       ),
@@ -360,7 +396,7 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
             height={160}
             yMin={0}
             formatValue={(v) => formatBytesPerSecond(v)}
-            ariaLabel="网络入站近 24h 趋势"
+            ariaLabel={`网络入站${labelPrefix}趋势`}
           />
         </article>
       ),
@@ -384,7 +420,7 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
             height={160}
             yMin={0}
             formatValue={(v) => formatBytesPerSecond(v)}
-            ariaLabel="网络出站近 24h 趋势"
+            ariaLabel={`网络出站${labelPrefix}趋势`}
           />
         </article>
       ),
@@ -405,7 +441,10 @@ export function MonitoringInstanceWatchtowerMetrics({ sample, samples, isMainten
           <h2>关键资源趋势</h2>
         </div>
         <p>
-          已按阈值优先级排序
+          {timeWindow === 'realtime'
+            ? `实时滚动 ${ascending.length} 点`
+            : `${labelPrefix} · ${window?.sample_count ?? 0} 个原始样本 · ${availableWindowLabel(window)}`}
+          {' · 已按阈值优先级排序'}
           {sorted[0]?.priority > 0 ? <> · 首要关注 {sorted[0].label}</> : null}
         </p>
       </div>

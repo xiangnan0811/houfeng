@@ -60,6 +60,7 @@ import {
   listVPSAssets,
   listVPSForMonitoringInstance,
   listVPSMonitoringInstances,
+  monitoringInstanceRuntimeStreamURL,
   createVPSMonitoringInstance,
   listVPSServices,
   createVPSDomain,
@@ -176,7 +177,7 @@ const settingsResponseBody = {
     ],
   },
   retention_policy: {
-    raw_layer_days: 7,
+    raw_layer_days: 30,
     aggregate_layer_days: 30,
     event_layer_days: 90,
     notification_layer_days: 180,
@@ -250,7 +251,7 @@ const settingsUpdateBody = {
     ],
   },
   retention_policy: {
-    raw_layer_days: 7,
+    raw_layer_days: 30,
     aggregate_layer_days: 30,
     event_layer_days: 90,
     notification_layer_days: 180,
@@ -1276,6 +1277,15 @@ describe('api helpers', () => {
       credentials: 'include',
       body: JSON.stringify(requestBody),
     })
+  })
+
+  it('builds same-origin monitoring runtime stream WebSocket URLs', () => {
+    expect(monitoringInstanceRuntimeStreamURL('mi_001', 'http://center.example.com')).toBe(
+      'ws://center.example.com/api/monitoring-instances/mi_001/runtime-stream',
+    )
+    expect(monitoringInstanceRuntimeStreamURL('mi/slash', 'https://center.example.com/base')).toBe(
+      'wss://center.example.com/api/monitoring-instances/mi%2Fslash/runtime-stream',
+    )
   })
 
   it('sends monitoring instance metadata optimistic preconditions when provided', async () => {

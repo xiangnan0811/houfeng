@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -81,6 +81,65 @@ function emptyRuntimeFacts(monitoringInstanceId = 'mi_conflict') {
   return {
     monitoring_instance_id: monitoringInstanceId,
     latest_host_sample: null,
+  }
+}
+
+function hostSampleRecord(monitoringInstanceId: string, overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    monitoring_instance_id: monitoringInstanceId,
+    observed_at: '2026-04-24T10:00:00Z',
+    received_at: '2026-04-24T10:00:01Z',
+    agent_version: 'dev',
+    fingerprint: `fp-${monitoringInstanceId}`,
+    cpu_usage_pct: 33,
+    load_1: 0.4,
+    load_5: 0.5,
+    load_15: 0.6,
+    mem_used_pct: 55,
+    mem_available_bytes: 1073741824,
+    mem_total_bytes: 8589934592,
+    swap_used_pct: 1,
+    disk_used_pct: 60,
+    disk_total_bytes: 107374182400,
+    inode_used_pct: 12,
+    net_in_bytes_per_sec: 1024,
+    net_out_bytes_per_sec: 2048,
+    cpu_iowait_pct: 5,
+    cpu_steal_pct: 0,
+    disk_read_bytes_per_sec: 512,
+    disk_write_bytes_per_sec: 768,
+    disk_busy_pct: 4,
+    uptime_seconds: 3600,
+    maintenance_context: false,
+    is_backfilled: false,
+    sync_batch_id: `sync-${monitoringInstanceId}`,
+    ...overrides,
+  }
+}
+
+class MockRuntimeWebSocket {
+  static instances: MockRuntimeWebSocket[] = []
+
+  readonly url: string
+  onopen: (() => void) | null = null
+  onmessage: ((event: MessageEvent<string>) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: (() => void) | null = null
+  close = vi.fn(() => {
+    this.onclose?.()
+  })
+
+  constructor(url: string) {
+    this.url = url
+    MockRuntimeWebSocket.instances.push(this)
+  }
+
+  emitOpen() {
+    this.onopen?.()
+  }
+
+  emitMessage(data: unknown) {
+    this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent<string>)
   }
 }
 
@@ -488,7 +547,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2)
   })
 
-  it('renders sparklines and a sample-count meta line when recent host samples are present', async () => {
+  it('renders sparklines and a sample-count meta line when host metric points are present', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -544,64 +603,39 @@ describe('MonitoringDetailPage', () => {
               is_backfilled: false,
               sync_batch_id: 'sync-trend-latest',
             },
-            recent_host_samples: [
+            window: {
+              key: '24h',
+              started_at: '2026-04-23T10:05:00Z',
+              ended_at: '2026-04-24T10:05:00Z',
+              bucket_count: 288,
+              available_started_at: '2026-04-24T09:35:00Z',
+              available_ended_at: '2026-04-24T10:05:00Z',
+              sample_count: 2,
+            },
+            host_metric_points: [
               {
-                monitoring_instance_id: 'mi_trend',
-                observed_at: '2026-04-24T10:05:00Z',
-                received_at: '2026-04-24T10:05:01Z',
-                agent_version: 'dev',
-                fingerprint: 'fp-trend',
-                cpu_usage_pct: 21,
-                load_1: 0.8,
-                load_5: 1.6,
-                load_15: 1.9,
-                mem_used_pct: 62,
-                mem_available_bytes: 1073741824,
-                mem_total_bytes: 8589934592,
-                swap_used_pct: 0,
-                disk_used_pct: 41,
-                disk_total_bytes: 107374182400,
-                inode_used_pct: 9,
-                net_in_bytes_per_sec: 1024,
-                net_out_bytes_per_sec: 2048,
-                cpu_iowait_pct: 6,
-                cpu_steal_pct: 1.4,
-                disk_read_bytes_per_sec: 3072,
-                disk_write_bytes_per_sec: 4096,
-                disk_busy_pct: 8,
-                uptime_seconds: 7200,
-                maintenance_context: false,
-                is_backfilled: false,
-                sync_batch_id: 'sync-trend-1',
-              },
-              {
-                monitoring_instance_id: 'mi_trend',
                 observed_at: '2026-04-24T09:35:00Z',
-                received_at: '2026-04-24T09:35:01Z',
-                agent_version: 'dev',
-                fingerprint: 'fp-trend',
+                sample_count: 1,
                 cpu_usage_pct: 18,
-                load_1: 0.7,
-                load_5: 1.2,
-                load_15: 1.5,
                 mem_used_pct: 58,
-                mem_available_bytes: 2147483648,
-                mem_total_bytes: 8589934592,
-                swap_used_pct: 0,
                 disk_used_pct: 40,
-                disk_total_bytes: 107374182400,
                 inode_used_pct: 8,
+                load_5: 1.2,
+                cpu_iowait_pct: 4,
                 net_in_bytes_per_sec: 900,
                 net_out_bytes_per_sec: 1800,
-                cpu_iowait_pct: 4,
-                cpu_steal_pct: 1.1,
-                disk_read_bytes_per_sec: 2048,
-                disk_write_bytes_per_sec: 3072,
-                disk_busy_pct: 6,
-                uptime_seconds: 5400,
-                maintenance_context: false,
-                is_backfilled: false,
-                sync_batch_id: 'sync-trend-2',
+              },
+              {
+                observed_at: '2026-04-24T10:05:00Z',
+                sample_count: 1,
+                cpu_usage_pct: 21,
+                mem_used_pct: 62,
+                disk_used_pct: 41,
+                inode_used_pct: 9,
+                load_5: 1.6,
+                cpu_iowait_pct: 6,
+                net_in_bytes_per_sec: 1024,
+                net_out_bytes_per_sec: 2048,
               },
             ],
           }),
@@ -625,11 +659,11 @@ describe('MonitoringDetailPage', () => {
     // Watchtower main view: 8 metric cards in 4×2 grid; each renders a MetricChart svg
     const cards = container.querySelectorAll('.watchtower-metrics .watchtower-metric-card')
     expect(cards.length).toBe(8)
-    // With 2 ascending samples, each card's MetricChart draws a polyline
+    // With 2 ascending metric points, each card's MetricChart draws a polyline
     expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
   })
 
-  it('renders an empty state when no recent host samples are available', async () => {
+  it('renders an empty state when no host metric points are available', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -2428,6 +2462,105 @@ describe('MonitoringDetailPage', () => {
         credentials: 'include',
       }),
     )
+  })
+
+  it('opens a realtime runtime stream, renders host samples, and closes it when leaving realtime', async () => {
+    MockRuntimeWebSocket.instances = []
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_realtime',
+            binding_status: '已绑定',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          monitoring_instance_id: 'mi_realtime',
+          latest_host_sample: null,
+          host_metric_points: [],
+        }),
+      )
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('WebSocket', MockRuntimeWebSocket)
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/monitoring/mi_realtime']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '实时' }))
+
+    await waitFor(() => expect(MockRuntimeWebSocket.instances).toHaveLength(1))
+    const socket = MockRuntimeWebSocket.instances[0]
+    expect(new URL(socket.url).protocol).toBe('ws:')
+    expect(new URL(socket.url).pathname).toBe('/api/monitoring-instances/mi_realtime/runtime-stream')
+
+    act(() => {
+      socket.emitOpen()
+    })
+    await waitFor(() => expect(screen.getByText('已连接')).toBeInTheDocument())
+
+    const firstSample = hostSampleRecord('mi_realtime', {
+      observed_at: '2026-04-24T10:00:00Z',
+      received_at: '2026-04-24T10:00:01Z',
+      cpu_usage_pct: 40,
+      mem_used_pct: 62,
+      disk_used_pct: 60,
+      inode_used_pct: 12,
+      load_5: 0.8,
+      cpu_iowait_pct: 6,
+      net_in_bytes_per_sec: 2048,
+      net_out_bytes_per_sec: 4096,
+    })
+    const secondSample = hostSampleRecord('mi_realtime', {
+      observed_at: '2026-04-24T10:00:05Z',
+      received_at: '2026-04-24T10:00:06Z',
+      cpu_usage_pct: 42,
+      mem_used_pct: 63,
+      disk_used_pct: 61,
+      inode_used_pct: 13,
+      load_5: 0.9,
+      cpu_iowait_pct: 7,
+      net_in_bytes_per_sec: 4096,
+      net_out_bytes_per_sec: 8192,
+    })
+    act(() => {
+      socket.emitMessage({
+        type: 'host_sample',
+        monitoring_instance_id: 'mi_realtime',
+        sample: firstSample,
+        received_at: '2026-04-24T10:00:01Z',
+      })
+      socket.emitMessage({
+        type: 'host_sample',
+        monitoring_instance_id: 'mi_realtime',
+        sample: secondSample,
+        received_at: '2026-04-24T10:00:06Z',
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText('实时滚动 2 点 · 已按阈值优先级排序')).toBeInTheDocument())
+    expect(screen.getByText('42.0%')).toBeInTheDocument()
+    expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
+
+    fireEvent.click(screen.getByRole('tab', { name: '24h' }))
+    await waitFor(() => expect(socket.close).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText('已连接')).not.toBeInTheDocument()
   })
 
   // ── Command execution ──

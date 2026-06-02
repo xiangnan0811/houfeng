@@ -40,6 +40,7 @@ type RouterOptions struct {
 	MonitoringInstanceItemHandler                 stdhttp.Handler
 	MonitoringInstanceVPSHandler                  stdhttp.Handler
 	MonitoringInstanceRuntimeFactsHandler         stdhttp.Handler
+	MonitoringInstanceRuntimeStreamHandler        stdhttp.Handler
 	MonitoringInstanceRuntimeControlHandler       stdhttp.Handler
 	MonitoringInstanceOnboardingHandler           stdhttp.Handler
 	MonitoringInstanceEnrollmentTokenHandler      stdhttp.Handler
@@ -226,7 +227,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.MonitoringInstanceBatchHandler != nil {
 		mux.Handle("/api/monitoring-instances/batch", protect(opts.MonitoringInstanceBatchHandler))
 	}
-	if opts.MonitoringInstanceItemHandler != nil || opts.MonitoringInstanceVPSHandler != nil || opts.MonitoringInstanceRuntimeFactsHandler != nil || opts.MonitoringInstanceRuntimeControlHandler != nil || opts.MonitoringInstanceOnboardingHandler != nil || opts.MonitoringInstanceEnrollmentTokenHandler != nil || opts.MonitoringInstanceInstallCommandHandler != nil || opts.MonitoringInstanceBindingConfirmRebindHandler != nil || opts.MonitoringInstanceBindingRejectPendingHandler != nil || opts.MonitoringInstanceBindingResetHandler != nil || opts.MonitoringInstanceSparklinesHandler != nil || opts.MonitoringInstanceActionsHandler != nil {
+	if opts.MonitoringInstanceItemHandler != nil || opts.MonitoringInstanceVPSHandler != nil || opts.MonitoringInstanceRuntimeFactsHandler != nil || opts.MonitoringInstanceRuntimeStreamHandler != nil || opts.MonitoringInstanceRuntimeControlHandler != nil || opts.MonitoringInstanceOnboardingHandler != nil || opts.MonitoringInstanceEnrollmentTokenHandler != nil || opts.MonitoringInstanceInstallCommandHandler != nil || opts.MonitoringInstanceBindingConfirmRebindHandler != nil || opts.MonitoringInstanceBindingRejectPendingHandler != nil || opts.MonitoringInstanceBindingResetHandler != nil || opts.MonitoringInstanceSparklinesHandler != nil || opts.MonitoringInstanceActionsHandler != nil {
 		mux.Handle("/api/monitoring-instances/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			monitoringInstanceID, subtree := monitoringInstanceSubtreePath(r.URL.Path)
 			if monitoringInstanceID == "" && subtree != monitoringInstanceSubtreeSparklines {
@@ -253,6 +254,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.MonitoringInstanceRuntimeFactsHandler.ServeHTTP(w, r)
+			case monitoringInstanceSubtreeRuntimeStream:
+				if opts.MonitoringInstanceRuntimeStreamHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.MonitoringInstanceRuntimeStreamHandler.ServeHTTP(w, r)
 			case monitoringInstanceSubtreeRuntimeControl:
 				if opts.MonitoringInstanceRuntimeControlHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -443,6 +450,7 @@ const (
 	monitoringInstanceSubtreeItem                 monitoringInstanceSubtree = "item"
 	monitoringInstanceSubtreeVPS                  monitoringInstanceSubtree = "vps"
 	monitoringInstanceSubtreeRuntimeFacts         monitoringInstanceSubtree = "runtime-facts"
+	monitoringInstanceSubtreeRuntimeStream        monitoringInstanceSubtree = "runtime-stream"
 	monitoringInstanceSubtreeRuntimeControl       monitoringInstanceSubtree = "runtime-control"
 	monitoringInstanceSubtreeOnboarding           monitoringInstanceSubtree = "onboarding"
 	monitoringInstanceSubtreeEnrollmentToken      monitoringInstanceSubtree = "enrollment-token"
@@ -475,6 +483,9 @@ func monitoringInstanceSubtreePath(path string) (monitoringInstanceID string, su
 	}
 	if segments[1] == "runtime-facts" && len(segments) == 2 {
 		return segments[0], monitoringInstanceSubtreeRuntimeFacts
+	}
+	if segments[1] == "runtime-stream" && len(segments) == 2 {
+		return segments[0], monitoringInstanceSubtreeRuntimeStream
 	}
 	if segments[1] == "runtime" && len(segments) == 3 {
 		return segments[0], monitoringInstanceSubtreeRuntimeControl

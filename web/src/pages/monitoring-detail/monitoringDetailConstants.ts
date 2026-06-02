@@ -25,6 +25,7 @@ export const COMMAND_LABELS: Record<string, string> = Object.fromEntries(
 export const MAX_STDOUT_LINES = 20
 
 export const TIME_WINDOW_ITEMS: Array<{ value: TimeWindow; label: string }> = [
+  { value: 'realtime', label: '实时' },
   { value: '24h', label: '24h' },
   { value: '7d', label: '7d' },
   { value: '30d', label: '30d' },

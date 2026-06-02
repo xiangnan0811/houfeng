@@ -77,7 +77,7 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 			},
 		},
 		RetentionPolicy: centersettings.RetentionPolicy{
-			RawLayerDays:          14,
+			RawLayerDays:          30,
 			AggregateLayerDays:    60,
 			EventLayerDays:        180,
 			NotificationLayerDays: 365,
@@ -120,7 +120,7 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 		t.Fatalf("telegram_runtime_managed = %#v, want true", seenArgs[3])
 	}
 	assertJSONArgContains(t, seenArgs[9], `"monitoring_instance_labels":[{"label":"core"`)
-	assertJSONArgContains(t, seenArgs[10], `"raw_layer_days":14`)
+	assertJSONArgContains(t, seenArgs[10], `"raw_layer_days":30`)
 }
 
 func TestCenterSettingsRepositoryPutSettingsValidatesBeforeWriting(t *testing.T) {

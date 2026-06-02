@@ -10,6 +10,7 @@ import {
   getMonitoringInstance,
   getMonitoringInstanceOnboarding,
   getMonitoringInstanceRuntimeFacts,
+  monitoringInstanceRuntimeStreamURL,
   listVPSForMonitoringInstance,
   listEvents,
   listHistoricalIncidents,
@@ -20,7 +21,7 @@ import {
   resetMonitoringInstanceBinding,
   resumeMonitoringInstanceMonitoring,
 } from '../lib/api'
-import type { ActiveIncidentRecord, MonitoringInstanceOnboardingState } from '../lib/types'
+import type { ActiveIncidentRecord, HostSample, HostSampleStreamMessage, MonitoringInstanceOnboardingState } from '../lib/types'
 import { MonitoringDetailPageBody } from './monitoring-detail/MonitoringDetailPageBody'
 import { MonitoringDetailLoading } from './monitoring-detail/MonitoringDetailLoading'
 import { MonitoringDetailUnavailable } from './monitoring-detail/MonitoringDetailUnavailable'
@@ -42,8 +43,12 @@ import type {
   LinkedVPSState,
   MonitoringDetailPageState,
   PendingRuntimeConfirmation,
+  RuntimeStreamStatus,
   TimeWindow,
 } from './monitoring-detail/types'
+
+const REALTIME_SAMPLE_LIMIT = 720
+const RUNTIME_STREAM_RECONNECT_MS = 2000
 
 export function MonitoringDetailPage() {
   const { monitoringInstanceId } = useParams()
@@ -80,6 +85,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [commandError, setCommandError] = useState<string | null>(null)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('24h')
+  const [realtimeSamples, setRealtimeSamples] = useState<HostSample[]>([])
+  const [runtimeStreamStatus, setRuntimeStreamStatus] = useState<RuntimeStreamStatus>('idle')
+  const [runtimeStreamError, setRuntimeStreamError] = useState<string | null>(null)
   const [linkedVPSState, setLinkedVPSState] = useState<LinkedVPSState>({
     requestedMonitoringInstanceId: null,
     records: [],
@@ -164,6 +172,8 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     let cancelled = false
     if (!monitoringInstanceId) return
 
+    if (timeWindow === 'realtime') return
+
     getMonitoringInstanceRuntimeFacts(monitoringInstanceId, timeWindow)
       .then((runtimeFacts) => {
         if (cancelled) return
@@ -177,6 +187,82 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       })
 
     return () => { cancelled = true }
+  }, [monitoringInstanceId, timeWindow])
+
+  useEffect(() => {
+    setRealtimeSamples([])
+    setRuntimeStreamStatus('idle')
+    setRuntimeStreamError(null)
+  }, [monitoringInstanceId])
+
+  useEffect(() => {
+    if (!monitoringInstanceId || timeWindow !== 'realtime') {
+      setRuntimeStreamStatus('idle')
+      setRuntimeStreamError(null)
+      return
+    }
+    if (typeof WebSocket === 'undefined') {
+      setRuntimeStreamStatus('disconnected')
+      setRuntimeStreamError('当前浏览器不支持 WebSocket')
+      return
+    }
+
+    let closed = false
+    let socket: WebSocket | null = null
+    let reconnectTimer: number | undefined
+
+    const connect = (reconnect: boolean) => {
+      if (closed) return
+      setRuntimeStreamStatus(reconnect ? 'reconnecting' : 'connecting')
+      setRuntimeStreamError(null)
+      socket = new WebSocket(monitoringInstanceRuntimeStreamURL(monitoringInstanceId))
+
+      socket.onopen = () => {
+        if (closed) return
+        setRuntimeStreamStatus('connected')
+        setRuntimeStreamError(null)
+      }
+      socket.onmessage = (event) => {
+        if (closed) return
+        try {
+          const message = JSON.parse(String(event.data)) as HostSampleStreamMessage
+          if (message.type !== 'host_sample' || message.monitoring_instance_id !== monitoringInstanceId) return
+          const sample = message.sample
+          setRealtimeSamples((current) => [...current, sample].slice(-REALTIME_SAMPLE_LIMIT))
+          setState((current) => {
+            if (current.requestedMonitoringInstanceId !== monitoringInstanceId || !current.runtimeFacts) return current
+            return {
+              ...current,
+              runtimeFacts: {
+                ...current.runtimeFacts,
+                latest_host_sample: sample,
+              },
+            }
+          })
+        } catch {
+          setRuntimeStreamError('实时数据解析失败')
+        }
+      }
+      socket.onerror = () => {
+        if (closed) return
+        setRuntimeStreamError('实时连接异常')
+      }
+      socket.onclose = () => {
+        if (closed) return
+        setRuntimeStreamStatus('disconnected')
+        reconnectTimer = window.setTimeout(() => connect(true), RUNTIME_STREAM_RECONNECT_MS)
+      }
+    }
+
+    connect(false)
+
+    return () => {
+      closed = true
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
+      socket?.close()
+      setRuntimeStreamStatus('idle')
+      setRuntimeStreamError(null)
+    }
   }, [monitoringInstanceId, timeWindow])
 
   useEffect(() => {
@@ -782,6 +868,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onBindingReset={() => void handleBindingAction('reset', resetMonitoringInstanceBinding)}
       timeWindow={timeWindow}
       onTimeWindowChange={handleTimeWindowChange}
+      realtimeSamples={realtimeSamples}
+      runtimeStreamStatus={runtimeStreamStatus}
+      runtimeStreamError={runtimeStreamError}
       historyOpen={historyOpen}
       historyTab={historyTab}
       historyIncidents={historyIncidents}

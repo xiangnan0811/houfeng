@@ -44,6 +44,29 @@ type PostSyncProcessor interface {
 	AfterSuccessfulSync(context.Context, Batch, Result) error
 }
 
+type CompositePostSyncProcessor struct {
+	primary    PostSyncProcessor
+	bestEffort []PostSyncProcessor
+}
+
+func NewCompositePostSyncProcessor(primary PostSyncProcessor, bestEffort ...PostSyncProcessor) PostSyncProcessor {
+	return CompositePostSyncProcessor{primary: primary, bestEffort: bestEffort}
+}
+
+func (p CompositePostSyncProcessor) AfterSuccessfulSync(ctx context.Context, batch Batch, result Result) error {
+	var primaryErr error
+	if p.primary != nil {
+		primaryErr = p.primary.AfterSuccessfulSync(ctx, batch, result)
+	}
+	for _, processor := range p.bestEffort {
+		if processor == nil {
+			continue
+		}
+		_ = processor.AfterSuccessfulSync(ctx, batch, result)
+	}
+	return primaryErr
+}
+
 type Repository interface {
 	ApplyBatch(context.Context, Batch) (Result, error)
 }

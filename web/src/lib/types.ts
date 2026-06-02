@@ -117,10 +117,42 @@ export type HostSample = {
   containers?: ContainerInfo[]
 }
 
+export type MonitoringRuntimeWindow = {
+  key: string
+  started_at: string
+  ended_at: string
+  bucket_count: number
+  available_started_at: string | null
+  available_ended_at: string | null
+  sample_count: number
+}
+
+export type HostMetricPoint = {
+  observed_at: string
+  sample_count: number
+  cpu_usage_pct: number
+  mem_used_pct: number
+  disk_used_pct: number
+  inode_used_pct: number
+  load_5: number
+  cpu_iowait_pct: number
+  net_in_bytes_per_sec: number
+  net_out_bytes_per_sec: number
+}
+
+export type HostSampleStreamMessage = {
+  type: 'host_sample'
+  monitoring_instance_id: string
+  sample: HostSample
+  received_at: string
+}
+
 export type MonitoringInstanceRuntimeFacts = {
   monitoring_instance_id: string
+  window?: MonitoringRuntimeWindow
   latest_host_sample: HostSample | null
-  recent_host_samples: HostSample[]
+  host_metric_points?: HostMetricPoint[]
+  recent_host_samples?: HostSample[]
 }
 
 export type TargetType = 'service' | 'china_reference'

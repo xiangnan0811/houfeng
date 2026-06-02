@@ -83,7 +83,7 @@ const settingsResponseBody = {
     ],
   },
   retention_policy: {
-    raw_layer_days: 7,
+    raw_layer_days: 30,
     aggregate_layer_days: 30,
     event_layer_days: 90,
     notification_layer_days: 180,
@@ -179,7 +179,7 @@ describe('SettingsPage', () => {
           host_sample_frequency_tier: '1m',
           retention_policy: {
             ...settingsResponseBody.retention_policy,
-            raw_layer_days: 14,
+            raw_layer_days: 45,
           },
         }),
       )
@@ -194,7 +194,7 @@ describe('SettingsPage', () => {
       target: { value: '1m' },
     })
     fireEvent.change(screen.getByLabelText('原始层保留天数'), {
-      target: { value: '14' },
+      target: { value: '45' },
     })
 
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
@@ -242,7 +242,7 @@ describe('SettingsPage', () => {
       },
       override_rules: settingsResponseBody.override_rules,
       retention_policy: {
-        raw_layer_days: 14,
+        raw_layer_days: 45,
         aggregate_layer_days: 30,
         event_layer_days: 90,
         notification_layer_days: 180,
@@ -266,7 +266,7 @@ describe('SettingsPage', () => {
           host_sample_frequency_tier: '1m',
           retention_policy: {
             ...settingsResponseBody.retention_policy,
-            raw_layer_days: 14,
+            raw_layer_days: 45,
           },
         }),
       )
@@ -286,7 +286,7 @@ describe('SettingsPage', () => {
       target: { value: '1m' },
     })
     fireEvent.change(screen.getByLabelText('原始层保留天数'), {
-      target: { value: '14' },
+      target: { value: '45' },
     })
 
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
@@ -343,12 +343,30 @@ describe('SettingsPage', () => {
       },
       override_rules: settingsResponseBody.override_rules,
       retention_policy: {
-        raw_layer_days: 14,
+        raw_layer_days: 45,
         aggregate_layer_days: 30,
         event_layer_days: 90,
         notification_layer_days: 180,
       },
     })
+  })
+
+  it('rejects raw retention below the 30 day monitoring window minimum', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('原始层保留天数'), {
+      target: { value: '14' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('原始层天数必须至少为 30 天。'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('saves a Telegram chat-id-only update when a token is already stored', async () => {
