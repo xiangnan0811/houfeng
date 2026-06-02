@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/xiangnan0811/houfeng/compare/v0.29.0...v0.30.0) (2026-06-02)
+
+
+### Features
+
+* **monitoring:** improve realtime detail watchtower ([88e729c](https://github.com/xiangnan0811/houfeng/commit/88e729c92a6de6f5f03a24116c6aed128aedb172))
+
 ## [0.29.0](https://github.com/xiangnan0811/houfeng/compare/v0.28.0...v0.29.0) (2026-06-02)
 
 
