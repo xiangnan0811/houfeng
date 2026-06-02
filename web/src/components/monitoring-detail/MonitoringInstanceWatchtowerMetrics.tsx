@@ -45,11 +45,6 @@ interface MetricCardDef {
   render: () => ReactNode
 }
 
-type SharedHoverMetric = {
-  label: string
-  value: string
-}
-
 function priorityFromThresholds(value: number, thresholds: { value: number; tone: string }[]): MetricPriority {
   let p: MetricPriority = 0
   for (const t of thresholds) {
@@ -103,25 +98,6 @@ function availableWindowLabel(window?: MonitoringRuntimeWindow): string {
   return `${new Date(window.available_started_at).toLocaleString()} - ${new Date(window.available_ended_at).toLocaleString()}`
 }
 
-function hoverTimeLabel(observedAt: string): string {
-  const d = new Date(observedAt)
-  if (Number.isNaN(d.getTime())) return observedAt
-  return d.toLocaleString()
-}
-
-function sharedHoverMetrics(point: HostMetricSeriesPoint | null): SharedHoverMetric[] {
-  return [
-    { label: 'CPU', value: point ? formatPercent(point.cpu_usage_pct) : '—' },
-    { label: '内存', value: point ? formatPercent(point.mem_used_pct) : '—' },
-    { label: '磁盘', value: point ? formatPercent(point.disk_used_pct) : '—' },
-    { label: 'Inode', value: point ? formatPercent(point.inode_used_pct) : '—' },
-    { label: 'Load5', value: point ? formatNumber(point.load_5) : '—' },
-    { label: 'IOWait', value: point ? formatPercent(point.cpu_iowait_pct) : '—' },
-    { label: '网络入', value: point ? formatBytesPerSecond(point.net_in_bytes_per_sec) : '—' },
-    { label: '网络出', value: point ? formatBytesPerSecond(point.net_out_bytes_per_sec) : '—' },
-  ]
-}
-
 export function MonitoringInstanceWatchtowerMetrics({
   sample,
   metricPoints,
@@ -147,12 +123,7 @@ export function MonitoringInstanceWatchtowerMetrics({
   const sharedChartProps = {
     hoveredAt,
     onHoverAtChange: setHoveredAt,
-    showTooltip: false,
   }
-  const hoveredPoint = hoveredAt
-    ? ascending.find((point) => point.observed_at === hoveredAt) ?? null
-    : null
-  const hoverMetrics = hoveredAt ? sharedHoverMetrics(hoveredPoint) : []
 
   // Compute priorities for each metric using default thresholds
   const t = DEFAULT_THRESHOLDS
@@ -491,18 +462,6 @@ export function MonitoringInstanceWatchtowerMetrics({
           {sorted[0]?.priority > 0 ? <> · 首要关注 {sorted[0].label}</> : null}
         </p>
       </div>
-      {hoveredAt ? (
-        <div className="watchtower-metrics-hover" role="status" aria-live="polite">
-          <span className="watchtower-metrics-hover__time">{hoverTimeLabel(hoveredAt)}</span>
-          <div className="watchtower-metrics-hover__values">
-            {hoverMetrics.map((metric) => (
-              <span key={metric.label} className="watchtower-metrics-hover__item">
-                {metric.label} <MonoDigits>{metric.value}</MonoDigits>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
       <div className="watchtower-metrics" role="group" aria-label="主机指标趋势">
         {sorted.map((card) => (
           <Fragment key={card.id}>{card.render()}</Fragment>
