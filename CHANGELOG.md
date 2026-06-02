@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/xiangnan0811/houfeng/compare/v0.27.0...v0.28.0) (2026-06-02)
+
+
+### Features
+
+* **monitoring:** restore history windows and realtime metrics ([792f2dd](https://github.com/xiangnan0811/houfeng/commit/792f2ddfadfadb332564c96bc62899c5bfe4e54d))
+
 ## [0.27.0](https://github.com/xiangnan0811/houfeng/compare/v0.26.1...v0.27.0) (2026-06-02)
 
 
