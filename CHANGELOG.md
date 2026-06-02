@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/xiangnan0811/houfeng/compare/v0.28.0...v0.29.0) (2026-06-02)
+
+
+### Features
+
+* **subscriptions:** add VPS cost center ([cd5a68a](https://github.com/xiangnan0811/houfeng/commit/cd5a68a79e42322b4f6489cf97320dacef0afce1))
+
 ## [0.28.0](https://github.com/xiangnan0811/houfeng/compare/v0.27.0...v0.28.0) (2026-06-02)
 
 
