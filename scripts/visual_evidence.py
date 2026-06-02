@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 VIEWPORT_RE = re.compile(r"^(?P<width>[1-9][0-9]*)x(?P<height>[1-9][0-9]*)$")
 MOCK_API_PROFILE_CHOICES = ("none", "asset-workflows", "observability-support")
 MockAPIProfile = Literal["none", "asset-workflows", "observability-support"]
+ASSET_WORKFLOW_BASE_CURRENCY = "CNY"
 
 
 @dataclass(frozen=True)
@@ -332,14 +333,30 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "currency": "USD",
             "billing_cycle": "monthly",
             "billing_months": 1,
+            "billing_period_unit": "month",
+            "billing_period_length": 1,
             "monthly_price": 10.5,
             "started_at": iso_date(-100),
             "renew_at": iso_date(8),
             "auto_renew": True,
             "auto_renew_cancelled": False,
+            "renewal_mode": "auto",
             "status": "active",
             "payment_method": "card-main",
+            "display_name": "ams-core-01 月付",
+            "cost_category": "compute",
+            "labels": ["prod", "web"],
+            "trial_ends_at": None,
+            "ends_at": None,
             "note": "Renewal window fixture.",
+            "monthly_price_base": 76.65,
+            "yearly_price_base": 919.8,
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "exchange_rate": 7.3,
+            "exchange_rate_date": iso_date(0),
+            "exchange_rate_stale": False,
+            "budget_status": "over",
+            "next_reminder_at": iso_timestamp(1),
             "created_at": iso_timestamp(-100),
             "updated_at": iso_timestamp(-1),
         },
@@ -350,14 +367,30 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "currency": "USD",
             "billing_cycle": "quarterly",
             "billing_months": 3,
+            "billing_period_unit": "month",
+            "billing_period_length": 3,
             "monthly_price": 8.0,
             "started_at": iso_date(-80),
             "renew_at": iso_date(21),
             "auto_renew": False,
             "auto_renew_cancelled": False,
+            "renewal_mode": "manual",
             "status": "active",
             "payment_method": "paypal-edge",
+            "display_name": "sjc-edge 迁移候选",
+            "cost_category": "edge",
+            "labels": ["edge", "migration"],
+            "trial_ends_at": None,
+            "ends_at": iso_date(45),
             "note": "Migration candidate subscription.",
+            "monthly_price_base": 58.4,
+            "yearly_price_base": 700.8,
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "exchange_rate": 7.3,
+            "exchange_rate_date": iso_date(-3),
+            "exchange_rate_stale": True,
+            "budget_status": "warning",
+            "next_reminder_at": iso_timestamp(7),
             "created_at": iso_timestamp(-80),
             "updated_at": iso_timestamp(-2),
         },
@@ -368,14 +401,30 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "currency": "EUR",
             "billing_cycle": "monthly",
             "billing_months": 1,
+            "billing_period_unit": "month",
+            "billing_period_length": 1,
             "monthly_price": 5.0,
             "started_at": iso_date(-240),
             "renew_at": iso_date(5),
             "auto_renew": True,
             "auto_renew_cancelled": True,
+            "renewal_mode": "auto_cancelled",
             "status": "active",
             "payment_method": "sepa",
+            "display_name": "fra legacy 待取消",
+            "cost_category": "legacy",
+            "labels": ["legacy", "cost-review"],
+            "trial_ends_at": None,
+            "ends_at": None,
             "note": "Cancel queue subscription with auto-renew cancelled.",
+            "monthly_price_base": 39.5,
+            "yearly_price_base": 474.0,
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "exchange_rate": 7.9,
+            "exchange_rate_date": iso_date(0),
+            "exchange_rate_stale": False,
+            "budget_status": "ok",
+            "next_reminder_at": iso_timestamp(4),
             "created_at": iso_timestamp(-240),
             "updated_at": iso_timestamp(-4),
         },
@@ -386,14 +435,30 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "currency": "EUR",
             "billing_cycle": "monthly",
             "billing_months": 1,
+            "billing_period_unit": "month",
+            "billing_period_length": 1,
             "monthly_price": 3.0,
             "started_at": iso_date(-900),
             "renew_at": iso_date(-20),
             "auto_renew": False,
             "auto_renew_cancelled": True,
+            "renewal_mode": "auto_cancelled",
             "status": "cancelled",
             "payment_method": "legacy-card",
+            "display_name": "archive old cancelled",
+            "cost_category": "archive",
+            "labels": ["archived"],
+            "trial_ends_at": None,
+            "ends_at": iso_date(-20),
             "note": "Archived subscription fixture.",
+            "monthly_price_base": 23.7,
+            "yearly_price_base": 284.4,
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "exchange_rate": 7.9,
+            "exchange_rate_date": iso_date(-30),
+            "exchange_rate_stale": True,
+            "budget_status": "disabled",
+            "next_reminder_at": None,
             "created_at": iso_timestamp(-900),
             "updated_at": iso_timestamp(-30),
         },
@@ -800,6 +865,202 @@ def asset_workflow_dashboard() -> dict[str, object]:
         "recent_events": [],
         "new_incident_trend_24h": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
         "recovery_trend_24h": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+    }
+
+
+def active_asset_workflow_subscriptions() -> list[dict[str, object]]:
+    return [
+        row
+        for row in asset_workflow_subscriptions()
+        if row.get("status") == "active"
+    ]
+
+
+def asset_workflow_budget_records() -> list[dict[str, object]]:
+    return [
+        {
+            "budget_id": "budget_global",
+            "scope_type": "global",
+            "scope_id": "",
+            "name": "全局 VPS 月预算",
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "monthly_limit": 150.0,
+            "yearly_limit": None,
+            "warning_pct": 80,
+            "enabled": True,
+            "note": "Visual evidence global budget.",
+            "current_monthly_spend": 174.55,
+            "current_yearly_spend": 2094.6,
+            "status": "over",
+            "created_at": iso_timestamp(-20),
+            "updated_at": iso_timestamp(-1),
+        },
+        {
+            "budget_id": "budget_edge",
+            "scope_type": "label",
+            "scope_id": "edge",
+            "name": "Edge 节点预算",
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "monthly_limit": 60.0,
+            "yearly_limit": None,
+            "warning_pct": 80,
+            "enabled": True,
+            "note": "Edge fleet warning budget.",
+            "current_monthly_spend": 58.4,
+            "current_yearly_spend": 700.8,
+            "status": "warning",
+            "created_at": iso_timestamp(-15),
+            "updated_at": iso_timestamp(-1),
+        },
+    ]
+
+
+def asset_workflow_subscription_settings() -> dict[str, object]:
+    return {
+        "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+        "exchange_rate_provider": "frankfurter",
+        "fixer_configured": False,
+        "default_reminder_offsets_days": [14, 7, 1],
+        "max_reminder_lead_days": 30,
+        "exchange_rate_stale_after_hours": 36,
+    }
+
+
+def asset_workflow_missing_subscription_assets() -> list[dict[str, object]]:
+    return [
+        {
+            "vps_id": "vps_tokyo_lab",
+            "display_name": "tokyo-lab-unlinked",
+            "provider_id": "",
+            "provider_name": "",
+            "lifecycle_status": "testing",
+            "renewal_decision": "unreviewed",
+        }
+    ]
+
+
+def subscription_breakdown(
+    rows: list[dict[str, object]],
+    key_fn: object,
+) -> list[dict[str, object]]:
+    items: dict[str, dict[str, object]] = {}
+    for row in rows:
+        monthly_cost = row.get("monthly_price_base")
+        yearly_cost = row.get("yearly_price_base")
+        if not isinstance(monthly_cost, (int, float)) or not isinstance(yearly_cost, (int, float)):
+            continue
+        key, label = key_fn(row)
+        item = items.setdefault(
+            str(key),
+            {
+                "key": str(key),
+                "label": str(label),
+                "monthly_cost": 0.0,
+                "yearly_cost": 0.0,
+                "subscription_count": 0,
+            },
+        )
+        item["monthly_cost"] = float(item["monthly_cost"]) + float(monthly_cost)
+        item["yearly_cost"] = float(item["yearly_cost"]) + float(yearly_cost)
+        item["subscription_count"] = int(item["subscription_count"]) + 1
+    return sorted(
+        items.values(),
+        key=lambda item: (-float(item["monthly_cost"]), str(item["label"])),
+    )
+
+
+def asset_workflow_provider_label(subscription: dict[str, object]) -> tuple[str, str]:
+    vps = next(
+        (row for row in asset_workflow_vps_assets() if row["vps_id"] == subscription["vps_id"]),
+    )
+    provider_id = str(vps.get("provider_id") or "")
+    provider_name = str(vps.get("provider_name") or provider_id or "未记录服务商")
+    return provider_id or provider_name, provider_name
+
+
+def asset_workflow_subscription_overview() -> dict[str, object]:
+    rows = active_asset_workflow_subscriptions()
+    total_monthly = sum(float(row.get("monthly_price_base") or 0) for row in rows)
+    total_yearly = sum(float(row.get("yearly_price_base") or 0) for row in rows)
+    budgets = asset_workflow_budget_records()
+    upcoming = [
+        {
+            "subscription_id": row["subscription_id"],
+            "vps_id": row["vps_id"],
+            "vps_display_name": next(
+                vps["display_name"]
+                for vps in asset_workflow_vps_assets()
+                if vps["vps_id"] == row["vps_id"]
+            ),
+            "display_name": row.get("display_name", ""),
+            "provider_name": asset_workflow_provider_label(row)[1],
+            "renew_at": row.get("renew_at"),
+            "monthly_price_base": row.get("monthly_price_base"),
+            "yearly_price_base": row.get("yearly_price_base"),
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "currency": row.get("currency"),
+            "renewal_decision": next(
+                vps["renewal_decision"]
+                for vps in asset_workflow_vps_assets()
+                if vps["vps_id"] == row["vps_id"]
+            ),
+            "lifecycle_status": next(
+                vps["lifecycle_status"]
+                for vps in asset_workflow_vps_assets()
+                if vps["vps_id"] == row["vps_id"]
+            ),
+            "exchange_rate_stale": row.get("exchange_rate_stale", False),
+        }
+        for row in rows
+    ]
+    upcoming.sort(key=lambda row: str(row.get("renew_at") or "9999-12-31"))
+    return {
+        "snapshot_generated_at": iso_timestamp(0),
+        "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+        "total_monthly_cost": round(total_monthly, 2),
+        "total_yearly_cost": round(total_yearly, 2),
+        "active_subscription_count": len(rows),
+        "renewal_due_14d_count": 2,
+        "renewal_due_30d_count": 3,
+        "budget_risk_count": 2,
+        "exchange_rate_stale_count": 1,
+        "decision_attention_count": 2,
+        "missing_subscription_vps_count": 1,
+        "upcoming_renewals": upcoming,
+        "provider_breakdown": subscription_breakdown(rows, asset_workflow_provider_label),
+        "currency_breakdown": subscription_breakdown(
+            rows,
+            lambda row: (str(row["currency"]), str(row["currency"])),
+        ),
+        "category_breakdown": subscription_breakdown(
+            rows,
+            lambda row: (
+                str(row.get("cost_category") or "未分类"),
+                str(row.get("cost_category") or "未分类"),
+            ),
+        ),
+        "budget_risks": budgets,
+        "vps_costs": rows,
+        "missing_subscription_assets": asset_workflow_missing_subscription_assets(),
+    }
+
+
+def asset_workflow_subscription_statistics(window: str | None = None) -> dict[str, object]:
+    overview = asset_workflow_subscription_overview()
+    return {
+        "window": window if window in {"month", "quarter", "year"} else "month",
+        "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+        "total_monthly_cost": overview["total_monthly_cost"],
+        "total_yearly_cost": overview["total_yearly_cost"],
+        "provider_breakdown": overview["provider_breakdown"],
+        "currency_breakdown": overview["currency_breakdown"],
+        "category_breakdown": overview["category_breakdown"],
+        "renewal_month_buckets": [
+            {"bucket": dt.date.today().strftime("%Y-%m"), "monthly_cost": 116.15, "renewal_count": 2},
+            {"bucket": (dt.date.today().replace(day=1) + dt.timedelta(days=32)).strftime("%Y-%m"), "monthly_cost": 58.4, "renewal_count": 1},
+            {"bucket": (dt.date.today().replace(day=1) + dt.timedelta(days=63)).strftime("%Y-%m"), "monthly_cost": 0, "renewal_count": 0},
+        ],
+        "budget_statuses": asset_workflow_budget_records(),
     }
 
 
@@ -1643,6 +1904,42 @@ def filter_asset_workflow_subscriptions(
     if status:
         rows = [row for row in rows if row["status"] == status]
 
+    currency = first_query_value(query, "currency")
+    if currency:
+        rows = [row for row in rows if row["currency"] == currency]
+
+    budget_status = first_query_value(query, "budget_status")
+    if budget_status:
+        rows = [row for row in rows if row.get("budget_status") == budget_status]
+
+    label = first_query_value(query, "label")
+    if label:
+        rows = [
+            row
+            for row in rows
+            if label in [str(item) for item in row.get("labels", [])]
+        ]
+
+    provider_id = first_query_value(query, "provider_id")
+    if provider_id:
+        rows = [
+            row
+            for row in rows
+            if asset_workflow_provider_label(row)[0] == provider_id
+        ]
+
+    renewal_decision = first_query_value(query, "renewal_decision")
+    if renewal_decision:
+        rows = [
+            row
+            for row in rows
+            if next(
+                vps["renewal_decision"]
+                for vps in asset_workflow_vps_assets()
+                if vps["vps_id"] == row["vps_id"]
+            ) == renewal_decision
+        ]
+
     renew_within_days = first_query_value(query, "renew_within_days")
     if renew_within_days:
         try:
@@ -1736,6 +2033,26 @@ def fulfill_asset_workflow_api(route: object) -> None:
 
     if method == "GET" and path == "/api/subscriptions":
         fulfill_json(route, 200, filter_asset_workflow_subscriptions(query))
+        return
+
+    if method == "GET" and path == "/api/subscriptions/overview":
+        fulfill_json(route, 200, asset_workflow_subscription_overview())
+        return
+
+    if method == "GET" and path == "/api/subscriptions/statistics":
+        fulfill_json(
+            route,
+            200,
+            asset_workflow_subscription_statistics(first_query_value(query, "window")),
+        )
+        return
+
+    if method == "GET" and path == "/api/subscriptions/settings":
+        fulfill_json(route, 200, asset_workflow_subscription_settings())
+        return
+
+    if method == "GET" and path == "/api/subscription-budgets":
+        fulfill_json(route, 200, asset_workflow_budget_records())
         return
 
     if method == "GET" and path == "/api/asset-context/monitoring-instances":

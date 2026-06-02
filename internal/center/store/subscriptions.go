@@ -56,6 +56,11 @@ const subscriptionSelectColumns = `
 	renewal_mode,
 	status,
 	payment_method,
+	display_name,
+	cost_category,
+	labels,
+	trial_ends_at,
+	ends_at,
 	note,
 	created_at,
 	updated_at`
@@ -68,6 +73,8 @@ func scanSubscription(row subscriptionScanner) (subscriptions.Record, error) {
 	var record subscriptions.Record
 	var startedAt *time.Time
 	var renewAt *time.Time
+	var trialEndsAt *time.Time
+	var endsAt *time.Time
 	if err := row.Scan(
 		&record.SubscriptionID,
 		&record.VPSID,
@@ -85,6 +92,11 @@ func scanSubscription(row subscriptionScanner) (subscriptions.Record, error) {
 		&record.RenewalMode,
 		&record.Status,
 		&record.PaymentMethod,
+		&record.DisplayName,
+		&record.CostCategory,
+		&record.Labels,
+		&trialEndsAt,
+		&endsAt,
 		&record.Note,
 		&record.CreatedAt,
 		&record.UpdatedAt,
@@ -93,6 +105,8 @@ func scanSubscription(row subscriptionScanner) (subscriptions.Record, error) {
 	}
 	record.StartedAt = dateFromScannedTime(startedAt)
 	record.RenewAt = dateFromScannedTime(renewAt)
+	record.TrialEndsAt = dateFromScannedTime(trialEndsAt)
+	record.EndsAt = dateFromScannedTime(endsAt)
 	return record, nil
 }
 
@@ -127,6 +141,34 @@ func (r *PostgresSubscriptionRepository) ListSubscriptions(ctx context.Context, 
 	if filters.RenewWithinDays != nil {
 		args = append(args, *filters.RenewWithinDays)
 		conditions = append(conditions, fmt.Sprintf("renew_at >= current_date and renew_at <= current_date + $%d::integer", len(args)))
+	}
+	if filters.Currency != "" {
+		args = append(args, filters.Currency)
+		conditions = append(conditions, fmt.Sprintf("currency = $%d", len(args)))
+	}
+	if filters.ProviderID != "" {
+		args = append(args, filters.ProviderID)
+		conditions = append(conditions, fmt.Sprintf(`exists (
+			select 1 from vps_assets v where v.vps_id = subscriptions.vps_id and v.provider_id = $%d
+		)`, len(args)))
+	}
+	if filters.AutoRenew != nil {
+		args = append(args, *filters.AutoRenew)
+		conditions = append(conditions, fmt.Sprintf("auto_renew = $%d", len(args)))
+	}
+	if filters.PaymentMethod != "" {
+		args = append(args, filters.PaymentMethod)
+		conditions = append(conditions, fmt.Sprintf("payment_method = $%d", len(args)))
+	}
+	if filters.Label != "" {
+		args = append(args, filters.Label)
+		conditions = append(conditions, fmt.Sprintf("labels @> array[$%d]::text[]", len(args)))
+	}
+	if filters.RenewalDecision != "" {
+		args = append(args, filters.RenewalDecision)
+		conditions = append(conditions, fmt.Sprintf(`exists (
+			select 1 from vps_assets v where v.vps_id = subscriptions.vps_id and v.renewal_decision = $%d
+		)`, len(args)))
 	}
 
 	query := `
@@ -200,6 +242,11 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 			renewal_mode,
 			status,
 			payment_method,
+			display_name,
+			cost_category,
+			labels,
+			trial_ends_at,
+			ends_at,
 			note
 		) values (
 			$1,
@@ -218,7 +265,12 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 			$14,
 			$15,
 			$16,
-			$17
+			$17,
+			$18,
+			$19,
+			$20,
+			$21,
+			$22
 		)
 		returning `+subscriptionSelectColumns,
 		subscriptionID,
@@ -237,6 +289,11 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 		input.RenewalMode,
 		string(input.Status),
 		input.PaymentMethod,
+		input.DisplayName,
+		input.CostCategory,
+		input.Labels,
+		subscriptionDateArg(input.TrialEndsAt),
+		subscriptionDateArg(input.EndsAt),
 		input.Note,
 	))
 	if err != nil {
@@ -355,7 +412,12 @@ func patchSubscriptionRow(ctx context.Context, db subscriptionQueryer, subscript
 		    renewal_mode = case when $24::boolean then $25 else renewal_mode end,
 		    status = case when $26::boolean then $27 else status end,
 		    payment_method = case when $28::boolean then $29 else payment_method end,
-		    note = case when $30::boolean then $31 else note end,
+		    display_name = case when $30::boolean then $31 else display_name end,
+		    cost_category = case when $32::boolean then $33 else cost_category end,
+		    labels = case when $34::boolean then $35::text[] else labels end,
+		    trial_ends_at = case when $36::boolean then $37::date else trial_ends_at end,
+		    ends_at = case when $38::boolean then $39::date else ends_at end,
+		    note = case when $40::boolean then $41 else note end,
 		    updated_at = now()
 		where subscription_id = $1
 		returning `+subscriptionSelectColumns,
@@ -388,6 +450,16 @@ func patchSubscriptionRow(ctx context.Context, db subscriptionQueryer, subscript
 		string(input.Status.Value),
 		input.PaymentMethod.Set,
 		input.PaymentMethod.Value,
+		input.DisplayName.Set,
+		input.DisplayName.Value,
+		input.CostCategory.Set,
+		input.CostCategory.Value,
+		input.Labels.Set,
+		input.Labels.Values,
+		input.TrialEndsAt.Set,
+		subscriptionDateArg(input.TrialEndsAt.Value),
+		input.EndsAt.Set,
+		subscriptionDateArg(input.EndsAt.Value),
 		input.Note.Set,
 		input.Note.Value,
 	))

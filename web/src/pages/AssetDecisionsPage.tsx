@@ -147,6 +147,9 @@ function queuePriority(
   if (vps.renewal_decision === 'unreviewed') priority += 500
   if (renewalDue) priority += 300
   if (vps.renewal_decision === 'migrate' || vps.renewal_decision === 'cancel') priority += 180
+  if (subscription?.budget_status === 'over') priority += 220
+  if (subscription?.budget_status === 'warning') priority += 120
+  if (subscription?.exchange_rate_stale) priority += 60
   if (vps.active_monitoring_instance_link_count <= 0) priority += 90
   if (!subscription) priority += 80
   return priority + qualityIssues.length * 8
@@ -172,6 +175,35 @@ function hasCancellationAttention(row: DecisionQueueItem): boolean {
   const inactiveSubscription = row.subscription.status !== 'active'
   const vpsCancelled = row.vps.lifecycle_status === 'to_cancel' || row.vps.lifecycle_status === 'cancelled'
   return inactiveSubscription && !vpsCancelled
+}
+
+function baseMoney(value?: number | null, currency = 'CNY'): string {
+  if (value == null || Number.isNaN(value)) return '—'
+  return formatMoney(value, currency)
+}
+
+function budgetStatusLabel(status?: string | null): string {
+  const labels: Record<string, string> = {
+    disabled: '预算停用',
+    ok: '预算内',
+    warning: '接近预算',
+    over: '已超预算',
+    unknown: '未匹配预算',
+  }
+  return labels[status ?? ''] ?? (status || '—')
+}
+
+function budgetBadgeClass(status?: string | null): string {
+  if (status === 'over') return 'badge badge-err'
+  if (status === 'warning') return 'badge badge-warn'
+  if (status === 'ok') return 'badge badge-ok'
+  return 'badge badge-muted'
+}
+
+function subscriptionCostAttention(subscription: SubscriptionRecord | null): boolean {
+  return subscription?.budget_status === 'over' ||
+    subscription?.budget_status === 'warning' ||
+    Boolean(subscription?.exchange_rate_stale)
 }
 export function AssetDecisionsPage() {
   const navigate = useNavigate()
@@ -482,6 +514,7 @@ export function AssetDecisionsPage() {
                 <th>供应商</th>
                 <th>决策</th>
                 <th>订阅</th>
+                <th>成本信号</th>
                 <th>监控实例</th>
                 <th>操作</th>
               </tr>
@@ -525,6 +558,30 @@ export function AssetDecisionsPage() {
                         >
                           缺订阅
                         </button>
+                      )}
+                    </td>
+                    <td>
+                      {sub ? (
+                        <div className="asset-context-cell asset-cost-signal">
+                          <span className={budgetBadgeClass(sub.budget_status)}>
+                            <span className="badge-dot" />{budgetStatusLabel(sub.budget_status)}
+                          </span>
+                          <small>
+                            {baseMoney(sub.monthly_price_base, sub.base_currency ?? 'CNY')}/月 · {baseMoney(sub.yearly_price_base, sub.base_currency ?? 'CNY')}/年
+                          </small>
+                          {subscriptionCostAttention(sub) ? (
+                            <span className="asset-context-pill asset-context-pill--attention">
+                              {sub.exchange_rate_stale ? '汇率过期' : '预算风险'}
+                            </span>
+                          ) : (
+                            <span className="asset-context-pill">成本正常</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="asset-context-cell asset-cost-signal">
+                          <span className="asset-context-pill asset-context-pill--attention">缺订阅成本</span>
+                          <small>无法参与预算和续费判断</small>
+                        </div>
                       )}
                     </td>
                     <td>

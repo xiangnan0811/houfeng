@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
+import type { SubscriptionOverview } from '../lib/types'
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -70,10 +71,43 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function renderWithDashboard(body: unknown, status = 200, vpsAssets: unknown[] = []) {
+function baseSubscriptionOverview(overrides: Partial<SubscriptionOverview> = {}): SubscriptionOverview {
+  return {
+    snapshot_generated_at: '2026-04-25T08:30:00Z',
+    base_currency: 'CNY',
+    total_monthly_cost: 298,
+    total_yearly_cost: 3576,
+    active_subscription_count: 4,
+    renewal_due_14d_count: 1,
+    renewal_due_30d_count: 3,
+    budget_risk_count: 1,
+    exchange_rate_stale_count: 0,
+    decision_attention_count: 0,
+    missing_subscription_vps_count: 0,
+    upcoming_renewals: [],
+    provider_breakdown: [],
+    currency_breakdown: [],
+    category_breakdown: [],
+    budget_risks: [],
+    vps_costs: [],
+    missing_subscription_assets: [],
+    ...overrides,
+  }
+}
+
+function renderWithDashboard(
+  body: unknown,
+  status = 200,
+  vpsAssets: unknown[] = [],
+  subscriptionOverview: SubscriptionOverview | null = baseSubscriptionOverview(),
+) {
   vi.stubGlobal('fetch', vi.fn((url: string) => {
+    if (url === '/api/dashboard') return Promise.resolve(mockJSONResponse(body, status))
     if (url === '/api/vps') return Promise.resolve(mockJSONResponse(vpsAssets))
-    return Promise.resolve(mockJSONResponse(body, status))
+    if (url === '/api/subscriptions/overview') {
+      return Promise.resolve(mockJSONResponse(subscriptionOverview ?? { error: 'subscription overview unavailable' }, subscriptionOverview ? 200 : 503))
+    }
+    return Promise.resolve(mockJSONResponse({ error: `unhandled ${url}` }, 404))
   }))
 
   return render(
@@ -190,9 +224,9 @@ describe('DashboardPage', () => {
     await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
 
     // Metric cards show correct counts
-    expect(screen.getByText('30天内续费')).toBeInTheDocument()
+    expect(screen.getByText('14天内续费')).toBeInTheDocument()
     expect(screen.getByText('月均成本')).toBeInTheDocument()
-    expect(screen.getByText('近期异常')).toBeInTheDocument()
+    expect(screen.getAllByText('预算风险').length).toBeGreaterThan(0)
 
     // Attention column shows abnormal monitoring and targets
     expect(screen.getByText('关注')).toBeInTheDocument()
@@ -271,9 +305,9 @@ describe('DashboardPage', () => {
 
     // Shows greeting and metric cards
     await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
-    expect(screen.getByText('30天内续费')).toBeInTheDocument()
+    expect(screen.getByText('14天内续费')).toBeInTheDocument()
     expect(screen.getByText('月均成本')).toBeInTheDocument()
-    expect(screen.getByText('近期异常')).toBeInTheDocument()
+    expect(screen.getAllByText('预算风险').length).toBeGreaterThan(0)
 
     // Events column shows recent event
     expect(screen.getByText('动态')).toBeInTheDocument()
@@ -325,7 +359,7 @@ describe('DashboardPage', () => {
 
     await waitFor(() => expect(screen.getByText('异常监控实例')).toBeInTheDocument())
     // Metric cards are present
-    expect(screen.getByText('30天内续费')).toBeInTheDocument()
+    expect(screen.getByText('14天内续费')).toBeInTheDocument()
     expect(screen.getByText('月均成本')).toBeInTheDocument()
   })
 

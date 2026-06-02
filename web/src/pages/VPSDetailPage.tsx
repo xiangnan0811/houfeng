@@ -26,6 +26,7 @@ import {
   unlinkVPSMonitoringInstance,
   updateVPSAsset,
 } from '../lib/api'
+import { formatDate, formatMoney } from '../lib/format'
 import type {
   AssetDomainRecord,
   AssetServiceRecord,
@@ -186,6 +187,29 @@ function shouldExposeCancellationWorkbench(detail: VPSAssetDetail, preview: Canc
     detail.lifecycle_status === 'cancelled' ||
     detail.lifecycle_status === 'archived' ||
     Boolean(preview && ((preview.warnings ?? []).length > 0 || (preview.blockers ?? []).length > 0))
+}
+
+function baseMoney(value?: number | null, currency = 'CNY'): string {
+  if (value == null || Number.isNaN(value)) return '—'
+  return formatMoney(value, currency)
+}
+
+function budgetStatusLabel(status?: string | null): string {
+  const labels: Record<string, string> = {
+    disabled: '预算停用',
+    ok: '预算内',
+    warning: '接近预算',
+    over: '已超预算',
+    unknown: '未匹配预算',
+  }
+  return labels[status ?? ''] ?? (status || '—')
+}
+
+function budgetBadgeClass(status?: string | null): string {
+  if (status === 'over') return 'badge badge-err'
+  if (status === 'warning') return 'badge badge-warn'
+  if (status === 'ok') return 'badge badge-ok'
+  return 'badge badge-muted'
 }
 
 export function VPSDetailPage() {
@@ -1368,6 +1392,68 @@ export function VPSDetailPage() {
         onOpenDomains={() => openDrawer('domains-detail')}
         onOpenTimeline={() => openDrawer('timeline-detail')}
       />
+
+      <section className="page-panel vps-cost-card">
+        <div className="section-heading section-heading--inline">
+          <div>
+            <p className="section-heading__eyebrow">Cost</p>
+            <h2 className="section-heading__title">成本卡片</h2>
+          </div>
+          {activeSubscription ? (
+            <Link className="btn sm secondary" to={`/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}`}>
+              订阅工作台
+            </Link>
+          ) : (
+            <button className="btn sm primary" onClick={() => openDrawer('subscription')}>
+              快速创建订阅
+            </button>
+          )}
+        </div>
+        {activeSubscription ? (
+          <>
+            <div className="vps-cost-card__grid">
+              <div>
+                <span>原币种价格</span>
+                <strong>{formatMoney(activeSubscription.price, activeSubscription.currency)}</strong>
+                <small>{activeSubscription.display_name || activeSubscription.cost_category || '当前 active 订阅'}</small>
+              </div>
+              <div>
+                <span>{activeSubscription.base_currency ?? 'CNY'} 月成本</span>
+                <strong>{baseMoney(activeSubscription.monthly_price_base, activeSubscription.base_currency ?? 'CNY')}</strong>
+                <small>年化 {baseMoney(activeSubscription.yearly_price_base, activeSubscription.base_currency ?? 'CNY')}</small>
+              </div>
+              <div>
+                <span>下次续费</span>
+                <strong>{formatDate(activeSubscription.renew_at)}</strong>
+                <small>{activeSubscription.next_reminder_at ? `下次提醒 ${formatDate(activeSubscription.next_reminder_at)}` : '提醒由订阅设置控制'}</small>
+              </div>
+              <div>
+                <span>预算状态</span>
+                <strong>{budgetStatusLabel(activeSubscription.budget_status)}</strong>
+                <small>{activeSubscription.payment_method || '未记录支付方式'}</small>
+              </div>
+            </div>
+            <div className="asset-context-inline vps-cost-card__signals">
+              <span className={budgetBadgeClass(activeSubscription.budget_status)}>
+                <span className="badge-dot" />{budgetStatusLabel(activeSubscription.budget_status)}
+              </span>
+              {activeSubscription.exchange_rate_stale ? (
+                <span className="asset-context-pill asset-context-pill--attention">汇率过期</span>
+              ) : (
+                <span className="asset-context-pill">汇率 {activeSubscription.exchange_rate_date || '当前缓存'}</span>
+              )}
+              <span className="asset-context-pill">
+                {activeSubscription.auto_renew_cancelled ? '已取消自动续费' : activeSubscription.auto_renew ? '自动续费' : '手动续费'}
+              </span>
+            </div>
+          </>
+        ) : (
+          <div className="vps-cost-card__empty">
+            <strong>缺少 active 订阅账单事实</strong>
+            <span>补齐订阅后，这里会展示原币种价格、统一基准货币成本、预算状态和提醒状态。</span>
+          </div>
+        )}
+      </section>
 
       {lifecycleConfirmingAction ? (
         <VPSLifecycleCard

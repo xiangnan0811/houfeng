@@ -595,7 +595,7 @@ func TestPostgresVPSAssetPatchCancellationDecisionCancelsSingleActiveSubscriptio
 	if !priceHistoryInserted {
 		t.Fatal("expected subscription auto-renew linkage to record price history")
 	}
-	if len(subscriptionPatchArgs) != 31 || subscriptionPatchArgs[0] != "sub_001" || subscriptionPatchArgs[19] != true || subscriptionPatchArgs[20] != false || subscriptionPatchArgs[21] != true || subscriptionPatchArgs[22] != true || subscriptionPatchArgs[23] != true || subscriptionPatchArgs[24] != "auto_cancelled" {
+	if len(subscriptionPatchArgs) != 41 || subscriptionPatchArgs[0] != "sub_001" || subscriptionPatchArgs[19] != true || subscriptionPatchArgs[20] != false || subscriptionPatchArgs[21] != true || subscriptionPatchArgs[22] != true || subscriptionPatchArgs[23] != true || subscriptionPatchArgs[24] != "auto_cancelled" {
 		t.Fatalf("subscription patch args = %#v, want auto_renew=false and auto_renew_cancelled=true", subscriptionPatchArgs)
 	}
 	if !tx.committed || tx.rolledBack == 0 {

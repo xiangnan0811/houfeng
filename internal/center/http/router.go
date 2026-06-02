@@ -36,6 +36,11 @@ type RouterOptions struct {
 	AssetContextTargetsHandler                    stdhttp.Handler
 	SubscriptionsCollectionHandler                stdhttp.Handler
 	SubscriptionItemHandler                       stdhttp.Handler
+	SubscriptionOverviewHandler                   stdhttp.Handler
+	SubscriptionStatisticsHandler                 stdhttp.Handler
+	SubscriptionSettingsHandler                   stdhttp.Handler
+	SubscriptionExchangeRateRefreshHandler        stdhttp.Handler
+	SubscriptionBudgetsHandler                    stdhttp.Handler
 	MonitoringInstancesCollectionHandler          stdhttp.Handler
 	MonitoringInstanceItemHandler                 stdhttp.Handler
 	MonitoringInstanceVPSHandler                  stdhttp.Handler
@@ -217,6 +222,21 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.SubscriptionsCollectionHandler != nil {
 		mux.Handle("/api/subscriptions", protect(opts.SubscriptionsCollectionHandler))
+	}
+	if opts.SubscriptionOverviewHandler != nil {
+		mux.Handle("/api/subscriptions/overview", protect(opts.SubscriptionOverviewHandler))
+	}
+	if opts.SubscriptionStatisticsHandler != nil {
+		mux.Handle("/api/subscriptions/statistics", protect(opts.SubscriptionStatisticsHandler))
+	}
+	if opts.SubscriptionSettingsHandler != nil {
+		mux.Handle("/api/subscriptions/settings", protect(opts.SubscriptionSettingsHandler))
+	}
+	if opts.SubscriptionExchangeRateRefreshHandler != nil {
+		mux.Handle("/api/subscriptions/exchange-rates/refresh", protect(opts.SubscriptionExchangeRateRefreshHandler))
+	}
+	if opts.SubscriptionBudgetsHandler != nil {
+		mux.Handle("/api/subscription-budgets", protect(opts.SubscriptionBudgetsHandler))
 	}
 	if opts.SubscriptionItemHandler != nil {
 		mux.Handle("/api/subscriptions/", protect(opts.SubscriptionItemHandler))

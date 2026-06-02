@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"houfeng/internal/center/subscriptioncosts"
 	"houfeng/internal/center/subscriptions"
 )
 
@@ -22,7 +23,7 @@ type vpsSubscriptionCreateRequest struct {
 	Note               string              `json:"note"`
 }
 
-func SubscriptionsCollection(repo subscriptions.Repository) http.Handler {
+func SubscriptionsCollection(repo subscriptions.Repository, costSvc ...*subscriptioncosts.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -32,7 +33,9 @@ func SubscriptionsCollection(repo subscriptions.Repository) http.Handler {
 				return
 			}
 
-			records, err := repo.ListSubscriptions(r.Context(), filters)
+			effectiveFilters := filters
+			effectiveFilters.BudgetStatus = ""
+			records, err := repo.ListSubscriptions(r.Context(), effectiveFilters)
 			if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
@@ -40,6 +43,14 @@ func SubscriptionsCollection(repo subscriptions.Repository) http.Handler {
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
+			}
+			if len(costSvc) > 0 && costSvc[0] != nil {
+				costRows, err := costSvc[0].ListCostRows(r.Context())
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				records = mergeSubscriptionCosts(records, costRows, filters.BudgetStatus)
 			}
 			writeJSON(w, http.StatusOK, records)
 		case http.MethodPost:
@@ -69,6 +80,31 @@ func SubscriptionsCollection(repo subscriptions.Repository) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+func mergeSubscriptionCosts(records []subscriptions.Record, costs []subscriptioncosts.CostRow, budgetStatus string) []subscriptions.Record {
+	byID := make(map[string]subscriptioncosts.CostRow, len(costs))
+	for _, cost := range costs {
+		byID[cost.SubscriptionID] = cost
+	}
+	merged := make([]subscriptions.Record, 0, len(records))
+	for _, record := range records {
+		if cost, ok := byID[record.SubscriptionID]; ok {
+			record.MonthlyPriceBase = cost.MonthlyPriceBase
+			record.YearlyPriceBase = cost.YearlyPriceBase
+			record.BaseCurrency = cost.BaseCurrency
+			record.ExchangeRate = cost.ExchangeRate
+			record.ExchangeRateDate = cost.ExchangeRateDate
+			record.ExchangeRateStale = cost.ExchangeRateStale
+			record.BudgetStatus = string(cost.BudgetStatus)
+			record.NextReminderAt = cost.NextReminderAt
+		}
+		if budgetStatus != "" && record.BudgetStatus != budgetStatus {
+			continue
+		}
+		merged = append(merged, record)
+	}
+	return merged
 }
 
 func VPSSubscriptions(repo subscriptions.Repository) http.Handler {
@@ -223,6 +259,31 @@ func subscriptionFiltersFromQuery(r *http.Request) (subscriptions.ListFilters, e
 			return subscriptions.ListFilters{}, subscriptions.ErrInvalidSubscriptionInput
 		}
 		filters.RenewWithinDays = &days
+	}
+	if raw := strings.TrimSpace(query.Get("currency")); raw != "" {
+		filters.Currency = raw
+	}
+	if raw := strings.TrimSpace(query.Get("provider_id")); raw != "" {
+		filters.ProviderID = raw
+	}
+	if raw := strings.TrimSpace(query.Get("budget_status")); raw != "" {
+		filters.BudgetStatus = raw
+	}
+	if raw := strings.TrimSpace(query.Get("auto_renew")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return subscriptions.ListFilters{}, subscriptions.ErrInvalidSubscriptionInput
+		}
+		filters.AutoRenew = &value
+	}
+	if raw := strings.TrimSpace(query.Get("payment_method")); raw != "" {
+		filters.PaymentMethod = raw
+	}
+	if raw := strings.TrimSpace(query.Get("label")); raw != "" {
+		filters.Label = raw
+	}
+	if raw := strings.TrimSpace(query.Get("renewal_decision")); raw != "" {
+		filters.RenewalDecision = raw
 	}
 
 	filters = subscriptions.NormalizeListFilters(filters)

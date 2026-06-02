@@ -1739,6 +1739,47 @@ select.input::-ms-expand{display:none}
 .subscriptions-evidence-workbench__context-card--warning{border-color:color-mix(in srgb,var(--color-state-notice) 34%,var(--border));background:color-mix(in srgb,var(--color-state-notice) 5%,var(--surface-elevated))}
 .subscriptions-evidence-workbench__context-card h3{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-body-size);font-weight:var(--type-h2-weight);line-height:1.3}
 .subscriptions-evidence-workbench__context-actions{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;min-width:0}
+.subscription-cost-focus{grid-template-columns:repeat(4,minmax(0,1fr))}
+.subscription-cost-focus button{appearance:none;text-align:left;cursor:pointer}
+.subscription-workbench-grid{display:grid;grid-template-columns:minmax(0,0.58fr) minmax(320px,0.42fr);gap:var(--space-4);align-items:start}
+.subscription-workbench-grid--settings{grid-template-columns:minmax(0,1fr) minmax(320px,0.9fr)}
+.subscription-workbench-panel{min-height:100%}
+.subscription-renewal-queue,.subscription-breakdown-list,.subscription-budget-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.subscription-renewal-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(96px,auto) minmax(132px,auto);gap:var(--space-3);align-items:center;min-width:0;padding:var(--space-2) var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 18%,transparent);color:inherit;text-decoration:none}
+.subscription-renewal-row:hover{border-color:color-mix(in srgb,var(--accent) 26%,var(--border))}
+.subscription-renewal-row--stale{border-color:color-mix(in srgb,var(--color-state-notice) 28%,var(--border));background:color-mix(in srgb,var(--color-state-notice) 4%,transparent)}
+.subscription-renewal-row span:first-child,.subscription-breakdown-row>div:first-child,.subscription-budget-row>div:first-child{display:flex;flex-direction:column;gap:2px;min-width:0}
+.subscription-renewal-row strong,.subscription-breakdown-row strong,.subscription-budget-row strong{color:var(--text-primary);font-size:var(--type-body-size);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subscription-renewal-row small,.subscription-breakdown-row small,.subscription-budget-row small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subscription-breakdown-row{display:grid;grid-template-columns:minmax(140px,0.42fr) minmax(120px,1fr) minmax(116px,auto);gap:var(--space-3);align-items:center;min-width:0;padding:var(--space-2) 0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent)}
+.subscription-breakdown-row:last-child{border-bottom:0}
+.subscription-breakdown-bar{height:8px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--border) 58%,transparent);overflow:hidden}
+.subscription-breakdown-bar span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 76%,var(--color-state-normal)),color-mix(in srgb,var(--color-state-normal) 68%,transparent))}
+.subscription-budget-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(160px,auto);gap:var(--space-3);align-items:center;min-width:0;padding:var(--space-2) var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 70%,transparent);border-left:var(--border-w-strong) solid color-mix(in srgb,var(--border-strong) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 16%,transparent)}
+.subscription-budget-row--normal{border-left-color:color-mix(in srgb,var(--color-state-normal) 62%,transparent)}
+.subscription-budget-row--notice{border-left-color:color-mix(in srgb,var(--color-state-notice) 62%,transparent)}
+.subscription-budget-row--critical{border-left-color:color-mix(in srgb,var(--color-state-critical) 62%,transparent);background:color-mix(in srgb,var(--color-state-critical) 4%,var(--surface))}
+.subscription-inline-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-3);align-items:end;margin-top:var(--space-4);padding-top:var(--space-4);border-top:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent)}
+.subscription-inline-form--settings{grid-template-columns:repeat(2,minmax(0,1fr))}
+.subscription-inline-form .create-form__error,.subscription-inline-form .asset-operation-feedback,.subscription-inline-form button[type='submit']{grid-column:1 / -1}
+.subscription-inline-form .asset-checkbox-line{min-height:38px;align-items:center}
+.asset-table .badge{width:max-content}
+.vps-cost-card{display:flex;flex-direction:column;gap:var(--space-3)}
+.vps-cost-card__grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2)}
+.vps-cost-card__grid div{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 16%,transparent)}
+.vps-cost-card__grid span{color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);line-height:1.25;text-transform:uppercase}
+.vps-cost-card__grid strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-h2-size);line-height:1.2;overflow-wrap:anywhere}
+.vps-cost-card__grid small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
+.vps-cost-card__signals{margin-top:0}
+.vps-cost-card__empty{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) dashed color-mix(in srgb,var(--border-dashed) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 10%,transparent)}
+.vps-cost-card__empty strong{color:var(--text-primary);font-size:var(--type-body-size)}
+.vps-cost-card__empty span{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45}
+.asset-cost-signal{max-width:220px}
+.asset-cost-signal .badge{width:max-content}
+.asset-cost-signal .asset-context-pill{min-height:22px}
+@media(max-width:1080px){.subscription-cost-focus{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-workbench-grid,.subscription-workbench-grid--settings{grid-template-columns:1fr}.subscription-inline-form,.subscription-inline-form--settings{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.vps-cost-card__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.subscription-cost-focus,.subscription-inline-form,.subscription-inline-form--settings,.vps-cost-card__grid{grid-template-columns:1fr}.subscription-renewal-row,.subscription-breakdown-row,.subscription-budget-row{grid-template-columns:1fr;align-items:start}.subscription-breakdown-bar{width:100%}}
 .asset-table .data-table__cell{vertical-align:top}
 .asset-workbench-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2);margin:0}
 .asset-decision-board__summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2);margin:var(--space-3) 0 0}

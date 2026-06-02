@@ -14,6 +14,7 @@ import type {
   CreateMonitoringInstanceInput,
   CreateProbeItemInput,
   CreateSubscriptionInput,
+  CreateSubscriptionBudgetInput,
   CreateVPSMonitoringInstanceInput,
   CreateVPSMonitoringInstanceResponse,
   CreateTargetInput,
@@ -36,10 +37,16 @@ import type {
   ProbeItemRecord,
   ProviderRecord,
   SettingsRecord,
+  SubscriptionBudgetRecord,
+  SubscriptionCostSettings,
+  SubscriptionCostSettingsUpdateInput,
   StateChangeEventRecord,
   SettingsUpdateInput,
+  ExchangeRateRefreshResult,
   SubscriptionListFilter,
+  SubscriptionOverview,
   SubscriptionRecord,
+  SubscriptionStatistics,
   TargetRecord,
   TargetRuntimeFacts,
   TargetSparklinesResponse,
@@ -47,6 +54,7 @@ import type {
   UpdateMonitoringInstanceMetadataInput,
   UpdateProviderInput,
   UpdateSubscriptionInput,
+  PatchSubscriptionBudgetInput,
   UpdateTargetMetadataInput,
   UpdateVPSAssetInput,
   VPSAssetDetail,
@@ -613,10 +621,62 @@ export function listSubscriptions(filter?: SubscriptionListFilter) {
       renew_before: filter?.renew_before,
       renew_after: filter?.renew_after,
       renew_within_days: filter?.renew_within_days,
+      currency: filter?.currency,
+      provider_id: filter?.provider_id,
+      budget_status: filter?.budget_status,
+      auto_renew: filter?.auto_renew == null ? undefined : String(filter.auto_renew),
+      payment_method: filter?.payment_method,
+      label: filter?.label,
+      renewal_decision: filter?.renewal_decision,
       sort: filter?.sort,
       order: filter?.order,
     }),
   )
+}
+
+export function getSubscriptionOverview() {
+  return requestJSON<SubscriptionOverview>('/api/subscriptions/overview')
+}
+
+export function getSubscriptionStatistics(window: 'month' | 'quarter' | 'year' = 'month') {
+  return requestJSON<SubscriptionStatistics>(withQuery('/api/subscriptions/statistics', { window }))
+}
+
+export function getSubscriptionCostSettings() {
+  return requestJSON<SubscriptionCostSettings>('/api/subscriptions/settings')
+}
+
+export function updateSubscriptionCostSettings(input: SubscriptionCostSettingsUpdateInput) {
+  return requestJSON<SubscriptionCostSettings>('/api/subscriptions/settings', {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  })
+}
+
+export function refreshSubscriptionExchangeRates() {
+  return postJSON<ExchangeRateRefreshResult>('/api/subscriptions/exchange-rates/refresh')
+}
+
+export function listSubscriptionBudgets(filter?: { scope_type?: string; scope_id?: string; enabled?: boolean | null }) {
+  return requestJSON<SubscriptionBudgetRecord[]>(
+    withQuery('/api/subscription-budgets', {
+      scope_type: filter?.scope_type,
+      scope_id: filter?.scope_id,
+      enabled: filter?.enabled == null ? undefined : String(filter.enabled),
+    }),
+  )
+}
+
+export function createSubscriptionBudget(input: CreateSubscriptionBudgetInput) {
+  return postJSONBody<SubscriptionBudgetRecord>('/api/subscription-budgets', input)
+}
+
+export function updateSubscriptionBudget(input: PatchSubscriptionBudgetInput) {
+  return patchJSONBody<SubscriptionBudgetRecord>('/api/subscription-budgets', input)
 }
 
 export function createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionRecord> {

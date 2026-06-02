@@ -278,8 +278,8 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 	if created.Currency != "USD" || created.MonthlyPrice != 10 {
 		t.Fatalf("created = %#v, want normalized USD and monthly price", created)
 	}
-	if len(rowArgs[0]) != 17 {
-		t.Fatalf("create args len = %d, want 17", len(rowArgs[0]))
+	if len(rowArgs[0]) != 22 {
+		t.Fatalf("create args len = %d, want 22", len(rowArgs[0]))
 	}
 	if rowArgs[0][1] != "vps_001" || rowArgs[0][3] != "USD" || rowArgs[0][6] != string(subscriptions.BillingPeriodMonth) || rowArgs[0][7] != 12 || rowArgs[0][8] != float64(10) || rowArgs[0][14] != string(subscriptions.StatusActive) {
 		t.Fatalf("create normalized args = %#v", rowArgs[0])
@@ -340,8 +340,8 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 		t.Fatalf("QueryRow calls = %d, want create/get/patch", len(rowCalls))
 	}
 	patchArgs := rowArgs[2]
-	if len(patchArgs) != 31 {
-		t.Fatalf("patch args len = %d, want 31", len(patchArgs))
+	if len(patchArgs) != 41 {
+		t.Fatalf("patch args len = %d, want 41", len(patchArgs))
 	}
 	if patchArgs[0] != "sub_001" || patchArgs[1] != true || patchArgs[2] != "vps_002" {
 		t.Fatalf("patch vps args = %#v, want subscription id and vps", patchArgs[:3])
@@ -775,9 +775,14 @@ func scanSubscriptionRecordDestinations(dest []any, record subscriptions.Record)
 	*(dest[13].(*string)) = record.RenewalMode
 	*(dest[14].(*subscriptions.Status)) = record.Status
 	*(dest[15].(*string)) = record.PaymentMethod
-	*(dest[16].(*string)) = record.Note
-	*(dest[17].(*time.Time)) = record.CreatedAt
-	*(dest[18].(*time.Time)) = record.UpdatedAt
+	*(dest[16].(*string)) = record.DisplayName
+	*(dest[17].(*string)) = record.CostCategory
+	*(dest[18].(*[]string)) = append([]string(nil), record.Labels...)
+	*(dest[19].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.TrialEndsAt))
+	*(dest[20].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.EndsAt))
+	*(dest[21].(*string)) = record.Note
+	*(dest[22].(*time.Time)) = record.CreatedAt
+	*(dest[23].(*time.Time)) = record.UpdatedAt
 }
 
 func scanPriceHistoryRecordDestinations(dest []any, record renewals.PriceHistoryRecord) {

@@ -182,6 +182,14 @@ const settingsResponseBody = {
     event_layer_days: 90,
     notification_layer_days: 180,
   },
+  subscription_cost_settings: {
+    base_currency: 'CNY',
+    exchange_rate_provider: 'frankfurter',
+    fixer_configured: false,
+    default_reminder_offsets_days: [14, 7, 1],
+    max_reminder_lead_days: 30,
+    exchange_rate_stale_after_hours: 36,
+  },
 } satisfies SettingsRecord
 
 const settingsUpdateBody = {

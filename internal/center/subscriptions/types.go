@@ -58,43 +58,61 @@ type Date struct {
 }
 
 type Record struct {
-	SubscriptionID      string    `json:"subscription_id"`
-	VPSID               string    `json:"vps_id"`
-	Price               float64   `json:"price"`
-	Currency            string    `json:"currency"`
-	BillingCycle        string    `json:"billing_cycle"`
-	BillingMonths       int       `json:"billing_months"`
-	BillingPeriodUnit   string    `json:"billing_period_unit"`
-	BillingPeriodLength int       `json:"billing_period_length"`
-	MonthlyPrice        float64   `json:"monthly_price"`
-	StartedAt           *Date     `json:"started_at"`
-	RenewAt             *Date     `json:"renew_at"`
-	AutoRenew           bool      `json:"auto_renew"`
-	AutoRenewCancelled  bool      `json:"auto_renew_cancelled"`
-	RenewalMode         string    `json:"renewal_mode"`
-	Status              Status    `json:"status"`
-	PaymentMethod       string    `json:"payment_method"`
-	Note                string    `json:"note"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	SubscriptionID      string     `json:"subscription_id"`
+	VPSID               string     `json:"vps_id"`
+	Price               float64    `json:"price"`
+	Currency            string     `json:"currency"`
+	BillingCycle        string     `json:"billing_cycle"`
+	BillingMonths       int        `json:"billing_months"`
+	BillingPeriodUnit   string     `json:"billing_period_unit"`
+	BillingPeriodLength int        `json:"billing_period_length"`
+	MonthlyPrice        float64    `json:"monthly_price"`
+	StartedAt           *Date      `json:"started_at"`
+	RenewAt             *Date      `json:"renew_at"`
+	AutoRenew           bool       `json:"auto_renew"`
+	AutoRenewCancelled  bool       `json:"auto_renew_cancelled"`
+	RenewalMode         string     `json:"renewal_mode"`
+	Status              Status     `json:"status"`
+	PaymentMethod       string     `json:"payment_method"`
+	DisplayName         string     `json:"display_name"`
+	CostCategory        string     `json:"cost_category"`
+	Labels              []string   `json:"labels"`
+	TrialEndsAt         *Date      `json:"trial_ends_at"`
+	EndsAt              *Date      `json:"ends_at"`
+	Note                string     `json:"note"`
+	MonthlyPriceBase    *float64   `json:"monthly_price_base,omitempty"`
+	YearlyPriceBase     *float64   `json:"yearly_price_base,omitempty"`
+	BaseCurrency        string     `json:"base_currency,omitempty"`
+	ExchangeRate        *float64   `json:"exchange_rate,omitempty"`
+	ExchangeRateDate    *Date      `json:"exchange_rate_date,omitempty"`
+	ExchangeRateStale   bool       `json:"exchange_rate_stale,omitempty"`
+	BudgetStatus        string     `json:"budget_status,omitempty"`
+	NextReminderAt      *time.Time `json:"next_reminder_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 type CreateInput struct {
-	VPSID               string  `json:"vps_id"`
-	Price               float64 `json:"price"`
-	Currency            string  `json:"currency"`
-	BillingCycle        string  `json:"billing_cycle"`
-	BillingMonths       int     `json:"billing_months"`
-	BillingPeriodUnit   string  `json:"billing_period_unit"`
-	BillingPeriodLength int     `json:"billing_period_length"`
-	StartedAt           *Date   `json:"started_at"`
-	RenewAt             *Date   `json:"renew_at"`
-	AutoRenew           bool    `json:"auto_renew"`
-	AutoRenewCancelled  bool    `json:"auto_renew_cancelled"`
-	RenewalMode         string  `json:"renewal_mode"`
-	Status              Status  `json:"status"`
-	PaymentMethod       string  `json:"payment_method"`
-	Note                string  `json:"note"`
+	VPSID               string   `json:"vps_id"`
+	Price               float64  `json:"price"`
+	Currency            string   `json:"currency"`
+	BillingCycle        string   `json:"billing_cycle"`
+	BillingMonths       int      `json:"billing_months"`
+	BillingPeriodUnit   string   `json:"billing_period_unit"`
+	BillingPeriodLength int      `json:"billing_period_length"`
+	StartedAt           *Date    `json:"started_at"`
+	RenewAt             *Date    `json:"renew_at"`
+	AutoRenew           bool     `json:"auto_renew"`
+	AutoRenewCancelled  bool     `json:"auto_renew_cancelled"`
+	RenewalMode         string   `json:"renewal_mode"`
+	Status              Status   `json:"status"`
+	PaymentMethod       string   `json:"payment_method"`
+	DisplayName         string   `json:"display_name"`
+	CostCategory        string   `json:"cost_category"`
+	Labels              []string `json:"labels"`
+	TrialEndsAt         *Date    `json:"trial_ends_at"`
+	EndsAt              *Date    `json:"ends_at"`
+	Note                string   `json:"note"`
 }
 
 type PatchInput struct {
@@ -112,6 +130,11 @@ type PatchInput struct {
 	RenewalMode         OptionalString `json:"renewal_mode"`
 	Status              OptionalStatus `json:"status"`
 	PaymentMethod       OptionalString `json:"payment_method"`
+	DisplayName         OptionalString `json:"display_name"`
+	CostCategory        OptionalString `json:"cost_category"`
+	Labels              OptionalLabels `json:"labels"`
+	TrialEndsAt         OptionalDate   `json:"trial_ends_at"`
+	EndsAt              OptionalDate   `json:"ends_at"`
 	Note                OptionalString `json:"note"`
 }
 
@@ -121,6 +144,13 @@ type ListFilters struct {
 	RenewBefore     *Date
 	RenewAfter      *Date
 	RenewWithinDays *int
+	Currency        string
+	ProviderID      string
+	BudgetStatus    string
+	AutoRenew       *bool
+	PaymentMethod   string
+	Label           string
+	RenewalDecision string
 	Sort            string
 	Order           string
 }
@@ -153,6 +183,11 @@ type OptionalBool struct {
 type OptionalStatus struct {
 	Set   bool
 	Value Status
+}
+
+type OptionalLabels struct {
+	Set    bool
+	Values []string
 }
 
 type Repository interface {
@@ -218,6 +253,10 @@ func PatchBool(value bool) OptionalBool {
 
 func PatchStatus(value Status) OptionalStatus {
 	return OptionalStatus{Set: true, Value: value}
+}
+
+func PatchLabels(values []string) OptionalLabels {
+	return OptionalLabels{Set: true, Values: append([]string(nil), values...)}
 }
 
 func (v *OptionalString) UnmarshalJSON(data []byte) error {
@@ -305,6 +344,20 @@ func (v *OptionalStatus) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (v *OptionalLabels) UnmarshalJSON(data []byte) error {
+	v.Set = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return errors.New("labels cannot be null")
+	}
+
+	var values []string
+	if err := json.Unmarshal(data, &values); err != nil {
+		return err
+	}
+	v.Values = values
+	return nil
+}
+
 func NormalizeCreateInput(input CreateInput) CreateInput {
 	input.VPSID = strings.TrimSpace(input.VPSID)
 	input.Currency = NormalizeCurrency(input.Currency)
@@ -334,6 +387,9 @@ func NormalizeCreateInput(input CreateInput) CreateInput {
 	}
 	input.AutoRenew, input.AutoRenewCancelled = LegacyRenewalFlags(input.RenewalMode)
 	input.PaymentMethod = strings.TrimSpace(input.PaymentMethod)
+	input.DisplayName = strings.TrimSpace(input.DisplayName)
+	input.CostCategory = strings.TrimSpace(input.CostCategory)
+	input.Labels = NormalizeLabels(input.Labels)
 	input.Note = strings.TrimSpace(input.Note)
 	return input
 }
@@ -409,6 +465,11 @@ func NormalizePatchInput(input PatchInput) PatchInput {
 		input.AutoRenewCancelled = PatchBool(autoRenewCancelled)
 	}
 	input.PaymentMethod = normalizeOptionalString(input.PaymentMethod)
+	input.DisplayName = normalizeOptionalString(input.DisplayName)
+	input.CostCategory = normalizeOptionalString(input.CostCategory)
+	if input.Labels.Set {
+		input.Labels.Values = NormalizeLabels(input.Labels.Values)
+	}
 	input.Note = normalizeOptionalString(input.Note)
 	return input
 }
@@ -456,12 +517,23 @@ func (input PatchInput) HasChanges() bool {
 		input.RenewalMode.Set ||
 		input.Status.Set ||
 		input.PaymentMethod.Set ||
+		input.DisplayName.Set ||
+		input.CostCategory.Set ||
+		input.Labels.Set ||
+		input.TrialEndsAt.Set ||
+		input.EndsAt.Set ||
 		input.Note.Set
 }
 
 func NormalizeListFilters(filters ListFilters) ListFilters {
 	filters.VPSID = strings.TrimSpace(filters.VPSID)
 	filters.Status = Status(strings.TrimSpace(string(filters.Status)))
+	filters.Currency = NormalizeCurrency(filters.Currency)
+	filters.ProviderID = strings.TrimSpace(filters.ProviderID)
+	filters.BudgetStatus = strings.ToLower(strings.TrimSpace(filters.BudgetStatus))
+	filters.PaymentMethod = strings.TrimSpace(filters.PaymentMethod)
+	filters.Label = strings.TrimSpace(filters.Label)
+	filters.RenewalDecision = NormalizeRenewalMode(filters.RenewalDecision)
 	filters.Sort = strings.ToLower(strings.TrimSpace(filters.Sort))
 	if filters.Sort == "" {
 		filters.Sort = SortRenewAt
@@ -480,6 +552,19 @@ func ValidateListFilters(filters ListFilters) error {
 	if filters.RenewWithinDays != nil && *filters.RenewWithinDays < 0 {
 		return fmt.Errorf("%w: renew_within_days must be non-negative", ErrInvalidSubscriptionInput)
 	}
+	if filters.Currency != "" && !IsValidCurrency(filters.Currency) {
+		return fmt.Errorf("%w: invalid currency", ErrInvalidSubscriptionInput)
+	}
+	if filters.BudgetStatus != "" {
+		switch filters.BudgetStatus {
+		case "ok", "warning", "over", "unknown", "disabled":
+		default:
+			return fmt.Errorf("%w: invalid budget_status", ErrInvalidSubscriptionInput)
+		}
+	}
+	if filters.RenewalDecision != "" && !IsValidRenewalMode(filters.RenewalDecision) {
+		return fmt.Errorf("%w: invalid renewal_decision", ErrInvalidSubscriptionInput)
+	}
 	if filters.Sort != SortRenewAt {
 		return fmt.Errorf("%w: invalid sort", ErrInvalidSubscriptionInput)
 	}
@@ -487,6 +572,23 @@ func ValidateListFilters(filters ListFilters) error {
 		return fmt.Errorf("%w: invalid order", ErrInvalidSubscriptionInput)
 	}
 	return nil
+}
+
+func NormalizeLabels(labels []string) []string {
+	normalized := make([]string, 0, len(labels))
+	seen := make(map[string]struct{}, len(labels))
+	for _, raw := range labels {
+		label := strings.TrimSpace(raw)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		normalized = append(normalized, label)
+	}
+	return normalized
 }
 
 func NormalizeCurrency(value string) string {
