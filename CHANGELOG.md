@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/xiangnan0811/houfeng/compare/v0.26.1...v0.27.0) (2026-06-02)
+
+
+### Features
+
+* **vps:** streamline VPS asset UX flows ([#179](https://github.com/xiangnan0811/houfeng/issues/179)) ([dd99d99](https://github.com/xiangnan0811/houfeng/commit/dd99d99b94b9324a6152ab12edc41a26e3aac485))
+
 ## [0.26.1](https://github.com/xiangnan0811/houfeng/compare/v0.26.0...v0.26.1) (2026-06-01)
 
 
