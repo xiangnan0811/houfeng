@@ -170,6 +170,98 @@ func TestGetMonitoringInstanceRuntimeFactsReturnsLatestHostSampleAndHostMetricPo
 	}
 }
 
+func TestGetMonitoringInstanceRuntimeFactsReturnsRealtimeRecentHostSamples(t *testing.T) {
+	t.Parallel()
+
+	endedAt := time.Date(2026, time.April, 24, 9, 0, 0, 0, time.UTC)
+	startedAt := endedAt.Add(-time.Hour)
+	older := fakeHostSampleValues{
+		MonitoringInstanceID: "mi_001",
+		ObservedAt:           endedAt.Add(-30 * time.Minute),
+		ReceivedAt:           endedAt.Add(-30*time.Minute + 2*time.Second),
+		AgentVersion:         "agent/v0.1.0",
+		Fingerprint:          "fp-001",
+		CPUUsagePct:          42,
+		MemUsedPct:           63,
+		DiskUsedPct:          51,
+		InodeUsedPct:         17,
+		Load5:                0.8,
+		CPUIOWaitPct:         0.2,
+		NetInBytesPerSec:     1024,
+		NetOutBytesPerSec:    2048,
+		SyncBatchID:          "sync_001",
+	}
+	latest := older
+	latest.ObservedAt = endedAt.Add(-5 * time.Minute)
+	latest.ReceivedAt = latest.ObservedAt.Add(2 * time.Second)
+	latest.CPUUsagePct = 55
+	latest.SyncBatchID = "sync_002"
+
+	repo := &PostgresRuntimeFactsRepository{db: fakeRuntimeFactsQueryer{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch sql {
+			case runtimeFactsMonitoringInstanceExistsSQL:
+				return fakeRuntimeFactsRow{scan: func(dest ...any) error {
+					*(dest[0].(*int)) = 1
+					return nil
+				}}
+			case runtimeFactsLatestHostSampleSQL:
+				return fakeRuntimeFactsHostSampleRow(latest)
+			case runtimeFactsHostSampleWindowSummarySQL:
+				return fakeRuntimeFactsRow{scan: func(dest ...any) error {
+					*(dest[0].(*stdsql.NullTime)) = stdsql.NullTime{Time: older.ObservedAt, Valid: true}
+					*(dest[1].(*stdsql.NullTime)) = stdsql.NullTime{Time: latest.ObservedAt, Valid: true}
+					*(dest[2].(*int)) = 2
+					return nil
+				}}
+			default:
+				return fakeRuntimeFactsRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
+			}
+		},
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			switch sql {
+			case runtimeFactsHostMetricPointsSQL:
+				return &fakeRuntimeFactsRows{}, nil
+			case runtimeFactsRecentHostSamplesSQL:
+				if args[1] != startedAt || args[2] != endedAt {
+					t.Fatalf("recent host sample args = %#v, want started/end window", args)
+				}
+				return &fakeRuntimeFactsRows{rows: []fakeRuntimeFactsScan{
+					fakeRuntimeFactsHostSampleScan(older),
+					fakeRuntimeFactsHostSampleScan(latest),
+				}}, nil
+			default:
+				return nil, errors.New("unexpected Query")
+			}
+		},
+	}}
+
+	facts, err := repo.GetMonitoringInstanceRuntimeFacts(context.Background(), "mi_001", runtimefacts.WindowRequest{
+		Key:         "realtime",
+		StartedAt:   startedAt,
+		EndedAt:     endedAt,
+		BucketCount: 720,
+	})
+	if err != nil {
+		t.Fatalf("GetMonitoringInstanceRuntimeFacts() error = %v", err)
+	}
+	if facts.Window.Key != "realtime" || facts.Window.BucketCount != 720 {
+		t.Fatalf("Window = %#v, want realtime/720 buckets", facts.Window)
+	}
+	if len(facts.RecentHostSamples) != 2 {
+		t.Fatalf("len(RecentHostSamples) = %d, want 2", len(facts.RecentHostSamples))
+	}
+	if got := facts.RecentHostSamples[0].ObservedAt; !got.Equal(older.ObservedAt) {
+		t.Fatalf("RecentHostSamples[0].ObservedAt = %v, want %v", got, older.ObservedAt)
+	}
+	if got := facts.RecentHostSamples[1].SyncBatchID; got != "sync_002" {
+		t.Fatalf("RecentHostSamples[1].SyncBatchID = %q, want sync_002", got)
+	}
+	if got := facts.RecentHostSamples[1].CPUUsagePct; got != 55 {
+		t.Fatalf("RecentHostSamples[1].CPUUsagePct = %v, want 55", got)
+	}
+}
+
 func TestGetMonitoringInstanceRuntimeFactsReturnsNilHostSampleWhenMonitoringInstanceHasNoFactsYet(t *testing.T) {
 	t.Parallel()
 
@@ -477,6 +569,12 @@ func TestRuntimeFactSQLLocksLatestOrderingHostMetricAggregationAndProbeJoinShape
 	if !strings.Contains(runtimeFactsHostMetricPointsSQL, "group by bucket") || !strings.Contains(runtimeFactsHostMetricPointsSQL, "order by bucket asc") {
 		t.Fatalf("runtimeFactsHostMetricPointsSQL = %q, want bucket grouping and ascending order", runtimeFactsHostMetricPointsSQL)
 	}
+	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "where monitoring_instance_id = $1") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "observed_at >= $2") || !strings.Contains(runtimeFactsRecentHostSamplesSQL, "observed_at <= $3") {
+		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want monitoring_instance_id and observed_at window filters", runtimeFactsRecentHostSamplesSQL)
+	}
+	if !strings.Contains(runtimeFactsRecentHostSamplesSQL, "order by observed_at asc, id asc") {
+		t.Fatalf("runtimeFactsRecentHostSamplesSQL = %q, want ascending realtime sample order", runtimeFactsRecentHostSamplesSQL)
+	}
 	if !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "join probe_items") {
 		t.Fatalf("runtimeFactsRecentProbeObservationsSQL = %q, want probe_items join", runtimeFactsRecentProbeObservationsSQL)
 	}
@@ -538,4 +636,76 @@ func (f *fakeRuntimeFactsRows) Next() bool {
 }
 func (f *fakeRuntimeFactsRows) Scan(dest ...any) error {
 	return f.rows[f.idx-1].scan(dest...)
+}
+
+type fakeHostSampleValues struct {
+	MonitoringInstanceID string
+	ObservedAt           time.Time
+	ReceivedAt           time.Time
+	AgentVersion         string
+	Fingerprint          string
+	CPUUsagePct          float64
+	Load1                float64
+	Load5                float64
+	Load15               float64
+	MemUsedPct           float64
+	MemAvailableBytes    int64
+	MemTotalBytes        int64
+	SwapUsedPct          float64
+	DiskUsedPct          float64
+	DiskTotalBytes       int64
+	InodeUsedPct         float64
+	NetInBytesPerSec     int64
+	NetOutBytesPerSec    int64
+	CPUIOWaitPct         float64
+	CPUStealPct          float64
+	DiskReadBytesPerSec  int64
+	DiskWriteBytesPerSec int64
+	DiskBusyPct          float64
+	UptimeSeconds        int64
+	SyncBatchID          string
+}
+
+func fakeRuntimeFactsHostSampleRow(values fakeHostSampleValues) pgx.Row {
+	return fakeRuntimeFactsRow{scan: func(dest ...any) error {
+		return scanFakeRuntimeFactsHostSample(dest, values)
+	}}
+}
+
+func fakeRuntimeFactsHostSampleScan(values fakeHostSampleValues) fakeRuntimeFactsScan {
+	return fakeRuntimeFactsScan{scan: func(dest ...any) error {
+		return scanFakeRuntimeFactsHostSample(dest, values)
+	}}
+}
+
+func scanFakeRuntimeFactsHostSample(dest []any, values fakeHostSampleValues) error {
+	*(dest[0].(*string)) = values.MonitoringInstanceID
+	*(dest[1].(*time.Time)) = values.ObservedAt
+	*(dest[2].(*time.Time)) = values.ReceivedAt
+	*(dest[3].(*string)) = values.AgentVersion
+	*(dest[4].(*string)) = values.Fingerprint
+	*(dest[5].(*float64)) = values.CPUUsagePct
+	*(dest[6].(*float64)) = values.Load1
+	*(dest[7].(*float64)) = values.Load5
+	*(dest[8].(*float64)) = values.Load15
+	*(dest[9].(*float64)) = values.MemUsedPct
+	*(dest[10].(*int64)) = values.MemAvailableBytes
+	*(dest[11].(*int64)) = values.MemTotalBytes
+	*(dest[12].(*float64)) = values.SwapUsedPct
+	*(dest[13].(*float64)) = values.DiskUsedPct
+	*(dest[14].(*int64)) = values.DiskTotalBytes
+	*(dest[15].(*float64)) = values.InodeUsedPct
+	*(dest[16].(*int64)) = values.NetInBytesPerSec
+	*(dest[17].(*int64)) = values.NetOutBytesPerSec
+	*(dest[18].(*float64)) = values.CPUIOWaitPct
+	*(dest[19].(*float64)) = values.CPUStealPct
+	*(dest[20].(*int64)) = values.DiskReadBytesPerSec
+	*(dest[21].(*int64)) = values.DiskWriteBytesPerSec
+	*(dest[22].(*float64)) = values.DiskBusyPct
+	*(dest[23].(*int64)) = values.UptimeSeconds
+	*(dest[24].(*bool)) = false
+	*(dest[25].(*bool)) = false
+	*(dest[26].(*string)) = values.SyncBatchID
+	*(dest[27].(*[]byte)) = []byte("[]")
+	return nil
 }

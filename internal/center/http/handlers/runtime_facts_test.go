@@ -241,6 +241,38 @@ func TestMonitoringInstanceRuntimeFactsDefaultWindowIs24h(t *testing.T) {
 	}
 }
 
+func TestMonitoringInstanceRuntimeFactsWithRealtimeWindow(t *testing.T) {
+	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
+	repo := &fakeRuntimeFactsRepository{
+		getMonitoringInstanceRuntimeFactsResult: runtimefacts.MonitoringInstanceRuntimeFacts{
+			MonitoringInstanceID: "mi_001",
+			LatestHostSample: &runtimefacts.HostSample{
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           now,
+				ReceivedAt:           now,
+				AgentVersion:         "1.0.0",
+			},
+		},
+	}
+
+	handler := handlers.MonitoringInstanceRuntimeFacts(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-facts?window=realtime", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body=%s", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	window := repo.getMonitoringInstanceRuntimeFactsWindow
+	if window.Key != "realtime" || window.BucketCount != 720 {
+		t.Fatalf("window = %#v, want realtime/720 buckets", window)
+	}
+	if got := window.EndedAt.Sub(window.StartedAt); got != time.Hour {
+		t.Fatalf("window duration = %v, want 1h", got)
+	}
+}
+
 func TestMonitoringInstanceRuntimeFactsWith7dWindow(t *testing.T) {
 	now := time.Date(2026, time.April, 24, 1, 2, 3, 0, time.UTC)
 	repo := &fakeRuntimeFactsRepository{

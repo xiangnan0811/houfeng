@@ -1,6 +1,3 @@
-import type { RefObject } from 'react'
-
-import { DetailSection } from '../../components/DetailSection'
 import {
   MonitoringInstanceWatchtowerHeader,
   MonitoringInstanceWatchtowerMetrics,
@@ -17,10 +14,8 @@ import type {
 } from '../../lib/types'
 import { MonitoringInstanceBindingConflictSection } from './MonitoringInstanceBindingConflictSection'
 import { MonitoringInstanceCommandDrawer } from './MonitoringInstanceCommandDrawer'
-import { MonitoringInstanceContainersSection } from './MonitoringInstanceContainersSection'
 import { MonitoringInstanceDangerCard } from './MonitoringInstanceDangerCard'
 import { MonitoringInstanceHistoryDrawer } from './MonitoringInstanceHistoryDrawer'
-import { MonitoringInstanceLinkedVPSSection } from './MonitoringInstanceLinkedVPSSection'
 import { MonitoringInstanceOnboardingDrawer } from './MonitoringInstanceOnboardingDrawer'
 import { MonitoringInstanceRuntimePauseConfirmation } from './MonitoringInstanceRuntimePauseConfirmation'
 import { MonitoringInstanceSnapshotMeta } from './MonitoringInstanceSnapshotMeta'
@@ -51,7 +46,6 @@ type MonitoringDetailPageBodyProps = {
   incidents: ActiveIncidentRecord[]
   events: StateChangeEventRecord[]
   eventsError: string | null
-  linkedVPSSectionRef: RefObject<HTMLDivElement | null>
   linkedVPS: VPSSummary[]
   linkedVPSLoading: boolean
   linkedVPSLoaded: boolean
@@ -101,7 +95,6 @@ export function MonitoringDetailPageBody({
   incidents,
   events,
   eventsError,
-  linkedVPSSectionRef,
   linkedVPS,
   linkedVPSLoading,
   linkedVPSLoaded,
@@ -170,6 +163,10 @@ export function MonitoringDetailPageBody({
         onOpenHistory={() => onOpenHistory('events')}
         onOpenCommands={onOpenCommands}
         onOpenOnboarding={onOpenOnboarding}
+        linkedVPS={linkedVPS}
+        linkedVPSLoading={linkedVPSLoading}
+        linkedVPSLoaded={linkedVPSLoaded}
+        linkedVPSError={linkedVPSError}
       />
 
       {pendingRuntimeConfirmation?.action === 'pause' ? (
@@ -217,22 +214,6 @@ export function MonitoringDetailPageBody({
         window={runtimeFacts?.window}
         isMaintenance={isMaintenance}
       />
-
-      <MonitoringInstanceLinkedVPSSection
-        sectionRef={linkedVPSSectionRef}
-        records={linkedVPS}
-        loading={linkedVPSLoading}
-        loaded={linkedVPSLoaded}
-        error={linkedVPSError}
-      />
-
-      <DetailSection
-        eyebrow="RUNTIME FACTS"
-        title="容器列表"
-        aside={sample?.containers?.length ? `${sample.containers.length} 个` : '暂无数据'}
-      >
-        <MonitoringInstanceContainersSection sample={sample} />
-      </DetailSection>
 
       <MonitoringInstanceSnapshotMeta sample={sample} />
 

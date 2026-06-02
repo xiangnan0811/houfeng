@@ -103,6 +103,42 @@ const runtimeFactsHostMetricPointsSQL = `
 		group by bucket
 		order by bucket asc`
 
+const runtimeFactsRecentHostSamplesSQL = `
+		select
+			monitoring_instance_id,
+			observed_at,
+			received_at,
+			agent_version,
+			fingerprint,
+			cpu_usage_pct,
+			load_1,
+			load_5,
+			load_15,
+			mem_used_pct,
+			mem_available_bytes,
+			mem_total_bytes,
+			swap_used_pct,
+			disk_used_pct,
+			disk_total_bytes,
+			inode_used_pct,
+			net_in_bytes_per_sec,
+			net_out_bytes_per_sec,
+			cpu_iowait_pct,
+			cpu_steal_pct,
+			disk_read_bytes_per_sec,
+			disk_write_bytes_per_sec,
+			disk_busy_pct,
+			uptime_seconds,
+			maintenance_context,
+			is_backfilled,
+			sync_batch_id,
+			containers
+		from host_samples
+		where monitoring_instance_id = $1
+			and observed_at >= $2
+			and observed_at <= $3
+		order by observed_at asc, id asc`
+
 const runtimeFactsTargetExistsSQL = `
 		select 1
 		from targets
@@ -245,6 +281,24 @@ func (r *PostgresRuntimeFactsRepository) GetMonitoringInstanceRuntimeFacts(ctx c
 	}
 	if err := rows.Err(); err != nil {
 		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("iterate host metric points for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+
+	if window.Key == "realtime" {
+		recentRows, err := r.db.Query(ctx, runtimeFactsRecentHostSamplesSQL, monitoringInstanceID, window.StartedAt, window.EndedAt)
+		if err != nil {
+			return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("query recent host samples for monitoring instance %q: %w", monitoringInstanceID, err)
+		}
+		defer recentRows.Close()
+		for recentRows.Next() {
+			var sample runtimefacts.HostSample
+			if err := scanHostSample(recentRows, &sample); err != nil {
+				return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("scan recent host sample for monitoring instance %q: %w", monitoringInstanceID, err)
+			}
+			facts.RecentHostSamples = append(facts.RecentHostSamples, sample)
+		}
+		if err := recentRows.Err(); err != nil {
+			return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("iterate recent host samples for monitoring instance %q: %w", monitoringInstanceID, err)
+		}
 	}
 
 	return facts, nil

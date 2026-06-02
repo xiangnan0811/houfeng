@@ -55,7 +55,7 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		_ = tx.Rollback(ctx)
 	}()
 
-	bindingFingerprint, err := validateAcceptedSyncBatch(ctx, tx, batch)
+	syncState, err := validateAcceptedSyncBatch(ctx, tx, batch)
 	if err != nil {
 		return syncing.Result{}, err
 	}
@@ -66,14 +66,15 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		return syncing.Result{}, err
 	}
 
-	lastHeartbeatAt, err := recordHeartbeatBatch(ctx, tx, batch.MonitoringInstanceID, bindingFingerprint, receivedAt, batch.Heartbeats)
+	lastHeartbeatAt, err := recordHeartbeatBatch(ctx, tx, batch.MonitoringInstanceID, syncState.BindingFingerprint, receivedAt, batch.Heartbeats)
 	if err != nil {
 		return syncing.Result{}, err
 	}
 	if err := recordObservationBatch(ctx, tx, observationBatch); err != nil {
 		return syncing.Result{}, err
 	}
-	if err := advanceMonitoringInstanceSyncState(ctx, tx, batch.MonitoringInstanceID, lastHeartbeatAt, receivedAt); err != nil {
+	nextLifecycleStatus := lifecycleStatusAfterAcceptedSync(syncState.LifecycleStatus, len(batch.Observations.HostSamples) > 0)
+	if err := advanceMonitoringInstanceSyncState(ctx, tx, batch.MonitoringInstanceID, lastHeartbeatAt, receivedAt, nextLifecycleStatus); err != nil {
 		return syncing.Result{}, err
 	}
 
@@ -104,49 +105,66 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 	}, nil
 }
 
-func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (string, error) {
+type acceptedSyncBatchState struct {
+	BindingFingerprint string
+	LifecycleStatus    string
+}
+
+func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (acceptedSyncBatchState, error) {
 	var (
 		bindingStatus       string
 		bindingFingerprint  string
 		storedSyncTokenHash string
+		lifecycleStatus     string
 	)
 	if err := tx.QueryRow(ctx, `
 		select binding_status,
 			coalesce(binding_fingerprint, ''),
-			coalesce(sync_token_hash, '')
+			coalesce(sync_token_hash, ''),
+			lifecycle_status
 		from monitoring_instances
 		where monitoring_instance_id = $1
 		for update`,
 		batch.MonitoringInstanceID,
-	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash); errors.Is(err, pgx.ErrNoRows) {
-		return "", monitoringinstances.ErrMonitoringInstanceNotFound
+	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash, &lifecycleStatus); errors.Is(err, pgx.ErrNoRows) {
+		return acceptedSyncBatchState{}, monitoringinstances.ErrMonitoringInstanceNotFound
 	} else if err != nil {
-		return "", fmt.Errorf("query sync batch state for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
+		return acceptedSyncBatchState{}, fmt.Errorf("query sync batch state for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 	}
 	if bindingStatus != monitoringinstances.BindingBound {
-		return "", syncing.ErrBindingNotAccepted
+		return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
 	}
 	if storedSyncTokenHash == "" || storedSyncTokenHash != hashSyncToken(batch.SyncToken) {
-		return "", syncing.ErrInvalidSyncToken
+		return acceptedSyncBatchState{}, syncing.ErrInvalidSyncToken
 	}
 
 	for _, heartbeat := range batch.Heartbeats {
 		if heartbeat.Fingerprint != bindingFingerprint {
-			return "", syncing.ErrBindingNotAccepted
+			return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
 		}
 	}
 	for _, sample := range batch.Observations.HostSamples {
 		if sample.Fingerprint != bindingFingerprint {
-			return "", syncing.ErrBindingNotAccepted
+			return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
 		}
 	}
 	for _, observation := range batch.Observations.ProbeObservations {
 		if observation.Fingerprint != bindingFingerprint {
-			return "", syncing.ErrBindingNotAccepted
+			return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
 		}
 	}
 
-	return bindingFingerprint, nil
+	return acceptedSyncBatchState{
+		BindingFingerprint: bindingFingerprint,
+		LifecycleStatus:    lifecycleStatus,
+	}, nil
+}
+
+func lifecycleStatusAfterAcceptedSync(current string, hasHostSample bool) string {
+	if hasHostSample && current == monitoringinstances.LifecyclePendingEnrollment {
+		return monitoringinstances.LifecycleInUse
+	}
+	return current
 }
 
 func validateProbeObservations(ctx context.Context, tx syncBatchTx, writes []observations.ProbeObservationWrite) error {
@@ -228,16 +246,18 @@ func recordHeartbeatBatch(ctx context.Context, tx syncBatchTx, monitoringInstanc
 	return lastHeartbeatAt, nil
 }
 
-func advanceMonitoringInstanceSyncState(ctx context.Context, tx syncBatchTx, monitoringInstanceID string, lastHeartbeatAt, lastSyncAt time.Time) error {
+func advanceMonitoringInstanceSyncState(ctx context.Context, tx syncBatchTx, monitoringInstanceID string, lastHeartbeatAt, lastSyncAt time.Time, lifecycleStatus string) error {
 	tag, err := tx.Exec(ctx, `
 		update monitoring_instances
 		set last_heartbeat_at = greatest(coalesce(last_heartbeat_at, $2), $2),
 			last_sync_at = greatest(coalesce(last_sync_at, $3), $3),
+			lifecycle_status = $4,
 			updated_at = now()
 		where monitoring_instance_id = $1`,
 		monitoringInstanceID,
 		lastHeartbeatAt,
 		lastSyncAt,
+		lifecycleStatus,
 	)
 	if err != nil {
 		return fmt.Errorf("touch sync batch state for monitoring instance %q: %w", monitoringInstanceID, err)

@@ -164,6 +164,9 @@ func parseMonitoringRuntimeWindow(raw string, now time.Time) (runtimefacts.Windo
 	var duration time.Duration
 	var bucketCount int
 	switch key {
+	case "realtime":
+		duration = time.Hour
+		bucketCount = 720
 	case "", "24h":
 		key = "24h"
 		duration = 24 * time.Hour
@@ -175,7 +178,7 @@ func parseMonitoringRuntimeWindow(raw string, now time.Time) (runtimefacts.Windo
 		duration = 30 * 24 * time.Hour
 		bucketCount = 720
 	default:
-		return runtimefacts.WindowRequest{}, errMetric("must be 24h, 7d, or 30d")
+		return runtimefacts.WindowRequest{}, errMetric("must be realtime, 24h, 7d, or 30d")
 	}
 
 	now = now.UTC()

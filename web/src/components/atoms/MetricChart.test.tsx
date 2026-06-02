@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render } from '@testing-library/react'
 import {
   MetricChart,
@@ -132,6 +132,41 @@ describe('MetricChart', () => {
 
     // Crosshair line should be visible
     expect(container.querySelector('.metric-chart__cursor')).toBeTruthy()
+  })
+
+  it('supports controlled hover without rendering the local tooltip', () => {
+    const samples = makeSamples(5, 10, 5_000)
+    const onHoverAtChange = vi.fn()
+    const { container } = render(
+      <MetricChart
+        samples={samples}
+        width={300}
+        height={140}
+        hoveredAt={samples[2].observedAt}
+        onHoverAtChange={onHoverAtChange}
+        showTooltip={false}
+      />,
+    )
+
+    expect(container.querySelector('.metric-chart__cursor')).toBeTruthy()
+    expect(container.querySelector('.metric-chart__tooltip')).toBeNull()
+
+    const svg = container.querySelector('svg')!
+    svg.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 300,
+      bottom: 140,
+      width: 300,
+      height: 140,
+      toJSON: () => ({}),
+    })
+    fireEvent.mouseMove(svg, { clientX: 300 })
+    expect(onHoverAtChange).toHaveBeenCalledWith(samples[4].observedAt)
+    fireEvent.mouseLeave(svg)
+    expect(onHoverAtChange).toHaveBeenCalledWith(null)
   })
 
   it('renders threshold lines even when value lies outside the Y range (clamped)', () => {
