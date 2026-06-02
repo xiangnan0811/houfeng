@@ -329,7 +329,10 @@ func TestMonitoringInstanceRuntimeFactsRejectsInvalidWindow(t *testing.T) {
 }
 
 func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
-	hub := runtimefacts.NewStreamHub()
+	hub := &notifyingHostSampleHub{
+		StreamHub:  runtimefacts.NewStreamHub(),
+		subscribed: make(chan string, 1),
+	}
 	repo := &fakeMonitoringInstanceRepository{
 		getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001"},
 	}
@@ -347,6 +350,15 @@ func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
+	select {
+	case monitoringInstanceID := <-hub.subscribed:
+		if monitoringInstanceID != "mi_001" {
+			t.Fatalf("subscription monitoring instance = %q, want mi_001", monitoringInstanceID)
+		}
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for runtime stream subscription: %v", ctx.Err())
+	}
+
 	if err := hub.AfterSuccessfulSync(ctx, syncingBatchWithHostSample("mi_001", 42), runtimefactsTestResult()); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
@@ -361,6 +373,20 @@ func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
 	if message.Sample.CPUUsagePct != 42 {
 		t.Fatalf("CPUUsagePct = %v, want 42", message.Sample.CPUUsagePct)
 	}
+}
+
+type notifyingHostSampleHub struct {
+	*runtimefacts.StreamHub
+	subscribed chan string
+}
+
+func (h *notifyingHostSampleHub) SubscribeHostSamples(monitoringInstanceID string) runtimefacts.HostSampleSubscription {
+	subscription := h.StreamHub.SubscribeHostSamples(monitoringInstanceID)
+	select {
+	case h.subscribed <- monitoringInstanceID:
+	default:
+	}
+	return subscription
 }
 
 func TestMonitoringInstanceRuntimeStreamMapsMonitoringInstanceNotFound(t *testing.T) {
