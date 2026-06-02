@@ -47,6 +47,8 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。
 - **modal / drawer focus 行为复用 `web/src/lib/useModalFocus.ts`**：可访问性弹层必须 portal 到 `document.body`，声明 `role="dialog"` / `aria-modal="true"`（确认类用 `alertdialog`），打开后移动初始焦点，Tab / Shift+Tab containment，Escape 关闭，关闭后恢复触发器焦点；不要在各组件里复制 ad-hoc `document.addEventListener('keydown')` + 手写 focus trap。
 - **Drawer 取消/关闭必须清理未提交本地状态**：page 用 Drawer 承载 create/edit 表单时，`onClose` / 取消按钮 / Escape / overlay 关闭都必须丢弃 draft、表单错误和保存反馈；重新打开应从当前已保存数据或初始空表单重建。测试至少覆盖“编辑草稿 → 取消关闭 → 重新打开草稿已重置”以及取消不触发提交。
+- **复杂表单 modal 必须有可读宽度和收束行为**：创建/编辑订阅、VPS 基础信息、监控实例接入、服务商等字段密集表单使用 `Modal` 的 `md` / `lg` / `xl` 尺寸，避免默认窄弹窗造成标签和命令无意义换行。提交成功必须关闭或跳转；取消必须丢弃草稿；失败留在当前弹层并展示错误。由 URL deep-link 打开的弹层在消费或关闭时必须清理 `create=1`、`onboarding=1` 等临时参数，同时保留承接上下文参数。
+- **常见有界字段优先选择器 + 自定义入口**：VPS 国家/地区、订阅币种、支付方式、计费周期单位、续费方式这类高频字段必须使用共享 option/helper 与 `<select>` / radio 控件；常见值内置，确实不在范围内才进入“自定义/其他”。不要把这些字段退回裸文本输入，也不要在创建和编辑表单各自散落字符串。
 - **关联表单优先选择器，不让用户复制内部 ID**：Provider、MonitoringInstance、Target、Service 这类已有业务对象的常规关联表单应渲染可辨识 `<select>`/selector（名称 + ID + 状态/位置等辅助信息），并保留空值/不关联能力。无候选或加载失败时用说明 + `<Link>`/action 指向对应列表/创建入口；MonitoringInstance/Target 选择只作为用户确认的资产关联，不在表单提交时隐式修改观测运行态。
 
 ### AppShell / Command Search 交互合同
