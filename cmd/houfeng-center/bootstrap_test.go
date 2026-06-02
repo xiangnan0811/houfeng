@@ -234,6 +234,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSCancellationHandler == nil {
 		t.Fatal("router vps cancellation handler = nil, want non-nil")
 	}
+	if gotOpts.VPSExtendValidityHandler == nil {
+		t.Fatal("router vps extend validity handler = nil, want non-nil")
+	}
 	if gotOpts.AssetContextMonitoringInstancesHandler == nil {
 		t.Fatal("router asset context monitoringInstances handler = nil, want non-nil")
 	}

@@ -1255,3 +1255,37 @@ Restored upgrade compatibility for pre-v0.25 agent local state by reading legacy
 ### Next Steps
 
 - None - task complete
+
+
+## Session 155: VPS asset UX remediation
+
+**Date**: 2026-06-02
+**Task**: VPS asset UX remediation
+**Branch**: `worktree/vps-asset-ux-remediation`
+
+### Summary
+
+Implemented VPS asset entry, subscription, validity extension, monitoring onboarding, modal behavior, and supporting tests/specs for the VPS asset UX remediation task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5eab3cb` | (see git log) |
+| `16d656a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

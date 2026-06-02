@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { Badge, Button, Hostname, MonoDigits, StatusGlyph, Timestamp } from '../../components/atoms'
 import { formatDate, formatMoney, formatOptional } from '../../lib/format'
+import { renewalModeFromLegacy, renewalModeLabel } from '../../lib/assetOptions'
 import type {
   AssetDomainRecord,
   AssetServiceRecord,
@@ -34,6 +35,8 @@ type VPSDecisionBoardProps = {
   experienceNotice: string | null
   subscriptionNotice: string | null
   subscriptionCreateError: string | null
+  validityExtensionNotice: string | null
+  validityExtensionError: string | null
   monitoringCreateNotice: string | null
   monitoringCreateError: string | null
   lifecycleNotice: string | null
@@ -78,6 +81,11 @@ function buildFeedback(props: VPSDecisionBoardProps): FeedbackItem[] {
       ? { message: props.subscriptionCreateError, error: true }
       : props.subscriptionNotice
         ? { message: props.subscriptionNotice, error: false }
+        : null,
+    props.validityExtensionError
+      ? { message: props.validityExtensionError, error: true }
+      : props.validityExtensionNotice
+        ? { message: props.validityExtensionNotice, error: false }
         : null,
     props.monitoringCreateError
       ? { message: props.monitoringCreateError, error: true }
@@ -288,7 +296,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
           </div>
           <p className="vps-decision-card__summary">
             {primarySubscription
-              ? `${formatMoney(primarySubscription.monthly_price, primarySubscription.currency)} / 月 · 续费日 ${formatDate(primarySubscription.renew_at)} · ${primarySubscription.auto_renew ? '自动续费' : '手工续费'}`
+              ? `${formatMoney(primarySubscription.monthly_price, primarySubscription.currency)} / 月 · 续费日 ${formatDate(primarySubscription.renew_at)} · ${renewalModeLabel(primarySubscription.renewal_mode ?? renewalModeFromLegacy(primarySubscription))}`
               : subscriptionLoadFailed
                 ? subscriptionError ?? '当前无法读取订阅，页面不把它误判为缺订阅。'
                 : '订阅接口已成功返回空结果，需要补录成本与续费日。'}

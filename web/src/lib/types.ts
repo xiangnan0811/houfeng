@@ -613,6 +613,10 @@ export type RenewalSubscriptionLinkageStatus =
 
 export type SubscriptionStatus = 'active' | 'paused' | 'cancelled' | 'expired' | 'unknown'
 
+export type BillingPeriodUnit = 'day' | 'week' | 'month' | 'year'
+
+export type RenewalMode = 'auto' | 'manual' | 'auto_cancelled' | 'lottery' | 'bonus' | 'other'
+
 export type AssetServiceType = 'web' | 'api' | 'database' | 'worker' | 'proxy' | 'other'
 
 export type AssetServiceStatus = 'active' | 'paused' | 'retired' | 'unknown'
@@ -759,6 +763,7 @@ export type LifecycleActionStep = {
   step_type:
     | 'vps_lifecycle'
     | 'subscription_status'
+    | 'subscription_renew_at'
     | 'monitoring_instance_lifecycle'
     | 'monitoring_instance_monitoring'
     | 'target_run_status'
@@ -774,7 +779,7 @@ export type LifecycleActionStep = {
 export type LifecycleActionRecord = {
   action_id: string
   vps_id: string
-  action_type: 'cancel_vps' | string
+  action_type: 'cancel_vps' | 'extend_validity' | string
   status: 'completed' | 'failed' | string
   reason: string
   effective_date?: string | null
@@ -811,6 +816,7 @@ export type RecommendedLifecycleStep = {
   step_type:
     | 'vps_lifecycle'
     | 'subscription_status'
+    | 'subscription_renew_at'
     | 'monitoring_instance_lifecycle'
     | 'monitoring_instance_monitoring'
     | 'target_run_status'
@@ -851,6 +857,14 @@ export type ApplyCancellationInput = {
   vps_lifecycle_status: Extract<VPSLifecycleStatus, 'to_cancel' | 'cancelled'>
   monitoring_instance_actions: MonitoringInstanceLifecycleActionInput[]
   target_actions: TargetLifecycleActionInput[]
+}
+
+export type ExtendVPSValidityInput = {
+  extend_to: string
+  reason: string
+  fee: number
+  fee_currency: string
+  source_type: string
 }
 
 export type LinkedVPSContext = {
@@ -1015,6 +1029,10 @@ export type VPSPriceHistoryRecord = {
   to_billing_cycle: string
   from_billing_months: number
   to_billing_months: number
+  from_billing_period_unit?: BillingPeriodUnit | string
+  to_billing_period_unit?: BillingPeriodUnit | string
+  from_billing_period_length?: number
+  to_billing_period_length?: number
   from_monthly_price: number
   to_monthly_price: number
   from_renew_at?: string | null
@@ -1023,6 +1041,8 @@ export type VPSPriceHistoryRecord = {
   to_auto_renew: boolean
   from_auto_renew_cancelled: boolean
   to_auto_renew_cancelled: boolean
+  from_renewal_mode?: RenewalMode | string
+  to_renewal_mode?: RenewalMode | string
   from_status: SubscriptionStatus
   to_status: SubscriptionStatus
   changed_at: string
@@ -1180,11 +1200,14 @@ export type SubscriptionRecord = {
   currency: string
   billing_cycle: string
   billing_months: number
+  billing_period_unit?: BillingPeriodUnit | string
+  billing_period_length?: number
   monthly_price: number
   started_at?: string | null
   renew_at?: string | null
   auto_renew: boolean
   auto_renew_cancelled: boolean
+  renewal_mode?: RenewalMode | string
   status: SubscriptionStatus
   payment_method: string
   note: string
@@ -1198,10 +1221,13 @@ export type CreateSubscriptionInput = {
   currency: string
   billing_cycle: string
   billing_months: number
+  billing_period_unit?: BillingPeriodUnit | string
+  billing_period_length?: number
   started_at?: string | null
   renew_at?: string | null
   auto_renew: boolean
   auto_renew_cancelled: boolean
+  renewal_mode?: RenewalMode | string
   status?: SubscriptionStatus
   payment_method: string
   note: string

@@ -57,6 +57,7 @@ export function MonitoringDetailPage() {
 
 function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInstanceId?: string }) {
   const [searchParams, setSearchParams] = useSearchParams()
+  const [onboardingReturnVPSId, setOnboardingReturnVPSId] = useState<string | null>(null)
   const [state, setState] = useState<MonitoringDetailPageState>(INITIAL_MONITORING_DETAIL_STATE)
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
@@ -114,8 +115,10 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   useEffect(() => {
     if (searchParams.get('onboarding') !== '1') return
     setOnboardingOpen(true)
+    setOnboardingReturnVPSId(searchParams.get('return_vps'))
     const next = new URLSearchParams(searchParams)
     next.delete('onboarding')
+    next.delete('return_vps')
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
@@ -687,11 +690,13 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }
 
   function openOnboardingDrawer() {
+    setOnboardingReturnVPSId(null)
     setOnboardingOpen(true)
   }
 
   function closeOnboardingDrawer() {
     setOnboardingOpen(false)
+    setOnboardingReturnVPSId(null)
   }
 
   function closeHistoryDrawer() {
@@ -793,6 +798,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onCloseCommand={closeCommandDrawer}
       onExecuteCommand={(commandId) => void handleCommandExecute(commandId)}
       onboardingOpen={onboardingOpen}
+      onboardingReturnVPSId={onboardingReturnVPSId}
       onOpenOnboarding={openOnboardingDrawer}
       onCloseOnboarding={closeOnboardingDrawer}
     />

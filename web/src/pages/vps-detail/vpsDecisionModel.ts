@@ -1,4 +1,5 @@
 import { formatMoney } from '../../lib/format'
+import { renewalModeFromLegacy, renewalModeLabel } from '../../lib/assetOptions'
 import type { SubscriptionRecord, VPSAssetDetail, VPSMonitoringInstanceSummary, VPSTimeline } from '../../lib/types'
 import {
   buildVPSQualityIssues,
@@ -185,7 +186,7 @@ function buildSubscriptionEvidence(
   return {
     label: '订阅证据',
     value: formatMoney(subscription.monthly_price, subscription.currency),
-    meta: `${renewalTimingLabel(days)} · ${subscription.auto_renew ? '自动续费' : '手工续费'}`,
+    meta: `${renewalTimingLabel(days)} · ${renewalModeLabel(subscription.renewal_mode ?? renewalModeFromLegacy(subscription))}`,
     tone: renewalTone(subscription, false),
   }
 }

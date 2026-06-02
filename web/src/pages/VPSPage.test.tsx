@@ -411,7 +411,8 @@ describe('VPSPage', () => {
     expect(within(reopenedModal).getByLabelText('VPS 名称')).toHaveValue('')
     fireEvent.change(within(reopenedModal).getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })
     fireEvent.change(within(reopenedModal).getByLabelText('服务商'), { target: { value: 'pv_001' } })
-    fireEvent.change(within(reopenedModal).getByLabelText('国家'), { target: { value: 'JP' } })
+    fireEvent.change(within(reopenedModal).getByLabelText('国家 / 地区'), { target: { value: 'JP' } })
+    fireEvent.change(within(reopenedModal).getByLabelText('IPv4 / 主入口'), { target: { value: '203.0.113.8' } })
     fireEvent.click(within(reopenedModal).getByRole('button', { name: /补充信息/ }))
     fireEvent.change(within(reopenedModal).getByLabelText('区域'), { target: { value: 'Kansai' } })
     fireEvent.change(within(reopenedModal).getByLabelText('城市'), { target: { value: 'Osaka' } })
@@ -437,9 +438,9 @@ describe('VPSPage', () => {
         region: 'Kansai',
         city: 'Osaka',
         datacenter: '',
-        ipv4: '',
+        ipv4: '203.0.113.8',
         ipv6: '',
-        ssh_host: '',
+        ssh_host: '203.0.113.8',
         ssh_port: 22,
         ssh_user: 'root',
         os_name: '',

@@ -1,6 +1,14 @@
 import { type FormEvent } from 'react'
 
-import { Button, Input } from '../../components/atoms'
+import { Button, Input, Select } from '../../components/atoms'
+import {
+  BILLING_PERIOD_UNIT_OPTIONS,
+  COMMON_CURRENCY_OPTIONS,
+  COMMON_PAYMENT_METHOD_OPTIONS,
+  CUSTOM_OPTION_VALUE,
+  RENEWAL_MODE_OPTIONS,
+  displayOption,
+} from '../../lib/assetOptions'
 import type { VPSAssetDetail } from '../../lib/types'
 import type { SubscriptionDraftState } from './types'
 
@@ -49,24 +57,36 @@ export function VPSSubscriptionForm({
           onChange={(event) => update('price', event.target.value)}
           required
         />
+        <Select label="币种" value={draft.currency} onChange={(event) => update('currency', event.target.value)} required>
+          {COMMON_CURRENCY_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{displayOption(option)}</option>
+          ))}
+          <option value={CUSTOM_OPTION_VALUE}>自定义币种</option>
+        </Select>
+        {draft.currency === CUSTOM_OPTION_VALUE ? (
+          <Input
+            label="自定义币种"
+            value={draft.customCurrency}
+            onChange={(event) => update('customCurrency', event.target.value)}
+            placeholder="例如：JPY"
+            required
+          />
+        ) : null}
+        <Select
+          label="计费周期单位"
+          value={draft.billingPeriodUnit}
+          onChange={(event) => update('billingPeriodUnit', event.target.value as SubscriptionDraftState['billingPeriodUnit'])}
+        >
+          {BILLING_PERIOD_UNIT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{displayOption(option)}</option>
+          ))}
+        </Select>
         <Input
-          label="币种"
-          value={draft.currency}
-          onChange={(event) => update('currency', event.target.value)}
-          required
-        />
-        <Input
-          label="计费周期"
-          value={draft.billingCycle}
-          onChange={(event) => update('billingCycle', event.target.value)}
-          placeholder="monthly / annual"
-        />
-        <Input
-          label="计费月数"
+          label="计费周期长度"
           type="number"
           min="1"
-          value={draft.billingMonths}
-          onChange={(event) => update('billingMonths', event.target.value)}
+          value={draft.billingPeriodLength}
+          onChange={(event) => update('billingPeriodLength', event.target.value)}
           required
         />
         <Input
@@ -81,32 +101,42 @@ export function VPSSubscriptionForm({
           value={draft.renewAt}
           onChange={(event) => update('renewAt', event.target.value)}
         />
+        <Select label="支付方式" value={draft.paymentMethod} onChange={(event) => update('paymentMethod', event.target.value)}>
+          <option value="">未记录</option>
+          {COMMON_PAYMENT_METHOD_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{displayOption(option)}</option>
+          ))}
+          <option value={CUSTOM_OPTION_VALUE}>自定义支付方式</option>
+        </Select>
+        {draft.paymentMethod === CUSTOM_OPTION_VALUE ? (
+          <Input
+            label="自定义支付方式"
+            value={draft.customPaymentMethod}
+            onChange={(event) => update('customPaymentMethod', event.target.value)}
+          />
+        ) : null}
       </div>
 
-      <div className="asset-operation-form__checks">
-        <label className="ck">
-          <input
-            type="checkbox"
-            checked={draft.autoRenew}
-            onChange={(event) => update('autoRenew', event.target.checked)}
-          />
-          <span className="ck-box" /> 自动续费
-        </label>
-        <label className="ck">
-          <input
-            type="checkbox"
-            checked={draft.autoRenewCancelled}
-            onChange={(event) => update('autoRenewCancelled', event.target.checked)}
-          />
-          <span className="ck-box" /> 已取消自动续费
-        </label>
+      <div className="asset-operation-form__section">
+        <div className="input-field__label">续费方式</div>
+        <div className="asset-option-grid" role="radiogroup" aria-label="续费方式">
+          {RENEWAL_MODE_OPTIONS.map((option) => (
+            <label key={option.value} className="asset-option-radio">
+              <input
+                type="radio"
+                name="vps-subscription-renewal-mode"
+                value={option.value}
+                aria-label={option.label}
+                checked={draft.renewalMode === option.value}
+                onChange={() => update('renewalMode', option.value)}
+              />
+              <span className="asset-option-radio__icon" aria-hidden="true">{option.icon}</span>
+              <span className="asset-option-radio__label">{option.label}</span>
+            </label>
+          ))}
+        </div>
       </div>
 
-      <Input
-        label="支付方式"
-        value={draft.paymentMethod}
-        onChange={(event) => update('paymentMethod', event.target.value)}
-      />
       <Input
         label="备注"
         value={draft.note}

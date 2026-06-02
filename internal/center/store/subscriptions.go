@@ -46,11 +46,14 @@ const subscriptionSelectColumns = `
 	currency,
 	billing_cycle,
 	billing_months,
+	billing_period_unit,
+	billing_period_length,
 	monthly_price,
 	started_at,
 	renew_at,
 	auto_renew,
 	auto_renew_cancelled,
+	renewal_mode,
 	status,
 	payment_method,
 	note,
@@ -72,11 +75,14 @@ func scanSubscription(row subscriptionScanner) (subscriptions.Record, error) {
 		&record.Currency,
 		&record.BillingCycle,
 		&record.BillingMonths,
+		&record.BillingPeriodUnit,
+		&record.BillingPeriodLength,
 		&record.MonthlyPrice,
 		&startedAt,
 		&renewAt,
 		&record.AutoRenew,
 		&record.AutoRenewCancelled,
+		&record.RenewalMode,
 		&record.Status,
 		&record.PaymentMethod,
 		&record.Note,
@@ -184,11 +190,14 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 			currency,
 			billing_cycle,
 			billing_months,
+			billing_period_unit,
+			billing_period_length,
 			monthly_price,
 			started_at,
 			renew_at,
 			auto_renew,
 			auto_renew_cancelled,
+			renewal_mode,
 			status,
 			payment_method,
 			note
@@ -206,7 +215,10 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 			$11,
 			$12,
 			$13,
-			$14
+			$14,
+			$15,
+			$16,
+			$17
 		)
 		returning `+subscriptionSelectColumns,
 		subscriptionID,
@@ -215,11 +227,14 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 		input.Currency,
 		input.BillingCycle,
 		input.BillingMonths,
-		subscriptions.CalculateMonthlyPrice(input.Price, input.BillingMonths),
+		input.BillingPeriodUnit,
+		input.BillingPeriodLength,
+		subscriptions.CalculateMonthlyPriceForPeriod(input.Price, input.BillingPeriodUnit, input.BillingPeriodLength),
 		subscriptionDateArg(input.StartedAt),
 		subscriptionDateArg(input.RenewAt),
 		input.AutoRenew,
 		input.AutoRenewCancelled,
+		input.RenewalMode,
 		string(input.Status),
 		input.PaymentMethod,
 		input.Note,
@@ -319,20 +334,28 @@ func patchSubscriptionRow(ctx context.Context, db subscriptionQueryer, subscript
 		    currency = case when $6::boolean then $7 else currency end,
 		    billing_cycle = case when $8::boolean then $9 else billing_cycle end,
 		    billing_months = case when $10::boolean then $11::integer else billing_months end,
+		    billing_period_unit = case when $12::boolean then $13 else billing_period_unit end,
+		    billing_period_length = case when $14::boolean then $15::integer else billing_period_length end,
 		    monthly_price = case
-		        when $4::boolean or $10::boolean then (
-		            case when $4::boolean then $5::numeric else price end /
-		            case when $10::boolean then $11::integer else billing_months end
-		        )
+		        when $4::boolean or $12::boolean or $14::boolean then round((
+		            (case when $4::boolean then $5::numeric else price end) /
+		            case (case when $12::boolean then $13 else billing_period_unit end)
+		                when 'day' then (case when $14::boolean then $15::integer else billing_period_length end)::numeric / 30
+		                when 'week' then ((case when $14::boolean then $15::integer else billing_period_length end)::numeric * 7) / 30
+		                when 'year' then (case when $14::boolean then $15::integer else billing_period_length end)::numeric * 12
+		                else (case when $14::boolean then $15::integer else billing_period_length end)::numeric
+		            end
+		        ) * 10000) / 10000
 		        else monthly_price
 		    end,
-		    started_at = case when $12::boolean then $13::date else started_at end,
-		    renew_at = case when $14::boolean then $15::date else renew_at end,
-		    auto_renew = case when $16::boolean then $17 else auto_renew end,
-		    auto_renew_cancelled = case when $18::boolean then $19 else auto_renew_cancelled end,
-		    status = case when $20::boolean then $21 else status end,
-		    payment_method = case when $22::boolean then $23 else payment_method end,
-		    note = case when $24::boolean then $25 else note end,
+		    started_at = case when $16::boolean then $17::date else started_at end,
+		    renew_at = case when $18::boolean then $19::date else renew_at end,
+		    auto_renew = case when $20::boolean then $21 else auto_renew end,
+		    auto_renew_cancelled = case when $22::boolean then $23 else auto_renew_cancelled end,
+		    renewal_mode = case when $24::boolean then $25 else renewal_mode end,
+		    status = case when $26::boolean then $27 else status end,
+		    payment_method = case when $28::boolean then $29 else payment_method end,
+		    note = case when $30::boolean then $31 else note end,
 		    updated_at = now()
 		where subscription_id = $1
 		returning `+subscriptionSelectColumns,
@@ -347,6 +370,10 @@ func patchSubscriptionRow(ctx context.Context, db subscriptionQueryer, subscript
 		input.BillingCycle.Value,
 		input.BillingMonths.Set,
 		input.BillingMonths.Value,
+		input.BillingPeriodUnit.Set,
+		input.BillingPeriodUnit.Value,
+		input.BillingPeriodLength.Set,
+		input.BillingPeriodLength.Value,
 		input.StartedAt.Set,
 		subscriptionDateArg(input.StartedAt.Value),
 		input.RenewAt.Set,
@@ -355,6 +382,8 @@ func patchSubscriptionRow(ctx context.Context, db subscriptionQueryer, subscript
 		input.AutoRenew.Value,
 		input.AutoRenewCancelled.Set,
 		input.AutoRenewCancelled.Value,
+		input.RenewalMode.Set,
+		input.RenewalMode.Value,
 		input.Status.Set,
 		string(input.Status.Value),
 		input.PaymentMethod.Set,
@@ -369,9 +398,12 @@ func patchRequiresPriceHistory(input subscriptions.PatchInput) bool {
 		input.Currency.Set ||
 		input.BillingCycle.Set ||
 		input.BillingMonths.Set ||
+		input.BillingPeriodUnit.Set ||
+		input.BillingPeriodLength.Set ||
 		input.RenewAt.Set ||
 		input.AutoRenew.Set ||
 		input.AutoRenewCancelled.Set ||
+		input.RenewalMode.Set ||
 		input.Status.Set
 }
 
@@ -380,10 +412,13 @@ func subscriptionPriceHistoryChanged(from, to subscriptions.Record) bool {
 		from.Currency != to.Currency ||
 		from.BillingCycle != to.BillingCycle ||
 		from.BillingMonths != to.BillingMonths ||
+		from.BillingPeriodUnit != to.BillingPeriodUnit ||
+		from.BillingPeriodLength != to.BillingPeriodLength ||
 		from.MonthlyPrice != to.MonthlyPrice ||
 		!sameSubscriptionDate(from.RenewAt, to.RenewAt) ||
 		from.AutoRenew != to.AutoRenew ||
 		from.AutoRenewCancelled != to.AutoRenewCancelled ||
+		from.RenewalMode != to.RenewalMode ||
 		from.Status != to.Status
 }
 

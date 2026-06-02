@@ -52,6 +52,37 @@ func TestPostgresSubscriptionMigrationDefinesTableConstraintsAndIndexes(t *testi
 			t.Fatalf("subscription migration missing %q", snippet)
 		}
 	}
+
+	periodSource, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "migrations", "0031_subscription_periods_and_validity_extension.sql"))
+	if err != nil {
+		t.Fatalf("ReadFile(subscription period migration) error = %v", err)
+	}
+	periodText := string(periodSource)
+	for _, snippet := range []string{
+		"add column if not exists billing_period_unit text not null default 'month'",
+		"add column if not exists billing_period_length integer not null default 1",
+		"add column if not exists renewal_mode text not null default 'manual'",
+		"subscriptions_billing_period_unit_allowed",
+		"billing_period_unit in ('day', 'week', 'month', 'year')",
+		"subscriptions_billing_period_length_positive",
+		"subscriptions_renewal_mode_allowed",
+		"renewal_mode in ('auto', 'manual', 'auto_cancelled', 'lottery', 'bonus', 'other')",
+		"add column if not exists from_billing_period_unit text not null default 'month'",
+		"add column if not exists to_billing_period_unit text not null default 'month'",
+		"add column if not exists from_billing_period_length integer not null default 1",
+		"add column if not exists to_billing_period_length integer not null default 1",
+		"add column if not exists from_renewal_mode text not null default 'manual'",
+		"add column if not exists to_renewal_mode text not null default 'manual'",
+		"price_histories_billing_period_unit_allowed",
+		"price_histories_billing_period_length_positive",
+		"price_histories_renewal_mode_allowed",
+		"action_type in ('cancel_vps', 'extend_validity')",
+		"'subscription_renew_at'",
+	} {
+		if !strings.Contains(periodText, snippet) {
+			t.Fatalf("subscription period migration missing %q", snippet)
+		}
+	}
 }
 
 func TestPostgresSubscriptionPriceHistoryMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
@@ -102,37 +133,41 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 			return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{
 				{scan: func(dest ...any) error {
 					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-						SubscriptionID:     "sub_001",
-						VPSID:              "vps_001",
-						Price:              120,
-						Currency:           "USD",
-						BillingCycle:       "annual",
-						BillingMonths:      12,
-						MonthlyPrice:       10,
-						StartedAt:          &startedAt,
-						RenewAt:            &renewAt,
-						AutoRenew:          true,
-						AutoRenewCancelled: false,
-						Status:             subscriptions.StatusActive,
-						PaymentMethod:      "card",
-						Note:               "production",
-						CreatedAt:          now,
-						UpdatedAt:          now,
+						SubscriptionID:      "sub_001",
+						VPSID:               "vps_001",
+						Price:               120,
+						Currency:            "USD",
+						BillingCycle:        "annual",
+						BillingMonths:       12,
+						BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+						BillingPeriodLength: 1,
+						MonthlyPrice:        10,
+						StartedAt:           &startedAt,
+						RenewAt:             &renewAt,
+						AutoRenew:           true,
+						AutoRenewCancelled:  false,
+						Status:              subscriptions.StatusActive,
+						PaymentMethod:       "card",
+						Note:                "production",
+						CreatedAt:           now,
+						UpdatedAt:           now,
 					})
 					return nil
 				}},
 				{scan: func(dest ...any) error {
 					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-						SubscriptionID: "sub_002",
-						VPSID:          "vps_002",
-						Price:          6,
-						Currency:       "EUR",
-						BillingCycle:   "monthly",
-						BillingMonths:  1,
-						MonthlyPrice:   6,
-						Status:         subscriptions.StatusPaused,
-						CreatedAt:      now,
-						UpdatedAt:      now,
+						SubscriptionID:      "sub_002",
+						VPSID:               "vps_002",
+						Price:               6,
+						Currency:            "EUR",
+						BillingCycle:        "monthly",
+						BillingMonths:       1,
+						BillingPeriodUnit:   string(subscriptions.BillingPeriodMonth),
+						BillingPeriodLength: 1,
+						MonthlyPrice:        6,
+						Status:              subscriptions.StatusPaused,
+						CreatedAt:           now,
+						UpdatedAt:           now,
 					})
 					return nil
 				}},
@@ -149,62 +184,68 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 						t.Fatalf("generated subscription id arg = %#v, want sub_ prefix", args[0])
 					}
 					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-						SubscriptionID:     subscriptionID,
-						VPSID:              "vps_001",
-						Price:              120,
-						Currency:           "USD",
-						BillingCycle:       "annual",
-						BillingMonths:      12,
-						MonthlyPrice:       10,
-						StartedAt:          &startedAt,
-						RenewAt:            &renewAt,
-						AutoRenew:          true,
-						AutoRenewCancelled: false,
-						Status:             subscriptions.StatusActive,
-						PaymentMethod:      "card",
-						Note:               "production",
-						CreatedAt:          now,
-						UpdatedAt:          now,
+						SubscriptionID:      subscriptionID,
+						VPSID:               "vps_001",
+						Price:               120,
+						Currency:            "USD",
+						BillingCycle:        "annual",
+						BillingMonths:       12,
+						BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+						BillingPeriodLength: 1,
+						MonthlyPrice:        10,
+						StartedAt:           &startedAt,
+						RenewAt:             &renewAt,
+						AutoRenew:           true,
+						AutoRenewCancelled:  false,
+						Status:              subscriptions.StatusActive,
+						PaymentMethod:       "card",
+						Note:                "production",
+						CreatedAt:           now,
+						UpdatedAt:           now,
 					})
 					return nil
 				}}
 			case strings.Contains(sql, "where subscription_id = $1") && strings.Contains(sql, "select"):
 				return fakeSubscriptionRow{scan: func(dest ...any) error {
 					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-						SubscriptionID: "sub_001",
-						VPSID:          "vps_001",
-						Price:          120,
-						Currency:       "USD",
-						BillingCycle:   "annual",
-						BillingMonths:  12,
-						MonthlyPrice:   10,
-						StartedAt:      &startedAt,
-						RenewAt:        &renewAt,
-						Status:         subscriptions.StatusActive,
-						CreatedAt:      now,
-						UpdatedAt:      now,
+						SubscriptionID:      "sub_001",
+						VPSID:               "vps_001",
+						Price:               120,
+						Currency:            "USD",
+						BillingCycle:        "annual",
+						BillingMonths:       12,
+						BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+						BillingPeriodLength: 1,
+						MonthlyPrice:        10,
+						StartedAt:           &startedAt,
+						RenewAt:             &renewAt,
+						Status:              subscriptions.StatusActive,
+						CreatedAt:           now,
+						UpdatedAt:           now,
 					})
 					return nil
 				}}
 			case strings.Contains(sql, "update subscriptions"):
 				return fakeSubscriptionRow{scan: func(dest ...any) error {
 					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-						SubscriptionID:     "sub_001",
-						VPSID:              "vps_002",
-						Price:              240,
-						Currency:           "EUR",
-						BillingCycle:       "biennial",
-						BillingMonths:      24,
-						MonthlyPrice:       10,
-						StartedAt:          nil,
-						RenewAt:            &patchedRenewAt,
-						AutoRenew:          false,
-						AutoRenewCancelled: true,
-						Status:             subscriptions.StatusPaused,
-						PaymentMethod:      "paypal",
-						Note:               "review",
-						CreatedAt:          now.Add(-time.Hour),
-						UpdatedAt:          now,
+						SubscriptionID:      "sub_001",
+						VPSID:               "vps_002",
+						Price:               240,
+						Currency:            "EUR",
+						BillingCycle:        "biennial",
+						BillingMonths:       24,
+						BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+						BillingPeriodLength: 2,
+						MonthlyPrice:        10,
+						StartedAt:           nil,
+						RenewAt:             &patchedRenewAt,
+						AutoRenew:           false,
+						AutoRenewCancelled:  true,
+						Status:              subscriptions.StatusPaused,
+						PaymentMethod:       "paypal",
+						Note:                "review",
+						CreatedAt:           now.Add(-time.Hour),
+						UpdatedAt:           now,
 					})
 					return nil
 				}}
@@ -237,10 +278,10 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 	if created.Currency != "USD" || created.MonthlyPrice != 10 {
 		t.Fatalf("created = %#v, want normalized USD and monthly price", created)
 	}
-	if len(rowArgs[0]) != 14 {
-		t.Fatalf("create args len = %d, want 14", len(rowArgs[0]))
+	if len(rowArgs[0]) != 17 {
+		t.Fatalf("create args len = %d, want 17", len(rowArgs[0]))
 	}
-	if rowArgs[0][1] != "vps_001" || rowArgs[0][3] != "USD" || rowArgs[0][6] != float64(10) || rowArgs[0][11] != string(subscriptions.StatusActive) {
+	if rowArgs[0][1] != "vps_001" || rowArgs[0][3] != "USD" || rowArgs[0][6] != string(subscriptions.BillingPeriodMonth) || rowArgs[0][7] != 12 || rowArgs[0][8] != float64(10) || rowArgs[0][14] != string(subscriptions.StatusActive) {
 		t.Fatalf("create normalized args = %#v", rowArgs[0])
 	}
 
@@ -299,25 +340,28 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 		t.Fatalf("QueryRow calls = %d, want create/get/patch", len(rowCalls))
 	}
 	patchArgs := rowArgs[2]
-	if len(patchArgs) != 25 {
-		t.Fatalf("patch args len = %d, want 25", len(patchArgs))
+	if len(patchArgs) != 31 {
+		t.Fatalf("patch args len = %d, want 31", len(patchArgs))
 	}
 	if patchArgs[0] != "sub_001" || patchArgs[1] != true || patchArgs[2] != "vps_002" {
 		t.Fatalf("patch vps args = %#v, want subscription id and vps", patchArgs[:3])
 	}
-	if patchArgs[3] != false || patchArgs[9] != false || patchArgs[19] != false {
+	if patchArgs[3] != false || patchArgs[9] != false || patchArgs[25] != false {
 		t.Fatalf("patch tracked history args = %#v, want price/month/status unset in direct patch", patchArgs)
 	}
-	if patchArgs[11] != true || patchArgs[12] != nil {
-		t.Fatalf("patch started_at args = set:%#v value:%#v, want explicit null", patchArgs[11], patchArgs[12])
+	if patchArgs[15] != true || patchArgs[16] != nil {
+		t.Fatalf("patch started_at args = set:%#v value:%#v, want explicit null", patchArgs[15], patchArgs[16])
 	}
 	for _, snippet := range []string{
 		"vps_id = case when $2::boolean then $3 else vps_id end",
 		"price = case when $4::boolean then $5::numeric else price end",
 		"billing_months = case when $10::boolean then $11::integer else billing_months end",
-		"when $4::boolean or $10::boolean then",
-		"started_at = case when $12::boolean then $13::date else started_at end",
-		"renew_at = case when $14::boolean then $15::date else renew_at end",
+		"billing_period_unit = case when $12::boolean then $13 else billing_period_unit end",
+		"billing_period_length = case when $14::boolean then $15::integer else billing_period_length end",
+		"when $4::boolean or $12::boolean or $14::boolean then",
+		"started_at = case when $16::boolean then $17::date else started_at end",
+		"renew_at = case when $18::boolean then $19::date else renew_at end",
+		"renewal_mode = case when $24::boolean then $25 else renewal_mode end",
 		"updated_at = now()",
 		"where subscription_id = $1",
 		"returning " + subscriptionSelectColumns,
@@ -387,38 +431,44 @@ func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
 		case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "for update"):
 			return fakeSubscriptionRow{scan: func(dest ...any) error {
 				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-					SubscriptionID:     "sub_001",
-					VPSID:              "vps_001",
-					Price:              120,
-					Currency:           "USD",
-					BillingCycle:       "annual",
-					BillingMonths:      12,
-					MonthlyPrice:       10,
-					RenewAt:            &renewAt,
-					AutoRenew:          true,
-					AutoRenewCancelled: false,
-					Status:             subscriptions.StatusActive,
-					CreatedAt:          now.Add(-time.Hour),
-					UpdatedAt:          now.Add(-time.Hour),
+					SubscriptionID:      "sub_001",
+					VPSID:               "vps_001",
+					Price:               120,
+					Currency:            "USD",
+					BillingCycle:        "annual",
+					BillingMonths:       12,
+					BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+					BillingPeriodLength: 1,
+					MonthlyPrice:        10,
+					RenewAt:             &renewAt,
+					AutoRenew:           true,
+					AutoRenewCancelled:  false,
+					RenewalMode:         string(subscriptions.RenewalModeAuto),
+					Status:              subscriptions.StatusActive,
+					CreatedAt:           now.Add(-time.Hour),
+					UpdatedAt:           now.Add(-time.Hour),
 				})
 				return nil
 			}}
 		case strings.Contains(sql, "update subscriptions"):
 			return fakeSubscriptionRow{scan: func(dest ...any) error {
 				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-					SubscriptionID:     "sub_001",
-					VPSID:              "vps_001",
-					Price:              240,
-					Currency:           "USD",
-					BillingCycle:       "biennial",
-					BillingMonths:      24,
-					MonthlyPrice:       10,
-					RenewAt:            &patchedRenewAt,
-					AutoRenew:          false,
-					AutoRenewCancelled: true,
-					Status:             subscriptions.StatusPaused,
-					CreatedAt:          now.Add(-time.Hour),
-					UpdatedAt:          now,
+					SubscriptionID:      "sub_001",
+					VPSID:               "vps_001",
+					Price:               240,
+					Currency:            "USD",
+					BillingCycle:        "biennial",
+					BillingMonths:       24,
+					BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+					BillingPeriodLength: 2,
+					MonthlyPrice:        10,
+					RenewAt:             &patchedRenewAt,
+					AutoRenew:           false,
+					AutoRenewCancelled:  true,
+					RenewalMode:         string(subscriptions.RenewalModeAutoCancelled),
+					Status:              subscriptions.StatusPaused,
+					CreatedAt:           now.Add(-time.Hour),
+					UpdatedAt:           now,
 				})
 				return nil
 			}}
@@ -444,13 +494,13 @@ func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
 		},
 	}
 	record, err := repo.PatchSubscription(context.Background(), "sub_001", subscriptions.PatchInput{
-		Price:              subscriptions.PatchFloat(240),
-		BillingCycle:       subscriptions.PatchString(" biennial "),
-		BillingMonths:      subscriptions.PatchInt(24),
-		RenewAt:            subscriptions.PatchDate(&patchedRenewAt),
-		AutoRenew:          subscriptions.PatchBool(false),
-		AutoRenewCancelled: subscriptions.PatchBool(true),
-		Status:             subscriptions.PatchStatus(subscriptions.StatusPaused),
+		Price:               subscriptions.PatchFloat(240),
+		BillingCycle:        subscriptions.PatchString(" biennial "),
+		BillingPeriodUnit:   subscriptions.PatchString(" year "),
+		BillingPeriodLength: subscriptions.PatchInt(2),
+		RenewAt:             subscriptions.PatchDate(&patchedRenewAt),
+		RenewalMode:         subscriptions.PatchString("auto_cancelled"),
+		Status:              subscriptions.PatchStatus(subscriptions.StatusPaused),
 	})
 	if err != nil {
 		t.Fatalf("PatchSubscription() error = %v", err)
@@ -468,13 +518,16 @@ func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
 		t.Fatalf("calls = %#v, want lock/update/price history", calls)
 	}
 	historyArgs := args[2]
-	if len(historyArgs) != 22 {
-		t.Fatalf("history args len = %d, want 22", len(historyArgs))
+	if len(historyArgs) != 28 {
+		t.Fatalf("history args len = %d, want 28", len(historyArgs))
 	}
 	if historyArgs[1] != "sub_001" || historyArgs[2] != "vps_001" || historyArgs[3] != float64(120) || historyArgs[4] != float64(240) {
 		t.Fatalf("history args = %#v, want from/to price and ids", historyArgs)
 	}
-	if historyArgs[9] != 12 || historyArgs[10] != 24 || historyArgs[19] != "active" || historyArgs[20] != "paused" {
+	if historyArgs[9] != 12 || historyArgs[10] != 24 || historyArgs[11] != "year" || historyArgs[14] != 2 {
+		t.Fatalf("history period args = %#v", historyArgs)
+	}
+	if historyArgs[23] != "auto" || historyArgs[24] != "auto_cancelled" || historyArgs[25] != "active" || historyArgs[26] != "paused" {
 		t.Fatalf("history billing/status args = %#v", historyArgs)
 	}
 }
@@ -491,19 +544,22 @@ func TestPostgresSubscriptionPatchSkipsPriceHistoryWhenTrackedFieldsUnchanged(t 
 		case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "for update"), strings.Contains(sql, "update subscriptions"):
 			return fakeSubscriptionRow{scan: func(dest ...any) error {
 				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-					SubscriptionID:     "sub_001",
-					VPSID:              "vps_001",
-					Price:              120,
-					Currency:           "USD",
-					BillingCycle:       "annual",
-					BillingMonths:      12,
-					MonthlyPrice:       10,
-					RenewAt:            &renewAt,
-					AutoRenew:          true,
-					AutoRenewCancelled: false,
-					Status:             subscriptions.StatusActive,
-					CreatedAt:          now,
-					UpdatedAt:          now,
+					SubscriptionID:      "sub_001",
+					VPSID:               "vps_001",
+					Price:               120,
+					Currency:            "USD",
+					BillingCycle:        "annual",
+					BillingMonths:       12,
+					BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+					BillingPeriodLength: 1,
+					MonthlyPrice:        10,
+					RenewAt:             &renewAt,
+					AutoRenew:           true,
+					AutoRenewCancelled:  false,
+					RenewalMode:         string(subscriptions.RenewalModeAuto),
+					Status:              subscriptions.StatusActive,
+					CreatedAt:           now,
+					UpdatedAt:           now,
 				})
 				return nil
 			}}
@@ -709,16 +765,19 @@ func scanSubscriptionRecordDestinations(dest []any, record subscriptions.Record)
 	*(dest[3].(*string)) = record.Currency
 	*(dest[4].(*string)) = record.BillingCycle
 	*(dest[5].(*int)) = record.BillingMonths
-	*(dest[6].(*float64)) = record.MonthlyPrice
-	*(dest[7].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.StartedAt))
-	*(dest[8].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.RenewAt))
-	*(dest[9].(*bool)) = record.AutoRenew
-	*(dest[10].(*bool)) = record.AutoRenewCancelled
-	*(dest[11].(*subscriptions.Status)) = record.Status
-	*(dest[12].(*string)) = record.PaymentMethod
-	*(dest[13].(*string)) = record.Note
-	*(dest[14].(*time.Time)) = record.CreatedAt
-	*(dest[15].(*time.Time)) = record.UpdatedAt
+	*(dest[6].(*string)) = record.BillingPeriodUnit
+	*(dest[7].(*int)) = record.BillingPeriodLength
+	*(dest[8].(*float64)) = record.MonthlyPrice
+	*(dest[9].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.StartedAt))
+	*(dest[10].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.RenewAt))
+	*(dest[11].(*bool)) = record.AutoRenew
+	*(dest[12].(*bool)) = record.AutoRenewCancelled
+	*(dest[13].(*string)) = record.RenewalMode
+	*(dest[14].(*subscriptions.Status)) = record.Status
+	*(dest[15].(*string)) = record.PaymentMethod
+	*(dest[16].(*string)) = record.Note
+	*(dest[17].(*time.Time)) = record.CreatedAt
+	*(dest[18].(*time.Time)) = record.UpdatedAt
 }
 
 func scanPriceHistoryRecordDestinations(dest []any, record renewals.PriceHistoryRecord) {
@@ -733,44 +792,56 @@ func scanPriceHistoryRecordDestinations(dest []any, record renewals.PriceHistory
 	*(dest[8].(*string)) = record.ToBillingCycle
 	*(dest[9].(*int)) = record.FromBillingMonths
 	*(dest[10].(*int)) = record.ToBillingMonths
-	*(dest[11].(*float64)) = record.FromMonthlyPrice
-	*(dest[12].(*float64)) = record.ToMonthlyPrice
-	*(dest[13].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.FromRenewAt))
-	*(dest[14].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.ToRenewAt))
-	*(dest[15].(*bool)) = record.FromAutoRenew
-	*(dest[16].(*bool)) = record.ToAutoRenew
-	*(dest[17].(*bool)) = record.FromAutoRenewCancelled
-	*(dest[18].(*bool)) = record.ToAutoRenewCancelled
-	*(dest[19].(*string)) = string(record.FromStatus)
-	*(dest[20].(*string)) = string(record.ToStatus)
-	*(dest[21].(*time.Time)) = record.ChangedAt
-	*(dest[22].(*time.Time)) = record.CreatedAt
+	*(dest[11].(*string)) = record.FromBillingPeriodUnit
+	*(dest[12].(*string)) = record.ToBillingPeriodUnit
+	*(dest[13].(*int)) = record.FromBillingPeriodLength
+	*(dest[14].(*int)) = record.ToBillingPeriodLength
+	*(dest[15].(*float64)) = record.FromMonthlyPrice
+	*(dest[16].(*float64)) = record.ToMonthlyPrice
+	*(dest[17].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.FromRenewAt))
+	*(dest[18].(**time.Time)) = cloneTimePtr(subscriptions.TimePtrFromDate(record.ToRenewAt))
+	*(dest[19].(*bool)) = record.FromAutoRenew
+	*(dest[20].(*bool)) = record.ToAutoRenew
+	*(dest[21].(*bool)) = record.FromAutoRenewCancelled
+	*(dest[22].(*bool)) = record.ToAutoRenewCancelled
+	*(dest[23].(*string)) = record.FromRenewalMode
+	*(dest[24].(*string)) = record.ToRenewalMode
+	*(dest[25].(*string)) = string(record.FromStatus)
+	*(dest[26].(*string)) = string(record.ToStatus)
+	*(dest[27].(*time.Time)) = record.ChangedAt
+	*(dest[28].(*time.Time)) = record.CreatedAt
 }
 
 func priceHistoryFixture(id string, now time.Time, fromRenewAt, toRenewAt subscriptions.Date) renewals.PriceHistoryRecord {
 	return renewals.PriceHistoryRecord{
-		PriceHistoryID:         id,
-		SubscriptionID:         "sub_001",
-		VPSID:                  "vps_001",
-		FromPrice:              120,
-		ToPrice:                240,
-		FromCurrency:           "USD",
-		ToCurrency:             "USD",
-		FromBillingCycle:       "annual",
-		ToBillingCycle:         "biennial",
-		FromBillingMonths:      12,
-		ToBillingMonths:        24,
-		FromMonthlyPrice:       10,
-		ToMonthlyPrice:         10,
-		FromRenewAt:            &fromRenewAt,
-		ToRenewAt:              &toRenewAt,
-		FromAutoRenew:          true,
-		ToAutoRenew:            false,
-		FromAutoRenewCancelled: false,
-		ToAutoRenewCancelled:   true,
-		FromStatus:             subscriptions.StatusActive,
-		ToStatus:               subscriptions.StatusPaused,
-		ChangedAt:              now,
-		CreatedAt:              now,
+		PriceHistoryID:          id,
+		SubscriptionID:          "sub_001",
+		VPSID:                   "vps_001",
+		FromPrice:               120,
+		ToPrice:                 240,
+		FromCurrency:            "USD",
+		ToCurrency:              "USD",
+		FromBillingCycle:        "annual",
+		ToBillingCycle:          "biennial",
+		FromBillingMonths:       12,
+		ToBillingMonths:         24,
+		FromBillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+		ToBillingPeriodUnit:     string(subscriptions.BillingPeriodYear),
+		FromBillingPeriodLength: 1,
+		ToBillingPeriodLength:   2,
+		FromMonthlyPrice:        10,
+		ToMonthlyPrice:          10,
+		FromRenewAt:             &fromRenewAt,
+		ToRenewAt:               &toRenewAt,
+		FromAutoRenew:           true,
+		ToAutoRenew:             false,
+		FromAutoRenewCancelled:  false,
+		ToAutoRenewCancelled:    true,
+		FromRenewalMode:         string(subscriptions.RenewalModeAuto),
+		ToRenewalMode:           string(subscriptions.RenewalModeAutoCancelled),
+		FromStatus:              subscriptions.StatusActive,
+		ToStatus:                subscriptions.StatusPaused,
+		ChangedAt:               now,
+		CreatedAt:               now,
 	}
 }

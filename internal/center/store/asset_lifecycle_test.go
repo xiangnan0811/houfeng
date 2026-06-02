@@ -234,6 +234,186 @@ func TestApplyVPSCancellationPersistsFailedAuditAfterRollback(t *testing.T) {
 	}
 }
 
+func TestExtendVPSValidityUpdatesSingleActiveSubscriptionAndAuditsAction(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	oldRenewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC))
+	newRenewAt := subscriptions.NewDate(time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC))
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "from subscriptions") {
+				return nil, errors.New("unexpected query")
+			}
+			return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{{
+				scan: func(dest ...any) error {
+					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+						SubscriptionID:      "sub_001",
+						VPSID:               "vps_001",
+						Price:               120,
+						Currency:            "USD",
+						BillingCycle:        "annual",
+						BillingMonths:       12,
+						BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+						BillingPeriodLength: 1,
+						MonthlyPrice:        10,
+						RenewAt:             &oldRenewAt,
+						AutoRenew:           true,
+						RenewalMode:         string(subscriptions.RenewalModeAuto),
+						Status:              subscriptions.StatusActive,
+						CreatedAt:           now,
+						UpdatedAt:           now,
+					})
+					return nil
+				},
+			}}}, nil
+		},
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil))
+					return nil
+				})
+			case strings.Contains(sql, "update subscriptions"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+						SubscriptionID:      "sub_001",
+						VPSID:               "vps_001",
+						Price:               120,
+						Currency:            "USD",
+						BillingCycle:        "annual",
+						BillingMonths:       12,
+						BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+						BillingPeriodLength: 1,
+						MonthlyPrice:        10,
+						RenewAt:             &newRenewAt,
+						AutoRenew:           true,
+						RenewalMode:         string(subscriptions.RenewalModeAuto),
+						Status:              subscriptions.StatusActive,
+						CreatedAt:           now,
+						UpdatedAt:           now,
+					})
+					return nil
+				})
+			case strings.Contains(sql, "insert into price_histories"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanPriceHistoryRecordDestinations(dest, priceHistoryFixture("ph_001", now, oldRenewAt, newRenewAt))
+					return nil
+				})
+			default:
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					return errors.New("unexpected query row")
+				})
+			}
+		},
+	}
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}}
+
+	result, err := repo.ExtendVPSValidity(context.Background(), "vps_001", assetlifecycle.ExtendValidityInput{
+		ExtendTo:    &newRenewAt,
+		Reason:      "outage compensation",
+		Fee:         0,
+		FeeCurrency: "USD",
+		SourceType:  "outage",
+	})
+	if err != nil {
+		t.Fatalf("ExtendVPSValidity() error = %v", err)
+	}
+	if tx.commitCount != 1 {
+		t.Fatalf("commit count = %d, want 1", tx.commitCount)
+	}
+	if result.Action.ActionType != assetlifecycle.ActionTypeExtendValidity || len(result.Steps) != 1 {
+		t.Fatalf("result = %#v, want validity extension action and one step", result)
+	}
+	actions, steps := filterAssetLifecycleAuditExecs(tx.execCalls)
+	if len(actions) != 1 || len(steps) != 1 {
+		t.Fatalf("audit inserts actions=%d steps=%d calls=%#v", len(actions), len(steps), tx.execCalls)
+	}
+	if actions[0].args[2] != string(assetlifecycle.ActionTypeExtendValidity) {
+		t.Fatalf("action type arg = %#v, want extend_validity", actions[0].args[2])
+	}
+	if steps[0].args[4] != assetlifecycle.StepTypeSubscriptionRenewAt {
+		t.Fatalf("step type arg = %#v, want subscription_renew_at", steps[0].args[4])
+	}
+	var summary map[string]any
+	if err := json.Unmarshal(actions[0].args[6].([]byte), &summary); err != nil {
+		t.Fatalf("unmarshal extension summary: %v", err)
+	}
+	if summary["subscription_id"] != "sub_001" || summary["source_type"] != "outage" {
+		t.Fatalf("summary = %#v, want subscription and source", summary)
+	}
+}
+
+func TestExtendVPSValidityRejectsShorteningCurrentSubscription(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	oldRenewAt := subscriptions.NewDate(time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC))
+	newRenewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC))
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "from subscriptions") {
+				return nil, errors.New("unexpected query")
+			}
+			return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{{
+				scan: func(dest ...any) error {
+					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+						SubscriptionID:      "sub_001",
+						VPSID:               "vps_001",
+						Price:               120,
+						Currency:            "USD",
+						BillingCycle:        "annual",
+						BillingMonths:       12,
+						BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
+						BillingPeriodLength: 1,
+						MonthlyPrice:        10,
+						RenewAt:             &oldRenewAt,
+						AutoRenew:           true,
+						RenewalMode:         string(subscriptions.RenewalModeAuto),
+						Status:              subscriptions.StatusActive,
+						CreatedAt:           now,
+						UpdatedAt:           now,
+					})
+					return nil
+				},
+			}}}, nil
+		},
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil))
+					return nil
+				})
+			default:
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					return errors.New("unexpected query row")
+				})
+			}
+		},
+	}
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}}
+
+	_, err := repo.ExtendVPSValidity(context.Background(), "vps_001", assetlifecycle.ExtendValidityInput{
+		ExtendTo:    &newRenewAt,
+		Reason:      "outage compensation",
+		Fee:         0,
+		FeeCurrency: "USD",
+		SourceType:  "outage",
+	})
+	if !errors.Is(err, assetlifecycle.ErrInvalidLifecycleActionInput) {
+		t.Fatalf("ExtendVPSValidity() error = %v, want invalid lifecycle action input", err)
+	}
+	if tx.commitCount != 0 {
+		t.Fatalf("commit count = %d, want 0", tx.commitCount)
+	}
+	actions, steps := filterAssetLifecycleAuditExecs(tx.execCalls)
+	if len(actions) != 1 || len(steps) != 0 {
+		t.Fatalf("audit inserts actions=%d steps=%d calls=%#v, want action only before rollback", len(actions), len(steps), tx.execCalls)
+	}
+}
+
 func TestCancellationPreviewFindingsTreatPausedAndUnknownSubscriptionsAsInactiveEvidence(t *testing.T) {
 	t.Parallel()
 
@@ -350,6 +530,7 @@ func (f *fakeAssetLifecycleDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, 
 
 type fakeAssetLifecycleTx struct {
 	queryRowFunc  func(context.Context, string, ...any) pgx.Row
+	queryFunc     func(context.Context, string, ...any) (pgx.Rows, error)
 	execFunc      func(context.Context, string, ...any) (pgconn.CommandTag, error)
 	execCalls     []fakeAssetLifecycleExecCall
 	commitCount   int
@@ -399,7 +580,10 @@ func (f *fakeAssetLifecycleTx) Exec(ctx context.Context, sql string, args ...any
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
 
-func (f *fakeAssetLifecycleTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (f *fakeAssetLifecycleTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.queryFunc != nil {
+		return f.queryFunc(ctx, sql, args...)
+	}
 	return nil, errors.New("unexpected Query on fake asset lifecycle tx")
 }
 

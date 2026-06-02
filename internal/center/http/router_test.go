@@ -243,6 +243,10 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 			called = "cancellation"
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSExtendValidityHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "extend-validity"
+			w.WriteHeader(http.StatusOK)
+		}),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
@@ -277,6 +281,7 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", want: http.StatusOK, called: "unlink-monitoring-instance"},
 		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusOK, called: "cancellation-preview"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/cancellation", want: http.StatusOK, called: "cancellation"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", want: http.StatusOK, called: "extend-validity"},
 	} {
 		req = httptest.NewRequest(tt.method, tt.path, nil)
 		recorder = httptest.NewRecorder()
@@ -296,6 +301,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	subscriptionsCalled := false
 	cancellationPreviewCalled := false
 	cancellationCalled := false
+	extendValidityCalled := false
 	middlewareCalls := 0
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
@@ -319,6 +325,10 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 			cancellationCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSExtendValidityHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			extendValidityCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
 		AuthMiddleware: func(_ http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				middlewareCalls++
@@ -327,7 +337,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/monitoring-instances", "/api/vps/vps_001/subscriptions", "/api/vps/vps_001/link-monitoring-instance", "/api/vps/vps_001/unlink-monitoring-instance", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation"} {
+	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/monitoring-instances", "/api/vps/vps_001/subscriptions", "/api/vps/vps_001/link-monitoring-instance", "/api/vps/vps_001/unlink-monitoring-instance", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation", "/api/vps/vps_001/extend-validity"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 
@@ -352,8 +362,11 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	if cancellationCalled {
 		t.Fatal("vps cancellation handler was called despite auth middleware blocking")
 	}
-	if middlewareCalls != 8 {
-		t.Fatalf("middleware calls = %d, want 8", middlewareCalls)
+	if extendValidityCalled {
+		t.Fatal("vps extend validity handler was called despite auth middleware blocking")
+	}
+	if middlewareCalls != 9 {
+		t.Fatalf("middleware calls = %d, want 9", middlewareCalls)
 	}
 }
 

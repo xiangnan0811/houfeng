@@ -220,6 +220,46 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSCancellation(ctx context.Cont
 	return assetlifecycle.LifecycleActionResult{Action: action, Steps: steps}, nil
 }
 
+func (r *PostgresAssetLifecycleRepository) ExtendVPSValidity(ctx context.Context, vpsID string, input assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionResult, error) {
+	vpsID = strings.TrimSpace(vpsID)
+	if vpsID == "" {
+		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("%w: vps_id is required", assetlifecycle.ErrInvalidLifecycleActionInput)
+	}
+	input = assetlifecycle.NormalizeExtendValidityInput(input)
+	if err := assetlifecycle.ValidateExtendValidityInput(input); err != nil {
+		return assetlifecycle.LifecycleActionResult{}, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("begin vps validity extension transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	currentVPS, err := getLifecycleVPSAsset(ctx, tx, vpsID, true)
+	if err != nil {
+		return assetlifecycle.LifecycleActionResult{}, err
+	}
+	currentSubscription, err := lockSingleActiveSubscriptionForValidityExtension(ctx, tx, vpsID)
+	if err != nil {
+		return assetlifecycle.LifecycleActionResult{}, err
+	}
+
+	action, err := insertValidityExtensionAction(ctx, tx, currentVPS.VPSID, currentSubscription, input)
+	if err != nil {
+		return assetlifecycle.LifecycleActionResult{}, err
+	}
+	step, err := applyValidityExtensionToSubscription(ctx, tx, action.ActionID, currentSubscription, input)
+	if err != nil {
+		return assetlifecycle.LifecycleActionResult{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("commit vps validity extension action %q: %w", action.ActionID, err)
+	}
+	return assetlifecycle.LifecycleActionResult{Action: action, Steps: []assetlifecycle.LifecycleActionStep{step}}, nil
+}
+
 func ensureVPSCancellationNotBlocked(current vpsassets.Record) error {
 	if current.LifecycleStatus == vpsassets.LifecycleArchived {
 		return fmt.Errorf("%w: archived vps %q cannot be cancelled by lifecycle action", assetlifecycle.ErrLifecycleActionBlocked, current.VPSID)
@@ -903,6 +943,66 @@ func insertLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID string, input a
 	}, nil
 }
 
+func insertValidityExtensionAction(ctx context.Context, tx pgx.Tx, vpsID string, currentSubscription subscriptions.Record, input assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionRecord, error) {
+	actionID, err := ids.New("ala")
+	if err != nil {
+		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("generate asset lifecycle action id: %w", err)
+	}
+	now := time.Now().UTC()
+	summary := map[string]any{
+		"subscription_id": currentSubscription.SubscriptionID,
+		"old_renew_at":    subscriptionDateState(currentSubscription.RenewAt),
+		"new_renew_at":    subscriptionDateState(input.ExtendTo),
+		"fee":             input.Fee,
+		"fee_currency":    input.FeeCurrency,
+		"source_type":     input.SourceType,
+	}
+	summaryJSON, err := json.Marshal(summary)
+	if err != nil {
+		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("marshal validity extension action summary: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into asset_lifecycle_actions (
+			action_id,
+			vps_id,
+			action_type,
+			status,
+			reason,
+			effective_date,
+			summary,
+			created_at,
+			confirmed_at,
+			completed_at
+		) values ($1,$2,$3,$4,$5,$6::date,$7::jsonb,$8,$8,$8)`,
+		actionID,
+		vpsID,
+		string(assetlifecycle.ActionTypeExtendValidity),
+		assetlifecycle.ActionStatusCompleted,
+		input.Reason,
+		subscriptionDateArg(input.ExtendTo),
+		summaryJSON,
+		now,
+	); err != nil {
+		if isLifecycleActionInvalidPostgresError(err) {
+			return assetlifecycle.LifecycleActionRecord{}, assetlifecycle.ErrInvalidLifecycleActionInput
+		}
+		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("insert validity extension action for vps %q: %w", vpsID, err)
+	}
+
+	return assetlifecycle.LifecycleActionRecord{
+		ActionID:      actionID,
+		VPSID:         vpsID,
+		ActionType:    assetlifecycle.ActionTypeExtendValidity,
+		Status:        assetlifecycle.ActionStatusCompleted,
+		Reason:        input.Reason,
+		EffectiveDate: cloneSubscriptionDate(input.ExtendTo),
+		CreatedAt:     now,
+		ConfirmedAt:   &now,
+		CompletedAt:   &now,
+		Summary:       summary,
+	}, nil
+}
+
 func recordFailedLifecycleAction(
 	ctx context.Context,
 	db assetLifecycleDB,
@@ -1128,6 +1228,65 @@ func lockSubscriptionForLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID, s
 		return subscriptions.Record{}, fmt.Errorf("lock subscription %q for lifecycle action: %w", subscriptionID, err)
 	}
 	return record, nil
+}
+
+func lockSingleActiveSubscriptionForValidityExtension(ctx context.Context, tx pgx.Tx, vpsID string) (subscriptions.Record, error) {
+	records, err := listLifecycleSubscriptionsForVPS(ctx, tx, vpsID, true)
+	if err != nil {
+		return subscriptions.Record{}, err
+	}
+	activeRecords := make([]subscriptions.Record, 0, 1)
+	for _, record := range records {
+		if record.Status == subscriptions.StatusActive {
+			activeRecords = append(activeRecords, record)
+		}
+	}
+	if len(activeRecords) == 0 {
+		return subscriptions.Record{}, fmt.Errorf("%w: active subscription is required for validity extension", assetlifecycle.ErrLifecycleActionBlocked)
+	}
+	if len(activeRecords) > 1 {
+		return subscriptions.Record{}, fmt.Errorf("%w: multiple active subscriptions require manual selection before validity extension", assetlifecycle.ErrLifecycleActionBlocked)
+	}
+	return activeRecords[0], nil
+}
+
+func applyValidityExtensionToSubscription(ctx context.Context, tx pgx.Tx, actionID string, current subscriptions.Record, input assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionStep, error) {
+	before := subscriptionValidityState(current)
+	if current.RenewAt != nil && current.RenewAt.Time.Equal(input.ExtendTo.Time) {
+		return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeSubscription, current.SubscriptionID, assetlifecycle.StepTypeSubscriptionRenewAt, assetlifecycle.StepStatusSkipped, before, before, "订阅有效期已经是目标日期。")
+	}
+	if current.RenewAt != nil && input.ExtendTo.Time.Before(current.RenewAt.Time) {
+		return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("%w: extend_to must not be before current renew_at", assetlifecycle.ErrInvalidLifecycleActionInput)
+	}
+
+	patch := subscriptions.NormalizePatchInput(subscriptions.PatchInput{
+		RenewAt: subscriptions.PatchDate(input.ExtendTo),
+	})
+	if err := subscriptions.ValidatePatchInput(patch); err != nil {
+		return assetlifecycle.LifecycleActionStep{}, err
+	}
+	updated, err := patchSubscriptionRow(ctx, tx, current.SubscriptionID, patch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrSubscriptionNotFound
+	}
+	if err != nil {
+		if isSubscriptionInvalidPostgresError(err) {
+			return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrInvalidSubscriptionInput
+		}
+		return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("patch subscription %q for validity extension: %w", current.SubscriptionID, err)
+	}
+	if subscriptionPriceHistoryChanged(current, updated) {
+		if _, err := createPriceHistory(ctx, tx, renewals.CreatePriceHistoryInput{
+			From: current,
+			To:   updated,
+		}); err != nil {
+			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
+				return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrInvalidSubscriptionInput
+			}
+			return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("record price history for subscription %q validity extension: %w", current.SubscriptionID, err)
+		}
+	}
+	return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeSubscription, current.SubscriptionID, assetlifecycle.StepTypeSubscriptionRenewAt, assetlifecycle.StepStatusCompleted, before, subscriptionValidityState(updated), "订阅续费/有效期日期已延长。")
 }
 
 func applyMonitoringInstanceLifecycleAction(ctx context.Context, tx pgx.Tx, actionID, vpsID string, input assetlifecycle.MonitoringInstanceActionInput) ([]assetlifecycle.LifecycleActionStep, error) {
@@ -1407,9 +1566,18 @@ func subscriptionLifecycleState(record subscriptions.Record) map[string]any {
 		"status":                 string(record.Status),
 		"auto_renew":             record.AutoRenew,
 		"auto_renew_cancelled":   record.AutoRenewCancelled,
+		"renewal_mode":           record.RenewalMode,
 		"renew_at":               subscriptionDateState(record.RenewAt),
 		"monthly_price":          record.MonthlyPrice,
 		"currency":               record.Currency,
+		"subscription_record_id": record.SubscriptionID,
+	}
+}
+
+func subscriptionValidityState(record subscriptions.Record) map[string]any {
+	return map[string]any{
+		"renew_at":               subscriptionDateState(record.RenewAt),
+		"status":                 string(record.Status),
 		"subscription_record_id": record.SubscriptionID,
 	}
 }

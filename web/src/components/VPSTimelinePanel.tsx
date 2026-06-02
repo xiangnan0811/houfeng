@@ -2,6 +2,10 @@ import type { ReactNode } from 'react'
 
 import { Badge, MonoDigits, Timestamp } from './atoms'
 import {
+  periodLabel,
+  renewalModeLabel,
+} from '../lib/assetOptions'
+import {
   VPS_EXPERIENCE_CATEGORY_LABELS,
   VPS_EXPERIENCE_SEVERITY_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
@@ -24,10 +28,6 @@ type TimelineMetaItem = {
 function renewalLabel(value?: VPSRenewalDecision | string | null): string {
   if (!value) return '首次记录'
   return VPS_RENEWAL_DECISION_LABELS[value as VPSRenewalDecision] ?? value
-}
-
-function booleanLabel(value: boolean): string {
-  return value ? '是' : '否'
 }
 
 function changedValue(
@@ -190,17 +190,7 @@ export function VPSTimelinePanel({ timeline }: VPSTimelinePanelProps) {
                     },
                     {
                       label: '计费周期',
-                      value: changedValue(
-                        history.from_billing_cycle,
-                        history.to_billing_cycle,
-                      ),
-                    },
-                    {
-                      label: '计费月数',
-                      value: changedValue(
-                        history.from_billing_months,
-                        history.to_billing_months,
-                      ),
+                      value: `${periodLabel(history.from_billing_period_unit, history.from_billing_period_length, history.from_billing_months)} -> ${periodLabel(history.to_billing_period_unit, history.to_billing_period_length, history.to_billing_months)}`,
                     },
                     {
                       label: '续费日',
@@ -209,16 +199,8 @@ export function VPSTimelinePanel({ timeline }: VPSTimelinePanelProps) {
                       )}`,
                     },
                     {
-                      label: '自动续费',
-                      value: `${booleanLabel(history.from_auto_renew)} -> ${booleanLabel(
-                        history.to_auto_renew,
-                      )}`,
-                    },
-                    {
-                      label: '自动续费取消',
-                      value: `${booleanLabel(
-                        history.from_auto_renew_cancelled,
-                      )} -> ${booleanLabel(history.to_auto_renew_cancelled)}`,
+                      label: '续费方式',
+                      value: `${renewalModeLabel(history.from_renewal_mode)} -> ${renewalModeLabel(history.to_renewal_mode)}`,
                     },
                   ]}
                 />

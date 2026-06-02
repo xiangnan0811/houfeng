@@ -27,6 +27,7 @@ import type {
   EventListFilter,
   EventListResponse,
   IncidentListFilter,
+  ExtendVPSValidityInput,
   MonitoringInstanceInstallCommandIssue,
   MonitoringInstanceOnboardingState,
   MonitoringInstanceRecord,
@@ -506,6 +507,10 @@ export function getVPSCancellationPreview(vpsId: string) {
 
 export function applyVPSCancellation(vpsId: string, input: ApplyCancellationInput): Promise<LifecycleActionResult> {
   return postJSONBody<LifecycleActionResult>(`/api/vps/${vpsId}/cancellation`, input)
+}
+
+export function extendVPSValidity(vpsId: string, input: ExtendVPSValidityInput): Promise<LifecycleActionResult> {
+  return postJSONBody<LifecycleActionResult>(`/api/vps/${vpsId}/extend-validity`, input)
 }
 
 export function getVPSTimeline(vpsId: string) {

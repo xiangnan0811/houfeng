@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { PageState } from './PageState'
 import { DataTable, type DataTableColumn } from './atoms'
+import { renewalModeFromLegacy, renewalModeLabel } from '../lib/assetOptions'
 import { formatDate, formatMoney } from '../lib/format'
 import type { SubscriptionRecord, VPSAssetRecord } from '../lib/types'
 import { SubscriptionStatusBadge } from '../pages/assetPageBadges'
@@ -43,7 +44,7 @@ export function AssetDecisionRenewalTable({
       render: (subscription) => (
         <div className="asset-table__stack">
           <strong>{formatDate(subscription.renew_at)}</strong>
-          <span>{subscription.auto_renew ? '自动续费' : '手动续费'} · {subscription.auto_renew_cancelled ? '已取消自动续费' : '自动续费未取消'}</span>
+          <span>{renewalModeLabel(subscription.renewal_mode ?? renewalModeFromLegacy(subscription))}</span>
         </div>
       ),
     },

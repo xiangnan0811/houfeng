@@ -502,6 +502,7 @@ export function VPSPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         providers={state.providers}
+        existingCountries={state.vps.map((vps) => vps.country)}
         onCreated={(vps) => navigate(`/vps/${vps.vps_id}`)}
         onProviderCreated={(p) => setState((s) => ({ ...s, providers: [...s.providers, p] }))}
       />
