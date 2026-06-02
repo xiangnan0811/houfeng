@@ -177,7 +177,7 @@ func Default() CenterSettings {
 			TargetLabels:             []TargetLabelOverrideRule{},
 		},
 		RetentionPolicy: RetentionPolicy{
-			RawLayerDays:          7,
+			RawLayerDays:          30,
 			AggregateLayerDays:    30,
 			EventLayerDays:        90,
 			NotificationLayerDays: 180,
@@ -508,8 +508,8 @@ func validateIncidentDefaultsOverride(input IncidentDefaultsOverride) (IncidentD
 }
 
 func validateRetentionPolicy(input RetentionPolicy) (RetentionPolicy, error) {
-	if input.RawLayerDays <= 0 {
-		return RetentionPolicy{}, invalidSettings("raw retention days must be positive")
+	if input.RawLayerDays < 30 {
+		return RetentionPolicy{}, invalidSettings("raw retention days must be at least 30")
 	}
 	if input.AggregateLayerDays <= 0 {
 		return RetentionPolicy{}, invalidSettings("aggregate retention days must be positive")

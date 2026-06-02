@@ -23,6 +23,7 @@ import (
 	"houfeng/internal/center/installer"
 	"houfeng/internal/center/notify"
 	"houfeng/internal/center/retention"
+	"houfeng/internal/center/runtimefacts"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
@@ -96,6 +97,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
 	enrollmentSvc := enrollment.NewService(monitoringInstanceRepo)
 	syncRepo := store.NewPostgresSyncRepository(db.Pool())
+	streamHub := runtimefacts.NewStreamHub()
 	notifier := deps.newIncidentNotifier(cfg, notifierSettingsRepo)
 	incidentSvc := incidentservice.NewSettingsBackedService(
 		monitoringInstanceRepo,
@@ -108,7 +110,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		5*time.Second,
 		cfg.IncidentSweepInterval,
 	)
-	syncSvc := syncing.NewService(syncRepo, incidentSvc)
+	syncSvc := syncing.NewService(syncRepo, syncing.NewCompositePostSyncProcessor(incidentSvc, streamHub))
 
 	userRepo := store.NewPostgresUserRepository(db.Pool())
 	sessionRepo := store.NewPostgresSessionRepository(db.Pool())
@@ -155,6 +157,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		MonitoringInstanceItemHandler:            handlers.MonitoringInstanceItem(monitoringInstanceRepo),
 		MonitoringInstanceVPSHandler:             handlers.MonitoringInstanceVPS(vpsMonitoringInstanceLinkRepo),
 		MonitoringInstanceRuntimeFactsHandler:    handlers.MonitoringInstanceRuntimeFacts(runtimeFactsRepo),
+		MonitoringInstanceRuntimeStreamHandler:   handlers.MonitoringInstanceRuntimeStream(monitoringInstanceRepo, streamHub),
 		MonitoringInstanceRuntimeControlHandler:  handlers.MonitoringInstanceRuntimeControls(monitoringInstanceRepo),
 		MonitoringInstanceOnboardingHandler:      handlers.MonitoringInstanceOnboarding(monitoringInstanceRepo),
 		MonitoringInstanceEnrollmentTokenHandler: handlers.MonitoringInstanceEnrollmentToken(monitoringInstanceRepo),

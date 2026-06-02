@@ -38,6 +38,36 @@ type HostSample struct {
 	Containers           []agentapi.ContainerInfo `json:"containers,omitempty"`
 }
 
+type WindowRequest struct {
+	Key         string
+	StartedAt   time.Time
+	EndedAt     time.Time
+	BucketCount int
+}
+
+type RuntimeWindowSummary struct {
+	Key                string     `json:"key"`
+	StartedAt          time.Time  `json:"started_at"`
+	EndedAt            time.Time  `json:"ended_at"`
+	BucketCount        int        `json:"bucket_count"`
+	AvailableStartedAt *time.Time `json:"available_started_at"`
+	AvailableEndedAt   *time.Time `json:"available_ended_at"`
+	SampleCount        int        `json:"sample_count"`
+}
+
+type HostMetricPoint struct {
+	ObservedAt        time.Time `json:"observed_at"`
+	SampleCount       int       `json:"sample_count"`
+	CPUUsagePct       float64   `json:"cpu_usage_pct"`
+	MemUsedPct        float64   `json:"mem_used_pct"`
+	DiskUsedPct       float64   `json:"disk_used_pct"`
+	InodeUsedPct      float64   `json:"inode_used_pct"`
+	Load5             float64   `json:"load_5"`
+	CPUIOWaitPct      float64   `json:"cpu_iowait_pct"`
+	NetInBytesPerSec  float64   `json:"net_in_bytes_per_sec"`
+	NetOutBytesPerSec float64   `json:"net_out_bytes_per_sec"`
+}
+
 type ProbeObservation struct {
 	MonitoringInstanceID string    `json:"monitoring_instance_id"`
 	TargetID             string    `json:"target_id"`
@@ -59,9 +89,11 @@ type ProbeObservation struct {
 }
 
 type MonitoringInstanceRuntimeFacts struct {
-	MonitoringInstanceID string       `json:"monitoring_instance_id"`
-	LatestHostSample     *HostSample  `json:"latest_host_sample"`
-	RecentHostSamples    []HostSample `json:"recent_host_samples"`
+	MonitoringInstanceID string               `json:"monitoring_instance_id"`
+	Window               RuntimeWindowSummary `json:"window"`
+	LatestHostSample     *HostSample          `json:"latest_host_sample"`
+	HostMetricPoints     []HostMetricPoint    `json:"host_metric_points"`
+	RecentHostSamples    []HostSample         `json:"recent_host_samples"`
 }
 
 type TargetRuntimeFacts struct {
@@ -71,6 +103,6 @@ type TargetRuntimeFacts struct {
 }
 
 type Repository interface {
-	GetMonitoringInstanceRuntimeFacts(context.Context, string, time.Time, int) (MonitoringInstanceRuntimeFacts, error)
+	GetMonitoringInstanceRuntimeFacts(context.Context, string, WindowRequest) (MonitoringInstanceRuntimeFacts, error)
 	GetTargetRuntimeFacts(context.Context, string, time.Time, int) (TargetRuntimeFacts, error)
 }

@@ -106,7 +106,9 @@ export function MonitoringComparePage() {
             {!monitoringInstanceA.loading && !monitoringInstanceA.error && monitoringInstanceA.runtimeFacts ? (
               <MonitoringInstanceWatchtowerMetrics
                 sample={monitoringInstanceA.runtimeFacts.latest_host_sample ?? null}
-                samples={monitoringInstanceA.runtimeFacts.recent_host_samples ?? []}
+                metricPoints={monitoringInstanceA.runtimeFacts.host_metric_points ?? []}
+                timeWindow="24h"
+                window={monitoringInstanceA.runtimeFacts.window}
               />
             ) : (
               <CompareColumnPlaceholder state={monitoringInstanceA} />
@@ -116,7 +118,9 @@ export function MonitoringComparePage() {
             {!monitoringInstanceB.loading && !monitoringInstanceB.error && monitoringInstanceB.runtimeFacts ? (
               <MonitoringInstanceWatchtowerMetrics
                 sample={monitoringInstanceB.runtimeFacts.latest_host_sample ?? null}
-                samples={monitoringInstanceB.runtimeFacts.recent_host_samples ?? []}
+                metricPoints={monitoringInstanceB.runtimeFacts.host_metric_points ?? []}
+                timeWindow="24h"
+                window={monitoringInstanceB.runtimeFacts.window}
               />
             ) : (
               <CompareColumnPlaceholder state={monitoringInstanceB} />
@@ -256,7 +260,7 @@ function CompareSummaryCard({ state, side }: { state: MonitoringInstanceState; s
 
   const monitoringInstance = state.monitoringInstance
   const sample = state.runtimeFacts?.latest_host_sample ?? null
-  const sampleCount = state.runtimeFacts?.recent_host_samples.length ?? 0
+  const sampleCount = state.runtimeFacts?.window?.sample_count ?? state.runtimeFacts?.host_metric_points?.length ?? 0
 
   return (
     <article className="compare-summary-card" aria-label={`${label} 侧摘要`}>

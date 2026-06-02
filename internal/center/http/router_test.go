@@ -660,6 +660,33 @@ func TestRouterDispatchesMonitoringInstanceRuntimeFactsAPI(t *testing.T) {
 	}
 }
 
+func TestRouterDispatchesMonitoringInstanceRuntimeStreamAPI(t *testing.T) {
+	var called string
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		MonitoringInstanceRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "runtime-facts"
+			w.WriteHeader(http.StatusOK)
+		}),
+		MonitoringInstanceRuntimeStreamHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "runtime-stream"
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-stream", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if called != "runtime-stream" {
+		t.Fatalf("expected runtime-stream handler, got %q", called)
+	}
+}
+
 func TestRouterDispatchesTargetRuntimeFactsAPI(t *testing.T) {
 	var called string
 	handler := centerhttp.New(centerhttp.RouterOptions{

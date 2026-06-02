@@ -11,6 +11,7 @@ import type {
   MonitoringInstanceOnboardingState,
   MonitoringInstanceRecord,
   MonitoringInstanceRuntimeFacts,
+  HostSample,
   StateChangeEventRecord,
   VPSSummary,
 } from '../../lib/types'
@@ -34,6 +35,7 @@ import type {
   BindingConflictAction,
   HistoryTab,
   PendingRuntimeConfirmation,
+  RuntimeStreamStatus,
   TimeWindow,
 } from './types'
 
@@ -63,6 +65,9 @@ type MonitoringDetailPageBodyProps = {
   onBindingReset: () => void
   timeWindow: TimeWindow
   onTimeWindowChange: (value: TimeWindow) => void
+  realtimeSamples: HostSample[]
+  runtimeStreamStatus: RuntimeStreamStatus
+  runtimeStreamError: string | null
   historyOpen: boolean
   historyTab: HistoryTab
   historyIncidents: ActiveIncidentRecord[] | null
@@ -110,6 +115,9 @@ export function MonitoringDetailPageBody({
   onBindingReset,
   timeWindow,
   onTimeWindowChange,
+  realtimeSamples,
+  runtimeStreamStatus,
+  runtimeStreamError,
   historyOpen,
   historyTab,
   historyIncidents,
@@ -130,8 +138,14 @@ export function MonitoringDetailPageBody({
   onOpenOnboarding,
   onCloseOnboarding,
 }: MonitoringDetailPageBodyProps) {
-  const sample = runtimeFacts?.latest_host_sample ?? null
-  const recentSamples = runtimeFacts?.recent_host_samples ?? []
+  const realtimeLatestSample = timeWindow === 'realtime'
+    ? realtimeSamples[realtimeSamples.length - 1] ?? null
+    : null
+  const sample = realtimeLatestSample ?? runtimeFacts?.latest_host_sample ?? null
+  const metricPoints =
+    timeWindow === 'realtime'
+      ? realtimeSamples
+      : runtimeFacts?.host_metric_points ?? []
   const isMaintenance = monitoringInstance.monitoring_status === '维护中'
   const showBindingConflict = monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
   const bindingActionsDisabled =
@@ -189,11 +203,18 @@ export function MonitoringDetailPageBody({
         />
       ) : null}
 
-      <MonitoringInstanceTimeWindowTabs value={timeWindow} onChange={onTimeWindowChange} />
+      <MonitoringInstanceTimeWindowTabs
+        value={timeWindow}
+        onChange={onTimeWindowChange}
+        streamStatus={runtimeStreamStatus}
+        streamError={runtimeStreamError}
+      />
 
       <MonitoringInstanceWatchtowerMetrics
         sample={sample}
-        samples={recentSamples}
+        metricPoints={metricPoints}
+        timeWindow={timeWindow}
+        window={runtimeFacts?.window}
         isMaintenance={isMaintenance}
       />
 

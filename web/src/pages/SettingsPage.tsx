@@ -99,6 +99,12 @@ function parsePositiveInteger(value: string, label: string) {
   return Number.parseInt(n, 10)
 }
 
+function parseRawRetentionDays(value: string) {
+  const days = parsePositiveInteger(value, '原始层天数')
+  if (days < 30) throw new Error('原始层天数必须至少为 30 天。')
+  return days
+}
+
 function parsePositiveNumber(value: string, label: string) {
   const num = Number(value.trim())
   if (!Number.isFinite(num) || num <= 0) throw new Error(`${label}必须为正数。`)
@@ -165,7 +171,7 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
       target_labels: parseOverrideRuleArray<TargetLabelOverrideRule>(form.targetLabelOverridesText, '目标标签覆盖'),
     },
     retention_policy: {
-      raw_layer_days: parsePositiveInteger(form.retentionPolicy.rawLayerDays, '原始层天数'),
+      raw_layer_days: parseRawRetentionDays(form.retentionPolicy.rawLayerDays),
       aggregate_layer_days: parsePositiveInteger(form.retentionPolicy.aggregateLayerDays, '聚合层天数'),
       event_layer_days: parsePositiveInteger(form.retentionPolicy.eventLayerDays, '事件层天数'),
       notification_layer_days: parsePositiveInteger(form.retentionPolicy.notificationLayerDays, '通知层天数'),
