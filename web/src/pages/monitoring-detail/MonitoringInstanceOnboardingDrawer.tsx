@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { Card, Modal, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
+import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { ApiError, issueMonitoringInstanceInstallCommand } from '../../lib/api'
 import { useCopyToClipboard } from '../../lib/useCopyToClipboard'
 import type { MonitoringInstanceInstallCommandIssue, MonitoringInstanceRecord } from '../../lib/types'
@@ -50,6 +52,7 @@ type Props = {
   monitoringInstance: MonitoringInstanceRecord
   open: boolean
   onClose: () => void
+  returnVPSId?: string | null
 }
 
 type IssueState = {
@@ -57,41 +60,56 @@ type IssueState = {
   busy: boolean
   error: string | null
   hidden: boolean
+  copyStatus: 'idle' | 'copied' | 'failed'
 }
 
-export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, onClose }: Props) {
+export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, onClose, returnVPSId }: Props) {
+  const navigate = useNavigate()
+  const { copy } = useCopyToClipboard()
   const [state, setState] = useState<IssueState>({
     issue: null,
     busy: false,
     error: null,
     hidden: false,
+    copyStatus: 'idle',
   })
 
   useEffect(() => {
     if (open) return
-    setState({ issue: null, busy: false, error: null, hidden: false })
+    setState({ issue: null, busy: false, error: null, hidden: false, copyStatus: 'idle' })
   }, [open])
 
   async function handleIssue() {
     setState((current) => ({ ...current, busy: true, error: null }))
     try {
       const issue = await issueMonitoringInstanceInstallCommand(monitoringInstance.monitoring_instance_id)
-      setState({ issue, busy: false, error: null, hidden: false })
+      const copied = await copy(issue.command)
+      setState({ issue, busy: false, error: null, hidden: false, copyStatus: copied ? 'copied' : 'failed' })
     } catch (error: unknown) {
       setState((current) => ({
         ...current,
         busy: false,
         error: describeInstallCommandError(error),
+        copyStatus: 'idle',
       }))
     }
   }
 
-  const { issue, busy, error, hidden } = state
+  function handleComplete() {
+    if (returnVPSId) {
+      navigate(`/vps/${encodeURIComponent(returnVPSId)}`)
+      return
+    }
+    onClose()
+  }
+
+  const { issue, busy, error, hidden, copyStatus } = state
   const primaryLabel = issue ? '重新生成安装命令' : '生成一键安装命令'
   const canShowCommand = issue !== null && !hidden
+  const completeLabel = returnVPSId ? '完成并返回 VPS' : '完成并查看监控实例'
 
   return (
-    <Modal open={open} onClose={onClose} title="接入 agent" ariaLabel="监控实例接入抽屉">
+    <Modal open={open} onClose={onClose} title="接入 agent" ariaLabel="监控实例接入抽屉" size="xl">
       <div className="onboarding-drawer">
         <Card cardRole="warning" className="onboarding-drawer__brief">
           <p className="onboarding-token__hint onboarding-token__hint--critical">
@@ -125,6 +143,13 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
 
         {canShowCommand && issue ? (
           <Card cardRole="accent" aria-label="一键安装命令">
+            {copyStatus === 'copied' ? (
+              <p className="asset-operation-feedback" role="status">安装命令已自动复制到剪贴板。</p>
+            ) : copyStatus === 'failed' ? (
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+                自动复制失败，请使用手动复制按钮。
+              </p>
+            ) : null}
             <div className="onboarding-snippet">
               <pre>
                 <code>{issue.command}</code>
@@ -154,6 +179,9 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               </div>
             </dl>
             <div className="onboarding-token__actions">
+              <button type="button" className="btn sm primary" onClick={handleComplete}>
+                {completeLabel}
+              </button>
               <button
                 type="button"
                 className="btn sm secondary"
@@ -172,8 +200,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
           </Card>
         ) : null}
 
-        <section className="onboarding-drawer__section" aria-label="安装器行为">
-          <h3 className="section-heading__title">命令执行后会做什么</h3>
+        <CollapsibleSection title="命令执行后会做什么" className="onboarding-drawer__section">
           <ol className="onboarding-steps">
             {installChecklist.map((item) => (
               <li key={item}>
@@ -181,10 +208,9 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               </li>
             ))}
           </ol>
-        </section>
+        </CollapsibleSection>
 
-        <section className="onboarding-drawer__section" aria-label="手工排障回退">
-          <h3 className="section-heading__title">手工安装（排障回退）</h3>
+        <CollapsibleSection title="手工安装（排障回退）" className="onboarding-drawer__section">
           <Card cardRole="dim" className="onboarding-manual-fallback">
             <p className="onboarding-token__hint">
               优先使用上方一键命令。仅在排查安装器、下载或 systemd 写入问题时，按部署文档手工写入以下配置；不要用浏览器地址推导生产 Center URL。
@@ -202,7 +228,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               <CopyButton value={manualTokenSnippet} label="复制 token 写入模板" />
             </div>
           </Card>
-        </section>
+        </CollapsibleSection>
       </div>
     </Modal>
   )

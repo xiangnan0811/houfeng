@@ -146,6 +146,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSServicesHandler:                       handlers.VPSServices(assetServiceRepo),
 		VPSCancellationPreviewHandler:            handlers.VPSCancellationPreview(assetLifecycleRepo),
 		VPSCancellationHandler:                   handlers.VPSCancellation(assetLifecycleRepo),
+		VPSExtendValidityHandler:                 handlers.VPSExtendValidity(assetLifecycleRepo),
 		AssetContextMonitoringInstancesHandler:   handlers.AssetContextMonitoringInstances(assetLifecycleRepo),
 		AssetContextTargetsHandler:               handlers.AssetContextTargets(assetLifecycleRepo),
 		SubscriptionsCollectionHandler:           handlers.SubscriptionsCollection(subscriptionRepo),

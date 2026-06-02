@@ -49,11 +49,14 @@ const subscription = {
   currency: 'USD',
   billing_cycle: 'monthly',
   billing_months: 1,
+  billing_period_unit: 'month',
+  billing_period_length: 1,
   monthly_price: 12,
   started_at: '2026-05-01',
   renew_at: '2026-06-01',
   auto_renew: true,
   auto_renew_cancelled: false,
+  renewal_mode: 'auto',
   status: 'active' as const,
   payment_method: 'card',
   note: '',
@@ -111,7 +114,15 @@ describe('SubscriptionsPage', () => {
   })
 
   it('creates subscriptions without sending monthly_price', async () => {
-    const created = { ...subscription, subscription_id: 'sub_new', price: 24, monthly_price: 12, billing_months: 2 }
+    const created = {
+      ...subscription,
+      subscription_id: 'sub_new',
+      price: 24,
+      monthly_price: 12,
+      billing_cycle: '2 months',
+      billing_months: 2,
+      billing_period_length: 2,
+    }
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse([]))
@@ -131,11 +142,12 @@ describe('SubscriptionsPage', () => {
     expect(createDialog).toBeInTheDocument()
     fireEvent.change(within(createDialog).getByLabelText('VPS'), { target: { value: 'vps_001' } })
     fireEvent.change(within(createDialog).getByLabelText('价格'), { target: { value: '24' } })
-    fireEvent.change(within(createDialog).getByLabelText('币种'), { target: { value: 'usd' } })
-    fireEvent.change(within(createDialog).getByLabelText('计费月数'), { target: { value: '2' } })
+    fireEvent.change(within(createDialog).getByLabelText('币种'), { target: { value: 'USD' } })
+    fireEvent.change(within(createDialog).getByLabelText('计费周期单位'), { target: { value: 'month' } })
+    fireEvent.change(within(createDialog).getByLabelText('计费周期长度'), { target: { value: '2' } })
     fireEvent.change(within(createDialog).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
     fireEvent.click(within(createDialog).getByLabelText('自动续费'))
-    fireEvent.click(within(createDialog).getByRole('button', { name: '创建' }))
+    fireEvent.click(within(createDialog).getByRole('button', { name: '创建订阅' }))
 
     await waitFor(() => expect(screen.getByText('USD 24.00')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/subscriptions', {
@@ -150,12 +162,15 @@ describe('SubscriptionsPage', () => {
         vps_id: 'vps_001',
         price: 24,
         currency: 'USD',
-        billing_cycle: 'monthly',
+        billing_cycle: '2 months',
         billing_months: 2,
+        billing_period_unit: 'month',
+        billing_period_length: 2,
         started_at: null,
         renew_at: '2026-07-01',
         auto_renew: true,
         auto_renew_cancelled: false,
+        renewal_mode: 'auto',
         payment_method: '',
         note: '',
       }),
@@ -200,8 +215,11 @@ describe('SubscriptionsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('dialog', { name: '新建订阅表单' })).toBeInTheDocument())
     const createDialog = screen.getByRole('dialog', { name: '新建订阅表单' })
-    fireEvent.click(within(createDialog).getByRole('button', { name: '创建' }))
-    expect(screen.getByText('价格必须为非负数字。')).toBeInTheDocument()
+    fireEvent.change(within(createDialog).getByLabelText('价格'), { target: { value: '9' } })
+    fireEvent.change(within(createDialog).getByLabelText('币种'), { target: { value: '__custom' } })
+    fireEvent.change(within(createDialog).getByLabelText('自定义币种'), { target: { value: 'US1' } })
+    fireEvent.click(within(createDialog).getByRole('button', { name: '创建订阅' }))
+    expect(screen.getByText('币种必须为 3 位大写代码。')).toBeInTheDocument()
     fireEvent.change(within(createDialog).getByLabelText('价格'), { target: { value: '99' } })
     fireEvent.click(within(createDialog).getByRole('button', { name: '取消' }))
 
@@ -209,7 +227,7 @@ describe('SubscriptionsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /新建订阅/ }))
 
     const reopened = screen.getByRole('dialog', { name: '新建订阅表单' })
-    expect(within(reopened).queryByText('价格必须为非负数字。')).not.toBeInTheDocument()
+    expect(within(reopened).queryByText('币种必须为 3 位大写代码。')).not.toBeInTheDocument()
     expect(within(reopened).getByLabelText('价格')).toHaveValue(null)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
@@ -218,14 +236,17 @@ describe('SubscriptionsPage', () => {
     const updated = {
       ...subscription,
       price: 24,
-      billing_cycle: 'quarterly',
+      billing_cycle: '3 months',
       billing_months: 3,
+      billing_period_unit: 'month',
+      billing_period_length: 3,
       monthly_price: 8,
       renew_at: '2026-08-01',
       auto_renew: false,
       auto_renew_cancelled: true,
+      renewal_mode: 'auto_cancelled',
       status: 'paused' as const,
-      payment_method: 'paypal',
+      payment_method: 'PayPal',
       note: 'review',
       updated_at: '2026-05-09T09:00:00Z',
     }
@@ -248,14 +269,13 @@ describe('SubscriptionsPage', () => {
     const editDialog = screen.getByRole('dialog', { name: '编辑订阅表单' })
     expect(editDialog).toBeInTheDocument()
     fireEvent.change(within(editDialog).getByLabelText('价格'), { target: { value: '24' } })
-    fireEvent.change(within(editDialog).getByLabelText('计费周期'), { target: { value: 'quarterly' } })
-    fireEvent.change(within(editDialog).getByLabelText('计费月数'), { target: { value: '3' } })
+    fireEvent.change(within(editDialog).getByLabelText('计费周期单位'), { target: { value: 'month' } })
+    fireEvent.change(within(editDialog).getByLabelText('计费周期长度'), { target: { value: '3' } })
     fireEvent.change(within(editDialog).getByLabelText('续费日期'), { target: { value: '2026-08-01' } })
-    fireEvent.click(within(editDialog).getByLabelText('自动续费'))
     fireEvent.click(within(editDialog).getByLabelText('已取消自动续费'))
-    fireEvent.change(within(editDialog).getByLabelText('支付方式'), { target: { value: 'paypal' } })
+    fireEvent.change(within(editDialog).getByLabelText('支付方式'), { target: { value: 'PayPal' } })
     fireEvent.change(within(editDialog).getByLabelText('备注'), { target: { value: 'review' } })
-    fireEvent.click(within(editDialog).getByRole('button', { name: '保存' }))
+    fireEvent.click(within(editDialog).getByRole('button', { name: '保存订阅' }))
 
     await waitFor(() => expect(screen.getAllByText('USD 24.00').length).toBeGreaterThan(0))
     expect(screen.getByText('已取消自动续费')).toBeInTheDocument()
@@ -271,13 +291,16 @@ describe('SubscriptionsPage', () => {
         vps_id: 'vps_001',
         price: 24,
         currency: 'USD',
-        billing_cycle: 'quarterly',
+        billing_cycle: '3 months',
         billing_months: 3,
+        billing_period_unit: 'month',
+        billing_period_length: 3,
         started_at: '2026-05-01',
         renew_at: '2026-08-01',
         auto_renew: false,
         auto_renew_cancelled: true,
-        payment_method: 'paypal',
+        renewal_mode: 'auto_cancelled',
+        payment_method: 'PayPal',
         note: 'review',
       }),
     })
@@ -286,7 +309,7 @@ describe('SubscriptionsPage', () => {
   it('links subscription billing facts back to the VPS owner', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([{ ...subscription, auto_renew: false, auto_renew_cancelled: true }]))
+      .mockResolvedValueOnce(mockJSONResponse([{ ...subscription, auto_renew: false, auto_renew_cancelled: true, renewal_mode: 'auto_cancelled' }]))
       .mockResolvedValueOnce(mockJSONResponse([vps]))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -339,10 +362,12 @@ describe('SubscriptionsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     const firstEditDialog = screen.getByRole('dialog', { name: '编辑订阅表单' })
-    fireEvent.change(within(firstEditDialog).getByLabelText('币种'), { target: { value: 'US1' } })
-    fireEvent.click(within(firstEditDialog).getByRole('button', { name: '保存' }))
+    fireEvent.change(within(firstEditDialog).getByLabelText('币种'), { target: { value: '__custom' } })
+    fireEvent.change(within(firstEditDialog).getByLabelText('自定义币种'), { target: { value: 'US1' } })
+    fireEvent.click(within(firstEditDialog).getByRole('button', { name: '保存订阅' }))
     await waitFor(() => expect(within(firstEditDialog).getByText('币种必须为 3 位大写代码。')).toBeInTheDocument())
-    fireEvent.change(within(firstEditDialog).getByLabelText('支付方式'), { target: { value: 'draft-pay' } })
+    fireEvent.change(within(firstEditDialog).getByLabelText('支付方式'), { target: { value: '__custom' } })
+    fireEvent.change(within(firstEditDialog).getByLabelText('自定义支付方式'), { target: { value: 'draft-pay' } })
     fireEvent.click(within(firstEditDialog).getByRole('button', { name: '取消' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑订阅表单' })).not.toBeInTheDocument())
@@ -351,7 +376,8 @@ describe('SubscriptionsPage', () => {
     const editDialog = screen.getByRole('dialog', { name: '编辑订阅表单' })
     expect(within(editDialog).queryByText('币种必须为 3 位大写代码。')).not.toBeInTheDocument()
     expect(within(editDialog).getByLabelText('币种')).toHaveValue('USD')
-    expect(within(editDialog).getByLabelText('支付方式')).toHaveValue('card')
+    expect(within(editDialog).getByLabelText('支付方式')).toHaveValue('__custom')
+    expect(within(editDialog).getByLabelText('自定义支付方式')).toHaveValue('card')
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

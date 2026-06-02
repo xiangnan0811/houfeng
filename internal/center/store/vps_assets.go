@@ -562,8 +562,14 @@ func applySubscriptionPatchPreview(record subscriptions.Record, input subscripti
 	if input.BillingMonths.Set {
 		record.BillingMonths = input.BillingMonths.Value
 	}
-	if input.Price.Set || input.BillingMonths.Set {
-		record.MonthlyPrice = subscriptions.CalculateMonthlyPrice(record.Price, record.BillingMonths)
+	if input.BillingPeriodUnit.Set {
+		record.BillingPeriodUnit = input.BillingPeriodUnit.Value
+	}
+	if input.BillingPeriodLength.Set {
+		record.BillingPeriodLength = input.BillingPeriodLength.Value
+	}
+	if input.Price.Set || input.BillingPeriodUnit.Set || input.BillingPeriodLength.Set {
+		record.MonthlyPrice = subscriptions.CalculateMonthlyPriceForPeriod(record.Price, record.BillingPeriodUnit, record.BillingPeriodLength)
 	}
 	if input.StartedAt.Set {
 		record.StartedAt = cloneSubscriptionDate(input.StartedAt.Value)
@@ -576,6 +582,9 @@ func applySubscriptionPatchPreview(record subscriptions.Record, input subscripti
 	}
 	if input.AutoRenewCancelled.Set {
 		record.AutoRenewCancelled = input.AutoRenewCancelled.Value
+	}
+	if input.RenewalMode.Set {
+		record.RenewalMode = input.RenewalMode.Value
 	}
 	if input.Status.Set {
 		record.Status = input.Status.Value

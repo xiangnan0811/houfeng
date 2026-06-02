@@ -36,29 +36,35 @@ type CreateDecisionInput struct {
 }
 
 type PriceHistoryRecord struct {
-	PriceHistoryID         string               `json:"price_history_id"`
-	SubscriptionID         string               `json:"subscription_id"`
-	VPSID                  string               `json:"vps_id"`
-	FromPrice              float64              `json:"from_price"`
-	ToPrice                float64              `json:"to_price"`
-	FromCurrency           string               `json:"from_currency"`
-	ToCurrency             string               `json:"to_currency"`
-	FromBillingCycle       string               `json:"from_billing_cycle"`
-	ToBillingCycle         string               `json:"to_billing_cycle"`
-	FromBillingMonths      int                  `json:"from_billing_months"`
-	ToBillingMonths        int                  `json:"to_billing_months"`
-	FromMonthlyPrice       float64              `json:"from_monthly_price"`
-	ToMonthlyPrice         float64              `json:"to_monthly_price"`
-	FromRenewAt            *subscriptions.Date  `json:"from_renew_at"`
-	ToRenewAt              *subscriptions.Date  `json:"to_renew_at"`
-	FromAutoRenew          bool                 `json:"from_auto_renew"`
-	ToAutoRenew            bool                 `json:"to_auto_renew"`
-	FromAutoRenewCancelled bool                 `json:"from_auto_renew_cancelled"`
-	ToAutoRenewCancelled   bool                 `json:"to_auto_renew_cancelled"`
-	FromStatus             subscriptions.Status `json:"from_status"`
-	ToStatus               subscriptions.Status `json:"to_status"`
-	ChangedAt              time.Time            `json:"changed_at"`
-	CreatedAt              time.Time            `json:"created_at"`
+	PriceHistoryID          string               `json:"price_history_id"`
+	SubscriptionID          string               `json:"subscription_id"`
+	VPSID                   string               `json:"vps_id"`
+	FromPrice               float64              `json:"from_price"`
+	ToPrice                 float64              `json:"to_price"`
+	FromCurrency            string               `json:"from_currency"`
+	ToCurrency              string               `json:"to_currency"`
+	FromBillingCycle        string               `json:"from_billing_cycle"`
+	ToBillingCycle          string               `json:"to_billing_cycle"`
+	FromBillingMonths       int                  `json:"from_billing_months"`
+	ToBillingMonths         int                  `json:"to_billing_months"`
+	FromBillingPeriodUnit   string               `json:"from_billing_period_unit"`
+	ToBillingPeriodUnit     string               `json:"to_billing_period_unit"`
+	FromBillingPeriodLength int                  `json:"from_billing_period_length"`
+	ToBillingPeriodLength   int                  `json:"to_billing_period_length"`
+	FromMonthlyPrice        float64              `json:"from_monthly_price"`
+	ToMonthlyPrice          float64              `json:"to_monthly_price"`
+	FromRenewAt             *subscriptions.Date  `json:"from_renew_at"`
+	ToRenewAt               *subscriptions.Date  `json:"to_renew_at"`
+	FromAutoRenew           bool                 `json:"from_auto_renew"`
+	ToAutoRenew             bool                 `json:"to_auto_renew"`
+	FromAutoRenewCancelled  bool                 `json:"from_auto_renew_cancelled"`
+	ToAutoRenewCancelled    bool                 `json:"to_auto_renew_cancelled"`
+	FromRenewalMode         string               `json:"from_renewal_mode"`
+	ToRenewalMode           string               `json:"to_renewal_mode"`
+	FromStatus              subscriptions.Status `json:"from_status"`
+	ToStatus                subscriptions.Status `json:"to_status"`
+	ChangedAt               time.Time            `json:"changed_at"`
+	CreatedAt               time.Time            `json:"created_at"`
 }
 
 type CreatePriceHistoryInput struct {
@@ -240,8 +246,17 @@ func ValidateCreatePriceHistoryInput(input CreatePriceHistoryInput) error {
 	if input.From.BillingMonths <= 0 || input.To.BillingMonths <= 0 {
 		return fmt.Errorf("%w: invalid billing_months", ErrInvalidAssetHistoryInput)
 	}
+	if !subscriptions.IsValidBillingPeriodUnit(input.From.BillingPeriodUnit) || !subscriptions.IsValidBillingPeriodUnit(input.To.BillingPeriodUnit) {
+		return fmt.Errorf("%w: invalid billing_period_unit", ErrInvalidAssetHistoryInput)
+	}
+	if input.From.BillingPeriodLength <= 0 || input.To.BillingPeriodLength <= 0 {
+		return fmt.Errorf("%w: invalid billing_period_length", ErrInvalidAssetHistoryInput)
+	}
 	if !subscriptions.IsValidCurrency(input.From.Currency) || !subscriptions.IsValidCurrency(input.To.Currency) {
 		return fmt.Errorf("%w: invalid currency", ErrInvalidAssetHistoryInput)
+	}
+	if !subscriptions.IsValidRenewalMode(input.From.RenewalMode) || !subscriptions.IsValidRenewalMode(input.To.RenewalMode) {
+		return fmt.Errorf("%w: invalid renewal_mode", ErrInvalidAssetHistoryInput)
 	}
 	if !subscriptions.IsValidStatus(input.From.Status) || !subscriptions.IsValidStatus(input.To.Status) {
 		return fmt.Errorf("%w: invalid status", ErrInvalidAssetHistoryInput)
@@ -364,6 +379,28 @@ func normalizeSubscriptionRecord(record subscriptions.Record) subscriptions.Reco
 	record.VPSID = NormalizeVPSID(record.VPSID)
 	record.Currency = subscriptions.NormalizeCurrency(record.Currency)
 	record.BillingCycle = strings.TrimSpace(record.BillingCycle)
+	record.BillingPeriodUnit = subscriptions.NormalizeBillingPeriodUnit(record.BillingPeriodUnit)
+	if record.BillingPeriodUnit == "" {
+		record.BillingPeriodUnit = string(subscriptions.DefaultBillingPeriodUnit)
+	}
+	if record.BillingPeriodLength <= 0 {
+		if record.BillingMonths > 0 && record.BillingPeriodUnit == string(subscriptions.BillingPeriodMonth) {
+			record.BillingPeriodLength = record.BillingMonths
+		} else {
+			record.BillingPeriodLength = subscriptions.DefaultBillingPeriodLength
+		}
+	}
+	if record.BillingMonths <= 0 {
+		record.BillingMonths = subscriptions.BillingMonthsForPeriod(record.BillingPeriodUnit, record.BillingPeriodLength)
+	}
+	if record.BillingCycle == "" {
+		record.BillingCycle = subscriptions.BillingCycleForPeriod(record.BillingPeriodUnit, record.BillingPeriodLength)
+	}
+	record.RenewalMode = subscriptions.NormalizeRenewalMode(record.RenewalMode)
+	if record.RenewalMode == "" {
+		record.RenewalMode = string(subscriptions.RenewalModeFromLegacyFlags(record.AutoRenew, record.AutoRenewCancelled))
+	}
+	record.AutoRenew, record.AutoRenewCancelled = subscriptions.LegacyRenewalFlags(record.RenewalMode)
 	record.Status = subscriptions.Status(strings.TrimSpace(string(record.Status)))
 	return record
 }

@@ -13,6 +13,8 @@ import type {
   VPSAssetDetail,
   VPSExperienceCategory,
   VPSExperienceSeverity,
+  BillingPeriodUnit,
+  RenewalMode,
   VPSRenewalDecision,
   VPSTimeline,
   VPSUsageStatus,
@@ -49,6 +51,7 @@ export type VPSDetailDrawerMode =
   | 'cancellation'
   | 'facts'
   | 'subscription'
+  | 'validity-extension'
   | 'monitoring-instance-create'
   | 'monitoring-instance-link'
   | 'experience'
@@ -94,17 +97,39 @@ export type LinkDraftState = {
   note: string
 }
 
+export type MonitoringInstanceCreateDraftState = {
+  displayName: string
+  group: string
+  region: string
+  city: string
+  provider: string
+  labels: string
+  note: string
+  linkNote: string
+}
+
 export type SubscriptionDraftState = {
   price: string
   currency: string
-  billingCycle: string
-  billingMonths: string
+  customCurrency: string
+  billingPeriodUnit: BillingPeriodUnit
+  billingPeriodLength: string
   startedAt: string
   renewAt: string
-  autoRenew: boolean
-  autoRenewCancelled: boolean
+  renewalMode: RenewalMode
   paymentMethod: string
+  customPaymentMethod: string
   note: string
+}
+
+export type ValidityExtensionDraftState = {
+  extendTo: string
+  reason: string
+  fee: string
+  currency: string
+  customCurrency: string
+  sourceType: string
+  customSourceType: string
 }
 
 export type ExperienceDraftState = {

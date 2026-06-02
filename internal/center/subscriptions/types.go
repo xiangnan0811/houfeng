@@ -16,6 +16,10 @@ var ErrInvalidSubscriptionInput = errors.New("invalid subscription input")
 
 type Status string
 
+type BillingPeriodUnit string
+
+type RenewalMode string
+
 const (
 	StatusActive    Status = "active"
 	StatusPaused    Status = "paused"
@@ -24,6 +28,23 @@ const (
 	StatusUnknown   Status = "unknown"
 
 	DefaultStatus = StatusActive
+
+	BillingPeriodDay   BillingPeriodUnit = "day"
+	BillingPeriodWeek  BillingPeriodUnit = "week"
+	BillingPeriodMonth BillingPeriodUnit = "month"
+	BillingPeriodYear  BillingPeriodUnit = "year"
+
+	DefaultBillingPeriodUnit   = BillingPeriodMonth
+	DefaultBillingPeriodLength = 1
+
+	RenewalModeAuto          RenewalMode = "auto"
+	RenewalModeManual        RenewalMode = "manual"
+	RenewalModeAutoCancelled RenewalMode = "auto_cancelled"
+	RenewalModeLottery       RenewalMode = "lottery"
+	RenewalModeBonus         RenewalMode = "bonus"
+	RenewalModeOther         RenewalMode = "other"
+
+	DefaultRenewalMode = RenewalModeManual
 
 	DateLayout = "2006-01-02"
 
@@ -37,52 +58,61 @@ type Date struct {
 }
 
 type Record struct {
-	SubscriptionID     string    `json:"subscription_id"`
-	VPSID              string    `json:"vps_id"`
-	Price              float64   `json:"price"`
-	Currency           string    `json:"currency"`
-	BillingCycle       string    `json:"billing_cycle"`
-	BillingMonths      int       `json:"billing_months"`
-	MonthlyPrice       float64   `json:"monthly_price"`
-	StartedAt          *Date     `json:"started_at"`
-	RenewAt            *Date     `json:"renew_at"`
-	AutoRenew          bool      `json:"auto_renew"`
-	AutoRenewCancelled bool      `json:"auto_renew_cancelled"`
-	Status             Status    `json:"status"`
-	PaymentMethod      string    `json:"payment_method"`
-	Note               string    `json:"note"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	SubscriptionID      string    `json:"subscription_id"`
+	VPSID               string    `json:"vps_id"`
+	Price               float64   `json:"price"`
+	Currency            string    `json:"currency"`
+	BillingCycle        string    `json:"billing_cycle"`
+	BillingMonths       int       `json:"billing_months"`
+	BillingPeriodUnit   string    `json:"billing_period_unit"`
+	BillingPeriodLength int       `json:"billing_period_length"`
+	MonthlyPrice        float64   `json:"monthly_price"`
+	StartedAt           *Date     `json:"started_at"`
+	RenewAt             *Date     `json:"renew_at"`
+	AutoRenew           bool      `json:"auto_renew"`
+	AutoRenewCancelled  bool      `json:"auto_renew_cancelled"`
+	RenewalMode         string    `json:"renewal_mode"`
+	Status              Status    `json:"status"`
+	PaymentMethod       string    `json:"payment_method"`
+	Note                string    `json:"note"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type CreateInput struct {
-	VPSID              string  `json:"vps_id"`
-	Price              float64 `json:"price"`
-	Currency           string  `json:"currency"`
-	BillingCycle       string  `json:"billing_cycle"`
-	BillingMonths      int     `json:"billing_months"`
-	StartedAt          *Date   `json:"started_at"`
-	RenewAt            *Date   `json:"renew_at"`
-	AutoRenew          bool    `json:"auto_renew"`
-	AutoRenewCancelled bool    `json:"auto_renew_cancelled"`
-	Status             Status  `json:"status"`
-	PaymentMethod      string  `json:"payment_method"`
-	Note               string  `json:"note"`
+	VPSID               string  `json:"vps_id"`
+	Price               float64 `json:"price"`
+	Currency            string  `json:"currency"`
+	BillingCycle        string  `json:"billing_cycle"`
+	BillingMonths       int     `json:"billing_months"`
+	BillingPeriodUnit   string  `json:"billing_period_unit"`
+	BillingPeriodLength int     `json:"billing_period_length"`
+	StartedAt           *Date   `json:"started_at"`
+	RenewAt             *Date   `json:"renew_at"`
+	AutoRenew           bool    `json:"auto_renew"`
+	AutoRenewCancelled  bool    `json:"auto_renew_cancelled"`
+	RenewalMode         string  `json:"renewal_mode"`
+	Status              Status  `json:"status"`
+	PaymentMethod       string  `json:"payment_method"`
+	Note                string  `json:"note"`
 }
 
 type PatchInput struct {
-	VPSID              OptionalString `json:"vps_id"`
-	Price              OptionalFloat  `json:"price"`
-	Currency           OptionalString `json:"currency"`
-	BillingCycle       OptionalString `json:"billing_cycle"`
-	BillingMonths      OptionalInt    `json:"billing_months"`
-	StartedAt          OptionalDate   `json:"started_at"`
-	RenewAt            OptionalDate   `json:"renew_at"`
-	AutoRenew          OptionalBool   `json:"auto_renew"`
-	AutoRenewCancelled OptionalBool   `json:"auto_renew_cancelled"`
-	Status             OptionalStatus `json:"status"`
-	PaymentMethod      OptionalString `json:"payment_method"`
-	Note               OptionalString `json:"note"`
+	VPSID               OptionalString `json:"vps_id"`
+	Price               OptionalFloat  `json:"price"`
+	Currency            OptionalString `json:"currency"`
+	BillingCycle        OptionalString `json:"billing_cycle"`
+	BillingMonths       OptionalInt    `json:"billing_months"`
+	BillingPeriodUnit   OptionalString `json:"billing_period_unit"`
+	BillingPeriodLength OptionalInt    `json:"billing_period_length"`
+	StartedAt           OptionalDate   `json:"started_at"`
+	RenewAt             OptionalDate   `json:"renew_at"`
+	AutoRenew           OptionalBool   `json:"auto_renew"`
+	AutoRenewCancelled  OptionalBool   `json:"auto_renew_cancelled"`
+	RenewalMode         OptionalString `json:"renewal_mode"`
+	Status              OptionalStatus `json:"status"`
+	PaymentMethod       OptionalString `json:"payment_method"`
+	Note                OptionalString `json:"note"`
 }
 
 type ListFilters struct {
@@ -279,10 +309,30 @@ func NormalizeCreateInput(input CreateInput) CreateInput {
 	input.VPSID = strings.TrimSpace(input.VPSID)
 	input.Currency = NormalizeCurrency(input.Currency)
 	input.BillingCycle = strings.TrimSpace(input.BillingCycle)
+	input.BillingPeriodUnit = NormalizeBillingPeriodUnit(input.BillingPeriodUnit)
+	if input.BillingPeriodUnit == "" {
+		input.BillingPeriodUnit = string(DefaultBillingPeriodUnit)
+	}
+	if input.BillingPeriodLength <= 0 {
+		if input.BillingMonths > 0 && input.BillingPeriodUnit == string(BillingPeriodMonth) {
+			input.BillingPeriodLength = input.BillingMonths
+		}
+	}
+	if input.BillingPeriodLength > 0 {
+		input.BillingMonths = BillingMonthsForPeriod(input.BillingPeriodUnit, input.BillingPeriodLength)
+	}
+	if input.BillingCycle == "" && input.BillingPeriodLength > 0 {
+		input.BillingCycle = BillingCycleForPeriod(input.BillingPeriodUnit, input.BillingPeriodLength)
+	}
 	input.Status = Status(strings.TrimSpace(string(input.Status)))
 	if input.Status == "" {
 		input.Status = DefaultStatus
 	}
+	input.RenewalMode = NormalizeRenewalMode(input.RenewalMode)
+	if input.RenewalMode == "" {
+		input.RenewalMode = string(RenewalModeFromLegacyFlags(input.AutoRenew, input.AutoRenewCancelled))
+	}
+	input.AutoRenew, input.AutoRenewCancelled = LegacyRenewalFlags(input.RenewalMode)
 	input.PaymentMethod = strings.TrimSpace(input.PaymentMethod)
 	input.Note = strings.TrimSpace(input.Note)
 	return input
@@ -298,8 +348,17 @@ func ValidateCreateInput(input CreateInput) error {
 	if input.BillingMonths <= 0 {
 		return fmt.Errorf("%w: billing_months must be greater than zero", ErrInvalidSubscriptionInput)
 	}
+	if !IsValidBillingPeriodUnit(input.BillingPeriodUnit) {
+		return fmt.Errorf("%w: invalid billing_period_unit", ErrInvalidSubscriptionInput)
+	}
+	if input.BillingPeriodLength <= 0 {
+		return fmt.Errorf("%w: billing_period_length must be greater than zero", ErrInvalidSubscriptionInput)
+	}
 	if !IsValidCurrency(input.Currency) {
 		return fmt.Errorf("%w: currency must be a 3-letter uppercase code", ErrInvalidSubscriptionInput)
+	}
+	if !IsValidRenewalMode(input.RenewalMode) {
+		return fmt.Errorf("%w: invalid renewal_mode", ErrInvalidSubscriptionInput)
 	}
 	if !IsValidStatus(input.Status) {
 		return fmt.Errorf("%w: invalid status", ErrInvalidSubscriptionInput)
@@ -311,8 +370,43 @@ func NormalizePatchInput(input PatchInput) PatchInput {
 	input.VPSID = normalizeOptionalString(input.VPSID)
 	input.Currency = normalizeOptionalCurrency(input.Currency)
 	input.BillingCycle = normalizeOptionalString(input.BillingCycle)
+	input.BillingPeriodUnit = normalizeOptionalBillingPeriodUnit(input.BillingPeriodUnit)
+	if input.BillingMonths.Set || input.BillingPeriodUnit.Set || input.BillingPeriodLength.Set {
+		unit := input.BillingPeriodUnit.Value
+		if !input.BillingPeriodUnit.Set || unit == "" {
+			unit = string(BillingPeriodMonth)
+		}
+		length := input.BillingPeriodLength.Value
+		if !input.BillingPeriodLength.Set {
+			if input.BillingMonths.Set && unit == string(BillingPeriodMonth) {
+				length = input.BillingMonths.Value
+			} else {
+				length = DefaultBillingPeriodLength
+			}
+		}
+		input.BillingPeriodUnit = PatchString(unit)
+		input.BillingPeriodLength = PatchInt(length)
+		if length > 0 {
+			input.BillingMonths = PatchInt(BillingMonthsForPeriod(unit, length))
+		}
+		if (!input.BillingCycle.Set || input.BillingCycle.Value == "") && length > 0 {
+			input.BillingCycle = PatchString(BillingCycleForPeriod(unit, length))
+		}
+	}
 	if input.Status.Set {
 		input.Status.Value = Status(strings.TrimSpace(string(input.Status.Value)))
+	}
+	input.RenewalMode = normalizeOptionalRenewalMode(input.RenewalMode)
+	if input.RenewalMode.Set {
+		autoRenew, autoRenewCancelled := LegacyRenewalFlags(input.RenewalMode.Value)
+		input.AutoRenew = PatchBool(autoRenew)
+		input.AutoRenewCancelled = PatchBool(autoRenewCancelled)
+	} else if input.AutoRenew.Set || input.AutoRenewCancelled.Set {
+		renewalMode := string(RenewalModeFromLegacyFlags(input.AutoRenew.Set && input.AutoRenew.Value, input.AutoRenewCancelled.Set && input.AutoRenewCancelled.Value))
+		input.RenewalMode = PatchString(renewalMode)
+		autoRenew, autoRenewCancelled := LegacyRenewalFlags(renewalMode)
+		input.AutoRenew = PatchBool(autoRenew)
+		input.AutoRenewCancelled = PatchBool(autoRenewCancelled)
 	}
 	input.PaymentMethod = normalizeOptionalString(input.PaymentMethod)
 	input.Note = normalizeOptionalString(input.Note)
@@ -329,8 +423,17 @@ func ValidatePatchInput(input PatchInput) error {
 	if input.BillingMonths.Set && input.BillingMonths.Value <= 0 {
 		return fmt.Errorf("%w: billing_months must be greater than zero", ErrInvalidSubscriptionInput)
 	}
+	if input.BillingPeriodUnit.Set && !IsValidBillingPeriodUnit(input.BillingPeriodUnit.Value) {
+		return fmt.Errorf("%w: invalid billing_period_unit", ErrInvalidSubscriptionInput)
+	}
+	if input.BillingPeriodLength.Set && input.BillingPeriodLength.Value <= 0 {
+		return fmt.Errorf("%w: billing_period_length must be greater than zero", ErrInvalidSubscriptionInput)
+	}
 	if input.Currency.Set && !IsValidCurrency(input.Currency.Value) {
 		return fmt.Errorf("%w: currency must be a 3-letter uppercase code", ErrInvalidSubscriptionInput)
+	}
+	if input.RenewalMode.Set && !IsValidRenewalMode(input.RenewalMode.Value) {
+		return fmt.Errorf("%w: invalid renewal_mode", ErrInvalidSubscriptionInput)
 	}
 	if input.Status.Set && !IsValidStatus(input.Status.Value) {
 		return fmt.Errorf("%w: invalid status", ErrInvalidSubscriptionInput)
@@ -344,10 +447,13 @@ func (input PatchInput) HasChanges() bool {
 		input.Currency.Set ||
 		input.BillingCycle.Set ||
 		input.BillingMonths.Set ||
+		input.BillingPeriodUnit.Set ||
+		input.BillingPeriodLength.Set ||
 		input.StartedAt.Set ||
 		input.RenewAt.Set ||
 		input.AutoRenew.Set ||
 		input.AutoRenewCancelled.Set ||
+		input.RenewalMode.Set ||
 		input.Status.Set ||
 		input.PaymentMethod.Set ||
 		input.Note.Set
@@ -387,6 +493,14 @@ func NormalizeCurrency(value string) string {
 	return strings.ToUpper(strings.TrimSpace(value))
 }
 
+func NormalizeBillingPeriodUnit(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func NormalizeRenewalMode(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
 func IsValidCurrency(value string) bool {
 	if len(value) != 3 {
 		return false
@@ -416,11 +530,122 @@ func IsValidStatus(status Status) bool {
 	}
 }
 
+func IsValidBillingPeriodUnit(value string) bool {
+	switch BillingPeriodUnit(NormalizeBillingPeriodUnit(value)) {
+	case BillingPeriodDay, BillingPeriodWeek, BillingPeriodMonth, BillingPeriodYear:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsValidRenewalMode(value string) bool {
+	switch RenewalMode(NormalizeRenewalMode(value)) {
+	case RenewalModeAuto, RenewalModeManual, RenewalModeAutoCancelled, RenewalModeLottery, RenewalModeBonus, RenewalModeOther:
+		return true
+	default:
+		return false
+	}
+}
+
+func RenewalModeFromLegacyFlags(autoRenew, autoRenewCancelled bool) RenewalMode {
+	switch {
+	case autoRenewCancelled:
+		return RenewalModeAutoCancelled
+	case autoRenew:
+		return RenewalModeAuto
+	default:
+		return DefaultRenewalMode
+	}
+}
+
+func LegacyRenewalFlags(mode string) (bool, bool) {
+	switch RenewalMode(NormalizeRenewalMode(mode)) {
+	case RenewalModeAuto:
+		return true, false
+	case RenewalModeAutoCancelled:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func BillingMonthsForPeriod(unit string, length int) int {
+	if length <= 0 {
+		length = DefaultBillingPeriodLength
+	}
+	switch BillingPeriodUnit(NormalizeBillingPeriodUnit(unit)) {
+	case BillingPeriodYear:
+		return length * 12
+	case BillingPeriodMonth:
+		return length
+	case BillingPeriodWeek:
+		return max(1, int(math.Ceil(float64(length*7)/30)))
+	case BillingPeriodDay:
+		return max(1, int(math.Ceil(float64(length)/30)))
+	default:
+		return length
+	}
+}
+
+func BillingCycleForPeriod(unit string, length int) string {
+	if length <= 0 {
+		length = DefaultBillingPeriodLength
+	}
+	switch BillingPeriodUnit(NormalizeBillingPeriodUnit(unit)) {
+	case BillingPeriodDay:
+		if length == 1 {
+			return "daily"
+		}
+		return fmt.Sprintf("%d days", length)
+	case BillingPeriodWeek:
+		if length == 1 {
+			return "weekly"
+		}
+		return fmt.Sprintf("%d weeks", length)
+	case BillingPeriodMonth:
+		if length == 1 {
+			return "monthly"
+		}
+		return fmt.Sprintf("%d months", length)
+	case BillingPeriodYear:
+		if length == 1 {
+			return "annual"
+		}
+		return fmt.Sprintf("%d years", length)
+	default:
+		return ""
+	}
+}
+
 func CalculateMonthlyPrice(price float64, billingMonths int) float64 {
 	if billingMonths <= 0 {
 		return 0
 	}
 	return math.Round((price/float64(billingMonths))*10000) / 10000
+}
+
+func CalculateMonthlyPriceForPeriod(price float64, unit string, length int) float64 {
+	if length <= 0 {
+		return 0
+	}
+	var months float64
+	switch BillingPeriodUnit(NormalizeBillingPeriodUnit(unit)) {
+	case BillingPeriodDay:
+		months = float64(length) / 30
+	case BillingPeriodWeek:
+		months = float64(length*7) / 30
+	case BillingPeriodMonth:
+		months = float64(length)
+	case BillingPeriodYear:
+		months = float64(length * 12)
+	default:
+		return CalculateMonthlyPrice(price, length)
+	}
+	if months <= 0 {
+		return 0
+	}
+	return math.Round((price/months)*10000) / 10000
 }
 
 func DateFromTimePtr(value *time.Time) *Date {
@@ -449,6 +674,20 @@ func normalizeOptionalString(value OptionalString) OptionalString {
 func normalizeOptionalCurrency(value OptionalString) OptionalString {
 	if value.Set {
 		value.Value = NormalizeCurrency(value.Value)
+	}
+	return value
+}
+
+func normalizeOptionalBillingPeriodUnit(value OptionalString) OptionalString {
+	if value.Set {
+		value.Value = NormalizeBillingPeriodUnit(value.Value)
+	}
+	return value
+}
+
+func normalizeOptionalRenewalMode(value OptionalString) OptionalString {
+	if value.Set {
+		value.Value = NormalizeRenewalMode(value.Value)
 	}
 	return value
 }

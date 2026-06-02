@@ -2,37 +2,87 @@ import { type FormEvent } from 'react'
 
 import { Button, Input } from '../../components/atoms'
 import type { VPSAssetDetail } from '../../lib/types'
+import type { MonitoringInstanceCreateDraftState } from './types'
 
 type VPSMonitoringInstanceCreateFormProps = {
   detail: VPSAssetDetail
+  draft: MonitoringInstanceCreateDraftState
   submitting: boolean
   error: string | null
   notice: string | null
   onCancel: () => void
+  onDraftChange: (draft: MonitoringInstanceCreateDraftState) => void
+  onFeedbackClear: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
 
 export function VPSMonitoringInstanceCreateForm({
   detail,
+  draft,
   submitting,
   error,
   notice,
   onCancel,
+  onDraftChange,
+  onFeedbackClear,
   onSubmit,
 }: VPSMonitoringInstanceCreateFormProps) {
-  const inherited = [
-    detail.display_name,
-    detail.provider_name || '未关联服务商',
-    [detail.region || detail.country, detail.city || detail.datacenter].filter(Boolean).join(' · ') || '位置未确认',
-  ].join(' · ')
+  function update<K extends keyof MonitoringInstanceCreateDraftState>(key: K, value: MonitoringInstanceCreateDraftState[K]) {
+    onDraftChange({ ...draft, [key]: value })
+    onFeedbackClear()
+  }
 
   return (
     <form className="asset-operation-form" onSubmit={onSubmit}>
       <div className="asset-operation-form__header">
         <h3>为 {detail.display_name} 创建监控实例</h3>
-        <p>系统会继承 VPS 身份、服务商、位置、标签和备注，创建后直接进入接入抽屉生成安装命令。</p>
+        <p>已按 VPS 资料预填，必要时微调后直接创建并进入 agent 接入。</p>
       </div>
-      <Input label="继承字段" value={inherited} readOnly />
+      <div className="asset-operation-form__grid">
+        <Input
+          label="监控实例名称"
+          value={draft.displayName}
+          onChange={(event) => update('displayName', event.target.value)}
+          required
+        />
+        <Input
+          label="分组"
+          value={draft.group}
+          onChange={(event) => update('group', event.target.value)}
+          placeholder="可选"
+        />
+        <Input
+          label="服务商"
+          value={draft.provider}
+          onChange={(event) => update('provider', event.target.value)}
+        />
+        <Input
+          label="区域"
+          value={draft.region}
+          onChange={(event) => update('region', event.target.value)}
+        />
+        <Input
+          label="城市"
+          value={draft.city}
+          onChange={(event) => update('city', event.target.value)}
+        />
+        <Input
+          label="标签"
+          value={draft.labels}
+          onChange={(event) => update('labels', event.target.value)}
+          placeholder="用逗号分隔"
+        />
+      </div>
+      <Input
+        label="关联备注"
+        value={draft.linkNote}
+        onChange={(event) => update('linkNote', event.target.value)}
+      />
+      <Input
+        label="监控备注"
+        value={draft.note}
+        onChange={(event) => update('note', event.target.value)}
+      />
       {error ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{error}</p> : null}
       {notice ? <p className="asset-operation-feedback" role="status">{notice}</p> : null}
       <div className="page-form-actions">

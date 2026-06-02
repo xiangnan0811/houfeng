@@ -4,6 +4,12 @@ import { Button, Input, Modal, Select } from './atoms'
 import { CollapsibleSection } from './CollapsibleSection'
 import { createProvider, createVPSAsset } from '../lib/api'
 import {
+  CUSTOM_OPTION_VALUE,
+  countryOptionsWithExisting,
+  displayOption,
+  normalizeCountry,
+} from '../lib/assetOptions'
+import {
   type CreateVPSAssetInput,
   type ProviderRecord,
   type VPSAssetRecord,
@@ -19,6 +25,7 @@ interface VPSCreateModalProps {
   open: boolean
   onClose: () => void
   providers: ProviderRecord[]
+  existingCountries?: string[]
   onCreated: (vps: VPSAssetRecord) => void
   onProviderCreated: (provider: ProviderRecord) => void
 }
@@ -29,11 +36,14 @@ type FormState = {
   productName: string
   orderRef: string
   country: string
+  customCountry: string
   region: string
   city: string
   datacenter: string
   ipv4: string
   ipv6: string
+  ipv6Enabled: boolean
+  sshHostDiffers: boolean
   sshHost: string
   sshPort: string
   sshUser: string
@@ -50,11 +60,14 @@ const INITIAL_FORM: FormState = {
   productName: '',
   orderRef: '',
   country: '',
+  customCountry: '',
   region: '',
   city: '',
   datacenter: '',
   ipv4: '',
   ipv6: '',
+  ipv6Enabled: false,
+  sshHostDiffers: false,
   sshHost: '',
   sshPort: '22',
   sshUser: 'root',
@@ -69,9 +82,24 @@ function parseLabels(raw: string): string[] {
   return [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))]
 }
 
+function selectedCountry(form: FormState): string {
+  return form.country === CUSTOM_OPTION_VALUE ? normalizeCountry(form.customCountry) : normalizeCountry(form.country)
+}
+
+function sshHostValue(form: FormState): string {
+  return form.sshHostDiffers ? form.sshHost : form.ipv4
+}
+
+function selectedSSHHost(form: FormState): string {
+  return sshHostValue(form).trim()
+}
+
 function buildCreateInput(form: FormState, providers: ProviderRecord[]): CreateVPSAssetInput {
   if (form.displayName.trim() === '') {
     throw new Error('VPS 名称不能为空。')
+  }
+  if (!form.ipv4.trim() && !selectedSSHHost(form)) {
+    throw new Error('IPv4 或 SSH Host 至少需要填写一个。')
   }
   const selectedProvider = providers.find((p) => p.provider_id === form.providerID)
   const sshPort = form.sshPort.trim() === '' ? undefined : Number.parseInt(form.sshPort.trim(), 10)
@@ -84,13 +112,13 @@ function buildCreateInput(form: FormState, providers: ProviderRecord[]): CreateV
     provider_name: selectedProvider?.name ?? '',
     product_name: form.productName.trim(),
     order_ref: form.orderRef.trim(),
-    country: form.country.trim(),
+    country: selectedCountry(form),
     region: form.region.trim(),
     city: form.city.trim(),
     datacenter: form.datacenter.trim(),
     ipv4: form.ipv4.trim(),
-    ipv6: form.ipv6.trim(),
-    ssh_host: form.sshHost.trim(),
+    ipv6: form.ipv6Enabled ? form.ipv6.trim() : '',
+    ssh_host: selectedSSHHost(form),
     ...(sshPort == null ? {} : { ssh_port: sshPort }),
     ssh_user: form.sshUser.trim(),
     os_name: form.osName.trim(),
@@ -104,7 +132,7 @@ function buildCreateInput(form: FormState, providers: ProviderRecord[]): CreateV
   }
 }
 
-export function VPSCreateModal({ open, onClose, providers, onCreated, onProviderCreated }: VPSCreateModalProps) {
+export function VPSCreateModal({ open, onClose, providers, existingCountries = [], onCreated, onProviderCreated }: VPSCreateModalProps) {
   const [form, setForm] = useState<FormState>(INITIAL_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -114,6 +142,7 @@ export function VPSCreateModal({ open, onClose, providers, onCreated, onProvider
   const [newProviderWebsite, setNewProviderWebsite] = useState('')
   const [providerCreating, setProviderCreating] = useState(false)
   const [providerError, setProviderError] = useState<string | null>(null)
+  const countryOptions = countryOptionsWithExisting(existingCountries)
 
   function reset() {
     setForm(INITIAL_FORM)
@@ -173,6 +202,30 @@ export function VPSCreateModal({ open, onClose, providers, onCreated, onProvider
       .finally(() => setProviderCreating(false))
   }
 
+  function updateIPv4(value: string) {
+    setForm((current) => ({
+      ...current,
+      ipv4: value,
+      sshHost: current.sshHostDiffers ? current.sshHost : value,
+    }))
+  }
+
+  function updateSSHHostDiffers(checked: boolean) {
+    setForm((current) => ({
+      ...current,
+      sshHostDiffers: checked,
+      sshHost: checked ? current.sshHost : current.ipv4,
+    }))
+  }
+
+  function updateIPv6Enabled(checked: boolean) {
+    setForm((current) => ({
+      ...current,
+      ipv6Enabled: checked,
+      ipv6: checked ? current.ipv6 : '',
+    }))
+  }
+
   const footer = (
     <>
       <span className="modal-footer__hint">创建后进入详情页。</span>
@@ -221,14 +274,56 @@ export function VPSCreateModal({ open, onClose, providers, onCreated, onProvider
         <div className="vps-create-form__section">
           <div className="vps-create-form__section-title">网络入口</div>
           <div className="vps-create-form__row">
-            <Input label="IPv4" value={form.ipv4} onChange={(e) => setForm((f) => ({ ...f, ipv4: e.target.value }))} placeholder="例如：1.2.3.4" />
-            <Input label="国家" value={form.country} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))} placeholder="例如：HK" />
+            <Input label="IPv4 / 主入口" value={form.ipv4} onChange={(e) => updateIPv4(e.target.value)} placeholder="例如：1.2.3.4" />
+            <Select label="国家 / 地区" value={form.country} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))}>
+              <option value="">未选择</option>
+              {countryOptions.map((option) => (
+                <option key={option.value} value={option.value}>{displayOption(option)}</option>
+              ))}
+              <option value={CUSTOM_OPTION_VALUE}>自定义 / 其他</option>
+            </Select>
+            {form.country === CUSTOM_OPTION_VALUE ? (
+              <Input label="自定义国家 / 地区" value={form.customCountry} onChange={(e) => setForm((f) => ({ ...f, customCountry: e.target.value }))} placeholder="例如：MO / Macau" />
+            ) : null}
+          </div>
+          <div className="vps-create-form__toggle-row">
+            <div>
+              <div className="input-field__label">SSH Host 与 IP 不一致</div>
+              <p className="input-field__hint">
+                默认使用 IPv4 作为 SSH Host；只有 NAT、跳板或域名入口不同才需要单独填写。
+              </p>
+            </div>
+            <label className="tg">
+              <input type="checkbox" checked={form.sshHostDiffers} onChange={(e) => updateSSHHostDiffers(e.target.checked)} />
+              <span className="tg-track" />
+              <span>单独填写</span>
+            </label>
           </div>
           <div className="vps-create-form__row--3col">
-            <Input label="SSH Host" value={form.sshHost} onChange={(e) => setForm((f) => ({ ...f, sshHost: e.target.value }))} />
+            <Input
+              label="SSH Host"
+              value={sshHostValue(form)}
+              onChange={(e) => setForm((f) => ({ ...f, sshHost: e.target.value }))}
+              disabled={!form.sshHostDiffers}
+              placeholder={form.sshHostDiffers ? '例如：ssh.example.com' : '默认跟随 IPv4'}
+            />
             <Input label="端口" type="number" value={form.sshPort} onChange={(e) => setForm((f) => ({ ...f, sshPort: e.target.value }))} />
             <Input label="用户" value={form.sshUser} onChange={(e) => setForm((f) => ({ ...f, sshUser: e.target.value }))} />
           </div>
+          <div className="vps-create-form__toggle-row">
+            <div>
+              <div className="input-field__label">IPv6</div>
+              <p className="input-field__hint">默认不录入 IPv6；开启后才提交 IPv6 地址。</p>
+            </div>
+            <label className="tg">
+              <input type="checkbox" checked={form.ipv6Enabled} onChange={(e) => updateIPv6Enabled(e.target.checked)} />
+              <span className="tg-track" />
+              <span>启用</span>
+            </label>
+          </div>
+          {form.ipv6Enabled ? (
+            <Input label="IPv6" value={form.ipv6} onChange={(e) => setForm((f) => ({ ...f, ipv6: e.target.value }))} placeholder="例如：2001:db8::1" />
+          ) : null}
         </div>
 
         <CollapsibleSection title="补充信息">
@@ -243,7 +338,7 @@ export function VPSCreateModal({ open, onClose, providers, onCreated, onProvider
             </div>
             <div className="vps-create-form__row">
               <Input label="数据中心" value={form.datacenter} onChange={(e) => setForm((f) => ({ ...f, datacenter: e.target.value }))} />
-              <Input label="IPv6" value={form.ipv6} onChange={(e) => setForm((f) => ({ ...f, ipv6: e.target.value }))} />
+              <Input label="访问入口预览" value={selectedSSHHost(form) || form.ipv4} readOnly />
             </div>
             <div className="vps-create-form__row">
               <Input label="操作系统" value={form.osName} onChange={(e) => setForm((f) => ({ ...f, osName: e.target.value }))} />

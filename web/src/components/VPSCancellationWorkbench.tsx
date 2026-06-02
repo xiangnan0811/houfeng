@@ -8,6 +8,7 @@ import {
   type LifecycleActionResult,
   type TargetRunStatus,
 } from '../lib/types'
+import { renewalModeFromLegacy, renewalModeLabel } from '../lib/assetOptions'
 import { formatDate, formatOptional } from '../lib/format'
 import { Badge, Button, Input, MonoDigits, Select } from './atoms'
 import { LifecycleBadge, RenewalBadge, SubscriptionStatusBadge } from '../pages/assetPageBadges'
@@ -317,7 +318,7 @@ export function VPSCancellationWorkbench({
                           <strong>{subscription.subscription_id}</strong>
                           <SubscriptionStatusBadge value={subscription.status} />
                         </span>
-                        <small>{formatDate(subscription.renew_at)} · {subscription.auto_renew ? '自动续费' : '手工续费'}</small>
+                        <small>{formatDate(subscription.renew_at)} · {renewalModeLabel(subscription.renewal_mode ?? renewalModeFromLegacy(subscription))}</small>
                         <span className="asset-cancel-workbench__choice-note">{impact.message}</span>
                       </span>
                     </label>

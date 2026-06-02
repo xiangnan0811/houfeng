@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { VPSDetailPage } from './VPSDetailPage'
@@ -23,11 +23,14 @@ const subscriptionBody = {
   currency: 'USD',
   billing_cycle: 'monthly',
   billing_months: 1,
+  billing_period_unit: 'month',
+  billing_period_length: 1,
   monthly_price: 12,
   started_at: '2026-05-01',
   renew_at: '2026-06-01',
   auto_renew: true,
   auto_renew_cancelled: false,
+  renewal_mode: 'auto',
   status: 'active',
   payment_method: 'card',
   note: 'primary subscription',
@@ -190,6 +193,11 @@ function openVPSActionsMenu() {
 function clickVPSAction(name: string) {
   openVPSActionsMenu()
   fireEvent.click(screen.getByRole('button', { name }))
+}
+
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="location-search">{location.search}</div>
 }
 
 describe('VPSDetailPage', () => {
@@ -616,6 +624,7 @@ describe('VPSDetailPage', () => {
       monthly_price: 18,
       renew_at: '2026-07-01',
       auto_renew: true,
+      renewal_mode: 'auto',
       payment_method: 'visa',
       note: 'created from vps detail',
     }
@@ -644,7 +653,8 @@ describe('VPSDetailPage', () => {
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
     fireEvent.change(within(drawer).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
     fireEvent.click(within(drawer).getByLabelText('自动续费'))
-    fireEvent.change(within(drawer).getByLabelText('支付方式'), { target: { value: 'visa' } })
+    fireEvent.change(within(drawer).getByLabelText('支付方式'), { target: { value: '__custom' } })
+    fireEvent.change(within(drawer).getByLabelText('自定义支付方式'), { target: { value: 'visa' } })
     fireEvent.change(within(drawer).getByLabelText('备注'), { target: { value: 'created from vps detail' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '创建订阅' }))
 
@@ -663,10 +673,13 @@ describe('VPSDetailPage', () => {
         currency: 'USD',
         billing_cycle: 'monthly',
         billing_months: 1,
+        billing_period_unit: 'month',
+        billing_period_length: 1,
         started_at: null,
         renew_at: '2026-07-01',
         auto_renew: true,
         auto_renew_cancelled: false,
+        renewal_mode: 'auto',
         payment_method: 'visa',
         note: 'created from vps detail',
       }),
@@ -727,8 +740,75 @@ describe('VPSDetailPage', () => {
     )
 
     const drawer = await screen.findByRole('dialog', { name: '创建并接入 agent' })
-    expect(within(drawer).getByLabelText('继承字段')).toHaveValue('Tokyo Edge · Hetzner · Kanto · Tokyo')
-    expect(within(drawer).getByText('系统会继承 VPS 身份、服务商、位置、标签和备注，创建后直接进入接入抽屉生成安装命令。')).toBeInTheDocument()
+    expect(within(drawer).getByLabelText('监控实例名称')).toHaveValue('Tokyo Edge')
+    expect(within(drawer).getByLabelText('服务商')).toHaveValue('Hetzner')
+    expect(within(drawer).getByLabelText('区域')).toHaveValue('Kanto')
+    expect(within(drawer).getByLabelText('城市')).toHaveValue('Tokyo')
+    expect(within(drawer).getByText('已按 VPS 资料预填，必要时微调后直接创建并进入 agent 接入。')).toBeInTheDocument()
+    expect(within(drawer).queryByLabelText('继承字段')).not.toBeInTheDocument()
+  })
+
+  it('cleans VPS workbench query params when a deep-linked drawer is cancelled', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(vpsDetailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001?workbench=subscription']}>
+        <Routes>
+          <Route
+            path="/vps/:vpsId"
+            element={(
+              <>
+                <LocationProbe />
+                <VPSDetailPage />
+              </>
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('location-search')).toHaveTextContent('workbench=subscription')
+    const drawer = await screen.findByRole('dialog', { name: '快速创建订阅' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '取消' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '快速创建订阅' })).not.toBeInTheDocument())
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('workbench=')
+  })
+
+  it('rejects validity extension dates before the active subscription renewal date', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(vpsDetailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const validityButtons = await screen.findAllByRole('button', { name: '延长有效期' })
+    fireEvent.click(validityButtons[0])
+    const drawer = await screen.findByRole('dialog', { name: '延长有效期' })
+    fireEvent.change(within(drawer).getByLabelText('延长至日期'), { target: { value: '2026-05-15' } })
+    fireEvent.change(within(drawer).getByLabelText('延长原因'), { target: { value: '故障补偿' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '保存延长记录' }))
+
+    expect(await within(drawer).findByRole('alert')).toHaveTextContent('延长至日期不能早于当前 active 订阅续费日。')
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('creates a monitoring instance from VPS identity and navigates to onboarding', async () => {
@@ -809,7 +889,8 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     fireEvent.click(screen.getAllByRole('button', { name: '创建并接入 agent' })[0])
     const drawer = screen.getByRole('dialog', { name: '创建并接入 agent' })
-    expect(within(drawer).getByLabelText('继承字段')).toHaveValue('Tokyo Edge · Hetzner · Kanto · Tokyo')
+    expect(within(drawer).getByLabelText('监控实例名称')).toHaveValue('Tokyo Edge')
+    expect(within(drawer).getByLabelText('标签')).toHaveValue('edge')
     fireEvent.click(within(drawer).getByRole('button', { name: '创建并接入 agent' }))
 
     await waitFor(() => expect(screen.getByText('monitoring onboarding route')).toBeInTheDocument())
@@ -821,7 +902,16 @@ describe('VPSDetailPage', () => {
       },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        display_name: 'Tokyo Edge',
+        group: '',
+        region: 'Kanto',
+        city: 'Tokyo',
+        provider: 'Hetzner',
+        labels: ['edge'],
+        note: 'primary',
+        link_note: 'created from vps detail',
+      }),
     })
     expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001', {
       headers: { Accept: 'application/json' },
@@ -1232,7 +1322,8 @@ describe('VPSDetailPage', () => {
     const factsDrawer = screen.getByRole('dialog', { name: '编辑基础信息' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: 'Tokyo Edge 2' } })
     fireEvent.change(within(factsDrawer).getByLabelText('产品名'), { target: { value: 'cx32' } })
-    fireEvent.change(within(factsDrawer).getByLabelText('IPv4'), { target: { value: '198.51.100.5' } })
+    fireEvent.change(within(factsDrawer).getByLabelText('IPv4 / 主入口'), { target: { value: '198.51.100.5' } })
+    fireEvent.click(within(factsDrawer).getByLabelText(/SSH Host 与 IP 不一致/))
     fireEvent.change(within(factsDrawer).getByLabelText('SSH Host'), { target: { value: 'edge.example.com' } })
     fireEvent.change(within(factsDrawer).getByLabelText('SSH 端口'), { target: { value: '2222' } })
     fireEvent.change(within(factsDrawer).getByLabelText('SSH 用户'), { target: { value: 'deploy' } })

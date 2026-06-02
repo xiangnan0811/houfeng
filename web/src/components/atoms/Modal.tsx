@@ -9,7 +9,7 @@ export interface ModalProps {
   children: ReactNode
   footer?: ReactNode
   persistent?: boolean
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'xl'
   contentClassName?: string
   ariaLabel?: string
 }

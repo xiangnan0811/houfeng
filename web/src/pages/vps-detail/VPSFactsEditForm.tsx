@@ -1,7 +1,14 @@
-import { useId, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
-import { Button, Input } from '../../components/atoms'
+import { Button, Input, Select } from '../../components/atoms'
+import {
+  CUSTOM_OPTION_VALUE,
+  countryOptionsWithExisting,
+  displayOption,
+  normalizeCountry,
+  optionSelectValue,
+} from '../../lib/assetOptions'
 import type { ProviderRecord, VPSUsageStatus } from '../../lib/types'
 import type { FactEditFormState } from './types'
 import { USAGE_OPTIONS } from './vpsDetailOptions'
@@ -34,6 +41,11 @@ export function VPSFactsEditForm({
   const providerSelectId = useId()
   const usageSelectId = useId()
   const noteId = useId()
+  const [countryOptions] = useState(() => countryOptionsWithExisting([draft.country]))
+  const [countrySelectValue, setCountrySelectValue] = useState(() => optionSelectValue(draft.country, countryOptions))
+  const [customCountry, setCustomCountry] = useState(() => (optionSelectValue(draft.country, countryOptions) === CUSTOM_OPTION_VALUE ? draft.country : ''))
+  const [ipv6Enabled, setIPv6Enabled] = useState(() => Boolean(draft.ipv6.trim()))
+  const [sshHostDiffers, setSSHHostDiffers] = useState(() => Boolean(draft.sshHost.trim() && draft.sshHost.trim() !== draft.ipv4.trim()))
 
   function handleProviderChange(providerID: string) {
     const provider = providers.find((item) => item.provider_id === providerID)
@@ -42,6 +54,40 @@ export function VPSFactsEditForm({
       providerID,
       providerName: provider ? provider.name : draft.providerName,
     })
+  }
+
+  function updateIPv4(value: string) {
+    onDraftChange({
+      ...draft,
+      ipv4: value,
+      sshHost: sshHostDiffers ? draft.sshHost : value,
+    })
+  }
+
+  function updateCountry(value: string) {
+    setCountrySelectValue(value)
+    if (value === CUSTOM_OPTION_VALUE) {
+      onDraftChange({ ...draft, country: normalizeCountry(customCountry) })
+      return
+    }
+    onDraftChange({ ...draft, country: normalizeCountry(value) })
+  }
+
+  function updateCustomCountry(value: string) {
+    setCustomCountry(value)
+    onDraftChange({ ...draft, country: normalizeCountry(value) })
+  }
+
+  function updateIPv6Enabled(checked: boolean) {
+    setIPv6Enabled(checked)
+    if (!checked) {
+      onDraftChange({ ...draft, ipv6: '' })
+    }
+  }
+
+  function updateSSHHostDiffers(checked: boolean) {
+    setSSHHostDiffers(checked)
+    onDraftChange({ ...draft, sshHost: checked ? draft.sshHost : draft.ipv4 })
   }
 
   return (
@@ -79,13 +125,45 @@ export function VPSFactsEditForm({
       <Input label="服务商名称快照" value={draft.providerName} onChange={(event) => onDraftChange({ ...draft, providerName: event.target.value })} />
       <Input label="产品名" value={draft.productName} onChange={(event) => onDraftChange({ ...draft, productName: event.target.value })} />
       <Input label="订单号" value={draft.orderRef} onChange={(event) => onDraftChange({ ...draft, orderRef: event.target.value })} />
-      <Input label="国家 / 地区" value={draft.country} onChange={(event) => onDraftChange({ ...draft, country: event.target.value })} />
+      <Select label="国家 / 地区" value={countrySelectValue} onChange={(event) => updateCountry(event.target.value)}>
+        <option value="">未选择</option>
+        {countryOptions.map((option) => (
+          <option key={option.value} value={option.value}>{displayOption(option)}</option>
+        ))}
+        <option value={CUSTOM_OPTION_VALUE}>自定义 / 其他</option>
+      </Select>
+      {countrySelectValue === CUSTOM_OPTION_VALUE ? (
+        <Input label="自定义国家 / 地区" value={customCountry} onChange={(event) => updateCustomCountry(event.target.value)} />
+      ) : null}
       <Input label="区域" value={draft.region} onChange={(event) => onDraftChange({ ...draft, region: event.target.value })} />
       <Input label="城市" value={draft.city} onChange={(event) => onDraftChange({ ...draft, city: event.target.value })} />
       <Input label="数据中心" value={draft.datacenter} onChange={(event) => onDraftChange({ ...draft, datacenter: event.target.value })} />
-      <Input label="IPv4" value={draft.ipv4} onChange={(event) => onDraftChange({ ...draft, ipv4: event.target.value })} />
-      <Input label="IPv6" value={draft.ipv6} onChange={(event) => onDraftChange({ ...draft, ipv6: event.target.value })} />
-      <Input label="SSH Host" value={draft.sshHost} onChange={(event) => onDraftChange({ ...draft, sshHost: event.target.value })} />
+      <Input label="IPv4 / 主入口" value={draft.ipv4} onChange={(event) => updateIPv4(event.target.value)} />
+      <label className="input-field" htmlFor="vps-facts-ipv6-enabled">
+        <span className="input-field__label">IPv6</span>
+        <span className="tg">
+          <input id="vps-facts-ipv6-enabled" type="checkbox" checked={ipv6Enabled} onChange={(event) => updateIPv6Enabled(event.target.checked)} />
+          <span className="tg-track" />
+          <span>启用 IPv6</span>
+        </span>
+      </label>
+      {ipv6Enabled ? (
+        <Input label="IPv6 地址" value={draft.ipv6} onChange={(event) => onDraftChange({ ...draft, ipv6: event.target.value })} />
+      ) : null}
+      <label className="input-field" htmlFor="vps-facts-ssh-host-differs">
+        <span className="input-field__label">SSH Host 与 IP 不一致</span>
+        <span className="tg">
+          <input id="vps-facts-ssh-host-differs" type="checkbox" checked={sshHostDiffers} onChange={(event) => updateSSHHostDiffers(event.target.checked)} />
+          <span className="tg-track" />
+          <span>单独填写</span>
+        </span>
+      </label>
+      <Input
+        label="SSH Host"
+        value={sshHostDiffers ? draft.sshHost : draft.ipv4}
+        disabled={!sshHostDiffers}
+        onChange={(event) => onDraftChange({ ...draft, sshHost: event.target.value })}
+      />
       <Input label="SSH 端口" type="number" min="1" max="65535" value={draft.sshPort} onChange={(event) => onDraftChange({ ...draft, sshPort: event.target.value })} />
       <Input label="SSH 用户" value={draft.sshUser} onChange={(event) => onDraftChange({ ...draft, sshUser: event.target.value })} />
       <Input label="操作系统" value={draft.osName} onChange={(event) => onDraftChange({ ...draft, osName: event.target.value })} />

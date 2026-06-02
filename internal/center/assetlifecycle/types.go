@@ -22,7 +22,8 @@ var ErrLifecycleActionBlocked = errors.New("lifecycle action blocked")
 type ActionType string
 
 const (
-	ActionTypeCancelVPS ActionType = "cancel_vps"
+	ActionTypeCancelVPS      ActionType = "cancel_vps"
+	ActionTypeExtendValidity ActionType = "extend_validity"
 
 	ActionStatusCompleted = "completed"
 	ActionStatusFailed    = "failed"
@@ -38,6 +39,7 @@ const (
 
 	StepTypeVPSLifecycle                 = "vps_lifecycle"
 	StepTypeSubscriptionStatus           = "subscription_status"
+	StepTypeSubscriptionRenewAt          = "subscription_renew_at"
 	StepTypeMonitoringInstanceLifecycle  = "monitoring_instance_lifecycle"
 	StepTypeMonitoringInstanceMonitoring = "monitoring_instance_monitoring"
 	StepTypeTargetRunStatus              = "target_run_status"
@@ -46,6 +48,7 @@ const (
 type Repository interface {
 	GetVPSCancellationPreview(context.Context, string) (CancellationPreview, error)
 	ApplyVPSCancellation(context.Context, string, ApplyCancellationInput) (LifecycleActionResult, error)
+	ExtendVPSValidity(context.Context, string, ExtendValidityInput) (LifecycleActionResult, error)
 	ListMonitoringInstanceAssetContexts(context.Context) ([]AssetContextForMonitoringInstance, error)
 	ListTargetAssetContexts(context.Context) ([]AssetContextForTarget, error)
 }
@@ -95,6 +98,14 @@ type ApplyCancellationInput struct {
 	VPSLifecycleStatus        vpsassets.LifecycleStatus       `json:"vps_lifecycle_status"`
 	MonitoringInstanceActions []MonitoringInstanceActionInput `json:"monitoring_instance_actions"`
 	TargetActions             []TargetActionInput             `json:"target_actions"`
+}
+
+type ExtendValidityInput struct {
+	ExtendTo    *subscriptions.Date `json:"extend_to"`
+	Reason      string              `json:"reason"`
+	Fee         float64             `json:"fee"`
+	FeeCurrency string              `json:"fee_currency"`
+	SourceType  string              `json:"source_type"`
 }
 
 type MonitoringInstanceActionInput struct {
@@ -182,6 +193,29 @@ func NormalizeApplyCancellationInput(input ApplyCancellationInput) ApplyCancella
 		input.TargetActions[i].RunStatus = strings.TrimSpace(input.TargetActions[i].RunStatus)
 	}
 	return input
+}
+
+func NormalizeExtendValidityInput(input ExtendValidityInput) ExtendValidityInput {
+	input.Reason = strings.TrimSpace(input.Reason)
+	input.FeeCurrency = subscriptions.NormalizeCurrency(input.FeeCurrency)
+	input.SourceType = strings.TrimSpace(input.SourceType)
+	return input
+}
+
+func ValidateExtendValidityInput(input ExtendValidityInput) error {
+	if input.ExtendTo == nil {
+		return fmt.Errorf("%w: extend_to is required", ErrInvalidLifecycleActionInput)
+	}
+	if strings.TrimSpace(input.Reason) == "" {
+		return fmt.Errorf("%w: reason is required", ErrInvalidLifecycleActionInput)
+	}
+	if !subscriptions.IsValidPrice(input.Fee) {
+		return fmt.Errorf("%w: fee must be non-negative", ErrInvalidLifecycleActionInput)
+	}
+	if input.FeeCurrency != "" && !subscriptions.IsValidCurrency(input.FeeCurrency) {
+		return fmt.Errorf("%w: fee_currency must be a 3-letter uppercase code", ErrInvalidLifecycleActionInput)
+	}
+	return nil
 }
 
 func ValidateApplyCancellationInput(input ApplyCancellationInput) error {

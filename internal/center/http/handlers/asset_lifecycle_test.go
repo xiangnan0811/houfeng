@@ -26,6 +26,10 @@ type fakeAssetLifecycleRepository struct {
 	applyErr                      error
 	applyVPSID                    string
 	applyInput                    assetlifecycle.ApplyCancellationInput
+	extendResult                  assetlifecycle.LifecycleActionResult
+	extendErr                     error
+	extendVPSID                   string
+	extendInput                   assetlifecycle.ExtendValidityInput
 	monitoringInstanceContexts    []assetlifecycle.AssetContextForMonitoringInstance
 	monitoringInstanceContextsErr error
 	targetContexts                []assetlifecycle.AssetContextForTarget
@@ -47,6 +51,15 @@ func (f *fakeAssetLifecycleRepository) ApplyVPSCancellation(_ context.Context, v
 		return assetlifecycle.LifecycleActionResult{}, f.applyErr
 	}
 	return f.applyResult, nil
+}
+
+func (f *fakeAssetLifecycleRepository) ExtendVPSValidity(_ context.Context, vpsID string, input assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionResult, error) {
+	f.extendVPSID = vpsID
+	f.extendInput = input
+	if f.extendErr != nil {
+		return assetlifecycle.LifecycleActionResult{}, f.extendErr
+	}
+	return f.extendResult, nil
 }
 
 func (f *fakeAssetLifecycleRepository) ListMonitoringInstanceAssetContexts(context.Context) ([]assetlifecycle.AssetContextForMonitoringInstance, error) {
@@ -160,6 +173,61 @@ func TestVPSCancellationAppliesConfirmedSelection(t *testing.T) {
 	}
 }
 
+func TestVPSExtendValidityUpdatesActiveSubscription(t *testing.T) {
+	completedAt := time.Date(2026, time.May, 30, 9, 0, 0, 0, time.UTC)
+	extendTo := subscriptions.NewDate(time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC))
+	repo := &fakeAssetLifecycleRepository{extendResult: assetlifecycle.LifecycleActionResult{
+		Action: assetlifecycle.LifecycleActionRecord{
+			ActionID:      "ala_extend",
+			VPSID:         "vps_001",
+			ActionType:    assetlifecycle.ActionTypeExtendValidity,
+			Status:        assetlifecycle.ActionStatusCompleted,
+			Reason:        "provider outage compensation",
+			EffectiveDate: &extendTo,
+			CompletedAt:   &completedAt,
+		},
+		Steps: []assetlifecycle.LifecycleActionStep{{
+			StepID:     "als_extend",
+			ActionID:   "ala_extend",
+			ObjectType: assetlifecycle.ObjectTypeSubscription,
+			ObjectID:   "sub_001",
+			StepType:   assetlifecycle.StepTypeSubscriptionRenewAt,
+			Status:     assetlifecycle.StepStatusCompleted,
+		}},
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/extend-validity", strings.NewReader(`{
+		"extend_to":"2026-12-01",
+		"reason":" provider outage compensation ",
+		"fee":0,
+		"fee_currency":" usd ",
+		"source_type":" outage_compensation "
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handlers.VPSExtendValidity(repo).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.extendVPSID != "vps_001" {
+		t.Fatalf("extend vps id = %q, want vps_001", repo.extendVPSID)
+	}
+	if repo.extendInput.ExtendTo == nil || repo.extendInput.ExtendTo.Time.Format(subscriptions.DateLayout) != "2026-12-01" {
+		t.Fatalf("extend_to = %#v, want 2026-12-01", repo.extendInput.ExtendTo)
+	}
+	if repo.extendInput.Reason != "provider outage compensation" || repo.extendInput.FeeCurrency != "USD" || repo.extendInput.SourceType != "outage_compensation" {
+		t.Fatalf("extend input = %#v, want normalized values", repo.extendInput)
+	}
+
+	var body assetlifecycle.LifecycleActionResult
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Action.ActionType != assetlifecycle.ActionTypeExtendValidity || len(body.Steps) != 1 {
+		t.Fatalf("response = %#v, want validity extension action", body)
+	}
+}
+
 func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -179,6 +247,9 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 		{name: "apply blocked lifecycle action", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_archived/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled"}`, want: http.StatusConflict},
 		{name: "apply missing vps", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled"}`, want: http.StatusNotFound},
 		{name: "apply repo failure", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled"}`, want: http.StatusInternalServerError},
+		{name: "extend invalid json", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{`, want: http.StatusBadRequest},
+		{name: "extend missing date", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{"reason":"outage"}`, want: http.StatusBadRequest},
+		{name: "extend blocked lifecycle action", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{extendErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{"extend_to":"2026-12-01","reason":"outage"}`, want: http.StatusConflict},
 	}
 
 	for _, tt := range tests {

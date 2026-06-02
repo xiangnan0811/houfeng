@@ -79,6 +79,7 @@ type MonitoringDetailPageBodyProps = {
   onCloseCommand: () => void
   onExecuteCommand: (commandId: string) => void
   onboardingOpen: boolean
+  onboardingReturnVPSId: string | null
   onOpenOnboarding: () => void
   onCloseOnboarding: () => void
 }
@@ -125,6 +126,7 @@ export function MonitoringDetailPageBody({
   onCloseCommand,
   onExecuteCommand,
   onboardingOpen,
+  onboardingReturnVPSId,
   onOpenOnboarding,
   onCloseOnboarding,
 }: MonitoringDetailPageBodyProps) {
@@ -238,7 +240,12 @@ export function MonitoringDetailPageBody({
         onExecute={onExecuteCommand}
       />
 
-      <MonitoringInstanceOnboardingDrawer monitoringInstance={monitoringInstance} open={onboardingOpen} onClose={onCloseOnboarding} />
+      <MonitoringInstanceOnboardingDrawer
+        monitoringInstance={monitoringInstance}
+        open={onboardingOpen}
+        returnVPSId={onboardingReturnVPSId}
+        onClose={onCloseOnboarding}
+      />
     </div>
   )
 }

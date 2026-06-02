@@ -31,6 +31,7 @@ type RouterOptions struct {
 	VPSServicesHandler                            stdhttp.Handler
 	VPSCancellationPreviewHandler                 stdhttp.Handler
 	VPSCancellationHandler                        stdhttp.Handler
+	VPSExtendValidityHandler                      stdhttp.Handler
 	AssetContextMonitoringInstancesHandler        stdhttp.Handler
 	AssetContextTargetsHandler                    stdhttp.Handler
 	SubscriptionsCollectionHandler                stdhttp.Handler
@@ -127,7 +128,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil {
+	if opts.VPSItemHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -202,6 +203,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSCancellationHandler.ServeHTTP(w, r)
+			case vpsSubtreeExtendValidity:
+				if opts.VPSExtendValidityHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSExtendValidityHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -382,6 +389,7 @@ const (
 	vpsSubtreeServices                 vpsSubtree = "services"
 	vpsSubtreeCancellationPreview      vpsSubtree = "cancellation-preview"
 	vpsSubtreeCancellation             vpsSubtree = "cancellation"
+	vpsSubtreeExtendValidity           vpsSubtree = "extend-validity"
 )
 
 func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
@@ -421,6 +429,8 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeCancellationPreview
 	case "cancellation":
 		return segments[0], vpsSubtreeCancellation
+	case "extend-validity":
+		return segments[0], vpsSubtreeExtendValidity
 	default:
 		return segments[0], vpsSubtreeUnknown
 	}

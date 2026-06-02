@@ -1,18 +1,33 @@
 import type {
+  BillingPeriodUnit,
   CreateAssetDomainInput,
   CreateAssetServiceInput,
+  CreateVPSMonitoringInstanceInput,
   CreateVPSSubscriptionInput,
   CreateVPSExperienceLogInput,
+  ExtendVPSValidityInput,
+  RenewalMode,
   UpdateVPSAssetInput,
   VPSAssetDetail,
 } from '../../lib/types'
+import {
+  billingCycleFromPeriod,
+  billingMonthsFromPeriod,
+  legacyFlagsFromRenewalMode,
+  normalizeBillingPeriodUnit,
+  normalizeCurrency,
+  normalizePaymentMethod,
+  normalizeRenewalMode,
+} from '../../lib/assetOptions'
 import { parseLabels } from '../assetPageUtils'
 import type {
   DomainDraftState,
   ExperienceDraftState,
   FactEditFormState,
+  MonitoringInstanceCreateDraftState,
   ServiceDraftState,
   SubscriptionDraftState,
+  ValidityExtensionDraftState,
   VPSDetailPageState,
   VPSDetailSelectorState,
 } from './types'
@@ -65,14 +80,38 @@ export const INITIAL_SERVICE_DRAFT: ServiceDraftState = {
 export const INITIAL_SUBSCRIPTION_DRAFT: SubscriptionDraftState = {
   price: '',
   currency: 'USD',
-  billingCycle: 'monthly',
-  billingMonths: '1',
+  customCurrency: '',
+  billingPeriodUnit: 'month',
+  billingPeriodLength: '1',
   startedAt: '',
   renewAt: '',
-  autoRenew: false,
-  autoRenewCancelled: false,
+  renewalMode: 'manual',
   paymentMethod: '',
+  customPaymentMethod: '',
   note: '',
+}
+
+export const INITIAL_VALIDITY_EXTENSION_DRAFT: ValidityExtensionDraftState = {
+  extendTo: '',
+  reason: '',
+  fee: '0',
+  currency: 'USD',
+  customCurrency: '',
+  sourceType: 'compensation',
+  customSourceType: '',
+}
+
+export function monitoringInstanceCreateDraftFromDetail(detail: VPSAssetDetail): MonitoringInstanceCreateDraftState {
+  return {
+    displayName: detail.display_name,
+    group: '',
+    region: detail.region || detail.country || '未确认',
+    city: detail.city || detail.datacenter || '未确认',
+    provider: detail.provider_name || '未关联服务商',
+    labels: detail.labels.join(', '),
+    note: detail.note,
+    linkNote: 'created from vps detail',
+  }
 }
 
 export const INITIAL_DOMAIN_DRAFT: DomainDraftState = {
@@ -94,25 +133,80 @@ export function buildSubscriptionInput(form: SubscriptionDraftState): CreateVPSS
   if (!Number.isFinite(price) || price < 0) {
     throw new Error('价格必须为非负数字。')
   }
-  const billingMonths = Number.parseInt(form.billingMonths.trim(), 10)
-  if (!Number.isInteger(billingMonths) || billingMonths <= 0) {
-    throw new Error('计费月数必须大于 0。')
+  const billingPeriodLength = Number.parseInt(form.billingPeriodLength.trim(), 10)
+  if (!Number.isInteger(billingPeriodLength) || billingPeriodLength <= 0) {
+    throw new Error('计费周期长度必须大于 0。')
   }
-  const currency = form.currency.trim().toUpperCase()
+  const billingPeriodUnit = normalizeBillingPeriodUnit(form.billingPeriodUnit) as BillingPeriodUnit
+  const billingMonths = billingMonthsFromPeriod(billingPeriodUnit, billingPeriodLength)
+  const currency = normalizeCurrency(form.currency === '__custom' ? form.customCurrency : form.currency)
   if (!/^[A-Z]{3}$/.test(currency)) {
     throw new Error('币种必须为 3 位大写代码。')
   }
+  const renewalMode = normalizeRenewalMode(form.renewalMode) as RenewalMode
+  const legacyRenewalFlags = legacyFlagsFromRenewalMode(renewalMode)
+  const paymentMethod = normalizePaymentMethod(form.paymentMethod === '__custom' ? form.customPaymentMethod : form.paymentMethod)
   return {
     price,
     currency,
-    billing_cycle: form.billingCycle.trim() || 'monthly',
+    billing_cycle: billingCycleFromPeriod(billingPeriodUnit, billingPeriodLength),
     billing_months: billingMonths,
+    billing_period_unit: billingPeriodUnit,
+    billing_period_length: billingPeriodLength,
     started_at: form.startedAt || null,
     renew_at: form.renewAt || null,
-    auto_renew: form.autoRenew,
-    auto_renew_cancelled: form.autoRenewCancelled,
-    payment_method: form.paymentMethod.trim(),
+    auto_renew: legacyRenewalFlags.auto_renew,
+    auto_renew_cancelled: legacyRenewalFlags.auto_renew_cancelled,
+    renewal_mode: renewalMode,
+    payment_method: paymentMethod,
     note: form.note.trim(),
+  }
+}
+
+export function buildValidityExtensionInput(form: ValidityExtensionDraftState): ExtendVPSValidityInput {
+  const extendTo = form.extendTo.trim()
+  if (!extendTo) {
+    throw new Error('延长至日期不能为空。')
+  }
+  const reason = form.reason.trim()
+  if (!reason) {
+    throw new Error('延长原因不能为空。')
+  }
+  const fee = Number.parseFloat(form.fee.trim() || '0')
+  if (!Number.isFinite(fee) || fee < 0) {
+    throw new Error('延长费用必须为非负数字。')
+  }
+  const currency = normalizeCurrency(form.currency === '__custom' ? form.customCurrency : form.currency)
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new Error('费用币种必须为 3 位大写代码。')
+  }
+  const sourceType = (form.sourceType === '__custom' ? form.customSourceType : form.sourceType).trim()
+  if (!sourceType) {
+    throw new Error('来源类型不能为空。')
+  }
+  return {
+    extend_to: extendTo,
+    reason,
+    fee,
+    fee_currency: currency,
+    source_type: sourceType,
+  }
+}
+
+export function buildMonitoringInstanceCreateInput(form: MonitoringInstanceCreateDraftState): CreateVPSMonitoringInstanceInput {
+  const displayName = form.displayName.trim()
+  if (!displayName) {
+    throw new Error('监控实例名称不能为空。')
+  }
+  return {
+    display_name: displayName,
+    group: form.group.trim(),
+    region: form.region.trim(),
+    city: form.city.trim(),
+    provider: form.provider.trim(),
+    labels: parseLabels(form.labels),
+    note: form.note.trim(),
+    link_note: form.linkNote.trim() || 'created from vps detail',
   }
 }
 
@@ -144,6 +238,9 @@ export function detailToFactEditForm(detail: VPSAssetDetail): FactEditFormState 
 export function buildFactEditInput(form: FactEditFormState): UpdateVPSAssetInput {
   if (form.displayName.trim() === '') {
     throw new Error('VPS 名称不能为空。')
+  }
+  if (!form.ipv4.trim() && !form.sshHost.trim()) {
+    throw new Error('IPv4 或 SSH Host 至少需要填写一个。')
   }
   const sshPort = Number.parseInt(form.sshPort.trim(), 10)
   if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) {

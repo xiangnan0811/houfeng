@@ -272,6 +272,10 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"action":{"action_id":"ala_001"},"steps":[]}`))
 		}),
+		VPSExtendValidityHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"action":{"action_id":"ala_extend"},"steps":[]}`))
+		}),
 	})
 
 	tests := []struct {
@@ -292,6 +296,7 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 		{name: "services", path: "/api/vps/vps_001/services", wantStatus: http.StatusOK, wantBodySnippet: `"service_id":"svc_001"`},
 		{name: "cancellation preview", path: "/api/vps/vps_001/cancellation-preview", wantStatus: http.StatusOK, wantBodySnippet: `"warnings":[]`},
 		{name: "cancellation", path: "/api/vps/vps_001/cancellation", wantStatus: http.StatusOK, wantBodySnippet: `"action_id":"ala_001"`},
+		{name: "extend validity", path: "/api/vps/vps_001/extend-validity", wantStatus: http.StatusOK, wantBodySnippet: `"action_id":"ala_extend"`},
 	}
 
 	for _, tt := range tests {

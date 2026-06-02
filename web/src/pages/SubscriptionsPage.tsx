@@ -4,9 +4,30 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Modal, Input, Select } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createSubscription, listSubscriptions, listVPSAssets, updateSubscription } from '../lib/api'
+import {
+  BILLING_PERIOD_UNIT_OPTIONS,
+  COMMON_CURRENCY_OPTIONS,
+  COMMON_PAYMENT_METHOD_OPTIONS,
+  CUSTOM_OPTION_VALUE,
+  RENEWAL_MODE_OPTIONS,
+  billingCycleFromPeriod,
+  billingMonthsFromPeriod,
+  displayOption,
+  legacyFlagsFromRenewalMode,
+  normalizeBillingPeriodUnit,
+  normalizeCurrency,
+  normalizePaymentMethod,
+  normalizeRenewalMode,
+  optionSelectValue,
+  periodLabel,
+  renewalModeFromLegacy,
+  renewalModeLabel,
+} from '../lib/assetOptions'
 import { formatDate, formatMoney } from '../lib/format'
 import {
+  type BillingPeriodUnit,
   type CreateSubscriptionInput,
+  type RenewalMode,
   type SubscriptionListFilter,
   type SubscriptionRecord,
   type VPSAssetRecord,
@@ -15,16 +36,18 @@ import {
 type PageState = { loading: boolean; error: string | null; subscriptions: SubscriptionRecord[]; vps: VPSAssetRecord[] }
 type FilterState = { vps_id: string | null; renew_window: string | null }
 type FormState = {
-  vpsID: string; price: string; currency: string; billingCycle: string; billingMonths: string
-  startedAt: string; renewAt: string; autoRenew: boolean; autoRenewCancelled: boolean
-  paymentMethod: string; note: string
+  vpsID: string; price: string; currency: string; customCurrency: string
+  billingPeriodUnit: BillingPeriodUnit; billingPeriodLength: string
+  startedAt: string; renewAt: string; renewalMode: RenewalMode
+  paymentMethod: string; customPaymentMethod: string; note: string
 }
 
 const INITIAL_PAGE: PageState = { loading: true, error: null, subscriptions: [], vps: [] }
 const INITIAL_FORM: FormState = {
-  vpsID: '', price: '', currency: 'USD', billingCycle: 'monthly', billingMonths: '1',
-  startedAt: '', renewAt: '', autoRenew: false, autoRenewCancelled: false,
-  paymentMethod: '', note: '',
+  vpsID: '', price: '', currency: 'USD', customCurrency: '',
+  billingPeriodUnit: 'month', billingPeriodLength: '1',
+  startedAt: '', renewAt: '', renewalMode: 'manual',
+  paymentMethod: '', customPaymentMethod: '', note: '',
 }
 
 function describeError(err: unknown, fallback: string): string {
@@ -59,26 +82,183 @@ function buildCreateInput(form: FormState): CreateSubscriptionInput {
   if (!form.vpsID.trim()) throw new Error('VPS 不能为空。')
   const price = Number.parseFloat(form.price.trim())
   if (!Number.isFinite(price) || price < 0) throw new Error('价格必须为非负数字。')
-  const billingMonths = Number.parseInt(form.billingMonths.trim(), 10)
-  if (!Number.isInteger(billingMonths) || billingMonths <= 0) throw new Error('计费月数必须大于 0。')
-  const currency = form.currency.trim().toUpperCase()
+  const billingPeriodLength = Number.parseInt(form.billingPeriodLength.trim(), 10)
+  if (!Number.isInteger(billingPeriodLength) || billingPeriodLength <= 0) throw new Error('计费周期长度必须大于 0。')
+  const billingPeriodUnit = normalizeBillingPeriodUnit(form.billingPeriodUnit)
+  const billingMonths = billingMonthsFromPeriod(billingPeriodUnit, billingPeriodLength)
+  const currency = normalizeCurrency(form.currency === CUSTOM_OPTION_VALUE ? form.customCurrency : form.currency)
   if (!/^[A-Z]{3}$/.test(currency)) throw new Error('币种必须为 3 位大写代码。')
+  const renewalMode = normalizeRenewalMode(form.renewalMode)
+  const legacyRenewalFlags = legacyFlagsFromRenewalMode(renewalMode)
+  const paymentMethod = normalizePaymentMethod(form.paymentMethod === CUSTOM_OPTION_VALUE ? form.customPaymentMethod : form.paymentMethod)
   return {
-    vps_id: form.vpsID.trim(), price, currency, billing_cycle: form.billingCycle.trim(),
-    billing_months: billingMonths, started_at: form.startedAt || null, renew_at: form.renewAt || null,
-    auto_renew: form.autoRenew, auto_renew_cancelled: form.autoRenewCancelled,
-    payment_method: form.paymentMethod.trim(), note: form.note.trim(),
+    vps_id: form.vpsID.trim(), price, currency,
+    billing_cycle: billingCycleFromPeriod(billingPeriodUnit, billingPeriodLength),
+    billing_months: billingMonths,
+    billing_period_unit: billingPeriodUnit,
+    billing_period_length: billingPeriodLength,
+    started_at: form.startedAt || null, renew_at: form.renewAt || null,
+    auto_renew: legacyRenewalFlags.auto_renew,
+    auto_renew_cancelled: legacyRenewalFlags.auto_renew_cancelled,
+    renewal_mode: renewalMode,
+    payment_method: paymentMethod, note: form.note.trim(),
   }
 }
 
 function subToForm(s: SubscriptionRecord): FormState {
+  const currency = optionSelectValue(s.currency, COMMON_CURRENCY_OPTIONS)
+  const paymentMethod = optionSelectValue(s.payment_method, COMMON_PAYMENT_METHOD_OPTIONS)
   return {
-    vpsID: s.vps_id, price: String(s.price), currency: s.currency,
-    billingCycle: s.billing_cycle, billingMonths: String(s.billing_months),
+    vpsID: s.vps_id, price: String(s.price),
+    currency, customCurrency: currency === CUSTOM_OPTION_VALUE ? s.currency : '',
+    billingPeriodUnit: normalizeBillingPeriodUnit(s.billing_period_unit),
+    billingPeriodLength: String(s.billing_period_length && s.billing_period_length > 0 ? s.billing_period_length : s.billing_months || 1),
     startedAt: s.started_at ?? '', renewAt: s.renew_at ?? '',
-    autoRenew: s.auto_renew, autoRenewCancelled: s.auto_renew_cancelled,
-    paymentMethod: s.payment_method, note: s.note,
+    renewalMode: renewalModeFromLegacy(s),
+    paymentMethod, customPaymentMethod: paymentMethod === CUSTOM_OPTION_VALUE ? s.payment_method : '',
+    note: s.note,
   }
+}
+
+type SubscriptionFormProps = {
+  id: string
+  form: FormState
+  vpsOptions: Array<{ value: string; label: string }>
+  vpsDisabled?: boolean
+  error: string | null
+  submitting: boolean
+  submitLabel: string
+  onChange: (form: FormState) => void
+  onCancel: () => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}
+
+function SubscriptionForm({
+  id,
+  form,
+  vpsOptions,
+  vpsDisabled,
+  error,
+  submitting,
+  submitLabel,
+  onChange,
+  onCancel,
+  onSubmit,
+}: SubscriptionFormProps) {
+  function update<K extends keyof FormState>(key: K, value: FormState[K]) {
+    onChange({ ...form, [key]: value })
+  }
+
+  return (
+    <form id={id} className="asset-operation-form" onSubmit={onSubmit}>
+      <div className="asset-operation-form__grid asset-operation-form__grid--3col">
+        <Select
+          label="VPS"
+          value={form.vpsID}
+          disabled={vpsDisabled}
+          onChange={(event) => update('vpsID', event.target.value)}
+          required
+        >
+          <option value="">选择 VPS</option>
+          {vpsOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </Select>
+        <Input
+          label="价格"
+          type="number"
+          min="0"
+          step="0.01"
+          value={form.price}
+          onChange={(event) => update('price', event.target.value)}
+          required
+        />
+        <Select label="币种" value={form.currency} onChange={(event) => update('currency', event.target.value)} required>
+          {COMMON_CURRENCY_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{displayOption(option)}</option>
+          ))}
+          <option value={CUSTOM_OPTION_VALUE}>自定义币种</option>
+        </Select>
+        {form.currency === CUSTOM_OPTION_VALUE ? (
+          <Input
+            label="自定义币种"
+            value={form.customCurrency}
+            onChange={(event) => update('customCurrency', event.target.value)}
+            placeholder="例如：JPY"
+            required
+          />
+        ) : null}
+        <Select
+          label="计费周期单位"
+          value={form.billingPeriodUnit}
+          onChange={(event) => update('billingPeriodUnit', event.target.value as BillingPeriodUnit)}
+        >
+          {BILLING_PERIOD_UNIT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{displayOption(option)}</option>
+          ))}
+        </Select>
+        <Input
+          label="计费周期长度"
+          type="number"
+          min="1"
+          value={form.billingPeriodLength}
+          onChange={(event) => update('billingPeriodLength', event.target.value)}
+          required
+        />
+        <Input
+          label="开始日期"
+          type="date"
+          value={form.startedAt}
+          onChange={(event) => update('startedAt', event.target.value)}
+        />
+        <Input
+          label="续费日期"
+          type="date"
+          value={form.renewAt}
+          onChange={(event) => update('renewAt', event.target.value)}
+        />
+        <Select label="支付方式" value={form.paymentMethod} onChange={(event) => update('paymentMethod', event.target.value)}>
+          <option value="">未记录</option>
+          {COMMON_PAYMENT_METHOD_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{displayOption(option)}</option>
+          ))}
+          <option value={CUSTOM_OPTION_VALUE}>自定义支付方式</option>
+        </Select>
+        {form.paymentMethod === CUSTOM_OPTION_VALUE ? (
+          <Input
+            label="自定义支付方式"
+            value={form.customPaymentMethod}
+            onChange={(event) => update('customPaymentMethod', event.target.value)}
+          />
+        ) : null}
+      </div>
+
+      <div className="asset-operation-form__section">
+        <div className="input-field__label">续费方式</div>
+        <div className="asset-option-grid" role="radiogroup" aria-label="续费方式">
+          {RENEWAL_MODE_OPTIONS.map((option) => (
+            <label key={option.value} className="asset-option-radio">
+              <input
+                type="radio"
+                name={`${id}-renewal-mode`}
+                value={option.value}
+                aria-label={option.label}
+                checked={form.renewalMode === option.value}
+                onChange={() => update('renewalMode', option.value)}
+              />
+              <span className="asset-option-radio__icon" aria-hidden="true">{option.icon}</span>
+              <span className="asset-option-radio__label">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <Input label="备注" value={form.note} onChange={(event) => update('note', event.target.value)} />
+      {error && <p className="create-form__error" role="alert">{error}</p>}
+      <div className="page-form-actions">
+        <button type="button" className="btn md secondary" onClick={onCancel} disabled={submitting}>取消</button>
+        <button type="submit" className="btn md primary" disabled={submitting}>{submitting ? '保存中…' : submitLabel}</button>
+      </div>
+    </form>
+  )
 }
 
 export function SubscriptionsPage() {
@@ -239,13 +419,13 @@ export function SubscriptionsPage() {
                 <tr key={s.subscription_id}>
                   <td className="name">{vpsName(s.vps_id)}</td>
                   <td className="sub">{s.billing_cycle}</td>
-                  <td>{s.billing_months > 1 ? `${s.billing_months} 个月` : '月付'}</td>
+                  <td>{periodLabel(s.billing_period_unit, s.billing_period_length, s.billing_months)}</td>
                   <td className="mono">{formatMoney(s.price, s.currency)}</td>
                   <td className={`time${isUrgent ? ' text-warn' : ''}`}>{formatDate(s.renew_at)}</td>
                   <td>
                     <span className="asset-context-inline">
-                      <span>{s.auto_renew ? '自动续费' : '手工续费'}</span>
-                      {s.auto_renew_cancelled ? <span>已取消自动续费</span> : null}
+                      <span>{renewalModeLabel(s.renewal_mode ?? renewalModeFromLegacy(s))}</span>
+                      {s.payment_method ? <span>{s.payment_method}</span> : null}
                       <Link className="text-link" to={`/vps/${s.vps_id}`}>回到 VPS</Link>
                     </span>
                   </td>
@@ -257,64 +437,39 @@ export function SubscriptionsPage() {
         </table>
       )}
 
-      <Modal open={panelOpen} onClose={closeCreate} title="新建订阅" ariaLabel="新建订阅表单">
-        <form className="drawer-form" onSubmit={handleCreate}>
-          <Select label="VPS" id="sub-create-vps" value={effectiveForm.vpsID} disabled={state.vps.length === 0} onChange={(e) => setCreateForm({ ...createForm, vpsID: e.target.value })} hint={state.vps.length === 0 ? <>无可选 VPS，<Link to="/vps">去创建</Link></> : undefined}>
-            <option value="">选择 VPS</option>
-            {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </Select>
-          <Input label="价格" type="number" min="0" step="0.01" value={createForm.price} onChange={(e) => setCreateForm({ ...createForm, price: e.target.value })} />
-          <Input label="币种" value={createForm.currency} onChange={(e) => setCreateForm({ ...createForm, currency: e.target.value })} />
-          <Input label="计费周期" value={createForm.billingCycle} onChange={(e) => setCreateForm({ ...createForm, billingCycle: e.target.value })} />
-          <Input label="计费月数" type="number" min="1" value={createForm.billingMonths} onChange={(e) => setCreateForm({ ...createForm, billingMonths: e.target.value })} />
-          <Input label="开始日期" type="date" value={createForm.startedAt} onChange={(e) => setCreateForm({ ...createForm, startedAt: e.target.value })} />
-          <Input label="续费日期" type="date" value={createForm.renewAt} onChange={(e) => setCreateForm({ ...createForm, renewAt: e.target.value })} />
-          <Input label="支付方式" value={createForm.paymentMethod} onChange={(e) => setCreateForm({ ...createForm, paymentMethod: e.target.value })} />
-          <label className="ck">
-            <input type="checkbox" checked={createForm.autoRenew} onChange={(e) => setCreateForm({ ...createForm, autoRenew: e.target.checked })} />
-            <span className="ck-box" /> 自动续费
-          </label>
-          <label className="ck">
-            <input type="checkbox" checked={createForm.autoRenewCancelled} onChange={(e) => setCreateForm({ ...createForm, autoRenewCancelled: e.target.checked })} />
-            <span className="ck-box" /> 已取消自动续费
-          </label>
-          <Input label="备注" value={createForm.note} onChange={(e) => setCreateForm({ ...createForm, note: e.target.value })} />
-          {createError && <p className="create-form__error" role="alert">{createError}</p>}
-          <div className="page-form-actions">
-            <button type="button" className="btn md secondary" onClick={closeCreate} disabled={createSubmitting}>取消</button>
-            <button type="submit" className="btn md primary" disabled={createSubmitting}>{createSubmitting ? '创建中…' : '创建'}</button>
-          </div>
-        </form>
+      <Modal open={panelOpen} onClose={closeCreate} title="新建订阅" ariaLabel="新建订阅表单" size="lg">
+        {state.vps.length === 0 ? (
+          <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+            无可选 VPS，<Link className="text-link" to="/vps">先去创建 VPS</Link>
+          </p>
+        ) : (
+          <SubscriptionForm
+            id="subscription-create-form"
+            form={effectiveForm}
+            vpsOptions={vpsOpts}
+            vpsDisabled={state.vps.length === 0}
+            error={createError}
+            submitting={createSubmitting}
+            submitLabel="创建订阅"
+            onChange={setCreateForm}
+            onCancel={closeCreate}
+            onSubmit={handleCreate}
+          />
+        )}
       </Modal>
 
-      <Modal open={editingId != null} onClose={cancelEdit} title="编辑订阅" ariaLabel="编辑订阅表单">
-        <form className="drawer-form" onSubmit={handleEdit}>
-          <Select label="VPS" id="sub-edit-vps" value={editForm.vpsID} onChange={(e) => setEditForm({ ...editForm, vpsID: e.target.value })}>
-            <option value="">选择 VPS</option>
-            {vpsOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </Select>
-          <Input label="价格" type="number" min="0" step="0.01" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} />
-          <Input label="币种" value={editForm.currency} onChange={(e) => setEditForm({ ...editForm, currency: e.target.value })} />
-          <Input label="计费周期" value={editForm.billingCycle} onChange={(e) => setEditForm({ ...editForm, billingCycle: e.target.value })} />
-          <Input label="计费月数" type="number" min="1" value={editForm.billingMonths} onChange={(e) => setEditForm({ ...editForm, billingMonths: e.target.value })} />
-          <Input label="开始日期" type="date" value={editForm.startedAt} onChange={(e) => setEditForm({ ...editForm, startedAt: e.target.value })} />
-          <Input label="续费日期" type="date" value={editForm.renewAt} onChange={(e) => setEditForm({ ...editForm, renewAt: e.target.value })} />
-          <Input label="支付方式" value={editForm.paymentMethod} onChange={(e) => setEditForm({ ...editForm, paymentMethod: e.target.value })} />
-          <label className="ck">
-            <input type="checkbox" checked={editForm.autoRenew} onChange={(e) => setEditForm({ ...editForm, autoRenew: e.target.checked })} />
-            <span className="ck-box" /> 自动续费
-          </label>
-          <label className="ck">
-            <input type="checkbox" checked={editForm.autoRenewCancelled} onChange={(e) => setEditForm({ ...editForm, autoRenewCancelled: e.target.checked })} />
-            <span className="ck-box" /> 已取消自动续费
-          </label>
-          <Input label="备注" value={editForm.note} onChange={(e) => setEditForm({ ...editForm, note: e.target.value })} />
-          {editError && <p className="create-form__error" role="alert">{editError}</p>}
-          <div className="page-form-actions">
-            <button type="button" className="btn md secondary" onClick={cancelEdit} disabled={editSubmitting}>取消</button>
-            <button type="submit" className="btn md primary" disabled={editSubmitting}>{editSubmitting ? '保存中…' : '保存'}</button>
-          </div>
-        </form>
+      <Modal open={editingId != null} onClose={cancelEdit} title="编辑订阅" ariaLabel="编辑订阅表单" size="lg">
+        <SubscriptionForm
+          id="subscription-edit-form"
+          form={editForm}
+          vpsOptions={vpsOpts}
+          error={editError}
+          submitting={editSubmitting}
+          submitLabel="保存订阅"
+          onChange={setEditForm}
+          onCancel={cancelEdit}
+          onSubmit={handleEdit}
+        />
       </Modal>
     </div>
   )
