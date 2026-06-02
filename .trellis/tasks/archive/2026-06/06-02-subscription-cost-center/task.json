@@ -1,0 +1,31 @@
+{
+  "id": "subscription-cost-center",
+  "name": "subscription-cost-center",
+  "title": "订阅模块 VPS 成本中枢",
+  "description": "Upgrade subscriptions into a VPS-first cost center with base currency, exchange rates, budgets, statistics, renewal reminders, and cross-module integration.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "xiangnan-mac",
+  "assignee": "xiangnan-mac",
+  "createdAt": "2026-06-02",
+  "completedAt": "2026-06-02",
+  "branch": "worktree/subscription-cost-center",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-02-subscription-currency-settings",
+    "06-02-subscription-statistics-budgets",
+    "06-02-subscription-renewal-reminders",
+    "06-02-subscription-workbench-integration"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
