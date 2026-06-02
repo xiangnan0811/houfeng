@@ -290,14 +290,26 @@ export function MetricChart({
     else setHoverIndex(null)
   }
 
-  // Tooltip (placed above chart, anchored at hovered X)
+  // Tooltip (anchored near the hovered sample point inside the chart)
   const tooltipNode = (() => {
     if (!showTooltip || effectiveHoverIndex == null || isSingle) return null
     const x = projectX(effectiveHoverIndex)
+    const y = projectY(samples[effectiveHoverIndex].value)
     const xPercent = (x / width) * 100
     const sample = samples[effectiveHoverIndex]
+    const placementClass = y < PADDING.top + 34
+      ? 'metric-chart__tooltip--below'
+      : 'metric-chart__tooltip--above'
+    const edgeClass = xPercent < 18
+      ? 'metric-chart__tooltip--edge-start'
+      : xPercent > 82
+        ? 'metric-chart__tooltip--edge-end'
+        : ''
     return (
-      <span className="metric-chart__tooltip" style={{ left: `${xPercent}%` }}>
+      <span
+        className={['metric-chart__tooltip', placementClass, edgeClass].filter(Boolean).join(' ')}
+        style={{ left: `${xPercent}%`, top: `${y.toFixed(2)}px` }}
+      >
         <span className="metric-chart__tooltip-value">{formatValue(sample.value)}</span>
         <span className="metric-chart__tooltip-time">{formatTooltipTime(sample.observedAt)}</span>
       </span>

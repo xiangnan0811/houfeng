@@ -113,6 +113,8 @@ describe('MetricChart', () => {
 
     const tooltip = container.querySelector('.metric-chart__tooltip')
     expect(tooltip).toBeTruthy()
+    expect((tooltip as HTMLElement).style.top).not.toBe('')
+    expect((tooltip as HTMLElement).style.left).not.toBe('')
     const valueNode = container.querySelector('.metric-chart__tooltip-value')
     expect(valueNode).toBeTruthy()
     // Tooltip should display one of the sample values formatted by formatValue
@@ -134,7 +136,26 @@ describe('MetricChart', () => {
     expect(container.querySelector('.metric-chart__cursor')).toBeTruthy()
   })
 
-  it('supports controlled hover without rendering the local tooltip', () => {
+  it('renders a local tooltip for controlled hover by default', () => {
+    const samples = makeSamples(5, 10, 5_000)
+    const { container } = render(
+      <MetricChart
+        samples={samples}
+        width={300}
+        height={140}
+        hoveredAt={samples[2].observedAt}
+        formatValue={(v) => `${v.toFixed(1)}%`}
+      />,
+    )
+
+    const tooltip = container.querySelector('.metric-chart__tooltip')
+    expect(tooltip).toBeTruthy()
+    expect(tooltip).toHaveTextContent('20.0%')
+    expect((tooltip as HTMLElement).style.top).not.toBe('')
+    expect(container.querySelector('.metric-chart__cursor')).toBeTruthy()
+  })
+
+  it('can suppress the local tooltip for controlled hover', () => {
     const samples = makeSamples(5, 10, 5_000)
     const onHoverAtChange = vi.fn()
     const { container } = render(

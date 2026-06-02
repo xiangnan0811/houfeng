@@ -760,7 +760,7 @@ describe('MonitoringDetailPage', () => {
     expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
   })
 
-  it('shows a shared eight-metric hover readout from any trend chart', async () => {
+  it('shows inline metric values on each chart at the shared hover time', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -857,16 +857,29 @@ describe('MonitoringDetailPage', () => {
     })
     fireEvent.mouseMove(svg, { clientX: 360 })
 
-    const hover = await screen.findByRole('status')
-    expect(hover).toHaveTextContent('CPU 42.0%')
-    expect(hover).toHaveTextContent('内存 63.0%')
-    expect(hover).toHaveTextContent('磁盘 61.0%')
-    expect(hover).toHaveTextContent('Inode 13.0%')
-    expect(hover).toHaveTextContent('Load5 0.9')
-    expect(hover).toHaveTextContent('IOWait 7.0%')
-    expect(hover).toHaveTextContent('网络入 4.0 KB/s')
-    expect(hover).toHaveTextContent('网络出 8.0 KB/s')
+    await waitFor(() =>
+      expect(container.querySelectorAll('.watchtower-metrics .metric-chart__tooltip').length).toBe(8),
+    )
+    expect(container.querySelector('.watchtower-metrics-hover')).toBeNull()
     expect(container.querySelectorAll('.watchtower-metrics .metric-chart__cursor').length).toBe(8)
+
+    const tooltipFor = (heading: string) => {
+      const card = screen.getByRole('heading', { name: heading }).closest('.watchtower-metric-card')
+      expect(card).toBeTruthy()
+      const tooltip = card!.querySelector('.metric-chart__tooltip')
+      expect(tooltip).toBeTruthy()
+      expect((tooltip as HTMLElement).style.top).not.toBe('')
+      return tooltip!
+    }
+
+    expect(tooltipFor('CPU 使用率')).toHaveTextContent('42.0%')
+    expect(tooltipFor('内存使用率')).toHaveTextContent('63.0%')
+    expect(tooltipFor('磁盘使用率')).toHaveTextContent('61.0%')
+    expect(tooltipFor('Inode 使用率')).toHaveTextContent('13.0%')
+    expect(tooltipFor('Load5')).toHaveTextContent('0.9')
+    expect(tooltipFor('CPU IOWait')).toHaveTextContent('7.0%')
+    expect(tooltipFor('网络入')).toHaveTextContent('4.0 KB/s')
+    expect(tooltipFor('网络出')).toHaveTextContent('8.0 KB/s')
   })
 
   it('renders an empty state when no host metric points are available', async () => {
