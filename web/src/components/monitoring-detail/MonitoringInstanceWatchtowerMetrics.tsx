@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Fragment } from 'react'
+import { Fragment, useState } from 'react'
 import { MetricChart, type MetricChartSample } from '../atoms/MetricChart'
 import { MonoDigits } from '../atoms/Mono'
 import {
@@ -43,6 +43,11 @@ interface MetricCardDef {
   priority: MetricPriority
   tone: MetricTone
   render: () => ReactNode
+}
+
+type SharedHoverMetric = {
+  label: string
+  value: string
 }
 
 function priorityFromThresholds(value: number, thresholds: { value: number; tone: string }[]): MetricPriority {
@@ -98,6 +103,25 @@ function availableWindowLabel(window?: MonitoringRuntimeWindow): string {
   return `${new Date(window.available_started_at).toLocaleString()} - ${new Date(window.available_ended_at).toLocaleString()}`
 }
 
+function hoverTimeLabel(observedAt: string): string {
+  const d = new Date(observedAt)
+  if (Number.isNaN(d.getTime())) return observedAt
+  return d.toLocaleString()
+}
+
+function sharedHoverMetrics(point: HostMetricSeriesPoint | null): SharedHoverMetric[] {
+  return [
+    { label: 'CPU', value: point ? formatPercent(point.cpu_usage_pct) : '—' },
+    { label: '内存', value: point ? formatPercent(point.mem_used_pct) : '—' },
+    { label: '磁盘', value: point ? formatPercent(point.disk_used_pct) : '—' },
+    { label: 'Inode', value: point ? formatPercent(point.inode_used_pct) : '—' },
+    { label: 'Load5', value: point ? formatNumber(point.load_5) : '—' },
+    { label: 'IOWait', value: point ? formatPercent(point.cpu_iowait_pct) : '—' },
+    { label: '网络入', value: point ? formatBytesPerSecond(point.net_in_bytes_per_sec) : '—' },
+    { label: '网络出', value: point ? formatBytesPerSecond(point.net_out_bytes_per_sec) : '—' },
+  ]
+}
+
 export function MonitoringInstanceWatchtowerMetrics({
   sample,
   metricPoints,
@@ -105,6 +129,8 @@ export function MonitoringInstanceWatchtowerMetrics({
   window,
   isMaintenance = false,
 }: Props) {
+  const [hoveredAt, setHoveredAt] = useState<string | null>(null)
+
   if (!sample) {
     return (
       <div className="empty-state">
@@ -118,6 +144,15 @@ export function MonitoringInstanceWatchtowerMetrics({
   const labelPrefix = timeWindowLabel(timeWindow)
   const baseTone = isMaintenance ? 'maintenance' : 'accent'
   const altTone = isMaintenance ? 'maintenance' : 'accent-2'
+  const sharedChartProps = {
+    hoveredAt,
+    onHoverAtChange: setHoveredAt,
+    showTooltip: false,
+  }
+  const hoveredPoint = hoveredAt
+    ? ascending.find((point) => point.observed_at === hoveredAt) ?? null
+    : null
+  const hoverMetrics = hoveredAt ? sharedHoverMetrics(hoveredPoint) : []
 
   // Compute priorities for each metric using default thresholds
   const t = DEFAULT_THRESHOLDS
@@ -159,6 +194,7 @@ export function MonitoringInstanceWatchtowerMetrics({
           </header>
           <MetricChart
             samples={toSeries(ascending, (s) => s.cpu_usage_pct)}
+            {...sharedChartProps}
             tone={cpuPriority > 0 ? priorityTone(cpuPriority) : baseTone}
             height={160}
             yMin={0}
@@ -196,6 +232,7 @@ export function MonitoringInstanceWatchtowerMetrics({
           </header>
           <MetricChart
             samples={toSeries(ascending, (s) => s.mem_used_pct)}
+            {...sharedChartProps}
             tone={memPriority > 0 ? priorityTone(memPriority) : baseTone}
             height={160}
             yMin={0}
@@ -245,6 +282,7 @@ export function MonitoringInstanceWatchtowerMetrics({
           </header>
           <MetricChart
             samples={toSeries(ascending, (s) => s.disk_used_pct)}
+            {...sharedChartProps}
             tone={diskPriority > 0 ? priorityTone(diskPriority) : baseTone}
             height={160}
             yMin={0}
@@ -297,6 +335,7 @@ export function MonitoringInstanceWatchtowerMetrics({
           </header>
           <MetricChart
             samples={toSeries(ascending, (s) => s.inode_used_pct)}
+            {...sharedChartProps}
             tone={inodePriority > 0 ? priorityTone(inodePriority) : baseTone}
             height={160}
             yMin={0}
@@ -326,6 +365,7 @@ export function MonitoringInstanceWatchtowerMetrics({
           </header>
           <MetricChart
             samples={toSeries(ascending, (s) => s.load_5)}
+            {...sharedChartProps}
             tone={load5Priority > 0 ? priorityTone(load5Priority) : baseTone}
             height={160}
             yMin={0}
@@ -364,6 +404,7 @@ export function MonitoringInstanceWatchtowerMetrics({
           </header>
           <MetricChart
             samples={toSeries(ascending, (s) => s.cpu_iowait_pct)}
+            {...sharedChartProps}
             tone={iowaitPriority > 0 ? priorityTone(iowaitPriority) : baseTone}
             height={160}
             yMin={0}
@@ -392,6 +433,7 @@ export function MonitoringInstanceWatchtowerMetrics({
           </header>
           <MetricChart
             samples={toSeries(ascending, (s) => s.net_in_bytes_per_sec)}
+            {...sharedChartProps}
             tone={altTone}
             height={160}
             yMin={0}
@@ -416,6 +458,7 @@ export function MonitoringInstanceWatchtowerMetrics({
           </header>
           <MetricChart
             samples={toSeries(ascending, (s) => s.net_out_bytes_per_sec)}
+            {...sharedChartProps}
             tone={baseTone}
             height={160}
             yMin={0}
@@ -448,6 +491,18 @@ export function MonitoringInstanceWatchtowerMetrics({
           {sorted[0]?.priority > 0 ? <> · 首要关注 {sorted[0].label}</> : null}
         </p>
       </div>
+      {hoveredAt ? (
+        <div className="watchtower-metrics-hover" role="status" aria-live="polite">
+          <span className="watchtower-metrics-hover__time">{hoverTimeLabel(hoveredAt)}</span>
+          <div className="watchtower-metrics-hover__values">
+            {hoverMetrics.map((metric) => (
+              <span key={metric.label} className="watchtower-metrics-hover__item">
+                {metric.label} <MonoDigits>{metric.value}</MonoDigits>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="watchtower-metrics" role="group" aria-label="主机指标趋势">
         {sorted.map((card) => (
           <Fragment key={card.id}>{card.render()}</Fragment>

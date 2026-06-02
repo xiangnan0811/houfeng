@@ -5,36 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MonitoringDetailPage } from './MonitoringDetailPage'
 import { formatDateTime } from '../lib/format'
 
-class MockIntersectionObserver implements IntersectionObserver {
-  private readonly callback: IntersectionObserverCallback
-  readonly root = null
-  readonly rootMargin = ''
-  readonly scrollMargin = ''
-  readonly thresholds = []
-
-  constructor(callback: IntersectionObserverCallback) {
-    this.callback = callback
-  }
-
-  observe(target: Element) {
-    this.callback([
-      {
-        isIntersecting: true,
-        target,
-        intersectionRatio: 1,
-        boundingClientRect: target.getBoundingClientRect(),
-        intersectionRect: target.getBoundingClientRect(),
-        rootBounds: null,
-        time: Date.now(),
-      } as IntersectionObserverEntry,
-    ], this)
-  }
-
-  disconnect() {}
-  takeRecords() { return [] }
-  unobserve() {}
-}
-
 function mockJSONResponse(body: unknown, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -196,8 +166,7 @@ describe('MonitoringDetailPage', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads linked VPS summaries when the asset ledger section is visible', async () => {
-    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+  it('loads linked VPS summary into the watchtower header', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -262,8 +231,10 @@ describe('MonitoringDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge VPS')).toBeInTheDocument())
-    expect(screen.getByText('primary host')).toBeInTheDocument()
-    expect(screen.getByText('VPS 是资产账本里的购买、续费与归属对象；监控实例是 agent 接入后的运行实例。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Tokyo Edge VPS' })).toHaveAttribute('href', '/vps/vps_001')
+    expect(screen.queryByText('primary host')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '关联 VPS' })).not.toBeInTheDocument()
+    expect(screen.queryByText('VPS 是资产账本里的购买、续费与归属对象；监控实例是 agent 接入后的运行实例。')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_001/vps', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -272,7 +243,6 @@ describe('MonitoringDetailPage', () => {
   })
 
   it('settles linked VPS loading after a delayed response', async () => {
-    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
     const linkedVPSResponse = deferredResponse()
     const fetchMock = vi
       .fn()
@@ -302,7 +272,7 @@ describe('MonitoringDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('正在加载关联 VPS…')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('VPS 关联加载中')).toBeInTheDocument())
 
     linkedVPSResponse.resolve(mockJSONResponse([
       {
@@ -325,8 +295,9 @@ describe('MonitoringDetailPage', () => {
     ]))
 
     await waitFor(() => expect(screen.getByText('Slow Response VPS')).toBeInTheDocument())
-    expect(screen.getByText('delayed response')).toBeInTheDocument()
-    expect(screen.queryByText('正在加载关联 VPS…')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Slow Response VPS' })).toHaveAttribute('href', '/vps/vps_slow')
+    expect(screen.queryByText('delayed response')).not.toBeInTheDocument()
+    expect(screen.queryByText('VPS 关联加载中')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
@@ -448,7 +419,7 @@ describe('MonitoringDetailPage', () => {
       cache: 'no-store',
         credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/runtime-facts?window=24h', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/runtime-facts?window=realtime', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
         credentials: 'include',
@@ -604,14 +575,74 @@ describe('MonitoringDetailPage', () => {
               sync_batch_id: 'sync-trend-latest',
             },
             window: {
-              key: '24h',
-              started_at: '2026-04-23T10:05:00Z',
+              key: 'realtime',
+              started_at: '2026-04-24T09:05:00Z',
               ended_at: '2026-04-24T10:05:00Z',
-              bucket_count: 288,
+              bucket_count: 720,
               available_started_at: '2026-04-24T09:35:00Z',
               available_ended_at: '2026-04-24T10:05:00Z',
               sample_count: 2,
             },
+            recent_host_samples: [
+              {
+                monitoring_instance_id: 'mi_trend',
+                observed_at: '2026-04-24T09:35:00Z',
+                received_at: '2026-04-24T09:35:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-trend',
+                cpu_usage_pct: 18,
+                load_1: 0.7,
+                load_5: 1.2,
+                load_15: 1.5,
+                mem_used_pct: 58,
+                mem_available_bytes: 1610612736,
+                mem_total_bytes: 8589934592,
+                swap_used_pct: 0,
+                disk_used_pct: 40,
+                disk_total_bytes: 107374182400,
+                inode_used_pct: 8,
+                net_in_bytes_per_sec: 900,
+                net_out_bytes_per_sec: 1800,
+                cpu_iowait_pct: 4,
+                cpu_steal_pct: 1,
+                disk_read_bytes_per_sec: 2048,
+                disk_write_bytes_per_sec: 3072,
+                disk_busy_pct: 7,
+                uptime_seconds: 6900,
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-trend-prev',
+              },
+              {
+                monitoring_instance_id: 'mi_trend',
+                observed_at: '2026-04-24T10:05:00Z',
+                received_at: '2026-04-24T10:05:01Z',
+                agent_version: 'dev',
+                fingerprint: 'fp-trend',
+                cpu_usage_pct: 21,
+                load_1: 0.8,
+                load_5: 1.6,
+                load_15: 1.9,
+                mem_used_pct: 62,
+                mem_available_bytes: 1073741824,
+                mem_total_bytes: 8589934592,
+                swap_used_pct: 0,
+                disk_used_pct: 41,
+                disk_total_bytes: 107374182400,
+                inode_used_pct: 9,
+                net_in_bytes_per_sec: 1024,
+                net_out_bytes_per_sec: 2048,
+                cpu_iowait_pct: 6,
+                cpu_steal_pct: 1.4,
+                disk_read_bytes_per_sec: 3072,
+                disk_write_bytes_per_sec: 4096,
+                disk_busy_pct: 8,
+                uptime_seconds: 7200,
+                maintenance_context: false,
+                is_backfilled: false,
+                sync_batch_id: 'sync-trend-latest',
+              },
+            ],
             host_metric_points: [
               {
                 observed_at: '2026-04-24T09:35:00Z',
@@ -661,6 +692,181 @@ describe('MonitoringDetailPage', () => {
     expect(cards.length).toBe(8)
     // With 2 ascending metric points, each card's MetricChart draws a polyline
     expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
+  })
+
+  it('renders realtime trends from recent host samples before websocket messages arrive', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_seed',
+            display_name: 'Seeded Realtime Monitoring Instance',
+            binding_status: '已绑定',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          })),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            monitoring_instance_id: 'mi_seed',
+            latest_host_sample: hostSampleRecord('mi_seed', {
+              observed_at: '2026-04-24T10:00:05Z',
+              cpu_usage_pct: 46,
+              sync_batch_id: 'sync-seed-2',
+            }),
+            window: {
+              key: 'realtime',
+              started_at: '2026-04-24T09:00:05Z',
+              ended_at: '2026-04-24T10:00:05Z',
+              bucket_count: 720,
+              available_started_at: '2026-04-24T10:00:00Z',
+              available_ended_at: '2026-04-24T10:00:05Z',
+              sample_count: 2,
+            },
+            recent_host_samples: [
+              hostSampleRecord('mi_seed', {
+                observed_at: '2026-04-24T10:00:00Z',
+                cpu_usage_pct: 44,
+                sync_batch_id: 'sync-seed-1',
+              }),
+              hostSampleRecord('mi_seed', {
+                observed_at: '2026-04-24T10:00:05Z',
+                cpu_usage_pct: 46,
+                sync_batch_id: 'sync-seed-2',
+              }),
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/monitoring/mi_seed']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Seeded Realtime Monitoring Instance' })).toBeInTheDocument(),
+    )
+
+    expect(screen.getByText('实时滚动 2 点 · 已按阈值优先级排序')).toBeInTheDocument()
+    expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
+  })
+
+  it('shows a shared eight-metric hover readout from any trend chart', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_hover',
+            display_name: 'Hover Monitoring Instance',
+            binding_status: '已绑定',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          })),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            monitoring_instance_id: 'mi_hover',
+            latest_host_sample: hostSampleRecord('mi_hover', {
+              observed_at: '2026-04-24T10:00:05Z',
+              cpu_usage_pct: 42,
+              mem_used_pct: 63,
+              disk_used_pct: 61,
+              inode_used_pct: 13,
+              load_5: 0.9,
+              cpu_iowait_pct: 7,
+              net_in_bytes_per_sec: 4096,
+              net_out_bytes_per_sec: 8192,
+              sync_batch_id: 'sync-hover-2',
+            }),
+            window: {
+              key: 'realtime',
+              started_at: '2026-04-24T09:00:05Z',
+              ended_at: '2026-04-24T10:00:05Z',
+              bucket_count: 720,
+              available_started_at: '2026-04-24T10:00:00Z',
+              available_ended_at: '2026-04-24T10:00:05Z',
+              sample_count: 2,
+            },
+            recent_host_samples: [
+              hostSampleRecord('mi_hover', {
+                observed_at: '2026-04-24T10:00:00Z',
+                cpu_usage_pct: 40,
+                mem_used_pct: 62,
+                disk_used_pct: 60,
+                inode_used_pct: 12,
+                load_5: 0.8,
+                cpu_iowait_pct: 6,
+                net_in_bytes_per_sec: 2048,
+                net_out_bytes_per_sec: 4096,
+                sync_batch_id: 'sync-hover-1',
+              }),
+              hostSampleRecord('mi_hover', {
+                observed_at: '2026-04-24T10:00:05Z',
+                cpu_usage_pct: 42,
+                mem_used_pct: 63,
+                disk_used_pct: 61,
+                inode_used_pct: 13,
+                load_5: 0.9,
+                cpu_iowait_pct: 7,
+                net_in_bytes_per_sec: 4096,
+                net_out_bytes_per_sec: 8192,
+                sync_batch_id: 'sync-hover-2',
+              }),
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/monitoring/mi_hover']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Hover Monitoring Instance' })).toBeInTheDocument(),
+    )
+
+    const svg = container.querySelector('.watchtower-metrics svg')!
+    svg.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 360,
+      bottom: 160,
+      width: 360,
+      height: 160,
+      toJSON: () => ({}),
+    })
+    fireEvent.mouseMove(svg, { clientX: 360 })
+
+    const hover = await screen.findByRole('status')
+    expect(hover).toHaveTextContent('CPU 42.0%')
+    expect(hover).toHaveTextContent('内存 63.0%')
+    expect(hover).toHaveTextContent('磁盘 61.0%')
+    expect(hover).toHaveTextContent('Inode 13.0%')
+    expect(hover).toHaveTextContent('Load5 0.9')
+    expect(hover).toHaveTextContent('IOWait 7.0%')
+    expect(hover).toHaveTextContent('网络入 4.0 KB/s')
+    expect(hover).toHaveTextContent('网络出 8.0 KB/s')
+    expect(container.querySelectorAll('.watchtower-metrics .metric-chart__cursor').length).toBe(8)
   })
 
   it('renders an empty state when no host metric points are available', async () => {
@@ -865,7 +1071,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getByText('4')).toBeInTheDocument()
     expect(screen.getByText(/同一台机器重装或合法替换/)).toBeInTheDocument()
     expect(screen.queryByText('标签与备注')).not.toBeInTheDocument()
-    expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '生命周期' })).not.toBeInTheDocument()
     expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
     openRuntimeMenu()
     expect(screen.getByRole('button', { name: '接入 agent…' })).toBeInTheDocument()
@@ -1617,7 +1823,7 @@ describe('MonitoringDetailPage', () => {
 
     expect(screen.queryByRole('button', { name: '恢复到观察中' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '退役监控实例' })).not.toBeInTheDocument()
-    expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '生命周期' })).not.toBeInTheDocument()
   })
 
   it('ignores a stale runtime-action success after switching to a different monitoringInstance route', async () => {
@@ -2022,15 +2228,15 @@ describe('MonitoringDetailPage', () => {
 
     expect(container.querySelectorAll('.collapsible-section.watchtower-secondary').length).toBe(0)
     expect(screen.queryByText('标签与备注')).not.toBeInTheDocument()
-    expect(screen.queryByText('生命周期')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '生命周期' })).not.toBeInTheDocument()
     expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '关联 VPS' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '容器列表' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '关联 VPS' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '容器列表' })).not.toBeInTheDocument()
     // Page footer surfaces the snapshot meta line
     expect(container.querySelector('.watchtower-snapshot-meta')).not.toBeNull()
   })
 
-  it('renders container list when latest_host_sample contains containers', async () => {
+  it('keeps container inventory out of the monitoring detail body', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -2112,25 +2318,14 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByRole('heading', { name: '容器列表' })).toBeInTheDocument()
-
-    // Verify container names appear.
-    expect(screen.getByText('nginx-prod')).toBeInTheDocument()
-    expect(screen.getByText('redis-cache')).toBeInTheDocument()
-
-    // Verify image names.
-    expect(screen.getByText('nginx:1.25-alpine')).toBeInTheDocument()
-    expect(screen.getByText('redis:7-alpine')).toBeInTheDocument()
-
-    // Verify CPU/Mem percentages (mono digits).
-    expect(screen.getByText('0.5%')).toBeInTheDocument()
-    expect(screen.getByText('1.2%')).toBeInTheDocument()
-
-    // Exited container should have dash for missing stats.
-    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByRole('heading', { name: '容器列表' })).not.toBeInTheDocument()
+    expect(screen.queryByText('nginx-prod')).not.toBeInTheDocument()
+    expect(screen.queryByText('redis-cache')).not.toBeInTheDocument()
+    expect(screen.queryByText('nginx:1.25-alpine')).not.toBeInTheDocument()
+    expect(screen.queryByText('redis:7-alpine')).not.toBeInTheDocument()
   })
 
-  it('shows 暂无容器数据 when latest_host_sample has no containers', async () => {
+  it('does not render empty container messaging when host samples omit containers', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -2196,8 +2391,8 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByRole('heading', { name: '容器列表' })).toBeInTheDocument()
-    expect(screen.getByText('暂无容器数据')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '容器列表' })).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无容器数据')).not.toBeInTheDocument()
   })
 
   it('triggers runtime maintenance via the watchtower header operations menu', async () => {
@@ -2364,7 +2559,7 @@ describe('MonitoringDetailPage', () => {
 
   // ── Time window Tabs ──
 
-  it('renders time window Tabs with 24h selected by default', async () => {
+  it('renders time window Tabs with realtime selected by default', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -2404,7 +2599,8 @@ describe('MonitoringDetailPage', () => {
 
     const tablist = screen.getByRole('tablist')
     expect(tablist).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '24h' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '实时' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: '24h' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByRole('tab', { name: '30d' })).toHaveAttribute('aria-selected', 'false')
   })
@@ -2445,8 +2641,8 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    // Initial load fetches runtime facts with default 24h window.
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_calm/runtime-facts?window=24h', {
+    // Initial load fetches runtime facts with the default realtime window.
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_calm/runtime-facts?window=realtime', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -2456,11 +2652,11 @@ describe('MonitoringDetailPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: '7d' }))
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_calm/runtime-facts?window=7d', {
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-        credentials: 'include',
-      }),
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          call[0] === '/api/monitoring-instances/mi_calm/runtime-facts?window=7d',
+        ),
+      ).toBe(true),
     )
   })
 
@@ -2483,11 +2679,36 @@ describe('MonitoringDetailPage', () => {
         mockJSONResponse({
           monitoring_instance_id: 'mi_realtime',
           latest_host_sample: null,
-          host_metric_points: [],
+          window: {
+            key: 'realtime',
+            started_at: '2026-04-24T09:00:00Z',
+            ended_at: '2026-04-24T10:00:00Z',
+            bucket_count: 720,
+            available_started_at: null,
+            available_ended_at: null,
+            sample_count: 0,
+          },
+          recent_host_samples: [],
         }),
       )
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          monitoring_instance_id: 'mi_realtime',
+          latest_host_sample: null,
+          window: {
+            key: '24h',
+            started_at: '2026-04-23T10:00:00Z',
+            ended_at: '2026-04-24T10:00:00Z',
+            bucket_count: 288,
+            available_started_at: null,
+            available_ended_at: null,
+            sample_count: 0,
+          },
+          host_metric_points: [],
+        }),
+      )
     vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('WebSocket', MockRuntimeWebSocket)
 
@@ -2502,8 +2723,6 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
-
-    fireEvent.click(screen.getByRole('tab', { name: '实时' }))
 
     await waitFor(() => expect(MockRuntimeWebSocket.instances).toHaveLength(1))
     const socket = MockRuntimeWebSocket.instances[0]

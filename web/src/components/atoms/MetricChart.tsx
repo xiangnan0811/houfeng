@@ -41,6 +41,9 @@ export interface MetricChartProps {
   /** Lock Y-axis upper bound. When omitted, derived from data. */
   yMax?: number
   className?: string
+  hoveredAt?: string | null
+  onHoverAtChange?: (observedAt: string | null) => void
+  showTooltip?: boolean
 }
 const TONE_VAR: Record<MetricChartTone, string> = {
   normal: 'var(--color-state-normal)',
@@ -110,6 +113,24 @@ function computeXTickIndices(sampleCount: number, targetCount = 5): number[] {
   return indices
 }
 
+function indexForObservedAt(samples: MetricChartSample[], observedAt: string | null | undefined): number | null {
+  if (!observedAt) return null
+  const target = new Date(observedAt).getTime()
+  if (Number.isNaN(target)) return null
+  let nearestIndex = 0
+  let nearestDiff = Number.POSITIVE_INFINITY
+  samples.forEach((sample, index) => {
+    const ms = new Date(sample.observedAt).getTime()
+    if (Number.isNaN(ms)) return
+    const diff = Math.abs(ms - target)
+    if (diff < nearestDiff) {
+      nearestDiff = diff
+      nearestIndex = index
+    }
+  })
+  return Number.isFinite(nearestDiff) ? nearestIndex : null
+}
+
 export function MetricChart({
   samples,
   width: propsWidth,
@@ -129,6 +150,9 @@ export function MetricChart({
   yMin,
   yMax,
   className = '',
+  hoveredAt,
+  onHoverAtChange,
+  showTooltip = true,
 }: MetricChartProps) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -216,6 +240,8 @@ export function MetricChart({
   const lastIdx = samples.length - 1
   const lastX = projectX(lastIdx)
   const lastY = projectY(samples[lastIdx].value)
+  const isControlledHover = hoveredAt !== undefined || onHoverAtChange !== undefined
+  const effectiveHoverIndex = isControlledHover ? indexForObservedAt(samples, hoveredAt) : hoverIndex
 
   // Y ticks (deduplicated by formatted string)
   const rawYTicks = computeYTicks(effectiveYMin, effectiveYMax, 4)
@@ -243,28 +269,33 @@ export function MetricChart({
     const vbX = (relX / rect.width) * width
     // Convert vbX into sample index, accounting for left padding
     if (vbX < PADDING.left) {
-      setHoverIndex(0)
+      if (isControlledHover) onHoverAtChange?.(samples[0].observedAt)
+      else setHoverIndex(0)
       return
     }
     if (vbX > PADDING.left + innerW) {
-      setHoverIndex(lastIdx)
+      if (isControlledHover) onHoverAtChange?.(samples[lastIdx].observedAt)
+      else setHoverIndex(lastIdx)
       return
     }
     const dataX = vbX - PADDING.left
     const idx = Math.round((dataX / innerW) * (samples.length - 1))
-    setHoverIndex(Math.max(0, Math.min(lastIdx, idx)))
+    const nextIndex = Math.max(0, Math.min(lastIdx, idx))
+    if (isControlledHover) onHoverAtChange?.(samples[nextIndex].observedAt)
+    else setHoverIndex(nextIndex)
   }
 
   const handleLeave = () => {
-    setHoverIndex(null)
+    if (isControlledHover) onHoverAtChange?.(null)
+    else setHoverIndex(null)
   }
 
   // Tooltip (placed above chart, anchored at hovered X)
   const tooltipNode = (() => {
-    if (hoverIndex == null || isSingle) return null
-    const x = projectX(hoverIndex)
+    if (!showTooltip || effectiveHoverIndex == null || isSingle) return null
+    const x = projectX(effectiveHoverIndex)
     const xPercent = (x / width) * 100
-    const sample = samples[hoverIndex]
+    const sample = samples[effectiveHoverIndex]
     return (
       <span className="metric-chart__tooltip" style={{ left: `${xPercent}%` }}>
         <span className="metric-chart__tooltip-value">{formatValue(sample.value)}</span>
@@ -435,9 +466,9 @@ export function MetricChart({
       <circle cx={lastX} cy={lastY} r={2.5} fill={stroke} />
 
       {/* Hover crosshair */}
-      {hoverIndex != null && !isSingle && (() => {
-        const x = projectX(hoverIndex)
-        const y = projectY(samples[hoverIndex].value)
+      {effectiveHoverIndex != null && !isSingle && (() => {
+        const x = projectX(effectiveHoverIndex)
+        const y = projectY(samples[effectiveHoverIndex].value)
         return (
           <g className="metric-chart__cursor">
             <line

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/contracts/agentapi"
@@ -144,6 +145,107 @@ func TestPostgresSyncRepositoryRejectsObservationBatchWithoutHeartbeatCarrier(t 
 	}
 }
 
+func TestSyncBatchPromotesPendingEnrollmentLifecycleAfterHostSample(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		monitoringInstanceLifecycle:     monitoringinstances.LifecyclePendingEnrollment,
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	if _, err := repo.ApplyBatch(context.Background(), testSyncBatchWithHostSample()); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	args := tx.argsForSQL("last_heartbeat_at = greatest")
+	if len(args) != 4 {
+		t.Fatalf("sync state args = %#v, want monitoringInstance id, heartbeat, sync time, lifecycle", args)
+	}
+	if got := args[3]; got != monitoringinstances.LifecycleInUse {
+		t.Fatalf("lifecycle update arg = %#v, want %q", got, monitoringinstances.LifecycleInUse)
+	}
+}
+
+func TestSyncBatchKeepsPendingEnrollmentLifecycleWithoutHostSample(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		monitoringInstanceLifecycle:     monitoringinstances.LifecyclePendingEnrollment,
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	args := tx.argsForSQL("last_heartbeat_at = greatest")
+	if len(args) != 4 {
+		t.Fatalf("sync state args = %#v, want monitoringInstance id, heartbeat, sync time, lifecycle", args)
+	}
+	if got := args[3]; got != monitoringinstances.LifecyclePendingEnrollment {
+		t.Fatalf("lifecycle update arg = %#v, want %q", got, monitoringinstances.LifecyclePendingEnrollment)
+	}
+}
+
+func TestSyncBatchDoesNotOverrideNonPendingLifecycleAfterHostSample(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		monitoringinstances.LifecycleInUse,
+		monitoringinstances.LifecycleObserving,
+		monitoringinstances.LifecycleNoRenewal,
+		monitoringinstances.LifecycleRetired,
+	}
+
+	for _, lifecycle := range tests {
+		lifecycle := lifecycle
+		t.Run(lifecycle, func(t *testing.T) {
+			t.Parallel()
+
+			tx := &fakeSyncBatchTx{
+				monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+				monitoringInstanceFingerprint:   "fp-001",
+				monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+				monitoringInstanceLifecycle:     lifecycle,
+				probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+			}
+			repo := &PostgresSyncRepository{
+				beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+					return tx, nil
+				},
+			}
+
+			if _, err := repo.ApplyBatch(context.Background(), testSyncBatchWithHostSample()); err != nil {
+				t.Fatalf("ApplyBatch() error = %v", err)
+			}
+
+			args := tx.argsForSQL("last_heartbeat_at = greatest")
+			if len(args) != 4 {
+				t.Fatalf("sync state args = %#v, want monitoringInstance id, heartbeat, sync time, lifecycle", args)
+			}
+			if got := args[3]; got != lifecycle {
+				t.Fatalf("lifecycle update arg = %#v, want %q", got, lifecycle)
+			}
+		})
+	}
+}
+
 func testSyncBatch() syncing.Batch {
 	observedAt := time.Date(2026, time.April, 24, 8, 0, 0, 0, time.UTC)
 	return syncing.Batch{
@@ -172,10 +274,31 @@ func testSyncBatch() syncing.Batch {
 	}
 }
 
+func testSyncBatchWithHostSample() syncing.Batch {
+	batch := testSyncBatch()
+	observedAt := batch.Heartbeats[0].ObservedAt
+	batch.Observations.HostSamples = []observations.HostSampleWrite{{
+		MonitoringInstanceID: "mi_001",
+		ObservedAt:           observedAt,
+		AgentVersion:         "agent/v0.1.0",
+		Fingerprint:          "fp-001",
+		CPUUsagePct:          42,
+		Load5:                0.8,
+		MemUsedPct:           64,
+		DiskUsedPct:          51,
+		InodeUsedPct:         18,
+		NetInBytesPerSec:     1024,
+		NetOutBytesPerSec:    2048,
+		SyncBatchID:          "sync_001",
+	}}
+	return batch
+}
+
 type fakeSyncBatchTx struct {
 	monitoringInstanceBindingStatus string
 	monitoringInstanceFingerprint   string
 	monitoringInstanceSyncTokenHash string
+	monitoringInstanceLifecycle     string
 	monitoringInstanceLabels        []string
 	pendingActionID                 string
 	pendingCommandID                string
@@ -231,9 +354,14 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 		}}
 	case strings.Contains(sql, "from monitoring_instances"):
 		return fakeRow{scan: func(dest ...any) error {
+			lifecycle := f.monitoringInstanceLifecycle
+			if lifecycle == "" {
+				lifecycle = monitoringinstances.LifecycleInUse
+			}
 			*(dest[0].(*string)) = f.monitoringInstanceBindingStatus
 			*(dest[1].(*string)) = f.monitoringInstanceFingerprint
 			*(dest[2].(*string)) = f.monitoringInstanceSyncTokenHash
+			*(dest[3].(*string)) = lifecycle
 			return nil
 		}}
 	case strings.Contains(sql, "from probe_items"):

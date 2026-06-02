@@ -47,8 +47,42 @@ import type {
   TimeWindow,
 } from './monitoring-detail/types'
 
-const REALTIME_SAMPLE_LIMIT = 720
+const REALTIME_WINDOW_MS = 60 * 60 * 1000
 const RUNTIME_STREAM_RECONNECT_MS = 2000
+const LINKED_VPS_SUMMARY_FETCH_DELAY_MS = 300
+const MONITORING_INSTANCE_LIFECYCLE_PENDING = '待接入'
+const MONITORING_INSTANCE_LIFECYCLE_IN_USE = '在用'
+
+function sampleKey(sample: HostSample): string {
+  return `${sample.observed_at}::${sample.sync_batch_id}`
+}
+
+function realtimeSeedSamples(runtimeFacts: { recent_host_samples?: HostSample[]; latest_host_sample?: HostSample | null }): HostSample[] {
+  if (runtimeFacts.recent_host_samples?.length) return runtimeFacts.recent_host_samples
+  return runtimeFacts.latest_host_sample ? [runtimeFacts.latest_host_sample] : []
+}
+
+function mergeRealtimeSamples(current: HostSample[], incoming: HostSample[]): HostSample[] {
+  if (incoming.length === 0) return current
+  const byKey = new Map<string, HostSample>()
+  for (const sample of current) byKey.set(sampleKey(sample), sample)
+  for (const sample of incoming) byKey.set(sampleKey(sample), sample)
+  const sorted = [...byKey.values()].sort((a, b) => {
+    const timeDiff = new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime()
+    if (timeDiff !== 0) return timeDiff
+    return a.sync_batch_id.localeCompare(b.sync_batch_id)
+  })
+  const newestTime = sorted.reduce((max, sample) => {
+    const ms = new Date(sample.observed_at).getTime()
+    return Number.isNaN(ms) ? max : Math.max(max, ms)
+  }, 0)
+  if (newestTime <= 0) return sorted
+  const cutoff = newestTime - REALTIME_WINDOW_MS
+  return sorted.filter((sample) => {
+    const ms = new Date(sample.observed_at).getTime()
+    return Number.isNaN(ms) || ms >= cutoff
+  })
+}
 
 export function MonitoringDetailPage() {
   const { monitoringInstanceId } = useParams()
@@ -84,7 +118,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [commandSubmitting, setCommandSubmitting] = useState(false)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>('24h')
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>('realtime')
   const [realtimeSamples, setRealtimeSamples] = useState<HostSample[]>([])
   const [runtimeStreamStatus, setRuntimeStreamStatus] = useState<RuntimeStreamStatus>('idle')
   const [runtimeStreamError, setRuntimeStreamError] = useState<string | null>(null)
@@ -95,14 +129,15 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     loaded: false,
     error: null,
   })
-  const [linkedVPSVisible, setLinkedVPSVisible] = useState(false)
-  const linkedVPSSectionRef = useRef<HTMLDivElement | null>(null)
   const linkedVPSFetchRef = useRef({
     monitoringInstanceId: null as string | null,
     inFlight: false,
     fetched: false,
+    scheduled: false,
+    timerId: null as number | null,
     requestId: 0,
   })
+  const linkedVPSInteractionBusyRef = useRef(false)
   const currentRouteMonitoringInstanceIdRef = useRef<string | null>(monitoringInstanceId ?? null)
   const currentRequestedMonitoringInstanceIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
@@ -133,6 +168,21 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   useEffect(() => {
     currentRequestedMonitoringInstanceIdRef.current = state.requestedMonitoringInstanceId
   }, [state.requestedMonitoringInstanceId])
+
+  const linkedVPSInteractionBusy = Boolean(
+    pendingRuntimeConfirmation ||
+    runtimeSubmitting ||
+    bindingAction ||
+    historyOpen ||
+    commandOpen ||
+    onboardingOpen ||
+    commandSubmitting ||
+    historyIncidentsLoading,
+  )
+
+  useEffect(() => {
+    linkedVPSInteractionBusyRef.current = linkedVPSInteractionBusy
+  }, [linkedVPSInteractionBusy])
 
   useEffect(() => {
     if (pendingRuntimeConfirmation) return
@@ -172,8 +222,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     let cancelled = false
     if (!monitoringInstanceId) return
 
-    if (timeWindow === 'realtime') return
-
     getMonitoringInstanceRuntimeFacts(monitoringInstanceId, timeWindow)
       .then((runtimeFacts) => {
         if (cancelled) return
@@ -181,6 +229,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
           if (current.requestedMonitoringInstanceId !== monitoringInstanceId) return current
           return { ...current, runtimeFacts }
         })
+        if (timeWindow === 'realtime') {
+          setRealtimeSamples((current) => mergeRealtimeSamples(current, realtimeSeedSamples(runtimeFacts)))
+        }
       })
       .catch(() => {
         // On window-switch fetch error, keep old data visible — no-op.
@@ -195,8 +246,13 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     setRuntimeStreamError(null)
   }, [monitoringInstanceId])
 
+  const realtimeRuntimeFactsReady =
+    state.requestedMonitoringInstanceId === monitoringInstanceId &&
+    Boolean(state.runtimeFacts) &&
+    (!state.runtimeFacts?.window || state.runtimeFacts.window.key === 'realtime')
+
   useEffect(() => {
-    if (!monitoringInstanceId || timeWindow !== 'realtime') {
+    if (!monitoringInstanceId || timeWindow !== 'realtime' || !realtimeRuntimeFactsReady) {
       setRuntimeStreamStatus('idle')
       setRuntimeStreamError(null)
       return
@@ -228,14 +284,25 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
           const message = JSON.parse(String(event.data)) as HostSampleStreamMessage
           if (message.type !== 'host_sample' || message.monitoring_instance_id !== monitoringInstanceId) return
           const sample = message.sample
-          setRealtimeSamples((current) => [...current, sample].slice(-REALTIME_SAMPLE_LIMIT))
+          setRealtimeSamples((current) => mergeRealtimeSamples(current, [sample]))
           setState((current) => {
             if (current.requestedMonitoringInstanceId !== monitoringInstanceId || !current.runtimeFacts) return current
             return {
               ...current,
+              monitoringInstance: current.monitoringInstance
+                ? {
+                    ...current.monitoringInstance,
+                    lifecycle_status:
+                      current.monitoringInstance.lifecycle_status === MONITORING_INSTANCE_LIFECYCLE_PENDING
+                        ? MONITORING_INSTANCE_LIFECYCLE_IN_USE
+                        : current.monitoringInstance.lifecycle_status,
+                    last_heartbeat_at: sample.observed_at,
+                  }
+                : current.monitoringInstance,
               runtimeFacts: {
                 ...current.runtimeFacts,
                 latest_host_sample: sample,
+                recent_host_samples: mergeRealtimeSamples(current.runtimeFacts.recent_host_samples ?? [], [sample]),
               },
             }
           })
@@ -263,15 +330,16 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       setRuntimeStreamStatus('idle')
       setRuntimeStreamError(null)
     }
-  }, [monitoringInstanceId, timeWindow])
+  }, [monitoringInstanceId, realtimeRuntimeFactsReady, timeWindow])
 
   useEffect(() => {
     let cancelled = false
     if (!monitoringInstanceId) return
 
-    Promise.all([getMonitoringInstance(monitoringInstanceId), getMonitoringInstanceRuntimeFacts(monitoringInstanceId)])
+    Promise.all([getMonitoringInstance(monitoringInstanceId), getMonitoringInstanceRuntimeFacts(monitoringInstanceId, 'realtime')])
       .then(([monitoringInstance, runtimeFacts]) => {
         if (cancelled) return
+        setRealtimeSamples((current) => mergeRealtimeSamples(current, realtimeSeedSamples(runtimeFacts)))
         setState((current) => ({
           ...current,
           requestedMonitoringInstanceId: monitoringInstanceId,
@@ -301,13 +369,16 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }, [monitoringInstanceId])
 
   useEffect(() => {
+    const pendingTimerId = linkedVPSFetchRef.current.timerId
+    if (pendingTimerId !== null) window.clearTimeout(pendingTimerId)
     linkedVPSFetchRef.current = {
       monitoringInstanceId: monitoringInstanceId ?? null,
       inFlight: false,
       fetched: false,
+      scheduled: false,
+      timerId: null,
       requestId: linkedVPSFetchRef.current.requestId + 1,
     }
-    setLinkedVPSVisible(false)
     setLinkedVPSState({
       requestedMonitoringInstanceId: null,
       records: [],
@@ -318,25 +389,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }, [monitoringInstanceId])
 
   useEffect(() => {
-    if (linkedVPSVisible) return
-    const element = linkedVPSSectionRef.current
-    if (!element) return
-    if (typeof IntersectionObserver === 'undefined') return
-
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return
-      setLinkedVPSVisible(true)
-      observer.disconnect()
-    }, { rootMargin: '160px' })
-
-    observer.observe(element)
-    return () => {
-      observer.disconnect()
-    }
-  }, [linkedVPSVisible, state.monitoringInstance, state.requestedMonitoringInstanceId])
-
-  useEffect(() => {
     if (!monitoringInstanceId) {
+      const pendingTimerId = linkedVPSFetchRef.current.timerId
+      if (pendingTimerId !== null) window.clearTimeout(pendingTimerId)
       setLinkedVPSState({
         requestedMonitoringInstanceId: null,
         records: [],
@@ -346,24 +401,129 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       })
       return
     }
-    if (!linkedVPSVisible) return
     if (state.requestedMonitoringInstanceId !== monitoringInstanceId || !state.monitoringInstance) return
+    if (state.requestedActivityMonitoringInstanceId !== monitoringInstanceId) return
+    if (
+      state.monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS &&
+      (
+        bindingConflictState.requestedMonitoringInstanceId !== monitoringInstanceId ||
+        bindingConflictState.loading
+      )
+    ) return
 
     if (linkedVPSFetchRef.current.monitoringInstanceId !== monitoringInstanceId) {
       linkedVPSFetchRef.current = {
         monitoringInstanceId,
         inFlight: false,
         fetched: false,
+        scheduled: false,
+        timerId: null,
         requestId: linkedVPSFetchRef.current.requestId + 1,
       }
     }
-    if (linkedVPSFetchRef.current.inFlight || linkedVPSFetchRef.current.fetched) return
+    if (
+      linkedVPSInteractionBusy ||
+      linkedVPSFetchRef.current.inFlight ||
+      linkedVPSFetchRef.current.fetched ||
+      linkedVPSFetchRef.current.scheduled
+    ) return
 
     const requestId = linkedVPSFetchRef.current.requestId + 1
+    const timerId = window.setTimeout(() => {
+      const fetchState = linkedVPSFetchRef.current
+      if (
+        linkedVPSInteractionBusyRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== monitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== monitoringInstanceId ||
+        fetchState.monitoringInstanceId !== monitoringInstanceId ||
+        fetchState.requestId !== requestId ||
+        !fetchState.scheduled
+      ) {
+        if (
+          fetchState.monitoringInstanceId === monitoringInstanceId &&
+          fetchState.requestId === requestId &&
+          fetchState.scheduled
+        ) {
+          linkedVPSFetchRef.current = {
+            monitoringInstanceId,
+            inFlight: false,
+            fetched: false,
+            scheduled: false,
+            timerId: null,
+            requestId,
+          }
+        }
+        return
+      }
+
+      linkedVPSFetchRef.current = {
+        monitoringInstanceId,
+        inFlight: true,
+        fetched: false,
+        scheduled: false,
+        timerId: null,
+        requestId,
+      }
+
+      listVPSForMonitoringInstance(monitoringInstanceId)
+        .then((records) => {
+          const currentFetchState = linkedVPSFetchRef.current
+          if (
+            !isMountedRef.current ||
+            currentRouteMonitoringInstanceIdRef.current !== monitoringInstanceId ||
+            currentRequestedMonitoringInstanceIdRef.current !== monitoringInstanceId ||
+            currentFetchState.monitoringInstanceId !== monitoringInstanceId ||
+            currentFetchState.requestId !== requestId
+          ) return
+          linkedVPSFetchRef.current = {
+            monitoringInstanceId,
+            inFlight: false,
+            fetched: true,
+            scheduled: false,
+            timerId: null,
+            requestId,
+          }
+          setLinkedVPSState({
+            requestedMonitoringInstanceId: monitoringInstanceId,
+            records: Array.isArray(records) ? records : [],
+            loading: false,
+            loaded: true,
+            error: null,
+          })
+        })
+        .catch((error: unknown) => {
+          const currentFetchState = linkedVPSFetchRef.current
+          if (
+            !isMountedRef.current ||
+            currentRouteMonitoringInstanceIdRef.current !== monitoringInstanceId ||
+            currentRequestedMonitoringInstanceIdRef.current !== monitoringInstanceId ||
+            currentFetchState.monitoringInstanceId !== monitoringInstanceId ||
+            currentFetchState.requestId !== requestId
+          ) return
+          linkedVPSFetchRef.current = {
+            monitoringInstanceId,
+            inFlight: false,
+            fetched: true,
+            scheduled: false,
+            timerId: null,
+            requestId,
+          }
+          setLinkedVPSState({
+            requestedMonitoringInstanceId: monitoringInstanceId,
+            records: [],
+            loading: false,
+            loaded: true,
+            error: describeError(error, '加载关联 VPS 失败'),
+          })
+        })
+    }, LINKED_VPS_SUMMARY_FETCH_DELAY_MS)
+
     linkedVPSFetchRef.current = {
       monitoringInstanceId,
-      inFlight: true,
+      inFlight: false,
       fetched: false,
+      scheduled: true,
+      timerId,
       requestId,
     }
 
@@ -375,44 +535,34 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       error: null,
     }))
 
-    listVPSForMonitoringInstance(monitoringInstanceId)
-      .then((records) => {
-        const fetchState = linkedVPSFetchRef.current
-        if (
-          !isMountedRef.current ||
-          currentRouteMonitoringInstanceIdRef.current !== monitoringInstanceId ||
-          currentRequestedMonitoringInstanceIdRef.current !== monitoringInstanceId ||
-          fetchState.monitoringInstanceId !== monitoringInstanceId ||
-          fetchState.requestId !== requestId
-        ) return
-        linkedVPSFetchRef.current = { monitoringInstanceId, inFlight: false, fetched: true, requestId }
-        setLinkedVPSState({
-          requestedMonitoringInstanceId: monitoringInstanceId,
-          records: Array.isArray(records) ? records : [],
-          loading: false,
-          loaded: true,
-          error: null,
-        })
-      })
-      .catch((error: unknown) => {
-        const fetchState = linkedVPSFetchRef.current
-        if (
-          !isMountedRef.current ||
-          currentRouteMonitoringInstanceIdRef.current !== monitoringInstanceId ||
-          currentRequestedMonitoringInstanceIdRef.current !== monitoringInstanceId ||
-          fetchState.monitoringInstanceId !== monitoringInstanceId ||
-          fetchState.requestId !== requestId
-        ) return
-        linkedVPSFetchRef.current = { monitoringInstanceId, inFlight: false, fetched: true, requestId }
-        setLinkedVPSState({
-          requestedMonitoringInstanceId: monitoringInstanceId,
-          records: [],
-          loading: false,
-          loaded: true,
-          error: describeError(error, '加载关联 VPS 失败'),
-        })
-      })
-  }, [linkedVPSVisible, monitoringInstanceId, state.monitoringInstance, state.requestedMonitoringInstanceId])
+    return () => {
+      const fetchState = linkedVPSFetchRef.current
+      if (
+        fetchState.monitoringInstanceId === monitoringInstanceId &&
+        fetchState.requestId === requestId &&
+        fetchState.scheduled &&
+        fetchState.timerId !== null
+      ) {
+        window.clearTimeout(fetchState.timerId)
+        linkedVPSFetchRef.current = {
+          monitoringInstanceId,
+          inFlight: false,
+          fetched: false,
+          scheduled: false,
+          timerId: null,
+          requestId,
+        }
+      }
+    }
+  }, [
+    bindingConflictState.loading,
+    bindingConflictState.requestedMonitoringInstanceId,
+    linkedVPSInteractionBusy,
+    monitoringInstanceId,
+    state.monitoringInstance,
+    state.requestedActivityMonitoringInstanceId,
+    state.requestedMonitoringInstanceId,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -762,6 +912,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }
 
   function handleTimeWindowChange(nextTimeWindow: TimeWindow) {
+    if (nextTimeWindow === 'realtime' && timeWindow !== 'realtime') {
+      setRealtimeSamples([])
+    }
     setTimeWindow(nextTimeWindow)
   }
 
@@ -854,7 +1007,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       incidents={incidents}
       events={events}
       eventsError={eventsError}
-      linkedVPSSectionRef={linkedVPSSectionRef}
       linkedVPS={linkedVPS}
       linkedVPSLoading={linkedVPSLoading}
       linkedVPSLoaded={linkedVPSLoaded}
