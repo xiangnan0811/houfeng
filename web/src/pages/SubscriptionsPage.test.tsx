@@ -88,7 +88,7 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
     active_subscription_count: subscriptions.length,
     renewal_due_14d_count: 0,
     renewal_due_30d_count: subscriptions.filter((sub) => sub.renew_at).length,
-    budget_risk_count: subscriptions.filter((sub) => sub.budget_status === 'warning' || sub.budget_status === 'over').length,
+    budget_risk_count: 0,
     exchange_rate_stale_count: subscriptions.filter((sub) => sub.exchange_rate_stale).length,
     decision_attention_count: 0,
     missing_subscription_vps_count: 0,
@@ -123,6 +123,8 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
       vps_display_name: 'Tokyo Edge',
       provider_id: 'pv_001',
       provider_name: 'Hetzner',
+      country: 'JP',
+      region: 'Kanto',
       display_name: sub.display_name || 'Tokyo Edge',
       cost_category: sub.cost_category ?? '',
       labels: sub.labels ?? [],
@@ -164,6 +166,8 @@ function statisticsFor(subscriptions: SubscriptionRecord[] = [], overrides: Part
     }] : [],
     currency_breakdown: [],
     category_breakdown: [],
+    payment_breakdown: [],
+    region_breakdown: [],
     cost_month_buckets: [
       { bucket: '2025-07', monthly_cost: Math.max(totalMonthly - 10, 0), renewal_count: 0, data_insufficient: false },
       { bucket: '2025-08', monthly_cost: totalMonthly, renewal_count: 0, data_insufficient: false },
@@ -260,6 +264,11 @@ function findCall(fetchMock: ReturnType<typeof vi.fn>, url: string, method = 'GE
   return fetchMock.mock.calls.find(([calledUrl, init]) => calledUrl === url && ((init as RequestInit | undefined)?.method ?? 'GET') === method)
 }
 
+function openSubscriptionEditor(name = 'Tokyo Edge') {
+  fireEvent.click(screen.getByRole('button', { name }))
+  return screen.getByRole('dialog', { name: '编辑订阅表单' })
+}
+
 describe('SubscriptionsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -278,6 +287,10 @@ describe('SubscriptionsPage', () => {
     expect(screen.queryByRole('dialog', { name: '新建订阅表单' })).not.toBeInTheDocument()
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
     expect(screen.getByText('自动续费')).toBeInTheDocument()
+    expect(screen.queryByText('预算状态')).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: '预算/汇率' })).not.toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'CNY 成本' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /预算风险/ })).toHaveAttribute('href', '/settings?tab=subscriptions')
 
     expect(fetchMock).toHaveBeenCalledWith('/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc', {
       headers: { Accept: 'application/json' },
@@ -413,8 +426,7 @@ describe('SubscriptionsPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
     expect(screen.queryByRole('dialog', { name: '编辑订阅表单' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    const editDialog = screen.getByRole('dialog', { name: '编辑订阅表单' })
+    const editDialog = openSubscriptionEditor()
     expect(editDialog).toBeInTheDocument()
     fireEvent.change(within(editDialog).getByLabelText('价格'), { target: { value: '24' } })
     fireEvent.change(within(editDialog).getByLabelText('计费周期单位'), { target: { value: 'month' } })
@@ -459,7 +471,7 @@ describe('SubscriptionsPage', () => {
     }])
   })
 
-  it('links subscription billing facts back to the VPS owner', async () => {
+  it('links subscription billing facts back to the VPS owner from the edit dialog', async () => {
     setupSubscriptionFetch({
       subscriptions: [{ ...subscription, auto_renew: false, auto_renew_cancelled: true, renewal_mode: 'auto_cancelled' }],
     })
@@ -471,7 +483,9 @@ describe('SubscriptionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('已取消自动续费')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: '回到 VPS' })).toHaveAttribute('href', '/vps/vps_001')
+    const editDialog = openSubscriptionEditor()
+    expect(within(editDialog).getByRole('link', { name: '打开关联 VPS' })).toHaveAttribute('href', '/vps/vps_001')
+    expect(screen.queryByRole('link', { name: '回到 VPS' })).not.toBeInTheDocument()
   })
 
   it('shows subscription error state with retry', async () => {
@@ -540,7 +554,7 @@ describe('SubscriptionsPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
     expect(screen.getByText('历史成本数据不足')).toBeInTheDocument()
-    expect(screen.getByText('部分历史月份缺少可用汇率，暂不绘制可能误导的趋势曲线。')).toBeInTheDocument()
+    expect(screen.getByText('部分历史月份缺少可用汇率或预算币种不一致，暂不绘制可能误导的趋势曲线。')).toBeInTheDocument()
     expect(container.querySelector('.subscription-insight-panel--trend polyline')).toBeNull()
   })
 
@@ -554,8 +568,7 @@ describe('SubscriptionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    const firstEditDialog = screen.getByRole('dialog', { name: '编辑订阅表单' })
+    const firstEditDialog = openSubscriptionEditor()
     fireEvent.change(within(firstEditDialog).getByLabelText('币种'), { target: { value: '__custom' } })
     fireEvent.change(within(firstEditDialog).getByLabelText('自定义币种'), { target: { value: 'US1' } })
     fireEvent.click(within(firstEditDialog).getByRole('button', { name: '保存订阅' }))
@@ -565,9 +578,7 @@ describe('SubscriptionsPage', () => {
     fireEvent.click(within(firstEditDialog).getByRole('button', { name: '取消' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑订阅表单' })).not.toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-
-    const editDialog = screen.getByRole('dialog', { name: '编辑订阅表单' })
+    const editDialog = openSubscriptionEditor()
     expect(within(editDialog).queryByText('币种必须为 3 位大写代码。')).not.toBeInTheDocument()
     expect(within(editDialog).getByLabelText('币种')).toHaveValue('USD')
     expect(within(editDialog).getByLabelText('支付方式')).toHaveValue('__custom')

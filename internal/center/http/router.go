@@ -41,6 +41,7 @@ type RouterOptions struct {
 	SubscriptionSettingsHandler                   stdhttp.Handler
 	SubscriptionExchangeRateRefreshHandler        stdhttp.Handler
 	SubscriptionBudgetsHandler                    stdhttp.Handler
+	SubscriptionMonthlyBudgetsHandler             stdhttp.Handler
 	MonitoringInstancesCollectionHandler          stdhttp.Handler
 	MonitoringInstanceItemHandler                 stdhttp.Handler
 	MonitoringInstanceVPSHandler                  stdhttp.Handler
@@ -237,6 +238,10 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.SubscriptionBudgetsHandler != nil {
 		mux.Handle("/api/subscription-budgets", protect(opts.SubscriptionBudgetsHandler))
+	}
+	if opts.SubscriptionMonthlyBudgetsHandler != nil {
+		mux.Handle("/api/subscription-monthly-budgets", protect(opts.SubscriptionMonthlyBudgetsHandler))
+		mux.Handle("/api/subscription-monthly-budgets/", protect(opts.SubscriptionMonthlyBudgetsHandler))
 	}
 	if opts.SubscriptionItemHandler != nil {
 		mux.Handle("/api/subscriptions/", protect(opts.SubscriptionItemHandler))

@@ -37,7 +37,6 @@ import {
   type BillingPeriodUnit,
   type CreateSubscriptionInput,
   type RenewalMode,
-  type SubscriptionBudgetStatus,
   type SubscriptionListFilter,
   type SubscriptionOverview,
   type SubscriptionRecord,
@@ -60,7 +59,6 @@ type FilterState = {
   vps_id: string | null
   renew_window: string | null
   currency: string | null
-  budget_status: string | null
   label: string | null
 }
 type FormState = {
@@ -102,7 +100,6 @@ function parseFilters(sp: URLSearchParams): FilterState {
     vps_id: sp.get('vps_id') || null,
     renew_window: rw && ['30', '60', '90'].includes(rw) ? rw : null,
     currency: sp.get('currency') || null,
-    budget_status: sp.get('budget_status') || null,
     label: sp.get('label') || null,
   }
 }
@@ -111,7 +108,6 @@ function filtersToParams(f: FilterState): URLSearchParams {
   if (f.vps_id) p.set('vps_id', f.vps_id)
   if (f.renew_window) p.set('renew_within_days', f.renew_window)
   if (f.currency) p.set('currency', f.currency)
-  if (f.budget_status) p.set('budget_status', f.budget_status)
   if (f.label) p.set('label', f.label)
   return p
 }
@@ -121,7 +117,7 @@ function filtersToAPI(f: FilterState): SubscriptionListFilter {
     vps_id: f.vps_id,
     renew_within_days: f.renew_window ? Number.parseInt(f.renew_window, 10) : null,
     currency: f.currency,
-    budget_status: parseBudgetStatus(f.budget_status),
+    budget_status: null,
     label: f.label,
     sort: f.renew_window ? 'renew_at' : '', order: f.renew_window ? 'asc' : '',
   }
@@ -131,32 +127,9 @@ function parseCSV(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean)
 }
 
-function parseBudgetStatus(value: string | null): SubscriptionBudgetStatus | null {
-  if (value === 'disabled' || value === 'ok' || value === 'warning' || value === 'over' || value === 'unknown') return value
-  return null
-}
-
 function moneyBase(value?: number | null, currency = 'CNY'): string {
   if (value == null || Number.isNaN(value)) return '—'
   return formatMoney(value, currency)
-}
-
-function budgetStatusLabel(status?: string | null): string {
-  const map: Record<string, string> = {
-    disabled: '已停用',
-    ok: '预算内',
-    warning: '接近上限',
-    over: '已超预算',
-    unknown: '未匹配',
-  }
-  return map[status ?? ''] ?? (status || '—')
-}
-
-function budgetBadgeClass(status?: string | null): string {
-  if (status === 'over') return 'badge badge-err'
-  if (status === 'warning') return 'badge badge-warn'
-  if (status === 'ok') return 'badge badge-ok'
-  return 'badge badge-muted'
 }
 
 function buildCreateInput(form: FormState): CreateSubscriptionInput {
@@ -216,6 +189,7 @@ type SubscriptionFormProps = {
   form: FormState
   vpsOptions: Array<{ value: string; label: string }>
   vpsDisabled?: boolean
+  vpsLink?: string | null
   error: string | null
   submitting: boolean
   submitLabel: string
@@ -229,6 +203,7 @@ function SubscriptionForm({
   form,
   vpsOptions,
   vpsDisabled,
+  vpsLink,
   error,
   submitting,
   submitLabel,
@@ -242,6 +217,11 @@ function SubscriptionForm({
 
   return (
     <form id={id} className="asset-operation-form" onSubmit={onSubmit}>
+      {vpsLink ? (
+        <div className="asset-operation-feedback">
+          <Link className="text-link" to={vpsLink}>打开关联 VPS</Link>
+        </div>
+      ) : null}
       <div className="asset-operation-form__grid asset-operation-form__grid--3col">
         <Select
           label="VPS"
@@ -506,7 +486,7 @@ export function SubscriptionsPage() {
   }
 
   const vpsOpts = state.vps.map((v) => ({ value: v.vps_id, label: v.display_name }))
-  const hasFilters = Boolean(filters.vps_id || filters.renew_window || filters.currency || filters.budget_status || filters.label)
+  const hasFilters = Boolean(filters.vps_id || filters.renew_window || filters.currency || filters.label)
   const [now] = useState(Date.now)
   const baseCurrency = state.overview?.base_currency ?? state.statistics?.base_currency ?? 'CNY'
   const availableCurrencies = Array.from(new Set(state.subscriptions.map((sub) => sub.currency))).sort()
@@ -514,7 +494,6 @@ export function SubscriptionsPage() {
     filters.vps_id ? { key: 'vps', label: `VPS：${vpsName(filters.vps_id)}`, clear: () => setFilter('vps_id', null) } : null,
     filters.renew_window ? { key: 'renew', label: `续费：未来 ${filters.renew_window} 天`, clear: () => setFilter('renew_window', null) } : null,
     filters.currency ? { key: 'currency', label: `币种：${filters.currency}`, clear: () => setFilter('currency', null) } : null,
-    filters.budget_status ? { key: 'budget', label: `预算：${budgetStatusLabel(filters.budget_status)}`, clear: () => setFilter('budget_status', null) } : null,
     filters.label ? { key: 'label', label: `标签：${filters.label}`, clear: () => setFilter('label', null) } : null,
   ].filter((chip): chip is { key: string; label: string; clear: () => void } => chip != null)
 
@@ -570,55 +549,28 @@ export function SubscriptionsPage() {
         />
       ) : (
         <>
-          <div className="asset-decision-focus subscription-cost-focus animate-in">
-            <button className="asset-decision-focus__item asset-decision-focus__item--normal" onClick={() => clearFilters()}>
+          <div className="subscription-metric-grid animate-in">
+            <button className="subscription-metric-card subscription-metric-card--normal" onClick={() => clearFilters()}>
               <span><StatusGlyph state="normal" size="sm" />月均成本</span>
               <strong>{moneyBase(state.overview?.total_monthly_cost, baseCurrency)}</strong>
               <small>年化 {moneyBase(state.overview?.total_yearly_cost, baseCurrency)}</small>
             </button>
-            <button className="asset-decision-focus__item asset-decision-focus__item--notice" onClick={() => setFilter('renew_window', '30')}>
+            <button className="subscription-metric-card subscription-metric-card--notice" onClick={() => setFilter('renew_window', '30')}>
               <span><StatusGlyph state={(state.overview?.renewal_due_30d_count ?? 0) > 0 ? 'notice' : 'normal'} size="sm" />未来 30 天续费</span>
               <strong>{state.overview?.renewal_due_30d_count ?? 0}</strong>
               <small>14 天内 {state.overview?.renewal_due_14d_count ?? 0}</small>
             </button>
-            <button className="asset-decision-focus__item asset-decision-focus__item--alert" onClick={() => setFilter('budget_status', 'warning')}>
+            <Link className="subscription-metric-card subscription-metric-card--alert" to="/settings?tab=subscriptions">
               <span><StatusGlyph state={(state.overview?.budget_risk_count ?? 0) > 0 ? 'alert' : 'normal'} size="sm" />预算风险</span>
               <strong>{state.overview?.budget_risk_count ?? 0}</strong>
-              <small>超额或接近预算</small>
-            </button>
-            <div className="asset-decision-focus__item asset-decision-focus__item--critical">
+              <small>全局月预算</small>
+            </Link>
+            <div className="subscription-metric-card subscription-metric-card--critical">
               <span><StatusGlyph state={(state.overview?.missing_subscription_vps_count ?? 0) > 0 ? 'critical' : 'normal'} size="sm" />缺订阅资产</span>
               <strong>{state.overview?.missing_subscription_vps_count ?? 0}</strong>
               <small>决策关注 {state.overview?.decision_attention_count ?? 0}</small>
             </div>
           </div>
-
-          <section className="page-panel subscription-workbench-panel">
-            <div className="section-heading section-heading--inline">
-              <div>
-                <p className="section-heading__eyebrow">Renewal Queue</p>
-                <h2 className="section-heading__title">续费队列</h2>
-              </div>
-              <Link className="btn sm secondary" to="/asset-decisions">资产决策</Link>
-            </div>
-            <div className="subscription-renewal-queue">
-              {(state.overview?.upcoming_renewals ?? []).length === 0 ? (
-                <p className="asset-table-empty-state"><strong>暂无临近续费</strong><span>未来 90 天没有需要处理的订阅续费。</span></p>
-              ) : state.overview?.upcoming_renewals.map((item) => {
-                const isStale = item.exchange_rate_stale
-                return (
-                  <Link key={item.subscription_id} className={`subscription-renewal-row ${isStale ? 'subscription-renewal-row--stale' : ''}`} to={`/vps/${item.vps_id}`}>
-                    <span>
-                      <strong><StatusGlyph state={isStale ? 'notice' : 'normal'} size="sm" />{item.display_name || item.vps_display_name}</strong>
-                      <small>{item.provider_name || '未记录服务商'} · {item.currency}</small>
-                    </span>
-                    <span className="mono">{formatDate(item.renew_at)}</span>
-                    <span className="mono">{moneyBase(item.monthly_price_base, item.base_currency)}/月</span>
-                  </Link>
-                )
-              })}
-            </div>
-          </section>
 
           <SubscriptionInsights
             overview={state.overview}
@@ -668,16 +620,6 @@ export function SubscriptionsPage() {
                         </select>
                       </div>
                       <div className="filter-select">
-                        <span className="filter-select__label">预算状态</span>
-                        <select className="filter-select__control" value={filters.budget_status ?? ''} onChange={(e) => setFilter('budget_status', e.target.value || null)}>
-                          <option value="">全部</option>
-                          <option value="ok">预算内</option>
-                          <option value="warning">接近上限</option>
-                          <option value="over">已超预算</option>
-                          <option value="unknown">未匹配</option>
-                        </select>
-                      </div>
-                      <div className="filter-select">
                         <span className="filter-select__label">标签</span>
                         <input className="filter-select__control" value={filters.label ?? ''} onChange={(e) => setFilter('label', e.target.value || null)} placeholder="标签" />
                       </div>
@@ -712,30 +654,32 @@ export function SubscriptionsPage() {
                 <thead className="data-table__head">
                   <tr>
                     <th>VPS</th>
+                    <th>分类</th>
+                    <th>标签</th>
                     <th>周期</th>
-                    <th>原币种</th>
-                    <th>{baseCurrency} 成本</th>
+                    <th>原价</th>
+                    <th>{baseCurrency ? `${baseCurrency} 成本` : '基准货币成本'}</th>
                     <th>续费</th>
-                    <th>预算/汇率</th>
-                    <th className="data-table__th--right">操作</th>
+                    <th>续费方式</th>
                   </tr>
                 </thead>
                 <tbody>
                   {state.subscriptions.map((s) => {
                     const isUrgent = Boolean(s.renew_at && (new Date(s.renew_at).getTime() - now) < 30 * 86400000)
-                    const budgetState = s.budget_status === 'over'
-                      ? 'critical'
-                      : s.budget_status === 'warning'
-                        ? 'alert'
-                        : s.budget_status === 'ok'
-                          ? 'normal'
-                          : 'maintenance'
                     return (
                       <tr className="data-table__row" key={s.subscription_id}>
                         <td className="data-table__cell">
                           <div className="asset-table__identity">
-                            <strong>{s.display_name || vpsName(s.vps_id)}</strong>
-                            <small>{s.cost_category || '未分类'} · {(s.labels ?? []).join(' / ') || '无标签'}</small>
+                            <button type="button" className="subscription-name-button" onClick={() => startEdit(s)}>
+                              {s.display_name || vpsName(s.vps_id)}
+                            </button>
+                            <small>{vpsName(s.vps_id)}</small>
+                          </div>
+                        </td>
+                        <td className="data-table__cell">{s.cost_category || '未分类'}</td>
+                        <td className="data-table__cell">
+                          <div className="subscription-tag-list">
+                            {(s.labels ?? []).length > 0 ? s.labels?.map((label) => <span key={label} className="asset-context-pill">{label}</span>) : <span className="text-muted">无标签</span>}
                           </div>
                         </td>
                         <td className="data-table__cell">{periodLabel(s.billing_period_unit, s.billing_period_length, s.billing_months)}</td>
@@ -753,16 +697,10 @@ export function SubscriptionsPage() {
                           </span>
                         </td>
                         <td className="data-table__cell">
-                          <span className={budgetBadgeClass(s.budget_status)}>
-                            <StatusGlyph state={budgetState} size="sm" />{budgetStatusLabel(s.budget_status)}
-                          </span>
                           <span className="asset-context-inline">
-                            {s.exchange_rate_stale ? <span className="asset-context-pill asset-context-pill--attention">汇率过期</span> : null}
                             <span>{renewalModeLabel(s.renewal_mode ?? renewalModeFromLegacy(s))}</span>
-                            <Link className="text-link" to={`/vps/${s.vps_id}`}>回到 VPS</Link>
                           </span>
                         </td>
-                        <td className="data-table__cell data-table__cell--right"><button className="btn-text sm secondary" onClick={() => startEdit(s)}>编辑</button></td>
                       </tr>
                     )
                   })}
@@ -799,6 +737,7 @@ export function SubscriptionsPage() {
           id="subscription-edit-form"
           form={editForm}
           vpsOptions={vpsOpts}
+          vpsLink={editForm.vpsID ? `/vps/${editForm.vpsID}` : null}
           error={editError}
           submitting={editSubmitting}
           submitLabel="保存订阅"

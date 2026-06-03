@@ -1322,3 +1322,36 @@ Implemented the VPS-first subscription cost center: settings, exchange rates, bu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 157: Subscription cost workbench UX follow-up
+
+**Date**: 2026-06-03
+**Task**: Subscription cost workbench UX follow-up
+**Branch**: `worktree/subscription-cost-workbench-ux-followup`
+
+### Summary
+
+Implemented global monthly subscription budgets, rebuilt the subscriptions workbench layout, removed VPS-level budget UI semantics, and verified Go/web/visual gates before GitHub PR delivery.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `91e5baa` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -40,6 +40,7 @@ import type {
   SubscriptionBudgetRecord,
   SubscriptionCostSettings,
   SubscriptionCostSettingsUpdateInput,
+  SubscriptionMonthlyBudgetRecord,
   StateChangeEventRecord,
   SettingsUpdateInput,
   ExchangeRateRefreshResult,
@@ -54,6 +55,7 @@ import type {
   UpdateMonitoringInstanceMetadataInput,
   UpdateProviderInput,
   UpdateSubscriptionInput,
+  UpsertSubscriptionMonthlyBudgetInput,
   PatchSubscriptionBudgetInput,
   UpdateTargetMetadataInput,
   UpdateVPSAssetInput,
@@ -677,6 +679,22 @@ export function createSubscriptionBudget(input: CreateSubscriptionBudgetInput) {
 
 export function updateSubscriptionBudget(input: PatchSubscriptionBudgetInput) {
   return patchJSONBody<SubscriptionBudgetRecord>('/api/subscription-budgets', input)
+}
+
+export function listSubscriptionMonthlyBudgets() {
+  return requestJSON<SubscriptionMonthlyBudgetRecord[]>('/api/subscription-monthly-budgets')
+}
+
+export function upsertSubscriptionMonthlyBudget(month: string, input: UpsertSubscriptionMonthlyBudgetInput) {
+  const normalizedMonth = month.trim().slice(0, 7)
+  return requestJSON<SubscriptionMonthlyBudgetRecord>(`/api/subscription-monthly-budgets/${encodeURIComponent(normalizedMonth)}`, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  })
 }
 
 export function createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionRecord> {

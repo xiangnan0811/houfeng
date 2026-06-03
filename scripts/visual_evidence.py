@@ -922,6 +922,29 @@ def asset_workflow_budget_records() -> list[dict[str, object]]:
     ]
 
 
+def asset_workflow_monthly_budget_records() -> list[dict[str, object]]:
+    return [
+        {
+            "budget_month": f"{month_bucket(-9)}-01",
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "monthly_limit": 120.0,
+            "warning_pct": 80,
+            "note": "Initial visual evidence monthly budget.",
+            "created_at": iso_timestamp(-270),
+            "updated_at": iso_timestamp(-270),
+        },
+        {
+            "budget_month": f"{month_bucket(-3)}-01",
+            "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+            "monthly_limit": 150.0,
+            "warning_pct": 80,
+            "note": "Growth adjustment fixture.",
+            "created_at": iso_timestamp(-90),
+            "updated_at": iso_timestamp(-90),
+        },
+    ]
+
+
 def asset_workflow_subscription_settings() -> dict[str, object]:
     return {
         "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
@@ -985,8 +1008,31 @@ def asset_workflow_provider_label(subscription: dict[str, object]) -> tuple[str,
     return provider_id or provider_name, provider_name
 
 
+def asset_workflow_vps_for_subscription(subscription: dict[str, object]) -> dict[str, object]:
+    return next(
+        (row for row in asset_workflow_vps_assets() if row["vps_id"] == subscription["vps_id"]),
+    )
+
+
+def asset_workflow_cost_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    costs: list[dict[str, object]] = []
+    for row in rows:
+        vps = asset_workflow_vps_for_subscription(row)
+        cost = dict(row)
+        cost["vps_display_name"] = vps.get("display_name", row.get("vps_id"))
+        cost["provider_id"] = vps.get("provider_id", "")
+        cost["provider_name"] = vps.get("provider_name", "")
+        cost["country"] = vps.get("country", "")
+        cost["region"] = vps.get("region", "")
+        cost["lifecycle_status"] = vps.get("lifecycle_status", "")
+        cost["renewal_decision"] = vps.get("renewal_decision", "")
+        costs.append(cost)
+    return costs
+
+
 def asset_workflow_subscription_overview() -> dict[str, object]:
     rows = active_asset_workflow_subscriptions()
+    cost_rows = asset_workflow_cost_rows(rows)
     total_monthly = sum(float(row.get("monthly_price_base") or 0) for row in rows)
     total_yearly = sum(float(row.get("yearly_price_base") or 0) for row in rows)
     budgets = asset_workflow_budget_records()
@@ -1046,8 +1092,22 @@ def asset_workflow_subscription_overview() -> dict[str, object]:
                 str(row.get("cost_category") or "未分类"),
             ),
         ),
+        "payment_breakdown": subscription_breakdown(
+            rows,
+            lambda row: (
+                str(row.get("payment_method") or "未记录"),
+                str(row.get("payment_method") or "未记录"),
+            ),
+        ),
+        "region_breakdown": subscription_breakdown(
+            cost_rows,
+            lambda row: (
+                str(row.get("country") or row.get("region") or "未记录"),
+                str(row.get("country") or row.get("region") or "未记录"),
+            ),
+        ),
         "budget_risks": budgets,
-        "vps_costs": rows,
+        "vps_costs": cost_rows,
         "missing_subscription_assets": asset_workflow_missing_subscription_assets(),
     }
 
@@ -1055,6 +1115,7 @@ def asset_workflow_subscription_overview() -> dict[str, object]:
 def asset_workflow_subscription_statistics(window: str | None = None) -> dict[str, object]:
     overview = asset_workflow_subscription_overview()
     cost_months = [72.5, 83.0, 83.0, 101.4, 111.9, 111.9, 135.6, 135.6, 151.3, 151.3, 174.55, 174.55]
+    budget_months = [None, None, 120.0, 120.0, 120.0, 120.0, 120.0, 120.0, 150.0, 150.0, 150.0, 150.0]
     return {
         "window": window if window in {"month", "quarter", "year"} else "month",
         "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
@@ -1063,8 +1124,18 @@ def asset_workflow_subscription_statistics(window: str | None = None) -> dict[st
         "provider_breakdown": overview["provider_breakdown"],
         "currency_breakdown": overview["currency_breakdown"],
         "category_breakdown": overview["category_breakdown"],
+        "payment_breakdown": overview["payment_breakdown"],
+        "region_breakdown": overview["region_breakdown"],
         "cost_month_buckets": [
-            {"bucket": month_bucket(index - 11), "monthly_cost": monthly_cost, "renewal_count": 0, "data_insufficient": False}
+            {
+                "bucket": month_bucket(index - 11),
+                "monthly_cost": monthly_cost,
+                "renewal_count": 0,
+                "budget_limit": budget_months[index],
+                "budget_currency": ASSET_WORKFLOW_BASE_CURRENCY if budget_months[index] is not None else None,
+                "budget_warning_pct": 80 if budget_months[index] is not None else None,
+                "data_insufficient": False,
+            }
             for index, monthly_cost in enumerate(cost_months)
         ],
         "renewal_month_buckets": [
@@ -2065,6 +2136,10 @@ def fulfill_asset_workflow_api(route: object) -> None:
 
     if method == "GET" and path == "/api/subscription-budgets":
         fulfill_json(route, 200, asset_workflow_budget_records())
+        return
+
+    if method == "GET" and path == "/api/subscription-monthly-budgets":
+        fulfill_json(route, 200, asset_workflow_monthly_budget_records())
         return
 
     if method == "GET" and path == "/api/asset-context/monitoring-instances":

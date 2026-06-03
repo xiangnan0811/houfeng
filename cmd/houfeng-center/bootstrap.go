@@ -177,6 +177,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		SubscriptionSettingsHandler:              handlers.SubscriptionSettings(subscriptionCostSvc),
 		SubscriptionExchangeRateRefreshHandler:   handlers.SubscriptionExchangeRateRefresh(subscriptionCostSvc),
 		SubscriptionBudgetsHandler:               handlers.SubscriptionBudgets(subscriptionCostSvc),
+		SubscriptionMonthlyBudgetsHandler:        handlers.SubscriptionMonthlyBudgets(subscriptionCostSvc),
 		MonitoringInstancesCollectionHandler:     handlers.MonitoringInstancesCollection(monitoringInstanceRepo),
 		MonitoringInstanceItemHandler:            handlers.MonitoringInstanceItem(monitoringInstanceRepo),
 		MonitoringInstanceVPSHandler:             handlers.MonitoringInstanceVPS(vpsMonitoringInstanceLinkRepo),

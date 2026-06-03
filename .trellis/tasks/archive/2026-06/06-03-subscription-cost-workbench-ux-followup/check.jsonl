@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/subscription-cost-center.md", "reason": "复核新月预算合同不会继续表达 VPS 级预算。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "复核 Go targeted tests、make verify-go 和 handler/router 覆盖。"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "复核 statistics/monthly budget API 字段、失败分层和设置页数据流。"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "复核四卡、四栏、表格和移动端无横向溢出。"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "复核 lint、test、build、browser-sanity 视觉验收。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "复核 storage/service/API/UI 跨层数据合同和预算沿用语义。"}

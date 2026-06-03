@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
@@ -113,8 +113,14 @@ function renderWithDashboard(
   return render(
     <MemoryRouter>
       <DashboardPage />
+      <LocationProbe />
     </MemoryRouter>,
   )
+}
+
+function LocationProbe() {
+  const location = useLocation()
+  return <span data-testid="location-probe">{location.pathname}{location.search}</span>
 }
 
 describe('DashboardPage', () => {
@@ -227,6 +233,8 @@ describe('DashboardPage', () => {
     expect(screen.getByText('14天内续费')).toBeInTheDocument()
     expect(screen.getByText('月均成本')).toBeInTheDocument()
     expect(screen.getAllByText('预算风险').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByText('订阅预算接近或超过上限').closest('.wb-att-item')!)
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/settings?tab=subscriptions')
 
     // Attention column shows abnormal monitoring and targets
     expect(screen.getByText('关注')).toBeInTheDocument()

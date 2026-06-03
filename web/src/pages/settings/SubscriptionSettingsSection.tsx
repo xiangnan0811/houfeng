@@ -4,26 +4,24 @@ import { Input, Select } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
 import {
   ApiError,
-  createSubscriptionBudget,
   getSubscriptionCostSettings,
-  listSubscriptionBudgets,
+  listSubscriptionMonthlyBudgets,
   refreshSubscriptionExchangeRates,
-  updateSubscriptionBudget,
   updateSubscriptionCostSettings,
+  upsertSubscriptionMonthlyBudget,
 } from '../../lib/api'
 import { formatMoney } from '../../lib/format'
 import type {
-  CreateSubscriptionBudgetInput,
-  PatchSubscriptionBudgetInput,
-  SubscriptionBudgetRecord,
   SubscriptionCostSettings,
+  SubscriptionMonthlyBudgetRecord,
+  UpsertSubscriptionMonthlyBudgetInput,
 } from '../../lib/types'
 
 type LoadState = {
   loading: boolean
   error: string | null
   settings: SubscriptionCostSettings | null
-  budgets: SubscriptionBudgetRecord[]
+  monthlyBudgets: SubscriptionMonthlyBudgetRecord[]
 }
 
 type SettingsDraft = {
@@ -36,13 +34,9 @@ type SettingsDraft = {
 }
 
 type BudgetDraft = {
-  scopeType: string
-  scopeID: string
-  name: string
+  month: string
   monthlyLimit: string
-  yearlyLimit: string
   warningPct: string
-  enabled: boolean
   note: string
 }
 
@@ -50,7 +44,7 @@ const INITIAL_STATE: LoadState = {
   loading: true,
   error: null,
   settings: null,
-  budgets: [],
+  monthlyBudgets: [],
 }
 
 const INITIAL_SETTINGS_DRAFT: SettingsDraft = {
@@ -63,14 +57,16 @@ const INITIAL_SETTINGS_DRAFT: SettingsDraft = {
 }
 
 const INITIAL_BUDGET_DRAFT: BudgetDraft = {
-  scopeType: 'global',
-  scopeID: '',
-  name: '',
+  month: currentMonthValue(),
   monthlyLimit: '',
-  yearlyLimit: '',
   warningPct: '80',
-  enabled: true,
   note: '',
+}
+
+function currentMonthValue(): string {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  return `${now.getFullYear()}-${month}`
 }
 
 function describeError(err: unknown, fallback: string): string {
@@ -103,52 +99,18 @@ function money(value?: number | null, currency = 'CNY'): string {
   return formatMoney(value, currency)
 }
 
-function budgetStatusLabel(status?: string | null): string {
-  const map: Record<string, string> = {
-    disabled: '已停用',
-    ok: '预算内',
-    warning: '接近上限',
-    over: '已超预算',
-    unknown: '未匹配',
-  }
-  return map[status ?? ''] ?? (status || '-')
-}
-
-function budgetBadgeClass(status?: string | null): string {
-  if (status === 'over') return 'badge badge-err'
-  if (status === 'warning') return 'badge badge-warn'
-  if (status === 'ok') return 'badge badge-ok'
-  return 'badge badge-muted'
-}
-
-function scopeLabel(scopeType: string, scopeID: string): string {
-  const scopeMap: Record<string, string> = {
-    global: '全局',
-    provider: '供应商',
-    label: '标签',
-    category: '分类',
-    vps: 'VPS',
-  }
-  const label = scopeMap[scopeType] ?? scopeType
-  return scopeID ? `${label} · ${scopeID}` : label
-}
-
-function budgetToDraft(budget: SubscriptionBudgetRecord): BudgetDraft {
+function budgetToDraft(budget: SubscriptionMonthlyBudgetRecord): BudgetDraft {
   return {
-    scopeType: budget.scope_type,
-    scopeID: budget.scope_id,
-    name: budget.name,
-    monthlyLimit: budget.monthly_limit == null ? '' : String(budget.monthly_limit),
-    yearlyLimit: budget.yearly_limit == null ? '' : String(budget.yearly_limit),
+    month: budget.budget_month.slice(0, 7),
+    monthlyLimit: String(budget.monthly_limit),
     warningPct: String(budget.warning_pct),
-    enabled: budget.enabled,
     note: budget.note,
   }
 }
 
-function parseOptionalLimit(value: string, label: string): number | null {
+function parseRequiredLimit(value: string, label: string): number {
   const trimmed = value.trim()
-  if (!trimmed) return null
+  if (!trimmed) throw new Error(`${label}不能为空。`)
   const parsed = Number.parseFloat(trimmed)
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`${label}必须为非负数字。`)
@@ -156,23 +118,15 @@ function parseOptionalLimit(value: string, label: string): number | null {
   return parsed
 }
 
-function buildBudgetInput(draft: BudgetDraft, baseCurrency: string): CreateSubscriptionBudgetInput {
-  const monthlyLimit = parseOptionalLimit(draft.monthlyLimit, '月预算')
-  const yearlyLimit = parseOptionalLimit(draft.yearlyLimit, '年预算')
+function buildMonthlyBudgetInput(draft: BudgetDraft, baseCurrency: string): UpsertSubscriptionMonthlyBudgetInput {
+  const monthlyLimit = parseRequiredLimit(draft.monthlyLimit, '月预算')
   const warningPct = Number.parseInt(draft.warningPct, 10)
-  if (!draft.name.trim()) throw new Error('预算名称不能为空。')
-  if (draft.scopeType !== 'global' && !draft.scopeID.trim()) throw new Error('非全局预算需要填写 scope ID。')
-  if (monthlyLimit == null && yearlyLimit == null) throw new Error('月预算或年预算至少填写一个。')
+  if (!/^\d{4}-\d{2}$/.test(draft.month.trim())) throw new Error('预算月份必须为 YYYY-MM。')
   if (!Number.isInteger(warningPct) || warningPct < 1 || warningPct > 100) throw new Error('预警比例必须在 1-100 之间。')
   return {
-    scope_type: draft.scopeType,
-    scope_id: draft.scopeType === 'global' ? '' : draft.scopeID.trim(),
-    name: draft.name.trim(),
     base_currency: baseCurrency,
     monthly_limit: monthlyLimit,
-    yearly_limit: yearlyLimit,
     warning_pct: warningPct,
-    enabled: draft.enabled,
     note: draft.note.trim(),
   }
 }
@@ -190,17 +144,17 @@ export function SubscriptionSettingsSection() {
   const [budgetSubmitting, setBudgetSubmitting] = useState(false)
   const [budgetError, setBudgetError] = useState<string | null>(null)
   const [budgetNotice, setBudgetNotice] = useState<string | null>(null)
-  const [editingBudgetID, setEditingBudgetID] = useState<string | null>(null)
+  const [editingBudgetMonth, setEditingBudgetMonth] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<BudgetDraft>(INITIAL_BUDGET_DRAFT)
   const [editingSubmitting, setEditingSubmitting] = useState(false)
   const [editingError, setEditingError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getSubscriptionCostSettings(), listSubscriptionBudgets()])
-      .then(([settings, budgets]) => {
+    Promise.all([getSubscriptionCostSettings(), listSubscriptionMonthlyBudgets()])
+      .then(([settings, monthlyBudgets]) => {
         if (cancelled) return
-        setState({ loading: false, error: null, settings, budgets })
+        setState({ loading: false, error: null, settings, monthlyBudgets })
         setSettingsDraft(settingsToDraft(settings))
       })
       .catch((err: unknown) => {
@@ -274,17 +228,17 @@ export function SubscriptionSettingsSection() {
     event.preventDefault()
     setBudgetError(null)
     setBudgetNotice(null)
-    let input: CreateSubscriptionBudgetInput
+    let input: UpsertSubscriptionMonthlyBudgetInput
     try {
-      input = buildBudgetInput(budgetDraft, baseCurrency)
+      input = buildMonthlyBudgetInput(budgetDraft, baseCurrency)
     } catch (err: unknown) {
       setBudgetError(describeError(err, '预算输入无效'))
       return
     }
     setBudgetSubmitting(true)
-    createSubscriptionBudget(input)
+    upsertSubscriptionMonthlyBudget(budgetDraft.month, input)
       .then(() => {
-        setBudgetDraft(INITIAL_BUDGET_DRAFT)
+        setBudgetDraft({ ...INITIAL_BUDGET_DRAFT, month: currentMonthValue() })
         setBudgetNotice('预算已创建')
         reload()
       })
@@ -292,31 +246,30 @@ export function SubscriptionSettingsSection() {
       .finally(() => setBudgetSubmitting(false))
   }
 
-  function startEditBudget(budget: SubscriptionBudgetRecord) {
-    setEditingBudgetID(budget.budget_id)
+  function startEditBudget(budget: SubscriptionMonthlyBudgetRecord) {
+    setEditingBudgetMonth(budget.budget_month.slice(0, 7))
     setEditDraft(budgetToDraft(budget))
     setEditingError(null)
   }
 
   function cancelEditBudget() {
-    setEditingBudgetID(null)
+    setEditingBudgetMonth(null)
     setEditDraft(INITIAL_BUDGET_DRAFT)
     setEditingError(null)
   }
 
-  function handleUpdateBudget(event: FormEvent<HTMLFormElement>, budgetID: string) {
+  function handleUpdateBudget(event: FormEvent<HTMLFormElement>, month: string) {
     event.preventDefault()
     setEditingError(null)
-    let input: CreateSubscriptionBudgetInput
+    let input: UpsertSubscriptionMonthlyBudgetInput
     try {
-      input = buildBudgetInput(editDraft, baseCurrency)
+      input = buildMonthlyBudgetInput(editDraft, baseCurrency)
     } catch (err: unknown) {
       setEditingError(describeError(err, '预算输入无效'))
       return
     }
-    const payload: PatchSubscriptionBudgetInput = { budget_id: budgetID, ...input }
     setEditingSubmitting(true)
-    updateSubscriptionBudget(payload)
+    upsertSubscriptionMonthlyBudget(month, input)
       .then(() => {
         cancelEditBudget()
         setBudgetNotice('预算已保存')
@@ -324,17 +277,6 @@ export function SubscriptionSettingsSection() {
       })
       .catch((err: unknown) => setEditingError(describeError(err, '保存预算失败')))
       .finally(() => setEditingSubmitting(false))
-  }
-
-  function toggleBudget(budget: SubscriptionBudgetRecord) {
-    setBudgetError(null)
-    setBudgetNotice(null)
-    updateSubscriptionBudget({ budget_id: budget.budget_id, enabled: !budget.enabled })
-      .then(() => {
-        setBudgetNotice(budget.enabled ? '预算已停用' : '预算已启用')
-        reload()
-      })
-      .catch((err: unknown) => setBudgetError(describeError(err, '更新预算状态失败')))
   }
 
   if (state.loading) {
@@ -391,32 +333,22 @@ export function SubscriptionSettingsSection() {
       <section className="settings-section subscription-settings__section">
         <div className="section-heading">
           <p className="section-heading__eyebrow">Budgets</p>
-          <h2 className="section-heading__title">预算规则</h2>
+          <h2 className="section-heading__title">月预算时间线</h2>
         </div>
         <div className="subscription-budget-list subscription-budget-list--managed">
-          {state.budgets.length === 0 ? (
+          {state.monthlyBudgets.length === 0 ? (
             <p className="asset-table-empty-state">
-              <strong>尚未配置预算</strong>
-              <span>可以先添加全局月预算，再逐步按供应商、标签或 VPS 收敛。</span>
+              <strong>尚未配置月预算</strong>
+              <span>添加一个月份的全局月预算后，后续月份会沿用最近一次配置，直到再次调整。</span>
             </p>
           ) : null}
-          {state.budgets.map((budget) => (
-            editingBudgetID === budget.budget_id ? (
-              <form key={budget.budget_id} className="subscription-budget-edit" onSubmit={(event) => handleUpdateBudget(event, budget.budget_id)}>
-                <Select label="范围" value={editDraft.scopeType} onChange={(event) => setEditDraft({ ...editDraft, scopeType: event.target.value })}>
-                  <option value="global">全局</option>
-                  <option value="provider">供应商</option>
-                  <option value="label">标签</option>
-                  <option value="category">分类</option>
-                  <option value="vps">VPS</option>
-                </Select>
-                <Input label="Scope ID" value={editDraft.scopeID} disabled={editDraft.scopeType === 'global'} onChange={(event) => setEditDraft({ ...editDraft, scopeID: event.target.value })} />
-                <Input label="名称" value={editDraft.name} onChange={(event) => setEditDraft({ ...editDraft, name: event.target.value })} />
+          {state.monthlyBudgets.map((budget) => (
+            editingBudgetMonth === budget.budget_month.slice(0, 7) ? (
+              <form key={budget.budget_month} className="subscription-budget-edit" onSubmit={(event) => handleUpdateBudget(event, editDraft.month)}>
+                <Input label="预算月份" type="month" value={editDraft.month} onChange={(event) => setEditDraft({ ...editDraft, month: event.target.value })} />
                 <Input label={`月预算 ${baseCurrency}`} type="number" min="0" step="0.01" value={editDraft.monthlyLimit} onChange={(event) => setEditDraft({ ...editDraft, monthlyLimit: event.target.value })} />
-                <Input label={`年预算 ${baseCurrency}`} type="number" min="0" step="0.01" value={editDraft.yearlyLimit} onChange={(event) => setEditDraft({ ...editDraft, yearlyLimit: event.target.value })} />
                 <Input label="预警比例" type="number" min="1" max="100" value={editDraft.warningPct} onChange={(event) => setEditDraft({ ...editDraft, warningPct: event.target.value })} />
                 <Input label="备注" value={editDraft.note} onChange={(event) => setEditDraft({ ...editDraft, note: event.target.value })} />
-                <label className="asset-checkbox-line"><input type="checkbox" checked={editDraft.enabled} onChange={(event) => setEditDraft({ ...editDraft, enabled: event.target.checked })} />启用</label>
                 {editingError ? <p className="create-form__error" role="alert">{editingError}</p> : null}
                 <div className="page-form-actions">
                   <button type="button" className="btn sm secondary" onClick={cancelEditBudget} disabled={editingSubmitting}>取消</button>
@@ -424,39 +356,28 @@ export function SubscriptionSettingsSection() {
                 </div>
               </form>
             ) : (
-              <div key={budget.budget_id} className="subscription-budget-row">
+              <div key={budget.budget_month} className="subscription-budget-row">
                 <div>
-                  <strong>{budget.name}</strong>
-                  <small>{scopeLabel(budget.scope_type, budget.scope_id)} · 预警 {budget.warning_pct}%</small>
+                  <strong>{budget.budget_month.slice(0, 7)}</strong>
+                  <small>全局月预算 · 预警 {budget.warning_pct}%{budget.note ? ` · ${budget.note}` : ''}</small>
                 </div>
-                <span className={budgetBadgeClass(budget.status)}><span className="badge-dot" />{budgetStatusLabel(budget.status)}</span>
-                <span className="mono">{money(budget.current_monthly_spend, budget.base_currency)} / {budget.monthly_limit != null ? money(budget.monthly_limit, budget.base_currency) : money((budget.yearly_limit ?? 0) / 12, budget.base_currency)}</span>
+                <span className="badge badge-muted"><span className="badge-dot" />{budget.base_currency}</span>
+                <span className="mono">{money(budget.monthly_limit, budget.base_currency)}</span>
                 <div className="subscription-budget-row__actions">
                   <button type="button" className="btn-text sm secondary" onClick={() => startEditBudget(budget)}>编辑</button>
-                  <button type="button" className="btn-text sm secondary" onClick={() => toggleBudget(budget)}>{budget.enabled ? '停用' : '启用'}</button>
                 </div>
               </div>
             )
           ))}
         </div>
         <form className="subscription-inline-form" onSubmit={handleCreateBudget}>
-          <Select label="范围" value={budgetDraft.scopeType} onChange={(event) => setBudgetDraft({ ...budgetDraft, scopeType: event.target.value })}>
-            <option value="global">全局</option>
-            <option value="provider">供应商</option>
-            <option value="label">标签</option>
-            <option value="category">分类</option>
-            <option value="vps">VPS</option>
-          </Select>
-          <Input label="Scope ID" value={budgetDraft.scopeID} disabled={budgetDraft.scopeType === 'global'} onChange={(event) => setBudgetDraft({ ...budgetDraft, scopeID: event.target.value })} />
-          <Input label="名称" value={budgetDraft.name} onChange={(event) => setBudgetDraft({ ...budgetDraft, name: event.target.value })} />
+          <Input label="预算月份" type="month" value={budgetDraft.month} onChange={(event) => setBudgetDraft({ ...budgetDraft, month: event.target.value })} />
           <Input label={`月预算 ${baseCurrency}`} type="number" min="0" step="0.01" value={budgetDraft.monthlyLimit} onChange={(event) => setBudgetDraft({ ...budgetDraft, monthlyLimit: event.target.value })} />
-          <Input label={`年预算 ${baseCurrency}`} type="number" min="0" step="0.01" value={budgetDraft.yearlyLimit} onChange={(event) => setBudgetDraft({ ...budgetDraft, yearlyLimit: event.target.value })} />
           <Input label="预警比例" type="number" min="1" max="100" value={budgetDraft.warningPct} onChange={(event) => setBudgetDraft({ ...budgetDraft, warningPct: event.target.value })} />
           <Input label="备注" value={budgetDraft.note} onChange={(event) => setBudgetDraft({ ...budgetDraft, note: event.target.value })} />
-          <label className="asset-checkbox-line"><input type="checkbox" checked={budgetDraft.enabled} onChange={(event) => setBudgetDraft({ ...budgetDraft, enabled: event.target.checked })} />启用</label>
           {budgetError ? <p className="create-form__error" role="alert">{budgetError}</p> : null}
           {budgetNotice ? <p className="asset-operation-feedback" role="status">{budgetNotice}</p> : null}
-          <button className="btn sm primary" type="submit" disabled={budgetSubmitting}>{budgetSubmitting ? '创建中…' : '添加预算'}</button>
+          <button className="btn sm primary" type="submit" disabled={budgetSubmitting}>{budgetSubmitting ? '保存中…' : '保存月预算'}</button>
         </form>
       </section>
     </div>

@@ -111,6 +111,8 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 			nr.next_reminder_at,
 			s.status,
 			s.payment_method,
+			v.country,
+			v.region,
 			v.lifecycle_status,
 			v.renewal_decision
 		from subscriptions s
@@ -162,6 +164,8 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 			&record.NextReminderAt,
 			&record.Status,
 			&record.PaymentMethod,
+			&record.Country,
+			&record.Region,
 			&record.LifecycleStatus,
 			&record.RenewalDecision,
 		); err != nil {
@@ -308,6 +312,72 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate subscription cost month buckets: %w", err)
+	}
+	return records, nil
+}
+
+func (r *PostgresSubscriptionCostRepository) ListBudgetMonthBuckets(ctx context.Context, settings centersettings.SubscriptionCostSettings, months int, now time.Time) ([]subscriptioncosts.SeriesPoint, error) {
+	if months <= 0 {
+		return []subscriptioncosts.SeriesPoint{}, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		with buckets as (
+			select generate_series(
+				date_trunc('month', $1::timestamptz) - (($2::integer - 1) * interval '1 month'),
+				date_trunc('month', $1::timestamptz),
+				interval '1 month'
+			)::date as bucket_start
+		)
+		select
+			to_char(b.bucket_start, 'YYYY-MM') as bucket,
+			mb.monthly_limit::float8,
+			coalesce(mb.base_currency, '') as budget_currency,
+			coalesce(mb.warning_pct, 0) as warning_pct,
+			mb.base_currency is not null and mb.base_currency <> $3 as currency_mismatch
+		from buckets b
+		left join lateral (
+			select
+				budget_month,
+				base_currency,
+				monthly_limit,
+				warning_pct
+			from subscription_monthly_budgets
+			where budget_month <= b.bucket_start
+			order by budget_month desc
+			limit 1
+		) mb on true
+		order by b.bucket_start asc`,
+		now.UTC(),
+		months,
+		settings.BaseCurrency,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query subscription budget month buckets: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]subscriptioncosts.SeriesPoint, 0, months)
+	for rows.Next() {
+		var record subscriptioncosts.SeriesPoint
+		var budgetLimit pgtype.Float8
+		var currencyMismatch bool
+		if err := rows.Scan(
+			&record.Bucket,
+			&budgetLimit,
+			&record.BudgetCurrency,
+			&record.BudgetWarningPct,
+			&currencyMismatch,
+		); err != nil {
+			return nil, fmt.Errorf("scan subscription budget month bucket: %w", err)
+		}
+		record.BudgetLimit = nullableFloat(budgetLimit)
+		if currencyMismatch {
+			record.DataInsufficient = true
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate subscription budget month buckets: %w", err)
 	}
 	return records, nil
 }
@@ -552,6 +622,79 @@ func (r *PostgresSubscriptionCostRepository) PatchBudget(ctx context.Context, in
 			return subscriptioncosts.BudgetRecord{}, subscriptioncosts.ErrInvalidInput
 		}
 		return subscriptioncosts.BudgetRecord{}, fmt.Errorf("patch subscription budget %q: %w", input.BudgetID, err)
+	}
+	return record, nil
+}
+
+func (r *PostgresSubscriptionCostRepository) ListMonthlyBudgets(ctx context.Context) ([]subscriptioncosts.MonthlyBudgetRecord, error) {
+	rows, err := r.db.Query(ctx, `
+		select
+			budget_month,
+			base_currency,
+			monthly_limit::float8,
+			warning_pct,
+			note,
+			created_at,
+			updated_at
+		from subscription_monthly_budgets
+		order by budget_month desc`)
+	if err != nil {
+		return nil, fmt.Errorf("query subscription monthly budgets: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]subscriptioncosts.MonthlyBudgetRecord, 0)
+	for rows.Next() {
+		record, err := scanSubscriptionMonthlyBudget(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan subscription monthly budget: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate subscription monthly budgets: %w", err)
+	}
+	return records, nil
+}
+
+func (r *PostgresSubscriptionCostRepository) UpsertMonthlyBudget(ctx context.Context, input subscriptioncosts.UpsertMonthlyBudgetInput) (subscriptioncosts.MonthlyBudgetRecord, error) {
+	input = subscriptioncosts.NormalizeUpsertMonthlyBudgetInput(input)
+	if err := subscriptioncosts.ValidateUpsertMonthlyBudgetInput(input); err != nil {
+		return subscriptioncosts.MonthlyBudgetRecord{}, err
+	}
+	record, err := scanSubscriptionMonthlyBudget(r.db.QueryRow(ctx, `
+		insert into subscription_monthly_budgets (
+			budget_month,
+			base_currency,
+			monthly_limit,
+			warning_pct,
+			note
+		) values ($1,$2,$3,$4,$5)
+		on conflict (budget_month) do update
+		set base_currency = excluded.base_currency,
+		    monthly_limit = excluded.monthly_limit,
+		    warning_pct = excluded.warning_pct,
+		    note = excluded.note,
+		    updated_at = now()
+		returning
+			budget_month,
+			base_currency,
+			monthly_limit::float8,
+			warning_pct,
+			note,
+			created_at,
+			updated_at`,
+		input.BudgetMonth.Time,
+		input.BaseCurrency,
+		input.MonthlyLimit,
+		input.WarningPct,
+		input.Note,
+	))
+	if err != nil {
+		if isSubscriptionCostInvalidPostgresError(err) {
+			return subscriptioncosts.MonthlyBudgetRecord{}, subscriptioncosts.ErrInvalidInput
+		}
+		return subscriptioncosts.MonthlyBudgetRecord{}, fmt.Errorf("upsert subscription monthly budget %s: %w", input.BudgetMonth.Time.Format("2006-01-02"), err)
 	}
 	return record, nil
 }
@@ -830,6 +973,28 @@ func scanSubscriptionBudget(row subscriptionBudgetScanner) (subscriptioncosts.Bu
 }
 
 type subscriptionBudgetScanner interface {
+	Scan(...any) error
+}
+
+func scanSubscriptionMonthlyBudget(row subscriptionMonthlyBudgetScanner) (subscriptioncosts.MonthlyBudgetRecord, error) {
+	var record subscriptioncosts.MonthlyBudgetRecord
+	var budgetMonth time.Time
+	if err := row.Scan(
+		&budgetMonth,
+		&record.BaseCurrency,
+		&record.MonthlyLimit,
+		&record.WarningPct,
+		&record.Note,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	); err != nil {
+		return subscriptioncosts.MonthlyBudgetRecord{}, err
+	}
+	record.BudgetMonth = subscriptions.NewDate(budgetMonth)
+	return record, nil
+}
+
+type subscriptionMonthlyBudgetScanner interface {
 	Scan(...any) error
 }
 

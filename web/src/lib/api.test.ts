@@ -30,6 +30,7 @@ import {
   getVPSTimeline,
   issueMonitoringInstanceInstallCommand,
   linkVPSMonitoringInstance,
+  listSubscriptionMonthlyBudgets,
   listAssetDomains,
   listAssetServices,
   listVPSDomains,
@@ -54,6 +55,7 @@ import {
   updateProbeItem,
   updateProvider,
   updateSettings,
+  upsertSubscriptionMonthlyBudget,
   updateSubscription,
   updateTargetMetadata,
   updateVPSAsset,
@@ -95,6 +97,7 @@ import type {
   VPSExperienceLogRecord,
   VPSMonitoringInstanceLinkRecord,
   VPSTimeline,
+  SubscriptionMonthlyBudgetRecord,
 } from './types'
 import { appRoutes } from '../app/router'
 
@@ -1199,6 +1202,52 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify(patchBody),
+    })
+  })
+
+  it('uses monthly budget endpoints for subscription budget timeline', async () => {
+    const monthlyBudget = {
+      budget_month: '2026-06-01',
+      base_currency: 'CNY',
+      monthly_limit: 100,
+      warning_pct: 80,
+      note: 'baseline',
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+    } satisfies SubscriptionMonthlyBudgetRecord
+    const input = {
+      base_currency: 'USD',
+      monthly_limit: 120,
+      warning_pct: 75,
+      note: 'growth',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([monthlyBudget])))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ ...monthlyBudget, ...input, budget_month: '2026-07-01' })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listSubscriptionMonthlyBudgets()).resolves.toEqual([monthlyBudget])
+    await expect(upsertSubscriptionMonthlyBudget('2026-07-15', input)).resolves.toEqual({
+      ...monthlyBudget,
+      ...input,
+      budget_month: '2026-07-01',
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/subscription-monthly-budgets', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/subscription-monthly-budgets/2026-07', {
+      method: 'PUT',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(input),
     })
   })
 

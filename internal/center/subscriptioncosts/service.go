@@ -87,6 +87,10 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 	}
 	budgets = applyBudgetSpend(rows, budgets)
 	applyRowBudgetStatus(rows, budgets)
+	budgetMonthBuckets, err := s.repo.ListBudgetMonthBuckets(ctx, settings, 1, s.now())
+	if err != nil {
+		return Overview{}, fmt.Errorf("list subscription budget month buckets: %w", err)
+	}
 
 	today := subscriptionDay(s.now())
 	overview := Overview{
@@ -131,12 +135,8 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 		}
 	}
 
-	for _, budget := range budgets {
-		if budget.Status == BudgetStatusWarning || budget.Status == BudgetStatusOver {
-			overview.BudgetRiskCount++
-			overview.BudgetRisks = append(overview.BudgetRisks, budget)
-		}
-	}
+	overview.BudgetRiskCount = currentMonthBudgetRiskCount(overview.TotalMonthlyCost, budgetMonthBuckets)
+	overview.BudgetRisks = monthlyBudgetRisks(overview.TotalMonthlyCost, budgetMonthBuckets)
 	sortRenewalQueue(overview.UpcomingRenewals)
 	if len(overview.UpcomingRenewals) > 12 {
 		overview.UpcomingRenewals = overview.UpcomingRenewals[:12]
@@ -167,6 +167,11 @@ func (s *Service) GetStatistics(ctx context.Context, window string) (Statistics,
 	if err != nil {
 		return Statistics{}, fmt.Errorf("list subscription cost month buckets: %w", err)
 	}
+	budgetMonthBuckets, err := s.repo.ListBudgetMonthBuckets(ctx, settings, statisticsWindowMonths(window), s.now())
+	if err != nil {
+		return Statistics{}, fmt.Errorf("list subscription budget month buckets: %w", err)
+	}
+	costMonthBuckets = mergeBudgetMonthBuckets(costMonthBuckets, budgetMonthBuckets)
 	budgets, err := s.repo.ListBudgets(ctx, BudgetListFilters{})
 	if err != nil {
 		return Statistics{}, fmt.Errorf("list subscription budgets: %w", err)
@@ -183,6 +188,19 @@ func (s *Service) GetStatistics(ctx context.Context, window string) (Statistics,
 		CategoryBreakdown: breakdown(rows, func(row CostRow) (string, string) {
 			return emptyAs(row.CostCategory, row.CostCategory, "未分类"), emptyAs(row.CostCategory, row.CostCategory, "未分类")
 		}),
+		PaymentBreakdown: breakdown(rows, func(row CostRow) (string, string) {
+			return emptyAs(row.PaymentMethod, row.PaymentMethod, "未记录支付方式"), emptyAs(row.PaymentMethod, row.PaymentMethod, "未记录支付方式")
+		}),
+		RegionBreakdown: breakdown(rows, func(row CostRow) (string, string) {
+			label := strings.TrimSpace(row.Country)
+			if region := strings.TrimSpace(row.Region); region != "" && region != label {
+				if label != "" {
+					label += " / "
+				}
+				label += region
+			}
+			return emptyAs(label, label, "未记录国家/地区"), emptyAs(label, label, "未记录国家/地区")
+		}),
 		CostMonthBuckets:    costMonthBuckets,
 		RenewalMonthBuckets: renewalBuckets(rows, s.now(), window),
 		BudgetStatuses:      budgets,
@@ -195,6 +213,18 @@ func (s *Service) GetStatistics(ctx context.Context, window string) (Statistics,
 		stats.TotalYearlyCost += *row.YearlyPriceBase
 	}
 	return stats, nil
+}
+
+func (s *Service) ListMonthlyBudgets(ctx context.Context) ([]MonthlyBudgetRecord, error) {
+	return s.repo.ListMonthlyBudgets(ctx)
+}
+
+func (s *Service) UpsertMonthlyBudget(ctx context.Context, input UpsertMonthlyBudgetInput) (MonthlyBudgetRecord, error) {
+	input = NormalizeUpsertMonthlyBudgetInput(input)
+	if err := ValidateUpsertMonthlyBudgetInput(input); err != nil {
+		return MonthlyBudgetRecord{}, err
+	}
+	return s.repo.UpsertMonthlyBudget(ctx, input)
 }
 
 func (s *Service) ListBudgets(ctx context.Context, filters BudgetListFilters) ([]BudgetRecord, error) {
@@ -465,6 +495,66 @@ func renewalBuckets(rows []CostRow, now time.Time, window string) []SeriesPoint 
 		buckets[i].MonthlyCost += *row.MonthlyPriceBase
 	}
 	return buckets
+}
+
+func mergeBudgetMonthBuckets(costBuckets, budgetBuckets []SeriesPoint) []SeriesPoint {
+	byBucket := make(map[string]SeriesPoint, len(budgetBuckets))
+	for _, budget := range budgetBuckets {
+		byBucket[budget.Bucket] = budget
+	}
+	for i := range costBuckets {
+		budget, ok := byBucket[costBuckets[i].Bucket]
+		if !ok {
+			continue
+		}
+		costBuckets[i].BudgetLimit = budget.BudgetLimit
+		costBuckets[i].BudgetCurrency = budget.BudgetCurrency
+		costBuckets[i].BudgetWarningPct = budget.BudgetWarningPct
+		if budget.DataInsufficient {
+			costBuckets[i].DataInsufficient = true
+		}
+	}
+	return costBuckets
+}
+
+func currentMonthBudgetRiskCount(monthlyCost float64, budgetBuckets []SeriesPoint) int {
+	if len(monthlyBudgetRisks(monthlyCost, budgetBuckets)) > 0 {
+		return 1
+	}
+	return 0
+}
+
+func monthlyBudgetRisks(monthlyCost float64, budgetBuckets []SeriesPoint) []BudgetRecord {
+	if len(budgetBuckets) == 0 {
+		return nil
+	}
+	budget := budgetBuckets[len(budgetBuckets)-1]
+	if budget.DataInsufficient {
+		return nil
+	}
+	status := budgetStatusForMonthlySpend(monthlyCost, budget.BudgetLimit, budget.BudgetWarningPct)
+	if status != BudgetStatusWarning && status != BudgetStatusOver {
+		return nil
+	}
+	return []BudgetRecord{{
+		BudgetID:            "monthly-" + budget.Bucket,
+		ScopeType:           string(BudgetScopeGlobal),
+		Name:                "月预算 " + budget.Bucket,
+		BaseCurrency:        budget.BudgetCurrency,
+		MonthlyLimit:        budget.BudgetLimit,
+		WarningPct:          budget.BudgetWarningPct,
+		Enabled:             true,
+		CurrentMonthlySpend: monthlyCost,
+		CurrentYearlySpend:  monthlyCost * 12,
+		Status:              status,
+	}}
+}
+
+func budgetStatusForMonthlySpend(monthlyCost float64, monthlyLimit *float64, warningPct int) BudgetStatus {
+	if monthlyLimit == nil {
+		return BudgetStatusUnknown
+	}
+	return EvaluateBudgetStatus(true, monthlyCost, monthlyLimit, nil, warningPct)
 }
 
 func renewalQueueItem(row CostRow) RenewalQueueItem {

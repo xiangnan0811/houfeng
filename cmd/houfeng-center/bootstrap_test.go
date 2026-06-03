@@ -249,6 +249,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.SubscriptionItemHandler == nil {
 		t.Fatal("router subscription item handler = nil, want non-nil")
 	}
+	if gotOpts.SubscriptionMonthlyBudgetsHandler == nil {
+		t.Fatal("router subscription monthly budgets handler = nil, want non-nil")
+	}
 	if gotOpts.MonitoringInstancesCollectionHandler == nil {
 		t.Fatal("router monitoringInstances collection handler = nil, want non-nil")
 	}

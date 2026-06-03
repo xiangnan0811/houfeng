@@ -10,6 +10,7 @@ import (
 
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/subscriptioncosts"
+	"houfeng/internal/center/subscriptions"
 )
 
 func SubscriptionOverview(service *subscriptioncosts.Service) http.Handler {
@@ -162,6 +163,63 @@ func SubscriptionBudgets(service *subscriptioncosts.Service) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+func SubscriptionMonthlyBudgets(service *subscriptioncosts.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			records, err := service.ListMonthlyBudgets(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusOK, records)
+		case http.MethodPut:
+			var input subscriptioncosts.UpsertMonthlyBudgetInput
+			if err := decodeJSON(r, &input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+			month, ok := subscriptionMonthlyBudgetPathMonth(r.URL.Path)
+			if !ok {
+				writeError(w, http.StatusNotFound, "not found")
+				return
+			}
+			if month != "" {
+				parsed, err := subscriptions.ParseDate(month + "-01")
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "invalid input")
+					return
+				}
+				input.BudgetMonth = parsed
+			}
+			record, err := service.UpsertMonthlyBudget(r.Context(), input)
+			if errors.Is(err, subscriptioncosts.ErrInvalidInput) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusOK, record)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})
+}
+
+func subscriptionMonthlyBudgetPathMonth(path string) (string, bool) {
+	const prefix = "/api/subscription-monthly-budgets/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", true
+	}
+	month := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	if month == "" || strings.Contains(month, "/") {
+		return "", false
+	}
+	return month, true
 }
 
 type budgetPatchRequest struct {
