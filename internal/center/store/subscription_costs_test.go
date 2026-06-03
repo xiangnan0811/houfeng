@@ -245,6 +245,133 @@ func TestPostgresSubscriptionCostRepositoryUpsertMonthlyBudget(t *testing.T) {
 	}
 }
 
+func TestPostgresSubscriptionCostRepositoryEarliestSubscriptionMonth(t *testing.T) {
+	t.Parallel()
+
+	var seenSQL string
+	repo := &PostgresSubscriptionCostRepository{db: fakeSubscriptionCostDB{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			seenSQL = sql
+			if len(args) != 0 {
+				t.Fatalf("query args = %#v, want none", args)
+			}
+			return fakeSubscriptionCostRow{scan: func(dest ...any) error {
+				if len(dest) != 1 {
+					t.Fatalf("scan destinations = %d, want 1", len(dest))
+				}
+				*(dest[0].(*pgtype.Date)) = pgtype.Date{Time: time.Date(2025, time.March, 1, 0, 0, 0, 0, time.UTC), Valid: true}
+				return nil
+			}}
+		},
+	}}
+
+	got, err := repo.EarliestSubscriptionMonth(context.Background())
+	if err != nil {
+		t.Fatalf("EarliestSubscriptionMonth() error = %v", err)
+	}
+	if got == nil || got.Time.Format("2006-01-02") != "2025-03-01" {
+		t.Fatalf("EarliestSubscriptionMonth() = %#v, want 2025-03-01", got)
+	}
+	for _, snippet := range []string{
+		"subscriptions",
+		"started_at",
+		"renew_at",
+		"price_histories",
+		"date_trunc('month'",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("EarliestSubscriptionMonth SQL missing %q in %s", snippet, seenSQL)
+		}
+	}
+}
+
+func TestPostgresSubscriptionCostRepositoryUpsertMonthlyBudgets(t *testing.T) {
+	t.Parallel()
+
+	first, err := subscriptions.ParseDate("2026-05-01")
+	if err != nil {
+		t.Fatalf("parse first date: %v", err)
+	}
+	second, err := subscriptions.ParseDate("2026-06-01")
+	if err != nil {
+		t.Fatalf("parse second date: %v", err)
+	}
+	createdAt := time.Date(2026, time.June, 3, 8, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, time.June, 3, 8, 30, 0, 0, time.UTC)
+	var seenSQL string
+	var seenArgs []any
+	repo := &PostgresSubscriptionCostRepository{db: fakeSubscriptionCostDB{
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			seenSQL = sql
+			seenArgs = append([]any(nil), args...)
+			return &fakeSubscriptionCostRows{rows: []fakeSubscriptionCostScan{
+				{scan: func(dest ...any) error {
+					if len(dest) != 7 {
+						t.Fatalf("scan destinations = %d, want 7", len(dest))
+					}
+					*(dest[0].(*time.Time)) = first.Time
+					*(dest[1].(*string)) = "USD"
+					*(dest[2].(*float64)) = 120
+					*(dest[3].(*int)) = 75
+					*(dest[4].(*string)) = "baseline"
+					*(dest[5].(*time.Time)) = createdAt
+					*(dest[6].(*time.Time)) = updatedAt
+					return nil
+				}},
+				{scan: func(dest ...any) error {
+					if len(dest) != 7 {
+						t.Fatalf("scan destinations = %d, want 7", len(dest))
+					}
+					*(dest[0].(*time.Time)) = second.Time
+					*(dest[1].(*string)) = "USD"
+					*(dest[2].(*float64)) = 120
+					*(dest[3].(*int)) = 75
+					*(dest[4].(*string)) = "baseline"
+					*(dest[5].(*time.Time)) = createdAt
+					*(dest[6].(*time.Time)) = updatedAt
+					return nil
+				}},
+			}}, nil
+		},
+	}}
+
+	got, err := repo.UpsertMonthlyBudgets(context.Background(), []subscriptioncosts.UpsertMonthlyBudgetInput{
+		{BudgetMonth: first, BaseCurrency: " usd ", MonthlyLimit: 120, WarningPct: 75, Note: " baseline "},
+		{BudgetMonth: second, BaseCurrency: "usd", MonthlyLimit: 120, WarningPct: 75, Note: "baseline"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertMonthlyBudgets() error = %v", err)
+	}
+	if len(got) != 2 || got[0].BudgetMonth.Time.Format("2006-01-02") != "2026-05-01" || got[1].BudgetMonth.Time.Format("2006-01-02") != "2026-06-01" {
+		t.Fatalf("UpsertMonthlyBudgets() = %#v, want returned records in month order", got)
+	}
+	if len(seenArgs) != 5 {
+		t.Fatalf("query args = %#v, want 5 array args", seenArgs)
+	}
+	months := seenArgs[0].([]time.Time)
+	baseCurrencies := seenArgs[1].([]string)
+	monthlyLimits := seenArgs[2].([]float64)
+	warningPcts := seenArgs[3].([]int)
+	notes := seenArgs[4].([]string)
+	if len(months) != 2 || !months[0].Equal(first.Time) || !months[1].Equal(second.Time) {
+		t.Fatalf("month args = %#v, want May and June", months)
+	}
+	if fmt.Sprint(baseCurrencies) != "[USD USD]" || fmt.Sprint(monthlyLimits) != "[120 120]" || fmt.Sprint(warningPcts) != "[75 75]" || fmt.Sprint(notes) != "[baseline baseline]" {
+		t.Fatalf("normalized args = %#v %#v %#v %#v", baseCurrencies, monthlyLimits, warningPcts, notes)
+	}
+	for _, snippet := range []string{
+		"unnest($1::date[]",
+		"insert into subscription_monthly_budgets",
+		"on conflict (budget_month) do update",
+		"updated_at = now()",
+		"order by budget_month asc",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("UpsertMonthlyBudgets SQL missing %q in %s", snippet, seenSQL)
+		}
+	}
+}
+
 func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsIntegration(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporarySubscriptionCostPostgresSchema(t, ctx)

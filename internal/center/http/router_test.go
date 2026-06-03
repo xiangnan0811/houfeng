@@ -462,6 +462,16 @@ func TestRouterDispatchesSubscriptionAPIs(t *testing.T) {
 	if called != "monthly-budgets" {
 		t.Fatalf("called = %q, want monthly-budgets", called)
 	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/subscription-monthly-budgets/bulk", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("monthly budget bulk status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "monthly-budgets" {
+		t.Fatalf("called = %q, want monthly-budgets", called)
+	}
 }
 
 func TestRouterDispatchesMonitoringInstanceVPSAPI(t *testing.T) {
@@ -518,7 +528,7 @@ func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/api/subscriptions", "/api/subscriptions/sub_001", "/api/subscription-monthly-budgets", "/api/subscription-monthly-budgets/2026-06"} {
+	for _, path := range []string{"/api/subscriptions", "/api/subscriptions/sub_001", "/api/subscription-monthly-budgets", "/api/subscription-monthly-budgets/2026-06", "/api/subscription-monthly-budgets/bulk"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 
@@ -537,8 +547,8 @@ func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 	if monthlyBudgetsCalled {
 		t.Fatal("subscription monthly budgets handler was called despite auth middleware blocking")
 	}
-	if middlewareCalls != 4 {
-		t.Fatalf("middleware calls = %d, want 4", middlewareCalls)
+	if middlewareCalls != 5 {
+		t.Fatalf("middleware calls = %d, want 5", middlewareCalls)
 	}
 }
 

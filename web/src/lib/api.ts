@@ -8,6 +8,8 @@ import type {
   AssetServiceRecord,
   ApplyCancellationInput,
   CancellationPreview,
+  BulkUpsertSubscriptionMonthlyBudgetInput,
+  BulkUpsertSubscriptionMonthlyBudgetResult,
   CreateAssetDomainInput,
   CreateProviderInput,
   CreateAssetServiceInput,
@@ -695,6 +697,10 @@ export function upsertSubscriptionMonthlyBudget(month: string, input: UpsertSubs
     },
     body: JSON.stringify(input),
   })
+}
+
+export function bulkUpsertSubscriptionMonthlyBudgets(input: BulkUpsertSubscriptionMonthlyBudgetInput) {
+  return postJSONBody<BulkUpsertSubscriptionMonthlyBudgetResult>('/api/subscription-monthly-budgets/bulk', input)
 }
 
 export function createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionRecord> {

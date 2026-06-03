@@ -1790,24 +1790,32 @@ select.input::-ms-expand{display:none}
 .subscription-inline-form--settings{grid-template-columns:repeat(2,minmax(0,1fr))}
 .subscription-inline-form .create-form__error,.subscription-inline-form .asset-operation-feedback,.subscription-inline-form button[type='submit']{grid-column:1 / -1}
 .subscription-inline-form .asset-checkbox-line{min-height:38px;align-items:center}
+.subscription-budget-coverage{grid-column:span 2;align-self:stretch;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 64%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 16%,transparent)}
+.subscription-budget-coverage span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.subscription-budget-coverage strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.35}
+.subscription-budget-coverage small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
 .subscription-insights{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
-.subscription-insights__grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-3);align-items:stretch}
-.subscription-insight-panel{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;min-height:360px}
+.subscription-insights__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);align-items:stretch}
+.subscription-insight-panel{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;min-height:330px}
 .subscription-panel-header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-2);align-items:start;min-width:0}
 .subscription-panel-header .tabs{max-width:100%;justify-self:end}
+.subscription-panel-select{display:flex;align-items:center;gap:var(--space-2);min-width:150px;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.2;white-space:nowrap}
+.subscription-panel-select select{min-width:108px;height:34px;padding:0 30px 0 var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 86%,transparent);border-radius:var(--radius-2);background:var(--surface) linear-gradient(45deg,transparent 50%,var(--text-muted) 50%) right 12px center/5px 5px no-repeat;color:var(--text-primary);font:inherit;appearance:none;cursor:pointer}
+.subscription-panel-select select:hover{border-color:color-mix(in srgb,var(--accent) 42%,var(--border))}
+.subscription-panel-select select:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 42%,transparent);outline-offset:2px}
 .subscription-panel-total{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size)}
 .subscription-panel-scroll{max-height:250px;overflow-y:auto;overflow-x:hidden;padding-right:var(--space-1)}
-.subscription-donut-layout{display:flex;flex-direction:column;gap:var(--space-3);align-items:center;min-width:0}
+.subscription-donut-layout{position:relative;display:flex;flex-direction:column;gap:var(--space-3);align-items:center;min-width:0}
 .subscription-donut-layout--compact{justify-content:center}
 .subscription-donut{width:min(100%,220px);max-width:220px;aspect-ratio:1;overflow:visible}
 .subscription-donut__track{fill:none;stroke:color-mix(in srgb,var(--border) 64%,transparent);stroke-width:18}
 .subscription-donut__segment{fill:none;stroke-width:18;stroke-linecap:butt;transform:rotate(-90deg);transform-origin:70px 70px;cursor:pointer;transition:opacity .16s ease,stroke-width .16s ease}
 .subscription-donut__segment:hover,.subscription-donut__segment:focus-visible{opacity:.82;stroke-width:20;outline:none}
-.subscription-donut__center-label{fill:var(--text-muted);font-size:10px;text-anchor:middle}
-.subscription-donut__center-value{fill:var(--text-primary);font-family:var(--font-mono);font-size:11px;font-weight:700;text-anchor:middle}
-.subscription-donut-tooltip{align-self:stretch;display:flex;flex-direction:column;gap:2px;min-height:92px;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 22%,transparent)}
-.subscription-donut-tooltip strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.subscription-donut-tooltip span,.subscription-donut-tooltip small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
+.subscription-donut__center-label{fill:var(--text-muted);font-size:10px;text-anchor:middle;pointer-events:none}
+.subscription-donut__center-value{fill:var(--text-primary);font-family:var(--font-mono);font-size:11px;font-weight:700;text-anchor:middle;pointer-events:none}
+.subscription-donut-popover{position:absolute;z-index:3;right:max(8px,calc(50% - 190px));top:50%;display:flex;min-width:190px;max-width:min(240px,calc(100% - 16px));transform:translateY(-50%);flex-direction:column;gap:2px;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);box-shadow:var(--shadow-md);background:color-mix(in srgb,var(--surface) 96%,var(--surface-elevated));pointer-events:none}
+.subscription-donut-popover strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subscription-donut-popover span,.subscription-donut-popover small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
 .subscription-ranking-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
 .subscription-ranking-row{display:grid;grid-template-columns:minmax(0,0.5fr) minmax(70px,1fr) minmax(84px,auto);gap:var(--space-2);align-items:center;width:100%;padding:var(--space-2) 0;border:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent);background:transparent;color:inherit;text-align:left;cursor:pointer}
 .subscription-ranking-row:hover strong{color:var(--accent)}
@@ -1855,11 +1863,10 @@ select.input::-ms-expand{display:none}
 .asset-cost-signal{max-width:220px}
 .asset-cost-signal .badge{width:max-content}
 .asset-cost-signal .asset-context-pill{min-height:22px}
-@media(max-width:1180px){.subscription-insights__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:1080px){.subscription-workbench-grid,.subscription-workbench-grid--settings{grid-template-columns:1fr}.subscription-inline-form,.subscription-inline-form--settings{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-budget-edit{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:860px){.subscription-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-insights__grid{grid-template-columns:1fr}.subscription-panel-header{grid-template-columns:1fr}.subscription-panel-header .tabs{justify-self:start}.subscription-donut-layout{grid-template-columns:1fr}}
+@media(max-width:860px){.subscription-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-insights__grid{grid-template-columns:1fr}.subscription-panel-header{grid-template-columns:1fr}.subscription-panel-header .tabs,.subscription-panel-select{justify-self:start}.subscription-donut-layout{grid-template-columns:1fr}.subscription-donut-popover{right:50%;top:auto;bottom:8px;transform:translateX(50%)}}
 @media(max-width:900px){.vps-cost-card__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:700px){.subscription-metric-grid,.subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit,.vps-cost-card__grid{grid-template-columns:1fr}.subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-budget-row{grid-template-columns:1fr;align-items:start}.subscription-breakdown-bar{width:100%}}
+@media(max-width:700px){.subscription-metric-grid,.subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit,.vps-cost-card__grid{grid-template-columns:1fr}.subscription-budget-coverage{grid-column:1}.subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-budget-row{grid-template-columns:1fr;align-items:start}.subscription-breakdown-bar{width:100%}}
 .asset-table .data-table__cell{vertical-align:top}
 .asset-workbench-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2);margin:0}
 .asset-decision-board__summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2);margin:var(--space-3) 0 0}

@@ -232,6 +232,97 @@ func TestServiceMonthlyBudgetRisksIgnoreCurrencyMismatch(t *testing.T) {
 	}
 }
 
+func TestServiceBulkUpsertMonthlyBudgetsCurrentYear(t *testing.T) {
+	service, repo := newTestService()
+	service.now = func() time.Time { return time.Date(2026, time.June, 3, 12, 0, 0, 0, time.UTC) }
+
+	result, err := service.BulkUpsertMonthlyBudgets(context.Background(), BulkUpsertMonthlyBudgetInput{
+		Scope:        MonthlyBudgetBulkScopeCurrentYear,
+		BaseCurrency: "usd",
+		MonthlyLimit: 88.5,
+		WarningPct:   70,
+		Note:         " baseline ",
+	})
+	if err != nil {
+		t.Fatalf("BulkUpsertMonthlyBudgets() error = %v", err)
+	}
+	if result.StartMonth.Time.Format("2006-01-02") != "2026-01-01" || result.EndMonth.Time.Format("2006-01-02") != "2026-06-01" {
+		t.Fatalf("range = %s..%s, want current year through current month", result.StartMonth.Time.Format("2006-01-02"), result.EndMonth.Time.Format("2006-01-02"))
+	}
+	if len(repo.upsertMonthlyBudgetInputs) != 6 || len(result.Records) != 6 {
+		t.Fatalf("upserted %d inputs and %d records, want 6", len(repo.upsertMonthlyBudgetInputs), len(result.Records))
+	}
+	first := repo.upsertMonthlyBudgetInputs[0]
+	last := repo.upsertMonthlyBudgetInputs[len(repo.upsertMonthlyBudgetInputs)-1]
+	if first.BudgetMonth.Time.Format("2006-01-02") != "2026-01-01" || last.BudgetMonth.Time.Format("2006-01-02") != "2026-06-01" {
+		t.Fatalf("months = %s..%s, want Jan..Jun", first.BudgetMonth.Time.Format("2006-01-02"), last.BudgetMonth.Time.Format("2006-01-02"))
+	}
+	if first.BaseCurrency != "USD" || first.MonthlyLimit != 88.5 || first.WarningPct != 70 || first.Note != "baseline" {
+		t.Fatalf("normalized first input = %#v", first)
+	}
+}
+
+func TestServiceBulkUpsertMonthlyBudgetsRecentYear(t *testing.T) {
+	service, repo := newTestService()
+	service.now = func() time.Time { return time.Date(2026, time.June, 3, 12, 0, 0, 0, time.UTC) }
+
+	result, err := service.BulkUpsertMonthlyBudgets(context.Background(), BulkUpsertMonthlyBudgetInput{
+		Scope:        MonthlyBudgetBulkScopeRecentYear,
+		BaseCurrency: "CNY",
+		MonthlyLimit: 100,
+	})
+	if err != nil {
+		t.Fatalf("BulkUpsertMonthlyBudgets() error = %v", err)
+	}
+	if result.StartMonth.Time.Format("2006-01-02") != "2025-07-01" || result.EndMonth.Time.Format("2006-01-02") != "2026-06-01" {
+		t.Fatalf("range = %s..%s, want latest 12 months", result.StartMonth.Time.Format("2006-01-02"), result.EndMonth.Time.Format("2006-01-02"))
+	}
+	if len(repo.upsertMonthlyBudgetInputs) != 12 {
+		t.Fatalf("upserted %d months, want 12", len(repo.upsertMonthlyBudgetInputs))
+	}
+	if repo.upsertMonthlyBudgetInputs[0].WarningPct != 80 {
+		t.Fatalf("default warning = %d, want 80", repo.upsertMonthlyBudgetInputs[0].WarningPct)
+	}
+}
+
+func TestServiceBulkUpsertMonthlyBudgetsAllHistoryUsesEarliestSubscriptionMonth(t *testing.T) {
+	service, repo := newTestService()
+	service.now = func() time.Time { return time.Date(2026, time.June, 3, 12, 0, 0, 0, time.UTC) }
+	earliest := subscriptions.NewDate(time.Date(2025, time.March, 18, 9, 0, 0, 0, time.UTC))
+	repo.earliestSubscriptionMonth = &earliest
+
+	result, err := service.BulkUpsertMonthlyBudgets(context.Background(), BulkUpsertMonthlyBudgetInput{
+		Scope:        MonthlyBudgetBulkScopeAllHistory,
+		BaseCurrency: "CNY",
+		MonthlyLimit: 100,
+	})
+	if err != nil {
+		t.Fatalf("BulkUpsertMonthlyBudgets() error = %v", err)
+	}
+	if result.StartMonth.Time.Format("2006-01-02") != "2025-03-01" || result.EndMonth.Time.Format("2006-01-02") != "2026-06-01" {
+		t.Fatalf("range = %s..%s, want earliest subscription month through current month", result.StartMonth.Time.Format("2006-01-02"), result.EndMonth.Time.Format("2006-01-02"))
+	}
+	if len(repo.upsertMonthlyBudgetInputs) != 16 {
+		t.Fatalf("upserted %d months, want 16", len(repo.upsertMonthlyBudgetInputs))
+	}
+}
+
+func TestServiceBulkUpsertMonthlyBudgetsRejectsInvalidScope(t *testing.T) {
+	service, repo := newTestService()
+
+	_, err := service.BulkUpsertMonthlyBudgets(context.Background(), BulkUpsertMonthlyBudgetInput{
+		Scope:        "future",
+		BaseCurrency: "CNY",
+		MonthlyLimit: 100,
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("BulkUpsertMonthlyBudgets() error = %v, want ErrInvalidInput", err)
+	}
+	if len(repo.upsertMonthlyBudgetInputs) != 0 {
+		t.Fatalf("upserted inputs despite invalid scope: %#v", repo.upsertMonthlyBudgetInputs)
+	}
+}
+
 func TestServiceRefreshExchangeRatesSanitizesProviderErrors(t *testing.T) {
 	ctx := context.Background()
 	service, repo := newTestService()
@@ -364,6 +455,8 @@ type fakeSubscriptionCostRepo struct {
 	monthlyBudgets            []MonthlyBudgetRecord
 	upsertMonthlyBudgetInput  UpsertMonthlyBudgetInput
 	upsertMonthlyBudgetRecord MonthlyBudgetRecord
+	earliestSubscriptionMonth *subscriptions.Date
+	upsertMonthlyBudgetInputs []UpsertMonthlyBudgetInput
 	currencies                []string
 	upserts                   []ExchangeRateUpsert
 	candidates                []ReminderCandidate
@@ -430,6 +523,25 @@ func (r *fakeSubscriptionCostRepo) UpsertMonthlyBudget(_ context.Context, input 
 		}, nil
 	}
 	return r.upsertMonthlyBudgetRecord, nil
+}
+
+func (r *fakeSubscriptionCostRepo) EarliestSubscriptionMonth(context.Context) (*subscriptions.Date, error) {
+	return r.earliestSubscriptionMonth, nil
+}
+
+func (r *fakeSubscriptionCostRepo) UpsertMonthlyBudgets(_ context.Context, inputs []UpsertMonthlyBudgetInput) ([]MonthlyBudgetRecord, error) {
+	r.upsertMonthlyBudgetInputs = append([]UpsertMonthlyBudgetInput(nil), inputs...)
+	records := make([]MonthlyBudgetRecord, 0, len(inputs))
+	for _, input := range inputs {
+		records = append(records, MonthlyBudgetRecord{
+			BudgetMonth:  input.BudgetMonth,
+			BaseCurrency: input.BaseCurrency,
+			MonthlyLimit: input.MonthlyLimit,
+			WarningPct:   input.WarningPct,
+			Note:         input.Note,
+		})
+	}
+	return records, nil
 }
 
 func (r *fakeSubscriptionCostRepo) ListActiveCurrencies(context.Context) ([]string, error) {

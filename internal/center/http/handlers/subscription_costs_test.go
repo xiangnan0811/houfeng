@@ -19,6 +19,8 @@ type fakeSubscriptionCostRepository struct {
 	monthlyBudgets            []subscriptioncosts.MonthlyBudgetRecord
 	upsertMonthlyBudget       subscriptioncosts.UpsertMonthlyBudgetInput
 	upsertMonthlyBudgetResult subscriptioncosts.MonthlyBudgetRecord
+	earliestSubscriptionMonth *subscriptions.Date
+	upsertMonthlyBudgets      []subscriptioncosts.UpsertMonthlyBudgetInput
 }
 
 func (r *fakeSubscriptionCostRepository) ListCostRows(context.Context, centersettings.SubscriptionCostSettings) ([]subscriptioncosts.CostRow, error) {
@@ -65,6 +67,25 @@ func (r *fakeSubscriptionCostRepository) UpsertMonthlyBudget(_ context.Context, 
 		}, nil
 	}
 	return r.upsertMonthlyBudgetResult, nil
+}
+
+func (r *fakeSubscriptionCostRepository) EarliestSubscriptionMonth(context.Context) (*subscriptions.Date, error) {
+	return r.earliestSubscriptionMonth, nil
+}
+
+func (r *fakeSubscriptionCostRepository) UpsertMonthlyBudgets(_ context.Context, inputs []subscriptioncosts.UpsertMonthlyBudgetInput) ([]subscriptioncosts.MonthlyBudgetRecord, error) {
+	r.upsertMonthlyBudgets = append([]subscriptioncosts.UpsertMonthlyBudgetInput(nil), inputs...)
+	records := make([]subscriptioncosts.MonthlyBudgetRecord, 0, len(inputs))
+	for _, input := range inputs {
+		records = append(records, subscriptioncosts.MonthlyBudgetRecord{
+			BudgetMonth:  input.BudgetMonth,
+			BaseCurrency: input.BaseCurrency,
+			MonthlyLimit: input.MonthlyLimit,
+			WarningPct:   input.WarningPct,
+			Note:         input.Note,
+		})
+	}
+	return records, nil
 }
 
 func (r *fakeSubscriptionCostRepository) ListActiveCurrencies(context.Context) ([]string, error) {
@@ -156,6 +177,40 @@ func TestSubscriptionMonthlyBudgetsUpsertsPathMonth(t *testing.T) {
 	}
 }
 
+func TestSubscriptionMonthlyBudgetsBulkUpsertsRange(t *testing.T) {
+	repo := &fakeSubscriptionCostRepository{}
+	service := subscriptioncosts.NewService(repo, &fakeSubscriptionCostSettingsRepository{}, nil)
+	handler := handlers.SubscriptionMonthlyBudgets(service)
+	req := httptest.NewRequest(http.MethodPost, "/api/subscription-monthly-budgets/bulk", strings.NewReader(`{
+		"scope":"current_year",
+		"base_currency":"usd",
+		"monthly_limit":140.5,
+		"warning_pct":75,
+		"note":" first setup "
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if len(repo.upsertMonthlyBudgets) == 0 {
+		t.Fatalf("bulk upsert inputs were not recorded")
+	}
+	first := repo.upsertMonthlyBudgets[0]
+	if first.BaseCurrency != "USD" || first.MonthlyLimit != 140.5 || first.WarningPct != 75 || first.Note != "first setup" {
+		t.Fatalf("first bulk input = %#v, want normalized payload", first)
+	}
+	var body subscriptioncosts.BulkUpsertMonthlyBudgetResult
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Scope != subscriptioncosts.MonthlyBudgetBulkScopeCurrentYear || len(body.Records) != len(repo.upsertMonthlyBudgets) {
+		t.Fatalf("body = %#v, want current_year records", body)
+	}
+}
+
 func TestSubscriptionMonthlyBudgetsRejectsInvalidInput(t *testing.T) {
 	service := subscriptioncosts.NewService(&fakeSubscriptionCostRepository{}, &fakeSubscriptionCostSettingsRepository{}, nil)
 	handler := handlers.SubscriptionMonthlyBudgets(service)
@@ -167,10 +222,15 @@ func TestSubscriptionMonthlyBudgetsRejectsInvalidInput(t *testing.T) {
 		{name: "invalid path month", path: "/api/subscription-monthly-budgets/2026-13", body: `{"base_currency":"CNY","monthly_limit":100}`},
 		{name: "non first day body month", path: "/api/subscription-monthly-budgets", body: `{"budget_month":"2026-06-02","base_currency":"CNY","monthly_limit":100}`},
 		{name: "negative limit", path: "/api/subscription-monthly-budgets/2026-06", body: `{"base_currency":"CNY","monthly_limit":-1}`},
+		{name: "invalid bulk scope", path: "/api/subscription-monthly-budgets/bulk", body: `{"scope":"next_decade","base_currency":"CNY","monthly_limit":100}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, tt.path, strings.NewReader(tt.body))
+			method := http.MethodPut
+			if strings.HasSuffix(tt.path, "/bulk") {
+				method = http.MethodPost
+			}
+			req := httptest.NewRequest(method, tt.path, strings.NewReader(tt.body))
 			recorder := httptest.NewRecorder()
 
 			handler.ServeHTTP(recorder, req)

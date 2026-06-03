@@ -436,6 +436,7 @@ func TestRouterKeepsSubscriptionsOutOfSPAFallback(t *testing.T) {
 		{name: "statistics", path: "/api/subscriptions/statistics?window=year", wantBodySnippet: `"cost_month_buckets"`},
 		{name: "monthly budgets", path: "/api/subscription-monthly-budgets", wantBodySnippet: `"monthly_limit"`},
 		{name: "monthly budget item", path: "/api/subscription-monthly-budgets/2026-06", wantBodySnippet: `"monthly_limit"`},
+		{name: "monthly budget bulk", path: "/api/subscription-monthly-budgets/bulk", wantBodySnippet: `"monthly_limit"`},
 	}
 
 	for _, tt := range tests {

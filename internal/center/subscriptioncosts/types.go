@@ -18,6 +18,7 @@ var ErrBudgetNotFound = errors.New("subscription budget not found")
 
 type BudgetScopeType string
 type BudgetStatus string
+type MonthlyBudgetBulkScope string
 type ReminderKind string
 
 const (
@@ -32,6 +33,10 @@ const (
 	BudgetStatusWarning  BudgetStatus = "warning"
 	BudgetStatusOver     BudgetStatus = "over"
 	BudgetStatusUnknown  BudgetStatus = "unknown"
+
+	MonthlyBudgetBulkScopeAllHistory  MonthlyBudgetBulkScope = "all_history"
+	MonthlyBudgetBulkScopeRecentYear  MonthlyBudgetBulkScope = "recent_year"
+	MonthlyBudgetBulkScopeCurrentYear MonthlyBudgetBulkScope = "current_year"
 
 	ReminderKindRenewal           ReminderKind = "renewal"
 	ReminderKindDecisionAttention ReminderKind = "decision_attention"
@@ -56,6 +61,8 @@ type Repository interface {
 	PatchBudget(context.Context, PatchBudgetInput) (BudgetRecord, error)
 	ListMonthlyBudgets(context.Context) ([]MonthlyBudgetRecord, error)
 	UpsertMonthlyBudget(context.Context, UpsertMonthlyBudgetInput) (MonthlyBudgetRecord, error)
+	EarliestSubscriptionMonth(context.Context) (*subscriptions.Date, error)
+	UpsertMonthlyBudgets(context.Context, []UpsertMonthlyBudgetInput) ([]MonthlyBudgetRecord, error)
 	ListActiveCurrencies(context.Context) ([]string, error)
 	UpsertExchangeRate(context.Context, ExchangeRateUpsert) (ExchangeRateRecord, error)
 	ListReminderCandidates(context.Context, centersettings.SubscriptionCostSettings, []int) ([]ReminderCandidate, error)
@@ -187,6 +194,21 @@ type UpsertMonthlyBudgetInput struct {
 	MonthlyLimit float64            `json:"monthly_limit"`
 	WarningPct   int                `json:"warning_pct"`
 	Note         string             `json:"note"`
+}
+
+type BulkUpsertMonthlyBudgetInput struct {
+	Scope        MonthlyBudgetBulkScope `json:"scope"`
+	BaseCurrency string                 `json:"base_currency"`
+	MonthlyLimit float64                `json:"monthly_limit"`
+	WarningPct   int                    `json:"warning_pct"`
+	Note         string                 `json:"note"`
+}
+
+type BulkUpsertMonthlyBudgetResult struct {
+	Scope      MonthlyBudgetBulkScope `json:"scope"`
+	StartMonth subscriptions.Date     `json:"start_month"`
+	EndMonth   subscriptions.Date     `json:"end_month"`
+	Records    []MonthlyBudgetRecord  `json:"records"`
 }
 
 type BudgetRecord struct {
@@ -442,6 +464,37 @@ func ValidateUpsertMonthlyBudgetInput(input UpsertMonthlyBudgetInput) error {
 	month := input.BudgetMonth.Time.UTC()
 	if month.Day() != 1 {
 		return fmt.Errorf("%w: budget_month must be the first day of a month", ErrInvalidInput)
+	}
+	if !isCurrencyCode(input.BaseCurrency) {
+		return fmt.Errorf("%w: budget base_currency must be a 3-letter uppercase code", ErrInvalidInput)
+	}
+	if !isValidMoney(input.MonthlyLimit) {
+		return fmt.Errorf("%w: monthly_limit must be non-negative money", ErrInvalidInput)
+	}
+	if input.WarningPct < 1 || input.WarningPct > 100 {
+		return fmt.Errorf("%w: warning_pct must be between 1 and 100", ErrInvalidInput)
+	}
+	return nil
+}
+
+func NormalizeBulkUpsertMonthlyBudgetInput(input BulkUpsertMonthlyBudgetInput) BulkUpsertMonthlyBudgetInput {
+	input.Scope = MonthlyBudgetBulkScope(strings.ToLower(strings.TrimSpace(string(input.Scope))))
+	input.BaseCurrency = strings.ToUpper(strings.TrimSpace(input.BaseCurrency))
+	if input.BaseCurrency == "" {
+		input.BaseCurrency = "CNY"
+	}
+	if input.WarningPct == 0 {
+		input.WarningPct = 80
+	}
+	input.Note = strings.TrimSpace(input.Note)
+	return input
+}
+
+func ValidateBulkUpsertMonthlyBudgetInput(input BulkUpsertMonthlyBudgetInput) error {
+	switch input.Scope {
+	case MonthlyBudgetBulkScopeAllHistory, MonthlyBudgetBulkScopeRecentYear, MonthlyBudgetBulkScopeCurrentYear:
+	default:
+		return fmt.Errorf("%w: invalid monthly budget bulk scope", ErrInvalidInput)
 	}
 	if !isCurrencyCode(input.BaseCurrency) {
 		return fmt.Errorf("%w: budget base_currency must be a 3-letter uppercase code", ErrInvalidInput)

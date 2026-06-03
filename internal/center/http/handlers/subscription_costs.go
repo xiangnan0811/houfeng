@@ -167,6 +167,29 @@ func SubscriptionBudgets(service *subscriptioncosts.Service) http.Handler {
 
 func SubscriptionMonthlyBudgets(service *subscriptioncosts.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Trim(r.URL.Path, "/") == "api/subscription-monthly-budgets/bulk" {
+			if r.Method != http.MethodPost {
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var input subscriptioncosts.BulkUpsertMonthlyBudgetInput
+			if err := decodeJSON(r, &input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+			result, err := service.BulkUpsertMonthlyBudgets(r.Context(), input)
+			if errors.Is(err, subscriptioncosts.ErrInvalidInput) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusOK, result)
+			return
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			records, err := service.ListMonthlyBudgets(r.Context())

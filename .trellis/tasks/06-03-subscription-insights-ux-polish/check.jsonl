@@ -1,0 +1,5 @@
+{"file": "web/src/pages/SubscriptionsPage.test.tsx", "reason": "covers insights order, composition select, and donut popover behavior"}
+{"file": "web/src/pages/SettingsPage.test.tsx", "reason": "covers single and bulk monthly budget settings flows"}
+{"file": "internal/center/subscriptioncosts/service_test.go", "reason": "covers bulk budget scopes and validation"}
+{"file": "internal/center/store/subscription_costs_test.go", "reason": "covers earliest month and bulk upsert SQL"}
+{"file": ".trellis/tasks/06-03-subscription-insights-ux-polish/research/screenshots/", "type": "directory", "reason": "visual smoke screenshots for subscriptions and settings"}

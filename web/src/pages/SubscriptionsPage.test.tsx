@@ -519,6 +519,64 @@ describe('SubscriptionsPage', () => {
     expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument()
   })
 
+  it('organizes cost insights as a 2 by 2 workbench with contextual donut details and a composition select', async () => {
+    setupSubscriptionFetch({
+      subscriptions: [
+        subscription,
+        {
+          ...subscription,
+          subscription_id: 'sub_002',
+          vps_id: 'vps_002',
+          display_name: 'Osaka Backup',
+          price: 6,
+          monthly_price: 6,
+          monthly_price_base: 42,
+          yearly_price_base: 504,
+          payment_method: 'paypal',
+        },
+      ],
+      statistics: statisticsFor([subscription], {
+        provider_breakdown: [
+          { key: 'pv_001', label: 'Hetzner', monthly_cost: 84, yearly_cost: 1008, subscription_count: 1 },
+        ],
+        payment_breakdown: [
+          { key: 'card', label: 'card', monthly_cost: 84, yearly_cost: 1008, subscription_count: 1 },
+        ],
+        region_breakdown: [
+          { key: 'JP / Kanto', label: 'JP / Kanto', monthly_cost: 84, yearly_cost: 1008, subscription_count: 1 },
+        ],
+        cost_month_buckets: [
+          { bucket: '2025-07', monthly_cost: 70, renewal_count: 0, budget_limit: 100, budget_currency: 'CNY', budget_warning_pct: 80, data_insufficient: false },
+          { bucket: '2025-08', monthly_cost: 84, renewal_count: 0, budget_limit: 80, budget_currency: 'CNY', budget_warning_pct: 80, data_insufficient: false },
+          { bucket: '2026-06', monthly_cost: 84, renewal_count: 0, budget_limit: 120, budget_currency: 'CNY', budget_warning_pct: 80, data_insufficient: false },
+        ],
+      }),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '成本洞察' })).toBeInTheDocument())
+    const insights = screen.getByRole('region', { name: '订阅成本洞察' })
+    const headings = within(insights).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+    expect(headings).toEqual(['月成本', '年度趋势与风险', '成本构成', '续费队列'])
+    expect(screen.getByLabelText('构成维度')).toHaveValue('provider')
+    fireEvent.change(screen.getByLabelText('构成维度'), { target: { value: 'payment' } })
+    expect(screen.getByText('card')).toBeInTheDocument()
+    expect(screen.queryByText('划过扇区查看明细')).not.toBeInTheDocument()
+    expect(screen.queryByText(/原始付费：/)).not.toBeInTheDocument()
+
+    const donutSegment = within(insights).getByRole('button', { name: /筛选 Tokyo Edge/ })
+    fireEvent.mouseEnter(donutSegment)
+    expect(screen.getByText('原始付费：USD 12.00')).toBeInTheDocument()
+    expect(screen.getByText('基准月成本：CNY 84.00')).toBeInTheDocument()
+    fireEvent.mouseLeave(donutSegment)
+    expect(screen.queryByText('原始付费：USD 12.00')).not.toBeInTheDocument()
+  })
+
   it('renders monthly labels for the annual trend axis', async () => {
     setupSubscriptionFetch({ subscriptions: [subscription] })
     const { container } = render(
