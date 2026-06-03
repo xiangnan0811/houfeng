@@ -182,6 +182,14 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("target_api_core", {target["target_id"] for target in targets})
 
+        status, statistics = call_asset_workflow_api("/api/subscriptions/statistics", "window=year")
+        self.assertEqual(status, 200)
+        self.assertEqual(statistics["window"], "year")
+        self.assertEqual(len(statistics["cost_month_buckets"]), 12)
+        self.assertTrue(
+            any(bucket["monthly_cost"] > 0 for bucket in statistics["cost_month_buckets"])
+        )
+
         status, body = call_asset_workflow_api("/api/settings")
         self.assertEqual(status, 404)
         self.assertEqual(

@@ -36,6 +36,10 @@ export interface MetricChartProps {
   formatValue?: (value: number) => string
   /** Y-axis tick label formatter. If omitted, uses an integer compact format. */
   formatAxisValue?: (value: number) => string
+  /** X-axis tick label formatter. Defaults to `HH:mm` for high-frequency samples. */
+  formatTime?: (observedAt: string) => string
+  /** Tooltip time label formatter. Defaults to a full local timestamp. */
+  formatTooltipTime?: (observedAt: string) => string
   /** Lock Y-axis lower bound. When omitted, derived from data. */
   yMin?: number
   /** Lock Y-axis upper bound. When omitted, derived from data. */
@@ -147,6 +151,8 @@ export function MetricChart({
     if (abs >= 1000) return (v / 1000).toFixed(1) + 'k'
     return v.toFixed(0)
   },
+  formatTime = formatAxisTime,
+  formatTooltipTime: formatTooltipLabel = formatTooltipTime,
   yMin,
   yMax,
   className = '',
@@ -311,7 +317,7 @@ export function MetricChart({
         style={{ left: `${xPercent}%`, top: `${y.toFixed(2)}px` }}
       >
         <span className="metric-chart__tooltip-value">{formatValue(sample.value)}</span>
-        <span className="metric-chart__tooltip-time">{formatTooltipTime(sample.observedAt)}</span>
+        <span className="metric-chart__tooltip-time">{formatTooltipLabel(sample.observedAt)}</span>
       </span>
     )
   })()
@@ -426,7 +432,7 @@ export function MetricChart({
             fill="var(--text-muted)"
             opacity={0.8}
           >
-            {formatAxisTime(sample.observedAt)}
+            {formatTime(sample.observedAt)}
           </text>
         )
       })}

@@ -136,6 +136,43 @@ describe('MetricChart', () => {
     expect(container.querySelector('.metric-chart__cursor')).toBeTruthy()
   })
 
+  it('accepts custom time formatters for coarse-grained series', () => {
+    const samples: MetricChartSample[] = [
+      { value: 80, observedAt: '2025-07-01T00:00:00Z' },
+      { value: 90, observedAt: '2025-08-01T00:00:00Z' },
+      { value: 110, observedAt: '2025-09-01T00:00:00Z' },
+    ]
+    const { container, getByText } = render(
+      <MetricChart
+        samples={samples}
+        width={300}
+        height={140}
+        formatTime={(observedAt) => observedAt.slice(2, 7).replace('-', '/')}
+        formatTooltipTime={(observedAt) => `${observedAt.slice(0, 7)} month`}
+      />,
+    )
+
+    expect(getByText('25/07')).toBeInTheDocument()
+    expect(getByText('25/08')).toBeInTheDocument()
+    expect(getByText('25/09')).toBeInTheDocument()
+    expect(container).not.toHaveTextContent('00:00')
+
+    const svg = container.querySelector('svg')!
+    svg.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 300,
+      bottom: 140,
+      width: 300,
+      height: 140,
+      toJSON: () => ({}),
+    })
+    fireEvent.mouseMove(svg, { clientX: 150 })
+    expect(container.querySelector('.metric-chart__tooltip-time')).toHaveTextContent(/2025-0[78] month/)
+  })
+
   it('renders a local tooltip for controlled hover by default', () => {
     const samples = makeSamples(5, 10, 5_000)
     const { container } = render(

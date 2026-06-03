@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { Modal } from '../components/atoms/Modal'
 import { Tabs } from '../components/atoms'
@@ -17,6 +18,7 @@ import { FrequencyDefaultsSection } from './settings/FrequencyDefaultsSection'
 import { IncidentDefaultsSection } from './settings/IncidentDefaultsSection'
 import { OverrideRulesSection } from './settings/OverrideRulesSection'
 import { RetentionPolicySection } from './settings/RetentionPolicySection'
+import { SubscriptionSettingsSection } from './settings/SubscriptionSettingsSection'
 import { TelegramSettingsSection } from './settings/TelegramSettingsSection'
 import { ThemeSettingsSection } from './settings/ThemeSettingsSection'
 import type { SettingsFormState } from './settings/types'
@@ -25,8 +27,12 @@ const SETTINGS_TABS = [
   { value: 'appearance', label: '外观' },
   { value: 'notification', label: '通知' },
   { value: 'monitoring', label: '监控策略' },
+  { value: 'subscriptions', label: '订阅' },
   { value: 'advanced', label: '高级' },
-]
+] as const
+
+type SettingsTab = (typeof SETTINGS_TABS)[number]['value']
+const SETTINGS_TAB_VALUES = new Set<string>(SETTINGS_TABS.map((tab) => tab.value))
 
 type State = {
   loading: boolean; saving: boolean; error: string | null
@@ -181,14 +187,17 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
 }
 
 export function SettingsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [state, setState] = useState<State>({
     loading: true, saving: false, error: null, saveError: null, saveSuccess: null, settings: null, form: null,
   })
-  const [activeTab, setActiveTab] = useState('appearance')
+  const rawTab = searchParams.get('tab')
+  const activeTab: SettingsTab = rawTab && SETTINGS_TAB_VALUES.has(rawTab) ? (rawTab as SettingsTab) : 'appearance'
   const [modalState, setModalState] = useState<'closed' | 'select' | 'configure-telegram' | 'configure-feishu'>('closed')
   const [channelDraft, setChannelDraft] = useState<SettingsFormState | null>(null)
   const [activeChannels, setActiveChannels] = useState<Set<NotificationChannel>>(new Set())
   const [expandedChannels, setExpandedChannels] = useState<Set<NotificationChannel>>(new Set())
+  const systemSettingsLoaded = state.settings !== null
 
   useEffect(() => {
     if (state.settings && state.form) {
@@ -200,34 +209,57 @@ export function SettingsPage() {
   }, [state.settings, state.form])
 
   useEffect(() => {
+    if (activeTab === 'subscriptions' || systemSettingsLoaded) return
     let cancelled = false
+    setState((current) => ({ ...current, loading: true, error: null }))
     getSettings()
       .then((settings) => { if (!cancelled) setState({ loading: false, saving: false, error: null, saveError: null, saveSuccess: null, settings, form: buildFormState(settings) }) })
       .catch((err: unknown) => { if (!cancelled) setState({ loading: false, saving: false, error: describeError(err, '加载设置失败'), saveError: null, saveSuccess: null, settings: null, form: null }) })
     return () => { cancelled = true }
-  }, [])
+  }, [activeTab, systemSettingsLoaded])
 
-  if (state.loading) return <PageState kind="loading" title="正在加载设置…" />
-  if (state.error || !state.settings || !state.form) return <PageState kind="error" title="设置不可用" description={state.error ?? '未获取到设置数据'} />
+  const systemSettings = state.settings
+  const systemForm = state.form
+  const systemTabActive = activeTab !== 'subscriptions'
 
-  const { settings, form } = state
+  if (systemTabActive && state.loading) return <PageState kind="loading" title="正在加载设置…" />
+  if (systemTabActive && (state.error || !systemSettings || !systemForm)) return <PageState kind="error" title="设置不可用" description={state.error ?? '未获取到设置数据'} />
 
   function patchForm(updater: (f: SettingsFormState) => SettingsFormState) {
     setState((c) => ({ ...c, form: c.form ? updater(c.form) : c.form, saveError: null, saveSuccess: null }))
   }
   function closeModal() { setChannelDraft(null); setModalState('closed') }
   function backToSelect() { setChannelDraft(null); setModalState('select') }
-  function openChannelConfig(ch: NotificationChannel) { setChannelDraft(form); setModalState(ch === 'telegram' ? 'configure-telegram' : 'configure-feishu') }
-  function patchDraft(updater: (f: SettingsFormState) => SettingsFormState) { setChannelDraft((d) => updater(d ?? form)) }
+  function openChannelConfig(ch: NotificationChannel) {
+    if (!state.form) return
+    setChannelDraft(state.form)
+    setModalState(ch === 'telegram' ? 'configure-telegram' : 'configure-feishu')
+  }
+  function patchDraft(updater: (f: SettingsFormState) => SettingsFormState) {
+    setChannelDraft((draft) => {
+      const base = draft ?? state.form
+      return base ? updater(base) : draft
+    })
+  }
   function confirmChannel(ch: NotificationChannel) {
-    setState((c) => ({ ...c, form: channelDraft ?? form, saveError: null, saveSuccess: null }))
+    setState((c) => ({ ...c, form: channelDraft ?? c.form, saveError: null, saveSuccess: null }))
     setActiveChannels((p) => new Set(p).add(ch)); setExpandedChannels((p) => new Set(p).add(ch)); closeModal()
+  }
+  function changeTab(tab: SettingsTab) {
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'appearance') next.delete('tab')
+    else next.set('tab', tab)
+    setSearchParams(next, { replace: true })
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     let payload: SettingsUpdateDraft
-    try { payload = buildUpdateInput(form, settings) } catch (err) { setState((c) => ({ ...c, saveError: describeError(err, '校验失败'), saveSuccess: null })); return }
+    if (!state.settings || !state.form) {
+      setState((c) => ({ ...c, saveError: '系统设置尚未加载完成', saveSuccess: null }))
+      return
+    }
+    try { payload = buildUpdateInput(state.form, state.settings) } catch (err) { setState((c) => ({ ...c, saveError: describeError(err, '校验失败'), saveSuccess: null })); return }
     setState((c) => ({ ...c, saving: true, saveError: null, saveSuccess: null }))
     try {
       const updated = await updateSettings(payload)
@@ -236,7 +268,7 @@ export function SettingsPage() {
   }
 
   return (
-    <form className="page-stack animate-in" onSubmit={handleSubmit}>
+    <div className="page-stack animate-in">
       <div className="page-header">
         <div>
           <h1 className="page-title">系统设置</h1>
@@ -245,144 +277,152 @@ export function SettingsPage() {
       </div>
 
       <div className="settings-tabs">
-        <Tabs variant="pill" value={activeTab} onChange={setActiveTab} items={SETTINGS_TABS} />
+        <Tabs variant="pill" value={activeTab} onChange={changeTab} items={SETTINGS_TABS} />
       </div>
 
-      {activeTab === 'appearance' && (
-        <div className="settings-section animate-in">
-          <ThemeSettingsSection />
-        </div>
-      )}
+      {activeTab === 'subscriptions' ? (
+        <SubscriptionSettingsSection />
+      ) : systemSettings && systemForm ? (
+        <form className="settings-system-form" onSubmit={handleSubmit}>
+          {activeTab === 'appearance' && (
+            <div className="settings-section animate-in">
+              <ThemeSettingsSection />
+            </div>
+          )}
 
-      {activeTab === 'notification' && (
-        <div className="settings-section animate-in">
-          <div className="ss-title">通知通道</div>
-          <div className="ss-desc">Telegram / 飞书异常推送</div>
-          {activeChannels.has('telegram') && (
+          {activeTab === 'notification' && (
+            <div className="settings-section animate-in">
+              <div className="ss-title">通知通道</div>
+              <div className="ss-desc">Telegram / 飞书异常推送</div>
+              {activeChannels.has('telegram') && (
+                <TelegramSettingsSection
+                  settings={systemSettings.telegram}
+                  form={systemForm}
+                  isExpanded={expandedChannels.has('telegram')}
+                  onToggleExpand={() => setExpandedChannels((p) => { const n = new Set(p); if (n.has('telegram')) n.delete('telegram'); else n.add('telegram'); return n })}
+                  onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
+                />
+              )}
+              {activeChannels.has('feishu') && (
+                <FeishuSettingsSection
+                  form={systemForm}
+                  isExpanded={expandedChannels.has('feishu')}
+                  onToggleExpand={() => setExpandedChannels((p) => { const n = new Set(p); if (n.has('feishu')) n.delete('feishu'); else n.add('feishu'); return n })}
+                  onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
+                />
+              )}
+              <div className="settings-channel-manager">
+                <button type="button" className="btn sm secondary" onClick={() => { setChannelDraft(null); setModalState('select') }}>
+                  + 新增通知渠道
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'monitoring' && (
+            <>
+              <div className="settings-section animate-in">
+                <IncidentDefaultsSection
+                  value={systemForm.incidentDefaults}
+                  onChange={(next) => patchForm((f) => ({ ...f, incidentDefaults: next }))}
+                />
+              </div>
+              <div className="settings-section animate-in">
+                <FrequencyDefaultsSection
+                  hostSampleFrequencyTier={systemForm.hostSampleFrequencyTier}
+                  probeFrequencyDefaults={systemForm.probeFrequencyDefaults}
+                  onHostSampleFrequencyChange={(v) => patchForm((f) => ({ ...f, hostSampleFrequencyTier: v }))}
+                  onProbeFrequencyDefaultsChange={(patch) => patchForm((f) => ({ ...f, probeFrequencyDefaults: { ...f.probeFrequencyDefaults, ...patch } }))}
+                />
+              </div>
+              <div className="settings-section animate-in">
+                <RetentionPolicySection
+                  value={systemForm.retentionPolicy}
+                  onChange={(patch) => patchForm((f) => ({ ...f, retentionPolicy: { ...f.retentionPolicy, ...patch } }))}
+                />
+              </div>
+            </>
+          )}
+
+          {activeTab === 'advanced' && (
+            <div className="settings-section animate-in">
+              <OverrideRulesSection
+                form={systemForm}
+                onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
+              />
+            </div>
+          )}
+
+          <div className="settings-save-footer">
+            <div>
+              {state.saveError && <p className="settings-save-footer__message settings-save-footer__message--error" role="alert">{state.saveError}</p>}
+              {state.saveSuccess && <p className="settings-save-footer__message settings-save-footer__message--success">{state.saveSuccess}</p>}
+            </div>
+            <button type="submit" className="btn md primary" disabled={state.saving}>
+              {state.saving ? '保存中…' : '保存设置'}
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {systemSettings && systemForm ? (
+        <Modal
+          open={modalState !== 'closed'}
+          onClose={closeModal}
+          title={modalState === 'select' ? '新增通知渠道' : modalState === 'configure-telegram' ? '配置 Telegram' : modalState === 'configure-feishu' ? '配置飞书' : ''}
+          footer={
+            modalState === 'configure-telegram' ? (
+              <>
+                <button type="button" className="btn md ghost" onClick={backToSelect}>返回</button>
+                <button type="button" className="btn md primary" onClick={() => confirmChannel('telegram')}>添加并编辑</button>
+              </>
+            ) : modalState === 'configure-feishu' ? (
+              <>
+                <button type="button" className="btn md ghost" onClick={backToSelect}>返回</button>
+                <button type="button" className="btn md primary" onClick={() => confirmChannel('feishu')}>添加并编辑</button>
+              </>
+            ) : null
+          }
+        >
+          {modalState === 'select' && (
+            <div className="settings-channel-modal">
+              <button type="button" className="settings-channel-option" aria-label="Telegram" disabled={activeChannels.has('telegram')} onClick={() => openChannelConfig('telegram')}>
+                <div className="settings-channel-option__content">
+                  <span className="settings-channel-option__icon">TG</span>
+                  <span className="settings-channel-option__text">
+                    <span className="settings-channel-option__title">Telegram</span>
+                    <span className="settings-channel-option__description">通过 Telegram Bot 推送异常事件通知</span>
+                  </span>
+                </div>
+              </button>
+              <button type="button" className="settings-channel-option" aria-label="飞书 (Feishu)" disabled={activeChannels.has('feishu')} onClick={() => openChannelConfig('feishu')}>
+                <div className="settings-channel-option__content">
+                  <span className="settings-channel-option__icon">FS</span>
+                  <span className="settings-channel-option__text">
+                    <span className="settings-channel-option__title">飞书 (Feishu)</span>
+                    <span className="settings-channel-option__description">通过飞书群 Webhook 推送异常事件通知</span>
+                  </span>
+                </div>
+              </button>
+            </div>
+          )}
+          {modalState === 'configure-telegram' && (
             <TelegramSettingsSection
-              settings={settings.telegram}
-              form={form}
-              isExpanded={expandedChannels.has('telegram')}
-              onToggleExpand={() => setExpandedChannels((p) => { const n = new Set(p); if (n.has('telegram')) n.delete('telegram'); else n.add('telegram'); return n })}
-              onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
+              wrapper="none"
+              settings={systemSettings.telegram}
+              form={channelDraft ?? systemForm}
+              onChange={(patch) => patchDraft((f) => ({ ...f, ...patch }))}
             />
           )}
-          {activeChannels.has('feishu') && (
+          {modalState === 'configure-feishu' && (
             <FeishuSettingsSection
-              form={form}
-              isExpanded={expandedChannels.has('feishu')}
-              onToggleExpand={() => setExpandedChannels((p) => { const n = new Set(p); if (n.has('feishu')) n.delete('feishu'); else n.add('feishu'); return n })}
-              onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
+              wrapper="none"
+              form={channelDraft ?? systemForm}
+              onChange={(patch) => patchDraft((f) => ({ ...f, ...patch }))}
             />
           )}
-          <div className="settings-channel-manager">
-            <button type="button" className="btn sm secondary" onClick={() => { setChannelDraft(null); setModalState('select') }}>
-              + 新增通知渠道
-            </button>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'monitoring' && (
-        <>
-          <div className="settings-section animate-in">
-            <IncidentDefaultsSection
-              value={form.incidentDefaults}
-              onChange={(next) => patchForm((f) => ({ ...f, incidentDefaults: next }))}
-            />
-          </div>
-          <div className="settings-section animate-in">
-            <FrequencyDefaultsSection
-              hostSampleFrequencyTier={form.hostSampleFrequencyTier}
-              probeFrequencyDefaults={form.probeFrequencyDefaults}
-              onHostSampleFrequencyChange={(v) => patchForm((f) => ({ ...f, hostSampleFrequencyTier: v }))}
-              onProbeFrequencyDefaultsChange={(patch) => patchForm((f) => ({ ...f, probeFrequencyDefaults: { ...f.probeFrequencyDefaults, ...patch } }))}
-            />
-          </div>
-          <div className="settings-section animate-in">
-            <RetentionPolicySection
-              value={form.retentionPolicy}
-              onChange={(patch) => patchForm((f) => ({ ...f, retentionPolicy: { ...f.retentionPolicy, ...patch } }))}
-            />
-          </div>
-        </>
-      )}
-
-      {activeTab === 'advanced' && (
-        <div className="settings-section animate-in">
-          <OverrideRulesSection
-            form={form}
-            onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
-          />
-        </div>
-      )}
-
-      <div className="settings-save-footer">
-        <div>
-          {state.saveError && <p className="settings-save-footer__message settings-save-footer__message--error" role="alert">{state.saveError}</p>}
-          {state.saveSuccess && <p className="settings-save-footer__message settings-save-footer__message--success">{state.saveSuccess}</p>}
-        </div>
-        <button type="submit" className="btn md primary" disabled={state.saving}>
-          {state.saving ? '保存中…' : '保存设置'}
-        </button>
-      </div>
-
-      <Modal
-        open={modalState !== 'closed'}
-        onClose={closeModal}
-        title={modalState === 'select' ? '新增通知渠道' : modalState === 'configure-telegram' ? '配置 Telegram' : modalState === 'configure-feishu' ? '配置飞书' : ''}
-        footer={
-          modalState === 'configure-telegram' ? (
-            <>
-              <button type="button" className="btn md ghost" onClick={backToSelect}>返回</button>
-              <button type="button" className="btn md primary" onClick={() => confirmChannel('telegram')}>添加并编辑</button>
-            </>
-          ) : modalState === 'configure-feishu' ? (
-            <>
-              <button type="button" className="btn md ghost" onClick={backToSelect}>返回</button>
-              <button type="button" className="btn md primary" onClick={() => confirmChannel('feishu')}>添加并编辑</button>
-            </>
-          ) : null
-        }
-      >
-        {modalState === 'select' && (
-          <div className="settings-channel-modal">
-            <button type="button" className="settings-channel-option" aria-label="Telegram" disabled={activeChannels.has('telegram')} onClick={() => openChannelConfig('telegram')}>
-              <div className="settings-channel-option__content">
-                <span className="settings-channel-option__icon">TG</span>
-                <span className="settings-channel-option__text">
-                  <span className="settings-channel-option__title">Telegram</span>
-                  <span className="settings-channel-option__description">通过 Telegram Bot 推送异常事件通知</span>
-                </span>
-              </div>
-            </button>
-            <button type="button" className="settings-channel-option" aria-label="飞书 (Feishu)" disabled={activeChannels.has('feishu')} onClick={() => openChannelConfig('feishu')}>
-              <div className="settings-channel-option__content">
-                <span className="settings-channel-option__icon">FS</span>
-                <span className="settings-channel-option__text">
-                  <span className="settings-channel-option__title">飞书 (Feishu)</span>
-                  <span className="settings-channel-option__description">通过飞书群 Webhook 推送异常事件通知</span>
-                </span>
-              </div>
-            </button>
-          </div>
-        )}
-        {modalState === 'configure-telegram' && (
-          <TelegramSettingsSection
-            wrapper="none"
-            settings={settings.telegram}
-            form={channelDraft ?? form}
-            onChange={(patch) => patchDraft((f) => ({ ...f, ...patch }))}
-          />
-        )}
-        {modalState === 'configure-feishu' && (
-          <FeishuSettingsSection
-            wrapper="none"
-            form={channelDraft ?? form}
-            onChange={(patch) => patchDraft((f) => ({ ...f, ...patch }))}
-          />
-        )}
-      </Modal>
-    </form>
+        </Modal>
+      ) : null}
+    </div>
   )
 }

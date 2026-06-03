@@ -181,6 +181,137 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 	return records, nil
 }
 
+func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Context, settings centersettings.SubscriptionCostSettings, months int, now time.Time) ([]subscriptioncosts.SeriesPoint, error) {
+	if months <= 0 {
+		return []subscriptioncosts.SeriesPoint{}, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		with buckets as (
+			select generate_series(
+				date_trunc('month', $3::timestamptz) - (($4::integer - 1) * interval '1 month'),
+				date_trunc('month', $3::timestamptz),
+				interval '1 month'
+			)::date as bucket_start
+		),
+		states as (
+			select
+				b.bucket_start,
+				s.subscription_id,
+				coalesce(
+					(
+						select h.to_monthly_price::float8
+						from price_histories h
+						where h.subscription_id = s.subscription_id
+						  and h.changed_at < (b.bucket_start + interval '1 month')
+						order by h.changed_at desc, h.created_at desc, h.price_history_id desc
+						limit 1
+					),
+					(
+						select h.from_monthly_price::float8
+						from price_histories h
+						where h.subscription_id = s.subscription_id
+						  and h.changed_at >= (b.bucket_start + interval '1 month')
+						order by h.changed_at asc, h.created_at asc, h.price_history_id asc
+						limit 1
+					),
+					s.monthly_price::float8
+				) as monthly_price,
+				coalesce(
+					(
+						select h.to_currency
+						from price_histories h
+						where h.subscription_id = s.subscription_id
+						  and h.changed_at < (b.bucket_start + interval '1 month')
+						order by h.changed_at desc, h.created_at desc, h.price_history_id desc
+						limit 1
+					),
+					(
+						select h.from_currency
+						from price_histories h
+						where h.subscription_id = s.subscription_id
+						  and h.changed_at >= (b.bucket_start + interval '1 month')
+						order by h.changed_at asc, h.created_at asc, h.price_history_id asc
+						limit 1
+					),
+					s.currency
+				) as currency,
+				coalesce(
+					(
+						select h.to_status
+						from price_histories h
+						where h.subscription_id = s.subscription_id
+						  and h.changed_at < (b.bucket_start + interval '1 month')
+						order by h.changed_at desc, h.created_at desc, h.price_history_id desc
+						limit 1
+					),
+					(
+						select h.from_status
+						from price_histories h
+						where h.subscription_id = s.subscription_id
+						  and h.changed_at >= (b.bucket_start + interval '1 month')
+						order by h.changed_at asc, h.created_at asc, h.price_history_id asc
+						limit 1
+					),
+					s.status
+				) as status
+			from buckets b
+			join subscriptions s on s.created_at < (b.bucket_start + interval '1 month')
+			join vps_assets v on v.vps_id = s.vps_id
+			where v.lifecycle_status <> 'archived'
+		)
+		select
+			to_char(b.bucket_start, 'YYYY-MM') as bucket,
+			coalesce(round(sum(
+				case
+					when st.status <> 'active' then 0
+					when st.currency = $2 then st.monthly_price
+					when lr.rate is not null then st.monthly_price * lr.rate
+					else null
+				end
+			)::numeric, 4)::float8, 0::float8) as monthly_cost,
+			count(*) filter (
+				where st.status = 'active'
+				  and st.currency <> $2
+				  and lr.rate is null
+			) > 0 as data_insufficient
+		from buckets b
+		left join states st on st.bucket_start = b.bucket_start
+		left join lateral (
+			select er.rate::float8
+			from subscription_exchange_rates er
+			where er.provider = $1
+			  and er.base_currency = $2
+			  and er.quote_currency = st.currency
+			  and er.fetched_at < (b.bucket_start + interval '1 month')
+			order by er.fetched_at desc, er.rate_date desc
+			limit 1
+		) lr on st.currency <> $2
+		group by b.bucket_start
+		order by b.bucket_start asc`,
+		settings.ExchangeRateProvider,
+		settings.BaseCurrency,
+		now.UTC(),
+		months,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query subscription cost month buckets: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]subscriptioncosts.SeriesPoint, 0, months)
+	for rows.Next() {
+		var record subscriptioncosts.SeriesPoint
+		if err := rows.Scan(&record.Bucket, &record.MonthlyCost, &record.DataInsufficient); err != nil {
+			return nil, fmt.Errorf("scan subscription cost month bucket: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate subscription cost month buckets: %w", err)
+	}
+	return records, nil
+}
+
 func (r *PostgresSubscriptionCostRepository) ListMissingSubscriptionAssets(ctx context.Context) ([]subscriptioncosts.MissingSubscriptionAsset, error) {
 	rows, err := r.db.Query(ctx, `
 		select

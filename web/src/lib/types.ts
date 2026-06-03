@@ -1450,6 +1450,7 @@ export type SubscriptionSeriesPoint = {
   bucket: string
   monthly_cost: number
   renewal_count: number
+  data_insufficient: boolean
 }
 
 export type SubscriptionStatistics = {
@@ -1460,6 +1461,7 @@ export type SubscriptionStatistics = {
   provider_breakdown: SubscriptionBreakdownItem[]
   currency_breakdown: SubscriptionBreakdownItem[]
   category_breakdown: SubscriptionBreakdownItem[]
+  cost_month_buckets: SubscriptionSeriesPoint[]
   renewal_month_buckets: SubscriptionSeriesPoint[]
   budget_statuses: SubscriptionBudgetRecord[]
 }
