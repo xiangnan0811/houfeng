@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/xiangnan0811/houfeng/compare/v0.32.0...v0.33.0) (2026-06-03)
+
+
+### Features
+
+* **subscriptions:** polish cost insights UX ([#193](https://github.com/xiangnan0811/houfeng/issues/193)) ([872aa7b](https://github.com/xiangnan0811/houfeng/commit/872aa7b62c442430f6d33ef65cc66436270e5d09))
+
 ## [0.32.0](https://github.com/xiangnan0811/houfeng/compare/v0.31.0...v0.32.0) (2026-06-03)
 
 
