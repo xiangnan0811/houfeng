@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/xiangnan0811/houfeng/compare/v0.31.0...v0.32.0) (2026-06-03)
+
+
+### Features
+
+* refine subscription cost workbench ([a840a31](https://github.com/xiangnan0811/houfeng/commit/a840a31794b617326d8835d4ac4ece5b36d896bb))
+
 ## [0.31.0](https://github.com/xiangnan0811/houfeng/compare/v0.30.1...v0.31.0) (2026-06-03)
 
 
