@@ -227,6 +227,55 @@ func (s *Service) UpsertMonthlyBudget(ctx context.Context, input UpsertMonthlyBu
 	return s.repo.UpsertMonthlyBudget(ctx, input)
 }
 
+func (s *Service) BulkUpsertMonthlyBudgets(ctx context.Context, input BulkUpsertMonthlyBudgetInput) (BulkUpsertMonthlyBudgetResult, error) {
+	input = NormalizeBulkUpsertMonthlyBudgetInput(input)
+	if err := ValidateBulkUpsertMonthlyBudgetInput(input); err != nil {
+		return BulkUpsertMonthlyBudgetResult{}, err
+	}
+
+	end := monthStart(s.now())
+	start := end
+	switch input.Scope {
+	case MonthlyBudgetBulkScopeCurrentYear:
+		start = subscriptions.NewDate(time.Date(end.Time.Year(), time.January, 1, 0, 0, 0, 0, time.UTC))
+	case MonthlyBudgetBulkScopeRecentYear:
+		start = subscriptions.NewDate(end.Time.AddDate(0, -11, 0))
+	case MonthlyBudgetBulkScopeAllHistory:
+		earliest, err := s.repo.EarliestSubscriptionMonth(ctx)
+		if err != nil {
+			return BulkUpsertMonthlyBudgetResult{}, err
+		}
+		if earliest != nil && !earliest.Time.IsZero() {
+			start = monthStart(earliest.Time)
+		}
+	}
+	if start.Time.After(end.Time) {
+		start = end
+	}
+
+	months := monthsInRange(start, end)
+	upserts := make([]UpsertMonthlyBudgetInput, 0, len(months))
+	for _, month := range months {
+		upserts = append(upserts, UpsertMonthlyBudgetInput{
+			BudgetMonth:  month,
+			BaseCurrency: input.BaseCurrency,
+			MonthlyLimit: input.MonthlyLimit,
+			WarningPct:   input.WarningPct,
+			Note:         input.Note,
+		})
+	}
+	records, err := s.repo.UpsertMonthlyBudgets(ctx, upserts)
+	if err != nil {
+		return BulkUpsertMonthlyBudgetResult{}, err
+	}
+	return BulkUpsertMonthlyBudgetResult{
+		Scope:      input.Scope,
+		StartMonth: start,
+		EndMonth:   end,
+		Records:    records,
+	}, nil
+}
+
 func (s *Service) ListBudgets(ctx context.Context, filters BudgetListFilters) ([]BudgetRecord, error) {
 	filters = NormalizeBudgetListFilters(filters)
 	if err := ValidateBudgetListFilters(filters); err != nil {
@@ -350,6 +399,22 @@ func (s *Service) RefreshExchangeRates(ctx context.Context) (ExchangeRateRefresh
 
 func subscriptionDay(now time.Time) subscriptions.Date {
 	return subscriptions.NewDate(now.UTC())
+}
+
+func monthStart(value time.Time) subscriptions.Date {
+	year, month, _ := value.UTC().Date()
+	return subscriptions.NewDate(time.Date(year, month, 1, 0, 0, 0, 0, time.UTC))
+}
+
+func monthsInRange(start, end subscriptions.Date) []subscriptions.Date {
+	if start.Time.IsZero() || end.Time.IsZero() || start.Time.After(end.Time) {
+		return nil
+	}
+	months := make([]subscriptions.Date, 0)
+	for current := monthStart(start.Time); !current.Time.After(end.Time); current = subscriptions.NewDate(current.Time.AddDate(0, 1, 0)) {
+		months = append(months, current)
+	}
+	return months
 }
 
 func applyBudgetSpend(rows []CostRow, budgets []BudgetRecord) []BudgetRecord {

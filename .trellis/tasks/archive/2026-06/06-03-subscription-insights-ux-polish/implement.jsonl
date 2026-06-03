@@ -1,0 +1,5 @@
+{"file": "web/src/pages/subscriptions/SubscriptionInsights.tsx", "reason": "2x2 insights order, donut contextual popover, composition select"}
+{"file": "web/src/pages/settings/SubscriptionSettingsSection.tsx", "reason": "subscription settings monthly budget bulk coverage UI"}
+{"file": "internal/center/subscriptioncosts/service.go", "reason": "bulk monthly budget range service contract"}
+{"file": "internal/center/store/subscription_costs.go", "reason": "bulk monthly budget persistence and earliest month lookup"}
+{"file": "internal/center/http/handlers/subscription_costs.go", "reason": "POST bulk monthly budget API handler"}

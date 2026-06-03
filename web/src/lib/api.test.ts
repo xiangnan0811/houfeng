@@ -5,6 +5,7 @@ import type { ApplyCancellationInput } from './types'
 import {
   applyVPSCancellation,
   archiveTarget,
+  bulkUpsertSubscriptionMonthlyBudgets,
   createAssetDomain,
   confirmMonitoringInstanceRebind,
   createAssetService,
@@ -1225,6 +1226,12 @@ describe('api helpers', () => {
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([monthlyBudget])))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ ...monthlyBudget, ...input, budget_month: '2026-07-01' })))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({
+        scope: 'recent_year',
+        start_month: '2025-08-01',
+        end_month: '2026-07-01',
+        records: [{ ...monthlyBudget, ...input, budget_month: '2026-07-01' }],
+      })))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listSubscriptionMonthlyBudgets()).resolves.toEqual([monthlyBudget])
@@ -1232,6 +1239,12 @@ describe('api helpers', () => {
       ...monthlyBudget,
       ...input,
       budget_month: '2026-07-01',
+    })
+    await expect(bulkUpsertSubscriptionMonthlyBudgets({ ...input, scope: 'recent_year' })).resolves.toEqual({
+      scope: 'recent_year',
+      start_month: '2025-08-01',
+      end_month: '2026-07-01',
+      records: [{ ...monthlyBudget, ...input, budget_month: '2026-07-01' }],
     })
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/subscription-monthly-budgets', {
@@ -1248,6 +1261,16 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify(input),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/subscription-monthly-budgets/bulk', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({ ...input, scope: 'recent_year' }),
     })
   })
 

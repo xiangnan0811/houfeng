@@ -1445,6 +1445,23 @@ export type UpsertSubscriptionMonthlyBudgetInput = {
   note: string
 }
 
+export type SubscriptionMonthlyBudgetBulkScope = 'all_history' | 'recent_year' | 'current_year'
+
+export type BulkUpsertSubscriptionMonthlyBudgetInput = {
+  scope: SubscriptionMonthlyBudgetBulkScope
+  base_currency: string
+  monthly_limit: number
+  warning_pct: number
+  note: string
+}
+
+export type BulkUpsertSubscriptionMonthlyBudgetResult = {
+  scope: SubscriptionMonthlyBudgetBulkScope
+  start_month: string
+  end_month: string
+  records: SubscriptionMonthlyBudgetRecord[]
+}
+
 export type SubscriptionOverview = {
   snapshot_generated_at: string
   base_currency: string

@@ -1355,3 +1355,36 @@ Implemented global monthly subscription budgets, rebuilt the subscriptions workb
 ### Next Steps
 
 - None - task complete
+
+
+## Session 158: Subscription insights UX polish
+
+**Date**: 2026-06-03
+**Task**: Subscription insights UX polish
+**Branch**: `worktree/subscription-insights-ux-polish`
+
+### Summary
+
+Polished subscription cost insights layout and interactions, added bulk monthly budget coverage API/UI, and verified full project checks.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2c71915` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

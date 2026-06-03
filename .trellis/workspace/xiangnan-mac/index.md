@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 157
+- **Total Sessions**: 158
 - **Last Active**: 2026-06-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1357 | Active |
+| `journal-3.md` | ~1390 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 158 | 2026-06-03 | Subscription insights UX polish | `2c71915` | `worktree/subscription-insights-ux-polish` |
 | 157 | 2026-06-03 | Subscription cost workbench UX follow-up | `91e5baa` | `worktree/subscription-cost-workbench-ux-followup` |
 | 156 | 2026-06-02 | Subscription VPS cost center | `9983149` | `worktree/subscription-cost-center` |
 | 155 | 2026-06-02 | VPS asset UX remediation | `5eab3cb`, `16d656a` | `worktree/vps-asset-ux-remediation` |

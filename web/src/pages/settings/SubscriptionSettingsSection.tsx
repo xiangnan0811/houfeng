@@ -4,6 +4,7 @@ import { Input, Select } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
 import {
   ApiError,
+  bulkUpsertSubscriptionMonthlyBudgets,
   getSubscriptionCostSettings,
   listSubscriptionMonthlyBudgets,
   refreshSubscriptionExchangeRates,
@@ -12,7 +13,9 @@ import {
 } from '../../lib/api'
 import { formatMoney } from '../../lib/format'
 import type {
+  BulkUpsertSubscriptionMonthlyBudgetInput,
   SubscriptionCostSettings,
+  SubscriptionMonthlyBudgetBulkScope,
   SubscriptionMonthlyBudgetRecord,
   UpsertSubscriptionMonthlyBudgetInput,
 } from '../../lib/types'
@@ -40,6 +43,8 @@ type BudgetDraft = {
   note: string
 }
 
+type BudgetValues = Omit<UpsertSubscriptionMonthlyBudgetInput, 'budget_month'>
+
 const INITIAL_STATE: LoadState = {
   loading: true,
   error: null,
@@ -62,6 +67,12 @@ const INITIAL_BUDGET_DRAFT: BudgetDraft = {
   warningPct: '80',
   note: '',
 }
+
+const BUDGET_BULK_SCOPE_OPTIONS: Array<{ value: SubscriptionMonthlyBudgetBulkScope; label: string }> = [
+  { value: 'all_history', label: '所有时间月预算' },
+  { value: 'recent_year', label: '最近一年月预算' },
+  { value: 'current_year', label: '今年月预算' },
+]
 
 function currentMonthValue(): string {
   const now = new Date()
@@ -118,10 +129,9 @@ function parseRequiredLimit(value: string, label: string): number {
   return parsed
 }
 
-function buildMonthlyBudgetInput(draft: BudgetDraft, baseCurrency: string): UpsertSubscriptionMonthlyBudgetInput {
+function buildBudgetValues(draft: BudgetDraft, baseCurrency: string): BudgetValues {
   const monthlyLimit = parseRequiredLimit(draft.monthlyLimit, '月预算')
   const warningPct = Number.parseInt(draft.warningPct, 10)
-  if (!/^\d{4}-\d{2}$/.test(draft.month.trim())) throw new Error('预算月份必须为 YYYY-MM。')
   if (!Number.isInteger(warningPct) || warningPct < 1 || warningPct > 100) throw new Error('预警比例必须在 1-100 之间。')
   return {
     base_currency: baseCurrency,
@@ -129,6 +139,11 @@ function buildMonthlyBudgetInput(draft: BudgetDraft, baseCurrency: string): Upse
     warning_pct: warningPct,
     note: draft.note.trim(),
   }
+}
+
+function buildMonthlyBudgetInput(draft: BudgetDraft, baseCurrency: string): UpsertSubscriptionMonthlyBudgetInput {
+  if (!/^\d{4}-\d{2}$/.test(draft.month.trim())) throw new Error('预算月份必须为 YYYY-MM。')
+  return buildBudgetValues(draft, baseCurrency)
 }
 
 export function SubscriptionSettingsSection() {
@@ -141,6 +156,8 @@ export function SubscriptionSettingsSection() {
   const [refreshingRates, setRefreshingRates] = useState(false)
   const [rateNotice, setRateNotice] = useState<string | null>(null)
   const [budgetDraft, setBudgetDraft] = useState<BudgetDraft>(INITIAL_BUDGET_DRAFT)
+  const [budgetBulkEnabled, setBudgetBulkEnabled] = useState(false)
+  const [budgetBulkScope, setBudgetBulkScope] = useState<SubscriptionMonthlyBudgetBulkScope>('recent_year')
   const [budgetSubmitting, setBudgetSubmitting] = useState(false)
   const [budgetError, setBudgetError] = useState<string | null>(null)
   const [budgetNotice, setBudgetNotice] = useState<string | null>(null)
@@ -228,18 +245,29 @@ export function SubscriptionSettingsSection() {
     event.preventDefault()
     setBudgetError(null)
     setBudgetNotice(null)
-    let input: UpsertSubscriptionMonthlyBudgetInput
+    let input: UpsertSubscriptionMonthlyBudgetInput | BulkUpsertSubscriptionMonthlyBudgetInput
     try {
-      input = buildMonthlyBudgetInput(budgetDraft, baseCurrency)
+      input = budgetBulkEnabled
+        ? { ...buildBudgetValues(budgetDraft, baseCurrency), scope: budgetBulkScope }
+        : buildMonthlyBudgetInput(budgetDraft, baseCurrency)
     } catch (err: unknown) {
       setBudgetError(describeError(err, '预算输入无效'))
       return
     }
     setBudgetSubmitting(true)
-    upsertSubscriptionMonthlyBudget(budgetDraft.month, input)
-      .then(() => {
+    const request = budgetBulkEnabled
+      ? bulkUpsertSubscriptionMonthlyBudgets(input as BulkUpsertSubscriptionMonthlyBudgetInput)
+      : upsertSubscriptionMonthlyBudget(budgetDraft.month, input as UpsertSubscriptionMonthlyBudgetInput)
+    request
+      .then((result) => {
         setBudgetDraft({ ...INITIAL_BUDGET_DRAFT, month: currentMonthValue() })
-        setBudgetNotice('预算已创建')
+        setBudgetBulkEnabled(false)
+        if ('records' in result) {
+          const scopeLabel = BUDGET_BULK_SCOPE_OPTIONS.find((item) => item.value === result.scope)?.label ?? '历史月预算'
+          setBudgetNotice(`${scopeLabel}已保存，共覆盖 ${result.records.length} 个月`)
+        } else {
+          setBudgetNotice('预算已创建')
+        }
         reload()
       })
       .catch((err: unknown) => setBudgetError(describeError(err, '创建预算失败')))
@@ -375,6 +403,28 @@ export function SubscriptionSettingsSection() {
           <Input label={`月预算 ${baseCurrency}`} type="number" min="0" step="0.01" value={budgetDraft.monthlyLimit} onChange={(event) => setBudgetDraft({ ...budgetDraft, monthlyLimit: event.target.value })} />
           <Input label="预警比例" type="number" min="1" max="100" value={budgetDraft.warningPct} onChange={(event) => setBudgetDraft({ ...budgetDraft, warningPct: event.target.value })} />
           <Input label="备注" value={budgetDraft.note} onChange={(event) => setBudgetDraft({ ...budgetDraft, note: event.target.value })} />
+          <label className="asset-checkbox-line subscription-budget-coverage">
+            <input
+              type="checkbox"
+              checked={budgetBulkEnabled}
+              onChange={(event) => setBudgetBulkEnabled(event.target.checked)}
+            />
+            <span>
+              <strong>批量覆盖历史月预算</strong>
+              <small>首次配置时可一次写入多个历史月份；默认关闭，只保存所选月份。</small>
+            </span>
+          </label>
+          {budgetBulkEnabled ? (
+            <Select
+              label="覆盖范围"
+              value={budgetBulkScope}
+              onChange={(event) => setBudgetBulkScope(event.target.value as SubscriptionMonthlyBudgetBulkScope)}
+            >
+              {BUDGET_BULK_SCOPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </Select>
+          ) : null}
           {budgetError ? <p className="create-form__error" role="alert">{budgetError}</p> : null}
           {budgetNotice ? <p className="asset-operation-feedback" role="status">{budgetNotice}</p> : null}
           <button className="btn sm primary" type="submit" disabled={budgetSubmitting}>{budgetSubmitting ? '保存中…' : '保存月预算'}</button>

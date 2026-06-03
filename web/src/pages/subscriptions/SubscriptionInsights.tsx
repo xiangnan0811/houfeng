@@ -395,22 +395,15 @@ export function SubscriptionInsights({
                 <text x="70" y="78" className="subscription-donut__center-value">{compactAmount(donutTotal)}</text>
                 <text x="70" y="92" className="subscription-donut__center-label">本月</text>
               </svg>
-              <div className="subscription-donut-tooltip" role="status" aria-live="polite">
-                {activeDonutItem ? (
-                  <>
-                    <strong>{activeDonutItem.label}</strong>
-                    <span>原始付费：{activeDonutItem.originalPrice}</span>
-                    <span>基准月成本：{money(activeDonutItem.cost, baseCurrency)}</span>
-                    <span>月付费占比：{activeDonutItem.share.toFixed(1)}%</span>
-                    {activeDonutItem.isOther ? <small>其他项仅展示汇总，不应用筛选。</small> : null}
-                  </>
-                ) : (
-                  <>
-                    <strong>划过扇区查看明细</strong>
-                    <span>点击具体 VPS 扇区可应用筛选。</span>
-                  </>
-                )}
-              </div>
+              {activeDonutItem ? (
+                <div className="subscription-donut-popover" role="status" aria-live="polite">
+                  <strong>{activeDonutItem.label}</strong>
+                  <span>原始付费：{activeDonutItem.originalPrice}</span>
+                  <span>基准月成本：{money(activeDonutItem.cost, baseCurrency)}</span>
+                  <span>月付费占比：{activeDonutItem.share.toFixed(1)}%</span>
+                  {activeDonutItem.isOther ? <small>其他项仅展示汇总，不应用筛选。</small> : null}
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="subscription-ranking-list subscription-panel-scroll">
@@ -432,35 +425,6 @@ export function SubscriptionInsights({
               })}
             </div>
           )}
-        </div>
-
-        <div className="page-panel subscription-insight-panel subscription-insight-panel--composition">
-          <div className="subscription-panel-header">
-            <div>
-              <p className="section-heading__eyebrow">Composition</p>
-              <h3 className="section-heading__title">成本构成</h3>
-            </div>
-          </div>
-          <Tabs variant="pill" value={breakdownKind} onChange={onBreakdownKindChange} items={BREAKDOWN_TABS} />
-          <div className="subscription-breakdown-list subscription-panel-scroll">
-            {currentBreakdown.length === 0 ? (
-              <p className="asset-table-empty-state">
-                <strong>暂无构成数据</strong>
-                <span>当前统计窗口没有可展示的成本构成。</span>
-              </p>
-            ) : currentBreakdown.map((item) => (
-              <div key={item.key} className="subscription-breakdown-row">
-                <div>
-                  <strong>{item.label}</strong>
-                  <small>{item.subscription_count} 项订阅</small>
-                </div>
-                <div className="subscription-breakdown-bar">
-                  <span style={{ width: barWidth(item.monthly_cost, breakdownMax) }} />
-                </div>
-                <span className="mono">{money(item.monthly_cost, baseCurrency)}</span>
-              </div>
-            ))}
-          </div>
         </div>
 
         <div className="page-panel subscription-insight-panel subscription-insight-panel--trend">
@@ -490,6 +454,45 @@ export function SubscriptionInsights({
               <span>{hasInsufficientTrendData ? '部分历史月份缺少可用汇率或预算币种不一致，暂不绘制可能误导的趋势曲线。' : '后端未返回足够的历史月成本与月预算 bucket。'}</span>
             </p>
           ) : null}
+        </div>
+
+        <div className="page-panel subscription-insight-panel subscription-insight-panel--composition">
+          <div className="subscription-panel-header">
+            <div>
+              <p className="section-heading__eyebrow">Composition</p>
+              <h3 className="section-heading__title">成本构成</h3>
+            </div>
+            <label className="subscription-panel-select">
+              <span>构成维度</span>
+              <select
+                value={breakdownKind}
+                onChange={(event) => onBreakdownKindChange(event.target.value as SubscriptionBreakdownKind)}
+              >
+                {BREAKDOWN_TABS.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="subscription-breakdown-list subscription-panel-scroll">
+            {currentBreakdown.length === 0 ? (
+              <p className="asset-table-empty-state">
+                <strong>暂无构成数据</strong>
+                <span>当前统计窗口没有可展示的成本构成。</span>
+              </p>
+            ) : currentBreakdown.map((item) => (
+              <div key={item.key} className="subscription-breakdown-row">
+                <div>
+                  <strong>{item.label}</strong>
+                  <small>{item.subscription_count} 项订阅</small>
+                </div>
+                <div className="subscription-breakdown-bar">
+                  <span style={{ width: barWidth(item.monthly_cost, breakdownMax) }} />
+                </div>
+                <span className="mono">{money(item.monthly_cost, baseCurrency)}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="page-panel subscription-insight-panel subscription-insight-panel--renewal">

@@ -699,6 +699,131 @@ func (r *PostgresSubscriptionCostRepository) UpsertMonthlyBudget(ctx context.Con
 	return record, nil
 }
 
+func (r *PostgresSubscriptionCostRepository) EarliestSubscriptionMonth(ctx context.Context) (*subscriptions.Date, error) {
+	var month pgtype.Date
+	err := r.db.QueryRow(ctx, `
+		with source_dates as (
+			select created_at::date as source_date from subscriptions
+			union all
+			select started_at from subscriptions where started_at is not null
+			union all
+			select renew_at from subscriptions where renew_at is not null
+			union all
+			select changed_at::date from price_histories
+		)
+		select date_trunc('month', min(source_date))::date
+		from source_dates
+		where source_date is not null`).Scan(&month)
+	if err != nil {
+		return nil, fmt.Errorf("query earliest subscription month: %w", err)
+	}
+	if !month.Valid {
+		return nil, nil
+	}
+	date := subscriptions.NewDate(month.Time)
+	return &date, nil
+}
+
+func (r *PostgresSubscriptionCostRepository) UpsertMonthlyBudgets(ctx context.Context, inputs []subscriptioncosts.UpsertMonthlyBudgetInput) ([]subscriptioncosts.MonthlyBudgetRecord, error) {
+	if len(inputs) == 0 {
+		return []subscriptioncosts.MonthlyBudgetRecord{}, nil
+	}
+	months := make([]time.Time, 0, len(inputs))
+	baseCurrencies := make([]string, 0, len(inputs))
+	monthlyLimits := make([]float64, 0, len(inputs))
+	warningPcts := make([]int, 0, len(inputs))
+	notes := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		input = subscriptioncosts.NormalizeUpsertMonthlyBudgetInput(input)
+		if err := subscriptioncosts.ValidateUpsertMonthlyBudgetInput(input); err != nil {
+			return nil, err
+		}
+		months = append(months, input.BudgetMonth.Time)
+		baseCurrencies = append(baseCurrencies, input.BaseCurrency)
+		monthlyLimits = append(monthlyLimits, input.MonthlyLimit)
+		warningPcts = append(warningPcts, input.WarningPct)
+		notes = append(notes, input.Note)
+	}
+
+	rows, err := r.db.Query(ctx, `
+		with input_rows as (
+			select *
+			from unnest($1::date[], $2::text[], $3::double precision[], $4::integer[], $5::text[]) as i(
+				budget_month,
+				base_currency,
+				monthly_limit,
+				warning_pct,
+				note
+			)
+		),
+		upserted as (
+			insert into subscription_monthly_budgets (
+				budget_month,
+				base_currency,
+				monthly_limit,
+				warning_pct,
+				note
+			)
+			select
+				budget_month,
+				base_currency,
+				monthly_limit,
+				warning_pct,
+				note
+			from input_rows
+			on conflict (budget_month) do update
+			set base_currency = excluded.base_currency,
+			    monthly_limit = excluded.monthly_limit,
+			    warning_pct = excluded.warning_pct,
+			    note = excluded.note,
+			    updated_at = now()
+			returning
+				budget_month,
+				base_currency,
+				monthly_limit::float8,
+				warning_pct,
+				note,
+				created_at,
+				updated_at
+		)
+		select
+			budget_month,
+			base_currency,
+			monthly_limit::float8,
+			warning_pct,
+			note,
+			created_at,
+			updated_at
+		from upserted
+		order by budget_month asc`,
+		months,
+		baseCurrencies,
+		monthlyLimits,
+		warningPcts,
+		notes,
+	)
+	if err != nil {
+		if isSubscriptionCostInvalidPostgresError(err) {
+			return nil, subscriptioncosts.ErrInvalidInput
+		}
+		return nil, fmt.Errorf("bulk upsert subscription monthly budgets: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]subscriptioncosts.MonthlyBudgetRecord, 0, len(inputs))
+	for rows.Next() {
+		record, err := scanSubscriptionMonthlyBudget(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan bulk subscription monthly budget: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate bulk subscription monthly budgets: %w", err)
+	}
+	return records, nil
+}
+
 func (r *PostgresSubscriptionCostRepository) ListActiveCurrencies(ctx context.Context) ([]string, error) {
 	rows, err := r.db.Query(ctx, `
 		select distinct currency

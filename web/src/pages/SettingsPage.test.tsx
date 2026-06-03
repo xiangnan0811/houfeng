@@ -265,7 +265,7 @@ describe('SettingsPage', () => {
   })
 
   it('opens subscription settings from query tab and manages subscription-specific APIs', async () => {
-    const subscriptionSettings = settingsResponseBody.subscription_cost_settings
+    let subscriptionSettings = settingsResponseBody.subscription_cost_settings
     const monthlyBudget = {
       budget_month: '2026-06-01',
       base_currency: 'CNY',
@@ -280,11 +280,12 @@ describe('SettingsPage', () => {
       if (url === '/api/settings') return Promise.resolve(mockJSONResponse(settingsResponseBody))
       if (url === '/api/subscriptions/settings' && method === 'GET') return Promise.resolve(mockJSONResponse(subscriptionSettings))
       if (url === '/api/subscriptions/settings' && method === 'PUT') {
-        return Promise.resolve(mockJSONResponse({
+        subscriptionSettings = {
           ...subscriptionSettings,
           base_currency: 'USD',
           max_reminder_lead_days: 45,
-        }))
+        }
+        return Promise.resolve(mockJSONResponse(subscriptionSettings))
       }
       if (url === '/api/subscription-monthly-budgets' && method === 'GET') return Promise.resolve(mockJSONResponse([monthlyBudget]))
       if (url === '/api/subscription-monthly-budgets/2026-07' && method === 'PUT') return Promise.resolve(mockJSONResponse({
@@ -293,6 +294,15 @@ describe('SettingsPage', () => {
         base_currency: 'USD',
         monthly_limit: 120,
         note: '增长期',
+      }))
+      if (url === '/api/subscription-monthly-budgets/bulk' && method === 'POST') return Promise.resolve(mockJSONResponse({
+        scope: 'current_year',
+        start_month: '2026-01-01',
+        end_month: '2026-07-01',
+        records: [
+          { ...monthlyBudget, budget_month: '2026-01-01', base_currency: 'USD', monthly_limit: 200, note: '首次基线' },
+          { ...monthlyBudget, budget_month: '2026-07-01', base_currency: 'USD', monthly_limit: 200, note: '首次基线' },
+        ],
       }))
       if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
         return Promise.resolve(mockJSONResponse({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '2026-05-09T08:00:00Z', succeeded: [{ quote_currency: 'USD', base_currency: 'CNY', rate: 7, rate_date: '2026-05-09' }], failed: [] }))
@@ -319,6 +329,21 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存月预算' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-monthly-budgets/2026-07' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
     await waitFor(() => expect(screen.getByRole('heading', { name: '月预算时间线' })).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('月预算 USD'), { target: { value: '200' } })
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: '首次基线' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /批量覆盖历史月预算/ }))
+    fireEvent.change(screen.getByLabelText('覆盖范围'), { target: { value: 'current_year' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存月预算' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-monthly-budgets/bulk' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
+    const bulkCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/subscription-monthly-budgets/bulk' && (init as RequestInit | undefined)?.method === 'POST')
+    expect(JSON.parse(String((bulkCall?.[1] as RequestInit | undefined)?.body))).toEqual({
+      scope: 'current_year',
+      base_currency: 'USD',
+      monthly_limit: 200,
+      warning_pct: 80,
+      note: '首次基线',
+    })
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/exchange-rates/refresh' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
