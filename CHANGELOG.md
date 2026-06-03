@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/xiangnan0811/houfeng/compare/v0.30.1...v0.31.0) (2026-06-03)
+
+
+### Features
+
+* **subscriptions:** rebuild cost workbench ([1fc2404](https://github.com/xiangnan0811/houfeng/commit/1fc240413dcec93c3a909c0ba1977383a6583138))
+
 ## [0.30.1](https://github.com/xiangnan0811/houfeng/compare/v0.30.0...v0.30.1) (2026-06-02)
 
 
