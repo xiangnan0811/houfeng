@@ -120,6 +120,13 @@ def iso_timestamp(days_from_today: int, hour: int = 8) -> str:
     return target.isoformat().replace("+00:00", "Z")
 
 
+def month_bucket(months_from_current: int) -> str:
+    current = dt.date.today().replace(day=1)
+    year = current.year + (current.month - 1 + months_from_current) // 12
+    month = (current.month - 1 + months_from_current) % 12 + 1
+    return f"{year:04d}-{month:02d}"
+
+
 def asset_workflow_providers() -> list[dict[str, object]]:
     return [
         {
@@ -1047,6 +1054,7 @@ def asset_workflow_subscription_overview() -> dict[str, object]:
 
 def asset_workflow_subscription_statistics(window: str | None = None) -> dict[str, object]:
     overview = asset_workflow_subscription_overview()
+    cost_months = [72.5, 83.0, 83.0, 101.4, 111.9, 111.9, 135.6, 135.6, 151.3, 151.3, 174.55, 174.55]
     return {
         "window": window if window in {"month", "quarter", "year"} else "month",
         "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
@@ -1055,10 +1063,14 @@ def asset_workflow_subscription_statistics(window: str | None = None) -> dict[st
         "provider_breakdown": overview["provider_breakdown"],
         "currency_breakdown": overview["currency_breakdown"],
         "category_breakdown": overview["category_breakdown"],
+        "cost_month_buckets": [
+            {"bucket": month_bucket(index - 11), "monthly_cost": monthly_cost, "renewal_count": 0, "data_insufficient": False}
+            for index, monthly_cost in enumerate(cost_months)
+        ],
         "renewal_month_buckets": [
-            {"bucket": dt.date.today().strftime("%Y-%m"), "monthly_cost": 116.15, "renewal_count": 2},
-            {"bucket": (dt.date.today().replace(day=1) + dt.timedelta(days=32)).strftime("%Y-%m"), "monthly_cost": 58.4, "renewal_count": 1},
-            {"bucket": (dt.date.today().replace(day=1) + dt.timedelta(days=63)).strftime("%Y-%m"), "monthly_cost": 0, "renewal_count": 0},
+            {"bucket": month_bucket(0), "monthly_cost": 116.15, "renewal_count": 2, "data_insufficient": False},
+            {"bucket": month_bucket(1), "monthly_cost": 58.4, "renewal_count": 1, "data_insufficient": False},
+            {"bucket": month_bucket(2), "monthly_cost": 0, "renewal_count": 0, "data_insufficient": False},
         ],
         "budget_statuses": asset_workflow_budget_records(),
     }
@@ -2299,6 +2311,10 @@ def run_browser_sanity(
                             return text.length > 0 && visible(el);
                           }
 
+                          function hasReliableBoxMetrics(el) {
+                            return el instanceof HTMLElement;
+                          }
+
                           const elements = Array.from(document.querySelectorAll('body *'));
                           const leafTextElements = elements.filter((el) => {
                             if (!hasVisibleText(el)) return false;
@@ -2306,6 +2322,7 @@ def run_browser_sanity(
                           });
 
                           const overflowingText = leafTextElements
+                            .filter((el) => hasReliableBoxMetrics(el))
                             .filter((el) => el.scrollWidth > el.clientWidth + 2 || el.scrollHeight > el.clientHeight + 2)
                             .slice(0, 8)
                             .map((el) => {

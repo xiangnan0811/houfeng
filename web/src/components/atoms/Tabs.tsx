@@ -7,7 +7,7 @@ export interface TabItem<V extends string = string> {
 }
 
 export interface TabsProps<V extends string = string> {
-  items: TabItem<V>[]
+  items: readonly TabItem<V>[]
   value: V
   onChange: (next: V) => void
   variant?: 'underline' | 'pill'

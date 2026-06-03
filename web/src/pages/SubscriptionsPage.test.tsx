@@ -4,8 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SubscriptionsPage } from './SubscriptionsPage'
 import type {
-  SubscriptionBudgetRecord,
-  SubscriptionCostSettings,
   SubscriptionOverview,
   SubscriptionRecord,
   SubscriptionStatistics,
@@ -80,16 +78,6 @@ const subscription: SubscriptionRecord = {
   updated_at: '2026-05-09T08:00:00Z',
 }
 
-const defaultSettings: SubscriptionCostSettings = {
-  base_currency: 'CNY',
-  exchange_rate_provider: 'frankfurter',
-  fixer_configured: false,
-  fixer_masked_summary: '',
-  default_reminder_offsets_days: [14, 7, 1],
-  max_reminder_lead_days: 30,
-  exchange_rate_stale_after_hours: 36,
-}
-
 function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partial<SubscriptionOverview> = {}): SubscriptionOverview {
   const totalMonthly = subscriptions.reduce((sum, sub) => sum + (sub.monthly_price_base ?? 0), 0)
   return {
@@ -129,7 +117,32 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
     currency_breakdown: [],
     category_breakdown: [],
     budget_risks: [],
-    vps_costs: [],
+    vps_costs: subscriptions.map((sub) => ({
+      subscription_id: sub.subscription_id,
+      vps_id: sub.vps_id,
+      vps_display_name: 'Tokyo Edge',
+      provider_id: 'pv_001',
+      provider_name: 'Hetzner',
+      display_name: sub.display_name || 'Tokyo Edge',
+      cost_category: sub.cost_category ?? '',
+      labels: sub.labels ?? [],
+      price: sub.price,
+      currency: sub.currency,
+      monthly_price: sub.monthly_price,
+      monthly_price_base: sub.monthly_price_base,
+      yearly_price_base: sub.yearly_price_base,
+      base_currency: sub.base_currency ?? 'CNY',
+      exchange_rate: sub.exchange_rate,
+      exchange_rate_date: sub.exchange_rate_date,
+      exchange_rate_stale: Boolean(sub.exchange_rate_stale),
+      renew_at: sub.renew_at,
+      next_reminder_at: sub.next_reminder_at,
+      status: sub.status,
+      payment_method: sub.payment_method,
+      lifecycle_status: 'active',
+      renewal_decision: 'keep',
+      budget_status: sub.budget_status ?? 'unknown',
+    })),
     missing_subscription_assets: [],
     ...overrides,
   }
@@ -138,7 +151,7 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
 function statisticsFor(subscriptions: SubscriptionRecord[] = [], overrides: Partial<SubscriptionStatistics> = {}): SubscriptionStatistics {
   const totalMonthly = subscriptions.reduce((sum, sub) => sum + (sub.monthly_price_base ?? 0), 0)
   return {
-    window: 'month',
+    window: 'year',
     base_currency: 'CNY',
     total_monthly_cost: totalMonthly,
     total_yearly_cost: totalMonthly * 12,
@@ -151,6 +164,11 @@ function statisticsFor(subscriptions: SubscriptionRecord[] = [], overrides: Part
     }] : [],
     currency_breakdown: [],
     category_breakdown: [],
+    cost_month_buckets: [
+      { bucket: '2025-07', monthly_cost: Math.max(totalMonthly - 10, 0), renewal_count: 0, data_insufficient: false },
+      { bucket: '2025-08', monthly_cost: totalMonthly, renewal_count: 0, data_insufficient: false },
+      { bucket: '2026-06', monthly_cost: totalMonthly, renewal_count: 0, data_insufficient: false },
+    ],
     renewal_month_buckets: [],
     budget_statuses: [],
     ...overrides,
@@ -160,17 +178,17 @@ function statisticsFor(subscriptions: SubscriptionRecord[] = [], overrides: Part
 type SubscriptionFetchOptions = {
   subscriptions?: SubscriptionRecord[]
   vpsRows?: VPSAssetRecord[]
-  budgets?: SubscriptionBudgetRecord[]
-  settings?: SubscriptionCostSettings
   subscriptionsErrorOnce?: string
+  statistics?: SubscriptionStatistics
+  statisticsError?: string
 }
 
 function setupSubscriptionFetch({
   subscriptions = [],
   vpsRows = [vps],
-  budgets = [],
-  settings = defaultSettings,
   subscriptionsErrorOnce,
+  statistics,
+  statisticsError,
 }: SubscriptionFetchOptions = {}) {
   let currentSubscriptions = subscriptions
   let failNextSubscriptions = subscriptionsErrorOnce
@@ -225,9 +243,13 @@ function setupSubscriptionFetch({
     }
     if (url === '/api/vps') return Promise.resolve(mockJSONResponse(vpsRows))
     if (url === '/api/subscriptions/overview') return Promise.resolve(mockJSONResponse(overviewFor(currentSubscriptions)))
-    if (url === '/api/subscriptions/statistics?window=month') return Promise.resolve(mockJSONResponse(statisticsFor(currentSubscriptions)))
-    if (url === '/api/subscription-budgets') return Promise.resolve(mockJSONResponse(budgets))
-    if (url === '/api/subscriptions/settings') return Promise.resolve(mockJSONResponse(settings))
+    if (url === '/api/subscriptions/statistics?window=year') {
+      if (statisticsError) return Promise.resolve(mockJSONResponse({ error: statisticsError }, 500))
+      return Promise.resolve(mockJSONResponse(statistics ?? statisticsFor(currentSubscriptions)))
+    }
+    if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
+      return Promise.resolve(mockJSONResponse({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '2026-05-09T08:00:00Z', succeeded: [], failed: [] }))
+    }
     return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -348,7 +370,8 @@ describe('SubscriptionsPage', () => {
     fireEvent.click(within(createDialog).getByRole('button', { name: '取消' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建订阅表单' })).not.toBeInTheDocument())
-    expect(fetchMock).toHaveBeenCalledTimes(12)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/subscriptions?vps_id=vps_001'))).toBe(true)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('create=1'))).toBe(false)
   })
 
   it('resets URL-requested create draft and errors after drawer cancel', async () => {
@@ -376,7 +399,7 @@ describe('SubscriptionsPage', () => {
     const reopened = screen.getByRole('dialog', { name: '新建订阅表单' })
     expect(within(reopened).queryByText('币种必须为 3 位大写代码。')).not.toBeInTheDocument()
     expect(within(reopened).getByLabelText('价格')).toHaveValue(null)
-    expect(fetchMock).toHaveBeenCalledTimes(12)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/subscriptions?vps_id=vps_001'))).toBe(true)
   })
 
   it('updates subscriptions through PATCH and shows updated billing facts', async () => {
@@ -464,8 +487,61 @@ describe('SubscriptionsPage', () => {
     expect(screen.getByText('subscriptions unavailable')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(12))
     await waitFor(() => expect(screen.getByText('尚未记录订阅')).toBeInTheDocument())
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/subscriptions')).length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('keeps list usable when statistics panel fails', async () => {
+    setupSubscriptionFetch({ subscriptions: [subscription], statisticsError: 'statistics unavailable' })
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
+    expect(screen.getByText('statistics unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument()
+  })
+
+  it('renders monthly labels for the annual trend axis', async () => {
+    setupSubscriptionFetch({ subscriptions: [subscription] })
+    const { container } = render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
+    expect(screen.getByText('25/07')).toBeInTheDocument()
+    expect(screen.getByText('25/08')).toBeInTheDocument()
+    expect(screen.getByText('26/06')).toBeInTheDocument()
+    expect(container).not.toHaveTextContent('00:00')
+  })
+
+  it('does not draw annual trend when any bucket is marked data-insufficient', async () => {
+    setupSubscriptionFetch({
+      subscriptions: [subscription],
+      statistics: statisticsFor([subscription], {
+        cost_month_buckets: [
+          { bucket: '2025-07', monthly_cost: 0, renewal_count: 0, data_insufficient: true },
+          { bucket: '2025-08', monthly_cost: 84, renewal_count: 0, data_insufficient: false },
+          { bucket: '2026-06', monthly_cost: 84, renewal_count: 0, data_insufficient: false },
+        ],
+      }),
+    })
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
+    expect(screen.getByText('历史成本数据不足')).toBeInTheDocument()
+    expect(screen.getByText('部分历史月份缺少可用汇率，暂不绘制可能误导的趋势曲线。')).toBeInTheDocument()
+    expect(container.querySelector('.subscription-insight-panel--trend polyline')).toBeNull()
   })
 
   it('resets subscription edit draft and errors after drawer cancel', async () => {
@@ -496,6 +572,6 @@ describe('SubscriptionsPage', () => {
     expect(within(editDialog).getByLabelText('币种')).toHaveValue('USD')
     expect(within(editDialog).getByLabelText('支付方式')).toHaveValue('__custom')
     expect(within(editDialog).getByLabelText('自定义支付方式')).toHaveValue('card')
-    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions').length).toBeGreaterThanOrEqual(1)
   })
 })

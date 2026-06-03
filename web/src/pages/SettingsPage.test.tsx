@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ThemeProvider } from '../lib/theme-context'
@@ -88,6 +89,15 @@ const settingsResponseBody = {
     event_layer_days: 90,
     notification_layer_days: 180,
   },
+  subscription_cost_settings: {
+    base_currency: 'CNY',
+    exchange_rate_provider: 'frankfurter',
+    fixer_configured: false,
+    fixer_masked_summary: '',
+    default_reminder_offsets_days: [14, 7, 1],
+    max_reminder_lead_days: 30,
+    exchange_rate_stale_after_hours: 36,
+  },
 }
 
 describe('SettingsPage', () => {
@@ -95,11 +105,13 @@ describe('SettingsPage', () => {
     vi.restoreAllMocks()
   })
 
-  function renderSettingsPage() {
+  function renderSettingsPage(initialEntry = '/settings') {
     return render(
-      <ThemeProvider>
-        <SettingsPage />
-      </ThemeProvider>,
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <ThemeProvider>
+          <SettingsPage />
+        </ThemeProvider>
+      </MemoryRouter>,
     )
   }
 
@@ -201,7 +213,9 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+    const payload = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(payload).not.toHaveProperty('subscription_cost_settings')
+    expect(payload).toEqual({
       telegram: {
         chat_id: 'chat-id',
         runtime_managed: false,
@@ -248,6 +262,81 @@ describe('SettingsPage', () => {
         notification_layer_days: 180,
       },
     })
+  })
+
+  it('opens subscription settings from query tab and manages subscription-specific APIs', async () => {
+    const subscriptionSettings = settingsResponseBody.subscription_cost_settings
+    const budget = {
+      budget_id: 'budget_global',
+      scope_type: 'global',
+      scope_id: '',
+      name: '全局预算',
+      base_currency: 'CNY',
+      monthly_limit: 100,
+      yearly_limit: null,
+      warning_pct: 80,
+      enabled: true,
+      note: '',
+      current_monthly_spend: 70,
+      current_yearly_spend: 840,
+      status: 'ok',
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+    }
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/settings') return Promise.resolve(mockJSONResponse(settingsResponseBody))
+      if (url === '/api/subscriptions/settings' && method === 'GET') return Promise.resolve(mockJSONResponse(subscriptionSettings))
+      if (url === '/api/subscriptions/settings' && method === 'PUT') {
+        return Promise.resolve(mockJSONResponse({
+          ...subscriptionSettings,
+          base_currency: 'USD',
+          max_reminder_lead_days: 45,
+        }))
+      }
+      if (url === '/api/subscription-budgets' && method === 'GET') return Promise.resolve(mockJSONResponse([budget]))
+      if (url === '/api/subscription-budgets' && method === 'POST') return Promise.resolve(mockJSONResponse({ ...budget, budget_id: 'budget_created', name: '供应商预算' }, 201))
+      if (url === '/api/subscription-budgets' && method === 'PATCH') return Promise.resolve(mockJSONResponse({ ...budget, enabled: false }))
+      if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
+        return Promise.resolve(mockJSONResponse({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '2026-05-09T08:00:00Z', succeeded: [{ quote_currency: 'USD', base_currency: 'CNY', rate: 7, rate_date: '2026-05-09' }], failed: [] }))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage('/settings?tab=subscriptions')
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '成本基准与汇率' })).toBeInTheDocument())
+    expect(screen.getByRole('tab', { name: '订阅' })).toHaveAttribute('aria-selected', 'true')
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/settings')).toBe(false)
+
+    fireEvent.change(screen.getByLabelText('基准货币'), { target: { value: 'USD' } })
+    fireEvent.change(screen.getByLabelText('最远提前天数'), { target: { value: '45' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅设置' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/settings' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
+    await waitFor(() => expect(screen.getByLabelText('月预算 USD')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '供应商预算' } })
+    fireEvent.change(screen.getByLabelText('月预算 USD'), { target: { value: '120' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加预算' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-budgets' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '预算规则' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/exchange-rates/refresh' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '预算规则' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '停用' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-budgets' && (init as RequestInit | undefined)?.method === 'PATCH')).toBe(true))
+  })
+
+  it('falls back to appearance for invalid settings tab', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)))
+
+    renderSettingsPage('/settings?tab=missing')
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    expect(screen.getByRole('tab', { name: '外观' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('saves updated settings with a replacement Telegram token and refreshed defaults', async () => {

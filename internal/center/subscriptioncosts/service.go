@@ -163,6 +163,10 @@ func (s *Service) GetStatistics(ctx context.Context, window string) (Statistics,
 	if err != nil {
 		return Statistics{}, fmt.Errorf("list subscription costs: %w", err)
 	}
+	costMonthBuckets, err := s.repo.ListCostMonthBuckets(ctx, settings, statisticsWindowMonths(window), s.now())
+	if err != nil {
+		return Statistics{}, fmt.Errorf("list subscription cost month buckets: %w", err)
+	}
 	budgets, err := s.repo.ListBudgets(ctx, BudgetListFilters{})
 	if err != nil {
 		return Statistics{}, fmt.Errorf("list subscription budgets: %w", err)
@@ -179,6 +183,7 @@ func (s *Service) GetStatistics(ctx context.Context, window string) (Statistics,
 		CategoryBreakdown: breakdown(rows, func(row CostRow) (string, string) {
 			return emptyAs(row.CostCategory, row.CostCategory, "未分类"), emptyAs(row.CostCategory, row.CostCategory, "未分类")
 		}),
+		CostMonthBuckets:    costMonthBuckets,
 		RenewalMonthBuckets: renewalBuckets(rows, s.now(), window),
 		BudgetStatuses:      budgets,
 	}
@@ -425,14 +430,19 @@ func breakdown(rows []CostRow, keyFn func(CostRow) (string, string)) []Breakdown
 	return result
 }
 
+func statisticsWindowMonths(window string) int {
+	switch window {
+	case StatisticsWindowYear:
+		return 12
+	case StatisticsWindowQuarter:
+		return 6
+	default:
+		return 3
+	}
+}
+
 func renewalBuckets(rows []CostRow, now time.Time, window string) []SeriesPoint {
-	months := 3
-	if window == StatisticsWindowQuarter {
-		months = 6
-	}
-	if window == StatisticsWindowYear {
-		months = 12
-	}
+	months := statisticsWindowMonths(window)
 	start := subscriptions.NewDate(now.UTC()).Time
 	buckets := make([]SeriesPoint, 0, months)
 	index := make(map[string]int, months)

@@ -48,6 +48,7 @@ type SettingsRepository interface {
 
 type Repository interface {
 	ListCostRows(context.Context, centersettings.SubscriptionCostSettings) ([]CostRow, error)
+	ListCostMonthBuckets(context.Context, centersettings.SubscriptionCostSettings, int, time.Time) ([]SeriesPoint, error)
 	ListMissingSubscriptionAssets(context.Context) ([]MissingSubscriptionAsset, error)
 	ListBudgets(context.Context, BudgetListFilters) ([]BudgetRecord, error)
 	CreateBudget(context.Context, CreateBudgetInput) (BudgetRecord, error)
@@ -124,6 +125,7 @@ type Statistics struct {
 	ProviderBreakdown   []BreakdownItem `json:"provider_breakdown"`
 	CurrencyBreakdown   []BreakdownItem `json:"currency_breakdown"`
 	CategoryBreakdown   []BreakdownItem `json:"category_breakdown"`
+	CostMonthBuckets    []SeriesPoint   `json:"cost_month_buckets"`
 	RenewalMonthBuckets []SeriesPoint   `json:"renewal_month_buckets"`
 	BudgetStatuses      []BudgetRecord  `json:"budget_statuses"`
 }
@@ -153,9 +155,10 @@ type BreakdownItem struct {
 }
 
 type SeriesPoint struct {
-	Bucket       string  `json:"bucket"`
-	MonthlyCost  float64 `json:"monthly_cost"`
-	RenewalCount int     `json:"renewal_count"`
+	Bucket           string  `json:"bucket"`
+	MonthlyCost      float64 `json:"monthly_cost"`
+	RenewalCount     int     `json:"renewal_count"`
+	DataInsufficient bool    `json:"data_insufficient"`
 }
 
 type BudgetRecord struct {

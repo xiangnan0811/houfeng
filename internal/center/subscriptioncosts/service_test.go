@@ -128,6 +128,52 @@ func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
 	}
 }
 
+func TestServiceStatisticsReturnsCostMonthBuckets(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 2, 9, 0, 0, 0, time.UTC)
+	monthly := 90.0
+	yearly := 1080.0
+	service, repo := newTestService()
+	service.now = func() time.Time { return now }
+	repo.rows = []CostRow{{
+		SubscriptionID:   "sub_a",
+		VPSID:            "vps_a",
+		VPSDisplayName:   "Tokyo Edge",
+		ProviderID:       "pv_hetzner",
+		ProviderName:     "Hetzner",
+		CostCategory:     "compute",
+		Currency:         "USD",
+		MonthlyPriceBase: &monthly,
+		YearlyPriceBase:  &yearly,
+		RenewAt:          datePtr(t, "2026-06-10"),
+	}}
+	repo.costMonthBuckets = []SeriesPoint{
+		{Bucket: "2025-07", MonthlyCost: 40},
+		{Bucket: "2025-08", MonthlyCost: 60, DataInsufficient: true},
+		{Bucket: "2026-06", MonthlyCost: 90},
+	}
+
+	stats, err := service.GetStatistics(ctx, StatisticsWindowYear)
+	if err != nil {
+		t.Fatalf("GetStatistics() error = %v", err)
+	}
+	if repo.costBucketMonths != 12 {
+		t.Fatalf("cost bucket months = %d, want 12", repo.costBucketMonths)
+	}
+	if !repo.costBucketNow.Equal(now) {
+		t.Fatalf("cost bucket now = %v, want %v", repo.costBucketNow, now)
+	}
+	if len(stats.CostMonthBuckets) != 3 || stats.CostMonthBuckets[2].Bucket != "2026-06" || stats.CostMonthBuckets[2].MonthlyCost != 90 {
+		t.Fatalf("cost month buckets = %#v, want populated historical series", stats.CostMonthBuckets)
+	}
+	if !stats.CostMonthBuckets[1].DataInsufficient {
+		t.Fatalf("cost month bucket = %#v, want data_insufficient passthrough", stats.CostMonthBuckets[1])
+	}
+	if len(stats.RenewalMonthBuckets) != 12 {
+		t.Fatalf("renewal month buckets = %d, want 12", len(stats.RenewalMonthBuckets))
+	}
+}
+
 func TestServiceRefreshExchangeRatesSanitizesProviderErrors(t *testing.T) {
 	ctx := context.Background()
 	service, repo := newTestService()
@@ -249,6 +295,9 @@ func (r *fakeSettingsRepo) PutSettings(_ context.Context, settings centersetting
 
 type fakeSubscriptionCostRepo struct {
 	rows             []CostRow
+	costMonthBuckets []SeriesPoint
+	costBucketMonths int
+	costBucketNow    time.Time
 	missing          []MissingSubscriptionAsset
 	budgets          []BudgetRecord
 	currencies       []string
@@ -260,6 +309,12 @@ type fakeSubscriptionCostRepo struct {
 
 func (r *fakeSubscriptionCostRepo) ListCostRows(context.Context, centersettings.SubscriptionCostSettings) ([]CostRow, error) {
 	return r.rows, nil
+}
+
+func (r *fakeSubscriptionCostRepo) ListCostMonthBuckets(_ context.Context, _ centersettings.SubscriptionCostSettings, months int, now time.Time) ([]SeriesPoint, error) {
+	r.costBucketMonths = months
+	r.costBucketNow = now
+	return r.costMonthBuckets, nil
 }
 
 func (r *fakeSubscriptionCostRepo) ListMissingSubscriptionAssets(context.Context) ([]MissingSubscriptionAsset, error) {

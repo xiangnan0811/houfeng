@@ -412,6 +412,14 @@ func TestRouterKeepsSubscriptionsOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"subscription_id":"sub_001"}`))
 		}),
+		SubscriptionStatisticsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("window") != "year" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"window":"year","cost_month_buckets":[{"bucket":"2026-06","monthly_cost":90,"renewal_count":0,"data_insufficient":false}]}`))
+		}),
 	})
 
 	tests := []struct {
@@ -421,6 +429,7 @@ func TestRouterKeepsSubscriptionsOutOfSPAFallback(t *testing.T) {
 	}{
 		{name: "collection", path: "/api/subscriptions", wantBodySnippet: `"subscription_id":"sub_001"`},
 		{name: "item", path: "/api/subscriptions/sub_001", wantBodySnippet: `"subscription_id":"sub_001"`},
+		{name: "statistics", path: "/api/subscriptions/statistics?window=year", wantBodySnippet: `"cost_month_buckets"`},
 	}
 
 	for _, tt := range tests {
