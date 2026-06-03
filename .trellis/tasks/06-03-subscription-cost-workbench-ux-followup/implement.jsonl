@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/subscription-cost-center.md", "reason": "订阅成本中枢的预算、汇率、续费和 Dashboard 边界。"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "新增 PostgreSQL migration、store 查询和约束时使用的数据库规范。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go 服务、handler、router、store 测试和质量门规范。"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "前端 API client、类型合同和页面数据加载边界。"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "订阅页、设置页和图表组件的拆分与命名约定。"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "全局 CSS、设计 token、BEM 风格和响应式布局约定。"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "前端测试、lint、build 和浏览器视觉验收规范。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "DB、service、HTTP、API types、UI 跨层合同一致性检查。"}

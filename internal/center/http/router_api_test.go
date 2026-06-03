@@ -420,6 +420,10 @@ func TestRouterKeepsSubscriptionsOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"window":"year","cost_month_buckets":[{"bucket":"2026-06","monthly_cost":90,"renewal_count":0,"data_insufficient":false}]}`))
 		}),
+		SubscriptionMonthlyBudgetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"budget_month":"2026-06-01","base_currency":"CNY","monthly_limit":120}]`))
+		}),
 	})
 
 	tests := []struct {
@@ -430,6 +434,8 @@ func TestRouterKeepsSubscriptionsOutOfSPAFallback(t *testing.T) {
 		{name: "collection", path: "/api/subscriptions", wantBodySnippet: `"subscription_id":"sub_001"`},
 		{name: "item", path: "/api/subscriptions/sub_001", wantBodySnippet: `"subscription_id":"sub_001"`},
 		{name: "statistics", path: "/api/subscriptions/statistics?window=year", wantBodySnippet: `"cost_month_buckets"`},
+		{name: "monthly budgets", path: "/api/subscription-monthly-budgets", wantBodySnippet: `"monthly_limit"`},
+		{name: "monthly budget item", path: "/api/subscription-monthly-budgets/2026-06", wantBodySnippet: `"monthly_limit"`},
 	}
 
 	for _, tt := range tests {

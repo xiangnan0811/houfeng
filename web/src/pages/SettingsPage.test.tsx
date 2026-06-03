@@ -266,20 +266,12 @@ describe('SettingsPage', () => {
 
   it('opens subscription settings from query tab and manages subscription-specific APIs', async () => {
     const subscriptionSettings = settingsResponseBody.subscription_cost_settings
-    const budget = {
-      budget_id: 'budget_global',
-      scope_type: 'global',
-      scope_id: '',
-      name: '全局预算',
+    const monthlyBudget = {
+      budget_month: '2026-06-01',
       base_currency: 'CNY',
       monthly_limit: 100,
-      yearly_limit: null,
       warning_pct: 80,
-      enabled: true,
       note: '',
-      current_monthly_spend: 70,
-      current_yearly_spend: 840,
-      status: 'ok',
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
     }
@@ -294,9 +286,14 @@ describe('SettingsPage', () => {
           max_reminder_lead_days: 45,
         }))
       }
-      if (url === '/api/subscription-budgets' && method === 'GET') return Promise.resolve(mockJSONResponse([budget]))
-      if (url === '/api/subscription-budgets' && method === 'POST') return Promise.resolve(mockJSONResponse({ ...budget, budget_id: 'budget_created', name: '供应商预算' }, 201))
-      if (url === '/api/subscription-budgets' && method === 'PATCH') return Promise.resolve(mockJSONResponse({ ...budget, enabled: false }))
+      if (url === '/api/subscription-monthly-budgets' && method === 'GET') return Promise.resolve(mockJSONResponse([monthlyBudget]))
+      if (url === '/api/subscription-monthly-budgets/2026-07' && method === 'PUT') return Promise.resolve(mockJSONResponse({
+        ...monthlyBudget,
+        budget_month: '2026-07-01',
+        base_currency: 'USD',
+        monthly_limit: 120,
+        note: '增长期',
+      }))
       if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
         return Promise.resolve(mockJSONResponse({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '2026-05-09T08:00:00Z', succeeded: [{ quote_currency: 'USD', base_currency: 'CNY', rate: 7, rate_date: '2026-05-09' }], failed: [] }))
       }
@@ -316,18 +313,17 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/settings' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
     await waitFor(() => expect(screen.getByLabelText('月预算 USD')).toBeInTheDocument())
 
-    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '供应商预算' } })
+    fireEvent.change(screen.getByLabelText('预算月份'), { target: { value: '2026-07' } })
     fireEvent.change(screen.getByLabelText('月预算 USD'), { target: { value: '120' } })
-    fireEvent.click(screen.getByRole('button', { name: '添加预算' }))
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-budgets' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
-    await waitFor(() => expect(screen.getByRole('heading', { name: '预算规则' })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: '增长期' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存月预算' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-monthly-budgets/2026-07' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '月预算时间线' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/exchange-rates/refresh' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
-    await waitFor(() => expect(screen.getByRole('heading', { name: '预算规则' })).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: '停用' }))
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-budgets' && (init as RequestInit | undefined)?.method === 'PATCH')).toBe(true))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '月预算时间线' })).toBeInTheDocument())
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/subscription-budgets'))).toBe(false)
   })
 
   it('falls back to appearance for invalid settings tab', async () => {

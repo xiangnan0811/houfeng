@@ -49,10 +49,13 @@ type SettingsRepository interface {
 type Repository interface {
 	ListCostRows(context.Context, centersettings.SubscriptionCostSettings) ([]CostRow, error)
 	ListCostMonthBuckets(context.Context, centersettings.SubscriptionCostSettings, int, time.Time) ([]SeriesPoint, error)
+	ListBudgetMonthBuckets(context.Context, centersettings.SubscriptionCostSettings, int, time.Time) ([]SeriesPoint, error)
 	ListMissingSubscriptionAssets(context.Context) ([]MissingSubscriptionAsset, error)
 	ListBudgets(context.Context, BudgetListFilters) ([]BudgetRecord, error)
 	CreateBudget(context.Context, CreateBudgetInput) (BudgetRecord, error)
 	PatchBudget(context.Context, PatchBudgetInput) (BudgetRecord, error)
+	ListMonthlyBudgets(context.Context) ([]MonthlyBudgetRecord, error)
+	UpsertMonthlyBudget(context.Context, UpsertMonthlyBudgetInput) (MonthlyBudgetRecord, error)
 	ListActiveCurrencies(context.Context) ([]string, error)
 	UpsertExchangeRate(context.Context, ExchangeRateUpsert) (ExchangeRateRecord, error)
 	ListReminderCandidates(context.Context, centersettings.SubscriptionCostSettings, []int) ([]ReminderCandidate, error)
@@ -82,6 +85,8 @@ type CostRow struct {
 	NextReminderAt    *time.Time          `json:"next_reminder_at"`
 	Status            string              `json:"status"`
 	PaymentMethod     string              `json:"payment_method"`
+	Country           string              `json:"country"`
+	Region            string              `json:"region"`
 	LifecycleStatus   string              `json:"lifecycle_status"`
 	RenewalDecision   string              `json:"renewal_decision"`
 	BudgetStatus      BudgetStatus        `json:"budget_status"`
@@ -125,6 +130,8 @@ type Statistics struct {
 	ProviderBreakdown   []BreakdownItem `json:"provider_breakdown"`
 	CurrencyBreakdown   []BreakdownItem `json:"currency_breakdown"`
 	CategoryBreakdown   []BreakdownItem `json:"category_breakdown"`
+	PaymentBreakdown    []BreakdownItem `json:"payment_breakdown"`
+	RegionBreakdown     []BreakdownItem `json:"region_breakdown"`
 	CostMonthBuckets    []SeriesPoint   `json:"cost_month_buckets"`
 	RenewalMonthBuckets []SeriesPoint   `json:"renewal_month_buckets"`
 	BudgetStatuses      []BudgetRecord  `json:"budget_statuses"`
@@ -155,10 +162,31 @@ type BreakdownItem struct {
 }
 
 type SeriesPoint struct {
-	Bucket           string  `json:"bucket"`
-	MonthlyCost      float64 `json:"monthly_cost"`
-	RenewalCount     int     `json:"renewal_count"`
-	DataInsufficient bool    `json:"data_insufficient"`
+	Bucket           string   `json:"bucket"`
+	MonthlyCost      float64  `json:"monthly_cost"`
+	RenewalCount     int      `json:"renewal_count"`
+	BudgetLimit      *float64 `json:"budget_limit,omitempty"`
+	BudgetCurrency   string   `json:"budget_currency,omitempty"`
+	BudgetWarningPct int      `json:"budget_warning_pct,omitempty"`
+	DataInsufficient bool     `json:"data_insufficient"`
+}
+
+type MonthlyBudgetRecord struct {
+	BudgetMonth  subscriptions.Date `json:"budget_month"`
+	BaseCurrency string             `json:"base_currency"`
+	MonthlyLimit float64            `json:"monthly_limit"`
+	WarningPct   int                `json:"warning_pct"`
+	Note         string             `json:"note"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+}
+
+type UpsertMonthlyBudgetInput struct {
+	BudgetMonth  subscriptions.Date `json:"budget_month"`
+	BaseCurrency string             `json:"base_currency"`
+	MonthlyLimit float64            `json:"monthly_limit"`
+	WarningPct   int                `json:"warning_pct"`
+	Note         string             `json:"note"`
 }
 
 type BudgetRecord struct {
@@ -390,6 +418,38 @@ func ValidatePatchBudgetInput(input PatchBudgetInput) error {
 		return fmt.Errorf("%w: yearly_limit must be non-negative money", ErrInvalidInput)
 	}
 	if input.WarningPct.Set && (input.WarningPct.Value < 1 || input.WarningPct.Value > 100) {
+		return fmt.Errorf("%w: warning_pct must be between 1 and 100", ErrInvalidInput)
+	}
+	return nil
+}
+
+func NormalizeUpsertMonthlyBudgetInput(input UpsertMonthlyBudgetInput) UpsertMonthlyBudgetInput {
+	input.BaseCurrency = strings.ToUpper(strings.TrimSpace(input.BaseCurrency))
+	if input.BaseCurrency == "" {
+		input.BaseCurrency = "CNY"
+	}
+	if input.WarningPct == 0 {
+		input.WarningPct = 80
+	}
+	input.Note = strings.TrimSpace(input.Note)
+	return input
+}
+
+func ValidateUpsertMonthlyBudgetInput(input UpsertMonthlyBudgetInput) error {
+	if input.BudgetMonth.Time.IsZero() {
+		return fmt.Errorf("%w: budget_month is required", ErrInvalidInput)
+	}
+	month := input.BudgetMonth.Time.UTC()
+	if month.Day() != 1 {
+		return fmt.Errorf("%w: budget_month must be the first day of a month", ErrInvalidInput)
+	}
+	if !isCurrencyCode(input.BaseCurrency) {
+		return fmt.Errorf("%w: budget base_currency must be a 3-letter uppercase code", ErrInvalidInput)
+	}
+	if !isValidMoney(input.MonthlyLimit) {
+		return fmt.Errorf("%w: monthly_limit must be non-negative money", ErrInvalidInput)
+	}
+	if input.WarningPct < 1 || input.WarningPct > 100 {
 		return fmt.Errorf("%w: warning_pct must be between 1 and 100", ErrInvalidInput)
 	}
 	return nil

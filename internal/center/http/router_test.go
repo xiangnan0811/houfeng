@@ -417,6 +417,10 @@ func TestRouterDispatchesSubscriptionAPIs(t *testing.T) {
 			called = "item"
 			w.WriteHeader(http.StatusOK)
 		}),
+		SubscriptionMonthlyBudgetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "monthly-budgets"
+			w.WriteHeader(http.StatusOK)
+		}),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions", nil)
@@ -437,6 +441,26 @@ func TestRouterDispatchesSubscriptionAPIs(t *testing.T) {
 	}
 	if called != "item" {
 		t.Fatalf("called = %q, want item", called)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/subscription-monthly-budgets", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("monthly budgets status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "monthly-budgets" {
+		t.Fatalf("called = %q, want monthly-budgets", called)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/subscription-monthly-budgets/2026-06", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("monthly budget item status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if called != "monthly-budgets" {
+		t.Fatalf("called = %q, want monthly-budgets", called)
 	}
 }
 
@@ -470,6 +494,7 @@ func TestRouterDispatchesMonitoringInstanceVPSAPI(t *testing.T) {
 func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 	collectionCalled := false
 	itemCalled := false
+	monthlyBudgetsCalled := false
 	middlewareCalls := 0
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
@@ -481,6 +506,10 @@ func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 			itemCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
+		SubscriptionMonthlyBudgetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			monthlyBudgetsCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
 		AuthMiddleware: func(_ http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				middlewareCalls++
@@ -489,7 +518,7 @@ func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/api/subscriptions", "/api/subscriptions/sub_001"} {
+	for _, path := range []string{"/api/subscriptions", "/api/subscriptions/sub_001", "/api/subscription-monthly-budgets", "/api/subscription-monthly-budgets/2026-06"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 
@@ -505,8 +534,11 @@ func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 	if itemCalled {
 		t.Fatal("subscription item handler was called despite auth middleware blocking")
 	}
-	if middlewareCalls != 2 {
-		t.Fatalf("middleware calls = %d, want 2", middlewareCalls)
+	if monthlyBudgetsCalled {
+		t.Fatal("subscription monthly budgets handler was called despite auth middleware blocking")
+	}
+	if middlewareCalls != 4 {
+		t.Fatalf("middleware calls = %d, want 4", middlewareCalls)
 	}
 }
 

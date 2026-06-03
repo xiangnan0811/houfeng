@@ -12,11 +12,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/store/migrate"
 	"houfeng/internal/center/subscriptioncosts"
+	"houfeng/internal/center/subscriptions"
 )
 
 func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsMarksInsufficientData(t *testing.T) {
@@ -111,6 +113,135 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsSkipsQueryForInva
 	}
 	if len(got) != 0 {
 		t.Fatalf("ListCostMonthBuckets() = %#v, want empty slice", got)
+	}
+}
+
+func TestPostgresSubscriptionCostRepositoryListBudgetMonthBucketsCarriesForward(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 2, 9, 0, 0, 0, time.UTC)
+	var seenSQL string
+	var seenArgs []any
+	repo := &PostgresSubscriptionCostRepository{db: fakeSubscriptionCostDB{
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			seenSQL = sql
+			seenArgs = append([]any(nil), args...)
+			return &fakeSubscriptionCostRows{rows: []fakeSubscriptionCostScan{
+				{scan: func(dest ...any) error {
+					if len(dest) != 5 {
+						t.Fatalf("scan destinations = %d, want 5", len(dest))
+					}
+					*(dest[0].(*string)) = "2026-05"
+					*(dest[1].(*pgtype.Float8)) = pgtype.Float8{Float64: 100, Valid: true}
+					*(dest[2].(*string)) = "CNY"
+					*(dest[3].(*int)) = 80
+					*(dest[4].(*bool)) = false
+					return nil
+				}},
+				{scan: func(dest ...any) error {
+					if len(dest) != 5 {
+						t.Fatalf("scan destinations = %d, want 5", len(dest))
+					}
+					*(dest[0].(*string)) = "2026-06"
+					*(dest[1].(*pgtype.Float8)) = pgtype.Float8{Float64: 120, Valid: true}
+					*(dest[2].(*string)) = "USD"
+					*(dest[3].(*int)) = 75
+					*(dest[4].(*bool)) = true
+					return nil
+				}},
+			}}, nil
+		},
+	}}
+
+	got, err := repo.ListBudgetMonthBuckets(context.Background(), centersettings.SubscriptionCostSettings{BaseCurrency: "CNY"}, 2, now)
+	if err != nil {
+		t.Fatalf("ListBudgetMonthBuckets() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListBudgetMonthBuckets() returned %d rows, want 2", len(got))
+	}
+	if got[0].Bucket != "2026-05" || got[0].BudgetLimit == nil || *got[0].BudgetLimit != 100 || got[0].BudgetCurrency != "CNY" || got[0].DataInsufficient {
+		t.Fatalf("first budget bucket = %#v, want carried CNY budget", got[0])
+	}
+	if got[1].Bucket != "2026-06" || got[1].BudgetLimit == nil || *got[1].BudgetLimit != 120 || got[1].BudgetCurrency != "USD" || !got[1].DataInsufficient {
+		t.Fatalf("second budget bucket = %#v, want currency mismatch marked insufficient", got[1])
+	}
+	if len(seenArgs) != 3 || seenArgs[1] != 2 || seenArgs[2] != "CNY" {
+		t.Fatalf("query args = %#v, want now/months/base", seenArgs)
+	}
+	if !seenArgs[0].(time.Time).Equal(now.UTC()) {
+		t.Fatalf("now arg = %v, want %v", seenArgs[0], now.UTC())
+	}
+	for _, snippet := range []string{
+		"subscription_monthly_budgets",
+		"budget_month <= b.bucket_start",
+		"order by budget_month desc",
+		"currency_mismatch",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("ListBudgetMonthBuckets SQL missing %q in %s", snippet, seenSQL)
+		}
+	}
+}
+
+func TestPostgresSubscriptionCostRepositoryUpsertMonthlyBudget(t *testing.T) {
+	t.Parallel()
+
+	month, err := subscriptions.ParseDate("2026-07-01")
+	if err != nil {
+		t.Fatalf("parse date: %v", err)
+	}
+	createdAt := time.Date(2026, time.June, 3, 8, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, time.June, 3, 8, 30, 0, 0, time.UTC)
+	var seenSQL string
+	var seenArgs []any
+	repo := &PostgresSubscriptionCostRepository{db: fakeSubscriptionCostDB{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			seenSQL = sql
+			seenArgs = append([]any(nil), args...)
+			return fakeSubscriptionCostRow{scan: func(dest ...any) error {
+				if len(dest) != 7 {
+					t.Fatalf("scan destinations = %d, want 7", len(dest))
+				}
+				*(dest[0].(*time.Time)) = month.Time
+				*(dest[1].(*string)) = "USD"
+				*(dest[2].(*float64)) = 180.5
+				*(dest[3].(*int)) = 75
+				*(dest[4].(*string)) = "growth"
+				*(dest[5].(*time.Time)) = createdAt
+				*(dest[6].(*time.Time)) = updatedAt
+				return nil
+			}}
+		},
+	}}
+
+	got, err := repo.UpsertMonthlyBudget(context.Background(), subscriptioncosts.UpsertMonthlyBudgetInput{
+		BudgetMonth:  month,
+		BaseCurrency: "usd",
+		MonthlyLimit: 180.5,
+		WarningPct:   75,
+		Note:         " growth ",
+	})
+	if err != nil {
+		t.Fatalf("UpsertMonthlyBudget() error = %v", err)
+	}
+	if got.BudgetMonth.Time.Format("2006-01-02") != "2026-07-01" || got.BaseCurrency != "USD" || got.MonthlyLimit != 180.5 || got.WarningPct != 75 || got.Note != "growth" {
+		t.Fatalf("UpsertMonthlyBudget() = %#v, want normalized returned record", got)
+	}
+	if len(seenArgs) != 5 || seenArgs[1] != "USD" || seenArgs[2] != 180.5 || seenArgs[3] != 75 || seenArgs[4] != "growth" {
+		t.Fatalf("query args = %#v, want normalized upsert args", seenArgs)
+	}
+	if !seenArgs[0].(time.Time).Equal(month.Time) {
+		t.Fatalf("budget month arg = %v, want %v", seenArgs[0], month.Time)
+	}
+	for _, snippet := range []string{
+		"insert into subscription_monthly_budgets",
+		"on conflict (budget_month) do update",
+		"updated_at = now()",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("UpsertMonthlyBudget SQL missing %q in %s", snippet, seenSQL)
+		}
 	}
 }
 

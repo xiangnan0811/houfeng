@@ -100,6 +100,12 @@ func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
 		WarningPct:   80,
 		Enabled:      true,
 	}}
+	repo.budgetMonthBuckets = []SeriesPoint{{
+		Bucket:           "2026-06",
+		BudgetLimit:      &limit,
+		BudgetCurrency:   "CNY",
+		BudgetWarningPct: 80,
+	}}
 
 	overview, err := service.GetOverview(ctx)
 	if err != nil {
@@ -146,11 +152,20 @@ func TestServiceStatisticsReturnsCostMonthBuckets(t *testing.T) {
 		MonthlyPriceBase: &monthly,
 		YearlyPriceBase:  &yearly,
 		RenewAt:          datePtr(t, "2026-06-10"),
+		PaymentMethod:    "card",
+		Country:          "JP",
+		Region:           "Tokyo",
 	}}
 	repo.costMonthBuckets = []SeriesPoint{
 		{Bucket: "2025-07", MonthlyCost: 40},
 		{Bucket: "2025-08", MonthlyCost: 60, DataInsufficient: true},
 		{Bucket: "2026-06", MonthlyCost: 90},
+	}
+	budgetLimit := 100.0
+	repo.budgetMonthBuckets = []SeriesPoint{
+		{Bucket: "2025-07", BudgetLimit: &budgetLimit, BudgetCurrency: "CNY", BudgetWarningPct: 80},
+		{Bucket: "2025-08", BudgetLimit: &budgetLimit, BudgetCurrency: "USD", BudgetWarningPct: 80, DataInsufficient: true},
+		{Bucket: "2026-06", BudgetLimit: &budgetLimit, BudgetCurrency: "CNY", BudgetWarningPct: 80},
 	}
 
 	stats, err := service.GetStatistics(ctx, StatisticsWindowYear)
@@ -169,8 +184,51 @@ func TestServiceStatisticsReturnsCostMonthBuckets(t *testing.T) {
 	if !stats.CostMonthBuckets[1].DataInsufficient {
 		t.Fatalf("cost month bucket = %#v, want data_insufficient passthrough", stats.CostMonthBuckets[1])
 	}
+	if stats.CostMonthBuckets[2].BudgetLimit == nil || *stats.CostMonthBuckets[2].BudgetLimit != 100 || stats.CostMonthBuckets[2].BudgetCurrency != "CNY" {
+		t.Fatalf("merged budget bucket = %#v, want CNY 100 budget", stats.CostMonthBuckets[2])
+	}
+	if len(stats.PaymentBreakdown) != 1 || stats.PaymentBreakdown[0].Label != "card" {
+		t.Fatalf("payment breakdown = %#v, want card", stats.PaymentBreakdown)
+	}
+	if len(stats.RegionBreakdown) != 1 || stats.RegionBreakdown[0].Label != "JP / Tokyo" {
+		t.Fatalf("region breakdown = %#v, want JP / Tokyo", stats.RegionBreakdown)
+	}
 	if len(stats.RenewalMonthBuckets) != 12 {
 		t.Fatalf("renewal month buckets = %d, want 12", len(stats.RenewalMonthBuckets))
+	}
+}
+
+func TestServiceMonthlyBudgetRisksIgnoreCurrencyMismatch(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 2, 9, 0, 0, 0, time.UTC)
+	monthly := 120.0
+	yearly := 1440.0
+	limit := 100.0
+	service, repo := newTestService()
+	service.now = func() time.Time { return now }
+	repo.rows = []CostRow{{
+		SubscriptionID:   "sub_a",
+		VPSID:            "vps_a",
+		VPSDisplayName:   "Tokyo Edge",
+		Currency:         "USD",
+		MonthlyPriceBase: &monthly,
+		YearlyPriceBase:  &yearly,
+		BaseCurrency:     "CNY",
+	}}
+	repo.budgetMonthBuckets = []SeriesPoint{{
+		Bucket:           "2026-06",
+		BudgetLimit:      &limit,
+		BudgetCurrency:   "USD",
+		BudgetWarningPct: 80,
+		DataInsufficient: true,
+	}}
+
+	overview, err := service.GetOverview(ctx)
+	if err != nil {
+		t.Fatalf("GetOverview() error = %v", err)
+	}
+	if overview.BudgetRiskCount != 0 || len(overview.BudgetRisks) != 0 {
+		t.Fatalf("budget risks = count %d rows %#v, want ignored for currency mismatch", overview.BudgetRiskCount, overview.BudgetRisks)
 	}
 }
 
@@ -294,17 +352,23 @@ func (r *fakeSettingsRepo) PutSettings(_ context.Context, settings centersetting
 }
 
 type fakeSubscriptionCostRepo struct {
-	rows             []CostRow
-	costMonthBuckets []SeriesPoint
-	costBucketMonths int
-	costBucketNow    time.Time
-	missing          []MissingSubscriptionAsset
-	budgets          []BudgetRecord
-	currencies       []string
-	upserts          []ExchangeRateUpsert
-	candidates       []ReminderCandidate
-	deliveryKeys     map[string]string
-	deliveryAttempts int
+	rows                      []CostRow
+	costMonthBuckets          []SeriesPoint
+	budgetMonthBuckets        []SeriesPoint
+	costBucketMonths          int
+	costBucketNow             time.Time
+	budgetBucketMonths        int
+	budgetBucketNow           time.Time
+	missing                   []MissingSubscriptionAsset
+	budgets                   []BudgetRecord
+	monthlyBudgets            []MonthlyBudgetRecord
+	upsertMonthlyBudgetInput  UpsertMonthlyBudgetInput
+	upsertMonthlyBudgetRecord MonthlyBudgetRecord
+	currencies                []string
+	upserts                   []ExchangeRateUpsert
+	candidates                []ReminderCandidate
+	deliveryKeys              map[string]string
+	deliveryAttempts          int
 }
 
 func (r *fakeSubscriptionCostRepo) ListCostRows(context.Context, centersettings.SubscriptionCostSettings) ([]CostRow, error) {
@@ -315,6 +379,12 @@ func (r *fakeSubscriptionCostRepo) ListCostMonthBuckets(_ context.Context, _ cen
 	r.costBucketMonths = months
 	r.costBucketNow = now
 	return r.costMonthBuckets, nil
+}
+
+func (r *fakeSubscriptionCostRepo) ListBudgetMonthBuckets(_ context.Context, _ centersettings.SubscriptionCostSettings, months int, now time.Time) ([]SeriesPoint, error) {
+	r.budgetBucketMonths = months
+	r.budgetBucketNow = now
+	return r.budgetMonthBuckets, nil
 }
 
 func (r *fakeSubscriptionCostRepo) ListMissingSubscriptionAssets(context.Context) ([]MissingSubscriptionAsset, error) {
@@ -342,6 +412,24 @@ func (r *fakeSubscriptionCostRepo) CreateBudget(_ context.Context, input CreateB
 
 func (r *fakeSubscriptionCostRepo) PatchBudget(context.Context, PatchBudgetInput) (BudgetRecord, error) {
 	return BudgetRecord{}, nil
+}
+
+func (r *fakeSubscriptionCostRepo) ListMonthlyBudgets(context.Context) ([]MonthlyBudgetRecord, error) {
+	return r.monthlyBudgets, nil
+}
+
+func (r *fakeSubscriptionCostRepo) UpsertMonthlyBudget(_ context.Context, input UpsertMonthlyBudgetInput) (MonthlyBudgetRecord, error) {
+	r.upsertMonthlyBudgetInput = input
+	if r.upsertMonthlyBudgetRecord.BudgetMonth.Time.IsZero() {
+		return MonthlyBudgetRecord{
+			BudgetMonth:  input.BudgetMonth,
+			BaseCurrency: input.BaseCurrency,
+			MonthlyLimit: input.MonthlyLimit,
+			WarningPct:   input.WarningPct,
+			Note:         input.Note,
+		}, nil
+	}
+	return r.upsertMonthlyBudgetRecord, nil
 }
 
 func (r *fakeSubscriptionCostRepo) ListActiveCurrencies(context.Context) ([]string, error) {

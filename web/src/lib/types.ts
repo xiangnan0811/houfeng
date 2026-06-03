@@ -1386,6 +1386,8 @@ export type SubscriptionCostRow = {
   next_reminder_at?: string | null
   status: string
   payment_method: string
+  country: string
+  region: string
   lifecycle_status: string
   renewal_decision: string
   budget_status: SubscriptionBudgetStatus | string
@@ -1425,6 +1427,24 @@ export type PatchSubscriptionBudgetInput = Partial<CreateSubscriptionBudgetInput
   budget_id: string
 }
 
+export type SubscriptionMonthlyBudgetRecord = {
+  budget_month: string
+  base_currency: string
+  monthly_limit: number
+  warning_pct: number
+  note: string
+  created_at: string
+  updated_at: string
+}
+
+export type UpsertSubscriptionMonthlyBudgetInput = {
+  budget_month?: string
+  base_currency: string
+  monthly_limit: number
+  warning_pct: number
+  note: string
+}
+
 export type SubscriptionOverview = {
   snapshot_generated_at: string
   base_currency: string
@@ -1450,6 +1470,9 @@ export type SubscriptionSeriesPoint = {
   bucket: string
   monthly_cost: number
   renewal_count: number
+  budget_limit?: number | null
+  budget_currency?: string
+  budget_warning_pct?: number
   data_insufficient: boolean
 }
 
@@ -1461,6 +1484,8 @@ export type SubscriptionStatistics = {
   provider_breakdown: SubscriptionBreakdownItem[]
   currency_breakdown: SubscriptionBreakdownItem[]
   category_breakdown: SubscriptionBreakdownItem[]
+  payment_breakdown: SubscriptionBreakdownItem[]
+  region_breakdown: SubscriptionBreakdownItem[]
   cost_month_buckets: SubscriptionSeriesPoint[]
   renewal_month_buckets: SubscriptionSeriesPoint[]
   budget_statuses: SubscriptionBudgetRecord[]

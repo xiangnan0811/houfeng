@@ -1,23 +1,42 @@
-import { type KeyboardEvent } from 'react'
+import { type KeyboardEvent, useState } from 'react'
 
-import { MetricChart, StatusGlyph, Tabs, type HealthState } from '../../components/atoms'
-import { formatMoney } from '../../lib/format'
+import { StatusGlyph, Tabs } from '../../components/atoms'
+import { formatDate, formatMoney } from '../../lib/format'
 import type {
   SubscriptionBreakdownItem,
   SubscriptionCostRow,
   SubscriptionOverview,
+  SubscriptionRenewalQueueItem,
   SubscriptionSeriesPoint,
   SubscriptionStatistics,
 } from '../../lib/types'
 
-export type SubscriptionBreakdownKind = 'provider' | 'category' | 'currency'
+export type SubscriptionBreakdownKind = 'provider' | 'category' | 'currency' | 'payment' | 'region'
+
+type MonthCostView = 'pie' | 'ranking'
 
 type DonutItem = {
   key: string
   label: string
   cost: number
+  originalPrice: string
   vpsID: string | null
   isOther: boolean
+  share: number
+}
+
+type TrendPoint = {
+  bucket: string
+  x: number
+  cost: number
+  budget: number | null
+  yCost: number
+  yBudget: number | null
+}
+
+type DifferenceArea = {
+  tone: 'over' | 'under'
+  points: string
 }
 
 type SubscriptionInsightsProps = {
@@ -44,6 +63,13 @@ const BREAKDOWN_TABS = [
   { value: 'provider', label: '服务商' },
   { value: 'category', label: '分类' },
   { value: 'currency', label: '币种' },
+  { value: 'payment', label: '支付方式' },
+  { value: 'region', label: '国家/地区' },
+] as const
+
+const MONTH_COST_TABS = [
+  { value: 'pie', label: '饼图' },
+  { value: 'ranking', label: '排行' },
 ] as const
 
 function money(value?: number | null, currency = 'CNY'): string {
@@ -68,51 +94,41 @@ function monthLabel(bucket: string): string {
   return `${year.slice(2)}/${month}`
 }
 
-function monthTooltipLabel(observedAt: string): string {
-  const bucket = observedAt.slice(0, 7)
-  const [year, month] = bucket.split('-')
-  if (!year || !month) return observedAt
-  return `${year} 年 ${month} 月`
-}
-
-function budgetTone(status?: string | null): HealthState {
-  if (status === 'over') return 'critical'
-  if (status === 'warning') return 'alert'
-  if (status === 'ok') return 'normal'
-  if (status === 'disabled') return 'maintenance'
-  return 'notice'
-}
-
-function budgetStatusLabel(status?: string | null): string {
-  const map: Record<string, string> = {
-    disabled: '已停用',
-    ok: '预算内',
-    warning: '接近上限',
-    over: '已超预算',
-    unknown: '未匹配',
-  }
-  return map[status ?? ''] ?? (status || '-')
+function buildMonthlyRows(rows: SubscriptionCostRow[]): SubscriptionCostRow[] {
+  return rows
+    .filter((row) => (row.monthly_price_base ?? 0) > 0)
+    .sort((left, right) => (right.monthly_price_base ?? 0) - (left.monthly_price_base ?? 0))
 }
 
 function buildDonutItems(rows: SubscriptionCostRow[]): DonutItem[] {
-  const sorted = rows
-    .map((row) => ({
+  const sorted = buildMonthlyRows(rows)
+  const total = sorted.reduce((sum, row) => sum + (row.monthly_price_base ?? 0), 0)
+  const top = sorted.slice(0, 5).map((row) => {
+    const cost = row.monthly_price_base ?? 0
+    return {
       key: row.vps_id,
       label: row.display_name || row.vps_display_name || row.vps_id,
-      cost: row.monthly_price_base ?? 0,
+      cost,
+      originalPrice: money(row.price, row.currency),
       vpsID: row.vps_id,
       isOther: false,
-    }))
-    .filter((item) => item.cost > 0)
-    .sort((left, right) => right.cost - left.cost)
-
-  const top = sorted.slice(0, 5)
+      share: total > 0 ? (cost / total) * 100 : 0,
+    }
+  })
   const other = sorted.slice(5)
   if (other.length === 0) return top
-  const otherCost = other.reduce((sum, item) => sum + item.cost, 0)
+  const otherCost = other.reduce((sum, row) => sum + (row.monthly_price_base ?? 0), 0)
   return [
     ...top,
-    { key: 'other', label: '其他', cost: otherCost, vpsID: null, isOther: true },
+    {
+      key: 'other',
+      label: '其他',
+      cost: otherCost,
+      originalPrice: `${other.length} 项订阅`,
+      vpsID: null,
+      isOther: true,
+      share: total > 0 ? (otherCost / total) * 100 : 0,
+    },
   ]
 }
 
@@ -120,20 +136,175 @@ function breakdownItems(statistics: SubscriptionStatistics | null, kind: Subscri
   if (!statistics) return []
   if (kind === 'category') return statistics.category_breakdown
   if (kind === 'currency') return statistics.currency_breakdown
+  if (kind === 'payment') return statistics.payment_breakdown ?? []
+  if (kind === 'region') return statistics.region_breakdown ?? []
   return statistics.provider_breakdown
-}
-
-function trendSamples(buckets: SubscriptionSeriesPoint[]) {
-  return buckets.map((bucket) => ({
-    value: bucket.monthly_cost,
-    observedAt: `${bucket.bucket}-01T00:00:00Z`,
-  }))
 }
 
 function handleKeyActivate(event: KeyboardEvent, run: () => void) {
   if (event.key !== 'Enter' && event.key !== ' ') return
   event.preventDefault()
   run()
+}
+
+function pathFrom(points: Array<{ x: number; y: number | null }>): string {
+  const valid = points.filter((point): point is { x: number; y: number } => point.y != null)
+  if (valid.length === 0) return ''
+  return valid.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ')
+}
+
+function pointOnSegment(left: TrendPoint, right: TrendPoint, t: number): { x: number; y: number } {
+  return {
+    x: left.x + (right.x - left.x) * t,
+    y: left.yCost + (right.yCost - left.yCost) * t,
+  }
+}
+
+function polygon(points: Array<{ x: number; y: number }>): string {
+  return points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
+}
+
+function buildDifferenceAreas(points: TrendPoint[]): DifferenceArea[] {
+  const areas: DifferenceArea[] = []
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const left = points[index]
+    const right = points[index + 1]
+    if (left.budget == null || right.budget == null || left.yBudget == null || right.yBudget == null) continue
+    const leftDelta = left.cost - left.budget
+    const rightDelta = right.cost - right.budget
+    if (leftDelta === 0 && rightDelta === 0) continue
+    if (leftDelta === 0 || rightDelta === 0 || Math.sign(leftDelta) === Math.sign(rightDelta)) {
+      const tone: DifferenceArea['tone'] = (leftDelta || rightDelta) > 0 ? 'over' : 'under'
+      areas.push({
+        tone,
+        points: polygon([
+          { x: left.x, y: left.yCost },
+          { x: right.x, y: right.yCost },
+          { x: right.x, y: right.yBudget },
+          { x: left.x, y: left.yBudget },
+        ]),
+      })
+      continue
+    }
+    const t = Math.abs(leftDelta) / (Math.abs(leftDelta) + Math.abs(rightDelta))
+    const intersection = pointOnSegment(left, right, t)
+    areas.push({
+      tone: leftDelta > 0 ? 'over' : 'under',
+      points: polygon([
+        { x: left.x, y: left.yCost },
+        intersection,
+        { x: left.x, y: left.yBudget },
+      ]),
+    })
+    areas.push({
+      tone: rightDelta > 0 ? 'over' : 'under',
+      points: polygon([
+        intersection,
+        { x: right.x, y: right.yCost },
+        { x: right.x, y: right.yBudget },
+      ]),
+    })
+  }
+  return areas
+}
+
+function BudgetCostTrendChart({
+  buckets,
+  baseCurrency,
+}: {
+  buckets: SubscriptionSeriesPoint[]
+  baseCurrency: string
+}) {
+  const width = 720
+  const height = 220
+  const pad = { left: 38, right: 14, top: 16, bottom: 28 }
+  const values = buckets.flatMap((bucket) => [
+    bucket.monthly_cost,
+    bucket.budget_limit ?? 0,
+  ])
+  const yMax = Math.max(...values, 1)
+  const chartWidth = width - pad.left - pad.right
+  const chartHeight = height - pad.top - pad.bottom
+  const xFor = (index: number) => pad.left + (buckets.length <= 1 ? chartWidth / 2 : (index / (buckets.length - 1)) * chartWidth)
+  const yFor = (value: number) => pad.top + chartHeight - (Math.max(0, value) / yMax) * chartHeight
+  const points: TrendPoint[] = buckets.map((bucket, index) => ({
+    bucket: bucket.bucket,
+    x: xFor(index),
+    cost: bucket.monthly_cost,
+    budget: bucket.budget_limit ?? null,
+    yCost: yFor(bucket.monthly_cost),
+    yBudget: bucket.budget_limit == null ? null : yFor(bucket.budget_limit),
+  }))
+  const costPath = pathFrom(points.map((point) => ({ x: point.x, y: point.yCost })))
+  const budgetPath = pathFrom(points.map((point) => ({ x: point.x, y: point.yBudget })))
+  const areas = buildDifferenceAreas(points)
+  const ticks = [0, yMax / 2, yMax]
+
+  return (
+    <svg className="subscription-trend-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`最近一年${baseCurrency}月成本与月预算趋势`}>
+      {ticks.map((tick) => {
+        const y = yFor(tick)
+        return (
+          <g key={tick}>
+            <line className="subscription-trend-chart__grid" x1={pad.left} y1={y} x2={width - pad.right} y2={y} />
+            <text className="subscription-trend-chart__axis" x={pad.left - 8} y={y + 3} textAnchor="end">{compactAmount(tick)}</text>
+          </g>
+        )
+      })}
+      {areas.map((area, index) => (
+        <polygon key={`${area.tone}-${index}`} className={`subscription-trend-chart__area subscription-trend-chart__area--${area.tone}`} points={area.points} />
+      ))}
+      <path className="subscription-trend-chart__line subscription-trend-chart__line--cost" d={costPath} />
+      {budgetPath ? <path className="subscription-trend-chart__line subscription-trend-chart__line--budget" d={budgetPath} /> : null}
+      {points.map((point) => (
+        <g key={point.bucket}>
+          <circle className="subscription-trend-chart__point subscription-trend-chart__point--cost" cx={point.x} cy={point.yCost} r="3.5" />
+          {point.yBudget == null ? null : <circle className="subscription-trend-chart__point subscription-trend-chart__point--budget" cx={point.x} cy={point.yBudget} r="3.5" />}
+        </g>
+      ))}
+      {points.map((point, index) => (
+        index % Math.max(1, Math.ceil(points.length / 5)) === 0 || index === points.length - 1 ? (
+          <text key={point.bucket} className="subscription-trend-chart__axis" x={point.x} y={height - 8} textAnchor="middle">{monthLabel(point.bucket)}</text>
+        ) : null
+      ))}
+    </svg>
+  )
+}
+
+function RenewalQueue({
+  items,
+  baseCurrency,
+  onSelectVPS,
+}: {
+  items: SubscriptionRenewalQueueItem[]
+  baseCurrency: string
+  onSelectVPS: (vpsID: string) => void
+}) {
+  if (items.length === 0) {
+    return (
+      <p className="asset-table-empty-state">
+        <strong>暂无临近续费</strong>
+        <span>未来 90 天没有需要处理的订阅续费。</span>
+      </p>
+    )
+  }
+  return (
+    <div className="subscription-renewal-queue subscription-panel-scroll">
+      {items.map((item) => {
+        const isStale = item.exchange_rate_stale
+        return (
+          <button key={item.subscription_id} type="button" className={`subscription-renewal-row ${isStale ? 'subscription-renewal-row--stale' : ''}`} onClick={() => onSelectVPS(item.vps_id)}>
+            <span>
+              <strong><StatusGlyph state={isStale ? 'notice' : 'normal'} size="sm" />{item.display_name || item.vps_display_name}</strong>
+              <small>{item.provider_name || '未记录服务商'} · {item.currency}</small>
+            </span>
+            <span className="mono">{formatDate(item.renew_at)}</span>
+            <span className="mono">{money(item.monthly_price_base, item.base_currency || baseCurrency)}/月</span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 export function SubscriptionInsights({
@@ -146,8 +317,12 @@ export function SubscriptionInsights({
   onBreakdownKindChange,
   onSelectVPS,
 }: SubscriptionInsightsProps) {
+  const [monthCostView, setMonthCostView] = useState<MonthCostView>('pie')
+  const [activeDonutKey, setActiveDonutKey] = useState<string | null>(null)
+  const monthlyRows = buildMonthlyRows(overview?.vps_costs ?? [])
   const donutItems = buildDonutItems(overview?.vps_costs ?? [])
   const donutTotal = donutItems.reduce((sum, item) => sum + item.cost, 0)
+  const activeDonutItem = donutItems.find((item) => item.key === activeDonutKey) ?? null
   const circumference = 2 * Math.PI * 52
   const donutSegments = donutItems.map((item, index) => {
     const priorCost = donutItems.slice(0, index).reduce((sum, prior) => sum + prior.cost, 0)
@@ -157,10 +332,12 @@ export function SubscriptionInsights({
   })
   const costBuckets = statistics?.cost_month_buckets ?? []
   const hasInsufficientTrendData = costBuckets.some((bucket) => bucket.data_insufficient)
-  const hasTrend = !hasInsufficientTrendData && costBuckets.length >= 2 && costBuckets.some((bucket) => bucket.monthly_cost > 0)
-  const renewalBuckets = (statistics?.renewal_month_buckets ?? []).filter((bucket) => bucket.renewal_count > 0 || bucket.monthly_cost > 0)
+  const hasTrend = !hasInsufficientTrendData &&
+    costBuckets.length >= 2 &&
+    costBuckets.some((bucket) => bucket.monthly_cost > 0 || (bucket.budget_limit ?? 0) > 0)
   const currentBreakdown = breakdownItems(statistics, breakdownKind)
   const breakdownMax = Math.max(...currentBreakdown.map((item) => item.monthly_cost), 0)
+  const rankingMax = Math.max(...monthlyRows.map((row) => row.monthly_price_base ?? 0), 0)
 
   return (
     <section className="subscription-insights animate-in" aria-label="订阅成本洞察">
@@ -169,25 +346,27 @@ export function SubscriptionInsights({
         <h2 className="section-heading__title">成本洞察</h2>
       </div>
       <div className="subscription-insights__grid">
-        <div className="page-panel subscription-insight-panel subscription-insight-panel--occupancy">
-          <div className="section-heading section-heading--inline">
+        <div className="page-panel subscription-insight-panel subscription-insight-panel--month">
+          <div className="subscription-panel-header">
             <div>
               <p className="section-heading__eyebrow">This Month</p>
-              <h3 className="section-heading__title">本月 VPS 成本占用</h3>
+              <h3 className="section-heading__title">月成本</h3>
             </div>
-            <span className="section-heading__meta">{money(donutTotal, baseCurrency)}</span>
+            <Tabs variant="pill" value={monthCostView} onChange={setMonthCostView} items={MONTH_COST_TABS} />
           </div>
-          {donutItems.length === 0 ? (
+          <span className="subscription-panel-total">{money(donutTotal, baseCurrency)}</span>
+          {monthlyRows.length === 0 ? (
             <p className="asset-table-empty-state">
               <strong>暂无可展示成本</strong>
               <span>当前没有可换算为基准货币的 VPS 订阅成本。</span>
             </p>
-          ) : (
-            <div className="subscription-donut-layout">
+          ) : monthCostView === 'pie' ? (
+            <div className="subscription-donut-layout subscription-donut-layout--compact">
               <svg className="subscription-donut" viewBox="0 0 140 140" role="img" aria-label={`本月 VPS 成本占用，总计 ${money(donutTotal, baseCurrency)}`}>
                 <circle className="subscription-donut__track" cx="70" cy="70" r="52" />
                 {donutSegments.map(({ item, index, length, dashOffset }) => {
                   const activate = () => {
+                    setActiveDonutKey(item.key)
                     if (item.vpsID) onSelectVPS(item.vpsID)
                   }
                   return (
@@ -201,8 +380,12 @@ export function SubscriptionInsights({
                       strokeDasharray={`${length} ${Math.max(0, circumference - length)}`}
                       strokeDashoffset={dashOffset}
                       role="button"
-                      tabIndex={item.vpsID ? 0 : -1}
-                      aria-label={item.vpsID ? `筛选 ${item.label}，本月成本 ${money(item.cost, baseCurrency)}` : `其他 VPS 成本 ${money(item.cost, baseCurrency)}`}
+                      tabIndex={0}
+                      aria-label={item.vpsID ? `筛选 ${item.label}，本月成本 ${money(item.cost, baseCurrency)}，占比 ${item.share.toFixed(1)}%` : `其他 VPS 成本 ${money(item.cost, baseCurrency)}，不应用模糊筛选`}
+                      onMouseEnter={() => setActiveDonutKey(item.key)}
+                      onMouseLeave={() => setActiveDonutKey(null)}
+                      onFocus={() => setActiveDonutKey(item.key)}
+                      onBlur={() => setActiveDonutKey(null)}
                       onClick={activate}
                       onKeyDown={(event) => handleKeyActivate(event, activate)}
                     />
@@ -212,36 +395,76 @@ export function SubscriptionInsights({
                 <text x="70" y="78" className="subscription-donut__center-value">{compactAmount(donutTotal)}</text>
                 <text x="70" y="92" className="subscription-donut__center-label">本月</text>
               </svg>
-              <div className="subscription-donut-legend">
-                {donutItems.map((item, index) => {
-                  const percent = donutTotal > 0 ? (item.cost / donutTotal) * 100 : 0
-                  const activate = () => {
-                    if (item.vpsID) onSelectVPS(item.vpsID)
-                  }
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className="subscription-donut-legend__item"
-                      disabled={item.isOther}
-                      title={item.isOther ? '其他项只展示汇总，不应用模糊筛选' : undefined}
-                      onClick={activate}
-                    >
-                      <span className="subscription-donut-legend__swatch" style={{ background: DONUT_COLORS[index % DONUT_COLORS.length] }} />
-                      <span>
-                        <strong>{item.label}</strong>
-                        <small>{money(item.cost, baseCurrency)} · {percent.toFixed(1)}%</small>
-                      </span>
-                    </button>
-                  )
-                })}
+              <div className="subscription-donut-tooltip" role="status" aria-live="polite">
+                {activeDonutItem ? (
+                  <>
+                    <strong>{activeDonutItem.label}</strong>
+                    <span>原始付费：{activeDonutItem.originalPrice}</span>
+                    <span>基准月成本：{money(activeDonutItem.cost, baseCurrency)}</span>
+                    <span>月付费占比：{activeDonutItem.share.toFixed(1)}%</span>
+                    {activeDonutItem.isOther ? <small>其他项仅展示汇总，不应用筛选。</small> : null}
+                  </>
+                ) : (
+                  <>
+                    <strong>划过扇区查看明细</strong>
+                    <span>点击具体 VPS 扇区可应用筛选。</span>
+                  </>
+                )}
               </div>
+            </div>
+          ) : (
+            <div className="subscription-ranking-list subscription-panel-scroll">
+              {monthlyRows.map((row) => {
+                const cost = row.monthly_price_base ?? 0
+                const share = donutTotal > 0 ? (cost / donutTotal) * 100 : 0
+                return (
+                  <button key={row.subscription_id} type="button" className="subscription-ranking-row" onClick={() => onSelectVPS(row.vps_id)}>
+                    <div>
+                      <strong>{row.display_name || row.vps_display_name || row.vps_id}</strong>
+                      <small>{money(row.price, row.currency)} · {share.toFixed(1)}%</small>
+                    </div>
+                    <div className="subscription-breakdown-bar">
+                      <span style={{ width: barWidth(cost, rankingMax) }} />
+                    </div>
+                    <span className="mono">{money(cost, baseCurrency)}</span>
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
 
+        <div className="page-panel subscription-insight-panel subscription-insight-panel--composition">
+          <div className="subscription-panel-header">
+            <div>
+              <p className="section-heading__eyebrow">Composition</p>
+              <h3 className="section-heading__title">成本构成</h3>
+            </div>
+          </div>
+          <Tabs variant="pill" value={breakdownKind} onChange={onBreakdownKindChange} items={BREAKDOWN_TABS} />
+          <div className="subscription-breakdown-list subscription-panel-scroll">
+            {currentBreakdown.length === 0 ? (
+              <p className="asset-table-empty-state">
+                <strong>暂无构成数据</strong>
+                <span>当前统计窗口没有可展示的成本构成。</span>
+              </p>
+            ) : currentBreakdown.map((item) => (
+              <div key={item.key} className="subscription-breakdown-row">
+                <div>
+                  <strong>{item.label}</strong>
+                  <small>{item.subscription_count} 项订阅</small>
+                </div>
+                <div className="subscription-breakdown-bar">
+                  <span style={{ width: barWidth(item.monthly_cost, breakdownMax) }} />
+                </div>
+                <span className="mono">{money(item.monthly_cost, baseCurrency)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="page-panel subscription-insight-panel subscription-insight-panel--trend">
-          <div className="section-heading section-heading--inline">
+          <div className="subscription-panel-header">
             <div>
               <p className="section-heading__eyebrow">Year</p>
               <h3 className="section-heading__title">年度趋势与风险</h3>
@@ -252,83 +475,32 @@ export function SubscriptionInsights({
             <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{statisticsError}</p>
           ) : null}
           {!statisticsError && hasTrend ? (
-            <MetricChart
-              samples={trendSamples(costBuckets)}
-              height={190}
-              tone="accent"
-              yMin={0}
-              ariaLabel="最近一年订阅月成本趋势"
-              formatValue={(value) => money(value, baseCurrency)}
-              formatAxisValue={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value.toFixed(0)}
-              formatTime={(observedAt) => monthLabel(observedAt.slice(0, 7))}
-              formatTooltipTime={monthTooltipLabel}
-              showTooltip
-            />
+            <>
+              <BudgetCostTrendChart buckets={costBuckets} baseCurrency={baseCurrency} />
+              <div className="subscription-trend-legend" aria-label="趋势图图例">
+                <span><i className="subscription-trend-legend__line subscription-trend-legend__line--cost" />月成本</span>
+                <span><i className="subscription-trend-legend__line subscription-trend-legend__line--budget" />月预算</span>
+                <span><i className="subscription-trend-legend__area subscription-trend-legend__area--over" />超预算区间</span>
+                <span><i className="subscription-trend-legend__area subscription-trend-legend__area--under" />低于预算区间</span>
+              </div>
+            </>
           ) : !statisticsError ? (
             <p className="asset-table-empty-state">
               <strong>历史成本数据不足</strong>
-              <span>{hasInsufficientTrendData ? '部分历史月份缺少可用汇率，暂不绘制可能误导的趋势曲线。' : '后端未返回足够的历史月成本 bucket，暂不绘制趋势曲线。'}</span>
+              <span>{hasInsufficientTrendData ? '部分历史月份缺少可用汇率或预算币种不一致，暂不绘制可能误导的趋势曲线。' : '后端未返回足够的历史月成本与月预算 bucket。'}</span>
             </p>
           ) : null}
+        </div>
 
-          <div className="subscription-risk-grid">
-            <div className="subscription-risk-card">
-              <span><StatusGlyph state={overview?.budget_risk_count ? 'alert' : 'normal'} size="sm" />预算风险</span>
-              <strong>{overview?.budget_risk_count ?? 0}</strong>
-              <small>{overview?.budget_risks?.[0]?.name ? `${overview.budget_risks[0].name} · ${budgetStatusLabel(overview.budget_risks[0].status)}` : '无预算风险'}</small>
+        <div className="page-panel subscription-insight-panel subscription-insight-panel--renewal">
+          <div className="subscription-panel-header">
+            <div>
+              <p className="section-heading__eyebrow">Renewal Queue</p>
+              <h3 className="section-heading__title">续费队列</h3>
             </div>
-            <div className="subscription-risk-card">
-              <span><StatusGlyph state={(overview?.exchange_rate_stale_count ?? 0) > 0 ? 'notice' : 'normal'} size="sm" />汇率状态</span>
-              <strong>{overview?.exchange_rate_stale_count ?? 0}</strong>
-              <small>过期汇率项</small>
-            </div>
-            <div className="subscription-risk-card">
-              <span><StatusGlyph state={(overview?.renewal_due_30d_count ?? 0) > 0 ? 'notice' : 'normal'} size="sm" />续费月份</span>
-              <strong>{renewalBuckets.length}</strong>
-              <small>{renewalBuckets[0] ? `${monthLabel(renewalBuckets[0].bucket)} · ${renewalBuckets[0].renewal_count} 项` : '无续费压力'}</small>
-            </div>
+            <span className="section-heading__meta">{overview?.upcoming_renewals?.length ?? 0} 项</span>
           </div>
-
-          {overview?.budget_risks?.length ? (
-            <div className="subscription-budget-risk-list">
-              {overview.budget_risks.slice(0, 3).map((budget) => (
-                <div key={budget.budget_id} className="subscription-budget-risk-list__item">
-                  <StatusGlyph state={budgetTone(budget.status)} size="sm" ariaLabel={budgetStatusLabel(budget.status)} />
-                  <span>{budget.name}</span>
-                  <strong>{money(budget.current_monthly_spend, budget.base_currency)}</strong>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <div className="subscription-breakdown-panel">
-            <div className="subscription-breakdown-panel__header">
-              <div>
-                <p className="section-heading__eyebrow">Composition</p>
-                <h4>成本构成</h4>
-              </div>
-              <Tabs variant="pill" value={breakdownKind} onChange={onBreakdownKindChange} items={BREAKDOWN_TABS} />
-            </div>
-            <div className="subscription-breakdown-list">
-              {currentBreakdown.length === 0 ? (
-                <p className="asset-table-empty-state">
-                  <strong>暂无构成数据</strong>
-                  <span>当前统计窗口没有可展示的成本构成。</span>
-                </p>
-              ) : currentBreakdown.slice(0, 8).map((item) => (
-                <div key={item.key} className="subscription-breakdown-row">
-                  <div>
-                    <strong>{item.label}</strong>
-                    <small>{item.subscription_count} 项订阅</small>
-                  </div>
-                  <div className="subscription-breakdown-bar">
-                    <span style={{ width: barWidth(item.monthly_cost, breakdownMax) }} />
-                  </div>
-                  <span className="mono">{money(item.monthly_cost, baseCurrency)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <RenewalQueue items={overview?.upcoming_renewals ?? []} baseCurrency={baseCurrency} onSelectVPS={onSelectVPS} />
         </div>
       </div>
     </section>

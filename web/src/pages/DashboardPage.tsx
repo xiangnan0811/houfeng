@@ -229,7 +229,7 @@ export function DashboardPage() {
               </div>
             ) : null}
             {subscriptionOverview && subscriptionOverview.budget_risk_count > 0 ? (
-              <div className="wb-att-item" onClick={() => navigate('/subscriptions?budget_status=warning')}>
+              <div className="wb-att-item" onClick={() => navigate('/settings?tab=subscriptions')}>
                 <span className="alert-dot warn"></span>
                 <div className="wb-att-body">
                   <span className="wb-att-text">订阅预算接近或超过上限</span>

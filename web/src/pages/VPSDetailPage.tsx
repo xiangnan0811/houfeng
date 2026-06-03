@@ -194,24 +194,6 @@ function baseMoney(value?: number | null, currency = 'CNY'): string {
   return formatMoney(value, currency)
 }
 
-function budgetStatusLabel(status?: string | null): string {
-  const labels: Record<string, string> = {
-    disabled: '预算停用',
-    ok: '预算内',
-    warning: '接近预算',
-    over: '已超预算',
-    unknown: '未匹配预算',
-  }
-  return labels[status ?? ''] ?? (status || '—')
-}
-
-function budgetBadgeClass(status?: string | null): string {
-  if (status === 'over') return 'badge badge-err'
-  if (status === 'warning') return 'badge badge-warn'
-  if (status === 'ok') return 'badge badge-ok'
-  return 'badge badge-muted'
-}
-
 export function VPSDetailPage() {
   const { vpsId } = useParams()
   const navigate = useNavigate()
@@ -1428,15 +1410,12 @@ export function VPSDetailPage() {
                 <small>{activeSubscription.next_reminder_at ? `下次提醒 ${formatDate(activeSubscription.next_reminder_at)}` : '提醒由订阅设置控制'}</small>
               </div>
               <div>
-                <span>预算状态</span>
-                <strong>{budgetStatusLabel(activeSubscription.budget_status)}</strong>
-                <small>{activeSubscription.payment_method || '未记录支付方式'}</small>
+                <span>支付方式</span>
+                <strong>{activeSubscription.payment_method || '未记录'}</strong>
+                <small>全局月预算在订阅设置中管理</small>
               </div>
             </div>
             <div className="asset-context-inline vps-cost-card__signals">
-              <span className={budgetBadgeClass(activeSubscription.budget_status)}>
-                <span className="badge-dot" />{budgetStatusLabel(activeSubscription.budget_status)}
-              </span>
               {activeSubscription.exchange_rate_stale ? (
                 <span className="asset-context-pill asset-context-pill--attention">汇率过期</span>
               ) : (
@@ -1450,7 +1429,7 @@ export function VPSDetailPage() {
         ) : (
           <div className="vps-cost-card__empty">
             <strong>缺少 active 订阅账单事实</strong>
-            <span>补齐订阅后，这里会展示原币种价格、统一基准货币成本、预算状态和提醒状态。</span>
+            <span>补齐订阅后，这里会展示原币种价格、统一基准货币成本、续费和提醒状态。</span>
           </div>
         )}
       </section>
