@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.0](https://github.com/xiangnan0811/houfeng/compare/v0.34.0...v0.35.0) (2026-06-04)
+
+
+### Features
+
+* **providers:** polish provider directory table ([#197](https://github.com/xiangnan0811/houfeng/issues/197)) ([be5a131](https://github.com/xiangnan0811/houfeng/commit/be5a131e7f45d754c6f9d5a3e9e86c8cbed68373))
+
 ## [0.34.0](https://github.com/xiangnan0811/houfeng/compare/v0.33.0...v0.34.0) (2026-06-04)
 
 
