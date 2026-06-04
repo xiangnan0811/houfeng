@@ -146,8 +146,9 @@ describe('ProvidersPage', () => {
   })
 
   it('renders provider directory context from providers, VPS, and subscriptions', async () => {
+    const providerNote = '关键生产服务商，账单入口跟实际续费日期需要人工核对。'
     const providers = [
-      provider(),
+      provider({ note: providerNote }),
       provider({
         provider_id: 'pv_002',
         name: 'Vultr',
@@ -178,18 +179,28 @@ describe('ProvidersPage', () => {
     expect(screen.getByText('2 个服务商')).toBeInTheDocument()
     expect(screen.getByText('1 个待补事实')).toBeInTheDocument()
     expect(screen.getByLabelText('服务商目录摘要')).toHaveTextContent('4 外部口碑源入口')
+    expect(screen.getByRole('heading', { name: '服务商与入口' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '目录与入口' })).not.toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '服务入口' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '标签 / 备注' })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: '操作' })).not.toBeInTheDocument()
     expectExactText('2 VPS · 2 订阅')
-    expectExactText('CNY 105.00/月')
-    expect(screen.getByText('2 项订阅')).toBeInTheDocument()
-    expect(screen.getByText('缺面板入口')).toBeInTheDocument()
-    expect(document.querySelector('col[style="width: 196px;"]')).toBeInTheDocument()
-    expect(document.querySelector('col[style="width: 136px;"]')).toBeInTheDocument()
-    expect(document.querySelector('col[style="width: 226px;"]')).toBeInTheDocument()
-    expect(screen.getByText('缺面板入口')).toHaveClass('badge')
-    expect(screen.getAllByText('网站已记录').length).toBeGreaterThan(0)
+    expect(document.querySelector('col[style="width: 160px;"]')).toBeInTheDocument()
+    expect(document.querySelector('col[style="width: 122px;"]')).toBeInTheDocument()
+    expect(document.querySelector('col[style="width: 154px;"]')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '我的评分' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '外部口碑' })).toBeInTheDocument()
-    expect(screen.getAllByText('入口，不代表我的评分').length).toBeGreaterThan(0)
+    expect(screen.queryByText('缺面板入口')).not.toBeInTheDocument()
+    expect(screen.queryByText('网站已记录')).not.toBeInTheDocument()
+    expect(screen.queryByText('网站未记录')).not.toBeInTheDocument()
+    expect(screen.queryByText('账号未记录')).not.toBeInTheDocument()
+    expect(screen.queryByText('未标记')).not.toBeInTheDocument()
+    expect(screen.queryByText('入口，不代表我的评分')).not.toBeInTheDocument()
+    expect(screen.queryByText('成本未折算')).not.toBeInTheDocument()
+    expect(screen.queryByText(/CNY .*\/月/)).not.toBeInTheDocument()
+    expect(screen.getByText(providerNote)).toHaveClass('provider-directory-note')
+    expect(screen.getByText(providerNote)).toHaveAttribute('title', providerNote)
+    expect(screen.getByRole('button', { name: '编辑服务商 Hetzner' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '在 LET 搜索 Hetzner 外部口碑' })).toHaveAttribute('href', 'https://lowendtalk.com/search?Search=Hetzner')
     expect(screen.getByRole('link', { name: '在 Trustpilot 搜索 Hetzner 外部口碑' })).toHaveAttribute('href', 'https://www.trustpilot.com/search?query=Hetzner')
     expect(screen.getByRole('link', { name: '在 VPSBenchmarks 搜索 Hetzner 外部口碑' })).toHaveAttribute('href', 'https://www.vpsbenchmarks.com/search?search=Hetzner')
@@ -200,7 +211,7 @@ describe('ProvidersPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
-  it('falls back when subscription costs are not safely folded', async () => {
+  it('keeps asset context to counts when subscription costs are not safely folded', async () => {
     stubInitialLoad({
       subscriptions: [subscription({ monthly_price_base: null, base_currency: 'CNY' })],
     })
@@ -208,8 +219,9 @@ describe('ProvidersPage', () => {
     renderProvidersPage()
 
     await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
-    expect(screen.getByText('1 项订阅')).toBeInTheDocument()
-    expect(screen.getByText('成本未折算')).toBeInTheDocument()
+    expectExactText('1 VPS · 1 订阅')
+    expect(screen.queryByText('1 项订阅')).not.toBeInTheDocument()
+    expect(screen.queryByText('成本未折算')).not.toBeInTheDocument()
     expect(screen.queryByText(/CNY .*\/月/)).not.toBeInTheDocument()
   })
 
@@ -224,7 +236,7 @@ describe('ProvidersPage', () => {
     await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
     expect(screen.getByText(/VPS 上下文不可用：vps unavailable/)).toBeInTheDocument()
     expect(screen.getByText(/订阅上下文不可用：subscriptions unavailable/)).toBeInTheDocument()
-    expect(screen.getAllByText('资产上下文不可用').length).toBeGreaterThan(0)
+    expect(screen.queryByText('资产上下文不可用')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '查看 Hetzner VPS' })).not.toBeInTheDocument()
   })
 
@@ -279,6 +291,10 @@ describe('ProvidersPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '低评分' }))
     expect(screen.getByText('Vultr')).toBeInTheDocument()
     expect(screen.queryByText('Linode')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '未评分' }))
+    expect(screen.getByText('Linode')).toBeInTheDocument()
+    expect(screen.queryByText('Vultr')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '全部' }))
     fireEvent.change(screen.getByLabelText('搜索服务商'), { target: { value: 'lab' } })
@@ -406,7 +422,7 @@ describe('ProvidersPage', () => {
 
     await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
     expect(screen.queryByRole('dialog', { name: '编辑服务商表单' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑服务商 Hetzner' }))
     const editDialog = screen.getByRole('dialog', { name: '编辑服务商表单' })
     expect(editDialog).toBeInTheDocument()
     fireEvent.change(within(editDialog).getByLabelText('服务商名称'), { target: { value: 'Hetzner Cloud' } })
@@ -469,7 +485,7 @@ describe('ProvidersPage', () => {
     renderProvidersPage()
 
     await waitFor(() => expect(screen.getByText('Hetzner')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑服务商 Hetzner' }))
     const firstEditDialog = screen.getByRole('dialog', { name: '编辑服务商表单' })
     fireEvent.change(within(firstEditDialog).getByLabelText('服务商名称'), { target: { value: '' } })
     fireEvent.click(within(firstEditDialog).getByRole('button', { name: '保存' }))
@@ -478,7 +494,7 @@ describe('ProvidersPage', () => {
     fireEvent.click(within(firstEditDialog).getByRole('button', { name: '取消' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑服务商表单' })).not.toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑服务商 Hetzner' }))
 
     const editDialog = screen.getByRole('dialog', { name: '编辑服务商表单' })
     expect(within(editDialog).queryByText('服务商名称不能为空。')).not.toBeInTheDocument()
