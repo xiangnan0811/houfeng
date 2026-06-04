@@ -5,7 +5,6 @@ import { DataTable, Input, Modal, MonoDigits, StatusGlyph, Timestamp } from '../
 import type { DataTableColumn } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createProvider, listProviders, listSubscriptions, listVPSAssets, updateProvider } from '../lib/api'
-import { formatMoney, formatOptional } from '../lib/format'
 import type { CreateProviderInput, ProviderRecord, SubscriptionRecord, VPSAssetRecord } from '../lib/types'
 import { parseLabels } from './assetPageUtils'
 
@@ -31,20 +30,12 @@ type FormState = {
 
 type ProviderQuickView = 'all' | 'with-assets' | 'multi-account' | 'missing-metadata' | 'unrated' | 'low-rating'
 type MetadataIssue = 'missing_panel' | 'missing_account' | 'missing_country' | 'unrated'
-type CostCompleteness = 'ready' | 'unavailable'
 type ExternalReputationKind = 'community' | 'rating' | 'benchmark'
-
-type ProviderCostSummary = {
-  text: string
-  meta: string
-  completeness: CostCompleteness
-}
 
 type ProviderDirectoryRow = {
   provider: ProviderRecord
   vpsCount: number
   subscriptionCount: number
-  cost: ProviderCostSummary
   metadataIssues: MetadataIssue[]
   hasAssets: boolean
   accounts: string[]
@@ -212,43 +203,6 @@ function isLowRating(provider: ProviderRecord): boolean {
   return provider.rating != null && provider.rating <= 2
 }
 
-function buildCostSummary(subscriptions: SubscriptionRecord[]): ProviderCostSummary {
-  if (subscriptions.length === 0) {
-    return { text: '—', meta: '无订阅事实', completeness: 'unavailable' }
-  }
-
-  let total = 0
-  const currencies = new Set<string>()
-  for (const subscription of subscriptions) {
-    const monthly = subscription.monthly_price_base
-    const currency = subscription.base_currency
-    if (monthly == null || !Number.isFinite(monthly) || !currency) {
-      return {
-        text: `${subscriptions.length} 项订阅`,
-        meta: '成本未折算',
-        completeness: 'unavailable',
-      }
-    }
-    total += monthly
-    currencies.add(currency)
-  }
-
-  if (currencies.size !== 1) {
-    return {
-      text: `${subscriptions.length} 项订阅`,
-      meta: '成本未折算',
-      completeness: 'unavailable',
-    }
-  }
-
-  const [currency] = Array.from(currencies)
-  return {
-    text: `${formatMoney(total, currency)}/月`,
-    meta: `${subscriptions.length} 项订阅`,
-    completeness: 'ready',
-  }
-}
-
 function buildProviderRows(
   providers: ProviderRecord[],
   vpsAssets: VPSAssetRecord[],
@@ -281,7 +235,6 @@ function buildProviderRows(
       provider,
       vpsCount: linkedVPS.length,
       subscriptionCount: linkedSubscriptions.length,
-      cost: buildCostSummary(linkedSubscriptions),
       metadataIssues: metadataIssues(provider),
       hasAssets: linkedVPS.length > 0 || linkedSubscriptions.length > 0,
       accounts,
@@ -333,37 +286,50 @@ function ProviderForm({
   onCancel,
   onSubmit,
 }: ProviderFormProps) {
+  const noteID = `${id}-note`
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     onChange({ ...form, [key]: value })
   }
 
   return (
-    <form id={id} className="asset-operation-form provider-form" onSubmit={onSubmit} noValidate>
-      <div className="asset-operation-form__section">
-        <div className="input-field__label">身份</div>
-        <div className="asset-operation-form__grid asset-operation-form__grid--3col">
+    <form id={id} className="provider-form" onSubmit={onSubmit} noValidate>
+      <section className="provider-form__section" aria-labelledby={`${id}-identity`}>
+        <h4 id={`${id}-identity`} className="provider-form__section-title">身份</h4>
+        <div className="provider-form__grid provider-form__grid--identity">
           <Input label="服务商名称" value={form.name} onChange={(event) => update('name', event.target.value)} required />
           <Input label="国家 / 地区" value={form.country} onChange={(event) => update('country', event.target.value)} />
-          <Input label="标签" hint="逗号分隔" value={form.labels} onChange={(event) => update('labels', event.target.value)} />
         </div>
-      </div>
+      </section>
 
-      <div className="asset-operation-form__section">
-        <div className="input-field__label">入口</div>
-        <div className="asset-operation-form__grid asset-operation-form__grid--3col">
-          <Input label="网站" value={form.website} onChange={(event) => update('website', event.target.value)} />
-          <Input label="面板地址" value={form.panelURL} onChange={(event) => update('panelURL', event.target.value)} />
+      <section className="provider-form__section" aria-labelledby={`${id}-entry`}>
+        <h4 id={`${id}-entry`} className="provider-form__section-title">入口</h4>
+        <div className="provider-form__grid provider-form__grid--entry">
+          <Input label="网站" type="url" value={form.website} onChange={(event) => update('website', event.target.value)} />
+          <Input label="面板地址" type="url" value={form.panelURL} onChange={(event) => update('panelURL', event.target.value)} />
           <Input label="账号提示" hint="多个账号用逗号或换行分隔" value={form.accountHint} onChange={(event) => update('accountHint', event.target.value)} />
         </div>
-      </div>
+      </section>
 
-      <div className="asset-operation-form__section">
-        <div className="input-field__label">复盘</div>
-        <div className="asset-operation-form__grid">
+      <section className="provider-form__section" aria-labelledby={`${id}-review`}>
+        <h4 id={`${id}-review`} className="provider-form__section-title">复盘</h4>
+        <div className="provider-form__grid">
           <Input label="评分 (1-5)" type="number" min="1" max="5" value={form.rating} onChange={(event) => update('rating', event.target.value)} />
-          <Input label="备注" value={form.note} onChange={(event) => update('note', event.target.value)} />
+          <Input label="标签" hint="逗号分隔" value={form.labels} onChange={(event) => update('labels', event.target.value)} />
+          <div className="input-field provider-form__wide">
+            <label className="input-field__label" htmlFor={noteID}>备注</label>
+            <div className="input-field__shell provider-form__textarea-shell">
+              <textarea
+                id={noteID}
+                className="input provider-form__textarea"
+                value={form.note}
+                onChange={(event) => update('note', event.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
         </div>
-      </div>
+      </section>
 
       {error && <p className="create-form__error" role="alert">{error}</p>}
       <div className="page-form-actions">
@@ -522,16 +488,25 @@ export function ProvidersPage() {
     {
       key: 'identity',
       label: '服务商',
-      width: '196px',
+      width: '160px',
       render: (row) => {
         const visibleAccounts = row.accounts.slice(0, 2)
         const hiddenAccountCount = Math.max(row.accounts.length - visibleAccounts.length, 0)
+        const metaItems = [
+          row.provider.country.trim(),
+          row.accountCount > 0 ? `${row.accountCount} 个账号` : null,
+        ].filter((item): item is string => item != null && item !== '')
         return (
           <div className="provider-directory-identity">
-            <span className="provider-directory-name">{row.provider.name}</span>
-            <span className="provider-directory-meta">
-              {formatOptional(row.provider.country)} · {row.accountCount === 0 ? '账号未记录' : row.accountCount > 1 ? `${row.accountCount} 个账号` : '1 个账号'}
-            </span>
+            <button
+              type="button"
+              className="provider-directory-name-button"
+              onClick={() => startEdit(row.provider)}
+              aria-label={`编辑服务商 ${row.provider.name}`}
+            >
+              {row.provider.name}
+            </button>
+            {metaItems.length > 0 ? <span className="provider-directory-meta">{metaItems.join(' · ')}</span> : null}
             {row.accounts.length > 0 ? (
               <span className="provider-directory-account-list" aria-label={`${row.provider.name} 账号提示`}>
                 {visibleAccounts.map((account) => (
@@ -539,14 +514,7 @@ export function ProvidersPage() {
                 ))}
                 {hiddenAccountCount > 0 ? <span className="provider-directory-account-chip provider-directory-account-chip--more">+{hiddenAccountCount}</span> : null}
               </span>
-            ) : (
-              <span className="provider-directory-account-list provider-directory-account-list--empty">账号未记录</span>
-            )}
-            <span className="provider-directory-tags">
-              {row.provider.labels.length > 0
-                ? row.provider.labels.map((label) => <span className="provider-directory-tag" key={label}>{label}</span>)
-                : <span className="provider-directory-tag provider-directory-tag--muted">未标记</span>}
-            </span>
+            ) : null}
           </div>
         )
       },
@@ -554,44 +522,68 @@ export function ProvidersPage() {
     {
       key: 'assets',
       label: '资产上下文',
-      width: '140px',
+      width: '122px',
       render: (row) => state.contextError ? (
-        <div className="provider-directory-kpi provider-directory-kpi--muted">
-          <strong>—</strong>
-          <span>资产上下文不可用</span>
-        </div>
+        <span className="provider-directory-asset-count provider-directory-asset-count--muted">—</span>
       ) : (
-        <div className="provider-directory-kpi">
-          <strong><MonoDigits>{row.vpsCount}</MonoDigits> VPS · <MonoDigits>{row.subscriptionCount}</MonoDigits> 订阅</strong>
-          <span className={`provider-directory-cost provider-directory-cost--${row.cost.completeness}`}>
-            <span>{row.cost.text}</span>
-            <small>{row.cost.meta}</small>
-          </span>
-        </div>
+        <span className="provider-directory-asset-count">
+          <MonoDigits>{row.vpsCount}</MonoDigits> VPS · <MonoDigits>{row.subscriptionCount}</MonoDigits> 订阅
+        </span>
       ),
     },
     {
       key: 'entry',
       label: '服务入口',
-      width: '136px',
-      render: (row) => (
-        <div className="provider-directory-entry">
-          {row.provider.panel_url.trim() ? (
-            <span className="badge badge--state tone--normal"><span className="badge__dot" />面板已记录</span>
-          ) : (
-            <span className="badge badge--state tone--notice"><span className="badge__dot" />缺面板入口</span>
-          )}
-          <span>{row.provider.website.trim() ? '网站已记录' : '网站未记录'}</span>
-        </div>
-      ),
+      width: '176px',
+      render: (row) => {
+        const website = row.provider.website.trim()
+        const panelURL = row.provider.panel_url.trim()
+        const providerID = encodeURIComponent(row.provider.provider_id)
+        return (
+          <div className="provider-directory-entry-links">
+            {website ? (
+              <a
+                className="provider-directory-entry-link"
+                href={website}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`打开官网 ${row.provider.name}`}
+              >
+                官网
+              </a>
+            ) : null}
+            {panelURL ? (
+              <a
+                className="provider-directory-entry-link"
+                href={panelURL}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`打开面板 ${row.provider.name}`}
+              >
+                面板
+              </a>
+            ) : null}
+            {!state.contextError && row.vpsCount > 0 ? (
+              <Link className="provider-directory-entry-link" to={`/vps?provider_id=${providerID}`} aria-label={`查看 ${row.provider.name} VPS`}>
+                VPS
+              </Link>
+            ) : null}
+            {!state.contextError && row.subscriptionCount > 0 ? (
+              <Link className="provider-directory-entry-link" to={`/subscriptions?provider_id=${providerID}`} aria-label={`查看 ${row.provider.name} 订阅`}>
+                订阅
+              </Link>
+            ) : null}
+          </div>
+        )
+      },
     },
     {
       key: 'rating',
       label: '我的评分',
-      width: '88px',
+      width: '70px',
       render: (row) => {
         if (row.provider.rating == null) {
-          return <span className="provider-directory-rating provider-directory-rating--missing"><StatusGlyph state="notice" size="sm" />未评分</span>
+          return null
         }
         return (
           <span className={`provider-directory-rating ${isLowRating(row.provider) ? 'provider-directory-rating--low' : ''}`}>
@@ -604,10 +596,9 @@ export function ProvidersPage() {
     {
       key: 'reputation',
       label: '外部口碑',
-      width: '226px',
+      width: '166px',
       render: (row) => (
         <div className="provider-directory-reputation">
-          <span className="provider-directory-reputation-note">入口，不代表我的评分</span>
           <span className="provider-directory-reputation-links">
             {row.externalLinks.map((link) => (
               <a
@@ -627,54 +618,30 @@ export function ProvidersPage() {
       ),
     },
     {
-      key: 'updated',
-      label: '更新时间',
-      width: '116px',
-      cellClassName: 'mono',
-      render: (row) => <Timestamp value={row.provider.updated_at} />,
+      key: 'notes',
+      label: '标签 / 备注',
+      width: '154px',
+      render: (row) => {
+        const note = row.provider.note.trim()
+        if (row.provider.labels.length === 0 && !note) return null
+        return (
+          <div className="provider-directory-notes">
+            {row.provider.labels.length > 0 ? (
+              <span className="provider-directory-tags">
+                {row.provider.labels.map((label) => <span className="provider-directory-tag" key={label}>{label}</span>)}
+              </span>
+            ) : null}
+            {note ? <p className="provider-directory-note" title={note}>{note}</p> : null}
+          </div>
+        )
+      },
     },
     {
-      key: 'actions',
-      label: '操作',
-      width: '192px',
-      align: 'right',
-      render: (row) => (
-        <div className="provider-directory-actions">
-          <button className="btn-text sm secondary" onClick={() => startEdit(row.provider)}>编辑</button>
-          {row.provider.website.trim() ? (
-            <a
-              className="btn-text sm secondary"
-              href={row.provider.website}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`打开官网 ${row.provider.name}`}
-            >
-              官网
-            </a>
-          ) : null}
-          {row.provider.panel_url.trim() ? (
-            <a
-              className="btn-text sm secondary"
-              href={row.provider.panel_url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`打开面板 ${row.provider.name}`}
-            >
-              面板
-            </a>
-          ) : null}
-          {!state.contextError && row.hasAssets ? (
-            <>
-              <Link className="btn-text sm secondary" to={`/vps?provider_id=${encodeURIComponent(row.provider.provider_id)}`} aria-label={`查看 ${row.provider.name} VPS`}>
-                VPS
-              </Link>
-              <Link className="btn-text sm secondary" to={`/subscriptions?provider_id=${encodeURIComponent(row.provider.provider_id)}`} aria-label={`查看 ${row.provider.name} 订阅`}>
-                订阅
-              </Link>
-            </>
-          ) : null}
-        </div>
-      ),
+      key: 'updated',
+      label: '更新时间',
+      width: '88px',
+      cellClassName: 'mono',
+      render: (row) => <Timestamp value={row.provider.updated_at} />,
     },
   ]
 
@@ -741,7 +708,7 @@ export function ProvidersPage() {
             <div className="section-heading section-heading--inline">
               <div>
                 <p className="section-heading__eyebrow">Providers</p>
-                <h2 className="section-heading__title">目录与入口</h2>
+                <h2 className="section-heading__title">服务商与入口</h2>
               </div>
               <span className="section-heading__meta">{filteredRows.length} / {rows.length} 条</span>
             </div>
@@ -789,7 +756,7 @@ export function ProvidersPage() {
         </>
       )}
 
-      <Modal open={createOpen} onClose={closeCreate} title="新建服务商" ariaLabel="新建服务商表单" size="lg">
+      <Modal open={createOpen} onClose={closeCreate} title="新建服务商" ariaLabel="新建服务商表单" size="md">
         <ProviderForm
           id="provider-create-form"
           form={createForm}
@@ -802,7 +769,7 @@ export function ProvidersPage() {
         />
       </Modal>
 
-      <Modal open={editingId != null} onClose={cancelEdit} title="编辑服务商" ariaLabel="编辑服务商表单" size="lg">
+      <Modal open={editingId != null} onClose={cancelEdit} title="编辑服务商" ariaLabel="编辑服务商表单" size="md">
         <ProviderForm
           id="provider-edit-form"
           form={editForm}
