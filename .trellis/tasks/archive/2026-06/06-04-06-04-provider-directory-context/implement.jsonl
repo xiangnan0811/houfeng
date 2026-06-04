@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "web layer guideline index"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "page and component composition rules"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API loading and frontend state patterns"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "v2 styling and CSS placement rules"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "test and verification expectations"}
+{"file": ".trellis/spec/guides/index.md", "reason": "shared Trellis guides"}

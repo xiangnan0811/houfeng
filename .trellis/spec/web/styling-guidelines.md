@@ -133,6 +133,27 @@
 - 字体角色固定（`tokens.css:22-27`）：标题 / 强调字段用 `--font-serif`（思源宋体回退栈）；正文 / UI 用 `--font-sans`；ID / 数字 / 代码用 `--font-mono`。`Mono` / `Hostname` / `Timestamp` 原子（`web/src/components/atoms/Mono.tsx`）已封装好，不要在 page 里自己写 `font-family: monospace`。
 - 工程工具感的关键在密度：留白用 `--space-2` / `--space-3` 而非 `--space-6`；表格 / 列表行高用 `--type-body-leading` 默认 1.6（紧凑场景压到 1.4 时显式声明）。
 
+### 高密度 DataTable 列宽合同
+
+服务商、订阅、资产等事实目录页使用 `DataTable` 时，短状态列和操作列必须有明确宽度与 `white-space: nowrap` 保护；身份 / 名称列不能用大比例宽度挤压右侧列。上线前浏览器核查要同时看桌面与窄屏：桌面不应出现“大量空白 + 短中文状态换行”的组合，窄屏只允许表格容器内部横向滚动，不允许页面整体横向溢出。
+
+**Wrong**：
+```tsx
+{ key: 'identity', label: '服务商', width: '30%', render: ... }
+{ key: 'entry', label: '服务入口', render: () => <span>缺面板入口</span> }
+```
+
+**Correct**：
+```tsx
+{ key: 'identity', label: '服务商', width: '196px', render: ... }
+{ key: 'entry', label: '服务入口', width: '136px', render: ... }
+```
+```css
+.provider-directory-table{min-width:1104px;table-layout:fixed}
+.provider-directory-entry .badge{white-space:nowrap}
+.provider-directory-actions{flex-wrap:nowrap}
+```
+
 ---
 
 ## Select 下拉箭头（caret）约定

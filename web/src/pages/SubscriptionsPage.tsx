@@ -57,6 +57,7 @@ type PageState = {
 }
 type FilterState = {
   vps_id: string | null
+  provider_id: string | null
   renew_window: string | null
   currency: string | null
   label: string | null
@@ -98,6 +99,7 @@ function parseFilters(sp: URLSearchParams): FilterState {
   const rw = sp.get('renew_within_days')
   return {
     vps_id: sp.get('vps_id') || null,
+    provider_id: sp.get('provider_id') || null,
     renew_window: rw && ['30', '60', '90'].includes(rw) ? rw : null,
     currency: sp.get('currency') || null,
     label: sp.get('label') || null,
@@ -106,6 +108,7 @@ function parseFilters(sp: URLSearchParams): FilterState {
 function filtersToParams(f: FilterState): URLSearchParams {
   const p = new URLSearchParams()
   if (f.vps_id) p.set('vps_id', f.vps_id)
+  if (f.provider_id) p.set('provider_id', f.provider_id)
   if (f.renew_window) p.set('renew_within_days', f.renew_window)
   if (f.currency) p.set('currency', f.currency)
   if (f.label) p.set('label', f.label)
@@ -115,6 +118,7 @@ function filtersToParams(f: FilterState): URLSearchParams {
 function filtersToAPI(f: FilterState): SubscriptionListFilter {
   return {
     vps_id: f.vps_id,
+    provider_id: f.provider_id,
     renew_within_days: f.renew_window ? Number.parseInt(f.renew_window, 10) : null,
     currency: f.currency,
     budget_status: null,
@@ -484,13 +488,17 @@ export function SubscriptionsPage() {
   function vpsName(id: string | null): string {
     if (!id) return ''; return state.vps.find((v) => v.vps_id === id)?.display_name ?? id
   }
+  function providerName(id: string | null): string {
+    if (!id) return ''; return state.vps.find((v) => v.provider_id === id)?.provider_name ?? id
+  }
 
   const vpsOpts = state.vps.map((v) => ({ value: v.vps_id, label: v.display_name }))
-  const hasFilters = Boolean(filters.vps_id || filters.renew_window || filters.currency || filters.label)
+  const hasFilters = Boolean(filters.vps_id || filters.provider_id || filters.renew_window || filters.currency || filters.label)
   const [now] = useState(Date.now)
   const baseCurrency = state.overview?.base_currency ?? state.statistics?.base_currency ?? 'CNY'
   const availableCurrencies = Array.from(new Set(state.subscriptions.map((sub) => sub.currency))).sort()
   const filterChips = [
+    filters.provider_id ? { key: 'provider', label: `服务商：${providerName(filters.provider_id)}`, clear: () => setFilter('provider_id', null) } : null,
     filters.vps_id ? { key: 'vps', label: `VPS：${vpsName(filters.vps_id)}`, clear: () => setFilter('vps_id', null) } : null,
     filters.renew_window ? { key: 'renew', label: `续费：未来 ${filters.renew_window} 天`, clear: () => setFilter('renew_window', null) } : null,
     filters.currency ? { key: 'currency', label: `币种：${filters.currency}`, clear: () => setFilter('currency', null) } : null,

@@ -1388,3 +1388,36 @@ Polished subscription cost insights layout and interactions, added bulk monthly 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 159: Provider directory context upgrade
+
+**Date**: 2026-06-04
+**Task**: Provider directory context upgrade
+**Branch**: `worktree/provider-directory-context`
+
+### Summary
+
+Upgraded /providers into a lightweight provider directory with derived VPS/subscription context, balanced high-density table layout, provider-linked subscription filters, focused tests, and browser sanity evidence.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `410b678` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

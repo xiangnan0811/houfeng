@@ -299,6 +299,24 @@ describe('SubscriptionsPage', () => {
     })
   })
 
+  it('applies provider filters from provider directory links', async () => {
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?provider_id=pv_001']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
+    expect(screen.getByRole('button', { name: /服务商：Hetzner/ })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/subscriptions?provider_id=pv_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
   it('shows no-VPS prerequisite with link to VPS page', async () => {
     setupSubscriptionFetch({ subscriptions: [], vpsRows: [] })
 
