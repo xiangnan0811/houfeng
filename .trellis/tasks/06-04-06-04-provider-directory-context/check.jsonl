@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/index.md", "reason": "web layer quality gate"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "frontend lint/test/build requirements"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "component behavior and accessibility contracts"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS and visual contract review"}
+{"file": ".trellis/spec/guides/index.md", "reason": "shared quality considerations"}
