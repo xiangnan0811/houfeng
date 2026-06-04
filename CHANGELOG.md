@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/xiangnan0811/houfeng/compare/v0.33.0...v0.34.0) (2026-06-04)
+
+
+### Features
+
+* **providers:** add provider directory context ([1f218f1](https://github.com/xiangnan0811/houfeng/commit/1f218f1f7eb5dcc50e9e52129b86ee47f9d91738))
+
 ## [0.33.0](https://github.com/xiangnan0811/houfeng/compare/v0.32.0...v0.33.0) (2026-06-03)
 
 
