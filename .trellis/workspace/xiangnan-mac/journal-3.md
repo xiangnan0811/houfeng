@@ -1421,3 +1421,37 @@ Upgraded /providers into a lightweight provider directory with derived VPS/subsc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 160: 服务商页二次信息架构修正
+
+**Date**: 2026-06-04
+**Task**: 服务商页二次信息架构修正
+**Branch**: `worktree/provider-directory-polish`
+
+### Summary
+
+完成服务商页表格信息架构、入口列、空值展示和编辑弹窗二次修正；验证 ProvidersPage/SubscriptionsPage 回归、全量测试、lint、build 和本地 Chrome 视觉几何核查。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `35baeab` | (see git log) |
+| `76f2c94` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

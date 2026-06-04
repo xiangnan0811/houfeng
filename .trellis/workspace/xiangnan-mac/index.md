@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 159
+- **Total Sessions**: 160
 - **Last Active**: 2026-06-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1423 | Active |
+| `journal-3.md` | ~1457 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 160 | 2026-06-04 | 服务商页二次信息架构修正 | `35baeab`, `76f2c94` | `worktree/provider-directory-polish` |
 | 159 | 2026-06-04 | Provider directory context upgrade | `410b678` | `worktree/provider-directory-context` |
 | 158 | 2026-06-03 | Subscription insights UX polish | `2c71915` | `worktree/subscription-insights-ux-polish` |
 | 157 | 2026-06-03 | Subscription cost workbench UX follow-up | `91e5baa` | `worktree/subscription-cost-workbench-ux-followup` |
