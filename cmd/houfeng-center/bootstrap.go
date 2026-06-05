@@ -157,6 +157,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AssetDecisionOverviewHandler:             handlers.AssetDecisionOverview(assetDecisionRepo),
 		AssetDecisionGroupsHandler:               handlers.AssetDecisionGroups(assetDecisionRepo),
 		AssetDecisionGroupHandler:                handlers.AssetDecisionGroup(assetDecisionRepo),
+		AssetDecisionRecordsHandler:              handlers.AssetDecisionRecords(assetDecisionRepo),
+		AssetDecisionRecordHandler:               handlers.AssetDecisionRecord(assetDecisionRepo),
 		ProvidersCollectionHandler:               handlers.ProvidersCollection(providerRepo),
 		ProviderItemHandler:                      handlers.ProviderItem(providerRepo),
 		VPSCollectionHandler:                     handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo),
