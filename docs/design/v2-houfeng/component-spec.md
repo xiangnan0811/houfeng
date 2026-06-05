@@ -222,8 +222,8 @@ parent: docs/design/v2-houfeng/design-language.md
 1. 资产决策页是 Asset Ledger 的组合决策工作台，不是三张 VPS 状态表的拼接，也不是订阅续费队列的复刻。首屏标题使用 `资产组合决策`，第一主 surface 必须是 `决策组列表`，承接后端只读自动组：需要决策、续费取舍、同区比较、服务商组合、预算压力、资料缺口。
 2. 顶部 summary 只保留能指导处理顺序的少量数字：自动组数量、涉及 VPS、续费取舍、预算压力、资料缺口和 evidence source 状态。不要恢复同权 KPI 卡片墙，也不要把单台队列数量放成唯一主指标。
 3. 主 tabs 使用 `needs_decision / renewal / region / provider / cost / evidence / single_queue` URL-state。切换 tab 后主 surface 仍保持组合组语义；`single_queue` 是辅助视图，不应改变页面标题或首屏信息架构。
-4. 决策组行必须服务组合扫描和取舍：组名 / scope、成员数量、生命周期 / 用途 / 续费分布、续费窗口、未评估、服务 / 域名 / Target、监控关联、异常事件、成本和 evidence chips。组级 evidence 可以展示 MonitoringInstance/Target 聚合异常，但不得把它误写成单台 VPS list contract 已拥有的 linked health 字段。
-5. 点击组打开右侧 Drawer / modal detail，展示组内 VPS 对比表。成员行必须展示 VPS identity、provider/region/product、生命周期/用途/续费决策、主订阅或订阅证据不可用状态、服务 / 域名 / Target / 监控数量、建议角色、建议动作和 evidence chips。建议只是扫描辅助；真正写入只通过单台 `AssetDecisionWorkPanel`。
+4. 决策组行必须服务组合扫描和取舍：组名 / scope、成员数量、生命周期 / 用途 / 续费分布、续费窗口、未评估、服务 / 域名 / Target、监控关联、异常事件、成本、证据质量判断尺度和 evidence chips。组级 evidence 可以展示 MonitoringInstance/Target 聚合异常，但不得把它误写成单台 VPS list contract 已拥有的 linked health 字段。
+5. 点击组打开右侧 Drawer / modal detail，展示组内 VPS 对比表。成员行必须展示 VPS identity、provider/region/product、生命周期/用途/续费决策、主订阅或订阅证据不可用状态、服务 / 域名 / Target / 监控数量、建议角色、建议动作、成员证据评估和 evidence chips。建议只是扫描辅助；真正写入只通过单台 `AssetDecisionWorkPanel`。
 6. 决策编辑使用 group detail 或底部单台辅助队列中的 `AssetDecisionWorkPanel`。保存成功的 notice 留在页面可见 surface 内；取消 / 退役 action 只能跳到 VPS 详情生命周期工作台，不在组合页直接执行。
 7. 页面底部保留 `单台待处理队列`，承接原有 `unreviewed / migrate / cancel` 快速处理。它视觉上低于 `决策组列表`，用于单台补充处理，不再是页面主体。
 8. 续费候选表是 `RENEWAL EVIDENCE` 次级证据区。它保留续费窗口切换和订阅入口，但视觉权重低于组合工作台；订阅 evidence 失败时只显示局部错误，不把所有 VPS 误判为缺订阅。

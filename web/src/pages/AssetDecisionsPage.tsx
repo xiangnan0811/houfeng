@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { AssetDecisionRenewalTable } from '../components/AssetDecisionRenewalTable'
@@ -32,6 +32,10 @@ import {
 import { formatDate, formatDateTime, formatMoney, formatOptional } from '../lib/format'
 import {
   type AssetDecisionEvidenceChip,
+  type AssetDecisionEvidenceAssessment,
+  type AssetDecisionEvidenceDecisionBias,
+  type AssetDecisionEvidenceQualityTier,
+  type AssetDecisionEvidenceSnapshot,
   type AssetDecisionGroupDetail,
   type AssetDecisionGroupMember,
   type AssetDecisionGroupSummary,
@@ -126,6 +130,10 @@ type RecordDraft = {
   members: Record<string, RecordMemberDraft>
 }
 
+type ScoreStyle = CSSProperties & {
+  '--score': number
+}
+
 type QueueState = {
   renewalsLoading: boolean
   renewalsError: string | null
@@ -213,6 +221,22 @@ const RECORD_STATUS_LABELS: Record<AssetDecisionRecordStatus, string> = {
   in_progress: '推进中',
   completed: '已完成',
   abandoned: '已放弃',
+}
+
+const EVIDENCE_TIER_LABELS: Record<AssetDecisionEvidenceQualityTier, string> = {
+  strong: '证据强',
+  usable: '可决策',
+  weak: '证据弱',
+  blocked: '先补证据',
+}
+
+const EVIDENCE_BIAS_LABELS: Record<AssetDecisionEvidenceDecisionBias, string> = {
+  keep: '偏保留',
+  observe: '偏观察',
+  complete_evidence: '补证据',
+  retire: '偏退役',
+  migrate: '偏迁移',
+  review: '待复核',
 }
 
 const ROLE_OPTIONS: ReadonlyArray<{ value: AssetDecisionSuggestedRole; label: string }> = [
@@ -418,6 +442,47 @@ function recordStatusTone(status: AssetDecisionRecordStatus): BadgeTone {
   return 'neutral'
 }
 
+function evidenceTierTone(tier: AssetDecisionEvidenceQualityTier): BadgeTone {
+  if (tier === 'strong') return 'normal'
+  if (tier === 'usable') return 'notice'
+  if (tier === 'blocked') return 'critical'
+  return 'maintenance'
+}
+
+function evidenceBiasTone(bias: AssetDecisionEvidenceDecisionBias): BadgeTone {
+  if (bias === 'keep') return 'normal'
+  if (bias === 'retire') return 'critical'
+  if (bias === 'migrate' || bias === 'observe') return 'maintenance'
+  if (bias === 'complete_evidence') return 'alert'
+  return 'notice'
+}
+
+function parseEvidenceAssessment(snapshot?: AssetDecisionEvidenceSnapshot | null): AssetDecisionEvidenceAssessment | null {
+  const raw = snapshot?.evidence_assessment
+  if (!raw || typeof raw !== 'object') return null
+  const candidate = raw as Partial<AssetDecisionEvidenceAssessment>
+  if (
+    typeof candidate.confidence_score !== 'number' ||
+    typeof candidate.pressure_score !== 'number' ||
+    typeof candidate.readiness_score !== 'number' ||
+    typeof candidate.quality_tier !== 'string' ||
+    typeof candidate.decision_bias !== 'string'
+  ) {
+    return null
+  }
+  return {
+    confidence_score: candidate.confidence_score,
+    pressure_score: candidate.pressure_score,
+    readiness_score: candidate.readiness_score,
+    quality_tier: candidate.quality_tier as AssetDecisionEvidenceQualityTier,
+    decision_bias: candidate.decision_bias as AssetDecisionEvidenceDecisionBias,
+    support_signal_count: typeof candidate.support_signal_count === 'number' ? candidate.support_signal_count : 0,
+    risk_signal_count: typeof candidate.risk_signal_count === 'number' ? candidate.risk_signal_count : 0,
+    gap_signal_count: typeof candidate.gap_signal_count === 'number' ? candidate.gap_signal_count : 0,
+    summary: typeof candidate.summary === 'string' ? candidate.summary : '证据评估快照',
+  }
+}
+
 function buildRecordDraft(detail: AssetDecisionGroupDetail): RecordDraft {
   const members: Record<string, RecordMemberDraft> = {}
   for (const member of detail.members) {
@@ -458,6 +523,39 @@ function renderEvidenceChips(chips: AssetDecisionEvidenceChip[], limit = 5) {
         </Badge>
       )}
     </span>
+  )
+}
+
+function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssessment | null, mode: 'compact' | 'detail' = 'compact') {
+  if (!assessment) return <span className="empty-inline">无证据评估</span>
+  return (
+    <div className={`asset-decision-assessment asset-decision-assessment--${mode}`}>
+      <div className="asset-decision-assessment__head">
+        <Badge variant="state" tone={evidenceTierTone(assessment.quality_tier)}>
+          {EVIDENCE_TIER_LABELS[assessment.quality_tier] ?? assessment.quality_tier}
+        </Badge>
+        <Badge variant="state" tone={evidenceBiasTone(assessment.decision_bias)}>
+          {EVIDENCE_BIAS_LABELS[assessment.decision_bias] ?? assessment.decision_bias}
+        </Badge>
+      </div>
+      <div className="asset-decision-assessment__bars" aria-label="证据评估刻度">
+        <span style={{ '--score': assessment.confidence_score } as ScoreStyle}>
+          可信 <MonoDigits>{assessment.confidence_score}</MonoDigits>
+        </span>
+        <span style={{ '--score': assessment.pressure_score } as ScoreStyle}>
+          压力 <MonoDigits>{assessment.pressure_score}</MonoDigits>
+        </span>
+        <span style={{ '--score': assessment.readiness_score } as ScoreStyle}>
+          准备 <MonoDigits>{assessment.readiness_score}</MonoDigits>
+        </span>
+      </div>
+      {mode === 'detail' && (
+        <div className="asset-decision-assessment__meta">
+          <strong>{assessment.summary}</strong>
+          <span>支撑 {assessment.support_signal_count} · 风险 {assessment.risk_signal_count} · 缺口 {assessment.gap_signal_count}</span>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -740,6 +838,9 @@ export function AssetDecisionsPage() {
   const unlinkedCount = decisionQueue.filter((item) => item.vps.active_monitoring_instance_link_count <= 0).length
   const cancellationAttentionCount = decisionQueue.filter(hasCancellationAttention).length
   const totalDecisionQueue = decisionQueue.length
+  const selectedRecordAssessment = recordDetailState.detail
+    ? parseEvidenceAssessment(recordDetailState.detail.evidence_snapshot)
+    : null
 
   const workbenchTabs = WORKBENCH_TABS.map((item) => ({
     ...item,
@@ -791,7 +892,7 @@ export function AssetDecisionsPage() {
     {
       key: 'evidence',
       label: '证据',
-      width: '276px',
+      width: '238px',
       render: (group) => (
         <div className="asset-table__stack">
           <strong>
@@ -805,6 +906,12 @@ export function AssetDecisionsPage() {
           </span>
         </div>
       ),
+    },
+    {
+      key: 'assessment',
+      label: '判断尺度',
+      width: '238px',
+      render: (group) => renderEvidenceAssessment(group.evidence_assessment),
     },
     {
       key: 'cost',
@@ -957,7 +1064,7 @@ export function AssetDecisionsPage() {
     {
       key: 'suggestion',
       label: '建议',
-      width: '168px',
+      width: '244px',
       render: (member) => (
         <div className="asset-table__stack">
           <span className="asset-decision-chip-row">
@@ -968,6 +1075,7 @@ export function AssetDecisionsPage() {
               {ACTION_LABELS[member.suggested_action]}
             </Badge>
           </span>
+          {renderEvidenceAssessment(member.evidence_assessment)}
           {member.cancellation_attention_reason && <span>{member.cancellation_attention_reason}</span>}
           {renderEvidenceChips(member.evidence_chips, 4)}
         </div>
@@ -1046,18 +1154,22 @@ export function AssetDecisionsPage() {
     {
       key: 'evidence',
       label: '快照证据',
-      width: '268px',
-      render: (member) => (
-        <div className="asset-table__stack">
-          <strong>
-            服务 {String(member.evidence_snapshot.service_count ?? '—')} · 域名 {String(member.evidence_snapshot.domain_count ?? '—')}
-          </strong>
-          <span>
-            监控 {String(member.evidence_snapshot.running_monitoring_count ?? '—')}/{String(member.evidence_snapshot.monitoring_link_count ?? '—')}
-          </span>
-          <span>{String(member.evidence_snapshot.primary_issue_summary || '暂无主要问题')}</span>
-        </div>
-      ),
+      width: '308px',
+      render: (member) => {
+        const assessment = parseEvidenceAssessment(member.evidence_snapshot)
+        return (
+          <div className="asset-table__stack">
+            {renderEvidenceAssessment(assessment)}
+            <strong>
+              服务 {String(member.evidence_snapshot.service_count ?? '—')} · 域名 {String(member.evidence_snapshot.domain_count ?? '—')}
+            </strong>
+            <span>
+              监控 {String(member.evidence_snapshot.running_monitoring_count ?? '—')}/{String(member.evidence_snapshot.monitoring_link_count ?? '—')}
+            </span>
+            <span>{String(member.evidence_snapshot.primary_issue_summary || '暂无主要问题')}</span>
+          </div>
+        )
+      },
     },
     {
       key: 'actions',
@@ -1724,12 +1836,13 @@ export function AssetDecisionsPage() {
                 <small>服务 / 域名，Target {detailState.detail.running_target_count}/{detailState.detail.target_count}</small>
               </div>
               <div>
-                <span>监控</span>
-                <strong>{detailState.detail.monitoring_link_count}</strong>
-                <small>异常 {detailState.detail.abnormal_monitoring_count}，事件 {detailState.detail.active_incident_count}</small>
+                <span>证据质量</span>
+                <strong>{EVIDENCE_TIER_LABELS[detailState.detail.evidence_assessment.quality_tier]}</strong>
+                <small>可信 {detailState.detail.evidence_assessment.confidence_score}，压力 {detailState.detail.evidence_assessment.pressure_score}，准备 {detailState.detail.evidence_assessment.readiness_score}</small>
               </div>
             </div>
             <div className="asset-decision-detail__evidence">
+              {renderEvidenceAssessment(detailState.detail.evidence_assessment, 'detail')}
               {renderEvidenceChips(detailState.detail.evidence_chips, 8)}
               <button className="btn sm primary" type="button" onClick={() => startRecordSave(detailState.detail!)}>
                 保存为决策记录
@@ -1919,9 +2032,9 @@ export function AssetDecisionsPage() {
                 <small>{recordDetailState.detail.source_group_type}</small>
               </div>
               <div>
-                <span>更新时间</span>
-                <strong>{formatDateTime(recordDetailState.detail.updated_at)}</strong>
-                <small>{recordDetailState.detail.completed_at ? `完成 ${formatDateTime(recordDetailState.detail.completed_at)}` : '尚未完成'}</small>
+                <span>证据快照</span>
+                <strong>{selectedRecordAssessment ? EVIDENCE_TIER_LABELS[selectedRecordAssessment.quality_tier] : '未记录'}</strong>
+                <small>{selectedRecordAssessment ? `可信 ${selectedRecordAssessment.confidence_score}，压力 ${selectedRecordAssessment.pressure_score}` : formatDateTime(recordDetailState.detail.updated_at)}</small>
               </div>
             </div>
             <div className="asset-decision-record-detail__lead">
@@ -1933,6 +2046,7 @@ export function AssetDecisionsPage() {
                     ? formatMoney(Number(recordDetailState.detail.evidence_snapshot.monthly_cost_base), String(recordDetailState.detail.evidence_snapshot.base_currency || 'CNY'))
                     : '暂无 base currency 成本'}
                 </span>
+                {selectedRecordAssessment && renderEvidenceAssessment(selectedRecordAssessment, 'detail')}
               </div>
               <form className="asset-decision-record-status-form" onSubmit={submitRecordStatus}>
                 <label className="input-field">

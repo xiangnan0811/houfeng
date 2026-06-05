@@ -1523,3 +1523,36 @@ Added persistent asset decision records on top of portfolio decision groups, wir
 ### Next Steps
 
 - None - task complete
+
+
+## Session 163: Asset decisions evidence assessment
+
+**Date**: 2026-06-05
+**Task**: Asset decisions evidence assessment
+**Branch**: `worktree/asset-decisions-evidence-quality`
+
+### Summary
+
+Added evidence assessment scoring and UI display for asset decision groups, members, and decision record snapshots; updated visual mock data, specs, and verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `938f129` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
