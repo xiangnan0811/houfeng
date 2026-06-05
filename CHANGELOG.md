@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.39.0](https://github.com/xiangnan0811/houfeng/compare/v0.38.0...v0.39.0) (2026-06-05)
+
+
+### Features
+
+* **asset-decisions:** track decision follow-ups ([4885fcc](https://github.com/xiangnan0811/houfeng/commit/4885fccead5ae9ffbe17272c4892227422f67e7a))
+* **asset-decisions:** track decision follow-ups ([0190e7c](https://github.com/xiangnan0811/houfeng/commit/0190e7cc17a1dbc0ea7a56250d14450a199c9303))
+
 ## [0.38.0](https://github.com/xiangnan0811/houfeng/compare/v0.37.0...v0.38.0) (2026-06-05)
 
 
