@@ -963,6 +963,75 @@ export type AssetDecisionGroupListFilter = {
   renew_within_days?: number | null
 }
 
+export type AssetDecisionRecordStatus =
+  | 'draft'
+  | 'decided'
+  | 'in_progress'
+  | 'completed'
+  | 'abandoned'
+
+export type AssetDecisionEvidenceSnapshot = Record<string, unknown>
+
+export type AssetDecisionRecordSummary = {
+  record_id: string
+  title: string
+  goal: string
+  status: AssetDecisionRecordStatus
+  source_type: string
+  source_group_id: string
+  source_group_type: AssetDecisionGroupType
+  source_view: AssetDecisionView
+  scope_key: string
+  scope_label: string
+  renew_within_days: number
+  member_count: number
+  evidence_snapshot: AssetDecisionEvidenceSnapshot
+  created_at: string
+  updated_at: string
+  decided_at?: string | null
+  completed_at?: string | null
+}
+
+export type AssetDecisionRecordMember = {
+  record_id: string
+  vps_id: string
+  display_name: string
+  suggested_role: AssetDecisionSuggestedRole
+  decided_role: AssetDecisionSuggestedRole
+  suggested_action: AssetDecisionSuggestedAction
+  decided_action: AssetDecisionSuggestedAction
+  reason: string
+  evidence_snapshot: AssetDecisionEvidenceSnapshot
+  created_at: string
+  updated_at: string
+}
+
+export type AssetDecisionRecordDetail = AssetDecisionRecordSummary & {
+  members: AssetDecisionRecordMember[]
+}
+
+export type CreateAssetDecisionRecordMemberInput = {
+  vps_id: string
+  decided_role?: AssetDecisionSuggestedRole
+  decided_action?: AssetDecisionSuggestedAction
+  reason?: string
+}
+
+export type CreateAssetDecisionRecordInput = {
+  source_group_id: string
+  renew_within_days: number
+  title?: string
+  goal?: string
+  status?: AssetDecisionRecordStatus
+  members?: CreateAssetDecisionRecordMemberInput[]
+}
+
+export type PatchAssetDecisionRecordInput = {
+  title?: string
+  goal?: string
+  status?: AssetDecisionRecordStatus
+}
+
 export type LifecycleActionStepStatus = 'completed' | 'skipped' | 'failed'
 
 export type LifecycleActionStep = {

@@ -698,26 +698,36 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - 该查询不得改变 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target、Agent、VPS、subscription 或 link 记录。
 - `limit` 只限制异常队列和 recent events；不得限制 `asset_summary`。
 
-### Scenario: Asset decision portfolio read model
+### Scenario: Asset decision portfolio read model and memory layer
 
 #### 1. Scope / Trigger
 
-- Trigger: 修改 `internal/center/assetdecisions/`、`internal/center/store/asset_decisions.go`、`/api/asset-decisions/*`、或任何依赖 VPS / Subscription / Service / Domain / MonitoringInstance / Target 聚合生成组合决策组的逻辑。
-- 目标：`/asset-decisions` 是资产组合决策中枢的只读读模型，不新增持久化状态，不成为第二套 VPS / Subscription / MonitoringInstance / Target 状态机。
+- Trigger: 修改 `internal/center/assetdecisions/`、`internal/center/store/asset_decisions.go`、`/api/asset-decisions/*`、`db/migrations/*asset_decision*`，或任何依赖 VPS / Subscription / Service / Domain / MonitoringInstance / Target 聚合生成组合决策组和决策记录的逻辑。
+- 目标：`/asset-decisions` 是资产组合决策中枢。自动组仍是只读派生 read model；决策记录是独立 memory layer，只保存用户判断和证据快照，不成为第二套 VPS / Subscription / MonitoringInstance / Target 状态机。
 
 #### 2. Signatures
 
-- Domain package: `internal/center/assetdecisions`，包含 `Repository`、`ListFilters`、`Overview`、`GroupSummary`、`GroupDetail`、`GroupMember`、`ErrAssetDecisionGroupNotFound`、`ErrInvalidAssetDecisionInput`。
+- Domain package: `internal/center/assetdecisions`，包含 `Repository`、`ListFilters`、`Overview`、`GroupSummary`、`GroupDetail`、`GroupMember`、`RecordSummary`、`RecordDetail`、`RecordMember`、`CreateRecordInput`、`PatchRecordInput`、`ErrAssetDecisionGroupNotFound`、`ErrAssetDecisionRecordNotFound`、`ErrInvalidAssetDecisionInput`。
 - Backend APIs:
   - `GET /api/asset-decisions/overview?view=&renew_within_days=`
   - `GET /api/asset-decisions/groups?view=&renew_within_days=`
   - `GET /api/asset-decisions/groups/{group_id}?renew_within_days=`
+  - `GET /api/asset-decisions/records`
+  - `POST /api/asset-decisions/records`
+  - `GET /api/asset-decisions/records/{record_id}`
+  - `PATCH /api/asset-decisions/records/{record_id}`
 - Store source tables: `vps_assets`、`providers`、`subscriptions`、`asset_services`、`asset_domains`、`vps_monitoring_instance_links`、`monitoring_instances`、`targets`。
+- Decision memory tables: `asset_decision_records`、`asset_decision_record_members`；view: `asset_decision_records_with_counts`。
 - Stable group id: `adg_auto_<12hex>`，由 group type、scope key 和续费窗口等只读 key 确定性派生；detail endpoint 每次重新计算组列表后按 ID 查找。
+- Decision record id: `adr_*`，由 `ids.New("adr")` 生成；记录只引用来源自动组 ID 作为历史来源，不把自动组 ID 当长期外键。
 
 #### 3. Contracts
 
-- 自动组只读派生，不新增 migration，不写数据库，不保存手工组，不保存用户决策记录。
+- 自动组只读派生，不写数据库，不保存手工组；用户决策只写入 `asset_decision_records` / `asset_decision_record_members`。
+- 创建决策记录时必须重新读取当前事实并通过 `FindGroup` 定位 `source_group_id`；自动组不存在返回 404，不得按前端传入的成员列表凭空创建记录。
+- 决策记录必须保存组级来源字段、标题、目标、状态、组级 `evidence_snapshot`，并为组内每台 VPS 保存系统建议角色/动作、用户决定角色/动作、成员理由和成员级 `evidence_snapshot`。
+- 决策记录状态固定为 `draft`、`decided`、`in_progress`、`completed`、`abandoned`；PATCH 只更新标题、目标和状态，不执行 VPS / Subscription / MonitoringInstance / Target 业务动作。
+- 成员级 `decided_action=cancel` 或 `open_cancellation_workbench` 只能给前端提供跳转到 VPS lifecycle workbench 的入口；后端 records API 不做批量取消、批量退役或批量迁移。
 - Group type 固定语义：`renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。
 - `renew_within_days` 默认 30，仅允许产品认可的窗口（当前 `30/60/90`）；非法值在 handler 返回 400。
 - `view` 只筛选返回的自动组，不改变底层事实读取；非法值返回 400。
@@ -735,6 +745,10 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 | invalid `view` | handler 返回 400 `invalid input` |
 | invalid `renew_within_days` | handler 返回 400 `invalid input` |
 | missing `group_id` | handler 返回 404 `asset decision group not found` |
+| missing `record_id` | handler 返回 404 `asset decision record not found` |
+| create record with missing auto group | handler 返回 404 `asset decision group not found` |
+| create record with member not in group | handler 返回 400 `invalid input`，不得开启写事务 |
+| patch record with invalid status/title | handler 返回 400 `invalid input` |
 | repository query failure | handler 返回 500 `internal server error`，store error 用 `%w` 包装 |
 | source table query failed | 不返回 evidence gap；整体 request fail，避免误报缺订阅 / 缺监控 |
 | source query succeeded but rows empty | 返回可解释的 `evidence_gap` 或空组，不伪造健康证据 |
@@ -746,18 +760,20 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Good: 同一国家 / region / city 下两台 active VPS 自动形成 `region_portfolio`，成员显示成本、用途、服务 / 域名 / 监控差异，帮助用户取舍。
 - Good: Provider 下多台 active VPS 自动形成 `provider_portfolio`，用于服务商组合比较。
 - Good: subscription query 成功且某台 VPS 没有 active subscription，`evidence_gap` 或成员 evidence chips 标记缺订阅。
+- Good: 用户打开自动组，保存为 `adr_*` 决策记录；记录保留当时成本、服务/域名/Target、监控和成员建议快照，后续只推进记录状态。
 - Base: 没有任何 VPS 时 overview 仍返回 0 计数和空 `top_groups`。
-- Bad: 在 store 里写入 `asset_decision_groups` 表，或把自动组 ID 当持久状态依赖。
+- Bad: 在 store 里写入 `asset_decision_groups` 表，或把自动组 ID 当长期外键依赖。
+- Bad: `PATCH /api/asset-decisions/records/{id}` 同时修改 VPS renewal decision、Subscription 状态或执行取消/退役。
 - Bad: group detail 为了展示性能趋势逐台请求 runtime facts detail endpoint，造成 N+1 和语义越界。
 - Bad: subscriptions 查询失败后把所有 VPS 标记为 `missing_subscription`，误导用户取消资产。
 
 #### 6. Tests Required
 
-- Domain tests: stable group id、view/window validation、renewal/cancellation/region/provider/cost/evidence group derivation、archived/cancelled 边界、source unavailable 不误报。
-- Store tests: member facts 聚合、主订阅选择、服务 / 域名 / Target / 监控计数、成本和 evidence chips，且不依赖 runtime facts detail。
-- Handler tests: overview、groups list、group detail success；invalid query、missing group、repo failure、method not allowed。
-- Router/bootstrap tests: `/api/asset-decisions/overview`、`/api/asset-decisions/groups`、`/api/asset-decisions/groups/{id}` 登录保护且不落 SPA fallback；`bootstrapCenter` wiring 非 nil。
-- Frontend tests: API helper query、页面主 surface、tabs、group detail、单台 PATCH payload、evidence 请求失败边界。
+- Domain tests: stable group id、view/window validation、record input validation、snapshot builder、renewal/cancellation/region/provider/cost/evidence group derivation、archived/cancelled 边界、source unavailable 不误报。
+- Store tests: member facts 聚合、主订阅选择、服务 / 域名 / Target / 监控计数、成本和 evidence chips，records list/create/get/patch，且不依赖 runtime facts detail。
+- Handler tests: overview、groups list、group detail、records list/create/detail/patch success；invalid query/input、missing group/record、repo failure、method not allowed。
+- Router/bootstrap tests: `/api/asset-decisions/overview`、`/api/asset-decisions/groups`、`/api/asset-decisions/groups/{id}`、`/api/asset-decisions/records`、`/api/asset-decisions/records/{id}` 登录保护且不落 SPA fallback；`bootstrapCenter` wiring 非 nil。
+- Frontend tests: API helper query/payload、页面主 surface、saved records surface、tabs、group detail、保存记录、记录详情状态推进、单台 PATCH payload、evidence 请求失败边界。
 
 #### 7. Wrong vs Correct
 

@@ -40,8 +40,8 @@ def call_observability_api(path: str, query: str = "") -> tuple[int, object]:
     return route.status, json.loads(route.body)
 
 
-def call_asset_workflow_api(path: str, query: str = "") -> tuple[int, object]:
-    route = FakeRoute(path, query)
+def call_asset_workflow_api(path: str, query: str = "", method: str = "GET") -> tuple[int, object]:
+    route = FakeRoute(path, query, method)
     visual_evidence.fulfill_asset_workflow_api(route)
     assert route.status is not None
     assert route.body is not None
@@ -180,6 +180,30 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(group_detail["group_id"], group_id)
         self.assertTrue(group_detail["members"])
+
+        status, records = call_asset_workflow_api("/api/asset-decisions/records")
+        self.assertEqual(status, 200)
+        self.assertTrue(records)
+        self.assertEqual(records[0]["record_id"], "adr_mock_eu_renewal")
+        self.assertEqual(records[0]["source_type"], "auto_group")
+
+        status, record_detail = call_asset_workflow_api("/api/asset-decisions/records/adr_mock_eu_renewal")
+        self.assertEqual(status, 200)
+        self.assertEqual(record_detail["record_id"], "adr_mock_eu_renewal")
+        self.assertEqual(len(record_detail["members"]), 3)
+        self.assertEqual(record_detail["members"][0]["decided_action"], "keep")
+
+        status, created_record = call_asset_workflow_api("/api/asset-decisions/records", method="POST")
+        self.assertEqual(status, 201)
+        self.assertEqual(created_record["record_id"], "adr_mock_created")
+
+        status, patched_record = call_asset_workflow_api("/api/asset-decisions/records/adr_mock_eu_renewal", method="PATCH")
+        self.assertEqual(status, 200)
+        self.assertEqual(patched_record["status"], "completed")
+
+        status, missing_record = call_asset_workflow_api("/api/asset-decisions/records/adr_missing")
+        self.assertEqual(status, 404)
+        self.assertEqual(missing_record["error"], "asset decision record not found")
 
         status, missing_group = call_asset_workflow_api("/api/asset-decisions/groups/adg_auto_missing")
         self.assertEqual(status, 404)

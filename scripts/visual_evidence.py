@@ -1185,6 +1185,159 @@ def asset_decision_group_detail(group_id: str) -> dict[str, object] | None:
     return None
 
 
+def asset_decision_record_summary(record_id: str = "adr_mock_eu_renewal") -> dict[str, object]:
+    group = asset_decision_group_detail("adg_auto_mock_renewal")
+    assert group is not None
+    return {
+        "record_id": record_id,
+        "title": "欧洲主备节点续费决策",
+        "goal": "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。",
+        "status": "decided",
+        "source_type": "auto_group",
+        "source_group_id": group["group_id"],
+        "source_group_type": group["group_type"],
+        "source_view": group["view"],
+        "scope_key": group["scope_key"],
+        "scope_label": group["scope_label"],
+        "renew_within_days": 30,
+        "member_count": len(group["members"]),
+        "evidence_snapshot": asset_decision_record_group_snapshot(group),
+        "created_at": iso_timestamp(-2),
+        "updated_at": iso_timestamp(-1),
+        "decided_at": iso_timestamp(-1),
+        "completed_at": None,
+    }
+
+
+def asset_decision_record_group_snapshot(group: dict[str, object]) -> dict[str, object]:
+    keys = [
+        "group_id",
+        "group_type",
+        "view",
+        "title",
+        "scope_key",
+        "scope_label",
+        "member_count",
+        "renewal_window_count",
+        "unreviewed_count",
+        "migrate_count",
+        "cancel_count",
+        "cancellation_attention_count",
+        "idle_count",
+        "standby_count",
+        "in_use_count",
+        "service_count",
+        "domain_count",
+        "target_count",
+        "running_target_count",
+        "monitoring_link_count",
+        "abnormal_monitoring_count",
+        "active_incident_count",
+        "primary_issue_summary",
+        "monthly_cost_by_currency",
+        "monthly_cost_base",
+        "yearly_cost_base",
+        "base_currency",
+        "evidence_chips",
+        "source_availability",
+    ]
+    return {key: group[key] for key in keys if key in group}
+
+
+def asset_decision_record_member(
+    member: dict[str, object],
+    *,
+    record_id: str,
+    decided_role: str,
+    decided_action: str,
+    reason: str,
+) -> dict[str, object]:
+    vps = member["vps"]
+    assert isinstance(vps, dict)
+    vps_id = str(vps["vps_id"])
+    display_name = str(vps["display_name"])
+    evidence_snapshot = {
+        "vps_id": vps_id,
+        "display_name": display_name,
+        "provider_name": vps.get("provider_name", ""),
+        "country": vps.get("country", ""),
+        "region": vps.get("region", ""),
+        "city": vps.get("city", ""),
+        "lifecycle_status": vps.get("lifecycle_status", ""),
+        "usage_status": vps.get("usage_status", ""),
+        "renewal_decision": vps.get("renewal_decision", ""),
+        "subscription_count": member.get("subscription_count", 0),
+        "active_subscription_count": member.get("active_subscription_count", 0),
+        "inactive_subscription_count": member.get("inactive_subscription_count", 0),
+        "service_count": member.get("service_count", 0),
+        "domain_count": member.get("domain_count", 0),
+        "target_count": member.get("target_count", 0),
+        "running_target_count": member.get("running_target_count", 0),
+        "monitoring_link_count": member.get("monitoring_link_count", 0),
+        "running_monitoring_count": member.get("running_monitoring_count", 0),
+        "abnormal_monitoring_count": member.get("abnormal_monitoring_count", 0),
+        "active_incident_count": member.get("active_incident_count", 0),
+        "primary_issue_summary": member.get("primary_issue_summary", ""),
+        "cancellation_attention_reason": member.get("cancellation_attention_reason", ""),
+        "renewal_within_window": member.get("renewal_within_window", False),
+        "evidence_chips": member.get("evidence_chips", []),
+        "source_availability": member.get("source_availability", {}),
+    }
+    if member.get("primary_subscription") is not None:
+        evidence_snapshot["primary_subscription"] = member["primary_subscription"]
+    return {
+        "record_id": record_id,
+        "vps_id": vps_id,
+        "display_name": display_name,
+        "suggested_role": member["suggested_role"],
+        "decided_role": decided_role,
+        "suggested_action": member["suggested_action"],
+        "decided_action": decided_action,
+        "reason": reason,
+        "evidence_snapshot": evidence_snapshot,
+        "created_at": iso_timestamp(-2),
+        "updated_at": iso_timestamp(-1),
+    }
+
+
+def asset_decision_record_detail(record_id: str = "adr_mock_eu_renewal") -> dict[str, object] | None:
+    if record_id not in {"adr_mock_eu_renewal", "adr_mock_created"}:
+        return None
+    group = asset_decision_group_detail("adg_auto_mock_renewal")
+    if group is None:
+        return None
+    summary = asset_decision_record_summary(record_id)
+    members_by_id = {str(member["vps"]["vps_id"]): member for member in group["members"]}
+    summary["members"] = [
+        asset_decision_record_member(
+            members_by_id["vps_ams_core"],
+            record_id=record_id,
+            decided_role="primary_candidate",
+            decided_action="keep",
+            reason="主力节点证据完整，虽然超预算但承载核心服务。",
+        ),
+        asset_decision_record_member(
+            members_by_id["vps_sjc_edge"],
+            record_id=record_id,
+            decided_role="standby_candidate",
+            decided_action="migrate",
+            reason="作为备用节点继续观察迁移窗口。",
+        ),
+        asset_decision_record_member(
+            members_by_id["vps_fra_legacy"],
+            record_id=record_id,
+            decided_role="retire_candidate",
+            decided_action="open_cancellation_workbench",
+            reason="取消前需要先处理仍在运行的服务和监控联动。",
+        ),
+    ]
+    return summary
+
+
+def asset_decision_records() -> list[dict[str, object]]:
+    return [asset_decision_record_summary()]
+
+
 def asset_workflow_vps_detail(vps_id: str) -> dict[str, object] | None:
     vps = next((row for row in asset_workflow_vps_assets() if row["vps_id"] == vps_id), None)
     if vps is None:
@@ -2544,6 +2697,38 @@ def fulfill_asset_workflow_api(route: object) -> None:
     if method == "GET" and path == "/api/asset-decisions/groups":
         fulfill_json(route, 200, asset_decision_public_groups(query))
         return
+
+    if path == "/api/asset-decisions/records":
+        if method == "GET":
+            fulfill_json(route, 200, asset_decision_records())
+            return
+        if method == "POST":
+            detail = asset_decision_record_detail()
+            assert detail is not None
+            created = dict(detail)
+            created["record_id"] = "adr_mock_created"
+            for member in created["members"]:
+                member["record_id"] = "adr_mock_created"
+            fulfill_json(route, 201, created)
+            return
+
+    if path.startswith("/api/asset-decisions/records/"):
+        parts = [part for part in path.split("/") if part]
+        if len(parts) == 4:
+            detail = asset_decision_record_detail(parts[3])
+            if detail is not None:
+                if method == "GET":
+                    fulfill_json(route, 200, detail)
+                    return
+                if method == "PATCH":
+                    patched = dict(detail)
+                    patched["status"] = "completed"
+                    patched["completed_at"] = iso_timestamp(0)
+                    patched["updated_at"] = iso_timestamp(0)
+                    fulfill_json(route, 200, patched)
+                    return
+            fulfill_json(route, 404, {"error": "asset decision record not found"})
+            return
 
     if method == "GET" and path.startswith("/api/asset-decisions/groups/"):
         parts = [part for part in path.split("/") if part]

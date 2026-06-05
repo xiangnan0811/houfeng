@@ -8,6 +8,8 @@ import type {
   AssetDecisionGroupListFilter,
   AssetDecisionGroupSummary,
   AssetDecisionOverview,
+  AssetDecisionRecordDetail,
+  AssetDecisionRecordSummary,
   AssetServiceListFilter,
   AssetServiceRecord,
   ApplyCancellationInput,
@@ -17,6 +19,7 @@ import type {
   CreateAssetDomainInput,
   CreateProviderInput,
   CreateAssetServiceInput,
+  CreateAssetDecisionRecordInput,
   CreateMonitoringInstanceInput,
   CreateProbeItemInput,
   CreateSubscriptionInput,
@@ -63,6 +66,7 @@ import type {
   UpdateSubscriptionInput,
   UpsertSubscriptionMonthlyBudgetInput,
   PatchSubscriptionBudgetInput,
+  PatchAssetDecisionRecordInput,
   UpdateTargetMetadataInput,
   UpdateVPSAssetInput,
   VPSAssetDetail,
@@ -547,6 +551,22 @@ export function getAssetDecisionGroup(groupId: string, filter?: Pick<AssetDecisi
       renew_within_days: filter?.renew_within_days,
     }),
   )
+}
+
+export function listAssetDecisionRecords() {
+  return requestJSON<AssetDecisionRecordSummary[]>('/api/asset-decisions/records')
+}
+
+export function createAssetDecisionRecord(input: CreateAssetDecisionRecordInput): Promise<AssetDecisionRecordDetail> {
+  return postJSONBody<AssetDecisionRecordDetail>('/api/asset-decisions/records', input)
+}
+
+export function getAssetDecisionRecord(recordId: string) {
+  return requestJSON<AssetDecisionRecordDetail>(`/api/asset-decisions/records/${encodeURIComponent(recordId)}`)
+}
+
+export function patchAssetDecisionRecord(recordId: string, input: PatchAssetDecisionRecordInput): Promise<AssetDecisionRecordDetail> {
+  return patchJSONBody<AssetDecisionRecordDetail>(`/api/asset-decisions/records/${encodeURIComponent(recordId)}`, input)
 }
 
 export function getVPSCancellationPreview(vpsId: string) {

@@ -15,6 +15,7 @@ import (
 )
 
 var ErrAssetDecisionGroupNotFound = errors.New("asset decision group not found")
+var ErrAssetDecisionRecordNotFound = errors.New("asset decision record not found")
 var ErrInvalidAssetDecisionInput = errors.New("invalid asset decision input")
 
 type GroupType string
@@ -59,6 +60,16 @@ const (
 	ActionCancel                    SuggestedAction = "cancel"
 	ActionOpenCancellationWorkbench SuggestedAction = "open_cancellation_workbench"
 	ActionCompleteEvidence          SuggestedAction = "complete_evidence"
+)
+
+type RecordStatus string
+
+const (
+	RecordStatusDraft      RecordStatus = "draft"
+	RecordStatusDecided    RecordStatus = "decided"
+	RecordStatusInProgress RecordStatus = "in_progress"
+	RecordStatusCompleted  RecordStatus = "completed"
+	RecordStatusAbandoned  RecordStatus = "abandoned"
 )
 
 type EvidenceKind string
@@ -123,6 +134,8 @@ type EvidenceChip struct {
 	Details string       `json:"details,omitempty"`
 }
 
+type EvidenceSnapshot map[string]any
+
 type GroupSummary struct {
 	GroupID                    string                            `json:"group_id"`
 	GroupType                  GroupType                         `json:"group_type"`
@@ -186,10 +199,85 @@ type GroupMember struct {
 	SourceAvailability          SourceAvailability    `json:"source_availability"`
 }
 
+type RecordSummary struct {
+	RecordID         string           `json:"record_id"`
+	Title            string           `json:"title"`
+	Goal             string           `json:"goal"`
+	Status           RecordStatus     `json:"status"`
+	SourceType       string           `json:"source_type"`
+	SourceGroupID    string           `json:"source_group_id"`
+	SourceGroupType  GroupType        `json:"source_group_type"`
+	SourceView       View             `json:"source_view"`
+	ScopeKey         string           `json:"scope_key"`
+	ScopeLabel       string           `json:"scope_label"`
+	RenewWithinDays  int              `json:"renew_within_days"`
+	MemberCount      int              `json:"member_count"`
+	EvidenceSnapshot EvidenceSnapshot `json:"evidence_snapshot"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
+	DecidedAt        *time.Time       `json:"decided_at,omitempty"`
+	CompletedAt      *time.Time       `json:"completed_at,omitempty"`
+}
+
+type RecordDetail struct {
+	RecordSummary
+	Members []RecordMember `json:"members"`
+}
+
+type RecordMember struct {
+	RecordID         string           `json:"record_id"`
+	VPSID            string           `json:"vps_id"`
+	DisplayName      string           `json:"display_name"`
+	SuggestedRole    SuggestedRole    `json:"suggested_role"`
+	DecidedRole      SuggestedRole    `json:"decided_role"`
+	SuggestedAction  SuggestedAction  `json:"suggested_action"`
+	DecidedAction    SuggestedAction  `json:"decided_action"`
+	Reason           string           `json:"reason"`
+	EvidenceSnapshot EvidenceSnapshot `json:"evidence_snapshot"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
+}
+
+type CreateRecordInput struct {
+	SourceGroupID   string                    `json:"source_group_id"`
+	RenewWithinDays int                       `json:"renew_within_days"`
+	Title           string                    `json:"title"`
+	Goal            string                    `json:"goal"`
+	Status          RecordStatus              `json:"status"`
+	Members         []CreateRecordMemberInput `json:"members"`
+}
+
+type CreateRecordMemberInput struct {
+	VPSID         string          `json:"vps_id"`
+	DecidedRole   SuggestedRole   `json:"decided_role"`
+	DecidedAction SuggestedAction `json:"decided_action"`
+	Reason        string          `json:"reason"`
+}
+
+type PatchRecordInput struct {
+	Title  PatchString       `json:"title"`
+	Goal   PatchString       `json:"goal"`
+	Status PatchRecordStatus `json:"status"`
+}
+
+type PatchString struct {
+	Set   bool
+	Value string
+}
+
+type PatchRecordStatus struct {
+	Set   bool
+	Value RecordStatus
+}
+
 type Repository interface {
 	GetOverview(context.Context, ListFilters) (Overview, error)
 	ListGroups(context.Context, ListFilters) ([]GroupSummary, error)
 	GetGroup(context.Context, string, ListFilters) (GroupDetail, error)
+	ListRecords(context.Context) ([]RecordSummary, error)
+	CreateRecord(context.Context, CreateRecordInput) (RecordDetail, error)
+	GetRecord(context.Context, string) (RecordDetail, error)
+	PatchRecord(context.Context, string, PatchRecordInput) (RecordDetail, error)
 }
 
 type Fact struct {
@@ -218,7 +306,9 @@ func NormalizeFilters(filters ListFilters) ListFilters {
 }
 
 func ValidateFilters(filters ListFilters) error {
-	if filters.RenewWithinDays < 1 || filters.RenewWithinDays > 365 {
+	switch filters.RenewWithinDays {
+	case 30, 60, 90:
+	default:
 		return ErrInvalidAssetDecisionInput
 	}
 	switch filters.View {
@@ -233,6 +323,192 @@ func StableGroupID(groupType GroupType, parts ...string) string {
 	seed := string(groupType) + "\x00" + strings.Join(parts, "\x00")
 	sum := sha1.Sum([]byte(seed))
 	return "adg_auto_" + hex.EncodeToString(sum[:])[:12]
+}
+
+func NormalizeCreateRecordInput(input CreateRecordInput) CreateRecordInput {
+	input.SourceGroupID = strings.TrimSpace(input.SourceGroupID)
+	input.Title = strings.TrimSpace(input.Title)
+	input.Goal = strings.TrimSpace(input.Goal)
+	if input.RenewWithinDays == 0 {
+		input.RenewWithinDays = 30
+	}
+	if input.Status == "" {
+		input.Status = RecordStatusDraft
+	}
+	normalizedMembers := make([]CreateRecordMemberInput, 0, len(input.Members))
+	for _, member := range input.Members {
+		member.VPSID = strings.TrimSpace(member.VPSID)
+		member.Reason = strings.TrimSpace(member.Reason)
+		normalizedMembers = append(normalizedMembers, member)
+	}
+	input.Members = normalizedMembers
+	return input
+}
+
+func ValidateCreateRecordInput(input CreateRecordInput) error {
+	if input.SourceGroupID == "" {
+		return ErrInvalidAssetDecisionInput
+	}
+	if _, err := validateRenewWindow(input.RenewWithinDays); err != nil {
+		return err
+	}
+	if err := ValidateRecordStatus(input.Status); err != nil {
+		return err
+	}
+	seen := map[string]struct{}{}
+	for _, member := range input.Members {
+		if member.VPSID == "" {
+			return ErrInvalidAssetDecisionInput
+		}
+		if _, ok := seen[member.VPSID]; ok {
+			return ErrInvalidAssetDecisionInput
+		}
+		seen[member.VPSID] = struct{}{}
+		if member.DecidedRole != "" {
+			if err := ValidateSuggestedRole(member.DecidedRole); err != nil {
+				return err
+			}
+		}
+		if member.DecidedAction != "" {
+			if err := ValidateSuggestedAction(member.DecidedAction); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func ValidatePatchRecordInput(input PatchRecordInput) error {
+	if input.Title.Set && strings.TrimSpace(input.Title.Value) == "" {
+		return ErrInvalidAssetDecisionInput
+	}
+	if input.Status.Set {
+		return ValidateRecordStatus(input.Status.Value)
+	}
+	return nil
+}
+
+func ValidateRecordStatus(status RecordStatus) error {
+	switch status {
+	case RecordStatusDraft, RecordStatusDecided, RecordStatusInProgress, RecordStatusCompleted, RecordStatusAbandoned:
+		return nil
+	default:
+		return ErrInvalidAssetDecisionInput
+	}
+}
+
+func ValidateSuggestedRole(role SuggestedRole) error {
+	switch role {
+	case RolePrimaryCandidate, RoleStandbyCandidate, RoleObserveCandidate, RoleRetireCandidate, RoleEvidenceNeeded:
+		return nil
+	default:
+		return ErrInvalidAssetDecisionInput
+	}
+}
+
+func ValidateSuggestedAction(action SuggestedAction) error {
+	switch action {
+	case ActionReview, ActionKeep, ActionObserve, ActionMigrate, ActionCancel, ActionOpenCancellationWorkbench, ActionCompleteEvidence:
+		return nil
+	default:
+		return ErrInvalidAssetDecisionInput
+	}
+}
+
+func RecordSnapshotFromGroup(group GroupDetail) EvidenceSnapshot {
+	snapshot := EvidenceSnapshot{
+		"group_id":                     group.GroupID,
+		"group_type":                   string(group.GroupType),
+		"view":                         string(group.View),
+		"title":                        group.Title,
+		"scope_key":                    group.ScopeKey,
+		"scope_label":                  group.ScopeLabel,
+		"member_count":                 group.MemberCount,
+		"renewal_window_count":         group.RenewalWindowCount,
+		"unreviewed_count":             group.UnreviewedCount,
+		"migrate_count":                group.MigrateCount,
+		"cancel_count":                 group.CancelCount,
+		"cancellation_attention_count": group.CancellationAttentionCount,
+		"idle_count":                   group.IdleCount,
+		"standby_count":                group.StandbyCount,
+		"in_use_count":                 group.InUseCount,
+		"service_count":                group.ServiceCount,
+		"domain_count":                 group.DomainCount,
+		"target_count":                 group.TargetCount,
+		"running_target_count":         group.RunningTargetCount,
+		"monitoring_link_count":        group.MonitoringLinkCount,
+		"abnormal_monitoring_count":    group.AbnormalMonitoringCount,
+		"active_incident_count":        group.ActiveIncidentCount,
+		"primary_issue_summary":        group.PrimaryIssueSummary,
+		"evidence_chips":               group.EvidenceChips,
+		"source_availability":          mergeMemberSourceAvailability(group.Members),
+	}
+	if group.MonthlyCostBase != nil {
+		snapshot["monthly_cost_base"] = *group.MonthlyCostBase
+	}
+	if group.YearlyCostBase != nil {
+		snapshot["yearly_cost_base"] = *group.YearlyCostBase
+	}
+	if group.BaseCurrency != "" {
+		snapshot["base_currency"] = group.BaseCurrency
+	}
+	if len(group.MonthlyCostByCurrency) > 0 {
+		snapshot["monthly_cost_by_currency"] = group.MonthlyCostByCurrency
+	}
+	return snapshot
+}
+
+func RecordSnapshotFromMember(member GroupMember) EvidenceSnapshot {
+	snapshot := EvidenceSnapshot{
+		"vps_id":                        member.VPS.VPSID,
+		"display_name":                  member.VPS.DisplayName,
+		"provider_name":                 member.VPS.ProviderName,
+		"country":                       member.VPS.Country,
+		"region":                        member.VPS.Region,
+		"city":                          member.VPS.City,
+		"lifecycle_status":              string(member.VPS.LifecycleStatus),
+		"usage_status":                  string(member.VPS.UsageStatus),
+		"renewal_decision":              string(member.VPS.RenewalDecision),
+		"subscription_count":            member.SubscriptionCount,
+		"active_subscription_count":     member.ActiveSubscriptionCount,
+		"inactive_subscription_count":   member.InactiveSubscriptionCount,
+		"service_count":                 member.ServiceCount,
+		"domain_count":                  member.DomainCount,
+		"target_count":                  member.TargetCount,
+		"running_target_count":          member.RunningTargetCount,
+		"monitoring_link_count":         member.MonitoringLinkCount,
+		"running_monitoring_count":      member.RunningMonitoringCount,
+		"abnormal_monitoring_count":     member.AbnormalMonitoringCount,
+		"active_incident_count":         member.ActiveIncidentCount,
+		"primary_issue_summary":         member.PrimaryIssueSummary,
+		"cancellation_attention_reason": member.CancellationAttentionReason,
+		"renewal_within_window":         member.RenewalWithinWindow,
+		"evidence_chips":                member.EvidenceChips,
+		"source_availability":           member.SourceAvailability,
+	}
+	if member.PrimarySubscription != nil {
+		snapshot["primary_subscription"] = map[string]any{
+			"subscription_id":     member.PrimarySubscription.SubscriptionID,
+			"status":              string(member.PrimarySubscription.Status),
+			"renew_at":            member.PrimarySubscription.RenewAt,
+			"monthly_price":       member.PrimarySubscription.MonthlyPrice,
+			"currency":            member.PrimarySubscription.Currency,
+			"monthly_price_base":  member.PrimarySubscription.MonthlyPriceBase,
+			"yearly_price_base":   member.PrimarySubscription.YearlyPriceBase,
+			"base_currency":       member.PrimarySubscription.BaseCurrency,
+			"budget_status":       member.PrimarySubscription.BudgetStatus,
+			"exchange_rate_stale": member.PrimarySubscription.ExchangeRateStale,
+		}
+	}
+	return snapshot
+}
+
+func CreateMemberInputsByVPS(inputs []CreateRecordMemberInput) map[string]CreateRecordMemberInput {
+	byVPS := make(map[string]CreateRecordMemberInput, len(inputs))
+	for _, input := range inputs {
+		byVPS[input.VPSID] = input
+	}
+	return byVPS
 }
 
 func DeriveOverview(facts []Fact, filters ListFilters) (Overview, error) {
@@ -737,6 +1013,33 @@ func appendUniqueChip(chips *[]EvidenceChip, chip EvidenceChip) {
 		}
 	}
 	*chips = append(*chips, chip)
+}
+
+func validateRenewWindow(days int) (int, error) {
+	switch days {
+	case 30, 60, 90:
+		return days, nil
+	default:
+		return 0, ErrInvalidAssetDecisionInput
+	}
+}
+
+func mergeMemberSourceAvailability(members []GroupMember) SourceAvailability {
+	availability := SourceAvailability{
+		Subscriptions: true,
+		Services:      true,
+		Domains:       true,
+		Monitoring:    true,
+		Targets:       true,
+	}
+	for _, member := range members {
+		availability.Subscriptions = availability.Subscriptions && member.SourceAvailability.Subscriptions
+		availability.Services = availability.Services && member.SourceAvailability.Services
+		availability.Domains = availability.Domains && member.SourceAvailability.Domains
+		availability.Monitoring = availability.Monitoring && member.SourceAvailability.Monitoring
+		availability.Targets = availability.Targets && member.SourceAvailability.Targets
+	}
+	return availability
 }
 
 func hasEvidence(member GroupMember, kind EvidenceKind) bool {

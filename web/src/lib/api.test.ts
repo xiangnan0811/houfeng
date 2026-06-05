@@ -9,6 +9,7 @@ import {
   createAssetDomain,
   confirmMonitoringInstanceRebind,
   createAssetService,
+  createAssetDecisionRecord,
   createProbeItem,
   createProvider,
   createSubscription,
@@ -23,6 +24,7 @@ import {
   exitTargetMaintenance,
   getAssetDecisionGroup,
   getAssetDecisionOverview,
+  getAssetDecisionRecord,
   getDashboard,
   getMonitoringInstanceOnboarding,
   getProvider,
@@ -33,6 +35,7 @@ import {
   getVPSTimeline,
   issueMonitoringInstanceInstallCommand,
   linkVPSMonitoringInstance,
+  listAssetDecisionRecords,
   listSubscriptionMonthlyBudgets,
   listAssetDomains,
   listAssetServices,
@@ -54,6 +57,7 @@ import {
   resumeMonitoringInstanceMonitoring,
   resumeTarget,
   postMonitoringInstanceAction,
+  patchAssetDecisionRecord,
   unlinkVPSMonitoringInstance,
   updateMonitoringInstanceMetadata,
   updateProbeItem,
@@ -75,6 +79,9 @@ import {
 import type {
   AssetDomainListFilter,
   AssetDomainRecord,
+  AssetDecisionRecordDetail,
+  CreateAssetDecisionRecordInput,
+  PatchAssetDecisionRecordInput,
   AssetServiceRecord,
   CreateAssetDomainInput,
   CreateAssetServiceInput,
@@ -603,7 +610,7 @@ describe('api helpers', () => {
   it('loads asset decision overview, groups, and group detail', async () => {
     const overview = {
       snapshot_generated_at: '2026-06-04T09:00:00Z',
-      renew_within_days: 45,
+      renew_within_days: 60,
       group_count: 1,
       member_vps_count: 2,
       needs_decision_count: 1,
@@ -627,9 +634,9 @@ describe('api helpers', () => {
       group_id: 'adg_auto_001',
       group_type: 'renewal_attention',
       view: 'renewal',
-      title: '45 天内续费取舍',
-      scope_key: '45',
-      scope_label: '45 天内续费取舍',
+      title: '60 天内续费取舍',
+      scope_key: '60',
+      scope_label: '60 天内续费取舍',
       priority: 90,
       member_count: 2,
       lifecycle_counts: { active: 2 },
@@ -655,31 +662,90 @@ describe('api helpers', () => {
       evidence_chips: [{ kind: 'renewal_due', label: '续费临近', tone: 'alert' }],
     }
     const detail = { ...group, members: [] }
+    const record: AssetDecisionRecordDetail = {
+      record_id: 'adr_001',
+      title: '德国主备取舍',
+      goal: '保留主力',
+      status: 'draft',
+      source_type: 'auto_group',
+      source_group_id: 'adg_auto_001',
+      source_group_type: 'renewal_attention',
+      source_view: 'renewal',
+      scope_key: '60',
+      scope_label: '60 天内续费取舍',
+      renew_within_days: 60,
+      member_count: 2,
+      evidence_snapshot: { group_id: 'adg_auto_001' },
+      created_at: '2026-06-05T09:00:00Z',
+      updated_at: '2026-06-05T09:00:00Z',
+      members: [],
+    }
+    const createInput: CreateAssetDecisionRecordInput = {
+      source_group_id: 'adg_auto_001',
+      renew_within_days: 60,
+      title: '德国主备取舍',
+      goal: '保留主力',
+      status: 'draft',
+      members: [{ vps_id: 'vps_001', decided_role: 'primary_candidate', decided_action: 'keep', reason: '主力' }],
+    }
+    const patchInput: PatchAssetDecisionRecordInput = { status: 'in_progress', goal: '开始迁移' }
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(overview)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([group])))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(detail)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([record])))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify(record)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(record)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ ...record, status: 'in_progress', goal: '开始迁移' })))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(getAssetDecisionOverview({ view: 'renewal', renew_within_days: 45 })).resolves.toEqual(overview)
-    await expect(listAssetDecisionGroups({ view: 'renewal', renew_within_days: 45 })).resolves.toEqual([group])
-    await expect(getAssetDecisionGroup('adg_auto_001', { renew_within_days: 45 })).resolves.toEqual(detail)
+    await expect(getAssetDecisionOverview({ view: 'renewal', renew_within_days: 60 })).resolves.toEqual(overview)
+    await expect(listAssetDecisionGroups({ view: 'renewal', renew_within_days: 60 })).resolves.toEqual([group])
+    await expect(getAssetDecisionGroup('adg_auto_001', { renew_within_days: 60 })).resolves.toEqual(detail)
+    await expect(listAssetDecisionRecords()).resolves.toEqual([record])
+    await expect(createAssetDecisionRecord(createInput)).resolves.toEqual(record)
+    await expect(getAssetDecisionRecord('adr_001')).resolves.toEqual(record)
+    await expect(patchAssetDecisionRecord('adr_001', patchInput)).resolves.toEqual({ ...record, status: 'in_progress', goal: '开始迁移' })
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/asset-decisions/overview?view=renewal&renew_within_days=45', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/asset-decisions/overview?view=renewal&renew_within_days=60', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/asset-decisions/groups?view=renewal&renew_within_days=45', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/asset-decisions/groups?view=renewal&renew_within_days=60', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=45', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=60', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/asset-decisions/records', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/asset-decisions/records', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(createInput),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/asset-decisions/records/adr_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/asset-decisions/records/adr_001', {
+      method: 'PATCH',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(patchInput),
     })
   })
 

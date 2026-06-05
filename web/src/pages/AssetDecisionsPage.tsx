@@ -18,11 +18,15 @@ import {
 import { PageState as PageStateView } from '../components/PageState'
 import {
   ApiError,
+  createAssetDecisionRecord,
   getAssetDecisionGroup,
   getAssetDecisionOverview,
+  getAssetDecisionRecord,
   listAssetDecisionGroups,
+  listAssetDecisionRecords,
   listSubscriptions,
   listVPSAssets,
+  patchAssetDecisionRecord,
   updateVPSAsset,
 } from '../lib/api'
 import { formatDate, formatDateTime, formatMoney, formatOptional } from '../lib/format'
@@ -32,6 +36,10 @@ import {
   type AssetDecisionGroupMember,
   type AssetDecisionGroupSummary,
   type AssetDecisionOverview,
+  type AssetDecisionRecordDetail,
+  type AssetDecisionRecordMember,
+  type AssetDecisionRecordStatus,
+  type AssetDecisionRecordSummary,
   type AssetDecisionSuggestedAction,
   type AssetDecisionSuggestedRole,
   type AssetDecisionView,
@@ -93,6 +101,31 @@ type DetailState = {
   detail: AssetDecisionGroupDetail | null
 }
 
+type RecordsState = {
+  loading: boolean
+  error: string | null
+  records: AssetDecisionRecordSummary[]
+}
+
+type RecordDetailState = {
+  loading: boolean
+  error: string | null
+  detail: AssetDecisionRecordDetail | null
+}
+
+type RecordMemberDraft = {
+  decidedRole: AssetDecisionSuggestedRole
+  decidedAction: AssetDecisionSuggestedAction
+  reason: string
+}
+
+type RecordDraft = {
+  title: string
+  goal: string
+  status: AssetDecisionRecordStatus
+  members: Record<string, RecordMemberDraft>
+}
+
 type QueueState = {
   renewalsLoading: boolean
   renewalsError: string | null
@@ -120,6 +153,16 @@ const INITIAL_PORTFOLIO_STATE: PortfolioState = {
   groups: [],
 }
 const INITIAL_DETAIL_STATE: DetailState = {
+  loading: false,
+  error: null,
+  detail: null,
+}
+const INITIAL_RECORDS_STATE: RecordsState = {
+  loading: true,
+  error: null,
+  records: [],
+}
+const INITIAL_RECORD_DETAIL_STATE: RecordDetailState = {
   loading: false,
   error: null,
   detail: null,
@@ -163,6 +206,40 @@ const ACTION_LABELS: Record<AssetDecisionSuggestedAction, string> = {
   open_cancellation_workbench: '进入取消台',
   complete_evidence: '补齐资料',
 }
+
+const RECORD_STATUS_LABELS: Record<AssetDecisionRecordStatus, string> = {
+  draft: '草稿',
+  decided: '已决策',
+  in_progress: '推进中',
+  completed: '已完成',
+  abandoned: '已放弃',
+}
+
+const ROLE_OPTIONS: ReadonlyArray<{ value: AssetDecisionSuggestedRole; label: string }> = [
+  { value: 'primary_candidate', label: ROLE_LABELS.primary_candidate },
+  { value: 'standby_candidate', label: ROLE_LABELS.standby_candidate },
+  { value: 'observe_candidate', label: ROLE_LABELS.observe_candidate },
+  { value: 'retire_candidate', label: ROLE_LABELS.retire_candidate },
+  { value: 'evidence_needed', label: ROLE_LABELS.evidence_needed },
+]
+
+const ACTION_OPTIONS: ReadonlyArray<{ value: AssetDecisionSuggestedAction; label: string }> = [
+  { value: 'review', label: ACTION_LABELS.review },
+  { value: 'keep', label: ACTION_LABELS.keep },
+  { value: 'observe', label: ACTION_LABELS.observe },
+  { value: 'migrate', label: ACTION_LABELS.migrate },
+  { value: 'cancel', label: ACTION_LABELS.cancel },
+  { value: 'open_cancellation_workbench', label: ACTION_LABELS.open_cancellation_workbench },
+  { value: 'complete_evidence', label: ACTION_LABELS.complete_evidence },
+]
+
+const RECORD_STATUS_OPTIONS: ReadonlyArray<{ value: AssetDecisionRecordStatus; label: string }> = [
+  { value: 'draft', label: RECORD_STATUS_LABELS.draft },
+  { value: 'decided', label: RECORD_STATUS_LABELS.decided },
+  { value: 'in_progress', label: RECORD_STATUS_LABELS.in_progress },
+  { value: 'completed', label: RECORD_STATUS_LABELS.completed },
+  { value: 'abandoned', label: RECORD_STATUS_LABELS.abandoned },
+]
 
 const WORKBENCH_TABS: ReadonlyArray<{ value: WorkbenchView; label: string }> = [
   { value: 'needs_decision', label: '需要决策' },
@@ -333,6 +410,38 @@ function actionTone(action: AssetDecisionSuggestedAction): BadgeTone {
   return 'notice'
 }
 
+function recordStatusTone(status: AssetDecisionRecordStatus): BadgeTone {
+  if (status === 'completed') return 'normal'
+  if (status === 'in_progress') return 'maintenance'
+  if (status === 'decided') return 'notice'
+  if (status === 'abandoned') return 'offline'
+  return 'neutral'
+}
+
+function buildRecordDraft(detail: AssetDecisionGroupDetail): RecordDraft {
+  const members: Record<string, RecordMemberDraft> = {}
+  for (const member of detail.members) {
+    members[member.vps.vps_id] = {
+      decidedRole: member.suggested_role,
+      decidedAction: member.suggested_action,
+      reason: '',
+    }
+  }
+  return {
+    title: detail.title,
+    goal: '',
+    status: 'draft',
+    members,
+  }
+}
+
+function actionHrefForMember(member: AssetDecisionRecordMember): string {
+  if (member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel') {
+    return `/vps/${member.vps_id}?workbench=cancellation`
+  }
+  return `/vps/${member.vps_id}`
+}
+
 function renderEvidenceChips(chips: AssetDecisionEvidenceChip[], limit = 5) {
   if (chips.length === 0) return <span className="empty-inline">证据稳定</span>
   const visible = chips.slice(0, limit)
@@ -419,9 +528,18 @@ export function AssetDecisionsPage() {
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
   const [portfolioState, setPortfolioState] = useState<PortfolioState>(INITIAL_PORTFOLIO_STATE)
   const [detailState, setDetailState] = useState<DetailState>(INITIAL_DETAIL_STATE)
+  const [recordsState, setRecordsState] = useState<RecordsState>(INITIAL_RECORDS_STATE)
+  const [recordDetailState, setRecordDetailState] = useState<RecordDetailState>(INITIAL_RECORD_DETAIL_STATE)
   const [queueState, setQueueState] = useState<QueueState>(INITIAL_QUEUE_STATE)
   const [selectedGroupID, setSelectedGroupID] = useState<string | null>(null)
+  const [selectedRecordID, setSelectedRecordID] = useState<string | null>(null)
   const [selectedVPS, setSelectedVPS] = useState<VPSAssetRecord | null>(null)
+  const [recordDraft, setRecordDraft] = useState<RecordDraft | null>(null)
+  const [recordSaving, setRecordSaving] = useState(false)
+  const [recordSaveError, setRecordSaveError] = useState<string | null>(null)
+  const [recordPatchStatus, setRecordPatchStatus] = useState<AssetDecisionRecordStatus>('draft')
+  const [recordPatching, setRecordPatching] = useState(false)
+  const [recordPatchError, setRecordPatchError] = useState<string | null>(null)
   const [decisionDraft, setDecisionDraft] = useState<AssetDecisionDraft>(INITIAL_DECISION_DRAFT)
   const [decisionSubmitting, setDecisionSubmitting] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
@@ -465,6 +583,24 @@ export function AssetDecisionsPage() {
 
     return () => { cancelled = true }
   }, [activeView, apiView, renewalWindow, refreshToken])
+
+  useEffect(() => {
+    let cancelled = false
+    listAssetDecisionRecords()
+      .then((records) => {
+        if (cancelled) return
+        setRecordsState({ loading: false, error: null, records })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setRecordsState({
+          loading: false,
+          error: describeError(error, '加载已保存组合决策失败'),
+          records: [],
+        })
+      })
+    return () => { cancelled = true }
+  }, [refreshToken])
 
   useEffect(() => {
     let cancelled = false
@@ -549,6 +685,28 @@ export function AssetDecisionsPage() {
       })
     return () => { cancelled = true }
   }, [selectedGroupID, renewalWindow, refreshToken])
+
+  useEffect(() => {
+    if (!selectedRecordID) {
+      return
+    }
+    let cancelled = false
+    getAssetDecisionRecord(selectedRecordID)
+      .then((detail) => {
+        if (cancelled) return
+        setRecordDetailState({ loading: false, error: null, detail })
+        setRecordPatchStatus(detail.status)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setRecordDetailState({
+          loading: false,
+          error: describeError(error, '加载决策记录失败'),
+          detail: null,
+        })
+      })
+    return () => { cancelled = true }
+  }, [selectedRecordID, refreshToken])
 
   const subscriptionsByVPS = useMemo(
     () => groupSubscriptionsByVPS(queueState.subscriptions),
@@ -672,6 +830,68 @@ export function AssetDecisionsPage() {
     },
   ]
 
+  const recordColumns: DataTableColumn<AssetDecisionRecordSummary>[] = [
+    {
+      key: 'record',
+      label: '决策记录',
+      width: '286px',
+      render: (record) => (
+        <div className="asset-table__identity asset-decision-record-cell">
+          <strong>{record.title}</strong>
+          <span>{VIEW_LABELS[record.source_view]} · {record.scope_label || record.source_group_id}</span>
+          <span>{record.goal || '暂无目标备注'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      label: '状态',
+      width: '136px',
+      render: (record) => (
+        <div className="asset-table__stack">
+          <Badge variant="state" tone={recordStatusTone(record.status)}>
+            {RECORD_STATUS_LABELS[record.status]}
+          </Badge>
+          <span>{record.renew_within_days} 天窗口</span>
+        </div>
+      ),
+    },
+    {
+      key: 'scope',
+      label: '来源',
+      width: '220px',
+      render: (record) => (
+        <div className="asset-table__stack">
+          <strong><MonoDigits>{record.member_count}</MonoDigits> 台 VPS</strong>
+          <span>{record.source_group_type}</span>
+          <span>{record.source_group_id}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'updated',
+      label: '更新时间',
+      width: '168px',
+      render: (record) => (
+        <div className="asset-table__stack">
+          <strong>{formatDateTime(record.updated_at)}</strong>
+          <span>{record.completed_at ? `完成 ${formatDateTime(record.completed_at)}` : record.decided_at ? `决策 ${formatDateTime(record.decided_at)}` : '尚未决策'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '入口',
+      align: 'right',
+      width: '112px',
+      render: (record) => (
+        <button className="btn sm primary" type="button" onClick={() => openRecord(record.record_id)}>
+          查看记录
+        </button>
+      ),
+    },
+  ]
+
   const memberColumns: DataTableColumn<AssetDecisionGroupMember>[] = [
     {
       key: 'vps',
@@ -777,6 +997,81 @@ export function AssetDecisionsPage() {
     },
   ]
 
+  const recordMemberColumns: DataTableColumn<AssetDecisionRecordMember>[] = [
+    {
+      key: 'vps',
+      label: 'VPS',
+      width: '220px',
+      render: (member) => (
+        <div className="asset-table__identity">
+          <strong><Link className="name" to={`/vps/${member.vps_id}`}>{member.display_name || member.vps_id}</Link></strong>
+          <span>{member.vps_id}</span>
+          <span>保存于 {formatDateTime(member.created_at)}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'suggested',
+      label: '系统建议',
+      width: '180px',
+      render: (member) => (
+        <span className="asset-decision-chip-row">
+          <Badge variant="state" tone={roleTone(member.suggested_role)}>
+            {ROLE_LABELS[member.suggested_role]}
+          </Badge>
+          <Badge variant="state" tone={actionTone(member.suggested_action)}>
+            {ACTION_LABELS[member.suggested_action]}
+          </Badge>
+        </span>
+      ),
+    },
+    {
+      key: 'decided',
+      label: '用户判断',
+      width: '220px',
+      render: (member) => (
+        <div className="asset-table__stack">
+          <span className="asset-decision-chip-row">
+            <Badge variant="state" tone={roleTone(member.decided_role)}>
+              {ROLE_LABELS[member.decided_role]}
+            </Badge>
+            <Badge variant="state" tone={actionTone(member.decided_action)}>
+              {ACTION_LABELS[member.decided_action]}
+            </Badge>
+          </span>
+          <span>{member.reason || '未填写成员理由'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'evidence',
+      label: '快照证据',
+      width: '268px',
+      render: (member) => (
+        <div className="asset-table__stack">
+          <strong>
+            服务 {String(member.evidence_snapshot.service_count ?? '—')} · 域名 {String(member.evidence_snapshot.domain_count ?? '—')}
+          </strong>
+          <span>
+            监控 {String(member.evidence_snapshot.running_monitoring_count ?? '—')}/{String(member.evidence_snapshot.monitoring_link_count ?? '—')}
+          </span>
+          <span>{String(member.evidence_snapshot.primary_issue_summary || '暂无主要问题')}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '推进',
+      align: 'right',
+      width: '138px',
+      render: (member) => (
+        <Link className="btn sm secondary" to={actionHrefForMember(member)}>
+          {member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel' ? '取消/退役' : 'VPS 详情'}
+        </Link>
+      ),
+    },
+  ]
+
   function setWorkbenchView(next: WorkbenchView) {
     setPortfolioState((current) => ({
       ...current,
@@ -815,6 +1110,8 @@ export function AssetDecisionsPage() {
   function openGroup(groupID: string) {
     setSelectedVPS(null)
     setDecisionError(null)
+    setRecordDraft(null)
+    setRecordSaveError(null)
     setDetailState({ loading: true, error: null, detail: null })
     setSelectedGroupID(groupID)
   }
@@ -823,8 +1120,124 @@ export function AssetDecisionsPage() {
     setSelectedGroupID(null)
     setDetailState(INITIAL_DETAIL_STATE)
     setSelectedVPS(null)
+    setRecordDraft(null)
+    setRecordSaveError(null)
     setDecisionDraft(INITIAL_DECISION_DRAFT)
     setDecisionError(null)
+  }
+
+  function startRecordSave(detail: AssetDecisionGroupDetail) {
+    setRecordDraft(buildRecordDraft(detail))
+    setRecordSaveError(null)
+  }
+
+  function cancelRecordSave() {
+    setRecordDraft(null)
+    setRecordSaveError(null)
+  }
+
+  function updateRecordDraftMember(vpsID: string, patch: Partial<RecordMemberDraft>) {
+    setRecordDraft((current) => {
+      if (!current) return current
+      const existing = current.members[vpsID]
+      if (!existing) return current
+      return {
+        ...current,
+        members: {
+          ...current.members,
+          [vpsID]: {
+            ...existing,
+            ...patch,
+          },
+        },
+      }
+    })
+  }
+
+  function submitRecordSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = detailState.detail
+    const draft = recordDraft
+    if (!detail || !draft) return
+    setRecordSaveError(null)
+
+    const title = draft.title.trim()
+    if (!title) {
+      setRecordSaveError('请填写决策记录标题')
+      return
+    }
+
+    setRecordSaving(true)
+    createAssetDecisionRecord({
+      source_group_id: detail.group_id,
+      renew_within_days: renewalWindow,
+      title,
+      goal: draft.goal.trim(),
+      status: draft.status,
+      members: detail.members.map((member) => {
+        const memberDraft = draft.members[member.vps.vps_id]
+        return {
+          vps_id: member.vps.vps_id,
+          decided_role: memberDraft?.decidedRole ?? member.suggested_role,
+          decided_action: memberDraft?.decidedAction ?? member.suggested_action,
+          reason: memberDraft?.reason.trim() ?? '',
+        }
+      }),
+    })
+      .then((record) => {
+        setRecordsState((current) => ({
+          loading: false,
+          error: null,
+          records: [record, ...current.records.filter((item) => item.record_id !== record.record_id)],
+        }))
+        setRecordDraft(null)
+        setDecisionNotice(`已保存组合决策记录：${record.title}`)
+        setSelectedGroupID(null)
+        setDetailState(INITIAL_DETAIL_STATE)
+        setSelectedVPS(null)
+        setSelectedRecordID(record.record_id)
+        setRecordDetailState({ loading: false, error: null, detail: record })
+        setRecordPatchStatus(record.status)
+      })
+      .catch((error: unknown) => {
+        setRecordSaveError(describeError(error, '保存组合决策记录失败'))
+      })
+      .finally(() => setRecordSaving(false))
+  }
+
+  function openRecord(recordID: string) {
+    setSelectedRecordID(recordID)
+    setRecordDetailState({ loading: true, error: null, detail: null })
+    setRecordPatchError(null)
+  }
+
+  function closeRecordDetail() {
+    setSelectedRecordID(null)
+    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
+    setRecordPatchError(null)
+  }
+
+  function submitRecordStatus(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = recordDetailState.detail
+    if (!detail) return
+    setRecordPatchError(null)
+    setRecordPatching(true)
+    patchAssetDecisionRecord(detail.record_id, { status: recordPatchStatus })
+      .then((record) => {
+        setRecordDetailState({ loading: false, error: null, detail: record })
+        setRecordPatchStatus(record.status)
+        setRecordsState((current) => ({
+          loading: false,
+          error: null,
+          records: current.records.map((item) => (item.record_id === record.record_id ? record : item)),
+        }))
+        setDecisionNotice(`决策记录状态已更新：${record.title} -> ${RECORD_STATUS_LABELS[record.status]}`)
+      })
+      .catch((error: unknown) => {
+        setRecordPatchError(describeError(error, '更新决策记录状态失败'))
+      })
+      .finally(() => setRecordPatching(false))
   }
 
   function selectVPS(vps: VPSAssetRecord) {
@@ -1030,7 +1443,55 @@ export function AssetDecisionsPage() {
         )}
       </section>
 
-      <section className="page-panel asset-renewal-evidence animate-in d3">
+      <section className="page-panel asset-decision-records animate-in d3">
+        <div className="asset-decision-board__header">
+          <div>
+            <p className="section-heading__eyebrow">DECISION MEMORY</p>
+            <h2>已保存组合决策</h2>
+            <p>保存组级目标、成员角色/动作/理由和当时证据快照，用于后续回看与推进。</p>
+          </div>
+          <span className="section-count">
+            {recordsState.loading ? '...' : recordsState.error ? '不可用' : `${recordsState.records.length} 条`}
+          </span>
+        </div>
+        {recordsState.loading ? (
+          <PageStateView
+            kind="loading"
+            title="正在加载决策记录…"
+            surface="empty"
+            compact
+          />
+        ) : recordsState.error ? (
+          <PageStateView
+            kind="error"
+            title="决策记录不可用"
+            description={<>{recordsState.error}</>}
+            technicalSummary={recordsState.error}
+            surface="empty"
+            compact
+          />
+        ) : recordsState.records.length === 0 ? (
+          <PageStateView
+            kind="empty"
+            title="尚未保存组合决策"
+            description="打开上方决策组后，可以把当前组合判断保存成长期记录。"
+            surface="empty"
+            compact
+          />
+        ) : (
+          <div className="asset-table-scroll" role="region" aria-label="已保存组合决策" tabIndex={0}>
+            <DataTable
+              className="asset-table asset-decision-records-table"
+              columns={recordColumns}
+              rows={recordsState.records}
+              rowKey={(record) => record.record_id}
+              onRowClick={(record) => openRecord(record.record_id)}
+            />
+          </div>
+        )}
+      </section>
+
+      <section className="page-panel asset-renewal-evidence animate-in d4">
         <div className="section-heading section-heading--inline">
           <div>
             <p className="section-heading__eyebrow">RENEWAL EVIDENCE</p>
@@ -1062,7 +1523,7 @@ export function AssetDecisionsPage() {
         />
       </section>
 
-      <section className="page-panel asset-decision-single-queue animate-in d4">
+      <section className="page-panel asset-decision-single-queue animate-in d5">
         <div className="asset-decision-board__header">
           <div>
             <p className="section-heading__eyebrow">SINGLE VPS QUEUE</p>
@@ -1270,10 +1731,110 @@ export function AssetDecisionsPage() {
             </div>
             <div className="asset-decision-detail__evidence">
               {renderEvidenceChips(detailState.detail.evidence_chips, 8)}
+              <button className="btn sm primary" type="button" onClick={() => startRecordSave(detailState.detail!)}>
+                保存为决策记录
+              </button>
               {detailState.detail.primary_issue_summary && (
                 <span className="asset-decision-detail__issue">{detailState.detail.primary_issue_summary}</span>
               )}
             </div>
+            {recordDraft && (
+              <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
+                <div className="asset-decision-record-form__header">
+                  <div>
+                    <p className="section-heading__eyebrow">SAVE DECISION</p>
+                    <h3>保存组合决策记录</h3>
+                    <p>记录当前组级目标、成员判断和这一次聚合出的证据快照。</p>
+                  </div>
+                  <div className="asset-decision-member-actions">
+                    <button className="btn sm primary" type="submit" disabled={recordSaving}>
+                      {recordSaving ? '保存中…' : '保存记录'}
+                    </button>
+                    <button className="btn sm secondary" type="button" onClick={cancelRecordSave} disabled={recordSaving}>
+                      取消
+                    </button>
+                  </div>
+                </div>
+                {recordSaveError && <div className="inline-alert danger">{recordSaveError}</div>}
+                <div className="asset-decision-record-form__grid">
+                  <label className="input-field">
+                    <span>标题</span>
+                    <input
+                      className="input"
+                      value={recordDraft.title}
+                      onChange={(event) => setRecordDraft((current) => current ? { ...current, title: event.target.value } : current)}
+                    />
+                  </label>
+                  <label className="input-field">
+                    <span>状态</span>
+                    <select
+                      className="input"
+                      value={recordDraft.status}
+                      onChange={(event) => setRecordDraft((current) => current ? { ...current, status: event.target.value as AssetDecisionRecordStatus } : current)}
+                    >
+                      {RECORD_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="input-field asset-decision-record-form__goal">
+                    <span>组合目标</span>
+                    <textarea
+                      className="input"
+                      value={recordDraft.goal}
+                      rows={2}
+                      onChange={(event) => setRecordDraft((current) => current ? { ...current, goal: event.target.value } : current)}
+                    />
+                  </label>
+                </div>
+                <div className="asset-decision-record-form__members">
+                  {detailState.detail.members.map((member) => {
+                    const memberDraft = recordDraft.members[member.vps.vps_id]
+                    return (
+                      <div className="asset-decision-record-form__member" key={member.vps.vps_id}>
+                        <div className="asset-table__identity">
+                          <strong>{member.vps.display_name}</strong>
+                          <span>{member.vps.vps_id}</span>
+                          {renderEvidenceChips(member.evidence_chips, 2)}
+                        </div>
+                        <label className="input-field">
+                          <span>角色</span>
+                          <select
+                            className="input"
+                            value={memberDraft?.decidedRole ?? member.suggested_role}
+                            onChange={(event) => updateRecordDraftMember(member.vps.vps_id, { decidedRole: event.target.value as AssetDecisionSuggestedRole })}
+                          >
+                            {ROLE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="input-field">
+                          <span>动作</span>
+                          <select
+                            className="input"
+                            value={memberDraft?.decidedAction ?? member.suggested_action}
+                            onChange={(event) => updateRecordDraftMember(member.vps.vps_id, { decidedAction: event.target.value as AssetDecisionSuggestedAction })}
+                          >
+                            {ACTION_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="input-field">
+                          <span>理由</span>
+                          <input
+                            className="input"
+                            value={memberDraft?.reason ?? ''}
+                            onChange={(event) => updateRecordDraftMember(member.vps.vps_id, { reason: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                    )
+                  })}
+                </div>
+              </form>
+            )}
             <div className="asset-table-scroll" role="region" aria-label="决策组成员对比" tabIndex={0}>
               <DataTable
                 className="asset-table asset-decision-members-table"
@@ -1318,6 +1879,91 @@ export function AssetDecisionsPage() {
           onSubmit={handleDecisionSubmit}
           onCancel={closeDecisionDrawer}
         />
+      </Modal>
+
+      <Modal
+        open={selectedRecordID != null}
+        onClose={closeRecordDetail}
+        title={recordDetailState.detail?.title ?? '组合决策记录'}
+        ariaLabel="资产组合决策记录详情"
+        size="xl"
+        contentClassName="asset-decision-record-modal"
+      >
+        {recordDetailState.loading ? (
+          <PageStateView kind="loading" title="正在加载决策记录…" surface="empty" compact />
+        ) : recordDetailState.error ? (
+          <PageStateView
+            kind="error"
+            title="决策记录不可用"
+            description={<>{recordDetailState.error}</>}
+            technicalSummary={recordDetailState.error}
+            surface="empty"
+            compact
+          />
+        ) : recordDetailState.detail ? (
+          <div className="asset-decision-detail asset-decision-record-detail">
+            <div className="asset-decision-detail__summary">
+              <div>
+                <span>状态</span>
+                <strong>{RECORD_STATUS_LABELS[recordDetailState.detail.status]}</strong>
+                <small>{recordDetailState.detail.record_id}</small>
+              </div>
+              <div>
+                <span>成员</span>
+                <strong><MonoDigits>{recordDetailState.detail.member_count}</MonoDigits></strong>
+                <small>{recordDetailState.detail.scope_label || recordDetailState.detail.source_group_id}</small>
+              </div>
+              <div>
+                <span>来源</span>
+                <strong>{VIEW_LABELS[recordDetailState.detail.source_view]}</strong>
+                <small>{recordDetailState.detail.source_group_type}</small>
+              </div>
+              <div>
+                <span>更新时间</span>
+                <strong>{formatDateTime(recordDetailState.detail.updated_at)}</strong>
+                <small>{recordDetailState.detail.completed_at ? `完成 ${formatDateTime(recordDetailState.detail.completed_at)}` : '尚未完成'}</small>
+              </div>
+            </div>
+            <div className="asset-decision-record-detail__lead">
+              <div>
+                <p className="section-heading__eyebrow">GOAL</p>
+                <strong>{recordDetailState.detail.goal || '暂无组合目标'}</strong>
+                <span>
+                  快照成本 {recordDetailState.detail.evidence_snapshot.monthly_cost_base != null
+                    ? formatMoney(Number(recordDetailState.detail.evidence_snapshot.monthly_cost_base), String(recordDetailState.detail.evidence_snapshot.base_currency || 'CNY'))
+                    : '暂无 base currency 成本'}
+                </span>
+              </div>
+              <form className="asset-decision-record-status-form" onSubmit={submitRecordStatus}>
+                <label className="input-field">
+                  <span>推进状态</span>
+                  <select
+                    aria-label="推进状态"
+                    className="input"
+                    value={recordPatchStatus}
+                    onChange={(event) => setRecordPatchStatus(event.target.value as AssetDecisionRecordStatus)}
+                  >
+                    {RECORD_STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <button className="btn sm primary" type="submit" disabled={recordPatching || recordPatchStatus === recordDetailState.detail.status}>
+                  {recordPatching ? '保存中…' : '更新状态'}
+                </button>
+              </form>
+            </div>
+            {recordPatchError && <div className="inline-alert danger">{recordPatchError}</div>}
+            <div className="asset-table-scroll" role="region" aria-label="决策记录成员" tabIndex={0}>
+              <DataTable
+                className="asset-table asset-decision-record-members-table"
+                columns={recordMemberColumns}
+                rows={recordDetailState.detail.members}
+                rowKey={(member) => member.vps_id}
+              />
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </div>
   )

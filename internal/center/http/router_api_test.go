@@ -235,6 +235,14 @@ func TestRouterKeepsAssetDecisionsOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"group_id":"adg_auto_001","members":[]}`))
 		}),
+		AssetDecisionRecordsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"record_id":"adr_001"}]`))
+		}),
+		AssetDecisionRecordHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"record_id":"adr_001","members":[]}`))
+		}),
 	})
 
 	tests := []struct {
@@ -245,6 +253,8 @@ func TestRouterKeepsAssetDecisionsOutOfSPAFallback(t *testing.T) {
 		{name: "overview", path: "/api/asset-decisions/overview", wantBodySnippet: `"group_count":1`},
 		{name: "groups", path: "/api/asset-decisions/groups", wantBodySnippet: `"group_id":"adg_auto_001"`},
 		{name: "group detail", path: "/api/asset-decisions/groups/adg_auto_001", wantBodySnippet: `"members":[]`},
+		{name: "records", path: "/api/asset-decisions/records", wantBodySnippet: `"record_id":"adr_001"`},
+		{name: "record detail", path: "/api/asset-decisions/records/adr_001", wantBodySnippet: `"members":[]`},
 	}
 
 	for _, tt := range tests {
