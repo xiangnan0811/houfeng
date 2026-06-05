@@ -1589,3 +1589,36 @@ Added asset decision record member follow-up tracking with migration, backend PA
 ### Next Steps
 
 - None - task complete
+
+
+## Session 165: Asset decision execution readback
+
+**Date**: 2026-06-05
+**Task**: Asset decision execution readback
+**Branch**: `worktree/asset-decisions-execution-readback`
+
+### Summary
+
+Implemented execution readback for saved asset decision records across backend read model, store batching, API contract, frontend record UI, tests, and Trellis specs. Verified target Go packages, full web verify, and noted local visual/containersample environment limitations.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7000b6a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

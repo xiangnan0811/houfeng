@@ -212,28 +212,29 @@ type GroupMember struct {
 }
 
 type RecordSummary struct {
-	RecordID                string           `json:"record_id"`
-	Title                   string           `json:"title"`
-	Goal                    string           `json:"goal"`
-	Status                  RecordStatus     `json:"status"`
-	SourceType              string           `json:"source_type"`
-	SourceGroupID           string           `json:"source_group_id"`
-	SourceGroupType         GroupType        `json:"source_group_type"`
-	SourceView              View             `json:"source_view"`
-	ScopeKey                string           `json:"scope_key"`
-	ScopeLabel              string           `json:"scope_label"`
-	RenewWithinDays         int              `json:"renew_within_days"`
-	MemberCount             int              `json:"member_count"`
-	FollowupTodoCount       int              `json:"followup_todo_count"`
-	FollowupInProgressCount int              `json:"followup_in_progress_count"`
-	FollowupBlockedCount    int              `json:"followup_blocked_count"`
-	FollowupDoneCount       int              `json:"followup_done_count"`
-	FollowupSkippedCount    int              `json:"followup_skipped_count"`
-	EvidenceSnapshot        EvidenceSnapshot `json:"evidence_snapshot"`
-	CreatedAt               time.Time        `json:"created_at"`
-	UpdatedAt               time.Time        `json:"updated_at"`
-	DecidedAt               *time.Time       `json:"decided_at,omitempty"`
-	CompletedAt             *time.Time       `json:"completed_at,omitempty"`
+	RecordID                string                  `json:"record_id"`
+	Title                   string                  `json:"title"`
+	Goal                    string                  `json:"goal"`
+	Status                  RecordStatus            `json:"status"`
+	SourceType              string                  `json:"source_type"`
+	SourceGroupID           string                  `json:"source_group_id"`
+	SourceGroupType         GroupType               `json:"source_group_type"`
+	SourceView              View                    `json:"source_view"`
+	ScopeKey                string                  `json:"scope_key"`
+	ScopeLabel              string                  `json:"scope_label"`
+	RenewWithinDays         int                     `json:"renew_within_days"`
+	MemberCount             int                     `json:"member_count"`
+	FollowupTodoCount       int                     `json:"followup_todo_count"`
+	FollowupInProgressCount int                     `json:"followup_in_progress_count"`
+	FollowupBlockedCount    int                     `json:"followup_blocked_count"`
+	FollowupDoneCount       int                     `json:"followup_done_count"`
+	FollowupSkippedCount    int                     `json:"followup_skipped_count"`
+	EvidenceSnapshot        EvidenceSnapshot        `json:"evidence_snapshot"`
+	CreatedAt               time.Time               `json:"created_at"`
+	UpdatedAt               time.Time               `json:"updated_at"`
+	DecidedAt               *time.Time              `json:"decided_at,omitempty"`
+	CompletedAt             *time.Time              `json:"completed_at,omitempty"`
+	ExecutionReadback       RecordExecutionReadback `json:"execution_readback"`
 }
 
 type RecordDetail struct {
@@ -242,20 +243,21 @@ type RecordDetail struct {
 }
 
 type RecordMember struct {
-	RecordID          string           `json:"record_id"`
-	VPSID             string           `json:"vps_id"`
-	DisplayName       string           `json:"display_name"`
-	SuggestedRole     SuggestedRole    `json:"suggested_role"`
-	DecidedRole       SuggestedRole    `json:"decided_role"`
-	SuggestedAction   SuggestedAction  `json:"suggested_action"`
-	DecidedAction     SuggestedAction  `json:"decided_action"`
-	Reason            string           `json:"reason"`
-	FollowupStatus    FollowupStatus   `json:"followup_status"`
-	FollowupNote      string           `json:"followup_note"`
-	FollowupUpdatedAt *time.Time       `json:"followup_updated_at,omitempty"`
-	EvidenceSnapshot  EvidenceSnapshot `json:"evidence_snapshot"`
-	CreatedAt         time.Time        `json:"created_at"`
-	UpdatedAt         time.Time        `json:"updated_at"`
+	RecordID          string                  `json:"record_id"`
+	VPSID             string                  `json:"vps_id"`
+	DisplayName       string                  `json:"display_name"`
+	SuggestedRole     SuggestedRole           `json:"suggested_role"`
+	DecidedRole       SuggestedRole           `json:"decided_role"`
+	SuggestedAction   SuggestedAction         `json:"suggested_action"`
+	DecidedAction     SuggestedAction         `json:"decided_action"`
+	Reason            string                  `json:"reason"`
+	FollowupStatus    FollowupStatus          `json:"followup_status"`
+	FollowupNote      string                  `json:"followup_note"`
+	FollowupUpdatedAt *time.Time              `json:"followup_updated_at,omitempty"`
+	EvidenceSnapshot  EvidenceSnapshot        `json:"evidence_snapshot"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	ExecutionReadback MemberExecutionReadback `json:"execution_readback"`
 }
 
 type CreateRecordInput struct {

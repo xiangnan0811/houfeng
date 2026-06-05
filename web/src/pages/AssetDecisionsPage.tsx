@@ -36,9 +36,13 @@ import {
   type AssetDecisionEvidenceDecisionBias,
   type AssetDecisionEvidenceQualityTier,
   type AssetDecisionEvidenceSnapshot,
+  type AssetDecisionExecutionCurrentFacts,
+  type AssetDecisionExecutionReadbackStatus,
   type AssetDecisionGroupDetail,
   type AssetDecisionGroupMember,
   type AssetDecisionGroupSummary,
+  type AssetDecisionMemberExecutionReadback,
+  type AssetDecisionRecordExecutionReadback,
   type AssetDecisionOverview,
   type AssetDecisionRecordDetail,
   type AssetDecisionFollowupStatus,
@@ -235,6 +239,15 @@ const FOLLOWUP_STATUS_LABELS: Record<AssetDecisionFollowupStatus, string> = {
   blocked: '阻塞',
   done: '已完成',
   skipped: '跳过',
+}
+
+const READBACK_STATUS_LABELS: Record<AssetDecisionExecutionReadbackStatus, string> = {
+  open: '待回读',
+  aligned: '已对齐',
+  drift: '有漂移',
+  blocked: '阻塞',
+  needs_evidence: '需补证据',
+  inactive: '不活跃',
 }
 
 const EVIDENCE_TIER_LABELS: Record<AssetDecisionEvidenceQualityTier, string> = {
@@ -471,12 +484,33 @@ function followupStatusTone(status: AssetDecisionFollowupStatus): BadgeTone {
   return 'notice'
 }
 
+function readbackStatusTone(status?: AssetDecisionExecutionReadbackStatus): BadgeTone {
+  if (status === 'aligned') return 'normal'
+  if (status === 'drift') return 'critical'
+  if (status === 'blocked') return 'critical'
+  if (status === 'needs_evidence') return 'alert'
+  if (status === 'inactive') return 'offline'
+  if (status === 'open') return 'maintenance'
+  return 'neutral'
+}
+
 function recordFollowupDoneCount(record: AssetDecisionRecordSummary): number {
   return (record.followup_done_count ?? 0) + (record.followup_skipped_count ?? 0)
 }
 
 function recordFollowupOpenCount(record: AssetDecisionRecordSummary): number {
   return (record.followup_todo_count ?? 0) + (record.followup_in_progress_count ?? 0) + (record.followup_blocked_count ?? 0)
+}
+
+function readbackCountSummary(readback?: AssetDecisionRecordExecutionReadback): string {
+  if (!readback) return '等待回读'
+  const parts = [
+    readback.drift_count > 0 ? `漂移 ${readback.drift_count}` : '',
+    readback.blocked_count > 0 ? `阻塞 ${readback.blocked_count}` : '',
+    readback.needs_evidence_count > 0 ? `缺口 ${readback.needs_evidence_count}` : '',
+    readback.open_count > 0 ? `待处理 ${readback.open_count}` : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : `对齐 ${readback.aligned_count ?? 0}`
 }
 
 function buildRecordFollowupDrafts(detail: AssetDecisionRecordDetail | null): Record<string, RecordFollowupDraft> {
@@ -663,6 +697,88 @@ function memberContextLabel(member: AssetDecisionGroupMember): string {
     `Target ${member.running_target_count}/${member.target_count}`,
     `监控 ${member.running_monitoring_count}/${member.monitoring_link_count}`,
   ].join(' · ')
+}
+
+function currentFactsLabel(facts?: AssetDecisionExecutionCurrentFacts): string {
+  if (!facts) return '当前事实尚未返回'
+  if (!facts.found) return '当前事实缺失'
+  return [
+    `订阅 ${facts.active_subscription_count}`,
+    `服务 ${facts.service_count}`,
+    `域名 ${facts.domain_count}`,
+    `Target ${facts.running_target_count}/${facts.target_count}`,
+    `监控 ${facts.running_monitoring_count}/${facts.monitoring_link_count}`,
+  ].join(' · ')
+}
+
+function currentFactsStateLabel(facts?: AssetDecisionExecutionCurrentFacts): string {
+  if (!facts) return '等待资产聚合事实'
+  if (!facts.found) return '资产聚合中未找到当前 VPS'
+  return [
+    facts.lifecycle_status ? lifecycleLabel(facts.lifecycle_status) : '',
+    facts.usage_status ? usageLabel(facts.usage_status) : '',
+    facts.renewal_decision ? renewalLabel(facts.renewal_decision) : '',
+    facts.abnormal_monitoring_count > 0 ? `异常监控 ${facts.abnormal_monitoring_count}` : '',
+    facts.active_incident_count > 0 ? `事件 ${facts.active_incident_count}` : '',
+  ].filter(Boolean).join(' · ') || '基础状态正常'
+}
+
+function renderReadbackBadge(readback?: { status: AssetDecisionExecutionReadbackStatus }) {
+  const status = readback?.status
+  if (!status) {
+    return (
+      <Badge variant="state" tone="neutral">
+        等待回读
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="state" tone={readbackStatusTone(status)}>
+      {READBACK_STATUS_LABELS[status] ?? status}
+    </Badge>
+  )
+}
+
+function renderMemberReadback(readback?: AssetDecisionMemberExecutionReadback) {
+  if (!readback) {
+    return (
+      <div className="asset-table__stack asset-decision-readback-cell">
+        <span className="asset-decision-chip-row">{renderReadbackBadge()}</span>
+        <strong>等待执行证据回读</strong>
+        <span>当前事实尚未返回</span>
+      </div>
+    )
+  }
+  const issues = readback.issues ?? []
+  return (
+    <div className="asset-table__stack asset-decision-readback-cell">
+      <span className="asset-decision-chip-row">
+        {renderReadbackBadge(readback)}
+        {issues.length > 0 && (
+          <Badge variant="count" tone={readbackStatusTone(readback.status)}>
+            {issues.length} 项
+          </Badge>
+        )}
+      </span>
+      <strong>{readback.summary || '等待执行回读'}</strong>
+      <span>{currentFactsLabel(readback.current_facts)}</span>
+      <span>{currentFactsStateLabel(readback.current_facts)}</span>
+      {issues.length > 0 && (
+        <span className="asset-decision-chip-row">
+          {issues.slice(0, 3).map((issue) => (
+            <Badge key={`${issue.kind}-${issue.label}`} variant="info" tone={chipTone(issue.tone)}>
+              {issue.label}
+            </Badge>
+          ))}
+          {issues.length > 3 && (
+            <Badge variant="count" tone="neutral">
+              +{issues.length - 3}
+            </Badge>
+          )}
+        </span>
+      )}
+    </div>
+  )
 }
 
 export function AssetDecisionsPage() {
@@ -1035,6 +1151,20 @@ export function AssetDecisionsPage() {
       ),
     },
     {
+      key: 'readback',
+      label: '执行回读',
+      width: '228px',
+      render: (record) => (
+        <div className="asset-table__stack asset-decision-readback-cell">
+          <span className="asset-decision-chip-row">
+            {renderReadbackBadge(record.execution_readback)}
+          </span>
+          <strong>{record.execution_readback?.summary || '等待执行证据回读'}</strong>
+          <span>{readbackCountSummary(record.execution_readback)}</span>
+        </div>
+      ),
+    },
+    {
       key: 'updated',
       label: '更新时间',
       width: '168px',
@@ -1229,6 +1359,12 @@ export function AssetDecisionsPage() {
           </div>
         )
       },
+    },
+    {
+      key: 'readback',
+      label: '当前回读',
+      width: '312px',
+      render: (member) => renderMemberReadback(member.execution_readback),
     },
     {
       key: 'actions',
@@ -2188,6 +2324,11 @@ export function AssetDecisionsPage() {
                   <MonoDigits>{recordFollowupDoneCount(recordDetailState.detail)}</MonoDigits>/<MonoDigits>{recordDetailState.detail.member_count}</MonoDigits>
                 </strong>
                 <small>阻塞 {recordDetailState.detail.followup_blocked_count ?? 0} · 待处理 {recordDetailState.detail.followup_todo_count ?? 0}</small>
+              </div>
+              <div>
+                <span>执行回读</span>
+                <strong>{recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}</strong>
+                <small>{readbackCountSummary(recordDetailState.detail.execution_readback)}</small>
               </div>
               <div>
                 <span>证据快照</span>

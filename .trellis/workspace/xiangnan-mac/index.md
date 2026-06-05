@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 164
+- **Total Sessions**: 165
 - **Last Active**: 2026-06-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1591 | Active |
+| `journal-3.md` | ~1624 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 165 | 2026-06-05 | Asset decision execution readback | `7000b6a` | `worktree/asset-decisions-execution-readback` |
 | 164 | 2026-06-05 | Asset Decisions follow-up tracking | `0190e7c` | `worktree/asset-decisions-execution-tracking` |
 | 163 | 2026-06-05 | Asset decisions evidence assessment | `938f129` | `worktree/asset-decisions-evidence-quality` |
 | 162 | 2026-06-05 | Asset decision record workbench | `942aa60` | `worktree/asset-decisions-phase2-planning` |

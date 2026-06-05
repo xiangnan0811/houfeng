@@ -252,6 +252,44 @@ function groupDetail() {
   }
 }
 
+function recordReadback(overrides: Record<string, unknown> = {}) {
+  return {
+    status: 'needs_evidence',
+    summary: '1 台 VPS 仍需补证据',
+    open_count: 0,
+    aligned_count: 1,
+    drift_count: 0,
+    blocked_count: 0,
+    needs_evidence_count: 1,
+    ...overrides,
+  }
+}
+
+function memberReadback(overrides: Record<string, unknown> = {}) {
+  return {
+    status: 'aligned',
+    summary: '当前事实与判断一致',
+    issues: [],
+    current_facts: {
+      found: true,
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      active_subscription_count: 1,
+      service_count: 2,
+      domain_count: 1,
+      target_count: 1,
+      running_target_count: 1,
+      monitoring_link_count: 1,
+      running_monitoring_count: 1,
+      abnormal_monitoring_count: 0,
+      active_incident_count: 0,
+      source_availability: sourceAvailability,
+    },
+    ...overrides,
+  }
+}
+
 function decisionRecord(overrides: Record<string, unknown> = {}) {
   return {
     record_id: 'adr_001',
@@ -271,6 +309,7 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
     followup_blocked_count: 0,
     followup_done_count: 0,
     followup_skipped_count: 0,
+    execution_readback: recordReadback(),
     evidence_snapshot: {
       group_id: 'adg_auto_001',
       monthly_cost_base: 140,
@@ -301,6 +340,7 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
         followup_status: 'todo',
         followup_note: '',
         followup_updated_at: null,
+        execution_readback: memberReadback(),
         evidence_snapshot: {
           service_count: 2,
           domain_count: 1,
@@ -361,6 +401,8 @@ describe('AssetDecisionsPage', () => {
     expect(screen.getAllByText('证据强').length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: '已保存组合决策' })).toBeInTheDocument()
     expect(screen.getByText('德国主备取舍记录')).toBeInTheDocument()
+    expect(screen.getAllByText('需补证据').length).toBeGreaterThan(0)
+    expect(screen.getByText('缺口 1')).toBeInTheDocument()
     expect(screen.getByText('RENEWAL EVIDENCE')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '单台待处理队列' })).toBeInTheDocument()
     expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0)
@@ -531,6 +573,14 @@ describe('AssetDecisionsPage', () => {
       status: 'in_progress',
       followup_todo_count: 1,
       followup_blocked_count: 1,
+      execution_readback: recordReadback({
+        status: 'drift',
+        summary: '1 台 VPS 与当前事实不一致',
+        drift_count: 1,
+        blocked_count: 0,
+        needs_evidence_count: 0,
+        aligned_count: 0,
+      }),
       updated_at: '2026-06-05T09:10:00Z',
       decided_at: '2026-06-05T09:00:00Z',
       members: [
@@ -539,6 +589,14 @@ describe('AssetDecisionsPage', () => {
           followup_status: 'blocked',
           followup_note: '等待迁移窗口',
           followup_updated_at: '2026-06-05T09:10:00Z',
+          execution_readback: memberReadback({
+            status: 'drift',
+            summary: '跟进已完成，但当前事实仍未闭环',
+            issues: [
+              { kind: 'active_subscription_remaining', label: '仍有 active 订阅', tone: 'critical', details: 'active subscription: 1' },
+              { kind: 'running_target_remaining', label: '仍有关联 Target 运行', tone: 'critical', details: 'running target: 1' },
+            ],
+          }),
         },
       ],
     })
@@ -564,6 +622,9 @@ describe('AssetDecisionsPage', () => {
     const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
     expect(within(dialog).getByText('主力保留')).toBeInTheDocument()
     expect(within(dialog).getByText('证据快照')).toBeInTheDocument()
+    expect(within(dialog).getByText('执行回读')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('已对齐').length).toBeGreaterThan(0)
+    expect(within(dialog).getByText(/订阅 1 · 服务 2/)).toBeInTheDocument()
     expect(within(dialog).getAllByText('可决策').length).toBeGreaterThan(0)
     fireEvent.change(within(dialog).getByLabelText('推进状态'), { target: { value: 'in_progress' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '更新状态' }))
@@ -607,6 +668,12 @@ describe('AssetDecisionsPage', () => {
       }),
     })
     expect(within(dialog).getByLabelText('Germany Primary 跟进备注')).toHaveValue('等待迁移窗口')
+    expect(within(dialog).getAllByText('有漂移').length).toBeGreaterThan(0)
+    expect(within(dialog).getByText('仍有 active 订阅')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/'))).toBe(false)
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/subscriptions/') && call[1]?.method)).toBe(false)
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/monitoring-instances/') && call[1]?.method)).toBe(false)
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/targets/') && call[1]?.method)).toBe(false)
   })
 
   it('keeps the single VPS renewal decision PATCH payload unchanged', async () => {
