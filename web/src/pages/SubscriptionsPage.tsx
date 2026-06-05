@@ -669,6 +669,7 @@ export function SubscriptionsPage() {
                     <th>{baseCurrency ? `${baseCurrency} 成本` : '基准货币成本'}</th>
                     <th>续费</th>
                     <th>续费方式</th>
+                    <th>资产判断</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -708,6 +709,11 @@ export function SubscriptionsPage() {
                           <span className="asset-context-inline">
                             <span>{renewalModeLabel(s.renewal_mode ?? renewalModeFromLegacy(s))}</span>
                           </span>
+                        </td>
+                        <td className="data-table__cell">
+                          <Link className="btn-text sm secondary" to="/asset-decisions?view=renewal&renew_within_days=30">
+                            需要资产判断
+                          </Link>
                         </td>
                       </tr>
                     )

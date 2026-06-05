@@ -4,6 +4,10 @@ import type {
   AssetDomainRecord,
   AssetContextForMonitoringInstance,
   AssetContextForTarget,
+  AssetDecisionGroupDetail,
+  AssetDecisionGroupListFilter,
+  AssetDecisionGroupSummary,
+  AssetDecisionOverview,
   AssetServiceListFilter,
   AssetServiceRecord,
   ApplyCancellationInput,
@@ -517,6 +521,32 @@ export function getVPSAsset(vpsId: string) {
 
 export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promise<VPSAssetUpdateResult> {
   return patchJSONBody<VPSAssetUpdateResult>(`/api/vps/${vpsId}`, input)
+}
+
+export function getAssetDecisionOverview(filter?: AssetDecisionGroupListFilter) {
+  return requestJSON<AssetDecisionOverview>(
+    withQuery('/api/asset-decisions/overview', {
+      view: filter?.view,
+      renew_within_days: filter?.renew_within_days,
+    }),
+  )
+}
+
+export function listAssetDecisionGroups(filter?: AssetDecisionGroupListFilter) {
+  return requestJSON<AssetDecisionGroupSummary[]>(
+    withQuery('/api/asset-decisions/groups', {
+      view: filter?.view,
+      renew_within_days: filter?.renew_within_days,
+    }),
+  )
+}
+
+export function getAssetDecisionGroup(groupId: string, filter?: Pick<AssetDecisionGroupListFilter, 'renew_within_days'>) {
+  return requestJSON<AssetDecisionGroupDetail>(
+    withQuery(`/api/asset-decisions/groups/${encodeURIComponent(groupId)}`, {
+      renew_within_days: filter?.renew_within_days,
+    }),
+  )
 }
 
 export function getVPSCancellationPreview(vpsId: string) {

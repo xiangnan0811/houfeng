@@ -187,7 +187,7 @@ function commandFocusItems(
       label: pressureTotal > 0 ? '资产压力' : '资产主线',
       value: pressureTotal,
       detail: assetFocusDetail(summary, pressureTotal),
-      to: pressureTotal > 0 ? DASHBOARD_LINKS.assetDecisions : DASHBOARD_LINKS.vps,
+      to: pressureTotal > 0 ? DASHBOARD_LINKS.assetDecisionsNeedsDecision : DASHBOARD_LINKS.vps,
       tone: pressureTotal > 0 ? 'notice' : 'normal',
       emphasis: pressureTotal > 0,
     },
@@ -210,35 +210,35 @@ function assetRows(summary: DashboardAssetSummary): CommandRow[] {
       label: '取消联动',
       value: summary.cancellation_attention_vps_count ?? 0,
       detail: `已取消 ${summary.cancelled_vps_count ?? 0} · 仍运行 ${summary.running_cancelled_asset_count ?? 0}`,
-      to: DASHBOARD_LINKS.vpsCancellationAttention,
+      to: DASHBOARD_LINKS.assetDecisionsNeedsDecision,
       tone: (summary.cancellation_attention_vps_count ?? 0) > 0 ? 'alert' : 'normal',
     },
     {
       label: '30 天续费',
       value: summary.renewal_due_30d_vps_count,
       detail: `订阅 ${summary.renewal_due_30d_subscription_count}`,
-      to: DASHBOARD_LINKS.assetDecisions,
+      to: DASHBOARD_LINKS.assetDecisionsRenewal,
       tone: summary.renewal_due_30d_vps_count > 0 ? 'notice' : 'normal',
     },
     {
       label: '待决策',
       value: summary.unreviewed_vps_count,
       detail: '未评估',
-      to: DASHBOARD_LINKS.assetDecisions,
+      to: DASHBOARD_LINKS.assetDecisionsNeedsDecision,
       tone: summary.unreviewed_vps_count > 0 ? 'notice' : 'normal',
     },
     {
       label: '取消 / 迁移',
       value: lifecycleReviewCount,
       detail: `待取消 ${summary.to_cancel_vps_count} · 迁移 ${summary.to_migrate_vps_count}`,
-      to: DASHBOARD_LINKS.assetDecisions,
+      to: DASHBOARD_LINKS.assetDecisionsNeedsDecision,
       tone: lifecycleReviewCount > 0 ? 'alert' : 'normal',
     },
     {
       label: '未关联监控实例',
       value: summary.unlinked_vps_count,
       detail: '人工核对',
-      to: DASHBOARD_LINKS.vps,
+      to: DASHBOARD_LINKS.assetDecisionsEvidence,
       tone: summary.unlinked_vps_count > 0 ? 'notice' : 'normal',
     },
     {
@@ -252,7 +252,7 @@ function assetRows(summary: DashboardAssetSummary): CommandRow[] {
       label: '成本',
       value: summary.cost_by_currency.length,
       detail: formatAssetCost(summary),
-      to: DASHBOARD_LINKS.subscriptionsRenew30d,
+      to: DASHBOARD_LINKS.assetDecisionsCost,
       tone: summary.cost_by_currency.length > 0 ? 'neutral' : 'normal',
     },
   ]
@@ -325,8 +325,8 @@ function nextActions(
   if (pressureTotal > 0) {
     const cancellationAttentionCount = summary.cancellation_attention_vps_count ?? 0
     const actionTarget = cancellationAttentionCount > 0
-      ? DASHBOARD_LINKS.vpsCancellationAttention
-      : DASHBOARD_LINKS.assetDecisions
+      ? DASHBOARD_LINKS.assetDecisionsNeedsDecision
+      : DASHBOARD_LINKS.assetDecisionsRenewal
     actions.push({
       label: cancellationAttentionCount > 0 ? '处理取消联动' : '进入资产决策队列',
       detail: `取消联动 ${cancellationAttentionCount} · 决策 ${summary.unreviewed_vps_count} · 续费 ${summary.renewal_due_30d_vps_count}`,
@@ -360,7 +360,7 @@ function nextActions(
     actions.push({
       label: '核对未关联 VPS',
       detail: 'VPS ↔ 监控实例',
-      to: DASHBOARD_LINKS.vps,
+      to: DASHBOARD_LINKS.assetDecisionsEvidence,
       tone: 'notice',
     })
   }
@@ -393,7 +393,7 @@ function nextActions(
       {
         label: '进入资产决策',
         detail: '续费 / 决策',
-        to: DASHBOARD_LINKS.assetDecisions,
+        to: DASHBOARD_LINKS.assetDecisionsNeedsDecision,
         tone: 'neutral',
       },
     ]

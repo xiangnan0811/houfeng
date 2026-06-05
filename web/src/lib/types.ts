@@ -810,6 +810,159 @@ export type VPSAssetUpdateResult = VPSAssetRecord & {
   renewal_subscription_linkage?: RenewalSubscriptionLinkage | null
 }
 
+export type AssetDecisionGroupType =
+  | 'renewal_attention'
+  | 'cancellation_attention'
+  | 'region_portfolio'
+  | 'provider_portfolio'
+  | 'cost_pressure'
+  | 'evidence_gap'
+
+export type AssetDecisionView =
+  | 'needs_decision'
+  | 'renewal'
+  | 'region'
+  | 'provider'
+  | 'cost'
+  | 'evidence'
+
+export type AssetDecisionSuggestedRole =
+  | 'primary_candidate'
+  | 'standby_candidate'
+  | 'observe_candidate'
+  | 'retire_candidate'
+  | 'evidence_needed'
+
+export type AssetDecisionSuggestedAction =
+  | 'review'
+  | 'keep'
+  | 'observe'
+  | 'migrate'
+  | 'cancel'
+  | 'open_cancellation_workbench'
+  | 'complete_evidence'
+
+export type AssetDecisionEvidenceKind =
+  | 'renewal_due'
+  | 'idle_paid'
+  | 'missing_subscription'
+  | 'missing_monitoring'
+  | 'carries_service'
+  | 'cancellation_linkage'
+  | 'budget_risk'
+  | 'abnormal_monitoring'
+  | 'missing_provider'
+  | 'missing_location'
+  | 'missing_access'
+  | 'exchange_rate_stale'
+  | 'no_service_context'
+  | 'subscription_unavailable'
+
+export type AssetDecisionSourceAvailability = {
+  subscriptions: boolean
+  services: boolean
+  domains: boolean
+  monitoring: boolean
+  targets: boolean
+}
+
+export type AssetDecisionCostByCurrency = {
+  currency: string
+  monthly_total: number
+  yearly_total: number
+}
+
+export type AssetDecisionEvidenceChip = {
+  kind: AssetDecisionEvidenceKind
+  label: string
+  tone: 'normal' | 'notice' | 'alert' | 'critical' | string
+  details?: string
+}
+
+export type AssetDecisionGroupSummary = {
+  group_id: string
+  group_type: AssetDecisionGroupType
+  view: AssetDecisionView
+  title: string
+  scope_key: string
+  scope_label: string
+  priority: number
+  member_count: number
+  lifecycle_counts: Partial<Record<VPSLifecycleStatus, number>>
+  usage_counts: Partial<Record<VPSUsageStatus, number>>
+  renewal_decision_counts: Partial<Record<VPSRenewalDecision, number>>
+  renewal_window_count: number
+  unreviewed_count: number
+  migrate_count: number
+  cancel_count: number
+  cancellation_attention_count: number
+  idle_count: number
+  standby_count: number
+  in_use_count: number
+  service_count: number
+  domain_count: number
+  target_count: number
+  running_target_count: number
+  monitoring_link_count: number
+  abnormal_monitoring_count: number
+  active_incident_count: number
+  primary_issue_summary: string
+  monthly_cost_by_currency: AssetDecisionCostByCurrency[]
+  monthly_cost_base?: number | null
+  yearly_cost_base?: number | null
+  base_currency?: string
+  evidence_chips: AssetDecisionEvidenceChip[]
+}
+
+export type AssetDecisionGroupMember = {
+  vps: VPSAssetRecord
+  primary_subscription?: SubscriptionRecord | null
+  subscription_count: number
+  active_subscription_count: number
+  inactive_subscription_count: number
+  service_count: number
+  domain_count: number
+  target_count: number
+  running_target_count: number
+  monitoring_link_count: number
+  running_monitoring_count: number
+  abnormal_monitoring_count: number
+  active_incident_count: number
+  primary_issue_summary: string
+  cancellation_attention_reason?: string
+  suggested_role: AssetDecisionSuggestedRole
+  suggested_action: AssetDecisionSuggestedAction
+  evidence_chips: AssetDecisionEvidenceChip[]
+  renewal_within_window: boolean
+  source_availability: AssetDecisionSourceAvailability
+}
+
+export type AssetDecisionGroupDetail = AssetDecisionGroupSummary & {
+  members: AssetDecisionGroupMember[]
+}
+
+export type AssetDecisionOverview = {
+  snapshot_generated_at: string
+  renew_within_days: number
+  group_count: number
+  member_vps_count: number
+  needs_decision_count: number
+  renewal_group_count: number
+  region_group_count: number
+  provider_group_count: number
+  cost_group_count: number
+  evidence_group_count: number
+  top_groups: AssetDecisionGroupSummary[]
+  type_counts: Partial<Record<AssetDecisionGroupType, number>>
+  view_counts: Partial<Record<AssetDecisionView, number>>
+  source_availability: AssetDecisionSourceAvailability
+}
+
+export type AssetDecisionGroupListFilter = {
+  view?: AssetDecisionView | '' | null
+  renew_within_days?: number | null
+}
+
 export type LifecycleActionStepStatus = 'completed' | 'skipped' | 'failed'
 
 export type LifecycleActionStep = {
