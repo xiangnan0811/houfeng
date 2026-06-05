@@ -1007,6 +1007,55 @@ export type AssetDecisionFollowupStatus =
 
 export type AssetDecisionEvidenceSnapshot = Record<string, unknown>
 
+export type AssetDecisionExecutionReadbackStatus =
+  | 'open'
+  | 'aligned'
+  | 'drift'
+  | 'blocked'
+  | 'needs_evidence'
+  | 'inactive'
+
+export type AssetDecisionExecutionReadbackIssue = {
+  kind: string
+  label: string
+  tone: 'normal' | 'notice' | 'alert' | 'critical' | string
+  details?: string
+}
+
+export type AssetDecisionExecutionCurrentFacts = {
+  found: boolean
+  lifecycle_status?: VPSLifecycleStatus
+  usage_status?: VPSUsageStatus
+  renewal_decision?: VPSRenewalDecision
+  active_subscription_count: number
+  service_count: number
+  domain_count: number
+  target_count: number
+  running_target_count: number
+  monitoring_link_count: number
+  running_monitoring_count: number
+  abnormal_monitoring_count: number
+  active_incident_count: number
+  source_availability: AssetDecisionSourceAvailability
+}
+
+export type AssetDecisionMemberExecutionReadback = {
+  status: AssetDecisionExecutionReadbackStatus
+  summary: string
+  issues: AssetDecisionExecutionReadbackIssue[]
+  current_facts: AssetDecisionExecutionCurrentFacts
+}
+
+export type AssetDecisionRecordExecutionReadback = {
+  status: AssetDecisionExecutionReadbackStatus
+  summary: string
+  open_count: number
+  aligned_count: number
+  drift_count: number
+  blocked_count: number
+  needs_evidence_count: number
+}
+
 export type AssetDecisionRecordSummary = {
   record_id: string
   title: string
@@ -1026,6 +1075,7 @@ export type AssetDecisionRecordSummary = {
   followup_done_count: number
   followup_skipped_count: number
   evidence_snapshot: AssetDecisionEvidenceSnapshot
+  execution_readback: AssetDecisionRecordExecutionReadback
   created_at: string
   updated_at: string
   decided_at?: string | null
@@ -1045,6 +1095,7 @@ export type AssetDecisionRecordMember = {
   followup_note: string
   followup_updated_at?: string | null
   evidence_snapshot: AssetDecisionEvidenceSnapshot
+  execution_readback: AssetDecisionMemberExecutionReadback
   created_at: string
   updated_at: string
 }

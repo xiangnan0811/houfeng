@@ -357,3 +357,116 @@ func firstGroup(groups []GroupDetail, groupType GroupType) GroupDetail {
 	}
 	return GroupDetail{}
 }
+
+func TestExecutionReadbackCancelDetectsDoneDrift(t *testing.T) {
+	f := fact("vps_cancel", "Cancel Candidate", "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageIdle, sub("sub_1", 10, 30))
+	f.RunningMonitoringCount = 1
+	member := RecordMember{
+		VPSID:          "vps_cancel",
+		DecidedAction:  ActionOpenCancellationWorkbench,
+		FollowupStatus: FollowupDone,
+	}
+
+	readback := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{f}))
+	if readback.Status != ReadbackDrift {
+		t.Fatalf("readback = %#v, want drift", readback)
+	}
+	if !hasReadbackIssue(readback, "cancel_lifecycle_open") || !hasReadbackIssue(readback, "active_subscription_remaining") || !hasReadbackIssue(readback, "running_monitoring_remaining") {
+		t.Fatalf("issues = %#v, want cancel lifecycle/subscription/monitoring drift", readback.Issues)
+	}
+}
+
+func TestExecutionReadbackCancelAlignedWhenFactsClosed(t *testing.T) {
+	f := fact("vps_cancel", "Cancel Candidate", "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageIdle, nil)
+	f.VPS.LifecycleStatus = vpsassets.LifecycleCancelled
+	member := RecordMember{VPSID: "vps_cancel", DecidedAction: ActionCancel, FollowupStatus: FollowupDone}
+
+	readback := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{f}))
+	if readback.Status != ReadbackAligned || len(readback.Issues) != 0 {
+		t.Fatalf("readback = %#v, want aligned without issues", readback)
+	}
+}
+
+func TestExecutionReadbackMigrateKeepsOldCarrierAsDrift(t *testing.T) {
+	f := fact("vps_migrate", "Migrate Candidate", "pv_1", "Provider", "US", "CA", "Los Angeles", vpsassets.UsageInUse, sub("sub_1", 20, 30))
+	f.VPS.RenewalDecision = vpsassets.RenewalMigrate
+	f.ServiceCount = 1
+	member := RecordMember{VPSID: "vps_migrate", DecidedAction: ActionMigrate, FollowupStatus: FollowupDone}
+
+	readback := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{f}))
+	if readback.Status != ReadbackDrift || !hasReadbackIssue(readback, "old_carrier_remaining") {
+		t.Fatalf("readback = %#v, want old carrier drift", readback)
+	}
+}
+
+func TestExecutionReadbackCompleteEvidenceUsesOnlyCurrentEvidenceGaps(t *testing.T) {
+	f := fact("vps_gap", "Evidence Gap", "", "", "", "", "", vpsassets.UsageInUse, nil)
+	f.SourceAvailability.Subscriptions = false
+	member := RecordMember{VPSID: "vps_gap", DecidedAction: ActionCompleteEvidence, FollowupStatus: FollowupTodo}
+
+	readback := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{f}))
+	if readback.Status != ReadbackNeedsEvidence {
+		t.Fatalf("readback = %#v, want needs evidence", readback)
+	}
+	if !hasReadbackIssue(readback, "evidence_gap") {
+		t.Fatalf("issues = %#v, want existing evidence gaps", readback.Issues)
+	}
+	for _, issue := range readback.Issues {
+		if issue.Kind == "performance" || issue.Kind == "route_quality" || issue.Kind == "ip_quality" {
+			t.Fatalf("issues = %#v, must not include future agent-derived signals", readback.Issues)
+		}
+	}
+}
+
+func TestExecutionReadbackFollowupPriority(t *testing.T) {
+	f := fact("vps_keep", "Keep Candidate", "pv_1", "Provider", "Germany", "", "Frankfurt", vpsassets.UsageInUse, sub("sub_1", 12, 30))
+	f.VPS.RenewalDecision = vpsassets.RenewalKeep
+
+	blocked := EvaluateMemberExecutionReadback(RecordMember{VPSID: "vps_keep", DecidedAction: ActionKeep, FollowupStatus: FollowupBlocked}, FactsByVPSID([]Fact{f}))
+	if blocked.Status != ReadbackBlocked {
+		t.Fatalf("blocked readback = %#v, want blocked", blocked)
+	}
+
+	skipped := EvaluateMemberExecutionReadback(RecordMember{VPSID: "vps_keep", DecidedAction: ActionKeep, FollowupStatus: FollowupSkipped}, FactsByVPSID([]Fact{f}))
+	if skipped.Status != ReadbackAligned {
+		t.Fatalf("skipped readback = %#v, want aligned", skipped)
+	}
+
+	f.VPS.LifecycleStatus = vpsassets.LifecycleCancelled
+	skippedDrift := EvaluateMemberExecutionReadback(RecordMember{VPSID: "vps_keep", DecidedAction: ActionKeep, FollowupStatus: FollowupSkipped}, FactsByVPSID([]Fact{f}))
+	if skippedDrift.Status != ReadbackDrift {
+		t.Fatalf("skipped drift readback = %#v, want drift for critical fact split", skippedDrift)
+	}
+}
+
+func TestExecutionReadbackAggregatesRecordStatus(t *testing.T) {
+	members := []RecordMember{
+		{ExecutionReadback: MemberExecutionReadback{Status: ReadbackAligned}},
+		{ExecutionReadback: MemberExecutionReadback{Status: ReadbackNeedsEvidence}},
+	}
+	readback := EvaluateRecordExecutionReadback(RecordStatusInProgress, members)
+	if readback.Status != ReadbackNeedsEvidence || readback.NeedsEvidenceCount != 1 {
+		t.Fatalf("record readback = %#v, want needs evidence", readback)
+	}
+
+	abandoned := EvaluateRecordExecutionReadback(RecordStatusAbandoned, members)
+	if abandoned.Status != ReadbackInactive {
+		t.Fatalf("abandoned readback = %#v, want inactive", abandoned)
+	}
+}
+
+func TestExecutionReadbackMissingCurrentFact(t *testing.T) {
+	readback := EvaluateMemberExecutionReadback(RecordMember{VPSID: "vps_missing", DecidedAction: ActionKeep}, map[string]Fact{})
+	if readback.Status != ReadbackDrift || !hasReadbackIssue(readback, "current_fact_missing") || readback.CurrentFacts.Found {
+		t.Fatalf("readback = %#v, want missing fact drift", readback)
+	}
+}
+
+func hasReadbackIssue(readback MemberExecutionReadback, kind string) bool {
+	for _, issue := range readback.Issues {
+		if issue.Kind == kind {
+			return true
+		}
+	}
+	return false
+}

@@ -229,6 +229,9 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | all subscriptions failed while building single queue | 单台辅助队列显示加载错误，避免把全量缺订阅误报为真实数据质量 |
 | backend group source availability says subscriptions unavailable | 组列表 / 组详情显示证据不可用，不渲染真实 `缺订阅` chip |
 | decision record snapshot lacks `evidence_assessment` | 记录详情显示“未记录”或“无证据评估”，成员表继续展示其他 snapshot 字段 |
+| decision record API returns `execution_readback` | 已保存记录列表显示 readback status badge、summary 和 drift / blocked / needs_evidence / open 计数；记录详情 summary 增加执行回读指标，成员表显示当前事实摘要与 issue chips |
+| readback status is `drift` | 只显示事实漂移证据和跳转入口，不自动 PATCH record status，也不调用 VPS / Subscription / MonitoringInstance / Target 写接口 |
+| readback current facts missing for member | 成员表显示“当前事实缺失”与 issue chip，不把该成员渲染成已对齐 |
 | VPS inventory subscriptions empty | 行级展示 `缺订阅`，quick view `缺订阅` 可筛出对应 VPS |
 | VPS inventory URL has unsupported `view` | 降级为 `all`，下次用户操作时写回合法 query |
 | user removes a chip or clears all filters | URL-state 与 visible rows 同步更新，不重新请求 `/api/vps?...` derived query |
@@ -243,6 +246,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: 打开决策组后，同组 VPS 可以比较主订阅、服务 / 域名 / Target / 监控数量、建议角色和 evidence chips；点击单台 `处理` 仍提交原有 VPS renewal decision PATCH。
 - Good: 打开决策组后保存为组合决策记录，记录详情能回看成员决定角色/动作/理由和保存时证据快照，并能把状态从 `draft` 推进到 `in_progress`。
 - Good: 打开已保存记录后，把单台 VPS 成员跟进从 `todo` 改为 `blocked` 并保存备注；记录详情显示更新时间，记录列表的阻塞 / 未关闭计数同步更新，业务动作入口仍只是跳到 VPS 详情或取消工作台。
+- Good: 已保存记录列表低权重展示执行回读；`drift` / `blocked` / `needs_evidence` 只作为复核证据，不抢走组合工作台主 surface。
+- Good: 记录详情成员表展示“当前回读”，包括 lifecycle / usage / renewal decision、active subscription、服务 / 域名 / Target / 监控计数和 issue chips；成员跟进 PATCH 成功后刷新记录详情和记录列表，readback 随 API 响应更新。
 - Good: 组列表和记录详情展示 `evidence_assessment` 的 tier、bias、可信 / 压力 / 准备刻度；旧记录没有该字段时不崩溃。
 - Good: 资产决策保存 `migrate` 后，VPS 从 `待评估` tab 消失并出现在 `迁移` tab，notice 留在队列 surface。
 - Good: 资产决策保存 `cancel` 后，notice 继续展示 `VPS -> 取消`，并追加 API 返回的订阅联动消息 / 订阅页 action。
@@ -252,6 +257,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
 - Bad: 订阅 evidence 请求失败后，前端把所有 VPS 标成 `缺订阅`，导致用户做出错误取消判断。
 - Bad: 在前端只保存自动组 ID 当作长期决策状态，或从记录详情批量取消 VPS / 直接修改 Subscription / MonitoringInstance / Target。
+- Bad: 前端看到 readback `drift` 后自动把记录状态改成 `in_progress` / `completed`，或自动调用 `/api/vps/*`、`/api/subscriptions/*`、`/api/monitoring-instances/*`、`/api/targets/*` 写接口。
 - Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked monitoring instance health。
 - Bad: Page 直接 `fetch('/api/vps')` 或在组件层调 API；业务请求必须走 `lib/api.ts`。
 - Bad: 在 VPS 详情表单里让用户输入 `mi_...`、`tg_...`、`svc_...` 作为常规路径，且不给候选列表或落地入口。
@@ -259,8 +265,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 6. Tests Required
 
-- `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string。
-- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、tabs query、组详情 drawer、组/成员/记录 `evidence_assessment` 展示、保存记录、记录详情状态推进、成员跟进 PATCH payload 与计数刷新、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅、错误/空态。
+- `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；记录 fixture 覆盖 `execution_readback`。
+- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、tabs query、组详情 drawer、组/成员/记录 `evidence_assessment` 展示、保存记录、记录详情状态推进、执行回读状态 / 计数 / 当前事实 / issue chips、成员跟进 PATCH payload 与计数刷新、readback drift 不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅、错误/空态。
 - `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
 - `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。

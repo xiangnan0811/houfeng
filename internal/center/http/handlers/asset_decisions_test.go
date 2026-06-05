@@ -193,8 +193,13 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 			SourceGroupID:   "adg_auto_001",
 			RenewWithinDays: 30,
 			MemberCount:     2,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			ExecutionReadback: assetdecisions.RecordExecutionReadback{
+				Status:             assetdecisions.ReadbackNeedsEvidence,
+				Summary:            "1 台 VPS 仍需补证据",
+				NeedsEvidenceCount: 1,
+			},
+			CreatedAt: now,
+			UpdatedAt: now,
 		}},
 		createResult: assetdecisions.RecordDetail{
 			RecordSummary: assetdecisions.RecordSummary{
@@ -204,8 +209,13 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 				SourceGroupID:   "adg_auto_001",
 				RenewWithinDays: 30,
 				MemberCount:     1,
-				CreatedAt:       now,
-				UpdatedAt:       now,
+				ExecutionReadback: assetdecisions.RecordExecutionReadback{
+					Status:       assetdecisions.ReadbackAligned,
+					Summary:      "当前事实与组合判断一致",
+					AlignedCount: 1,
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
 			},
 			Members: []assetdecisions.RecordMember{{
 				RecordID:        "adr_created",
@@ -215,6 +225,13 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 				DecidedAction:   assetdecisions.ActionKeep,
 				SuggestedRole:   assetdecisions.RolePrimaryCandidate,
 				SuggestedAction: assetdecisions.ActionKeep,
+				ExecutionReadback: assetdecisions.MemberExecutionReadback{
+					Status:  assetdecisions.ReadbackAligned,
+					Summary: "当前事实与判断一致",
+					CurrentFacts: assetdecisions.ExecutionCurrentFacts{
+						Found: true,
+					},
+				},
 			}},
 		},
 	}
@@ -231,6 +248,9 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 	}
 	if len(listBody) != 1 || listBody[0].RecordID != "adr_001" {
 		t.Fatalf("list body = %#v, want record summary", listBody)
+	}
+	if listBody[0].ExecutionReadback.Status != assetdecisions.ReadbackNeedsEvidence || listBody[0].ExecutionReadback.NeedsEvidenceCount != 1 {
+		t.Fatalf("list readback = %#v, want serialized execution readback", listBody[0].ExecutionReadback)
 	}
 
 	body := []byte(`{"source_group_id":"adg_auto_001","renew_within_days":30,"title":"保存德国组","goal":"保留主力","status":"decided","members":[{"vps_id":"vps_001","decided_role":"primary_candidate","decided_action":"keep","reason":"主力"}]}`)
@@ -249,6 +269,9 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 	if createBody.RecordID != "adr_created" || len(createBody.Members) != 1 {
 		t.Fatalf("create body = %#v, want created detail", createBody)
 	}
+	if createBody.ExecutionReadback.Status != assetdecisions.ReadbackAligned || createBody.Members[0].ExecutionReadback.Status != assetdecisions.ReadbackAligned {
+		t.Fatalf("create readback = %#v member=%#v, want serialized execution readback", createBody.ExecutionReadback, createBody.Members[0].ExecutionReadback)
+	}
 }
 
 func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
@@ -260,9 +283,27 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 				Title:       "服务商组合",
 				Status:      assetdecisions.RecordStatusDraft,
 				MemberCount: 1,
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				ExecutionReadback: assetdecisions.RecordExecutionReadback{
+					Status:    assetdecisions.ReadbackOpen,
+					Summary:   "1 台 VPS 仍待执行或复核",
+					OpenCount: 1,
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
 			},
+			Members: []assetdecisions.RecordMember{{
+				RecordID:    "adr_001",
+				VPSID:       "vps_001",
+				DisplayName: "Frankfurt Primary",
+				ExecutionReadback: assetdecisions.MemberExecutionReadback{
+					Status:  assetdecisions.ReadbackOpen,
+					Summary: "当前事实仍待执行或复核",
+					CurrentFacts: assetdecisions.ExecutionCurrentFacts{
+						Found:                   true,
+						ActiveSubscriptionCount: 1,
+					},
+				},
+			}},
 		},
 		patchResult: assetdecisions.RecordDetail{
 			RecordSummary: assetdecisions.RecordSummary{
@@ -271,8 +312,13 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 				Status:               assetdecisions.RecordStatusInProgress,
 				MemberCount:          1,
 				FollowupBlockedCount: 1,
-				CreatedAt:            now,
-				UpdatedAt:            now,
+				ExecutionReadback: assetdecisions.RecordExecutionReadback{
+					Status:       assetdecisions.ReadbackBlocked,
+					Summary:      "1 台 VPS 跟进阻塞",
+					BlockedCount: 1,
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
 			},
 			Members: []assetdecisions.RecordMember{{
 				RecordID:       "adr_001",
@@ -280,6 +326,13 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 				DisplayName:    "Frankfurt Primary",
 				FollowupStatus: assetdecisions.FollowupBlocked,
 				FollowupNote:   "",
+				ExecutionReadback: assetdecisions.MemberExecutionReadback{
+					Status:  assetdecisions.ReadbackBlocked,
+					Summary: "成员跟进阻塞",
+					CurrentFacts: assetdecisions.ExecutionCurrentFacts{
+						Found: true,
+					},
+				},
 			}},
 		},
 	}
@@ -292,6 +345,13 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 	}
 	if repo.recordID != "adr_001" {
 		t.Fatalf("recordID = %q, want adr_001", repo.recordID)
+	}
+	var getBody assetdecisions.RecordDetail
+	if err := json.Unmarshal(getRecorder.Body.Bytes(), &getBody); err != nil {
+		t.Fatalf("unmarshal get body: %v", err)
+	}
+	if getBody.ExecutionReadback.Status != assetdecisions.ReadbackOpen || len(getBody.Members) != 1 || !getBody.Members[0].ExecutionReadback.CurrentFacts.Found {
+		t.Fatalf("get readback = %#v members=%#v, want serialized execution readback", getBody.ExecutionReadback, getBody.Members)
 	}
 
 	patchRecorder := httptest.NewRecorder()
@@ -312,6 +372,9 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 	}
 	if patchBody.Status != assetdecisions.RecordStatusInProgress || patchBody.FollowupBlockedCount != 1 || len(patchBody.Members) != 1 || patchBody.Members[0].FollowupStatus != assetdecisions.FollowupBlocked {
 		t.Fatalf("patch body = %#v, want in_progress with blocked followup", patchBody)
+	}
+	if patchBody.ExecutionReadback.Status != assetdecisions.ReadbackBlocked || patchBody.Members[0].ExecutionReadback.Status != assetdecisions.ReadbackBlocked {
+		t.Fatalf("patch readback = %#v member=%#v, want serialized execution readback", patchBody.ExecutionReadback, patchBody.Members[0].ExecutionReadback)
 	}
 }
 

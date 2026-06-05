@@ -127,7 +127,18 @@ func (r *PostgresAssetDecisionRepository) ListRecords(ctx context.Context) ([]as
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate asset decision records: %w", err)
 	}
-	return records, nil
+	if len(records) == 0 {
+		return records, nil
+	}
+	facts, err := r.loadFacts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	membersByRecord, err := r.listMembersForRecords(ctx, recordIDs(records))
+	if err != nil {
+		return nil, err
+	}
+	return assetdecisions.ApplyExecutionReadbackToSummaries(records, membersByRecord, facts), nil
 }
 
 func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, input assetdecisions.CreateRecordInput) (assetdecisions.RecordDetail, error) {
@@ -291,7 +302,7 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 	if err := tx.Commit(ctx); err != nil {
 		return assetdecisions.RecordDetail{}, fmt.Errorf("commit asset decision record transaction: %w", err)
 	}
-	return assetdecisions.RecordDetail{
+	return assetdecisions.ApplyExecutionReadback(assetdecisions.RecordDetail{
 		RecordSummary: assetdecisions.RecordSummary{
 			RecordID:          recordID,
 			Title:             input.Title,
@@ -313,7 +324,7 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 			CompletedAt:       completedAt,
 		},
 		Members: recordMembers,
-	}, nil
+	}, facts), nil
 }
 
 func (r *PostgresAssetDecisionRepository) GetRecord(ctx context.Context, recordID string) (assetdecisions.RecordDetail, error) {
@@ -335,7 +346,11 @@ func (r *PostgresAssetDecisionRepository) GetRecord(ctx context.Context, recordI
 	if err != nil {
 		return assetdecisions.RecordDetail{}, err
 	}
-	return assetdecisions.RecordDetail{RecordSummary: summary, Members: members}, nil
+	facts, err := r.loadFacts(ctx)
+	if err != nil {
+		return assetdecisions.RecordDetail{}, err
+	}
+	return assetdecisions.ApplyExecutionReadback(assetdecisions.RecordDetail{RecordSummary: summary, Members: members}, facts), nil
 }
 
 func (r *PostgresAssetDecisionRepository) PatchRecord(ctx context.Context, recordID string, input assetdecisions.PatchRecordInput) (assetdecisions.RecordDetail, error) {
@@ -657,6 +672,56 @@ func (r *PostgresAssetDecisionRepository) listRecordMembers(ctx context.Context,
 		return nil, fmt.Errorf("iterate asset decision record members: %w", err)
 	}
 	return members, nil
+}
+
+func (r *PostgresAssetDecisionRepository) listMembersForRecords(ctx context.Context, recordIDs []string) (map[string][]assetdecisions.RecordMember, error) {
+	membersByRecord := make(map[string][]assetdecisions.RecordMember, len(recordIDs))
+	if len(recordIDs) == 0 {
+		return membersByRecord, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		select
+			record_id,
+			vps_id,
+			display_name,
+			suggested_role,
+			decided_role,
+			suggested_action,
+			decided_action,
+			reason,
+			followup_status,
+			followup_note,
+			followup_updated_at,
+			evidence_snapshot,
+			created_at,
+			updated_at
+		from asset_decision_record_members
+		where record_id = any($1)
+		order by record_id asc, display_name asc, vps_id asc`, recordIDs)
+	if err != nil {
+		return nil, fmt.Errorf("query asset decision record members for readback: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		member, err := scanAssetDecisionRecordMember(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan asset decision record member for readback: %w", err)
+		}
+		membersByRecord[member.RecordID] = append(membersByRecord[member.RecordID], member)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate asset decision record members for readback: %w", err)
+	}
+	return membersByRecord, nil
+}
+
+func recordIDs(records []assetdecisions.RecordSummary) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.RecordID)
+	}
+	return ids
 }
 
 type assetDecisionFactScanner interface {

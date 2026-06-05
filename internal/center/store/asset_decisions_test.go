@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -134,39 +135,75 @@ func TestPostgresAssetDecisionRepositoryGetGroupMissing(t *testing.T) {
 
 func TestPostgresAssetDecisionRepositoryListRecordsScansSnapshots(t *testing.T) {
 	now := time.Date(2026, time.June, 5, 9, 0, 0, 0, time.UTC)
+	var summaryQueries int
+	var factQueries int
+	var memberQueries int
 	repo := &PostgresAssetDecisionRepository{db: fakeAssetDecisionQueryer{
-		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			if !strings.Contains(sql, "asset_decision_records_with_counts") {
-				t.Fatalf("query SQL = %q, want records view", sql)
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			if strings.Contains(sql, "asset_decision_records_with_counts") {
+				summaryQueries++
+				snapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"member_count": float64(2)})
+				if err != nil {
+					t.Fatalf("marshal snapshot: %v", err)
+				}
+				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordSummaryValues(
+					"adr_001",
+					"德国主备取舍",
+					"保留主力并退掉弱承载",
+					string(assetdecisions.RecordStatusDraft),
+					"auto_group",
+					"adg_auto_001",
+					string(assetdecisions.GroupRegionPortfolio),
+					string(assetdecisions.ViewRegion),
+					"country=Germany",
+					"Germany",
+					30,
+					2,
+					1,
+					1,
+					0,
+					0,
+					0,
+					snapshot,
+					now,
+					now,
+					nil,
+					nil,
+				)}}}, nil
 			}
-			snapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"member_count": float64(2)})
-			if err != nil {
-				t.Fatalf("marshal snapshot: %v", err)
+			if strings.Contains(sql, "from vps_assets") {
+				factQueries++
+				return fakeAssetDecisionFactRows(now), nil
 			}
-			return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordSummaryValues(
-				"adr_001",
-				"德国主备取舍",
-				"保留主力并退掉弱承载",
-				string(assetdecisions.RecordStatusDraft),
-				"auto_group",
-				"adg_auto_001",
-				string(assetdecisions.GroupRegionPortfolio),
-				string(assetdecisions.ViewRegion),
-				"country=Germany",
-				"Germany",
-				30,
-				2,
-				1,
-				1,
-				0,
-				0,
-				0,
-				snapshot,
-				now,
-				now,
-				nil,
-				nil,
-			)}}}, nil
+			if strings.Contains(sql, "asset_decision_record_members") {
+				memberQueries++
+				recordIDs, ok := args[0].([]string)
+				if !ok || len(recordIDs) != 1 || recordIDs[0] != "adr_001" {
+					t.Fatalf("member readback args = %#v, want batch record ids", args)
+				}
+				memberSnapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"service_count": float64(1)})
+				if err != nil {
+					t.Fatalf("marshal member snapshot: %v", err)
+				}
+				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordMemberValues(
+					"adr_001",
+					"vps_001",
+					"Frankfurt Primary",
+					string(assetdecisions.RolePrimaryCandidate),
+					string(assetdecisions.RolePrimaryCandidate),
+					string(assetdecisions.ActionReview),
+					string(assetdecisions.ActionReview),
+					"需要复核",
+					string(assetdecisions.FollowupTodo),
+					"",
+					nil,
+					memberSnapshot,
+					now,
+					now,
+				)}}}, nil
+			}
+			t.Fatalf("query SQL = %q, want records, facts, or batch members", sql)
+			return nil, nil
 		},
 	}}
 
@@ -186,6 +223,79 @@ func TestPostgresAssetDecisionRepositoryListRecordsScansSnapshots(t *testing.T) 
 	}
 	if got := record.EvidenceSnapshot["member_count"]; got != float64(2) {
 		t.Fatalf("snapshot member_count = %#v, want 2", got)
+	}
+	if record.ExecutionReadback.Status != assetdecisions.ReadbackAligned || record.ExecutionReadback.AlignedCount != 1 {
+		t.Fatalf("readback = %#v, want aligned summary from batch members and facts", record.ExecutionReadback)
+	}
+	if summaryQueries != 1 || factQueries != 1 || memberQueries != 1 {
+		t.Fatalf("query counts summary=%d facts=%d members=%d, want one batched query per source", summaryQueries, factQueries, memberQueries)
+	}
+}
+
+func TestPostgresAssetDecisionRepositoryListRecordsSkipsReadbackForEmptyList(t *testing.T) {
+	repo := &PostgresAssetDecisionRepository{db: fakeAssetDecisionQueryer{
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if !strings.Contains(sql, "asset_decision_records_with_counts") {
+				t.Fatalf("query SQL = %q, want only records view for empty list", sql)
+			}
+			return &fakeAssetDecisionRows{}, nil
+		},
+	}}
+
+	records, err := repo.ListRecords(context.Background())
+	if err != nil {
+		t.Fatalf("ListRecords() error = %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("records len = %d, want empty", len(records))
+	}
+}
+
+func TestPostgresAssetDecisionRepositoryListRecordsFailsClosedWhenFactsFail(t *testing.T) {
+	now := time.Date(2026, time.June, 5, 9, 0, 0, 0, time.UTC)
+	snapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"member_count": float64(1)})
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	repo := &PostgresAssetDecisionRepository{db: fakeAssetDecisionQueryer{
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if strings.Contains(sql, "asset_decision_records_with_counts") {
+				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordSummaryValues(
+					"adr_001",
+					"德国主备取舍",
+					"保留主力并退掉弱承载",
+					string(assetdecisions.RecordStatusDraft),
+					"auto_group",
+					"adg_auto_001",
+					string(assetdecisions.GroupRegionPortfolio),
+					string(assetdecisions.ViewRegion),
+					"country=Germany",
+					"Germany",
+					30,
+					1,
+					1,
+					0,
+					0,
+					0,
+					0,
+					snapshot,
+					now,
+					now,
+					nil,
+					nil,
+				)}}}, nil
+			}
+			if strings.Contains(sql, "from vps_assets") {
+				return nil, errors.New("facts unavailable")
+			}
+			t.Fatalf("query SQL = %q, want records or facts", sql)
+			return nil, nil
+		},
+	}}
+
+	_, err = repo.ListRecords(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "query asset decision facts") {
+		t.Fatalf("ListRecords() error = %v, want facts query failure", err)
 	}
 }
 
@@ -240,6 +350,9 @@ func TestPostgresAssetDecisionRepositoryCreateRecordPersistsGroupAndMemberSnapsh
 	}
 	if len(detail.Members) != 1 || detail.Members[0].DecidedRole != assetdecisions.RoleRetireCandidate || detail.Members[0].DecidedAction != assetdecisions.ActionMigrate || detail.Members[0].FollowupStatus != assetdecisions.FollowupTodo {
 		t.Fatalf("members = %#v, want user decided role/action", detail.Members)
+	}
+	if detail.ExecutionReadback.Status == "" || !detail.Members[0].ExecutionReadback.CurrentFacts.Found {
+		t.Fatalf("readback = %#v member=%#v, want current facts readback on created record", detail.ExecutionReadback, detail.Members[0].ExecutionReadback)
 	}
 	if got := detail.EvidenceSnapshot["group_id"]; got != detail.SourceGroupID {
 		t.Fatalf("snapshot group_id = %#v, want source group id", got)
@@ -320,25 +433,32 @@ func TestPostgresAssetDecisionRepositoryGetAndPatchRecord(t *testing.T) {
 			)}
 		},
 		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
-			if !strings.Contains(sql, "asset_decision_record_members") || args[0] != "adr_001" {
-				t.Fatalf("query sql=%q args=%#v, want members", sql, args)
+			if strings.Contains(sql, "asset_decision_record_members") {
+				if args[0] != "adr_001" {
+					t.Fatalf("query args=%#v, want record id", args)
+				}
+				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordMemberValues(
+					"adr_001",
+					"vps_001",
+					"Frankfurt Primary",
+					string(assetdecisions.RolePrimaryCandidate),
+					string(assetdecisions.RolePrimaryCandidate),
+					string(assetdecisions.ActionKeep),
+					string(assetdecisions.ActionKeep),
+					"主力保留",
+					string(assetdecisions.FollowupInProgress),
+					"已进入迁移窗口",
+					&now,
+					memberSnapshot,
+					now,
+					now,
+				)}}}, nil
 			}
-			return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordMemberValues(
-				"adr_001",
-				"vps_001",
-				"Frankfurt Primary",
-				string(assetdecisions.RolePrimaryCandidate),
-				string(assetdecisions.RolePrimaryCandidate),
-				string(assetdecisions.ActionKeep),
-				string(assetdecisions.ActionKeep),
-				"主力保留",
-				string(assetdecisions.FollowupInProgress),
-				"已进入迁移窗口",
-				&now,
-				memberSnapshot,
-				now,
-				now,
-			)}}}, nil
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetDecisionFactRows(now), nil
+			}
+			t.Fatalf("query sql=%q args=%#v, want members or facts", sql, args)
+			return nil, nil
 		},
 	}}
 
@@ -351,6 +471,9 @@ func TestPostgresAssetDecisionRepositoryGetAndPatchRecord(t *testing.T) {
 	}
 	if detail.FollowupInProgressCount != 1 || detail.Members[0].FollowupStatus != assetdecisions.FollowupInProgress || detail.Members[0].FollowupUpdatedAt == nil {
 		t.Fatalf("detail followup = %#v members=%#v, want scanned followup", detail.RecordSummary, detail.Members)
+	}
+	if detail.ExecutionReadback.Status == "" || !detail.Members[0].ExecutionReadback.CurrentFacts.Found {
+		t.Fatalf("readback = %#v member=%#v, want current facts readback", detail.ExecutionReadback, detail.Members[0].ExecutionReadback)
 	}
 }
 
@@ -401,25 +524,32 @@ func TestPostgresAssetDecisionRepositoryPatchRecordUpdatesMemberFollowup(t *test
 				)}
 			},
 			query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
-				if !strings.Contains(sql, "asset_decision_record_members") || args[0] != "adr_001" {
-					t.Fatalf("query sql=%q args=%#v, want members after patch", sql, args)
+				if strings.Contains(sql, "asset_decision_record_members") {
+					if args[0] != "adr_001" {
+						t.Fatalf("query args=%#v, want record id after patch", args)
+					}
+					return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordMemberValues(
+						"adr_001",
+						"vps_001",
+						"Frankfurt Primary",
+						string(assetdecisions.RolePrimaryCandidate),
+						string(assetdecisions.RolePrimaryCandidate),
+						string(assetdecisions.ActionKeep),
+						string(assetdecisions.ActionKeep),
+						"主力保留",
+						string(assetdecisions.FollowupBlocked),
+						"等待迁移窗口",
+						&now,
+						memberSnapshot,
+						now,
+						now,
+					)}}}, nil
 				}
-				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordMemberValues(
-					"adr_001",
-					"vps_001",
-					"Frankfurt Primary",
-					string(assetdecisions.RolePrimaryCandidate),
-					string(assetdecisions.RolePrimaryCandidate),
-					string(assetdecisions.ActionKeep),
-					string(assetdecisions.ActionKeep),
-					"主力保留",
-					string(assetdecisions.FollowupBlocked),
-					"等待迁移窗口",
-					&now,
-					memberSnapshot,
-					now,
-					now,
-				)}}}, nil
+				if strings.Contains(sql, "from vps_assets") {
+					return fakeAssetDecisionFactRows(now), nil
+				}
+				t.Fatalf("query sql=%q args=%#v, want members or facts after patch", sql, args)
+				return nil, nil
 			},
 		},
 		beginTx: func(context.Context, pgx.TxOptions) (assetDecisionTx, error) {
@@ -455,6 +585,9 @@ func TestPostgresAssetDecisionRepositoryPatchRecordUpdatesMemberFollowup(t *test
 	}
 	if len(updated.Members) != 1 || updated.Members[0].FollowupStatus != assetdecisions.FollowupBlocked || updated.Members[0].FollowupNote != "等待迁移窗口" {
 		t.Fatalf("updated members = %#v, want blocked member followup", updated.Members)
+	}
+	if updated.ExecutionReadback.Status != assetdecisions.ReadbackBlocked || updated.Members[0].ExecutionReadback.Status != assetdecisions.ReadbackBlocked {
+		t.Fatalf("readback = %#v member=%#v, want blocked readback after followup patch", updated.ExecutionReadback, updated.Members[0].ExecutionReadback)
 	}
 }
 
