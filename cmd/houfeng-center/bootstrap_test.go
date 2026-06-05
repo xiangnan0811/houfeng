@@ -192,6 +192,15 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.AssetServicesCollectionHandler == nil {
 		t.Fatal("router asset services collection handler = nil, want non-nil")
 	}
+	if gotOpts.AssetDecisionOverviewHandler == nil {
+		t.Fatal("router asset decision overview handler = nil, want non-nil")
+	}
+	if gotOpts.AssetDecisionGroupsHandler == nil {
+		t.Fatal("router asset decision groups handler = nil, want non-nil")
+	}
+	if gotOpts.AssetDecisionGroupHandler == nil {
+		t.Fatal("router asset decision group handler = nil, want non-nil")
+	}
 	if gotOpts.ProvidersCollectionHandler == nil {
 		t.Fatal("router providers collection handler = nil, want non-nil")
 	}

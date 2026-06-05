@@ -17,6 +17,9 @@ type RouterOptions struct {
 	SettingsHandler                               stdhttp.Handler
 	AssetDomainsCollectionHandler                 stdhttp.Handler
 	AssetServicesCollectionHandler                stdhttp.Handler
+	AssetDecisionOverviewHandler                  stdhttp.Handler
+	AssetDecisionGroupsHandler                    stdhttp.Handler
+	AssetDecisionGroupHandler                     stdhttp.Handler
 	ProvidersCollectionHandler                    stdhttp.Handler
 	ProviderItemHandler                           stdhttp.Handler
 	VPSCollectionHandler                          stdhttp.Handler
@@ -119,6 +122,15 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.AssetServicesCollectionHandler != nil {
 		mux.Handle("/api/services", protect(opts.AssetServicesCollectionHandler))
+	}
+	if opts.AssetDecisionOverviewHandler != nil {
+		mux.Handle("/api/asset-decisions/overview", protect(opts.AssetDecisionOverviewHandler))
+	}
+	if opts.AssetDecisionGroupsHandler != nil {
+		mux.Handle("/api/asset-decisions/groups", protect(opts.AssetDecisionGroupsHandler))
+	}
+	if opts.AssetDecisionGroupHandler != nil {
+		mux.Handle("/api/asset-decisions/groups/", protect(opts.AssetDecisionGroupHandler))
 	}
 	if opts.AssetContextMonitoringInstancesHandler != nil {
 		mux.Handle("/api/asset-context/monitoring-instances", protect(opts.AssetContextMonitoringInstancesHandler))
