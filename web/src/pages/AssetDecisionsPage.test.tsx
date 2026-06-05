@@ -266,6 +266,11 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
     scope_label: '未来 30 天',
     renew_within_days: 30,
     member_count: 2,
+    followup_todo_count: 2,
+    followup_in_progress_count: 0,
+    followup_blocked_count: 0,
+    followup_done_count: 0,
+    followup_skipped_count: 0,
     evidence_snapshot: {
       group_id: 'adg_auto_001',
       monthly_cost_base: 140,
@@ -293,6 +298,9 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
         suggested_action: 'keep',
         decided_action: 'keep',
         reason: '主力保留',
+        followup_status: 'todo',
+        followup_note: '',
+        followup_updated_at: null,
         evidence_snapshot: {
           service_count: 2,
           domain_count: 1,
@@ -519,11 +527,27 @@ describe('AssetDecisionsPage', () => {
       updated_at: '2026-06-05T09:00:00Z',
       decided_at: '2026-06-05T09:00:00Z',
     })
+    const followupPatched = decisionRecord({
+      status: 'in_progress',
+      followup_todo_count: 1,
+      followup_blocked_count: 1,
+      updated_at: '2026-06-05T09:10:00Z',
+      decided_at: '2026-06-05T09:00:00Z',
+      members: [
+        {
+          ...decisionRecord().members[0],
+          followup_status: 'blocked',
+          followup_note: '等待迁移窗口',
+          followup_updated_at: '2026-06-05T09:10:00Z',
+        },
+      ],
+    })
     const fetchMock = vi.fn()
     mockInitialWorkbench(fetchMock)
     fetchMock
       .mockResolvedValueOnce(mockJSONResponse(decisionRecord()))
       .mockResolvedValueOnce(mockJSONResponse(patched))
+      .mockResolvedValueOnce(mockJSONResponse(followupPatched))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -560,6 +584,29 @@ describe('AssetDecisionsPage', () => {
       credentials: 'include',
       body: JSON.stringify({ status: 'in_progress' }),
     })
+
+    fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进状态'), { target: { value: 'blocked' } })
+    fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进备注'), { target: { value: '等待迁移窗口' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存跟进' }))
+
+    await waitFor(() => expect(screen.getByText('成员跟进已更新：Germany Primary -> 阻塞')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/asset-decisions/records/adr_001', {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        members: [{
+          vps_id: 'vps_primary',
+          followup_status: 'blocked',
+          followup_note: '等待迁移窗口',
+        }],
+      }),
+    })
+    expect(within(dialog).getByLabelText('Germany Primary 跟进备注')).toHaveValue('等待迁移窗口')
   })
 
   it('keeps the single VPS renewal decision PATCH payload unchanged', async () => {

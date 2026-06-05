@@ -156,6 +156,11 @@ func TestPostgresAssetDecisionRepositoryListRecordsScansSnapshots(t *testing.T) 
 				"Germany",
 				30,
 				2,
+				1,
+				1,
+				0,
+				0,
+				0,
 				snapshot,
 				now,
 				now,
@@ -175,6 +180,9 @@ func TestPostgresAssetDecisionRepositoryListRecordsScansSnapshots(t *testing.T) 
 	record := records[0]
 	if record.RecordID != "adr_001" || record.Status != assetdecisions.RecordStatusDraft || record.MemberCount != 2 {
 		t.Fatalf("record = %#v, want scanned summary", record)
+	}
+	if record.FollowupTodoCount != 1 || record.FollowupInProgressCount != 1 {
+		t.Fatalf("record followup counts = %#v, want todo/in_progress counts", record)
 	}
 	if got := record.EvidenceSnapshot["member_count"]; got != float64(2) {
 		t.Fatalf("snapshot member_count = %#v, want 2", got)
@@ -224,10 +232,13 @@ func TestPostgresAssetDecisionRepositoryCreateRecordPersistsGroupAndMemberSnapsh
 	if detail.Title != "续费窗口取舍" || detail.Status != assetdecisions.RecordStatusDecided || detail.MemberCount != 1 {
 		t.Fatalf("detail summary = %#v, want normalized summary", detail.RecordSummary)
 	}
+	if detail.FollowupTodoCount != 1 {
+		t.Fatalf("detail followup todo count = %d, want 1", detail.FollowupTodoCount)
+	}
 	if detail.DecidedAt == nil || detail.CompletedAt != nil {
 		t.Fatalf("timestamps decided=%v completed=%v, want decided only", detail.DecidedAt, detail.CompletedAt)
 	}
-	if len(detail.Members) != 1 || detail.Members[0].DecidedRole != assetdecisions.RoleRetireCandidate || detail.Members[0].DecidedAction != assetdecisions.ActionMigrate {
+	if len(detail.Members) != 1 || detail.Members[0].DecidedRole != assetdecisions.RoleRetireCandidate || detail.Members[0].DecidedAction != assetdecisions.ActionMigrate || detail.Members[0].FollowupStatus != assetdecisions.FollowupTodo {
 		t.Fatalf("members = %#v, want user decided role/action", detail.Members)
 	}
 	if got := detail.EvidenceSnapshot["group_id"]; got != detail.SourceGroupID {
@@ -296,6 +307,11 @@ func TestPostgresAssetDecisionRepositoryGetAndPatchRecord(t *testing.T) {
 				"Hetzner",
 				60,
 				1,
+				0,
+				1,
+				0,
+				0,
+				0,
 				summarySnapshot,
 				now,
 				now,
@@ -316,6 +332,9 @@ func TestPostgresAssetDecisionRepositoryGetAndPatchRecord(t *testing.T) {
 				string(assetdecisions.ActionKeep),
 				string(assetdecisions.ActionKeep),
 				"主力保留",
+				string(assetdecisions.FollowupInProgress),
+				"已进入迁移窗口",
+				&now,
 				memberSnapshot,
 				now,
 				now,
@@ -330,15 +349,148 @@ func TestPostgresAssetDecisionRepositoryGetAndPatchRecord(t *testing.T) {
 	if detail.RecordID != "adr_001" || len(detail.Members) != 1 || detail.Members[0].DisplayName != "Frankfurt Primary" {
 		t.Fatalf("detail = %#v, want scanned detail", detail)
 	}
+	if detail.FollowupInProgressCount != 1 || detail.Members[0].FollowupStatus != assetdecisions.FollowupInProgress || detail.Members[0].FollowupUpdatedAt == nil {
+		t.Fatalf("detail followup = %#v members=%#v, want scanned followup", detail.RecordSummary, detail.Members)
+	}
+}
+
+func TestPostgresAssetDecisionRepositoryPatchRecordUpdatesMemberFollowup(t *testing.T) {
+	now := time.Date(2026, time.June, 5, 9, 0, 0, 0, time.UTC)
+	summarySnapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"scope": "provider"})
+	if err != nil {
+		t.Fatalf("marshal summary snapshot: %v", err)
+	}
+	memberSnapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"service_count": float64(2)})
+	if err != nil {
+		t.Fatalf("marshal member snapshot: %v", err)
+	}
+	var execs []fakeAssetDecisionExecCall
+	tx := &fakeAssetDecisionTx{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+		execs = append(execs, fakeAssetDecisionExecCall{sql: sql, args: args})
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}}
+	repo := &PostgresAssetDecisionRepository{
+		db: fakeAssetDecisionQueryer{
+			queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+				if !strings.Contains(sql, "asset_decision_records_with_counts") || args[0] != "adr_001" {
+					t.Fatalf("QueryRow sql=%q args=%#v, want record lookup after patch", sql, args)
+				}
+				return fakeAssetDecisionRow{scan: scanAssetDecisionRecordSummaryValues(
+					"adr_001",
+					"服务商组合推进",
+					"保留主力",
+					string(assetdecisions.RecordStatusInProgress),
+					"auto_group",
+					"adg_auto_provider",
+					string(assetdecisions.GroupProviderPortfolio),
+					string(assetdecisions.ViewProvider),
+					"provider=pv_001",
+					"Hetzner",
+					60,
+					1,
+					0,
+					0,
+					1,
+					0,
+					0,
+					summarySnapshot,
+					now,
+					now,
+					&now,
+					nil,
+				)}
+			},
+			query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+				if !strings.Contains(sql, "asset_decision_record_members") || args[0] != "adr_001" {
+					t.Fatalf("query sql=%q args=%#v, want members after patch", sql, args)
+				}
+				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionRecordMemberValues(
+					"adr_001",
+					"vps_001",
+					"Frankfurt Primary",
+					string(assetdecisions.RolePrimaryCandidate),
+					string(assetdecisions.RolePrimaryCandidate),
+					string(assetdecisions.ActionKeep),
+					string(assetdecisions.ActionKeep),
+					"主力保留",
+					string(assetdecisions.FollowupBlocked),
+					"等待迁移窗口",
+					&now,
+					memberSnapshot,
+					now,
+					now,
+				)}}}, nil
+			},
+		},
+		beginTx: func(context.Context, pgx.TxOptions) (assetDecisionTx, error) {
+			return tx, nil
+		},
+	}
 
 	updated, err := repo.PatchRecord(context.Background(), "adr_001", assetdecisions.PatchRecordInput{
 		Status: assetdecisions.PatchRecordStatus{Set: true, Value: assetdecisions.RecordStatusInProgress},
+		Members: []assetdecisions.PatchRecordMemberInput{{
+			VPSID:          " vps_001 ",
+			FollowupStatus: assetdecisions.PatchFollowupStatus{Set: true, Value: assetdecisions.FollowupBlocked},
+			FollowupNote:   assetdecisions.PatchString{Set: true, Value: " 等待迁移窗口 "},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("PatchRecord() error = %v", err)
 	}
-	if updated.Status != assetdecisions.RecordStatusInProgress || updated.DecidedAt == nil {
-		t.Fatalf("updated = %#v, want in_progress with decided_at", updated.RecordSummary)
+	if !tx.committed {
+		t.Fatal("transaction committed = false, want true")
+	}
+	if len(execs) != 2 {
+		t.Fatalf("exec count = %d, want record and member updates", len(execs))
+	}
+	if !strings.Contains(execs[0].sql, "update asset_decision_records") || !strings.Contains(execs[1].sql, "update asset_decision_record_members") {
+		t.Fatalf("exec SQL = %#v, want record then member updates", execs)
+	}
+	if execs[1].args[1] != "vps_001" || execs[1].args[5] != "等待迁移窗口" {
+		t.Fatalf("member update args = %#v, want normalized member patch", execs[1].args)
+	}
+	if updated.Status != assetdecisions.RecordStatusInProgress || updated.DecidedAt == nil || updated.FollowupBlockedCount != 1 {
+		t.Fatalf("updated = %#v, want in_progress with blocked followup count", updated.RecordSummary)
+	}
+	if len(updated.Members) != 1 || updated.Members[0].FollowupStatus != assetdecisions.FollowupBlocked || updated.Members[0].FollowupNote != "等待迁移窗口" {
+		t.Fatalf("updated members = %#v, want blocked member followup", updated.Members)
+	}
+}
+
+func TestPostgresAssetDecisionRepositoryPatchRecordUnknownMemberRollsBack(t *testing.T) {
+	var execs []fakeAssetDecisionExecCall
+	tx := &fakeAssetDecisionTx{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+		execs = append(execs, fakeAssetDecisionExecCall{sql: sql, args: args})
+		if strings.Contains(sql, "asset_decision_record_members") {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}}
+	repo := &PostgresAssetDecisionRepository{
+		db: fakeAssetDecisionQueryer{},
+		beginTx: func(context.Context, pgx.TxOptions) (assetDecisionTx, error) {
+			return tx, nil
+		},
+	}
+
+	_, err := repo.PatchRecord(context.Background(), "adr_001", assetdecisions.PatchRecordInput{
+		Members: []assetdecisions.PatchRecordMemberInput{{
+			VPSID:          "vps_missing",
+			FollowupStatus: assetdecisions.PatchFollowupStatus{Set: true, Value: assetdecisions.FollowupDone},
+		}},
+	})
+	if err != assetdecisions.ErrInvalidAssetDecisionInput {
+		t.Fatalf("PatchRecord() error = %v, want invalid input", err)
+	}
+	if tx.committed {
+		t.Fatal("transaction committed = true, want rollback")
+	}
+	if !tx.rolled {
+		t.Fatal("transaction rolled = false, want rollback")
+	}
+	if len(execs) != 2 {
+		t.Fatalf("exec count = %d, want record update then member update", len(execs))
 	}
 }
 
@@ -479,6 +631,11 @@ func scanAssetDecisionRecordSummaryValues(
 	scopeLabel string,
 	renewWithinDays int,
 	memberCount int,
+	followupTodoCount int,
+	followupInProgressCount int,
+	followupBlockedCount int,
+	followupDoneCount int,
+	followupSkippedCount int,
 	evidenceSnapshot []byte,
 	createdAt time.Time,
 	updatedAt time.Time,
@@ -498,11 +655,16 @@ func scanAssetDecisionRecordSummaryValues(
 		*(dest[9].(*string)) = scopeLabel
 		*(dest[10].(*int)) = renewWithinDays
 		*(dest[11].(*int)) = memberCount
-		*(dest[12].(*[]byte)) = evidenceSnapshot
-		*(dest[13].(*time.Time)) = createdAt
-		*(dest[14].(*time.Time)) = updatedAt
-		*(dest[15].(**time.Time)) = decidedAt
-		*(dest[16].(**time.Time)) = completedAt
+		*(dest[12].(*int)) = followupTodoCount
+		*(dest[13].(*int)) = followupInProgressCount
+		*(dest[14].(*int)) = followupBlockedCount
+		*(dest[15].(*int)) = followupDoneCount
+		*(dest[16].(*int)) = followupSkippedCount
+		*(dest[17].(*[]byte)) = evidenceSnapshot
+		*(dest[18].(*time.Time)) = createdAt
+		*(dest[19].(*time.Time)) = updatedAt
+		*(dest[20].(**time.Time)) = decidedAt
+		*(dest[21].(**time.Time)) = completedAt
 		return nil
 	}
 }
@@ -516,6 +678,9 @@ func scanAssetDecisionRecordMemberValues(
 	suggestedAction string,
 	decidedAction string,
 	reason string,
+	followupStatus string,
+	followupNote string,
+	followupUpdatedAt *time.Time,
 	evidenceSnapshot []byte,
 	createdAt time.Time,
 	updatedAt time.Time,
@@ -529,9 +694,12 @@ func scanAssetDecisionRecordMemberValues(
 		*(dest[5].(*string)) = suggestedAction
 		*(dest[6].(*string)) = decidedAction
 		*(dest[7].(*string)) = reason
-		*(dest[8].(*[]byte)) = evidenceSnapshot
-		*(dest[9].(*time.Time)) = createdAt
-		*(dest[10].(*time.Time)) = updatedAt
+		*(dest[8].(*string)) = followupStatus
+		*(dest[9].(*string)) = followupNote
+		*(dest[10].(**time.Time)) = followupUpdatedAt
+		*(dest[11].(*[]byte)) = evidenceSnapshot
+		*(dest[12].(*time.Time)) = createdAt
+		*(dest[13].(*time.Time)) = updatedAt
 		return nil
 	}
 }

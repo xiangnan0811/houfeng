@@ -41,6 +41,30 @@ type PostgresAssetDecisionRepository struct {
 	beginTx func(context.Context, pgx.TxOptions) (assetDecisionTx, error)
 }
 
+const assetDecisionRecordSummaryColumns = `
+	record_id,
+	title,
+	goal,
+	status,
+	source_type,
+	source_group_id,
+	source_group_type,
+	source_view,
+	scope_key,
+	scope_label,
+	renew_within_days,
+	member_count,
+	followup_todo_count,
+	followup_in_progress_count,
+	followup_blocked_count,
+	followup_done_count,
+	followup_skipped_count,
+	evidence_snapshot,
+	created_at,
+	updated_at,
+	decided_at,
+	completed_at`
+
 func NewPostgresAssetDecisionRepository(db *pgxpool.Pool) *PostgresAssetDecisionRepository {
 	return &PostgresAssetDecisionRepository{
 		db: db,
@@ -84,24 +108,7 @@ func (r *PostgresAssetDecisionRepository) GetGroup(ctx context.Context, groupID 
 
 func (r *PostgresAssetDecisionRepository) ListRecords(ctx context.Context) ([]assetdecisions.RecordSummary, error) {
 	rows, err := r.db.Query(ctx, `
-		select
-			record_id,
-			title,
-			goal,
-			status,
-			source_type,
-			source_group_id,
-			source_group_type,
-			source_view,
-			scope_key,
-			scope_label,
-			renew_within_days,
-			member_count,
-			evidence_snapshot,
-			created_at,
-			updated_at,
-			decided_at,
-			completed_at
+		select `+assetDecisionRecordSummaryColumns+`
 		from asset_decision_records_with_counts
 		order by updated_at desc, record_id desc`)
 	if err != nil {
@@ -274,6 +281,7 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 			SuggestedAction:  member.SuggestedAction,
 			DecidedAction:    decidedAction,
 			Reason:           memberInput.Reason,
+			FollowupStatus:   assetdecisions.FollowupTodo,
 			EvidenceSnapshot: memberSnapshotMap,
 			CreatedAt:        now,
 			UpdatedAt:        now,
@@ -285,23 +293,24 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 	}
 	return assetdecisions.RecordDetail{
 		RecordSummary: assetdecisions.RecordSummary{
-			RecordID:         recordID,
-			Title:            input.Title,
-			Goal:             input.Goal,
-			Status:           input.Status,
-			SourceType:       "auto_group",
-			SourceGroupID:    group.GroupID,
-			SourceGroupType:  group.GroupType,
-			SourceView:       group.View,
-			ScopeKey:         group.ScopeKey,
-			ScopeLabel:       group.ScopeLabel,
-			RenewWithinDays:  input.RenewWithinDays,
-			MemberCount:      len(recordMembers),
-			EvidenceSnapshot: assetdecisions.RecordSnapshotFromGroup(group),
-			CreatedAt:        now,
-			UpdatedAt:        now,
-			DecidedAt:        decidedAt,
-			CompletedAt:      completedAt,
+			RecordID:          recordID,
+			Title:             input.Title,
+			Goal:              input.Goal,
+			Status:            input.Status,
+			SourceType:        "auto_group",
+			SourceGroupID:     group.GroupID,
+			SourceGroupType:   group.GroupType,
+			SourceView:        group.View,
+			ScopeKey:          group.ScopeKey,
+			ScopeLabel:        group.ScopeLabel,
+			RenewWithinDays:   input.RenewWithinDays,
+			MemberCount:       len(recordMembers),
+			FollowupTodoCount: len(recordMembers),
+			EvidenceSnapshot:  assetdecisions.RecordSnapshotFromGroup(group),
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			DecidedAt:         decidedAt,
+			CompletedAt:       completedAt,
 		},
 		Members: recordMembers,
 	}, nil
@@ -313,24 +322,7 @@ func (r *PostgresAssetDecisionRepository) GetRecord(ctx context.Context, recordI
 		return assetdecisions.RecordDetail{}, assetdecisions.ErrAssetDecisionRecordNotFound
 	}
 	summary, err := scanAssetDecisionRecordSummary(r.db.QueryRow(ctx, `
-		select
-			record_id,
-			title,
-			goal,
-			status,
-			source_type,
-			source_group_id,
-			source_group_type,
-			source_view,
-			scope_key,
-			scope_label,
-			renew_within_days,
-			member_count,
-			evidence_snapshot,
-			created_at,
-			updated_at,
-			decided_at,
-			completed_at
+		select `+assetDecisionRecordSummaryColumns+`
 		from asset_decision_records_with_counts
 		where record_id = $1`, recordID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -348,21 +340,37 @@ func (r *PostgresAssetDecisionRepository) GetRecord(ctx context.Context, recordI
 
 func (r *PostgresAssetDecisionRepository) PatchRecord(ctx context.Context, recordID string, input assetdecisions.PatchRecordInput) (assetdecisions.RecordDetail, error) {
 	recordID = strings.TrimSpace(recordID)
-	input.Title.Value = strings.TrimSpace(input.Title.Value)
-	input.Goal.Value = strings.TrimSpace(input.Goal.Value)
+	input = assetdecisions.NormalizePatchRecordInput(input)
 	if recordID == "" {
 		return assetdecisions.RecordDetail{}, assetdecisions.ErrAssetDecisionRecordNotFound
 	}
 	if err := assetdecisions.ValidatePatchRecordInput(input); err != nil {
 		return assetdecisions.RecordDetail{}, err
 	}
-	if !input.Title.Set && !input.Goal.Set && !input.Status.Set {
+	hasMemberPatch := len(input.Members) > 0
+	if !input.Title.Set && !input.Goal.Set && !input.Status.Set && !hasMemberPatch {
 		return r.GetRecord(ctx, recordID)
 	}
 
 	now := time.Now().UTC()
 	decidedAt, completedAt := recordStatusTimestamps(input.Status.Value, now)
-	record, err := scanAssetDecisionRecordSummary(r.db.QueryRow(ctx, `
+	beginTx := r.beginTx
+	if beginTx == nil {
+		beginner, ok := r.db.(assetDecisionTxBeginner)
+		if !ok {
+			return assetdecisions.RecordDetail{}, fmt.Errorf("begin asset decision record patch transaction: transaction not supported")
+		}
+		beginTx = func(ctx context.Context, opts pgx.TxOptions) (assetDecisionTx, error) {
+			return beginner.BeginTx(ctx, opts)
+		}
+	}
+	tx, err := beginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return assetdecisions.RecordDetail{}, fmt.Errorf("begin asset decision record patch transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
 		update asset_decision_records
 		set title = case when $2::boolean then $3 else title end,
 		    goal = case when $4::boolean then $5 else goal end,
@@ -376,26 +384,8 @@ func (r *PostgresAssetDecisionRepository) PatchRecord(ctx context.Context, recor
 		      when $6::boolean and $7 <> 'completed' then null
 		      else completed_at
 		    end,
-		    updated_at = now()
-		where record_id = $1
-		returning
-			record_id,
-			title,
-			goal,
-			status,
-			source_type,
-			source_group_id,
-			source_group_type,
-			source_view,
-			scope_key,
-			scope_label,
-			renew_within_days,
-			(select count(*)::int from asset_decision_record_members where record_id = asset_decision_records.record_id),
-			evidence_snapshot,
-			created_at,
-			updated_at,
-			decided_at,
-			completed_at`,
+		    updated_at = $10
+		where record_id = $1`,
 		recordID,
 		input.Title.Set,
 		input.Title.Value,
@@ -405,21 +395,49 @@ func (r *PostgresAssetDecisionRepository) PatchRecord(ctx context.Context, recor
 		string(input.Status.Value),
 		decidedAt,
 		completedAt,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return assetdecisions.RecordDetail{}, assetdecisions.ErrAssetDecisionRecordNotFound
-	}
+		now,
+	)
 	if err != nil {
 		if isAssetDecisionInvalidPostgresError(err) {
 			return assetdecisions.RecordDetail{}, assetdecisions.ErrInvalidAssetDecisionInput
 		}
 		return assetdecisions.RecordDetail{}, fmt.Errorf("patch asset decision record %q: %w", recordID, err)
 	}
-	members, err := r.listRecordMembers(ctx, recordID)
-	if err != nil {
-		return assetdecisions.RecordDetail{}, err
+	if tag.RowsAffected() == 0 {
+		return assetdecisions.RecordDetail{}, assetdecisions.ErrAssetDecisionRecordNotFound
 	}
-	return assetdecisions.RecordDetail{RecordSummary: record, Members: members}, nil
+
+	for _, member := range input.Members {
+		tag, err := tx.Exec(ctx, `
+			update asset_decision_record_members
+			set followup_status = case when $3::boolean then $4 else followup_status end,
+			    followup_note = case when $5::boolean then $6 else followup_note end,
+			    followup_updated_at = $7,
+			    updated_at = $7
+			where record_id = $1 and vps_id = $2`,
+			recordID,
+			member.VPSID,
+			member.FollowupStatus.Set,
+			string(member.FollowupStatus.Value),
+			member.FollowupNote.Set,
+			member.FollowupNote.Value,
+			now,
+		)
+		if err != nil {
+			if isAssetDecisionInvalidPostgresError(err) {
+				return assetdecisions.RecordDetail{}, assetdecisions.ErrInvalidAssetDecisionInput
+			}
+			return assetdecisions.RecordDetail{}, fmt.Errorf("patch asset decision record member %q/%q: %w", recordID, member.VPSID, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return assetdecisions.RecordDetail{}, assetdecisions.ErrInvalidAssetDecisionInput
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return assetdecisions.RecordDetail{}, fmt.Errorf("commit asset decision record patch transaction: %w", err)
+	}
+	return r.GetRecord(ctx, recordID)
 }
 
 func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]assetdecisions.Fact, error) {
@@ -613,6 +631,9 @@ func (r *PostgresAssetDecisionRepository) listRecordMembers(ctx context.Context,
 			suggested_action,
 			decided_action,
 			reason,
+			followup_status,
+			followup_note,
+			followup_updated_at,
 			evidence_snapshot,
 			created_at,
 			updated_at
@@ -773,6 +794,11 @@ func scanAssetDecisionRecordSummary(row assetDecisionRecordSummaryScanner) (asse
 		&record.ScopeLabel,
 		&record.RenewWithinDays,
 		&record.MemberCount,
+		&record.FollowupTodoCount,
+		&record.FollowupInProgressCount,
+		&record.FollowupBlockedCount,
+		&record.FollowupDoneCount,
+		&record.FollowupSkippedCount,
 		&rawSnapshot,
 		&record.CreatedAt,
 		&record.UpdatedAt,
@@ -799,6 +825,7 @@ func scanAssetDecisionRecordMember(row assetDecisionRecordSummaryScanner) (asset
 		decidedRole     string
 		suggestedAction string
 		decidedAction   string
+		followupStatus  string
 		rawSnapshot     []byte
 	)
 	if err := row.Scan(
@@ -810,6 +837,9 @@ func scanAssetDecisionRecordMember(row assetDecisionRecordSummaryScanner) (asset
 		&suggestedAction,
 		&decidedAction,
 		&member.Reason,
+		&followupStatus,
+		&member.FollowupNote,
+		&member.FollowupUpdatedAt,
 		&rawSnapshot,
 		&member.CreatedAt,
 		&member.UpdatedAt,
@@ -820,6 +850,7 @@ func scanAssetDecisionRecordMember(row assetDecisionRecordSummaryScanner) (asset
 	member.DecidedRole = assetdecisions.SuggestedRole(decidedRole)
 	member.SuggestedAction = assetdecisions.SuggestedAction(suggestedAction)
 	member.DecidedAction = assetdecisions.SuggestedAction(decidedAction)
+	member.FollowupStatus = assetdecisions.FollowupStatus(followupStatus)
 	snapshot, err := unmarshalAssetDecisionSnapshot(rawSnapshot)
 	if err != nil {
 		return assetdecisions.RecordMember{}, err

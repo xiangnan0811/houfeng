@@ -675,6 +675,11 @@ describe('api helpers', () => {
       scope_label: '60 天内续费取舍',
       renew_within_days: 60,
       member_count: 2,
+      followup_todo_count: 2,
+      followup_in_progress_count: 0,
+      followup_blocked_count: 0,
+      followup_done_count: 0,
+      followup_skipped_count: 0,
       evidence_snapshot: { group_id: 'adg_auto_001' },
       created_at: '2026-06-05T09:00:00Z',
       updated_at: '2026-06-05T09:00:00Z',
@@ -688,7 +693,11 @@ describe('api helpers', () => {
       status: 'draft',
       members: [{ vps_id: 'vps_001', decided_role: 'primary_candidate', decided_action: 'keep', reason: '主力' }],
     }
-    const patchInput: PatchAssetDecisionRecordInput = { status: 'in_progress', goal: '开始迁移' }
+    const patchInput: PatchAssetDecisionRecordInput = {
+      status: 'in_progress',
+      goal: '开始迁移',
+      members: [{ vps_id: 'vps_001', followup_status: 'blocked', followup_note: '等待迁移窗口' }],
+    }
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(overview)))

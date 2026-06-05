@@ -998,6 +998,13 @@ export type AssetDecisionRecordStatus =
   | 'completed'
   | 'abandoned'
 
+export type AssetDecisionFollowupStatus =
+  | 'todo'
+  | 'in_progress'
+  | 'blocked'
+  | 'done'
+  | 'skipped'
+
 export type AssetDecisionEvidenceSnapshot = Record<string, unknown>
 
 export type AssetDecisionRecordSummary = {
@@ -1013,6 +1020,11 @@ export type AssetDecisionRecordSummary = {
   scope_label: string
   renew_within_days: number
   member_count: number
+  followup_todo_count: number
+  followup_in_progress_count: number
+  followup_blocked_count: number
+  followup_done_count: number
+  followup_skipped_count: number
   evidence_snapshot: AssetDecisionEvidenceSnapshot
   created_at: string
   updated_at: string
@@ -1029,6 +1041,9 @@ export type AssetDecisionRecordMember = {
   suggested_action: AssetDecisionSuggestedAction
   decided_action: AssetDecisionSuggestedAction
   reason: string
+  followup_status: AssetDecisionFollowupStatus
+  followup_note: string
+  followup_updated_at?: string | null
   evidence_snapshot: AssetDecisionEvidenceSnapshot
   created_at: string
   updated_at: string
@@ -1058,6 +1073,11 @@ export type PatchAssetDecisionRecordInput = {
   title?: string
   goal?: string
   status?: AssetDecisionRecordStatus
+  members?: Array<{
+    vps_id: string
+    followup_status?: AssetDecisionFollowupStatus
+    followup_note?: string
+  }>
 }
 
 export type LifecycleActionStepStatus = 'completed' | 'skipped' | 'failed'
