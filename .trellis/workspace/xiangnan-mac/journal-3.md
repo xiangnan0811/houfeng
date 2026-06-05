@@ -1490,3 +1490,36 @@ Implemented Phase 1 of the asset portfolio decision center: readonly backend dec
 ### Next Steps
 
 - None - task complete
+
+
+## Session 162: Asset decision record workbench
+
+**Date**: 2026-06-05
+**Task**: Asset decision record workbench
+**Branch**: `worktree/asset-decisions-phase2-planning`
+
+### Summary
+
+Added persistent asset decision records on top of portfolio decision groups, wired records APIs and UI save/detail/status flows, extended visual mock coverage, and verified Go/web/browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `942aa60` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
