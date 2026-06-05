@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.38.0](https://github.com/xiangnan0811/houfeng/compare/v0.37.0...v0.38.0) (2026-06-05)
+
+
+### Features
+
+* **asset-decisions:** add evidence assessment ([a7b7962](https://github.com/xiangnan0811/houfeng/commit/a7b79620a86a5db6e022cc14c8623ed2820df00a))
+* **asset-decisions:** add evidence assessment ([a7b7962](https://github.com/xiangnan0811/houfeng/commit/a7b79620a86a5db6e022cc14c8623ed2820df00a))
+* **asset-decisions:** add evidence assessment ([938f129](https://github.com/xiangnan0811/houfeng/commit/938f129e9aa97bd1650f0f36925e1d418c4ac389))
+
 ## [0.37.0](https://github.com/xiangnan0811/houfeng/compare/v0.36.0...v0.37.0) (2026-06-05)
 
 
