@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 162
+- **Total Sessions**: 163
 - **Last Active**: 2026-06-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1525 | Active |
+| `journal-3.md` | ~1558 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 163 | 2026-06-05 | Asset decisions evidence assessment | `938f129` | `worktree/asset-decisions-evidence-quality` |
 | 162 | 2026-06-05 | Asset decision record workbench | `942aa60` | `worktree/asset-decisions-phase2-planning` |
 | 161 | 2026-06-05 | Asset decisions portfolio workbench phase 1 | `c28c00a`, `15d8662`, `e16c178` | `worktree/asset-decisions-phase1` |
 | 160 | 2026-06-04 | 服务商页二次信息架构修正 | `35baeab`, `76f2c94` | `worktree/provider-directory-polish` |
