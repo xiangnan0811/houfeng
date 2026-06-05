@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.41.0](https://github.com/xiangnan0811/houfeng/compare/v0.40.0...v0.41.0) (2026-06-05)
+
+
+### Features
+
+* **asset-decisions:** add scenario workbench ([7a2c4c3](https://github.com/xiangnan0811/houfeng/commit/7a2c4c3151b41460882f54d17ac781b0e5d54882))
+* **asset-decisions:** add scenario workbench ([956cfba](https://github.com/xiangnan0811/houfeng/commit/956cfba106090f4a1fc8b00bf80767acdc929bec))
+
 ## [0.40.0](https://github.com/xiangnan0811/houfeng/compare/v0.39.0...v0.40.0) (2026-06-05)
 
 
