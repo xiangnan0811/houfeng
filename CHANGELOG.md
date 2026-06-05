@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/xiangnan0811/houfeng/compare/v0.35.0...v0.36.0) (2026-06-05)
+
+
+### Features
+
+* **asset-decisions:** add portfolio decision workbench ([2bb3d16](https://github.com/xiangnan0811/houfeng/commit/2bb3d16e4e08218b62f5085477dc61fa78a79177))
+
 ## [0.35.0](https://github.com/xiangnan0811/houfeng/compare/v0.34.0...v0.35.0) (2026-06-04)
 
 
