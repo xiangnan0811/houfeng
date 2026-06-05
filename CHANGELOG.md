@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.0](https://github.com/xiangnan0811/houfeng/compare/v0.39.0...v0.40.0) (2026-06-05)
+
+
+### Features
+
+* **asset-decisions:** add execution readback ([07cbf10](https://github.com/xiangnan0811/houfeng/commit/07cbf1042a6ef79571ba7f9158082bdd3017d140))
+
 ## [0.39.0](https://github.com/xiangnan0811/houfeng/compare/v0.38.0...v0.39.0) (2026-06-05)
 
 
