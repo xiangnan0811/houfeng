@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/xiangnan0811/houfeng/compare/v0.36.0...v0.37.0) (2026-06-05)
+
+
+### Features
+
+* **asset-decisions:** persist portfolio decision records ([f595b1a](https://github.com/xiangnan0811/houfeng/commit/f595b1a6a335ed5bb8432bdf9818ba33a8ee1795))
+
 ## [0.36.0](https://github.com/xiangnan0811/houfeng/compare/v0.35.0...v0.36.0) (2026-06-05)
 
 
