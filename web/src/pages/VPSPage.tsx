@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
   Button,
@@ -414,6 +414,7 @@ export function VPSPage() {
           <h1 className="page-title">VPS 资产</h1>
         </div>
         <div className="header-actions">
+          <Link className="btn sm secondary" to="/asset-decisions?view=needs_decision">进入组合决策</Link>
           <button type="button" className="btn sm secondary" onClick={openFilterDrawer}>筛选</button>
           <button type="button" className="btn sm primary" onClick={() => setCreateOpen(true)}>
             {state.vps.length === 0 ? '创建第一台 VPS' : '添加 VPS'}

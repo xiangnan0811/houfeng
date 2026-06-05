@@ -95,12 +95,14 @@ export function AssetDecisionRenewalTable({
   }
 
   return (
-    <DataTable
-      className="asset-table asset-decision-renewals-table"
-      columns={columns}
-      rows={renewals}
-      rowKey={(subscription) => subscription.subscription_id}
-      emptyContent={<span className="empty-inline">当前窗口暂无续费候选</span>}
-    />
+    <div className="asset-table-scroll" role="region" aria-label="续费证据区" tabIndex={0}>
+      <DataTable
+        className="asset-table asset-decision-renewals-table"
+        columns={columns}
+        rows={renewals}
+        rowKey={(subscription) => subscription.subscription_id}
+        emptyContent={<span className="empty-inline">当前窗口暂无续费候选</span>}
+      />
+    </div>
   )
 }

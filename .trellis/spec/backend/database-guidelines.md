@@ -698,6 +698,93 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - 该查询不得改变 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target、Agent、VPS、subscription 或 link 记录。
 - `limit` 只限制异常队列和 recent events；不得限制 `asset_summary`。
 
+### Scenario: Asset decision portfolio read model
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `internal/center/assetdecisions/`、`internal/center/store/asset_decisions.go`、`/api/asset-decisions/*`、或任何依赖 VPS / Subscription / Service / Domain / MonitoringInstance / Target 聚合生成组合决策组的逻辑。
+- 目标：`/asset-decisions` 是资产组合决策中枢的只读读模型，不新增持久化状态，不成为第二套 VPS / Subscription / MonitoringInstance / Target 状态机。
+
+#### 2. Signatures
+
+- Domain package: `internal/center/assetdecisions`，包含 `Repository`、`ListFilters`、`Overview`、`GroupSummary`、`GroupDetail`、`GroupMember`、`ErrAssetDecisionGroupNotFound`、`ErrInvalidAssetDecisionInput`。
+- Backend APIs:
+  - `GET /api/asset-decisions/overview?view=&renew_within_days=`
+  - `GET /api/asset-decisions/groups?view=&renew_within_days=`
+  - `GET /api/asset-decisions/groups/{group_id}?renew_within_days=`
+- Store source tables: `vps_assets`、`providers`、`subscriptions`、`asset_services`、`asset_domains`、`vps_monitoring_instance_links`、`monitoring_instances`、`targets`。
+- Stable group id: `adg_auto_<12hex>`，由 group type、scope key 和续费窗口等只读 key 确定性派生；detail endpoint 每次重新计算组列表后按 ID 查找。
+
+#### 3. Contracts
+
+- 自动组只读派生，不新增 migration，不写数据库，不保存手工组，不保存用户决策记录。
+- Group type 固定语义：`renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。
+- `renew_within_days` 默认 30，仅允许产品认可的窗口（当前 `30/60/90`）；非法值在 handler 返回 400。
+- `view` 只筛选返回的自动组，不改变底层事实读取；非法值返回 400。
+- Store 读取现有表后在 Go 中派生组合摘要和成员建议，避免 Dashboard / VPS / Subscription / Provider 页面各自重复 join 后语义漂移。
+- 组级摘要可以聚合成本、续费窗口、取消联动、服务 / 域名 / Target、监控关联、异常和 evidence chips；成员级建议角色 / 建议动作只能作为扫描提示，不执行写操作。
+- archived VPS 不进入普通 region/provider/cost/evidence 组合；cancelled/to_cancel 只能作为取消联动相关证据出现，避免归档资产污染正常组合比较。
+- 订阅、服务、域名、监控或 Target 查询失败必须返回 repository error；不得构造“健康”或“缺证据”假结果。只有查询成功且事实为空时，才生成 `missing_subscription`、`unlinked_monitoring` 等真实 evidence gap。
+- `/api/asset-decisions/*` 不逐台调用 runtime facts detail endpoint，只读 MonitoringInstance / Target 当前摘要字段和关联计数；CPU / IO / 路由 / IP 质量 / 超售判断属于后续能力。
+- 组合页仍只通过既有 `PATCH /api/vps/{id}` 改单台 VPS renewal decision；取消 / 退役执行必须回到 VPS lifecycle workbench。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| invalid `view` | handler 返回 400 `invalid input` |
+| invalid `renew_within_days` | handler 返回 400 `invalid input` |
+| missing `group_id` | handler 返回 404 `asset decision group not found` |
+| repository query failure | handler 返回 500 `internal server error`，store error 用 `%w` 包装 |
+| source table query failed | 不返回 evidence gap；整体 request fail，避免误报缺订阅 / 缺监控 |
+| source query succeeded but rows empty | 返回可解释的 `evidence_gap` 或空组，不伪造健康证据 |
+| unsupported method | handler 返回 405 `method not allowed` |
+| `/api/asset-decisions/*` route missing | router test 必须失败；该路径不得落 SPA fallback |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: 同一国家 / region / city 下两台 active VPS 自动形成 `region_portfolio`，成员显示成本、用途、服务 / 域名 / 监控差异，帮助用户取舍。
+- Good: Provider 下多台 active VPS 自动形成 `provider_portfolio`，用于服务商组合比较。
+- Good: subscription query 成功且某台 VPS 没有 active subscription，`evidence_gap` 或成员 evidence chips 标记缺订阅。
+- Base: 没有任何 VPS 时 overview 仍返回 0 计数和空 `top_groups`。
+- Bad: 在 store 里写入 `asset_decision_groups` 表，或把自动组 ID 当持久状态依赖。
+- Bad: group detail 为了展示性能趋势逐台请求 runtime facts detail endpoint，造成 N+1 和语义越界。
+- Bad: subscriptions 查询失败后把所有 VPS 标记为 `missing_subscription`，误导用户取消资产。
+
+#### 6. Tests Required
+
+- Domain tests: stable group id、view/window validation、renewal/cancellation/region/provider/cost/evidence group derivation、archived/cancelled 边界、source unavailable 不误报。
+- Store tests: member facts 聚合、主订阅选择、服务 / 域名 / Target / 监控计数、成本和 evidence chips，且不依赖 runtime facts detail。
+- Handler tests: overview、groups list、group detail success；invalid query、missing group、repo failure、method not allowed。
+- Router/bootstrap tests: `/api/asset-decisions/overview`、`/api/asset-decisions/groups`、`/api/asset-decisions/groups/{id}` 登录保护且不落 SPA fallback；`bootstrapCenter` wiring 非 nil。
+- Frontend tests: API helper query、页面主 surface、tabs、group detail、单台 PATCH payload、evidence 请求失败边界。
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：证据源失败时构造“缺订阅”假事实。
+if err != nil {
+    member.EvidenceChips = append(member.EvidenceChips, EvidenceChip{Kind: "missing_subscription"})
+    return groups, nil
+}
+```
+
+```go
+// 正确：查询失败是 source unavailable，交给 handler 返回错误或前端显示局部失败。
+if err != nil {
+    return nil, fmt.Errorf("list asset decision facts: %w", err)
+}
+```
+
+```go
+// 错误：详情依赖已经保存的自动组状态。
+return repo.loadPersistedGroup(ctx, groupID)
+
+// 正确：每次重新派生组，再按稳定 ID 查找。
+groups := DeriveGroups(facts, filters)
+return FindGroup(groups, groupID)
+```
+
 ### Scenario: Events backfilled filter contract
 
 #### 1. Scope / Trigger

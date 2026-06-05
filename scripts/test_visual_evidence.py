@@ -159,6 +159,32 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertEqual(body["path"], "/api/vps")
 
     def test_asset_workflows_profile_still_serves_asset_routes(self) -> None:
+        status, overview = call_asset_workflow_api(
+            "/api/asset-decisions/overview",
+            "view=needs_decision&renew_within_days=30",
+        )
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(overview["group_count"], 5)
+        self.assertTrue(overview["source_availability"]["subscriptions"])
+
+        status, provider_groups = call_asset_workflow_api(
+            "/api/asset-decisions/groups",
+            "view=provider&renew_within_days=30",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(provider_groups)
+        self.assertTrue(all(group["view"] == "provider" for group in provider_groups))
+
+        group_id = provider_groups[0]["group_id"]
+        status, group_detail = call_asset_workflow_api(f"/api/asset-decisions/groups/{group_id}")
+        self.assertEqual(status, 200)
+        self.assertEqual(group_detail["group_id"], group_id)
+        self.assertTrue(group_detail["members"])
+
+        status, missing_group = call_asset_workflow_api("/api/asset-decisions/groups/adg_auto_missing")
+        self.assertEqual(status, 404)
+        self.assertEqual(missing_group["error"], "asset decision group not found")
+
         status, assets = call_asset_workflow_api("/api/vps", "renewal_decision=unreviewed")
         self.assertEqual(status, 200)
         self.assertTrue(assets)

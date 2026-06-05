@@ -166,9 +166,9 @@ MonitoringPage 是运行证据扫描页，不应把筛选、批量操作、趋�
 | 无选择且未打开批量操作 | 批量 bar 不渲染 |
 | 打开批量操作但未全选 | 显示范围/选择入口，不显示实际批量动作按钮 |
 
-### Asset Ledger 列表与决策队列数据流
+### Asset Ledger 组合决策与列表数据流
 
-Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端做轻量 join，用于人工核对和资料质量提示；这不是后端字段扩展，也不能创造未存在的健康语义。
+Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端做轻量 join，用于人工核对和资料质量提示；这不是后端字段扩展，也不能创造未存在的健康语义。`/asset-decisions` 例外地使用后端只读组合决策 read model 作为主语义来源：它把 VPS、订阅、服务、域名、Target 和监控关联聚成自动决策组，但仍不拥有业务状态写入权。
 
 #### 1. Scope / Trigger
 
@@ -176,16 +176,22 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 2. Signatures
 
-- Frontend API: `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listMonitoringInstanceAssetContexts()`、`listTargetAssetContexts()`，不得在页面里直接 `fetch()`。
-- Decision queue data: `AssetDecisionsPage` 拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
+- Frontend API: `getAssetDecisionOverview(filter?)`, `listAssetDecisionGroups(filter?)`, `getAssetDecisionGroup(groupId, filter?)`, `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listMonitoringInstanceAssetContexts()`、`listTargetAssetContexts()`，不得在页面里直接 `fetch()`。
+- Asset portfolio data: `AssetDecisionsPage` 首屏主 surface 从 `/api/asset-decisions/overview` 与 `/api/asset-decisions/groups?view=&renew_within_days=` 读取自动组；点击组时读取 `/api/asset-decisions/groups/{group_id}?renew_within_days=`。自动组是只读派生视图，不在前端保存或补写 group state。
+- Single queue data: `AssetDecisionsPage` 底部辅助队列继续拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
 - VPS inventory data: `VPSPage` 拉取全量 `listVPSAssets()`、`listProviders()` 和 `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views。
+- Asset Decisions URL-state: `view=needs_decision|renewal|region|provider|cost|evidence|single_queue`，`renew_within_days=30|60|90`。非法 view 在前端降级为 `needs_decision`，后端 API 对非法 view/window 返回 400。
 - URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|archived|cancellation_attention`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
 
 #### 3. Contracts
 
-- Asset Decisions 首屏主 surface 必须是一个统一工作队列；不得恢复三张同权 VPS queue table。
-- 决策编辑必须在 drawer 或同等次级 surface 中完成；保存成功 notice 应在队列 surface 可见。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
-- Asset Decisions、Dashboard 和 VPS 列表只能把 Subscription / MonitoringInstance 作为 VPS 的证据和缺口展示；主处理入口必须回到 `/vps/{id}` 或 VPS 筛选视图。不要把订阅或监控实例作为与 VPS 同级的“待处理主体”。
+- Asset Decisions 首屏主 surface 必须是 `资产组合决策` 的决策组列表，不得恢复三张同权 VPS queue table，也不得把单台续费队列重新提升为主视觉主体。
+- 自动组至少覆盖 `renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。组级摘要展示 VPS 数量、生命周期 / 用途 / 续费决策分布、成本、续费窗口、取消联动、服务 / 域名 / Target、监控关联、异常和 evidence chips。
+- 组详情必须展示成员 VPS 基础事实、主订阅、服务 / 域名 / Target / 监控摘要、`suggested_role`、`suggested_action` 和 evidence chips。建议只能帮助扫描和排序，不得自动提交 keep / migrate / cancel。
+- 单台决策编辑必须在 group detail drawer 或底部单台辅助队列中完成，仍使用 `AssetDecisionWorkPanel` 与 `PATCH /api/vps/{id}`。保存成功 notice 应留在页面可见 surface 内。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
+- 取消 / 退役不是 Phase 1 的组合页写动作；任何取消 / 退役执行入口必须跳到 `/vps/{id}?workbench=cancellation`，由 VPS 详情生命周期工作台加载 preview 并提交用户确认步骤。
+- Asset Decisions、Dashboard 和 VPS 列表只能把 Subscription / MonitoringInstance / Target / Service / Domain 作为 VPS 的证据和缺口展示；主处理入口必须回到 `/vps/{id}`、VPS 筛选视图或组合决策组。不要把订阅或监控实例作为与 VPS 同级的“待处理主体”。
+- Dashboard 资产 lane 应深链到 `/asset-decisions?view=...` 承接组合判断。VPS 页可以提供 `进入组合决策` 入口但不改变库存主路径；订阅页只展示 `需要资产判断` 链接，不在订阅页修改 VPS 决策；服务商页入口指向 `view=provider`。
 - 当订阅为 `expired` / `cancelled` / `paused` 而 VPS、MonitoringInstance 或 Target 仍表现为 active/running，页面必须把它归入 `cancellation_attention` 或等价的联动处理入口；入口应打开 `/vps/{id}?workbench=cancellation`，由统一工作台提交用户确认的步骤。
 - 统一取消 / 退役工作台必须展示 preview 返回的 subscription、VPS、MonitoringInstance、Target 影响范围；MonitoringInstance/Target 默认只展示为待确认项，只有用户在工作台勾选并提交的 `monitoring_instance_actions` / `target_actions` 才能修改运行状态。
 - MonitoringInstance 列表 / 详情、Target 列表 / 详情必须消费批量 asset-context API 显示关联 VPS 的取消 / 过期 / 状态割裂上下文；不得只显示自身运行状态而隐藏宿主 VPS 已取消或待取消的事实。
@@ -204,8 +210,11 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | Condition | Expected behavior |
 | --- | --- |
 | Asset Decisions evidence-boundary explanation grows long | 保持优先级队列为主 surface，证据边界用 `<details>` / 低权重说明承载，不抢占主视觉 |
+| `/api/asset-decisions/overview` 或 groups list failed | 组合工作台显示局部错误；底部单台队列和 renewal evidence 可按各自 API 独立加载 |
+| group detail missing / 404 | Drawer 显示决策组不存在或已变化，允许返回列表；不得制造空 group |
 | subscriptions list failed in Asset Decisions renewal window | 续费候选 evidence 显示错误，VPS 决策队列仍可显示已加载 VPS |
-| all subscriptions failed while building decision queue | VPS 队列显示加载错误，避免把全量缺订阅误报为真实数据质量 |
+| all subscriptions failed while building single queue | 单台辅助队列显示加载错误，避免把全量缺订阅误报为真实数据质量 |
+| backend group source availability says subscriptions unavailable | 组列表 / 组详情显示证据不可用，不渲染真实 `缺订阅` chip |
 | VPS inventory subscriptions empty | 行级展示 `缺订阅`，quick view `缺订阅` 可筛出对应 VPS |
 | VPS inventory URL has unsupported `view` | 降级为 `all`，下次用户操作时写回合法 query |
 | user removes a chip or clears all filters | URL-state 与 visible rows 同步更新，不重新请求 `/api/vps?...` derived query |
@@ -216,12 +225,16 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 #### 5. Good/Base/Bad Cases
 
 - Good: `/vps?view=unlinked&renewal_decision=unreviewed` 首屏显示 `视图: 未关联` 和 `续费: 未评估` chips，列表只显示同时满足条件的 rows。
+- Good: `/asset-decisions?view=provider&renew_within_days=60` 首屏请求 provider 组合组，列表展示同服务商 VPS 成本、服务/域名、监控和建议动作。
+- Good: 打开决策组后，同组 VPS 可以比较主订阅、服务 / 域名 / Target / 监控数量、建议角色和 evidence chips；点击单台 `处理` 仍提交原有 VPS renewal decision PATCH。
 - Good: 资产决策保存 `migrate` 后，VPS 从 `待评估` tab 消失并出现在 `迁移` tab，notice 留在队列 surface。
 - Good: 资产决策保存 `cancel` 后，notice 继续展示 `VPS -> 取消`，并追加 API 返回的订阅联动消息 / 订阅页 action。
 - Good: VPS 详情打开 MonitoringInstance link Drawer 时懒加载 `listMonitoringInstances()`，用 `选择监控实例` selector 展示名称、ID、provider、生命周期和健康状态。
 - Good: VPS 详情无订阅时显示“快速创建订阅”，调用 `/api/vps/{vps_id}/subscriptions`，表单只收账单事实，不出现订阅状态。
 - Good: VPS 详情无监控实例时显示“创建并接入 agent”，调用 `/api/vps/{vps_id}/monitoring-instances`，后端从 VPS 派生身份字段，成功后跳转 MonitoringInstance onboarding。
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
+- Bad: 订阅 evidence 请求失败后，前端把所有 VPS 标成 `缺订阅`，导致用户做出错误取消判断。
+- Bad: 在 `/asset-decisions` 保存自动组 ID、批量取消 VPS 或直接修改 Subscription / MonitoringInstance / Target。
 - Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked monitoring instance health。
 - Bad: Page 直接 `fetch('/api/vps')` 或在组件层调 API；业务请求必须走 `lib/api.ts`。
 - Bad: 在 VPS 详情表单里让用户输入 `mi_...`、`tg_...`、`svc_...` 作为常规路径，且不给候选列表或落地入口。
@@ -229,7 +242,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 6. Tests Required
 
-- `AssetDecisionsPage.test.tsx`: 续费窗口请求、统一工作队列渲染、drawer 更新决策、保存后队列移动/移除、取消类联动 message/action、错误/空态。
+- `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string。
+- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、tabs query、组详情 drawer、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅、错误/空态。
 - `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
 - `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。

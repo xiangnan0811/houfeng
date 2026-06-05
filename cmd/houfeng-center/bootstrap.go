@@ -85,6 +85,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
 	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
+	assetDecisionRepo := store.NewPostgresAssetDecisionRepository(db.Pool())
 	settingsRepo := store.NewPostgresSettingsRepository(db.Pool())
 	retentionRepo := store.NewPostgresRetentionRepository(db.Pool())
 	retentionWorker := retention.NewWorker(retentionRepo, settingsRepo, slog.Default(), retention.DefaultWorkerInterval)
@@ -153,6 +154,9 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		SettingsHandler:                          handlers.Settings(settingsHandlerRepo),
 		AssetDomainsCollectionHandler:            handlers.AssetDomainsCollection(assetDomainRepo),
 		AssetServicesCollectionHandler:           handlers.AssetServicesCollection(assetServiceRepo),
+		AssetDecisionOverviewHandler:             handlers.AssetDecisionOverview(assetDecisionRepo),
+		AssetDecisionGroupsHandler:               handlers.AssetDecisionGroups(assetDecisionRepo),
+		AssetDecisionGroupHandler:                handlers.AssetDecisionGroup(assetDecisionRepo),
 		ProvidersCollectionHandler:               handlers.ProvidersCollection(providerRepo),
 		ProviderItemHandler:                      handlers.ProviderItem(providerRepo),
 		VPSCollectionHandler:                     handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo),

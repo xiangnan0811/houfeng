@@ -21,6 +21,8 @@ import {
   enterTargetMaintenance,
   exitMonitoringInstanceMaintenance,
   exitTargetMaintenance,
+  getAssetDecisionGroup,
+  getAssetDecisionOverview,
   getDashboard,
   getMonitoringInstanceOnboarding,
   getProvider,
@@ -41,6 +43,7 @@ import {
   listEvents,
   listIncidents,
   listSubscriptions,
+  listAssetDecisionGroups,
   listMonitoringInstanceAssetContexts,
   listTargetAssetContexts,
   pauseMonitoringInstanceMonitoring,
@@ -594,6 +597,89 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify(input),
+    })
+  })
+
+  it('loads asset decision overview, groups, and group detail', async () => {
+    const overview = {
+      snapshot_generated_at: '2026-06-04T09:00:00Z',
+      renew_within_days: 45,
+      group_count: 1,
+      member_vps_count: 2,
+      needs_decision_count: 1,
+      renewal_group_count: 1,
+      region_group_count: 0,
+      provider_group_count: 0,
+      cost_group_count: 0,
+      evidence_group_count: 0,
+      top_groups: [],
+      type_counts: { renewal_attention: 1 },
+      view_counts: { renewal: 1 },
+      source_availability: {
+        subscriptions: true,
+        services: true,
+        domains: true,
+        monitoring: true,
+        targets: true,
+      },
+    }
+    const group = {
+      group_id: 'adg_auto_001',
+      group_type: 'renewal_attention',
+      view: 'renewal',
+      title: '45 天内续费取舍',
+      scope_key: '45',
+      scope_label: '45 天内续费取舍',
+      priority: 90,
+      member_count: 2,
+      lifecycle_counts: { active: 2 },
+      usage_counts: { in_use: 1, standby: 1 },
+      renewal_decision_counts: { unreviewed: 2 },
+      renewal_window_count: 2,
+      unreviewed_count: 2,
+      migrate_count: 0,
+      cancel_count: 0,
+      cancellation_attention_count: 0,
+      idle_count: 0,
+      standby_count: 1,
+      in_use_count: 1,
+      service_count: 1,
+      domain_count: 1,
+      target_count: 1,
+      running_target_count: 1,
+      monitoring_link_count: 2,
+      abnormal_monitoring_count: 0,
+      active_incident_count: 0,
+      primary_issue_summary: '',
+      monthly_cost_by_currency: [{ currency: 'USD', monthly_total: 20, yearly_total: 240 }],
+      evidence_chips: [{ kind: 'renewal_due', label: '续费临近', tone: 'alert' }],
+    }
+    const detail = { ...group, members: [] }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(overview)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([group])))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(detail)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getAssetDecisionOverview({ view: 'renewal', renew_within_days: 45 })).resolves.toEqual(overview)
+    await expect(listAssetDecisionGroups({ view: 'renewal', renew_within_days: 45 })).resolves.toEqual([group])
+    await expect(getAssetDecisionGroup('adg_auto_001', { renew_within_days: 45 })).resolves.toEqual(detail)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/asset-decisions/overview?view=renewal&renew_within_days=45', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/asset-decisions/groups?view=renewal&renew_within_days=45', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=45', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
     })
   })
 

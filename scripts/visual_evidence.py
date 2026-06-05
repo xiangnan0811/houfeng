@@ -728,6 +728,463 @@ def asset_workflow_domains(vps_id: str) -> list[dict[str, object]]:
     ]
 
 
+def asset_decision_source_availability() -> dict[str, bool]:
+    return {
+        "subscriptions": True,
+        "services": True,
+        "domains": True,
+        "monitoring": True,
+        "targets": True,
+    }
+
+
+def asset_decision_chip(
+    kind: str,
+    label: str,
+    tone: str,
+    details: str | None = None,
+) -> dict[str, object]:
+    chip: dict[str, object] = {"kind": kind, "label": label, "tone": tone}
+    if details:
+        chip["details"] = details
+    return chip
+
+
+def asset_decision_primary_subscription(vps_id: str) -> dict[str, object] | None:
+    rows = [
+        row
+        for row in asset_workflow_subscriptions()
+        if row["vps_id"] == vps_id and row["status"] == "active"
+    ]
+    rows.sort(key=lambda row: str(row.get("renew_at") or "9999-12-31"))
+    return dict(rows[0]) if rows else None
+
+
+def asset_decision_days_until(value: object) -> int | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return (dt.date.fromisoformat(value) - dt.date.today()).days
+    except ValueError:
+        return None
+
+
+def asset_decision_member(
+    vps_id: str,
+    *,
+    suggested_role: str,
+    suggested_action: str,
+    evidence_chips: list[dict[str, object]],
+    cancellation_attention_reason: str | None = None,
+) -> dict[str, object]:
+    vps = next(row for row in asset_workflow_vps_assets() if row["vps_id"] == vps_id)
+    subscriptions = [row for row in asset_workflow_subscriptions() if row["vps_id"] == vps_id]
+    primary_subscription = asset_decision_primary_subscription(vps_id)
+    service_count = len(asset_workflow_services(vps_id))
+    domain_count = len(asset_workflow_domains(vps_id))
+    target_count = 1 if vps_id == "vps_fra_legacy" else 0
+    monitoring_link_count = int(vps.get("active_monitoring_instance_link_count") or 0)
+    abnormal_monitoring_count = 1 if vps_id == "vps_fra_legacy" else 0
+    active_incident_count = 1 if vps_id == "vps_fra_legacy" else 0
+    return {
+        "vps": dict(vps),
+        "primary_subscription": primary_subscription,
+        "subscription_count": len(subscriptions),
+        "active_subscription_count": sum(1 for row in subscriptions if row["status"] == "active"),
+        "inactive_subscription_count": sum(1 for row in subscriptions if row["status"] != "active"),
+        "service_count": service_count,
+        "domain_count": domain_count,
+        "target_count": target_count,
+        "running_target_count": int(vps.get("running_target_count") or 0),
+        "monitoring_link_count": monitoring_link_count,
+        "running_monitoring_count": int(vps.get("running_monitoring_instance_count") or 0),
+        "abnormal_monitoring_count": abnormal_monitoring_count,
+        "active_incident_count": active_incident_count,
+        "primary_issue_summary": (
+            "legacy service still responds on cancelled host"
+            if vps_id == "vps_fra_legacy"
+            else ""
+        ),
+        "cancellation_attention_reason": cancellation_attention_reason or "",
+        "suggested_role": suggested_role,
+        "suggested_action": suggested_action,
+        "evidence_chips": evidence_chips,
+        "renewal_within_window": (
+            (asset_decision_days_until(primary_subscription.get("renew_at")) or 9999) <= 30
+            if primary_subscription
+            else False
+        ),
+        "source_availability": asset_decision_source_availability(),
+    }
+
+
+def asset_decision_count_by(rows: list[dict[str, object]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = str(row.get(key) or "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def asset_decision_cost_by_currency(vps_ids: list[str]) -> list[dict[str, object]]:
+    by_currency: dict[str, dict[str, object]] = {}
+    for row in asset_workflow_subscriptions():
+        if row["vps_id"] not in vps_ids or row["status"] != "active":
+            continue
+        currency = str(row["currency"])
+        item = by_currency.setdefault(
+            currency,
+            {"currency": currency, "monthly_total": 0.0, "yearly_total": 0.0},
+        )
+        item["monthly_total"] = round(float(item["monthly_total"]) + float(row.get("monthly_price") or 0), 2)
+        item["yearly_total"] = round(float(item["yearly_total"]) + float(row.get("monthly_price") or 0) * 12, 2)
+    return list(by_currency.values())
+
+
+def asset_decision_group_summary(
+    *,
+    group_id: str,
+    group_type: str,
+    view: str,
+    title: str,
+    scope_key: str,
+    scope_label: str,
+    priority: int,
+    vps_ids: list[str],
+    evidence_chips: list[dict[str, object]],
+    primary_issue_summary: str = "",
+) -> dict[str, object]:
+    vps_rows = [
+        row
+        for row in asset_workflow_vps_assets()
+        if row["vps_id"] in vps_ids
+    ]
+    members = [
+        asset_decision_member(
+            str(row["vps_id"]),
+            suggested_role="observe_candidate",
+            suggested_action="review",
+            evidence_chips=[],
+        )
+        for row in vps_rows
+    ]
+    monthly_cost_base = sum(
+        float(row.get("monthly_price_base") or 0)
+        for row in asset_workflow_subscriptions()
+        if row["vps_id"] in vps_ids and row["status"] == "active"
+    )
+    yearly_cost_base = sum(
+        float(row.get("yearly_price_base") or 0)
+        for row in asset_workflow_subscriptions()
+        if row["vps_id"] in vps_ids and row["status"] == "active"
+    )
+    return {
+        "group_id": group_id,
+        "group_type": group_type,
+        "view": view,
+        "title": title,
+        "scope_key": scope_key,
+        "scope_label": scope_label,
+        "priority": priority,
+        "member_count": len(vps_rows),
+        "lifecycle_counts": asset_decision_count_by(vps_rows, "lifecycle_status"),
+        "usage_counts": asset_decision_count_by(vps_rows, "usage_status"),
+        "renewal_decision_counts": asset_decision_count_by(vps_rows, "renewal_decision"),
+        "renewal_window_count": sum(
+            1
+            for row in members
+            if row["renewal_within_window"]
+        ),
+        "unreviewed_count": sum(1 for row in vps_rows if row["renewal_decision"] == "unreviewed"),
+        "migrate_count": sum(1 for row in vps_rows if row["renewal_decision"] == "migrate"),
+        "cancel_count": sum(1 for row in vps_rows if row["renewal_decision"] == "cancel"),
+        "cancellation_attention_count": sum(
+            1
+            for row in vps_rows
+            if row["lifecycle_status"] in {"to_cancel", "cancelled"} or row["renewal_decision"] == "cancel"
+        ),
+        "idle_count": sum(1 for row in vps_rows if row["usage_status"] == "idle"),
+        "standby_count": sum(1 for row in vps_rows if row["usage_status"] == "standby"),
+        "in_use_count": sum(1 for row in vps_rows if row["usage_status"] == "in_use"),
+        "service_count": sum(int(row["service_count"]) for row in members),
+        "domain_count": sum(int(row["domain_count"]) for row in members),
+        "target_count": sum(int(row["target_count"]) for row in members),
+        "running_target_count": sum(int(row["running_target_count"]) for row in members),
+        "monitoring_link_count": sum(int(row["monitoring_link_count"]) for row in members),
+        "abnormal_monitoring_count": sum(int(row["abnormal_monitoring_count"]) for row in members),
+        "active_incident_count": sum(int(row["active_incident_count"]) for row in members),
+        "primary_issue_summary": primary_issue_summary,
+        "monthly_cost_by_currency": asset_decision_cost_by_currency(vps_ids),
+        "monthly_cost_base": round(monthly_cost_base, 2),
+        "yearly_cost_base": round(yearly_cost_base, 2),
+        "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+        "evidence_chips": evidence_chips,
+    }
+
+
+def asset_decision_group_definitions() -> list[dict[str, object]]:
+    return [
+        {
+            "vps_ids": ["vps_ams_core", "vps_sjc_edge", "vps_fra_legacy"],
+            "summary": asset_decision_group_summary(
+                group_id="adg_auto_mock_renewal",
+                group_type="renewal_attention",
+                view="renewal",
+                title="续费窗口组合取舍",
+                scope_key="renewal-window",
+                scope_label="未来 30 天",
+                priority=94,
+                vps_ids=["vps_ams_core", "vps_sjc_edge", "vps_fra_legacy"],
+                evidence_chips=[
+                    asset_decision_chip("renewal_due", "续费临近", "alert"),
+                    asset_decision_chip("budget_risk", "预算风险", "critical"),
+                ],
+            ),
+            "members": [
+                asset_decision_member(
+                    "vps_ams_core",
+                    suggested_role="primary_candidate",
+                    suggested_action="keep",
+                    evidence_chips=[
+                        asset_decision_chip("renewal_due", "8 天后续费", "alert"),
+                        asset_decision_chip("budget_risk", "超预算", "critical"),
+                    ],
+                ),
+                asset_decision_member(
+                    "vps_sjc_edge",
+                    suggested_role="standby_candidate",
+                    suggested_action="migrate",
+                    evidence_chips=[
+                        asset_decision_chip("renewal_due", "21 天后续费", "notice"),
+                        asset_decision_chip("exchange_rate_stale", "汇率过期", "alert"),
+                    ],
+                ),
+                asset_decision_member(
+                    "vps_fra_legacy",
+                    suggested_role="retire_candidate",
+                    suggested_action="open_cancellation_workbench",
+                    evidence_chips=[
+                        asset_decision_chip("cancellation_linkage", "取消联动", "critical"),
+                        asset_decision_chip("carries_service", "仍承载服务", "alert"),
+                    ],
+                    cancellation_attention_reason="VPS 待取消，但仍有关联监控和 Target 运行。",
+                ),
+            ],
+        },
+        {
+            "vps_ids": ["vps_fra_legacy"],
+            "summary": asset_decision_group_summary(
+                group_id="adg_auto_mock_cancel",
+                group_type="cancellation_attention",
+                view="needs_decision",
+                title="取消联动待确认",
+                scope_key="cancellation-linkage",
+                scope_label="取消 / 运行状态割裂",
+                priority=99,
+                vps_ids=["vps_fra_legacy"],
+                evidence_chips=[
+                    asset_decision_chip("cancellation_linkage", "取消联动", "critical"),
+                    asset_decision_chip("abnormal_monitoring", "异常关联", "alert"),
+                ],
+                primary_issue_summary="legacy service still responds on cancelled host",
+            ),
+            "members": [
+                asset_decision_member(
+                    "vps_fra_legacy",
+                    suggested_role="retire_candidate",
+                    suggested_action="open_cancellation_workbench",
+                    evidence_chips=[
+                        asset_decision_chip("cancellation_linkage", "取消联动", "critical"),
+                        asset_decision_chip("carries_service", "仍承载服务", "alert"),
+                    ],
+                    cancellation_attention_reason="待取消 VPS 下仍有运行中的 MonitoringInstance 与 Target。",
+                )
+            ],
+        },
+        {
+            "vps_ids": ["vps_ams_core", "vps_fra_legacy"],
+            "summary": asset_decision_group_summary(
+                group_id="adg_auto_mock_region_eu",
+                group_type="region_portfolio",
+                view="region",
+                title="欧洲节点组合比较",
+                scope_key="region:eu",
+                scope_label="EU / Europe",
+                priority=70,
+                vps_ids=["vps_ams_core", "vps_fra_legacy"],
+                evidence_chips=[
+                    asset_decision_chip("carries_service", "服务承载差异", "notice"),
+                    asset_decision_chip("idle_paid", "闲置付费", "alert"),
+                ],
+            ),
+            "members": [
+                asset_decision_member(
+                    "vps_ams_core",
+                    suggested_role="primary_candidate",
+                    suggested_action="keep",
+                    evidence_chips=[asset_decision_chip("renewal_due", "续费临近", "alert")],
+                ),
+                asset_decision_member(
+                    "vps_fra_legacy",
+                    suggested_role="retire_candidate",
+                    suggested_action="open_cancellation_workbench",
+                    evidence_chips=[asset_decision_chip("idle_paid", "闲置付费", "alert")],
+                ),
+            ],
+        },
+        {
+            "vps_ids": ["vps_ams_core", "vps_fra_legacy"],
+            "summary": asset_decision_group_summary(
+                group_id="adg_auto_mock_provider",
+                group_type="provider_portfolio",
+                view="provider",
+                title="服务商组合复核",
+                scope_key="provider:mixed-eu",
+                scope_label="Hetzner / Netcup",
+                priority=66,
+                vps_ids=["vps_ams_core", "vps_fra_legacy"],
+                evidence_chips=[
+                    asset_decision_chip("budget_risk", "成本差异", "alert"),
+                    asset_decision_chip("abnormal_monitoring", "服务质量线索", "notice"),
+                ],
+            ),
+            "members": [
+                asset_decision_member(
+                    "vps_ams_core",
+                    suggested_role="primary_candidate",
+                    suggested_action="keep",
+                    evidence_chips=[asset_decision_chip("budget_risk", "预算风险", "critical")],
+                ),
+                asset_decision_member(
+                    "vps_fra_legacy",
+                    suggested_role="retire_candidate",
+                    suggested_action="open_cancellation_workbench",
+                    evidence_chips=[asset_decision_chip("abnormal_monitoring", "异常关联", "alert")],
+                ),
+            ],
+        },
+        {
+            "vps_ids": ["vps_ams_core", "vps_sjc_edge"],
+            "summary": asset_decision_group_summary(
+                group_id="adg_auto_mock_cost",
+                group_type="cost_pressure",
+                view="cost",
+                title="预算压力组合",
+                scope_key="cost:budget",
+                scope_label="CNY 预算风险",
+                priority=86,
+                vps_ids=["vps_ams_core", "vps_sjc_edge"],
+                evidence_chips=[
+                    asset_decision_chip("budget_risk", "超预算 / 预警", "critical"),
+                    asset_decision_chip("exchange_rate_stale", "汇率过期", "alert"),
+                ],
+            ),
+            "members": [
+                asset_decision_member(
+                    "vps_ams_core",
+                    suggested_role="primary_candidate",
+                    suggested_action="review",
+                    evidence_chips=[asset_decision_chip("budget_risk", "超预算", "critical")],
+                ),
+                asset_decision_member(
+                    "vps_sjc_edge",
+                    suggested_role="observe_candidate",
+                    suggested_action="migrate",
+                    evidence_chips=[asset_decision_chip("exchange_rate_stale", "汇率过期", "alert")],
+                ),
+            ],
+        },
+        {
+            "vps_ids": ["vps_tokyo_lab"],
+            "summary": asset_decision_group_summary(
+                group_id="adg_auto_mock_evidence",
+                group_type="evidence_gap",
+                view="evidence",
+                title="资料缺口待补齐",
+                scope_key="evidence-gap",
+                scope_label="缺订阅 / 缺监控 / 缺基础资料",
+                priority=78,
+                vps_ids=["vps_tokyo_lab"],
+                evidence_chips=[
+                    asset_decision_chip("missing_subscription", "缺订阅", "alert"),
+                    asset_decision_chip("missing_monitoring", "未关联监控", "alert"),
+                    asset_decision_chip("missing_access", "缺访问入口", "notice"),
+                ],
+            ),
+            "members": [
+                asset_decision_member(
+                    "vps_tokyo_lab",
+                    suggested_role="evidence_needed",
+                    suggested_action="complete_evidence",
+                    evidence_chips=[
+                        asset_decision_chip("missing_subscription", "缺订阅", "alert"),
+                        asset_decision_chip("missing_monitoring", "未关联监控", "alert"),
+                        asset_decision_chip("missing_provider", "缺服务商", "notice"),
+                        asset_decision_chip("missing_location", "缺地域", "notice"),
+                        asset_decision_chip("missing_access", "缺访问入口", "notice"),
+                    ],
+                )
+            ],
+        },
+    ]
+
+
+def asset_decision_public_groups(query: dict[str, list[str]]) -> list[dict[str, object]]:
+    view = first_query_value(query, "view") or "needs_decision"
+    groups = [dict(item["summary"]) for item in asset_decision_group_definitions()]
+    if view == "needs_decision":
+        allowed_types = {"renewal_attention", "cancellation_attention", "cost_pressure", "evidence_gap"}
+        groups = [group for group in groups if str(group["group_type"]) in allowed_types]
+    elif view:
+        groups = [group for group in groups if group["view"] == view]
+    groups.sort(key=lambda group: (-int(group["priority"]), str(group["title"])))
+    return groups
+
+
+def asset_decision_overview(query: dict[str, list[str]]) -> dict[str, object]:
+    all_groups = [dict(item["summary"]) for item in asset_decision_group_definitions()]
+    type_counts: dict[str, int] = {}
+    view_counts: dict[str, int] = {}
+    member_ids: set[str] = set()
+    for definition in asset_decision_group_definitions():
+        summary = definition["summary"]
+        group_type = str(summary["group_type"])
+        view = str(summary["view"])
+        type_counts[group_type] = type_counts.get(group_type, 0) + 1
+        view_counts[view] = view_counts.get(view, 0) + 1
+        member_ids.update(str(vps_id) for vps_id in definition["vps_ids"])
+    all_groups.sort(key=lambda group: -int(group["priority"]))
+    return {
+        "snapshot_generated_at": iso_timestamp(0),
+        "renew_within_days": int(first_query_value(query, "renew_within_days") or "30"),
+        "group_count": len(all_groups),
+        "member_vps_count": len(member_ids),
+        "needs_decision_count": len([
+            group
+            for group in all_groups
+            if group["group_type"] in {"renewal_attention", "cancellation_attention", "cost_pressure", "evidence_gap"}
+        ]),
+        "renewal_group_count": view_counts.get("renewal", 0),
+        "region_group_count": view_counts.get("region", 0),
+        "provider_group_count": view_counts.get("provider", 0),
+        "cost_group_count": view_counts.get("cost", 0),
+        "evidence_group_count": view_counts.get("evidence", 0),
+        "top_groups": all_groups[:4],
+        "type_counts": type_counts,
+        "view_counts": view_counts,
+        "source_availability": asset_decision_source_availability(),
+    }
+
+
+def asset_decision_group_detail(group_id: str) -> dict[str, object] | None:
+    for definition in asset_decision_group_definitions():
+        summary = dict(definition["summary"])
+        if summary["group_id"] == group_id:
+            summary["members"] = definition["members"]
+            return summary
+    return None
+
+
 def asset_workflow_vps_detail(vps_id: str) -> dict[str, object] | None:
     vps = next((row for row in asset_workflow_vps_assets() if row["vps_id"] == vps_id), None)
     if vps is None:
@@ -2079,6 +2536,24 @@ def fulfill_asset_workflow_api(route: object) -> None:
     if method == "GET" and path == "/api/dashboard":
         fulfill_json(route, 200, asset_workflow_dashboard())
         return
+
+    if method == "GET" and path == "/api/asset-decisions/overview":
+        fulfill_json(route, 200, asset_decision_overview(query))
+        return
+
+    if method == "GET" and path == "/api/asset-decisions/groups":
+        fulfill_json(route, 200, asset_decision_public_groups(query))
+        return
+
+    if method == "GET" and path.startswith("/api/asset-decisions/groups/"):
+        parts = [part for part in path.split("/") if part]
+        if len(parts) == 4:
+            detail = asset_decision_group_detail(parts[3])
+            if detail is not None:
+                fulfill_json(route, 200, detail)
+                return
+            fulfill_json(route, 404, {"error": "asset decision group not found"})
+            return
 
     if method == "GET" and path == "/api/providers":
         fulfill_json(route, 200, asset_workflow_providers())

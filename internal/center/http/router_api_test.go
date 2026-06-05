@@ -219,6 +219,58 @@ func TestRouterKeepsAssetDomainsOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsAssetDecisionsOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		AssetDecisionOverviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"group_count":1}`))
+		}),
+		AssetDecisionGroupsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"group_id":"adg_auto_001"}]`))
+		}),
+		AssetDecisionGroupHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"group_id":"adg_auto_001","members":[]}`))
+		}),
+	})
+
+	tests := []struct {
+		name            string
+		path            string
+		wantBodySnippet string
+	}{
+		{name: "overview", path: "/api/asset-decisions/overview", wantBodySnippet: `"group_count":1`},
+		{name: "groups", path: "/api/asset-decisions/groups", wantBodySnippet: `"group_id":"adg_auto_001"`},
+		{name: "group detail", path: "/api/asset-decisions/groups/adg_auto_001", wantBodySnippet: `"members":[]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			}
+			body, err := io.ReadAll(recorder.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+			if strings.TrimSpace(string(body)) == spaShell {
+				t.Fatalf("expected asset decisions API response, got SPA fallback body %q", string(body))
+			}
+			if !strings.Contains(string(body), tt.wantBodySnippet) {
+				t.Fatalf("expected asset decisions payload, got %q", string(body))
+			}
+		})
+	}
+}
+
 func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",

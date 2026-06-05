@@ -1455,3 +1455,38 @@ Upgraded /providers into a lightweight provider directory with derived VPS/subsc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 161: Asset decisions portfolio workbench phase 1
+
+**Date**: 2026-06-05
+**Task**: Asset decisions portfolio workbench phase 1
+**Branch**: `worktree/asset-decisions-phase1`
+
+### Summary
+
+Implemented Phase 1 of the asset portfolio decision center: readonly backend decision groups, portfolio workbench UI, cross-page entry links, visual mock support, and specs/tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c28c00a` | (see git log) |
+| `15d8662` | (see git log) |
+| `e16c178` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
