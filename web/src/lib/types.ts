@@ -879,6 +879,32 @@ export type AssetDecisionEvidenceChip = {
   details?: string
 }
 
+export type AssetDecisionEvidenceQualityTier =
+  | 'strong'
+  | 'usable'
+  | 'weak'
+  | 'blocked'
+
+export type AssetDecisionEvidenceDecisionBias =
+  | 'keep'
+  | 'observe'
+  | 'complete_evidence'
+  | 'retire'
+  | 'migrate'
+  | 'review'
+
+export type AssetDecisionEvidenceAssessment = {
+  confidence_score: number
+  pressure_score: number
+  readiness_score: number
+  quality_tier: AssetDecisionEvidenceQualityTier
+  decision_bias: AssetDecisionEvidenceDecisionBias
+  support_signal_count: number
+  risk_signal_count: number
+  gap_signal_count: number
+  summary: string
+}
+
 export type AssetDecisionGroupSummary = {
   group_id: string
   group_type: AssetDecisionGroupType
@@ -912,6 +938,7 @@ export type AssetDecisionGroupSummary = {
   yearly_cost_base?: number | null
   base_currency?: string
   evidence_chips: AssetDecisionEvidenceChip[]
+  evidence_assessment: AssetDecisionEvidenceAssessment
 }
 
 export type AssetDecisionGroupMember = {
@@ -933,6 +960,7 @@ export type AssetDecisionGroupMember = {
   suggested_role: AssetDecisionSuggestedRole
   suggested_action: AssetDecisionSuggestedAction
   evidence_chips: AssetDecisionEvidenceChip[]
+  evidence_assessment: AssetDecisionEvidenceAssessment
   renewal_within_window: boolean
   source_availability: AssetDecisionSourceAvailability
 }

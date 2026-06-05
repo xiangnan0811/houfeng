@@ -97,6 +97,21 @@ const cancelVPS = {
   running_target_count: 0,
 }
 
+function evidenceAssessment(overrides: Record<string, unknown> = {}) {
+  return {
+    confidence_score: 82,
+    pressure_score: 38,
+    readiness_score: 76,
+    quality_tier: 'strong',
+    decision_bias: 'keep',
+    support_signal_count: 5,
+    risk_signal_count: 1,
+    gap_signal_count: 0,
+    summary: '证据完整：可保存组合判断',
+    ...overrides,
+  }
+}
+
 function groupSummary(overrides: Record<string, unknown> = {}) {
   return {
     group_id: 'adg_auto_001',
@@ -128,6 +143,7 @@ function groupSummary(overrides: Record<string, unknown> = {}) {
     primary_issue_summary: '',
     monthly_cost_by_currency: [{ currency: 'USD', monthly_total: 20, yearly_total: 240 }],
     evidence_chips: [{ kind: 'renewal_due', label: '续费临近', tone: 'alert' }],
+    evidence_assessment: evidenceAssessment(),
     ...overrides,
   }
 }
@@ -187,6 +203,7 @@ function groupDetail() {
         suggested_role: 'primary_candidate',
         suggested_action: 'keep',
         evidence_chips: [{ kind: 'carries_service', label: '承载服务', tone: 'normal' }],
+        evidence_assessment: evidenceAssessment(),
         renewal_within_window: true,
         source_availability: sourceAvailability,
       },
@@ -217,6 +234,17 @@ function groupDetail() {
         suggested_role: 'evidence_needed',
         suggested_action: 'complete_evidence',
         evidence_chips: [{ kind: 'missing_subscription', label: '缺订阅', tone: 'alert' }],
+        evidence_assessment: evidenceAssessment({
+          confidence_score: 34,
+          pressure_score: 18,
+          readiness_score: 22,
+          quality_tier: 'blocked',
+          decision_bias: 'complete_evidence',
+          support_signal_count: 1,
+          risk_signal_count: 0,
+          gap_signal_count: 3,
+          summary: '证据阻塞：3 项缺口，先补齐资料',
+        }),
         renewal_within_window: false,
         source_availability: sourceAvailability,
       },
@@ -242,6 +270,14 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
       group_id: 'adg_auto_001',
       monthly_cost_base: 140,
       base_currency: 'CNY',
+      evidence_assessment: evidenceAssessment({
+        confidence_score: 68,
+        pressure_score: 42,
+        readiness_score: 61,
+        quality_tier: 'usable',
+        decision_bias: 'review',
+        summary: '证据可用：复核后决策',
+      }),
     },
     created_at: '2026-06-05T08:00:00Z',
     updated_at: '2026-06-05T08:00:00Z',
@@ -263,6 +299,7 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
           running_monitoring_count: 1,
           monitoring_link_count: 1,
           primary_issue_summary: '',
+          evidence_assessment: evidenceAssessment(),
         },
         created_at: '2026-06-05T08:00:00Z',
         updated_at: '2026-06-05T08:00:00Z',
@@ -312,6 +349,8 @@ describe('AssetDecisionsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '资产组合决策' })).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '决策组列表' })).toBeInTheDocument()
     expect(screen.getByText('德国主力组合')).toBeInTheDocument()
+    expect(screen.getByText('判断尺度')).toBeInTheDocument()
+    expect(screen.getAllByText('证据强').length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: '已保存组合决策' })).toBeInTheDocument()
     expect(screen.getByText('德国主备取舍记录')).toBeInTheDocument()
     expect(screen.getByText('RENEWAL EVIDENCE')).toBeInTheDocument()
@@ -399,6 +438,8 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getAllByText('保留').length).toBeGreaterThan(0)
     expect(within(dialog).getByText(/服务 2/)).toBeInTheDocument()
     expect(within(dialog).getByText(/监控 1/)).toBeInTheDocument()
+    expect(within(dialog).getByText('证据质量')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('先补证据').length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -498,6 +539,8 @@ describe('AssetDecisionsPage', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
     expect(within(dialog).getByText('主力保留')).toBeInTheDocument()
+    expect(within(dialog).getByText('证据快照')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('可决策').length).toBeGreaterThan(0)
     fireEvent.change(within(dialog).getByLabelText('推进状态'), { target: { value: 'in_progress' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '更新状态' }))
 

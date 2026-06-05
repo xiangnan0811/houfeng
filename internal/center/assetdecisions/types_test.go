@@ -51,6 +51,44 @@ func TestDeriveGroupsBuildsPortfolioDecisionGroups(t *testing.T) {
 	}
 }
 
+func TestEvidenceAssessmentRatesCompleteEvidenceAsDecisionReady(t *testing.T) {
+	facts := []Fact{
+		fact("vps_de_1", "DE Primary", "pv_hetzner", "Hetzner", "Germany", "Hesse", "Falkenstein", vpsassets.UsageInUse, sub("sub_1", 12, 120)),
+		fact("vps_de_2", "DE Peer", "pv_hetzner", "Hetzner", "Germany", "Hesse", "Falkenstein", vpsassets.UsageInUse, sub("sub_2", 10, 120)),
+	}
+	for i := range facts {
+		facts[i].ServiceCount = 2
+		facts[i].DomainCount = 1
+		facts[i].TargetCount = 1
+		facts[i].RunningTargetCount = 1
+		facts[i].MonitoringLinkCount = 1
+		facts[i].RunningMonitoringCount = 1
+	}
+
+	groups, err := DeriveGroups(facts, ListFilters{RenewWithinDays: 30, View: ViewRegion})
+	if err != nil {
+		t.Fatalf("DeriveGroups() error = %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("groups = %#v, want one region group", groups)
+	}
+
+	assessment := groups[0].EvidenceAssessment
+	if assessment.QualityTier != EvidenceTierStrong {
+		t.Fatalf("group assessment = %#v, want strong evidence", assessment)
+	}
+	if assessment.DecisionBias != EvidenceBiasKeep {
+		t.Fatalf("group assessment = %#v, want keep bias", assessment)
+	}
+	if assessment.ConfidenceScore < 80 || assessment.ReadinessScore < 70 {
+		t.Fatalf("group assessment = %#v, want high confidence and readiness", assessment)
+	}
+	memberAssessment := groups[0].Members[0].EvidenceAssessment
+	if memberAssessment.SupportSignalCount < 4 || memberAssessment.GapSignalCount != 0 {
+		t.Fatalf("member assessment = %#v, want support signals without gaps", memberAssessment)
+	}
+}
+
 func TestDeriveGroupsCancellationAndArchivedBoundaries(t *testing.T) {
 	facts := []Fact{
 		fact("vps_cancelled_running", "Cancelled Runtime", "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageInUse, sub("sub_running", 10, 30)),
@@ -72,6 +110,9 @@ func TestDeriveGroupsCancellationAndArchivedBoundaries(t *testing.T) {
 	}
 	if hasGroupType(groups, GroupRegionPortfolio) {
 		t.Fatalf("groups = %#v, want archived/cancelled excluded from ordinary portfolio groups", groups)
+	}
+	if cancellation.EvidenceAssessment.PressureScore < 70 || cancellation.EvidenceAssessment.DecisionBias != EvidenceBiasRetire {
+		t.Fatalf("cancellation assessment = %#v, want high pressure retire bias", cancellation.EvidenceAssessment)
 	}
 }
 
@@ -97,6 +138,15 @@ func TestDeriveGroupsEvidenceGapDoesNotMisreportUnavailableSubscriptions(t *test
 	if member.SuggestedAction != ActionCompleteEvidence || member.SuggestedRole != RoleEvidenceNeeded {
 		t.Fatalf("member suggestion = (%q,%q), want evidence completion", member.SuggestedRole, member.SuggestedAction)
 	}
+	if member.EvidenceAssessment.DecisionBias != EvidenceBiasCompleteEvidence {
+		t.Fatalf("member assessment = %#v, want complete evidence bias", member.EvidenceAssessment)
+	}
+	if member.EvidenceAssessment.ConfidenceScore >= 60 || member.EvidenceAssessment.GapSignalCount == 0 {
+		t.Fatalf("member assessment = %#v, want low confidence with evidence gaps", member.EvidenceAssessment)
+	}
+	if groups[0].EvidenceAssessment.DecisionBias != EvidenceBiasCompleteEvidence {
+		t.Fatalf("group assessment = %#v, want complete evidence bias", groups[0].EvidenceAssessment)
+	}
 }
 
 func TestFindGroupRecomputesStableGroups(t *testing.T) {
@@ -116,6 +166,39 @@ func TestFindGroupRecomputesStableGroups(t *testing.T) {
 
 	if _, err := FindGroup(facts, "adg_auto_missing", ListFilters{RenewWithinDays: 30}); err != ErrAssetDecisionGroupNotFound {
 		t.Fatalf("FindGroup() error = %v, want not found sentinel", err)
+	}
+}
+
+func TestRecordSnapshotsIncludeEvidenceAssessment(t *testing.T) {
+	facts := []Fact{
+		fact("vps_de_1", "DE Primary", "pv_1", "Provider", "Germany", "", "Frankfurt", vpsassets.UsageInUse, sub("sub_1", 12, 30)),
+		fact("vps_de_2", "DE Standby", "pv_1", "Provider", "Germany", "", "Frankfurt", vpsassets.UsageStandby, nil),
+	}
+	facts[0].ServiceCount = 1
+	facts[0].MonitoringLinkCount = 1
+	facts[0].RunningMonitoringCount = 1
+
+	group, err := FindGroup(facts, StableGroupID(GroupRegionPortfolio, "germany / frankfurt"), ListFilters{RenewWithinDays: 30})
+	if err != nil {
+		t.Fatalf("FindGroup() error = %v", err)
+	}
+
+	groupSnapshot := RecordSnapshotFromGroup(group)
+	groupAssessment, ok := groupSnapshot["evidence_assessment"].(EvidenceAssessment)
+	if !ok {
+		t.Fatalf("group snapshot = %#v, want evidence assessment", groupSnapshot)
+	}
+	if groupAssessment.GapSignalCount == 0 {
+		t.Fatalf("group assessment = %#v, want member evidence gaps rolled up", groupAssessment)
+	}
+
+	memberSnapshot := RecordSnapshotFromMember(group.Members[0])
+	memberAssessment, ok := memberSnapshot["evidence_assessment"].(EvidenceAssessment)
+	if !ok {
+		t.Fatalf("member snapshot = %#v, want evidence assessment", memberSnapshot)
+	}
+	if memberAssessment.ConfidenceScore == 0 {
+		t.Fatalf("member assessment = %#v, want scored member snapshot", memberAssessment)
 	}
 }
 

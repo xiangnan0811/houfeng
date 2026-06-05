@@ -169,6 +169,7 @@ type GroupSummary struct {
 	YearlyCostBase             *float64                          `json:"yearly_cost_base,omitempty"`
 	BaseCurrency               string                            `json:"base_currency,omitempty"`
 	EvidenceChips              []EvidenceChip                    `json:"evidence_chips"`
+	EvidenceAssessment         EvidenceAssessment                `json:"evidence_assessment"`
 }
 
 type GroupDetail struct {
@@ -195,6 +196,7 @@ type GroupMember struct {
 	SuggestedRole               SuggestedRole         `json:"suggested_role"`
 	SuggestedAction             SuggestedAction       `json:"suggested_action"`
 	EvidenceChips               []EvidenceChip        `json:"evidence_chips"`
+	EvidenceAssessment          EvidenceAssessment    `json:"evidence_assessment"`
 	RenewalWithinWindow         bool                  `json:"renewal_within_window"`
 	SourceAvailability          SourceAvailability    `json:"source_availability"`
 }
@@ -441,6 +443,7 @@ func RecordSnapshotFromGroup(group GroupDetail) EvidenceSnapshot {
 		"active_incident_count":        group.ActiveIncidentCount,
 		"primary_issue_summary":        group.PrimaryIssueSummary,
 		"evidence_chips":               group.EvidenceChips,
+		"evidence_assessment":          group.EvidenceAssessment,
 		"source_availability":          mergeMemberSourceAvailability(group.Members),
 	}
 	if group.MonthlyCostBase != nil {
@@ -484,6 +487,7 @@ func RecordSnapshotFromMember(member GroupMember) EvidenceSnapshot {
 		"cancellation_attention_reason": member.CancellationAttentionReason,
 		"renewal_within_window":         member.RenewalWithinWindow,
 		"evidence_chips":                member.EvidenceChips,
+		"evidence_assessment":           member.EvidenceAssessment,
 		"source_availability":           member.SourceAvailability,
 	}
 	if member.PrimarySubscription != nil {
@@ -842,6 +846,7 @@ func buildGroup(groupType GroupType, view View, scopeKey, title, scopeLabel stri
 		summary.BaseCurrency = baseCurrency
 	}
 	summary.PrimaryIssueSummary = topIssue(issueCounts)
+	summary.EvidenceAssessment = assessGroup(groupType, priority, members)
 	return GroupDetail{GroupSummary: summary, Members: members}
 }
 
@@ -871,6 +876,7 @@ func buildMember(fact Fact, filters ListFilters) GroupMember {
 	member.CancellationAttentionReason = cancellationReason(fact)
 	member.EvidenceChips = buildEvidenceChips(fact, member.RenewalWithinWindow)
 	member.SuggestedRole, member.SuggestedAction = suggestMember(member)
+	member.EvidenceAssessment = assessMember(member)
 	return member
 }
 

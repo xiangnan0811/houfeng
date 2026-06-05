@@ -750,6 +750,167 @@ def asset_decision_chip(
     return chip
 
 
+def asset_decision_evidence_assessment(
+    *,
+    confidence_score: int,
+    pressure_score: int,
+    readiness_score: int,
+    quality_tier: str,
+    decision_bias: str,
+    support_signal_count: int,
+    risk_signal_count: int,
+    gap_signal_count: int,
+    summary: str,
+) -> dict[str, object]:
+    return {
+        "confidence_score": confidence_score,
+        "pressure_score": pressure_score,
+        "readiness_score": readiness_score,
+        "quality_tier": quality_tier,
+        "decision_bias": decision_bias,
+        "support_signal_count": support_signal_count,
+        "risk_signal_count": risk_signal_count,
+        "gap_signal_count": gap_signal_count,
+        "summary": summary,
+    }
+
+
+def asset_decision_member_assessment(
+    suggested_action: str,
+    evidence_chips: list[dict[str, object]],
+) -> dict[str, object]:
+    chip_kinds = {str(chip.get("kind") or "") for chip in evidence_chips}
+    gap_count = sum(
+        1
+        for kind in chip_kinds
+        if kind
+        in {
+            "missing_subscription",
+            "missing_monitoring",
+            "missing_provider",
+            "missing_location",
+            "missing_access",
+            "no_service_context",
+            "subscription_unavailable",
+        }
+    )
+    risk_count = sum(
+        1
+        for kind in chip_kinds
+        if kind
+        in {
+            "renewal_due",
+            "idle_paid",
+            "budget_risk",
+            "abnormal_monitoring",
+            "cancellation_linkage",
+            "exchange_rate_stale",
+        }
+    )
+    support_count = 2 + int("carries_service" in chip_kinds)
+    confidence = max(18, min(92, 78 + support_count * 3 - gap_count * 14))
+    pressure = max(8, min(96, risk_count * 22 + (30 if suggested_action in {"open_cancellation_workbench", "cancel"} else 0)))
+    readiness = max(15, min(88, confidence + min(pressure // 4, 12) - gap_count * 10))
+    if gap_count >= 3:
+        tier = "blocked"
+        bias = "complete_evidence"
+        summary = f"证据阻塞：{gap_count} 项缺口，先补齐资料"
+    elif gap_count > 0:
+        tier = "weak"
+        bias = "complete_evidence"
+        summary = f"证据偏弱：{gap_count} 项缺口，先补证据"
+    elif suggested_action in {"open_cancellation_workbench", "cancel"}:
+        tier = "usable"
+        bias = "retire"
+        summary = "压力较高：优先复核取消联动"
+    elif suggested_action == "migrate":
+        tier = "usable"
+        bias = "migrate"
+        summary = "证据可用：偏向迁移观察"
+    elif suggested_action == "keep" and confidence >= 80:
+        tier = "strong"
+        bias = "keep"
+        summary = "证据完整：可保存组合判断"
+    else:
+        tier = "usable"
+        bias = "review"
+        summary = "证据可用：复核后决策"
+    return asset_decision_evidence_assessment(
+        confidence_score=confidence,
+        pressure_score=pressure,
+        readiness_score=readiness,
+        quality_tier=tier,
+        decision_bias=bias,
+        support_signal_count=support_count,
+        risk_signal_count=risk_count,
+        gap_signal_count=gap_count,
+        summary=summary,
+    )
+
+
+def asset_decision_group_assessment(
+    members: list[dict[str, object]],
+    group_type: str,
+) -> dict[str, object]:
+    assessments = [member["evidence_assessment"] for member in members]
+    if not assessments:
+        return asset_decision_evidence_assessment(
+            confidence_score=0,
+            pressure_score=0,
+            readiness_score=0,
+            quality_tier="weak",
+            decision_bias="review",
+            support_signal_count=0,
+            risk_signal_count=0,
+            gap_signal_count=0,
+            summary="暂无成员证据",
+        )
+    count = len(assessments)
+    confidence = round(sum(int(item["confidence_score"]) for item in assessments) / count)
+    pressure = round(
+        (
+            sum(int(item["pressure_score"]) for item in assessments) / count
+            + max(int(item["pressure_score"]) for item in assessments)
+        )
+        / 2
+    )
+    readiness = round(sum(int(item["readiness_score"]) for item in assessments) / count)
+    gap_count = sum(int(item["gap_signal_count"]) for item in assessments)
+    risk_count = sum(int(item["risk_signal_count"]) for item in assessments)
+    support_count = sum(int(item["support_signal_count"]) for item in assessments)
+    if group_type == "evidence_gap" or gap_count >= 3:
+        tier = "blocked"
+        bias = "complete_evidence"
+        summary = f"证据阻塞：{gap_count} 项缺口，先补齐资料"
+    elif group_type == "cancellation_attention":
+        tier = "usable"
+        bias = "retire"
+        summary = "压力较高：优先复核取消联动"
+    elif confidence >= 78 and readiness >= 70 and gap_count == 0:
+        tier = "strong"
+        bias = "keep"
+        summary = "证据完整：可保存组合判断"
+    elif pressure >= 68:
+        tier = "usable"
+        bias = "review"
+        summary = f"压力较高：{risk_count} 项风险，优先复核"
+    else:
+        tier = "usable"
+        bias = "review"
+        summary = "证据可用：复核后决策"
+    return asset_decision_evidence_assessment(
+        confidence_score=max(0, min(100, confidence)),
+        pressure_score=max(0, min(100, pressure)),
+        readiness_score=max(0, min(100, readiness)),
+        quality_tier=tier,
+        decision_bias=bias,
+        support_signal_count=support_count,
+        risk_signal_count=risk_count,
+        gap_signal_count=gap_count,
+        summary=summary,
+    )
+
+
 def asset_decision_primary_subscription(vps_id: str) -> dict[str, object] | None:
     rows = [
         row
@@ -786,6 +947,7 @@ def asset_decision_member(
     monitoring_link_count = int(vps.get("active_monitoring_instance_link_count") or 0)
     abnormal_monitoring_count = 1 if vps_id == "vps_fra_legacy" else 0
     active_incident_count = 1 if vps_id == "vps_fra_legacy" else 0
+    assessment = asset_decision_member_assessment(suggested_action, evidence_chips)
     return {
         "vps": dict(vps),
         "primary_subscription": primary_subscription,
@@ -809,6 +971,7 @@ def asset_decision_member(
         "suggested_role": suggested_role,
         "suggested_action": suggested_action,
         "evidence_chips": evidence_chips,
+        "evidence_assessment": assessment,
         "renewal_within_window": (
             (asset_decision_days_until(primary_subscription.get("renew_at")) or 9999) <= 30
             if primary_subscription
@@ -878,6 +1041,7 @@ def asset_decision_group_summary(
         for row in asset_workflow_subscriptions()
         if row["vps_id"] in vps_ids and row["status"] == "active"
     )
+    assessment = asset_decision_group_assessment(members, group_type)
     return {
         "group_id": group_id,
         "group_type": group_type,
@@ -919,6 +1083,7 @@ def asset_decision_group_summary(
         "yearly_cost_base": round(yearly_cost_base, 2),
         "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
         "evidence_chips": evidence_chips,
+        "evidence_assessment": assessment,
     }
 
 
@@ -1239,6 +1404,7 @@ def asset_decision_record_group_snapshot(group: dict[str, object]) -> dict[str, 
         "yearly_cost_base",
         "base_currency",
         "evidence_chips",
+        "evidence_assessment",
         "source_availability",
     ]
     return {key: group[key] for key in keys if key in group}
@@ -1281,6 +1447,7 @@ def asset_decision_record_member(
         "cancellation_attention_reason": member.get("cancellation_attention_reason", ""),
         "renewal_within_window": member.get("renewal_within_window", False),
         "evidence_chips": member.get("evidence_chips", []),
+        "evidence_assessment": member.get("evidence_assessment", {}),
         "source_availability": member.get("source_availability", {}),
     }
     if member.get("primary_subscription") is not None:

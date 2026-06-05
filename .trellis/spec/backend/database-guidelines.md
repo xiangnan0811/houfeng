@@ -720,6 +720,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Decision memory tables: `asset_decision_records`、`asset_decision_record_members`；view: `asset_decision_records_with_counts`。
 - Stable group id: `adg_auto_<12hex>`，由 group type、scope key 和续费窗口等只读 key 确定性派生；detail endpoint 每次重新计算组列表后按 ID 查找。
 - Decision record id: `adr_*`，由 `ids.New("adr")` 生成；记录只引用来源自动组 ID 作为历史来源，不把自动组 ID 当长期外键。
+- Evidence assessment: `GroupSummary` 和 `GroupMember` 必须返回 `evidence_assessment`，字段固定为 `confidence_score`、`pressure_score`、`readiness_score`、`quality_tier`（`strong|usable|weak|blocked`）、`decision_bias`（`keep|observe|complete_evidence|retire|migrate|review`）、`support_signal_count`、`risk_signal_count`、`gap_signal_count`、`summary`。
 
 #### 3. Contracts
 
@@ -733,6 +734,9 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - `view` 只筛选返回的自动组，不改变底层事实读取；非法值返回 400。
 - Store 读取现有表后在 Go 中派生组合摘要和成员建议，避免 Dashboard / VPS / Subscription / Provider 页面各自重复 join 后语义漂移。
 - 组级摘要可以聚合成本、续费窗口、取消联动、服务 / 域名 / Target、监控关联、异常和 evidence chips；成员级建议角色 / 建议动作只能作为扫描提示，不执行写操作。
+- `evidence_assessment` 是只读、可解释评分层，只消费当前 `GroupMember` / `GroupSummary` 已有事实、source availability 和 evidence chips；它不得新增数据库读取、逐台 runtime facts 调用或执行语义，也不得把评分当成自动 keep / migrate / cancel 写入。
+- 证据源不可用时只能降低 `confidence_score` / `readiness_score` 并增加 gap 计数；不得把 `subscription_unavailable`、Monitoring/Target/Service/Domain 查询失败解释为真实 `missing_subscription` / `missing_monitoring` 业务事实。
+- `RecordSnapshotFromGroup` 与 `RecordSnapshotFromMember` 必须把当时的 `evidence_assessment` 写入 `evidence_snapshot`，用于记录详情回看保存时的判断基础；旧记录缺少该字段时前端必须可降级显示。
 - archived VPS 不进入普通 region/provider/cost/evidence 组合；cancelled/to_cancel 只能作为取消联动相关证据出现，避免归档资产污染正常组合比较。
 - 订阅、服务、域名、监控或 Target 查询失败必须返回 repository error；不得构造“健康”或“缺证据”假结果。只有查询成功且事实为空时，才生成 `missing_subscription`、`unlinked_monitoring` 等真实 evidence gap。
 - `/api/asset-decisions/*` 不逐台调用 runtime facts detail endpoint，只读 MonitoringInstance / Target 当前摘要字段和关联计数；CPU / IO / 路由 / IP 质量 / 超售判断属于后续能力。
@@ -752,6 +756,8 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 | repository query failure | handler 返回 500 `internal server error`，store error 用 `%w` 包装 |
 | source table query failed | 不返回 evidence gap；整体 request fail，避免误报缺订阅 / 缺监控 |
 | source query succeeded but rows empty | 返回可解释的 `evidence_gap` 或空组，不伪造健康证据 |
+| source availability false but fact rows unknown | `evidence_assessment` 降低可信度并提示证据不可用；不得生成真实缺订阅 / 缺监控 chip |
+| old decision record snapshot without `evidence_assessment` | API 正常返回历史 snapshot；前端显示缺失评估，不要求后端 backfill |
 | unsupported method | handler 返回 405 `method not allowed` |
 | `/api/asset-decisions/*` route missing | router test 必须失败；该路径不得落 SPA fallback |
 
@@ -761,6 +767,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Good: Provider 下多台 active VPS 自动形成 `provider_portfolio`，用于服务商组合比较。
 - Good: subscription query 成功且某台 VPS 没有 active subscription，`evidence_gap` 或成员 evidence chips 标记缺订阅。
 - Good: 用户打开自动组，保存为 `adr_*` 决策记录；记录保留当时成本、服务/域名/Target、监控和成员建议快照，后续只推进记录状态。
+- Good: 完整证据的同区组合返回较高可信度/准备度与 `quality_tier=strong`，资料缺口或来源不可用返回较低可信度与 `decision_bias=complete_evidence`。
 - Base: 没有任何 VPS 时 overview 仍返回 0 计数和空 `top_groups`。
 - Bad: 在 store 里写入 `asset_decision_groups` 表，或把自动组 ID 当长期外键依赖。
 - Bad: `PATCH /api/asset-decisions/records/{id}` 同时修改 VPS renewal decision、Subscription 状态或执行取消/退役。
@@ -770,6 +777,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 #### 6. Tests Required
 
 - Domain tests: stable group id、view/window validation、record input validation、snapshot builder、renewal/cancellation/region/provider/cost/evidence group derivation、archived/cancelled 边界、source unavailable 不误报。
+- Domain assessment tests: 完整证据、资料缺口、证据源不可用、取消联动 / 预算压力、record snapshot 均断言 `evidence_assessment` 的 tier / bias / score 方向。
 - Store tests: member facts 聚合、主订阅选择、服务 / 域名 / Target / 监控计数、成本和 evidence chips，records list/create/get/patch，且不依赖 runtime facts detail。
 - Handler tests: overview、groups list、group detail、records list/create/detail/patch success；invalid query/input、missing group/record、repo failure、method not allowed。
 - Router/bootstrap tests: `/api/asset-decisions/overview`、`/api/asset-decisions/groups`、`/api/asset-decisions/groups/{id}`、`/api/asset-decisions/records`、`/api/asset-decisions/records/{id}` 登录保护且不落 SPA fallback；`bootstrapCenter` wiring 非 nil。
