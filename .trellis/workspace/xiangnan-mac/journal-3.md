@@ -1622,3 +1622,36 @@ Implemented execution readback for saved asset decision records across backend r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 166: 资产组合决策场景工作台
+
+**Date**: 2026-06-06
+**Task**: 资产组合决策场景工作台
+**Branch**: `worktree/asset-decisions-scenario-workbench`
+
+### Summary
+
+实现资产决策手工场景组合、manual group API/迁移、从手工组合保存记录、前端自定义组合工作台，并完成 Go/Web/视觉 sanity 验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `956cfba` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

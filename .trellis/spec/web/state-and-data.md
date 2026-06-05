@@ -168,7 +168,7 @@ MonitoringPage 是运行证据扫描页，不应把筛选、批量操作、趋�
 
 ### Asset Ledger 组合决策与列表数据流
 
-Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端做轻量 join，用于人工核对和资料质量提示；这不是后端字段扩展，也不能创造未存在的健康语义。`/asset-decisions` 例外地使用后端组合决策 read model 作为主语义来源：它把 VPS、订阅、服务、域名、Target 和监控关联聚成自动决策组；同时通过决策记录 memory layer 保存用户判断和证据快照。记录层只保存决策记忆，不拥有 VPS / Subscription / MonitoringInstance / Target 的执行状态机。
+Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端做轻量 join，用于人工核对和资料质量提示；这不是后端字段扩展，也不能创造未存在的健康语义。`/asset-decisions` 例外地使用后端组合决策 read model 作为主语义来源：它把 VPS、订阅、服务、域名、Target 和监控关联聚成自动决策组；同时通过手工组合 scenario layer 保存用户正在比较的真实问题篮子，通过决策记录 memory layer 保存一次判断和证据快照。手工组合和记录层都不拥有 VPS / Subscription / MonitoringInstance / Target 的执行状态机。
 
 #### 1. Scope / Trigger
 
@@ -176,8 +176,9 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 2. Signatures
 
-- Frontend API: `getAssetDecisionOverview(filter?)`, `listAssetDecisionGroups(filter?)`, `getAssetDecisionGroup(groupId, filter?)`, `listAssetDecisionRecords()`, `createAssetDecisionRecord(input)`, `getAssetDecisionRecord(recordId)`, `patchAssetDecisionRecord(recordId, input)`, `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listMonitoringInstanceAssetContexts()`、`listTargetAssetContexts()`，不得在页面里直接 `fetch()`。
+- Frontend API: `getAssetDecisionOverview(filter?)`, `listAssetDecisionGroups(filter?)`, `getAssetDecisionGroup(groupId, filter?)`, `listAssetDecisionManualGroups()`, `createAssetDecisionManualGroup(input)`, `getAssetDecisionManualGroup(manualGroupId)`, `patchAssetDecisionManualGroup(manualGroupId, input)`, `addAssetDecisionManualGroupMember(manualGroupId, input)`, `patchAssetDecisionManualGroupMember(manualGroupId, vpsId, input)`, `deleteAssetDecisionManualGroupMember(manualGroupId, vpsId)`, `listAssetDecisionRecords()`, `createAssetDecisionRecord(input)`, `getAssetDecisionRecord(recordId)`, `patchAssetDecisionRecord(recordId, input)`, `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listMonitoringInstanceAssetContexts()`、`listTargetAssetContexts()`，不得在页面里直接 `fetch()`。
 - Asset portfolio data: `AssetDecisionsPage` 首屏主 surface 从 `/api/asset-decisions/overview` 与 `/api/asset-decisions/groups?view=&renew_within_days=` 读取自动组；点击组时读取 `/api/asset-decisions/groups/{group_id}?renew_within_days=`。自动组是只读派生视图，不在前端保存或补写 group state；保存决策必须调用 `/api/asset-decisions/records`，由后端重新计算组详情并生成快照。
+- Manual scenario data: 页面读取 `/api/asset-decisions/manual-groups` 展示“自定义组合” surface；点击组合读取 `/api/asset-decisions/manual-groups/{manual_group_id}`。从自动组创建手工组合 POST `source_type=auto_group`、`source_group_id`、`renew_within_days`、`scenario`、`title`、`goal`、`note`；成员增删改只调用 manual group member endpoints。新增成员必须用 VPS selector，从 `listVPSAssets()` 候选选择，不要求用户复制内部 ID。
 - Asset decision records data: 页面读取 `/api/asset-decisions/records` 展示“已保存组合决策”辅助 surface；点击记录读取 `/api/asset-decisions/records/{record_id}`；推进记录状态 PATCH `/api/asset-decisions/records/{record_id}` 的 `title` / `goal` / `status` 字段，成员跟进 PATCH 同 endpoint 的 `members:[{vps_id, followup_status?, followup_note?}]`，但不得修改 VPS/订阅/监控/Target。
 - Evidence assessment data: `AssetDecisionGroupSummary` 与 `AssetDecisionGroupMember` 必须包含 `evidence_assessment`；字段为 `confidence_score`、`pressure_score`、`readiness_score`、`quality_tier`、`decision_bias`、`support_signal_count`、`risk_signal_count`、`gap_signal_count`、`summary`。记录详情从 `evidence_snapshot.evidence_assessment` 读取保存时快照；历史记录缺失该字段时只显示降级文案。
 - Single queue data: `AssetDecisionsPage` 底部辅助队列继续拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
@@ -189,10 +190,12 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 - Asset Decisions 首屏主 surface 必须是 `资产组合决策` 的决策组列表，不得恢复三张同权 VPS queue table，也不得把单台续费队列重新提升为主视觉主体。
 - 已保存组合决策必须作为主工作台下方的辅助 surface 展示，承接“保存本次判断、回看当时证据、推进记录状态”的用户任务，但不得取代自动组发现入口。
+- 自定义组合必须作为自动组发现和已保存记录之间的 scenario surface：自动组回答“系统发现哪些组合问题”，自定义组合回答“用户正在比较哪些真实场景”，记录回答“某一次判断和后续跟进是什么”。自定义组合可编辑 title/goal/note/scenario/status 与成员 intended role/action/reason/note/sort，不得修改 VPS / Subscription / MonitoringInstance / Target。
 - 自动组至少覆盖 `renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。组级摘要展示 VPS 数量、生命周期 / 用途 / 续费决策分布、成本、续费窗口、取消联动、服务 / 域名 / Target、监控关联、异常和 evidence chips。
 - 组详情必须展示成员 VPS 基础事实、主订阅、服务 / 域名 / Target / 监控摘要、`suggested_role`、`suggested_action` 和 evidence chips。建议只能帮助扫描和排序，不得自动提交 keep / migrate / cancel。
 - `evidence_assessment` 的视觉层级高于零散 evidence chips、低于组合事实本身：组列表展示判断尺度，组详情展示组级和成员级评估，记录详情展示保存时证据快照。UI 文案必须表达“证据质量 / 决策压力 / 准备度”，不得把 `decision_bias` 写成自动执行承诺。
-- 组详情可以保存当前自动组为决策记录；保存表单允许编辑标题、组合目标、状态，以及每个成员的决定角色、决定动作和理由。保存成功后展示记录详情，而不是继续停留在只读组详情中。
+- 组详情可以把当前自动组创建为自定义组合，也可以直接保存当前自动组为决策记录。保存表单允许编辑标题、组合目标、状态，以及每个成员的决定角色、决定动作和理由。保存成功后展示记录详情，而不是继续停留在只读组详情中。
+- 自定义组合详情必须展示当前 facts 回读后的成员对比、组合属性表单、VPS 选择器新增成员、成员意图编辑和保存为决策记录入口。从自定义组合保存记录必须发送 `source_type=manual_group`，并使用当前成员 intended role/action/reason 作为默认决定值。
 - 记录详情必须展示记录状态、来源、成员判断和证据快照，并允许推进记录状态；成员动作里的 `cancel` / `open_cancellation_workbench` 只能渲染到 `/vps/{id}?workbench=cancellation` 的跳转入口。
 - 记录详情必须展示成员级跟进状态、备注与最后更新时间；单个成员保存跟进时只 PATCH 该成员 `vps_id`、`followup_status`、`followup_note`，成功后刷新当前记录详情与已保存记录列表的跟进计数。成员跟进状态只表达“组合判断后的执行记忆”，不能隐式修改记录级状态，也不能触发 VPS、Subscription、MonitoringInstance 或 Target 写操作。
 - 单台决策编辑必须在 group detail drawer 或底部单台辅助队列中完成，仍使用 `AssetDecisionWorkPanel` 与 `PATCH /api/vps/{id}`。保存成功 notice 应留在页面可见 surface 内。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
@@ -219,6 +222,11 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | Asset Decisions evidence-boundary explanation grows long | 保持优先级队列为主 surface，证据边界用 `<details>` / 低权重说明承载，不抢占主视觉 |
 | `/api/asset-decisions/overview` 或 groups list failed | 组合工作台显示局部错误；底部单台队列和 renewal evidence 可按各自 API 独立加载 |
 | group detail missing / 404 | Drawer 显示决策组不存在或已变化，允许返回列表；不得制造空 group |
+| create manual group from auto group failed | 错误留在自动组详情内；不关闭当前组、不伪造手工组合 |
+| manual group list/detail failed | 自定义组合 surface 或 modal 显示局部错误；自动组、记录、单台队列继续可用 |
+| manual member selector candidate list failed | 成员新增表单显示局部错误并禁用 selector；不得让用户手输内部 ID 作为普通路径 |
+| manual group member patch/delete failed | 错误留在自定义组合详情内；不修改本地成员意图，不触发业务对象写接口 |
+| save record from manual group | POST records 带 `source_type=manual_group`；成功后关闭自定义组合详情并打开记录详情 |
 | create decision record 404 | 显示自动组已变化 / 不存在的保存错误，要求用户刷新组列表，不在前端补造记录 |
 | saved decision records failed | 已保存组合决策 surface 显示局部错误；自动组、续费 evidence 和单台队列继续独立可用 |
 | record detail missing / 404 | 记录详情 modal 显示记录不存在，不制造空记录 |
@@ -244,6 +252,9 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: `/vps?view=unlinked&renewal_decision=unreviewed` 首屏显示 `视图: 未关联` 和 `续费: 未评估` chips，列表只显示同时满足条件的 rows。
 - Good: `/asset-decisions?view=provider&renew_within_days=60` 首屏请求 provider 组合组，列表展示同服务商 VPS 成本、服务/域名、监控和建议动作。
 - Good: 打开决策组后，同组 VPS 可以比较主订阅、服务 / 域名 / Target / 监控数量、建议角色和 evidence chips；点击单台 `处理` 仍提交原有 VPS renewal decision PATCH。
+- Good: 打开自动组后创建自定义组合，页面刷新自定义组合列表并打开新组合详情；用户能继续编辑组合目标、场景和成员意图。
+- Good: 自定义组合详情通过 VPS selector 新增成员，保存成员 intended action/reason 只调用 `/api/asset-decisions/manual-groups/{id}/members`，不写 VPS / Subscription / MonitoringInstance / Target。
+- Good: 从自定义组合保存记录时，payload 带 `source_type=manual_group` 和成员决定值，记录详情继续使用 execution readback。
 - Good: 打开决策组后保存为组合决策记录，记录详情能回看成员决定角色/动作/理由和保存时证据快照，并能把状态从 `draft` 推进到 `in_progress`。
 - Good: 打开已保存记录后，把单台 VPS 成员跟进从 `todo` 改为 `blocked` 并保存备注；记录详情显示更新时间，记录列表的阻塞 / 未关闭计数同步更新，业务动作入口仍只是跳到 VPS 详情或取消工作台。
 - Good: 已保存记录列表低权重展示执行回读；`drift` / `blocked` / `needs_evidence` 只作为复核证据，不抢走组合工作台主 surface。
@@ -257,6 +268,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
 - Bad: 订阅 evidence 请求失败后，前端把所有 VPS 标成 `缺订阅`，导致用户做出错误取消判断。
 - Bad: 在前端只保存自动组 ID 当作长期决策状态，或从记录详情批量取消 VPS / 直接修改 Subscription / MonitoringInstance / Target。
+- Bad: 自定义组合新增成员让用户复制 `vps_...` 内部 ID，或者保存成员意图时顺手 PATCH `/api/vps/{id}`。
 - Bad: 前端看到 readback `drift` 后自动把记录状态改成 `in_progress` / `completed`，或自动调用 `/api/vps/*`、`/api/subscriptions/*`、`/api/monitoring-instances/*`、`/api/targets/*` 写接口。
 - Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked monitoring instance health。
 - Bad: Page 直接 `fetch('/api/vps')` 或在组件层调 API；业务请求必须走 `lib/api.ts`。
@@ -265,8 +277,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 6. Tests Required
 
-- `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；记录 fixture 覆盖 `execution_readback`。
-- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、tabs query、组详情 drawer、组/成员/记录 `evidence_assessment` 展示、保存记录、记录详情状态推进、执行回读状态 / 计数 / 当前事实 / issue chips、成员跟进 PATCH payload 与计数刷新、readback drift 不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅、错误/空态。
+- `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；manual group helper list/create/get/patch/member add/patch/delete；记录 fixture 覆盖 `execution_readback`。
+- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、tabs query、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 展示、保存记录、记录详情状态推进、执行回读状态 / 计数 / 当前事实 / issue chips、成员跟进 PATCH payload 与计数刷新、readback drift 不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅、错误/空态。
 - `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
 - `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。

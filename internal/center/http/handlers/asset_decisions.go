@@ -14,6 +14,13 @@ type AssetDecisionRepository interface {
 	GetOverview(context.Context, assetdecisions.ListFilters) (assetdecisions.Overview, error)
 	ListGroups(context.Context, assetdecisions.ListFilters) ([]assetdecisions.GroupSummary, error)
 	GetGroup(context.Context, string, assetdecisions.ListFilters) (assetdecisions.GroupDetail, error)
+	ListManualGroups(context.Context) ([]assetdecisions.ManualGroupSummary, error)
+	CreateManualGroup(context.Context, assetdecisions.CreateManualGroupInput) (assetdecisions.ManualGroupDetail, error)
+	GetManualGroup(context.Context, string) (assetdecisions.ManualGroupDetail, error)
+	PatchManualGroup(context.Context, string, assetdecisions.PatchManualGroupInput) (assetdecisions.ManualGroupDetail, error)
+	AddManualGroupMember(context.Context, string, assetdecisions.CreateManualGroupMemberInput) (assetdecisions.ManualGroupDetail, error)
+	PatchManualGroupMember(context.Context, string, string, assetdecisions.PatchManualGroupMemberInput) (assetdecisions.ManualGroupDetail, error)
+	DeleteManualGroupMember(context.Context, string, string) (assetdecisions.ManualGroupDetail, error)
 	ListRecords(context.Context) ([]assetdecisions.RecordSummary, error)
 	CreateRecord(context.Context, assetdecisions.CreateRecordInput) (assetdecisions.RecordDetail, error)
 	GetRecord(context.Context, string) (assetdecisions.RecordDetail, error)
@@ -102,6 +109,59 @@ func AssetDecisionGroup(repo AssetDecisionRepository) http.Handler {
 	})
 }
 
+func AssetDecisionManualGroups(repo AssetDecisionRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			groups, err := repo.ListManualGroups(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusOK, groups)
+		case http.MethodPost:
+			var input assetdecisions.CreateManualGroupInput
+			if err := decodeJSON(r, &input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+			group, err := repo.CreateManualGroup(r.Context(), input)
+			writeManualGroupResult(w, group, err, http.StatusCreated)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})
+}
+
+func AssetDecisionManualGroup(repo AssetDecisionRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := assetDecisionManualGroupPathParts(r.URL.Path)
+		if len(parts) == 0 || parts[0] == "" {
+			writeError(w, http.StatusNotFound, "asset decision manual group not found")
+			return
+		}
+		manualGroupID := parts[0]
+		switch len(parts) {
+		case 1:
+			handleAssetDecisionManualGroupItem(w, r, repo, manualGroupID)
+		case 2:
+			if parts[1] != "members" {
+				writeError(w, http.StatusNotFound, "asset decision manual group not found")
+				return
+			}
+			handleAssetDecisionManualGroupMembers(w, r, repo, manualGroupID)
+		case 3:
+			if parts[1] != "members" || parts[2] == "" {
+				writeError(w, http.StatusNotFound, "asset decision manual group member not found")
+				return
+			}
+			handleAssetDecisionManualGroupMember(w, r, repo, manualGroupID, parts[2])
+		default:
+			writeError(w, http.StatusNotFound, "asset decision manual group not found")
+		}
+	})
+}
+
 func AssetDecisionRecords(repo AssetDecisionRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -126,6 +186,9 @@ func AssetDecisionRecords(repo AssetDecisionRepository) http.Handler {
 			case errors.Is(err, assetdecisions.ErrAssetDecisionGroupNotFound):
 				writeError(w, http.StatusNotFound, "asset decision group not found")
 				return
+			case errors.Is(err, assetdecisions.ErrAssetDecisionManualGroupNotFound):
+				writeError(w, http.StatusNotFound, "asset decision manual group not found")
+				return
 			case err != nil:
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
@@ -135,6 +198,82 @@ func AssetDecisionRecords(repo AssetDecisionRepository) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+func handleAssetDecisionManualGroupItem(w http.ResponseWriter, r *http.Request, repo AssetDecisionRepository, manualGroupID string) {
+	switch r.Method {
+	case http.MethodGet:
+		group, err := repo.GetManualGroup(r.Context(), manualGroupID)
+		writeManualGroupResult(w, group, err, http.StatusOK)
+	case http.MethodPatch:
+		var request assetDecisionManualGroupPatchRequest
+		if err := decodeJSON(r, &request); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		group, err := repo.PatchManualGroup(r.Context(), manualGroupID, request.toInput())
+		writeManualGroupResult(w, group, err, http.StatusOK)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func handleAssetDecisionManualGroupMembers(w http.ResponseWriter, r *http.Request, repo AssetDecisionRepository, manualGroupID string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var input assetdecisions.CreateManualGroupMemberInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	group, err := repo.AddManualGroupMember(r.Context(), manualGroupID, input)
+	writeManualGroupResult(w, group, err, http.StatusCreated)
+}
+
+func handleAssetDecisionManualGroupMember(w http.ResponseWriter, r *http.Request, repo AssetDecisionRepository, manualGroupID, vpsID string) {
+	switch r.Method {
+	case http.MethodPatch:
+		var request assetDecisionManualGroupMemberPatchRequest
+		if err := decodeJSON(r, &request); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		group, err := repo.PatchManualGroupMember(r.Context(), manualGroupID, vpsID, request.toInput())
+		writeManualGroupResult(w, group, err, http.StatusOK)
+	case http.MethodDelete:
+		group, err := repo.DeleteManualGroupMember(r.Context(), manualGroupID, vpsID)
+		writeManualGroupResult(w, group, err, http.StatusOK)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func writeManualGroupResult(w http.ResponseWriter, group assetdecisions.ManualGroupDetail, err error, status int) {
+	switch {
+	case errors.Is(err, assetdecisions.ErrInvalidAssetDecisionInput):
+		writeError(w, http.StatusBadRequest, "invalid input")
+	case errors.Is(err, assetdecisions.ErrAssetDecisionGroupNotFound):
+		writeError(w, http.StatusNotFound, "asset decision group not found")
+	case errors.Is(err, assetdecisions.ErrAssetDecisionManualGroupNotFound):
+		writeError(w, http.StatusNotFound, "asset decision manual group not found")
+	case errors.Is(err, assetdecisions.ErrAssetDecisionManualGroupMemberNotFound):
+		writeError(w, http.StatusNotFound, "asset decision manual group member not found")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal server error")
+	default:
+		writeJSON(w, status, group)
+	}
+}
+
+func assetDecisionManualGroupPathParts(path string) []string {
+	rest := strings.TrimPrefix(path, "/api/asset-decisions/manual-groups/")
+	rest = strings.Trim(rest, "/")
+	if rest == "" {
+		return nil
+	}
+	return strings.Split(rest, "/")
 }
 
 func AssetDecisionRecord(repo AssetDecisionRepository) http.Handler {
@@ -242,6 +381,72 @@ func (r assetDecisionRecordPatchRequest) toInput() assetdecisions.PatchRecordInp
 			next.FollowupNote.Value = *member.FollowupNote
 		}
 		input.Members = append(input.Members, next)
+	}
+	return input
+}
+
+type assetDecisionManualGroupPatchRequest struct {
+	Status   *assetdecisions.ManualGroupStatus   `json:"status"`
+	Scenario *assetdecisions.ManualGroupScenario `json:"scenario"`
+	Title    *string                             `json:"title"`
+	Goal     *string                             `json:"goal"`
+	Note     *string                             `json:"note"`
+}
+
+func (r assetDecisionManualGroupPatchRequest) toInput() assetdecisions.PatchManualGroupInput {
+	var input assetdecisions.PatchManualGroupInput
+	if r.Status != nil {
+		input.Status.Set = true
+		input.Status.Value = *r.Status
+	}
+	if r.Scenario != nil {
+		input.Scenario.Set = true
+		input.Scenario.Value = *r.Scenario
+	}
+	if r.Title != nil {
+		input.Title.Set = true
+		input.Title.Value = *r.Title
+	}
+	if r.Goal != nil {
+		input.Goal.Set = true
+		input.Goal.Value = *r.Goal
+	}
+	if r.Note != nil {
+		input.Note.Set = true
+		input.Note.Value = *r.Note
+	}
+	return input
+}
+
+type assetDecisionManualGroupMemberPatchRequest struct {
+	IntendedRole   *assetdecisions.SuggestedRole   `json:"intended_role"`
+	IntendedAction *assetdecisions.SuggestedAction `json:"intended_action"`
+	Reason         *string                         `json:"reason"`
+	Note           *string                         `json:"note"`
+	SortOrder      *int                            `json:"sort_order"`
+}
+
+func (r assetDecisionManualGroupMemberPatchRequest) toInput() assetdecisions.PatchManualGroupMemberInput {
+	var input assetdecisions.PatchManualGroupMemberInput
+	if r.IntendedRole != nil {
+		input.IntendedRole.Set = true
+		input.IntendedRole.Value = *r.IntendedRole
+	}
+	if r.IntendedAction != nil {
+		input.IntendedAction.Set = true
+		input.IntendedAction.Value = *r.IntendedAction
+	}
+	if r.Reason != nil {
+		input.Reason.Set = true
+		input.Reason.Value = *r.Reason
+	}
+	if r.Note != nil {
+		input.Note.Set = true
+		input.Note.Value = *r.Note
+	}
+	if r.SortOrder != nil {
+		input.SortOrder.Set = true
+		input.SortOrder.Value = *r.SortOrder
 	}
 	return input
 }

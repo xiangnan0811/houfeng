@@ -201,6 +201,12 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.AssetDecisionGroupHandler == nil {
 		t.Fatal("router asset decision group handler = nil, want non-nil")
 	}
+	if gotOpts.AssetDecisionManualGroupsHandler == nil {
+		t.Fatal("router asset decision manual groups handler = nil, want non-nil")
+	}
+	if gotOpts.AssetDecisionManualGroupHandler == nil {
+		t.Fatal("router asset decision manual group handler = nil, want non-nil")
+	}
 	if gotOpts.AssetDecisionRecordsHandler == nil {
 		t.Fatal("router asset decision records handler = nil, want non-nil")
 	}

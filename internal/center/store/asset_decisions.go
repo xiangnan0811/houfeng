@@ -151,29 +151,20 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 	if err != nil {
 		return assetdecisions.RecordDetail{}, err
 	}
-	group, err := assetdecisions.FindGroup(facts, input.SourceGroupID, assetdecisions.ListFilters{RenewWithinDays: input.RenewWithinDays})
+	recordSource, err := r.recordSourceFromInput(ctx, input, facts)
 	if err != nil {
 		return assetdecisions.RecordDetail{}, err
 	}
+	input.RenewWithinDays = recordSource.renewWithinDays
 	if input.Title == "" {
-		input.Title = group.Title
-	}
-	memberInputs := assetdecisions.CreateMemberInputsByVPS(input.Members)
-	groupMemberIDs := map[string]struct{}{}
-	for _, member := range group.Members {
-		groupMemberIDs[member.VPS.VPSID] = struct{}{}
-	}
-	for vpsID := range memberInputs {
-		if _, ok := groupMemberIDs[vpsID]; !ok {
-			return assetdecisions.RecordDetail{}, assetdecisions.ErrInvalidAssetDecisionInput
-		}
+		input.Title = recordSource.title
 	}
 
 	recordID, err := ids.New("adr")
 	if err != nil {
 		return assetdecisions.RecordDetail{}, fmt.Errorf("generate asset decision record id: %w", err)
 	}
-	groupSnapshot, err := marshalAssetDecisionSnapshot(assetdecisions.RecordSnapshotFromGroup(group))
+	groupSnapshot, err := marshalAssetDecisionSnapshot(recordSource.evidenceSnapshot)
 	if err != nil {
 		return assetdecisions.RecordDetail{}, err
 	}
@@ -216,12 +207,12 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 			completed_at
 		) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$13,$14,$15)`,
 		recordID,
-		"auto_group",
-		group.GroupID,
-		string(group.GroupType),
-		string(group.View),
-		group.ScopeKey,
-		group.ScopeLabel,
+		recordSource.sourceType,
+		recordSource.sourceGroupID,
+		string(recordSource.sourceGroupType),
+		string(recordSource.sourceView),
+		recordSource.scopeKey,
+		recordSource.scopeLabel,
 		input.RenewWithinDays,
 		input.Title,
 		input.Goal,
@@ -237,18 +228,9 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 		return assetdecisions.RecordDetail{}, fmt.Errorf("insert asset decision record: %w", err)
 	}
 
-	recordMembers := make([]assetdecisions.RecordMember, 0, len(group.Members))
-	for _, member := range group.Members {
-		memberInput := memberInputs[member.VPS.VPSID]
-		decidedRole := memberInput.DecidedRole
-		if decidedRole == "" {
-			decidedRole = member.SuggestedRole
-		}
-		decidedAction := memberInput.DecidedAction
-		if decidedAction == "" {
-			decidedAction = member.SuggestedAction
-		}
-		memberSnapshotMap := assetdecisions.RecordSnapshotFromMember(member)
+	recordMembers := make([]assetdecisions.RecordMember, 0, len(recordSource.members))
+	for _, member := range recordSource.members {
+		memberSnapshotMap := member.evidenceSnapshot
 		memberSnapshot, err := marshalAssetDecisionSnapshot(memberSnapshotMap)
 		if err != nil {
 			return assetdecisions.RecordDetail{}, err
@@ -271,10 +253,10 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 			member.VPS.VPSID,
 			member.VPS.DisplayName,
 			string(member.SuggestedRole),
-			string(decidedRole),
+			string(member.decidedRole),
 			string(member.SuggestedAction),
-			string(decidedAction),
-			memberInput.Reason,
+			string(member.decidedAction),
+			member.reason,
 			memberSnapshot,
 			now,
 		); err != nil {
@@ -288,10 +270,10 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 			VPSID:            member.VPS.VPSID,
 			DisplayName:      member.VPS.DisplayName,
 			SuggestedRole:    member.SuggestedRole,
-			DecidedRole:      decidedRole,
+			DecidedRole:      member.decidedRole,
 			SuggestedAction:  member.SuggestedAction,
-			DecidedAction:    decidedAction,
-			Reason:           memberInput.Reason,
+			DecidedAction:    member.decidedAction,
+			Reason:           member.reason,
 			FollowupStatus:   assetdecisions.FollowupTodo,
 			EvidenceSnapshot: memberSnapshotMap,
 			CreatedAt:        now,
@@ -308,16 +290,16 @@ func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, inpu
 			Title:             input.Title,
 			Goal:              input.Goal,
 			Status:            input.Status,
-			SourceType:        "auto_group",
-			SourceGroupID:     group.GroupID,
-			SourceGroupType:   group.GroupType,
-			SourceView:        group.View,
-			ScopeKey:          group.ScopeKey,
-			ScopeLabel:        group.ScopeLabel,
+			SourceType:        recordSource.sourceType,
+			SourceGroupID:     recordSource.sourceGroupID,
+			SourceGroupType:   recordSource.sourceGroupType,
+			SourceView:        recordSource.sourceView,
+			ScopeKey:          recordSource.scopeKey,
+			ScopeLabel:        recordSource.scopeLabel,
 			RenewWithinDays:   input.RenewWithinDays,
 			MemberCount:       len(recordMembers),
 			FollowupTodoCount: len(recordMembers),
-			EvidenceSnapshot:  assetdecisions.RecordSnapshotFromGroup(group),
+			EvidenceSnapshot:  recordSource.evidenceSnapshot,
 			CreatedAt:         now,
 			UpdatedAt:         now,
 			DecidedAt:         decidedAt,

@@ -392,6 +392,282 @@ func TestPostgresAssetDecisionRepositoryCreateRecordRejectsUnknownMember(t *test
 	}
 }
 
+func TestPostgresAssetDecisionRepositoryManualGroupsListAndDetailUseCurrentFacts(t *testing.T) {
+	now := time.Date(2026, time.June, 6, 10, 0, 0, 0, time.UTC)
+	manualSnapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"source": "manual"})
+	if err != nil {
+		t.Fatalf("marshal manual snapshot: %v", err)
+	}
+	var groupQueries int
+	var batchMemberQueries int
+	var detailMemberQueries int
+	var factQueries int
+	repo := &PostgresAssetDecisionRepository{db: fakeAssetDecisionQueryer{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if !strings.Contains(sql, "asset_decision_manual_groups") || args[0] != "admg_001" {
+				t.Fatalf("QueryRow sql=%q args=%#v, want manual group lookup", sql, args)
+			}
+			return fakeAssetDecisionRow{scan: scanAssetDecisionManualGroupValues(
+				"admg_001",
+				string(assetdecisions.ManualGroupStatusActive),
+				string(assetdecisions.ManualGroupScenarioPrimaryStandby),
+				"德国主备取舍",
+				"保留主力",
+				"note",
+				assetdecisions.RecordSourceAutoGroup,
+				"adg_auto_001",
+				string(assetdecisions.GroupRenewalAttention),
+				string(assetdecisions.ViewRenewal),
+				"window",
+				"30 天内续费取舍",
+				30,
+				now,
+				now,
+				nil,
+			)}
+		},
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			switch {
+			case strings.Contains(sql, "from asset_decision_manual_groups"):
+				groupQueries++
+				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionManualGroupValues(
+					"admg_001",
+					string(assetdecisions.ManualGroupStatusActive),
+					string(assetdecisions.ManualGroupScenarioPrimaryStandby),
+					"德国主备取舍",
+					"保留主力",
+					"note",
+					assetdecisions.RecordSourceAutoGroup,
+					"adg_auto_001",
+					string(assetdecisions.GroupRenewalAttention),
+					string(assetdecisions.ViewRenewal),
+					"window",
+					"30 天内续费取舍",
+					30,
+					now,
+					now,
+					nil,
+				)}}}, nil
+			case strings.Contains(sql, "manual_group_id = any"):
+				batchMemberQueries++
+				groupIDs, ok := args[0].([]string)
+				if !ok || len(groupIDs) != 1 || groupIDs[0] != "admg_001" {
+					t.Fatalf("batch member args=%#v, want manual group ids", args)
+				}
+				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionManualGroupMemberValues(
+					"admg_001",
+					"vps_001",
+					string(assetdecisions.RoleStandbyCandidate),
+					string(assetdecisions.ActionObserve),
+					"保留备用",
+					"member note",
+					2,
+					manualSnapshot,
+					now,
+					now,
+				)}}}, nil
+			case strings.Contains(sql, "from asset_decision_manual_group_members"):
+				detailMemberQueries++
+				if args[0] != "admg_001" {
+					t.Fatalf("detail member args=%#v, want manual group id", args)
+				}
+				return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionManualGroupMemberValues(
+					"admg_001",
+					"vps_001",
+					string(assetdecisions.RoleStandbyCandidate),
+					string(assetdecisions.ActionObserve),
+					"保留备用",
+					"member note",
+					2,
+					manualSnapshot,
+					now,
+					now,
+				)}}}, nil
+			case strings.Contains(sql, "from vps_assets"):
+				factQueries++
+				return fakeAssetDecisionFactRows(now), nil
+			default:
+				t.Fatalf("query sql=%q args=%#v, want manual group/member/facts", sql, args)
+				return nil, nil
+			}
+		},
+	}}
+
+	summaries, err := repo.ListManualGroups(context.Background())
+	if err != nil {
+		t.Fatalf("ListManualGroups() error = %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ManualGroupID != "admg_001" || summaries[0].MemberCount != 1 || summaries[0].RenewalWindowCount != 1 {
+		t.Fatalf("summaries = %#v, want current facts summary", summaries)
+	}
+	if summaries[0].EvidenceAssessment.QualityTier == "" {
+		t.Fatalf("summary assessment = %#v, want derived evidence assessment", summaries[0].EvidenceAssessment)
+	}
+	if groupQueries != 1 || batchMemberQueries != 1 || factQueries != 1 {
+		t.Fatalf("query counts group=%d batchMembers=%d facts=%d, want 1/1/1", groupQueries, batchMemberQueries, factQueries)
+	}
+
+	detail, err := repo.GetManualGroup(context.Background(), " admg_001 ")
+	if err != nil {
+		t.Fatalf("GetManualGroup() error = %v", err)
+	}
+	if detail.ManualGroupID != "admg_001" || len(detail.Members) != 1 || !detail.Members[0].CurrentFactFound {
+		t.Fatalf("detail = %#v, want member current facts", detail)
+	}
+	if detail.Members[0].IntendedRole != assetdecisions.RoleStandbyCandidate || detail.Members[0].IntendedAction != assetdecisions.ActionObserve || detail.Members[0].VPS.DisplayName != "Frankfurt Primary" {
+		t.Fatalf("member = %#v, want manual intent plus current vps facts", detail.Members[0])
+	}
+	if detailMemberQueries != 1 || factQueries != 2 {
+		t.Fatalf("detail query counts members=%d facts=%d, want detail member and facts query", detailMemberQueries, factQueries)
+	}
+}
+
+func TestPostgresAssetDecisionRepositoryCreateManualGroupFromAutoGroupPersistsMembers(t *testing.T) {
+	now := time.Date(2026, time.June, 6, 11, 0, 0, 0, time.UTC)
+	var execs []fakeAssetDecisionExecCall
+	tx := &fakeAssetDecisionTx{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+		execs = append(execs, fakeAssetDecisionExecCall{sql: sql, args: args})
+		return pgconn.CommandTag{}, nil
+	}}
+	repo := &PostgresAssetDecisionRepository{
+		db: fakeAssetDecisionQueryer{
+			query: func(context.Context, string, ...any) (pgx.Rows, error) {
+				return fakeAssetDecisionFactRows(now), nil
+			},
+		},
+		beginTx: func(context.Context, pgx.TxOptions) (assetDecisionTx, error) {
+			return tx, nil
+		},
+	}
+
+	detail, err := repo.CreateManualGroup(context.Background(), assetdecisions.CreateManualGroupInput{
+		SourceType:      assetdecisions.RecordSourceAutoGroup,
+		SourceGroupID:   assetdecisions.StableGroupID(assetdecisions.GroupRenewalAttention, "30"),
+		RenewWithinDays: 30,
+		Scenario:        assetdecisions.ManualGroupScenarioMigrationRetirement,
+		Title:           "  续费迁移退役计划  ",
+		Goal:            "退掉弱承载",
+		Members: []assetdecisions.CreateManualGroupMemberInput{{
+			VPSID:          "vps_001",
+			IntendedRole:   assetdecisions.RoleRetireCandidate,
+			IntendedAction: assetdecisions.ActionMigrate,
+			Reason:         "先迁移",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateManualGroup() error = %v", err)
+	}
+	if !tx.committed {
+		t.Fatal("transaction committed = false, want true")
+	}
+	if !strings.HasPrefix(detail.ManualGroupID, "admg_") || detail.Title != "续费迁移退役计划" || detail.SourceGroupType != assetdecisions.GroupRenewalAttention {
+		t.Fatalf("detail summary = %#v, want generated manual group from auto source", detail.ManualGroupSummary)
+	}
+	if len(detail.Members) != 1 || detail.Members[0].IntendedAction != assetdecisions.ActionMigrate || detail.Members[0].Reason != "先迁移" {
+		t.Fatalf("members = %#v, want override intent copied", detail.Members)
+	}
+	if len(execs) != 2 {
+		t.Fatalf("exec count = %d, want manual group and member insert", len(execs))
+	}
+	if !strings.Contains(execs[0].sql, "insert into asset_decision_manual_groups") || !strings.Contains(execs[1].sql, "insert into asset_decision_manual_group_members") {
+		t.Fatalf("exec SQL = %#v, want manual group then member insert", execs)
+	}
+	if execs[0].args[6] != assetdecisions.RecordSourceAutoGroup || execs[1].args[2] != string(assetdecisions.RoleRetireCandidate) {
+		t.Fatalf("exec args group=%#v member=%#v, want source and intended role", execs[0].args, execs[1].args)
+	}
+}
+
+func TestPostgresAssetDecisionRepositoryCreateRecordFromManualGroupUsesIntentAndReadback(t *testing.T) {
+	now := time.Date(2026, time.June, 6, 12, 0, 0, 0, time.UTC)
+	manualSnapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"source": "manual"})
+	if err != nil {
+		t.Fatalf("marshal manual snapshot: %v", err)
+	}
+	var execs []fakeAssetDecisionExecCall
+	tx := &fakeAssetDecisionTx{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+		execs = append(execs, fakeAssetDecisionExecCall{sql: sql, args: args})
+		return pgconn.CommandTag{}, nil
+	}}
+	repo := &PostgresAssetDecisionRepository{
+		db: fakeAssetDecisionQueryer{
+			queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+				if !strings.Contains(sql, "asset_decision_manual_groups") || args[0] != "admg_001" {
+					t.Fatalf("QueryRow sql=%q args=%#v, want manual group lookup", sql, args)
+				}
+				return fakeAssetDecisionRow{scan: scanAssetDecisionManualGroupValues(
+					"admg_001",
+					string(assetdecisions.ManualGroupStatusActive),
+					string(assetdecisions.ManualGroupScenarioPrimaryStandby),
+					"德国主备取舍",
+					"保留主力",
+					"",
+					assetdecisions.RecordSourceAutoGroup,
+					"adg_auto_001",
+					string(assetdecisions.GroupRenewalAttention),
+					string(assetdecisions.ViewRenewal),
+					"window",
+					"30 天内续费取舍",
+					60,
+					now,
+					now,
+					nil,
+				)}
+			},
+			query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+				if strings.Contains(sql, "from asset_decision_manual_group_members") {
+					return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: scanAssetDecisionManualGroupMemberValues(
+						"admg_001",
+						"vps_001",
+						string(assetdecisions.RoleStandbyCandidate),
+						string(assetdecisions.ActionObserve),
+						"保留备用",
+						"",
+						1,
+						manualSnapshot,
+						now,
+						now,
+					)}}}, nil
+				}
+				if strings.Contains(sql, "from vps_assets") {
+					return fakeAssetDecisionFactRows(now), nil
+				}
+				t.Fatalf("query sql=%q args=%#v, want manual members or facts", sql, args)
+				return nil, nil
+			},
+		},
+		beginTx: func(context.Context, pgx.TxOptions) (assetDecisionTx, error) {
+			return tx, nil
+		},
+	}
+
+	detail, err := repo.CreateRecord(context.Background(), assetdecisions.CreateRecordInput{
+		SourceType:    assetdecisions.RecordSourceManualGroup,
+		SourceGroupID: "admg_001",
+		Status:        assetdecisions.RecordStatusDecided,
+	})
+	if err != nil {
+		t.Fatalf("CreateRecord() error = %v", err)
+	}
+	if !tx.committed {
+		t.Fatal("transaction committed = false, want true")
+	}
+	if detail.SourceType != assetdecisions.RecordSourceManualGroup || detail.SourceGroupID != "admg_001" || detail.RenewWithinDays != 60 {
+		t.Fatalf("detail summary = %#v, want manual source and manual renew window", detail.RecordSummary)
+	}
+	if len(detail.Members) != 1 || detail.Members[0].DecidedRole != assetdecisions.RoleStandbyCandidate || detail.Members[0].DecidedAction != assetdecisions.ActionObserve || detail.Members[0].Reason != "保留备用" {
+		t.Fatalf("members = %#v, want manual intended role/action/reason", detail.Members)
+	}
+	if detail.ExecutionReadback.Status == "" || !detail.Members[0].ExecutionReadback.CurrentFacts.Found {
+		t.Fatalf("readback = %#v member=%#v, want current facts readback", detail.ExecutionReadback, detail.Members[0].ExecutionReadback)
+	}
+	if got := detail.EvidenceSnapshot["manual_group_id"]; got != "admg_001" {
+		t.Fatalf("manual snapshot id = %#v, want admg_001", got)
+	}
+	if len(execs) != 2 || execs[0].args[1] != assetdecisions.RecordSourceManualGroup || execs[1].args[4] != string(assetdecisions.RoleStandbyCandidate) {
+		t.Fatalf("execs = %#v, want manual source record and intended member role", execs)
+	}
+}
+
 func TestPostgresAssetDecisionRepositoryGetAndPatchRecord(t *testing.T) {
 	now := time.Date(2026, time.June, 5, 9, 0, 0, 0, time.UTC)
 	summarySnapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"scope": "provider"})
@@ -833,6 +1109,72 @@ func scanAssetDecisionRecordMemberValues(
 		*(dest[11].(*[]byte)) = evidenceSnapshot
 		*(dest[12].(*time.Time)) = createdAt
 		*(dest[13].(*time.Time)) = updatedAt
+		return nil
+	}
+}
+
+func scanAssetDecisionManualGroupValues(
+	manualGroupID string,
+	status string,
+	scenario string,
+	title string,
+	goal string,
+	note string,
+	sourceType string,
+	sourceGroupID string,
+	sourceGroupType string,
+	sourceView string,
+	scopeKey string,
+	scopeLabel string,
+	renewWithinDays int,
+	createdAt time.Time,
+	updatedAt time.Time,
+	archivedAt *time.Time,
+) func(dest ...any) error {
+	return func(dest ...any) error {
+		*(dest[0].(*string)) = manualGroupID
+		*(dest[1].(*string)) = status
+		*(dest[2].(*string)) = scenario
+		*(dest[3].(*string)) = title
+		*(dest[4].(*string)) = goal
+		*(dest[5].(*string)) = note
+		*(dest[6].(*string)) = sourceType
+		*(dest[7].(*string)) = sourceGroupID
+		*(dest[8].(*string)) = sourceGroupType
+		*(dest[9].(*string)) = sourceView
+		*(dest[10].(*string)) = scopeKey
+		*(dest[11].(*string)) = scopeLabel
+		*(dest[12].(*int)) = renewWithinDays
+		*(dest[13].(*time.Time)) = createdAt
+		*(dest[14].(*time.Time)) = updatedAt
+		*(dest[15].(**time.Time)) = archivedAt
+		return nil
+	}
+}
+
+func scanAssetDecisionManualGroupMemberValues(
+	manualGroupID string,
+	vpsID string,
+	intendedRole string,
+	intendedAction string,
+	reason string,
+	note string,
+	sortOrder int,
+	evidenceSnapshot []byte,
+	createdAt time.Time,
+	updatedAt time.Time,
+) func(dest ...any) error {
+	return func(dest ...any) error {
+		*(dest[0].(*string)) = manualGroupID
+		*(dest[1].(*string)) = vpsID
+		*(dest[2].(*string)) = intendedRole
+		*(dest[3].(*string)) = intendedAction
+		*(dest[4].(*string)) = reason
+		*(dest[5].(*string)) = note
+		*(dest[6].(*int)) = sortOrder
+		*(dest[7].(*[]byte)) = evidenceSnapshot
+		*(dest[8].(*time.Time)) = createdAt
+		*(dest[9].(*time.Time)) = updatedAt
 		return nil
 	}
 }
