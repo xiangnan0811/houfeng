@@ -3,10 +3,12 @@ import { matchRoutes } from 'react-router-dom'
 
 import type { ApplyCancellationInput } from './types'
 import {
+  addAssetDecisionManualGroupMember,
   applyVPSCancellation,
   archiveTarget,
   bulkUpsertSubscriptionMonthlyBudgets,
   createAssetDomain,
+  createAssetDecisionManualGroup,
   confirmMonitoringInstanceRebind,
   createAssetService,
   createAssetDecisionRecord,
@@ -17,12 +19,14 @@ import {
   createVPSAsset,
   createVPSExperienceLog,
   createVPSService,
+  deleteAssetDecisionManualGroupMember,
   deleteProbeItem,
   enterMonitoringInstanceMaintenance,
   enterTargetMaintenance,
   exitMonitoringInstanceMaintenance,
   exitTargetMaintenance,
   getAssetDecisionGroup,
+  getAssetDecisionManualGroup,
   getAssetDecisionOverview,
   getAssetDecisionRecord,
   getDashboard,
@@ -35,6 +39,7 @@ import {
   getVPSTimeline,
   issueMonitoringInstanceInstallCommand,
   linkVPSMonitoringInstance,
+  listAssetDecisionManualGroups,
   listAssetDecisionRecords,
   listSubscriptionMonthlyBudgets,
   listAssetDomains,
@@ -57,6 +62,8 @@ import {
   resumeMonitoringInstanceMonitoring,
   resumeTarget,
   postMonitoringInstanceAction,
+  patchAssetDecisionManualGroup,
+  patchAssetDecisionManualGroupMember,
   patchAssetDecisionRecord,
   unlinkVPSMonitoringInstance,
   updateMonitoringInstanceMetadata,
@@ -79,8 +86,13 @@ import {
 import type {
   AssetDomainListFilter,
   AssetDomainRecord,
+  AssetDecisionManualGroupDetail,
   AssetDecisionRecordDetail,
+  CreateAssetDecisionManualGroupInput,
+  CreateAssetDecisionManualGroupMemberInput,
   CreateAssetDecisionRecordInput,
+  PatchAssetDecisionManualGroupInput,
+  PatchAssetDecisionManualGroupMemberInput,
   PatchAssetDecisionRecordInput,
   AssetServiceRecord,
   CreateAssetDomainInput,
@@ -764,6 +776,165 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify(patchInput),
+    })
+  })
+
+  it('serializes asset decision manual group operations', async () => {
+    const evidenceAssessment = {
+      confidence_score: 70,
+      pressure_score: 45,
+      readiness_score: 64,
+      quality_tier: 'usable',
+      decision_bias: 'observe',
+      support_signal_count: 2,
+      risk_signal_count: 1,
+      gap_signal_count: 0,
+      summary: '证据可用于组合比较',
+    } as const
+    const manualGroup: AssetDecisionManualGroupDetail = {
+      manual_group_id: 'admg_001',
+      status: 'active',
+      scenario: 'primary_standby',
+      title: '德国主备取舍',
+      goal: '保留一台主力和一台备用',
+      note: '从同区自动组生成',
+      source_type: 'auto_group',
+      source_group_id: 'adg_auto_001',
+      source_group_type: 'region_portfolio',
+      source_view: 'region',
+      scope_key: 'DE/Berlin',
+      scope_label: '德国 / Berlin',
+      renew_within_days: 60,
+      member_count: 2,
+      lifecycle_counts: { active: 2 },
+      usage_counts: { in_use: 1, standby: 1 },
+      renewal_decision_counts: { unreviewed: 2 },
+      renewal_window_count: 1,
+      unreviewed_count: 2,
+      migrate_count: 0,
+      cancel_count: 0,
+      cancellation_attention_count: 0,
+      idle_count: 0,
+      standby_count: 1,
+      in_use_count: 1,
+      service_count: 2,
+      domain_count: 1,
+      target_count: 2,
+      running_target_count: 2,
+      monitoring_link_count: 2,
+      abnormal_monitoring_count: 0,
+      active_incident_count: 0,
+      primary_issue_summary: '',
+      monthly_cost_by_currency: [{ currency: 'EUR', monthly_total: 18, yearly_total: 216 }],
+      monthly_cost_base: 140,
+      yearly_cost_base: 1680,
+      base_currency: 'CNY',
+      evidence_chips: [{ kind: 'carries_service', label: '承载服务', tone: 'notice' }],
+      evidence_assessment: evidenceAssessment,
+      source_availability: {
+        subscriptions: true,
+        services: true,
+        domains: true,
+        monitoring: true,
+        targets: true,
+      },
+      created_at: '2026-06-06T09:00:00Z',
+      updated_at: '2026-06-06T09:00:00Z',
+      members: [],
+    }
+    const { members: manualMembers, ...manualSummary } = manualGroup
+    expect(manualMembers).toEqual([])
+    const createInput: CreateAssetDecisionManualGroupInput = {
+      source_type: 'auto_group',
+      source_group_id: 'adg_auto_001',
+      renew_within_days: 60,
+      scenario: 'primary_standby',
+      title: '德国主备取舍',
+      goal: '保留一台主力和一台备用',
+      note: '从同区自动组生成',
+    }
+    const patchInput: PatchAssetDecisionManualGroupInput = {
+      status: 'archived',
+      note: '已完成判断',
+    }
+    const memberInput: CreateAssetDecisionManualGroupMemberInput = {
+      vps_id: 'vps_002',
+      intended_role: 'standby_candidate',
+      intended_action: 'observe',
+      reason: '保留容灾',
+      note: '观察下月账单',
+      sort_order: 20,
+    }
+    const memberPatchInput: PatchAssetDecisionManualGroupMemberInput = {
+      intended_action: 'keep',
+      reason: '备用价值明确',
+      note: '',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify([manualSummary])))
+      .mockResolvedValueOnce(mockResponse(201, JSON.stringify(manualGroup)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(manualGroup)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ ...manualGroup, status: 'archived', note: '已完成判断' })))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(manualGroup)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(manualGroup)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ ...manualGroup, member_count: 1 })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listAssetDecisionManualGroups()).resolves.toEqual([manualSummary])
+    await expect(createAssetDecisionManualGroup(createInput)).resolves.toEqual(manualGroup)
+    await expect(getAssetDecisionManualGroup('admg_001')).resolves.toEqual(manualGroup)
+    await expect(patchAssetDecisionManualGroup('admg_001', patchInput)).resolves.toMatchObject({
+      status: 'archived',
+      note: '已完成判断',
+    })
+    await expect(addAssetDecisionManualGroupMember('admg_001', memberInput)).resolves.toEqual(manualGroup)
+    await expect(patchAssetDecisionManualGroupMember('admg_001', 'vps_002', memberPatchInput)).resolves.toEqual(manualGroup)
+    await expect(deleteAssetDecisionManualGroupMember('admg_001', 'vps_002')).resolves.toMatchObject({ member_count: 1 })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/asset-decisions/manual-groups', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/asset-decisions/manual-groups', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(createInput),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-decisions/manual-groups/admg_001', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/asset-decisions/manual-groups/admg_001', {
+      method: 'PATCH',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(patchInput),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/asset-decisions/manual-groups/admg_001/members', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(memberInput),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/asset-decisions/manual-groups/admg_001/members/vps_002', {
+      method: 'PATCH',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(memberPatchInput),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/asset-decisions/manual-groups/admg_001/members/vps_002', {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
     })
   })
 

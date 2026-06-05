@@ -7,6 +7,8 @@ import type {
   AssetDecisionGroupDetail,
   AssetDecisionGroupListFilter,
   AssetDecisionGroupSummary,
+  AssetDecisionManualGroupDetail,
+  AssetDecisionManualGroupSummary,
   AssetDecisionOverview,
   AssetDecisionRecordDetail,
   AssetDecisionRecordSummary,
@@ -17,6 +19,8 @@ import type {
   BulkUpsertSubscriptionMonthlyBudgetInput,
   BulkUpsertSubscriptionMonthlyBudgetResult,
   CreateAssetDomainInput,
+  CreateAssetDecisionManualGroupInput,
+  CreateAssetDecisionManualGroupMemberInput,
   CreateProviderInput,
   CreateAssetServiceInput,
   CreateAssetDecisionRecordInput,
@@ -66,6 +70,8 @@ import type {
   UpdateSubscriptionInput,
   UpsertSubscriptionMonthlyBudgetInput,
   PatchSubscriptionBudgetInput,
+  PatchAssetDecisionManualGroupInput,
+  PatchAssetDecisionManualGroupMemberInput,
   PatchAssetDecisionRecordInput,
   UpdateTargetMetadataInput,
   UpdateVPSAssetInput,
@@ -550,6 +556,63 @@ export function getAssetDecisionGroup(groupId: string, filter?: Pick<AssetDecisi
     withQuery(`/api/asset-decisions/groups/${encodeURIComponent(groupId)}`, {
       renew_within_days: filter?.renew_within_days,
     }),
+  )
+}
+
+export function listAssetDecisionManualGroups() {
+  return requestJSON<AssetDecisionManualGroupSummary[]>('/api/asset-decisions/manual-groups')
+}
+
+export function createAssetDecisionManualGroup(
+  input: CreateAssetDecisionManualGroupInput,
+): Promise<AssetDecisionManualGroupDetail> {
+  return postJSONBody<AssetDecisionManualGroupDetail>('/api/asset-decisions/manual-groups', input)
+}
+
+export function getAssetDecisionManualGroup(manualGroupId: string) {
+  return requestJSON<AssetDecisionManualGroupDetail>(
+    `/api/asset-decisions/manual-groups/${encodeURIComponent(manualGroupId)}`,
+  )
+}
+
+export function patchAssetDecisionManualGroup(
+  manualGroupId: string,
+  input: PatchAssetDecisionManualGroupInput,
+): Promise<AssetDecisionManualGroupDetail> {
+  return patchJSONBody<AssetDecisionManualGroupDetail>(
+    `/api/asset-decisions/manual-groups/${encodeURIComponent(manualGroupId)}`,
+    input,
+  )
+}
+
+export function addAssetDecisionManualGroupMember(
+  manualGroupId: string,
+  input: CreateAssetDecisionManualGroupMemberInput,
+): Promise<AssetDecisionManualGroupDetail> {
+  return postJSONBody<AssetDecisionManualGroupDetail>(
+    `/api/asset-decisions/manual-groups/${encodeURIComponent(manualGroupId)}/members`,
+    input,
+  )
+}
+
+export function patchAssetDecisionManualGroupMember(
+  manualGroupId: string,
+  vpsId: string,
+  input: PatchAssetDecisionManualGroupMemberInput,
+): Promise<AssetDecisionManualGroupDetail> {
+  return patchJSONBody<AssetDecisionManualGroupDetail>(
+    `/api/asset-decisions/manual-groups/${encodeURIComponent(manualGroupId)}/members/${encodeURIComponent(vpsId)}`,
+    input,
+  )
+}
+
+export function deleteAssetDecisionManualGroupMember(
+  manualGroupId: string,
+  vpsId: string,
+): Promise<AssetDecisionManualGroupDetail> {
+  return requestJSON<AssetDecisionManualGroupDetail>(
+    `/api/asset-decisions/manual-groups/${encodeURIComponent(manualGroupId)}/members/${encodeURIComponent(vpsId)}`,
+    { method: 'DELETE' },
   )
 }
 

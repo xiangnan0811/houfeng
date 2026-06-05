@@ -1,0 +1,4 @@
+{"file": "internal/center/store/asset_decisions_test.go", "reason": "store coverage for manual groups and manual-source records"}
+{"file": "internal/center/http/handlers/asset_decisions_test.go", "reason": "handler coverage for manual group endpoints"}
+{"file": "web/src/pages/AssetDecisionsPage.test.tsx", "reason": "frontend manual group workbench coverage"}
+{"file": "scripts/visual_evidence.py", "reason": "visual sanity fixture updated for manual groups"}

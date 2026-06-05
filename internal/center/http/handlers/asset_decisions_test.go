@@ -16,28 +16,53 @@ import (
 )
 
 type fakeAssetDecisionRepository struct {
-	overviewResult  assetdecisions.Overview
-	overviewErr     error
-	overviewFilters assetdecisions.ListFilters
-	groupsResult    []assetdecisions.GroupSummary
-	groupsErr       error
-	groupsFilters   assetdecisions.ListFilters
-	groupResult     assetdecisions.GroupDetail
-	groupErr        error
-	groupID         string
-	groupFilters    assetdecisions.ListFilters
-	recordsResult   []assetdecisions.RecordSummary
-	recordsErr      error
-	createInput     assetdecisions.CreateRecordInput
-	createResult    assetdecisions.RecordDetail
-	createErr       error
-	recordResult    assetdecisions.RecordDetail
-	recordErr       error
-	recordID        string
-	patchID         string
-	patchInput      assetdecisions.PatchRecordInput
-	patchResult     assetdecisions.RecordDetail
-	patchErr        error
+	overviewResult      assetdecisions.Overview
+	overviewErr         error
+	overviewFilters     assetdecisions.ListFilters
+	groupsResult        []assetdecisions.GroupSummary
+	groupsErr           error
+	groupsFilters       assetdecisions.ListFilters
+	groupResult         assetdecisions.GroupDetail
+	groupErr            error
+	groupID             string
+	groupFilters        assetdecisions.ListFilters
+	manualGroupsResult  []assetdecisions.ManualGroupSummary
+	manualGroupsErr     error
+	createManualInput   assetdecisions.CreateManualGroupInput
+	createManualResult  assetdecisions.ManualGroupDetail
+	createManualErr     error
+	manualGroupResult   assetdecisions.ManualGroupDetail
+	manualGroupErr      error
+	manualGroupID       string
+	patchManualID       string
+	patchManualInput    assetdecisions.PatchManualGroupInput
+	patchManualResult   assetdecisions.ManualGroupDetail
+	patchManualErr      error
+	addMemberGroupID    string
+	addMemberInput      assetdecisions.CreateManualGroupMemberInput
+	addMemberResult     assetdecisions.ManualGroupDetail
+	addMemberErr        error
+	patchMemberGroupID  string
+	patchMemberVPSID    string
+	patchMemberInput    assetdecisions.PatchManualGroupMemberInput
+	patchMemberResult   assetdecisions.ManualGroupDetail
+	patchMemberErr      error
+	deleteMemberGroupID string
+	deleteMemberVPSID   string
+	deleteMemberResult  assetdecisions.ManualGroupDetail
+	deleteMemberErr     error
+	recordsResult       []assetdecisions.RecordSummary
+	recordsErr          error
+	createInput         assetdecisions.CreateRecordInput
+	createResult        assetdecisions.RecordDetail
+	createErr           error
+	recordResult        assetdecisions.RecordDetail
+	recordErr           error
+	recordID            string
+	patchID             string
+	patchInput          assetdecisions.PatchRecordInput
+	patchResult         assetdecisions.RecordDetail
+	patchErr            error
 }
 
 func (f *fakeAssetDecisionRepository) GetOverview(_ context.Context, filters assetdecisions.ListFilters) (assetdecisions.Overview, error) {
@@ -63,6 +88,66 @@ func (f *fakeAssetDecisionRepository) GetGroup(_ context.Context, groupID string
 		return assetdecisions.GroupDetail{}, f.groupErr
 	}
 	return f.groupResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) ListManualGroups(context.Context) ([]assetdecisions.ManualGroupSummary, error) {
+	if f.manualGroupsErr != nil {
+		return nil, f.manualGroupsErr
+	}
+	return f.manualGroupsResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) CreateManualGroup(_ context.Context, input assetdecisions.CreateManualGroupInput) (assetdecisions.ManualGroupDetail, error) {
+	f.createManualInput = input
+	if f.createManualErr != nil {
+		return assetdecisions.ManualGroupDetail{}, f.createManualErr
+	}
+	return f.createManualResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) GetManualGroup(_ context.Context, manualGroupID string) (assetdecisions.ManualGroupDetail, error) {
+	f.manualGroupID = manualGroupID
+	if f.manualGroupErr != nil {
+		return assetdecisions.ManualGroupDetail{}, f.manualGroupErr
+	}
+	return f.manualGroupResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) PatchManualGroup(_ context.Context, manualGroupID string, input assetdecisions.PatchManualGroupInput) (assetdecisions.ManualGroupDetail, error) {
+	f.patchManualID = manualGroupID
+	f.patchManualInput = input
+	if f.patchManualErr != nil {
+		return assetdecisions.ManualGroupDetail{}, f.patchManualErr
+	}
+	return f.patchManualResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) AddManualGroupMember(_ context.Context, manualGroupID string, input assetdecisions.CreateManualGroupMemberInput) (assetdecisions.ManualGroupDetail, error) {
+	f.addMemberGroupID = manualGroupID
+	f.addMemberInput = input
+	if f.addMemberErr != nil {
+		return assetdecisions.ManualGroupDetail{}, f.addMemberErr
+	}
+	return f.addMemberResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) PatchManualGroupMember(_ context.Context, manualGroupID string, vpsID string, input assetdecisions.PatchManualGroupMemberInput) (assetdecisions.ManualGroupDetail, error) {
+	f.patchMemberGroupID = manualGroupID
+	f.patchMemberVPSID = vpsID
+	f.patchMemberInput = input
+	if f.patchMemberErr != nil {
+		return assetdecisions.ManualGroupDetail{}, f.patchMemberErr
+	}
+	return f.patchMemberResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) DeleteManualGroupMember(_ context.Context, manualGroupID string, vpsID string) (assetdecisions.ManualGroupDetail, error) {
+	f.deleteMemberGroupID = manualGroupID
+	f.deleteMemberVPSID = vpsID
+	if f.deleteMemberErr != nil {
+		return assetdecisions.ManualGroupDetail{}, f.deleteMemberErr
+	}
+	return f.deleteMemberResult, nil
 }
 
 func (f *fakeAssetDecisionRepository) ListRecords(context.Context) ([]assetdecisions.RecordSummary, error) {
@@ -180,6 +265,114 @@ func TestAssetDecisionGroupReturnsDetail(t *testing.T) {
 	}
 	if len(body.Members) != 1 || body.Members[0].VPS.VPSID != "vps_001" {
 		t.Fatalf("body = %#v, want group detail member", body)
+	}
+}
+
+func TestAssetDecisionManualGroupsListCreateAndMemberMutations(t *testing.T) {
+	now := time.Date(2026, time.June, 6, 9, 0, 0, 0, time.UTC)
+	baseDetail := assetdecisions.ManualGroupDetail{
+		ManualGroupSummary: assetdecisions.ManualGroupSummary{
+			ManualGroupID:   "admg_001",
+			Status:          assetdecisions.ManualGroupStatusActive,
+			Scenario:        assetdecisions.ManualGroupScenarioPrimaryStandby,
+			Title:           "德国主备取舍",
+			Goal:            "保留一主一备",
+			SourceType:      assetdecisions.RecordSourceAutoGroup,
+			SourceGroupID:   "adg_auto_001",
+			RenewWithinDays: 30,
+			MemberCount:     1,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		Members: []assetdecisions.ManualGroupMember{{
+			VPSID:          "vps_001",
+			ManualGroupID:  "admg_001",
+			IntendedRole:   assetdecisions.RolePrimaryCandidate,
+			IntendedAction: assetdecisions.ActionKeep,
+			GroupMember: assetdecisions.GroupMember{
+				VPS: vpsassets.Record{VPSID: "vps_001", DisplayName: "Frankfurt Primary"},
+			},
+			CurrentFactFound: true,
+		}},
+	}
+	repo := &fakeAssetDecisionRepository{
+		manualGroupsResult: []assetdecisions.ManualGroupSummary{baseDetail.ManualGroupSummary},
+		createManualResult: baseDetail,
+		manualGroupResult:  baseDetail,
+		patchManualResult:  baseDetail,
+		addMemberResult:    baseDetail,
+		patchMemberResult:  baseDetail,
+		deleteMemberResult: baseDetail,
+	}
+
+	collection := handlers.AssetDecisionManualGroups(repo)
+	listRecorder := httptest.NewRecorder()
+	collection.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/asset-decisions/manual-groups", nil))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d; body=%s", listRecorder.Code, http.StatusOK, listRecorder.Body.String())
+	}
+	var listBody []assetdecisions.ManualGroupSummary
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	if len(listBody) != 1 || listBody[0].ManualGroupID != "admg_001" {
+		t.Fatalf("list body = %#v, want manual group", listBody)
+	}
+
+	createBody := []byte(`{"source_type":"auto_group","source_group_id":"adg_auto_001","scenario":"primary_standby","title":"德国主备取舍","goal":"保留一主一备","renew_within_days":30}`)
+	createRecorder := httptest.NewRecorder()
+	collection.ServeHTTP(createRecorder, httptest.NewRequest(http.MethodPost, "/api/asset-decisions/manual-groups", bytes.NewReader(createBody)))
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", createRecorder.Code, http.StatusCreated, createRecorder.Body.String())
+	}
+	if repo.createManualInput.SourceType != assetdecisions.RecordSourceAutoGroup || repo.createManualInput.SourceGroupID != "adg_auto_001" || repo.createManualInput.Scenario != assetdecisions.ManualGroupScenarioPrimaryStandby {
+		t.Fatalf("create input = %#v, want decoded manual group create", repo.createManualInput)
+	}
+
+	item := handlers.AssetDecisionManualGroup(repo)
+	getRecorder := httptest.NewRecorder()
+	item.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/api/asset-decisions/manual-groups/admg_001", nil))
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want %d; body=%s", getRecorder.Code, http.StatusOK, getRecorder.Body.String())
+	}
+	if repo.manualGroupID != "admg_001" {
+		t.Fatalf("manualGroupID = %q, want admg_001", repo.manualGroupID)
+	}
+
+	patchRecorder := httptest.NewRecorder()
+	item.ServeHTTP(patchRecorder, httptest.NewRequest(http.MethodPatch, "/api/asset-decisions/manual-groups/admg_001", bytes.NewReader([]byte(`{"status":"archived","note":"阶段完成"}`))))
+	if patchRecorder.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want %d; body=%s", patchRecorder.Code, http.StatusOK, patchRecorder.Body.String())
+	}
+	if repo.patchManualID != "admg_001" || !repo.patchManualInput.Status.Set || repo.patchManualInput.Status.Value != assetdecisions.ManualGroupStatusArchived || !repo.patchManualInput.Note.Set || repo.patchManualInput.Note.Value != "阶段完成" {
+		t.Fatalf("patch manual input = id %q %#v, want archived note", repo.patchManualID, repo.patchManualInput)
+	}
+
+	addRecorder := httptest.NewRecorder()
+	item.ServeHTTP(addRecorder, httptest.NewRequest(http.MethodPost, "/api/asset-decisions/manual-groups/admg_001/members", bytes.NewReader([]byte(`{"vps_id":"vps_002","intended_role":"standby_candidate","intended_action":"observe","reason":"备用"}`))))
+	if addRecorder.Code != http.StatusCreated {
+		t.Fatalf("add status = %d, want %d; body=%s", addRecorder.Code, http.StatusCreated, addRecorder.Body.String())
+	}
+	if repo.addMemberGroupID != "admg_001" || repo.addMemberInput.VPSID != "vps_002" || repo.addMemberInput.IntendedAction != assetdecisions.ActionObserve {
+		t.Fatalf("add member input = group %q %#v, want decoded member", repo.addMemberGroupID, repo.addMemberInput)
+	}
+
+	memberPatchRecorder := httptest.NewRecorder()
+	item.ServeHTTP(memberPatchRecorder, httptest.NewRequest(http.MethodPatch, "/api/asset-decisions/manual-groups/admg_001/members/vps_002", bytes.NewReader([]byte(`{"intended_action":"migrate","sort_order":4}`))))
+	if memberPatchRecorder.Code != http.StatusOK {
+		t.Fatalf("member patch status = %d, want %d; body=%s", memberPatchRecorder.Code, http.StatusOK, memberPatchRecorder.Body.String())
+	}
+	if repo.patchMemberGroupID != "admg_001" || repo.patchMemberVPSID != "vps_002" || !repo.patchMemberInput.IntendedAction.Set || repo.patchMemberInput.IntendedAction.Value != assetdecisions.ActionMigrate || !repo.patchMemberInput.SortOrder.Set || repo.patchMemberInput.SortOrder.Value != 4 {
+		t.Fatalf("patch member input = group %q vps %q %#v, want decoded patch", repo.patchMemberGroupID, repo.patchMemberVPSID, repo.patchMemberInput)
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	item.ServeHTTP(deleteRecorder, httptest.NewRequest(http.MethodDelete, "/api/asset-decisions/manual-groups/admg_001/members/vps_002", nil))
+	if deleteRecorder.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d; body=%s", deleteRecorder.Code, http.StatusOK, deleteRecorder.Body.String())
+	}
+	if repo.deleteMemberGroupID != "admg_001" || repo.deleteMemberVPSID != "vps_002" {
+		t.Fatalf("delete member = group %q vps %q, want decoded path", repo.deleteMemberGroupID, repo.deleteMemberVPSID)
 	}
 }
 
@@ -428,6 +621,12 @@ func TestAssetDecisionHandlersMapErrors(t *testing.T) {
 			wantCode: http.StatusNotFound,
 		},
 		{
+			name:     "records missing manual group",
+			handler:  handlers.AssetDecisionRecords(&fakeAssetDecisionRepository{createErr: assetdecisions.ErrAssetDecisionManualGroupNotFound}),
+			request:  httptest.NewRequest(http.MethodPost, "/api/asset-decisions/records", bytes.NewReader([]byte(`{"source_type":"manual_group","source_group_id":"admg_missing"}`))),
+			wantCode: http.StatusNotFound,
+		},
+		{
 			name:     "records list failure",
 			handler:  handlers.AssetDecisionRecords(&fakeAssetDecisionRepository{recordsErr: errors.New("boom")}),
 			request:  httptest.NewRequest(http.MethodGet, "/api/asset-decisions/records", nil),
@@ -455,6 +654,42 @@ func TestAssetDecisionHandlersMapErrors(t *testing.T) {
 			name:     "method not allowed",
 			handler:  handlers.AssetDecisionGroups(&fakeAssetDecisionRepository{}),
 			request:  httptest.NewRequest(http.MethodPost, "/api/asset-decisions/groups", nil),
+			wantCode: http.StatusMethodNotAllowed,
+		},
+		{
+			name:     "manual groups create invalid json",
+			handler:  handlers.AssetDecisionManualGroups(&fakeAssetDecisionRepository{}),
+			request:  httptest.NewRequest(http.MethodPost, "/api/asset-decisions/manual-groups", bytes.NewReader([]byte(`{"title":`))),
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "manual groups create missing auto source",
+			handler:  handlers.AssetDecisionManualGroups(&fakeAssetDecisionRepository{createManualErr: assetdecisions.ErrAssetDecisionGroupNotFound}),
+			request:  httptest.NewRequest(http.MethodPost, "/api/asset-decisions/manual-groups", bytes.NewReader([]byte(`{"source_type":"auto_group","source_group_id":"adg_auto_missing","title":"x"}`))),
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "manual groups list failure",
+			handler:  handlers.AssetDecisionManualGroups(&fakeAssetDecisionRepository{manualGroupsErr: errors.New("boom")}),
+			request:  httptest.NewRequest(http.MethodGet, "/api/asset-decisions/manual-groups", nil),
+			wantCode: http.StatusInternalServerError,
+		},
+		{
+			name:     "manual group missing",
+			handler:  handlers.AssetDecisionManualGroup(&fakeAssetDecisionRepository{manualGroupErr: assetdecisions.ErrAssetDecisionManualGroupNotFound}),
+			request:  httptest.NewRequest(http.MethodGet, "/api/asset-decisions/manual-groups/admg_missing", nil),
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "manual group member missing",
+			handler:  handlers.AssetDecisionManualGroup(&fakeAssetDecisionRepository{patchMemberErr: assetdecisions.ErrAssetDecisionManualGroupMemberNotFound}),
+			request:  httptest.NewRequest(http.MethodPatch, "/api/asset-decisions/manual-groups/admg_001/members/vps_missing", bytes.NewReader([]byte(`{"note":"x"}`))),
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "manual group member method not allowed",
+			handler:  handlers.AssetDecisionManualGroup(&fakeAssetDecisionRepository{}),
+			request:  httptest.NewRequest(http.MethodPut, "/api/asset-decisions/manual-groups/admg_001/members/vps_001", nil),
 			wantCode: http.StatusMethodNotAllowed,
 		},
 	}

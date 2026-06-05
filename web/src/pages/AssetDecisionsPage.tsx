@@ -18,14 +18,21 @@ import {
 import { PageState as PageStateView } from '../components/PageState'
 import {
   ApiError,
+  addAssetDecisionManualGroupMember,
+  createAssetDecisionManualGroup,
   createAssetDecisionRecord,
+  deleteAssetDecisionManualGroupMember,
   getAssetDecisionGroup,
+  getAssetDecisionManualGroup,
   getAssetDecisionOverview,
   getAssetDecisionRecord,
   listAssetDecisionGroups,
+  listAssetDecisionManualGroups,
   listAssetDecisionRecords,
   listSubscriptions,
   listVPSAssets,
+  patchAssetDecisionManualGroup,
+  patchAssetDecisionManualGroupMember,
   patchAssetDecisionRecord,
   updateVPSAsset,
 } from '../lib/api'
@@ -41,10 +48,16 @@ import {
   type AssetDecisionGroupDetail,
   type AssetDecisionGroupMember,
   type AssetDecisionGroupSummary,
+  type AssetDecisionManualGroupDetail,
+  type AssetDecisionManualGroupMember,
+  type AssetDecisionManualGroupScenario,
+  type AssetDecisionManualGroupStatus,
+  type AssetDecisionManualGroupSummary,
   type AssetDecisionMemberExecutionReadback,
   type AssetDecisionRecordExecutionReadback,
   type AssetDecisionOverview,
   type AssetDecisionRecordDetail,
+  type AssetDecisionSourceType,
   type AssetDecisionFollowupStatus,
   type AssetDecisionRecordMember,
   type AssetDecisionRecordStatus,
@@ -110,6 +123,24 @@ type DetailState = {
   detail: AssetDecisionGroupDetail | null
 }
 
+type ManualGroupsState = {
+  loading: boolean
+  error: string | null
+  groups: AssetDecisionManualGroupSummary[]
+}
+
+type ManualDetailState = {
+  loading: boolean
+  error: string | null
+  detail: AssetDecisionManualGroupDetail | null
+}
+
+type VPSCatalogState = {
+  loading: boolean
+  error: string | null
+  rows: VPSAssetRecord[]
+}
+
 type RecordsState = {
   loading: boolean
   error: string | null
@@ -134,14 +165,37 @@ type RecordFollowupDraft = {
 }
 
 type RecordDraft = {
+  sourceType: AssetDecisionSourceType
+  sourceGroupID: string
+  renewWithinDays: number
   title: string
   goal: string
   status: AssetDecisionRecordStatus
+  memberOrder: string[]
   members: Record<string, RecordMemberDraft>
+}
+
+type ManualMemberDraft = {
+  intendedRole: AssetDecisionSuggestedRole
+  intendedAction: AssetDecisionSuggestedAction
+  reason: string
+  note: string
+  sortOrder: string
+}
+
+type ManualMemberAddDraft = ManualMemberDraft & {
+  vpsID: string
 }
 
 type ScoreStyle = CSSProperties & {
   '--score': number
+}
+
+type CostSummaryLike = {
+  monthly_cost_by_currency: AssetDecisionGroupSummary['monthly_cost_by_currency']
+  monthly_cost_base?: number | null
+  yearly_cost_base?: number | null
+  base_currency?: string
 }
 
 type QueueState = {
@@ -174,6 +228,21 @@ const INITIAL_DETAIL_STATE: DetailState = {
   loading: false,
   error: null,
   detail: null,
+}
+const INITIAL_MANUAL_GROUPS_STATE: ManualGroupsState = {
+  loading: true,
+  error: null,
+  groups: [],
+}
+const INITIAL_MANUAL_DETAIL_STATE: ManualDetailState = {
+  loading: false,
+  error: null,
+  detail: null,
+}
+const INITIAL_VPS_CATALOG_STATE: VPSCatalogState = {
+  loading: true,
+  error: null,
+  rows: [],
 }
 const INITIAL_RECORDS_STATE: RecordsState = {
   loading: true,
@@ -223,6 +292,21 @@ const ACTION_LABELS: Record<AssetDecisionSuggestedAction, string> = {
   cancel: '取消',
   open_cancellation_workbench: '进入取消台',
   complete_evidence: '补齐资料',
+}
+
+const MANUAL_GROUP_STATUS_LABELS: Record<AssetDecisionManualGroupStatus, string> = {
+  active: '进行中',
+  archived: '已归档',
+}
+
+const MANUAL_GROUP_SCENARIO_LABELS: Record<AssetDecisionManualGroupScenario, string> = {
+  general: '通用组合',
+  primary_standby: '主备取舍',
+  budget_reduction: '预算压缩',
+  provider_review: '服务商评估',
+  region_review: '同区比较',
+  migration_retirement: '迁移退役',
+  evidence_cleanup: '资料清理',
 }
 
 const RECORD_STATUS_LABELS: Record<AssetDecisionRecordStatus, string> = {
@@ -282,6 +366,16 @@ const ACTION_OPTIONS: ReadonlyArray<{ value: AssetDecisionSuggestedAction; label
   { value: 'cancel', label: ACTION_LABELS.cancel },
   { value: 'open_cancellation_workbench', label: ACTION_LABELS.open_cancellation_workbench },
   { value: 'complete_evidence', label: ACTION_LABELS.complete_evidence },
+]
+
+const MANUAL_GROUP_SCENARIO_OPTIONS: ReadonlyArray<{ value: AssetDecisionManualGroupScenario; label: string }> = [
+  { value: 'general', label: MANUAL_GROUP_SCENARIO_LABELS.general },
+  { value: 'primary_standby', label: MANUAL_GROUP_SCENARIO_LABELS.primary_standby },
+  { value: 'budget_reduction', label: MANUAL_GROUP_SCENARIO_LABELS.budget_reduction },
+  { value: 'provider_review', label: MANUAL_GROUP_SCENARIO_LABELS.provider_review },
+  { value: 'region_review', label: MANUAL_GROUP_SCENARIO_LABELS.region_review },
+  { value: 'migration_retirement', label: MANUAL_GROUP_SCENARIO_LABELS.migration_retirement },
+  { value: 'evidence_cleanup', label: MANUAL_GROUP_SCENARIO_LABELS.evidence_cleanup },
 ]
 
 const RECORD_STATUS_OPTIONS: ReadonlyArray<{ value: AssetDecisionRecordStatus; label: string }> = [
@@ -469,6 +563,19 @@ function actionTone(action: AssetDecisionSuggestedAction): BadgeTone {
   return 'notice'
 }
 
+function manualGroupStatusTone(status: AssetDecisionManualGroupStatus): BadgeTone {
+  return status === 'active' ? 'maintenance' : 'offline'
+}
+
+function scenarioForGroup(group: Pick<AssetDecisionGroupSummary, 'group_type'>): AssetDecisionManualGroupScenario {
+  if (group.group_type === 'region_portfolio') return 'region_review'
+  if (group.group_type === 'provider_portfolio') return 'provider_review'
+  if (group.group_type === 'cost_pressure') return 'budget_reduction'
+  if (group.group_type === 'cancellation_attention') return 'migration_retirement'
+  if (group.group_type === 'evidence_gap') return 'evidence_cleanup'
+  return 'general'
+}
+
 function recordStatusTone(status: AssetDecisionRecordStatus): BadgeTone {
   if (status === 'completed') return 'normal'
   if (status === 'in_progress') return 'maintenance'
@@ -524,6 +631,20 @@ function buildRecordFollowupDrafts(detail: AssetDecisionRecordDetail | null): Re
   return drafts
 }
 
+function buildManualMemberDrafts(detail: AssetDecisionManualGroupDetail | null): Record<string, ManualMemberDraft> {
+  const drafts: Record<string, ManualMemberDraft> = {}
+  for (const member of detail?.members ?? []) {
+    drafts[member.vps_id] = {
+      intendedRole: member.intended_role,
+      intendedAction: member.intended_action,
+      reason: member.reason,
+      note: member.note,
+      sortOrder: String(member.sort_order),
+    }
+  }
+  return drafts
+}
+
 function evidenceTierTone(tier: AssetDecisionEvidenceQualityTier): BadgeTone {
   if (tier === 'strong') return 'normal'
   if (tier === 'usable') return 'notice'
@@ -565,21 +686,112 @@ function parseEvidenceAssessment(snapshot?: AssetDecisionEvidenceSnapshot | null
   }
 }
 
-function buildRecordDraft(detail: AssetDecisionGroupDetail): RecordDraft {
+function buildRecordDraft(detail: AssetDecisionGroupDetail, renewWithinDays: number): RecordDraft {
   const members: Record<string, RecordMemberDraft> = {}
+  const memberOrder: string[] = []
   for (const member of detail.members) {
-    members[member.vps.vps_id] = {
+    const vpsID = member.vps.vps_id
+    memberOrder.push(vpsID)
+    members[vpsID] = {
       decidedRole: member.suggested_role,
       decidedAction: member.suggested_action,
       reason: '',
     }
   }
   return {
+    sourceType: 'auto_group',
+    sourceGroupID: detail.group_id,
+    renewWithinDays,
     title: detail.title,
     goal: '',
     status: 'draft',
+    memberOrder,
     members,
   }
+}
+
+function buildManualRecordDraft(detail: AssetDecisionManualGroupDetail): RecordDraft {
+  const members: Record<string, RecordMemberDraft> = {}
+  const memberOrder: string[] = []
+  for (const member of detail.members) {
+    memberOrder.push(member.vps_id)
+    members[member.vps_id] = {
+      decidedRole: member.intended_role,
+      decidedAction: member.intended_action,
+      reason: member.reason,
+    }
+  }
+  return {
+    sourceType: 'manual_group',
+    sourceGroupID: detail.manual_group_id,
+    renewWithinDays: detail.renew_within_days,
+    title: detail.title,
+    goal: detail.goal,
+    status: 'draft',
+    memberOrder,
+    members,
+  }
+}
+
+function manualGroupSummaryFromDetail(detail: AssetDecisionManualGroupDetail): AssetDecisionManualGroupSummary {
+  const summary: AssetDecisionManualGroupSummary = {
+    manual_group_id: detail.manual_group_id,
+    status: detail.status,
+    scenario: detail.scenario,
+    title: detail.title,
+    goal: detail.goal,
+    note: detail.note,
+    source_type: detail.source_type,
+    source_group_id: detail.source_group_id,
+    source_group_type: detail.source_group_type,
+    source_view: detail.source_view,
+    scope_key: detail.scope_key,
+    scope_label: detail.scope_label,
+    renew_within_days: detail.renew_within_days,
+    member_count: detail.member_count,
+    lifecycle_counts: detail.lifecycle_counts,
+    usage_counts: detail.usage_counts,
+    renewal_decision_counts: detail.renewal_decision_counts,
+    renewal_window_count: detail.renewal_window_count,
+    unreviewed_count: detail.unreviewed_count,
+    migrate_count: detail.migrate_count,
+    cancel_count: detail.cancel_count,
+    cancellation_attention_count: detail.cancellation_attention_count,
+    idle_count: detail.idle_count,
+    standby_count: detail.standby_count,
+    in_use_count: detail.in_use_count,
+    service_count: detail.service_count,
+    domain_count: detail.domain_count,
+    target_count: detail.target_count,
+    running_target_count: detail.running_target_count,
+    monitoring_link_count: detail.monitoring_link_count,
+    abnormal_monitoring_count: detail.abnormal_monitoring_count,
+    active_incident_count: detail.active_incident_count,
+    primary_issue_summary: detail.primary_issue_summary,
+    monthly_cost_by_currency: detail.monthly_cost_by_currency,
+    monthly_cost_base: detail.monthly_cost_base,
+    yearly_cost_base: detail.yearly_cost_base,
+    base_currency: detail.base_currency,
+    evidence_chips: detail.evidence_chips,
+    evidence_assessment: detail.evidence_assessment,
+    source_availability: detail.source_availability,
+    created_at: detail.created_at,
+    updated_at: detail.updated_at,
+    archived_at: detail.archived_at,
+  }
+  return summary
+}
+
+function upsertManualGroupSummary(
+  rows: AssetDecisionManualGroupSummary[],
+  detail: AssetDecisionManualGroupDetail,
+): AssetDecisionManualGroupSummary[] {
+  const summary = manualGroupSummaryFromDetail(detail)
+  const next = [summary, ...rows.filter((row) => row.manual_group_id !== summary.manual_group_id)]
+  return next.sort((left, right) => {
+    if (left.status !== right.status) return left.status === 'active' ? -1 : 1
+    return right.updated_at.localeCompare(left.updated_at)
+  })
 }
 
 function actionHrefForMember(member: AssetDecisionRecordMember): string {
@@ -641,7 +853,7 @@ function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssessment | 
   )
 }
 
-function formatGroupMonthlyCost(group: AssetDecisionGroupSummary): string {
+function formatGroupMonthlyCost(group: CostSummaryLike): string {
   if (group.monthly_cost_base != null) {
     return `${formatMoney(group.monthly_cost_base, group.base_currency ?? 'CNY')}/月`
   }
@@ -653,7 +865,7 @@ function formatGroupMonthlyCost(group: AssetDecisionGroupSummary): string {
   return '暂无成本'
 }
 
-function formatGroupYearlyCost(group: AssetDecisionGroupSummary): string {
+function formatGroupYearlyCost(group: CostSummaryLike): string {
   if (group.yearly_cost_base != null) {
     return `${formatMoney(group.yearly_cost_base, group.base_currency ?? 'CNY')}/年`
   }
@@ -790,15 +1002,32 @@ export function AssetDecisionsPage() {
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
   const [portfolioState, setPortfolioState] = useState<PortfolioState>(INITIAL_PORTFOLIO_STATE)
   const [detailState, setDetailState] = useState<DetailState>(INITIAL_DETAIL_STATE)
+  const [manualGroupsState, setManualGroupsState] = useState<ManualGroupsState>(INITIAL_MANUAL_GROUPS_STATE)
+  const [manualDetailState, setManualDetailState] = useState<ManualDetailState>(INITIAL_MANUAL_DETAIL_STATE)
+  const [vpsCatalogState, setVPSCatalogState] = useState<VPSCatalogState>(INITIAL_VPS_CATALOG_STATE)
   const [recordsState, setRecordsState] = useState<RecordsState>(INITIAL_RECORDS_STATE)
   const [recordDetailState, setRecordDetailState] = useState<RecordDetailState>(INITIAL_RECORD_DETAIL_STATE)
   const [queueState, setQueueState] = useState<QueueState>(INITIAL_QUEUE_STATE)
   const [selectedGroupID, setSelectedGroupID] = useState<string | null>(null)
+  const [selectedManualGroupID, setSelectedManualGroupID] = useState<string | null>(null)
   const [selectedRecordID, setSelectedRecordID] = useState<string | null>(null)
   const [selectedVPS, setSelectedVPS] = useState<VPSAssetRecord | null>(null)
   const [recordDraft, setRecordDraft] = useState<RecordDraft | null>(null)
   const [recordSaving, setRecordSaving] = useState(false)
   const [recordSaveError, setRecordSaveError] = useState<string | null>(null)
+  const [manualGroupCreating, setManualGroupCreating] = useState(false)
+  const [manualGroupSaving, setManualGroupSaving] = useState(false)
+  const [manualGroupError, setManualGroupError] = useState<string | null>(null)
+  const [manualMemberDrafts, setManualMemberDrafts] = useState<Record<string, ManualMemberDraft>>({})
+  const [manualMemberSaving, setManualMemberSaving] = useState<Record<string, boolean>>({})
+  const [manualMemberAddDraft, setManualMemberAddDraft] = useState<ManualMemberAddDraft>({
+    vpsID: '',
+    intendedRole: 'observe_candidate',
+    intendedAction: 'review',
+    reason: '',
+    note: '',
+    sortOrder: '',
+  })
   const [recordPatchStatus, setRecordPatchStatus] = useState<AssetDecisionRecordStatus>('draft')
   const [recordPatching, setRecordPatching] = useState(false)
   const [recordPatchError, setRecordPatchError] = useState<string | null>(null)
@@ -868,6 +1097,24 @@ export function AssetDecisionsPage() {
 
   useEffect(() => {
     let cancelled = false
+    listAssetDecisionManualGroups()
+      .then((groups) => {
+        if (cancelled) return
+        setManualGroupsState({ loading: false, error: null, groups })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setManualGroupsState({
+          loading: false,
+          error: describeError(error, '加载自定义组合失败'),
+          groups: [],
+        })
+      })
+    return () => { cancelled = true }
+  }, [refreshToken])
+
+  useEffect(() => {
+    let cancelled = false
     listSubscriptions({
       renew_within_days: renewalWindow,
       sort: 'renew_at',
@@ -930,6 +1177,24 @@ export function AssetDecisionsPage() {
   }, [refreshToken])
 
   useEffect(() => {
+    let cancelled = false
+    listVPSAssets()
+      .then((rows) => {
+        if (cancelled) return
+        setVPSCatalogState({ loading: false, error: null, rows })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setVPSCatalogState({
+          loading: false,
+          error: describeError(error, '加载 VPS 候选失败'),
+          rows: [],
+        })
+      })
+    return () => { cancelled = true }
+  }, [refreshToken])
+
+  useEffect(() => {
     if (!selectedGroupID) {
       return
     }
@@ -949,6 +1214,29 @@ export function AssetDecisionsPage() {
       })
     return () => { cancelled = true }
   }, [selectedGroupID, renewalWindow, refreshToken])
+
+  useEffect(() => {
+    if (!selectedManualGroupID) {
+      return
+    }
+    let cancelled = false
+    getAssetDecisionManualGroup(selectedManualGroupID)
+      .then((detail) => {
+        if (cancelled) return
+        setManualDetailState({ loading: false, error: null, detail })
+        setManualMemberDrafts(buildManualMemberDrafts(detail))
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setManualDetailState({
+          loading: false,
+          error: describeError(error, '加载自定义组合详情失败'),
+          detail: null,
+        })
+        setManualMemberDrafts({})
+      })
+    return () => { cancelled = true }
+  }, [selectedManualGroupID, refreshToken])
 
   useEffect(() => {
     if (!selectedRecordID) {
@@ -980,12 +1268,24 @@ export function AssetDecisionsPage() {
   )
   const vpsByID = useMemo(() => {
     const rows = new Map<string, VPSAssetRecord>()
+    for (const vps of vpsCatalogState.rows) rows.set(vps.vps_id, vps)
     for (const vps of [...queueState.unreviewed, ...queueState.migrate, ...queueState.cancel]) {
       rows.set(vps.vps_id, vps)
     }
     for (const member of detailState.detail?.members ?? []) rows.set(member.vps.vps_id, member.vps)
+    for (const member of manualDetailState.detail?.members ?? []) {
+      if (member.current_fact_found && member.vps?.vps_id) {
+        rows.set(member.vps.vps_id, member.vps)
+      }
+    }
     return rows
-  }, [detailState.detail?.members, queueState.cancel, queueState.migrate, queueState.unreviewed])
+  }, [detailState.detail?.members, manualDetailState.detail?.members, queueState.cancel, queueState.migrate, queueState.unreviewed, vpsCatalogState.rows])
+  const manualMemberCandidateRows = useMemo(() => {
+    const existing = new Set((manualDetailState.detail?.members ?? []).map((member) => member.vps_id))
+    return vpsCatalogState.rows
+      .filter((vps) => !existing.has(vps.vps_id))
+      .sort((left, right) => left.display_name.localeCompare(right.display_name))
+  }, [manualDetailState.detail?.members, vpsCatalogState.rows])
   const decisionQueue = useMemo(
     () =>
       buildDecisionQueue(
@@ -1100,6 +1400,94 @@ export function AssetDecisionsPage() {
       render: (group) => (
         <button className="btn sm primary" type="button" onClick={() => openGroup(group.group_id)}>
           查看组
+        </button>
+      ),
+    },
+  ]
+
+  const manualGroupColumns: DataTableColumn<AssetDecisionManualGroupSummary>[] = [
+    {
+      key: 'group',
+      label: '自定义组合',
+      width: '286px',
+      render: (group) => (
+        <div className="asset-table__identity asset-decision-group-cell">
+          <strong>{group.title}</strong>
+          <span>{MANUAL_GROUP_SCENARIO_LABELS[group.scenario]} · {group.goal || group.scope_label || '用户场景'}</span>
+          <span className="asset-decision-chip-row">
+            <Badge variant="state" tone={manualGroupStatusTone(group.status)}>
+              {MANUAL_GROUP_STATUS_LABELS[group.status]}
+            </Badge>
+            <Badge variant="info" tone="neutral">
+              {group.source_type === 'auto_group' ? '来自自动组' : '手工创建'}
+            </Badge>
+          </span>
+          {renderEvidenceChips(group.evidence_chips, 3)}
+        </div>
+      ),
+    },
+    {
+      key: 'portfolio',
+      label: '组合事实',
+      width: '220px',
+      render: (group) => (
+        <div className="asset-table__stack">
+          <strong><MonoDigits>{group.member_count}</MonoDigits> 台 VPS</strong>
+          <span>{countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</span>
+          <span>{countSummary(group.renewal_decision_counts, ['unreviewed', 'keep', 'observe', 'migrate', 'cancel', 'auto_renew_cancelled', 'replaced'], renewalLabel)}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'evidence',
+      label: '证据',
+      width: '236px',
+      render: (group) => (
+        <div className="asset-table__stack">
+          <strong>
+            服务 {group.service_count} · 域名 {group.domain_count}
+          </strong>
+          <span>Target {group.running_target_count}/{group.target_count} · 监控 {group.monitoring_link_count}</span>
+          <span>资料缺口 {group.evidence_assessment.gap_signal_count} · 风险 {group.evidence_assessment.risk_signal_count}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'assessment',
+      label: '判断尺度',
+      width: '238px',
+      render: (group) => renderEvidenceAssessment(group.evidence_assessment),
+    },
+    {
+      key: 'cost',
+      label: '成本',
+      width: '176px',
+      render: (group) => (
+        <div className="asset-table__stack">
+          <strong>{formatGroupMonthlyCost(group)}</strong>
+          <span>{formatGroupYearlyCost(group)}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'updated',
+      label: '更新',
+      width: '160px',
+      render: (group) => (
+        <div className="asset-table__stack">
+          <strong>{formatDateTime(group.updated_at)}</strong>
+          <span>{group.archived_at ? `归档 ${formatDateTime(group.archived_at)}` : '持续跟进'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '入口',
+      align: 'right',
+      width: '128px',
+      render: (group) => (
+        <button className="btn sm primary" type="button" onClick={() => openManualGroup(group.manual_group_id)}>
+          查看组合
         </button>
       ),
     },
@@ -1294,6 +1682,149 @@ export function AssetDecisionsPage() {
     },
   ]
 
+  const manualMemberColumns: DataTableColumn<AssetDecisionManualGroupMember>[] = [
+    {
+      key: 'vps',
+      label: 'VPS',
+      width: '236px',
+      render: (member) => {
+        const displayName = member.current_fact_found ? member.vps.display_name : member.vps_id
+        return (
+          <div className="asset-table__identity">
+            <strong>
+              {member.current_fact_found ? (
+                <Link className="name" to={`/vps/${member.vps_id}`}>{displayName}</Link>
+              ) : (
+                displayName
+              )}
+            </strong>
+            <span>{member.current_fact_found ? `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}` : '当前资产事实缺失'}</span>
+            <span>{member.current_fact_found ? member.vps.product_name || member.vps_id : member.vps_id}</span>
+            <span className="asset-decision-chip-row">
+              {member.current_fact_found ? (
+                <>
+                  <LifecycleBadge value={member.vps.lifecycle_status} />
+                  <UsageBadge value={member.vps.usage_status} />
+                  <RenewalBadge value={member.vps.renewal_decision} />
+                </>
+              ) : (
+                <Badge variant="state" tone="critical">事实缺失</Badge>
+              )}
+            </span>
+          </div>
+        )
+      },
+    },
+    {
+      key: 'context',
+      label: '当前上下文',
+      width: '248px',
+      render: (member) => (
+        <div className="asset-table__stack">
+          <strong>{member.current_fact_found ? memberContextLabel(member) : '无法回读当前事实'}</strong>
+          <span>{member.current_fact_found ? sourceAvailabilityLabel(member.source_availability) : '手工组合成员仍在，但当前 facts 未返回该 VPS'}</span>
+          <span>{member.primary_issue_summary || '暂无主要问题'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'intent',
+      label: '组合意图',
+      width: '336px',
+      render: (member) => {
+        const draft = manualMemberDrafts[member.vps_id] ?? {
+          intendedRole: member.intended_role,
+          intendedAction: member.intended_action,
+          reason: member.reason,
+          note: member.note,
+          sortOrder: String(member.sort_order),
+        }
+        const isSaving = Boolean(manualMemberSaving[member.vps_id])
+        return (
+          <form className="asset-decision-manual-member-form" onSubmit={(event) => submitManualMemberPatch(event, member)}>
+            <label className="visually-hidden" htmlFor={`manual-role-${member.manual_group_id}-${member.vps_id}`}>
+              {member.vps_id} 组合角色
+            </label>
+            <select
+              id={`manual-role-${member.manual_group_id}-${member.vps_id}`}
+              aria-label={`${member.vps_id} 组合角色`}
+              className="input"
+              value={draft.intendedRole}
+              onChange={(event) => updateManualMemberDraft(member.vps_id, { intendedRole: event.target.value as AssetDecisionSuggestedRole })}
+            >
+              {ROLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <label className="visually-hidden" htmlFor={`manual-action-${member.manual_group_id}-${member.vps_id}`}>
+              {member.vps_id} 组合动作
+            </label>
+            <select
+              id={`manual-action-${member.manual_group_id}-${member.vps_id}`}
+              aria-label={`${member.vps_id} 组合动作`}
+              className="input"
+              value={draft.intendedAction}
+              onChange={(event) => updateManualMemberDraft(member.vps_id, { intendedAction: event.target.value as AssetDecisionSuggestedAction })}
+            >
+              {ACTION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <label className="visually-hidden" htmlFor={`manual-reason-${member.manual_group_id}-${member.vps_id}`}>
+              {member.vps_id} 意图理由
+            </label>
+            <input
+              id={`manual-reason-${member.manual_group_id}-${member.vps_id}`}
+              aria-label={`${member.vps_id} 意图理由`}
+              className="input"
+              value={draft.reason}
+              placeholder="理由"
+              onChange={(event) => updateManualMemberDraft(member.vps_id, { reason: event.target.value })}
+            />
+            <label className="visually-hidden" htmlFor={`manual-note-${member.manual_group_id}-${member.vps_id}`}>
+              {member.vps_id} 备注
+            </label>
+            <input
+              id={`manual-note-${member.manual_group_id}-${member.vps_id}`}
+              aria-label={`${member.vps_id} 备注`}
+              className="input"
+              value={draft.note}
+              placeholder="备注"
+              onChange={(event) => updateManualMemberDraft(member.vps_id, { note: event.target.value })}
+            />
+            <div className="asset-decision-manual-member-form__actions">
+              <button className="btn sm primary" type="submit" disabled={isSaving}>
+                {isSaving ? '保存中…' : '保存意图'}
+              </button>
+              <button className="btn sm secondary" type="button" onClick={() => deleteManualMember(member)} disabled={isSaving}>
+                移除
+              </button>
+            </div>
+          </form>
+        )
+      },
+    },
+    {
+      key: 'evidence',
+      label: '证据',
+      width: '250px',
+      render: (member) => (
+        <div className="asset-table__stack">
+          <span className="asset-decision-chip-row">
+            <Badge variant="state" tone={roleTone(member.intended_role)}>
+              {ROLE_LABELS[member.intended_role]}
+            </Badge>
+            <Badge variant="state" tone={actionTone(member.intended_action)}>
+              {ACTION_LABELS[member.intended_action]}
+            </Badge>
+          </span>
+          {renderEvidenceAssessment(member.evidence_assessment)}
+          {renderEvidenceChips(member.evidence_chips, 3)}
+        </div>
+      ),
+    },
+  ]
+
   const recordMemberColumns: DataTableColumn<AssetDecisionRecordMember>[] = [
     {
       key: 'vps',
@@ -1465,6 +1996,7 @@ export function AssetDecisionsPage() {
     setDecisionError(null)
     setRecordDraft(null)
     setRecordSaveError(null)
+    setManualGroupError(null)
     setDetailState({ loading: true, error: null, detail: null })
     setSelectedGroupID(groupID)
   }
@@ -1479,8 +2011,78 @@ export function AssetDecisionsPage() {
     setDecisionError(null)
   }
 
+  function openManualGroup(manualGroupID: string) {
+    setSelectedGroupID(null)
+    setDetailState(INITIAL_DETAIL_STATE)
+    setSelectedVPS(null)
+    setDecisionError(null)
+    setRecordDraft(null)
+    setRecordSaveError(null)
+    setManualGroupError(null)
+    setManualDetailState({ loading: true, error: null, detail: null })
+    setSelectedManualGroupID(manualGroupID)
+  }
+
+  function closeManualGroupDetail() {
+    setSelectedManualGroupID(null)
+    setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
+    setManualGroupError(null)
+    setManualMemberDrafts({})
+    setManualMemberSaving({})
+    setManualMemberAddDraft({
+      vpsID: '',
+      intendedRole: 'observe_candidate',
+      intendedAction: 'review',
+      reason: '',
+      note: '',
+      sortOrder: '',
+    })
+    setRecordDraft(null)
+    setRecordSaveError(null)
+  }
+
+  function applyManualDetail(detail: AssetDecisionManualGroupDetail) {
+    setManualDetailState({ loading: false, error: null, detail })
+    setManualMemberDrafts(buildManualMemberDrafts(detail))
+    setManualGroupsState((current) => ({
+      loading: false,
+      error: null,
+      groups: upsertManualGroupSummary(current.groups, detail),
+    }))
+  }
+
+  function createManualGroupFromAuto(detail: AssetDecisionGroupDetail) {
+    setManualGroupError(null)
+    setManualGroupCreating(true)
+    createAssetDecisionManualGroup({
+      source_type: 'auto_group',
+      source_group_id: detail.group_id,
+      renew_within_days: renewalWindow,
+      scenario: scenarioForGroup(detail),
+      title: detail.title,
+      goal: '',
+      note: `由自动组 ${detail.group_id} 创建`,
+    })
+      .then((manualDetail) => {
+        applyManualDetail(manualDetail)
+        setSelectedGroupID(null)
+        setDetailState(INITIAL_DETAIL_STATE)
+        setSelectedManualGroupID(manualDetail.manual_group_id)
+        setDecisionNotice(`已创建自定义组合：${manualDetail.title}`)
+      })
+      .catch((error: unknown) => {
+        setManualGroupError(describeError(error, '创建自定义组合失败'))
+      })
+      .finally(() => setManualGroupCreating(false))
+  }
+
   function startRecordSave(detail: AssetDecisionGroupDetail) {
-    setRecordDraft(buildRecordDraft(detail))
+    setRecordDraft(buildRecordDraft(detail, renewalWindow))
+    setRecordSaveError(null)
+  }
+
+  function startManualRecordSave(detail: AssetDecisionManualGroupDetail) {
+    setRecordDraft(buildManualRecordDraft(detail))
     setRecordSaveError(null)
   }
 
@@ -1509,9 +2111,8 @@ export function AssetDecisionsPage() {
 
   function submitRecordSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const detail = detailState.detail
     const draft = recordDraft
-    if (!detail || !draft) return
+    if (!draft) return
     setRecordSaveError(null)
 
     const title = draft.title.trim()
@@ -1522,17 +2123,18 @@ export function AssetDecisionsPage() {
 
     setRecordSaving(true)
     createAssetDecisionRecord({
-      source_group_id: detail.group_id,
-      renew_within_days: renewalWindow,
+      source_type: draft.sourceType,
+      source_group_id: draft.sourceGroupID,
+      renew_within_days: draft.renewWithinDays,
       title,
       goal: draft.goal.trim(),
       status: draft.status,
-      members: detail.members.map((member) => {
-        const memberDraft = draft.members[member.vps.vps_id]
+      members: draft.memberOrder.map((vpsID) => {
+        const memberDraft = draft.members[vpsID]
         return {
-          vps_id: member.vps.vps_id,
-          decided_role: memberDraft?.decidedRole ?? member.suggested_role,
-          decided_action: memberDraft?.decidedAction ?? member.suggested_action,
+          vps_id: vpsID,
+          decided_role: memberDraft?.decidedRole ?? 'observe_candidate',
+          decided_action: memberDraft?.decidedAction ?? 'review',
           reason: memberDraft?.reason.trim() ?? '',
         }
       }),
@@ -1546,7 +2148,9 @@ export function AssetDecisionsPage() {
         setRecordDraft(null)
         setDecisionNotice(`已保存组合决策记录：${record.title}`)
         setSelectedGroupID(null)
+        setSelectedManualGroupID(null)
         setDetailState(INITIAL_DETAIL_STATE)
+        setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
         setSelectedVPS(null)
         setSelectedRecordID(record.record_id)
         setRecordDetailState({ loading: false, error: null, detail: record })
@@ -1559,6 +2163,13 @@ export function AssetDecisionsPage() {
   }
 
   function openRecord(recordID: string) {
+    setSelectedGroupID(null)
+    setSelectedManualGroupID(null)
+    setDetailState(INITIAL_DETAIL_STATE)
+    setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
+    setSelectedVPS(null)
+    setRecordDraft(null)
+    setRecordSaveError(null)
     setSelectedRecordID(recordID)
     setRecordDetailState({ loading: true, error: null, detail: null })
     setRecordPatchError(null)
@@ -1593,6 +2204,134 @@ export function AssetDecisionsPage() {
         setRecordPatchError(describeError(error, '更新决策记录状态失败'))
       })
       .finally(() => setRecordPatching(false))
+  }
+
+  function updateManualMemberDraft(vpsID: string, patch: Partial<ManualMemberDraft>) {
+    setManualMemberDrafts((current) => ({
+      ...current,
+      [vpsID]: {
+        ...current[vpsID],
+        ...patch,
+      },
+    }))
+  }
+
+  function submitManualGroupPatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = manualDetailState.detail
+    if (!detail) return
+    const form = new FormData(event.currentTarget)
+    const title = String(form.get('title') ?? '').trim()
+    if (!title) {
+      setManualGroupError('请填写自定义组合标题')
+      return
+    }
+    setManualGroupError(null)
+    setManualGroupSaving(true)
+    patchAssetDecisionManualGroup(detail.manual_group_id, {
+      title,
+      goal: String(form.get('goal') ?? '').trim(),
+      note: String(form.get('note') ?? '').trim(),
+      scenario: String(form.get('scenario') ?? detail.scenario) as AssetDecisionManualGroupScenario,
+      status: String(form.get('status') ?? detail.status) as AssetDecisionManualGroupStatus,
+    })
+      .then((updated) => {
+        applyManualDetail(updated)
+        setDecisionNotice(`自定义组合已更新：${updated.title}`)
+      })
+      .catch((error: unknown) => {
+        setManualGroupError(describeError(error, '更新自定义组合失败'))
+      })
+      .finally(() => setManualGroupSaving(false))
+  }
+
+  function submitManualMemberAdd(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const detail = manualDetailState.detail
+    if (!detail) return
+    const vpsID = manualMemberAddDraft.vpsID.trim()
+    if (!vpsID) {
+      setManualGroupError('请选择要加入组合的 VPS')
+      return
+    }
+    const parsedSortOrder = Number.parseInt(manualMemberAddDraft.sortOrder, 10)
+    setManualGroupError(null)
+    setManualGroupSaving(true)
+    addAssetDecisionManualGroupMember(detail.manual_group_id, {
+      vps_id: vpsID,
+      intended_role: manualMemberAddDraft.intendedRole,
+      intended_action: manualMemberAddDraft.intendedAction,
+      reason: manualMemberAddDraft.reason.trim(),
+      note: manualMemberAddDraft.note.trim(),
+      ...(Number.isFinite(parsedSortOrder) ? { sort_order: parsedSortOrder } : {}),
+    })
+      .then((updated) => {
+        applyManualDetail(updated)
+        setManualMemberAddDraft({
+          vpsID: '',
+          intendedRole: 'observe_candidate',
+          intendedAction: 'review',
+          reason: '',
+          note: '',
+          sortOrder: '',
+        })
+        setDecisionNotice('自定义组合成员已加入')
+      })
+      .catch((error: unknown) => {
+        setManualGroupError(describeError(error, '新增自定义组合成员失败'))
+      })
+      .finally(() => setManualGroupSaving(false))
+  }
+
+  function submitManualMemberPatch(event: FormEvent<HTMLFormElement>, member: AssetDecisionManualGroupMember) {
+    event.preventDefault()
+    const detail = manualDetailState.detail
+    if (!detail) return
+    const draft = manualMemberDrafts[member.vps_id] ?? {
+      intendedRole: member.intended_role,
+      intendedAction: member.intended_action,
+      reason: member.reason,
+      note: member.note,
+      sortOrder: String(member.sort_order),
+    }
+    const parsedSortOrder = Number.parseInt(draft.sortOrder, 10)
+    setManualGroupError(null)
+    setManualMemberSaving((current) => ({ ...current, [member.vps_id]: true }))
+    patchAssetDecisionManualGroupMember(detail.manual_group_id, member.vps_id, {
+      intended_role: draft.intendedRole,
+      intended_action: draft.intendedAction,
+      reason: draft.reason.trim(),
+      note: draft.note.trim(),
+      ...(Number.isFinite(parsedSortOrder) ? { sort_order: parsedSortOrder } : {}),
+    })
+      .then((updated) => {
+        applyManualDetail(updated)
+        setDecisionNotice(`成员意图已更新：${member.current_fact_found ? member.vps.display_name : member.vps_id}`)
+      })
+      .catch((error: unknown) => {
+        setManualGroupError(describeError(error, '更新成员意图失败'))
+      })
+      .finally(() => {
+        setManualMemberSaving((current) => ({ ...current, [member.vps_id]: false }))
+      })
+  }
+
+  function deleteManualMember(member: AssetDecisionManualGroupMember) {
+    const detail = manualDetailState.detail
+    if (!detail) return
+    setManualGroupError(null)
+    setManualMemberSaving((current) => ({ ...current, [member.vps_id]: true }))
+    deleteAssetDecisionManualGroupMember(detail.manual_group_id, member.vps_id)
+      .then((updated) => {
+        applyManualDetail(updated)
+        setDecisionNotice(`成员已移出自定义组合：${member.current_fact_found ? member.vps.display_name : member.vps_id}`)
+      })
+      .catch((error: unknown) => {
+        setManualGroupError(describeError(error, '移除成员失败'))
+      })
+      .finally(() => {
+        setManualMemberSaving((current) => ({ ...current, [member.vps_id]: false }))
+      })
   }
 
   function updateRecordFollowupDraft(vpsID: string, patch: Partial<RecordFollowupDraft>) {
@@ -1847,7 +2586,55 @@ export function AssetDecisionsPage() {
         )}
       </section>
 
-      <section className="page-panel asset-decision-records animate-in d3">
+      <section className="page-panel asset-decision-manual-groups animate-in d3">
+        <div className="asset-decision-board__header">
+          <div>
+            <p className="section-heading__eyebrow">SCENARIO WORKBENCH</p>
+            <h2>自定义组合</h2>
+            <p>把系统发现的自动组沉淀成真实问题篮子，也可以围绕预算、主备、迁移退役持续调整成员意图。</p>
+          </div>
+          <span className="section-count">
+            {manualGroupsState.loading ? '...' : manualGroupsState.error ? '不可用' : `${manualGroupsState.groups.length} 个`}
+          </span>
+        </div>
+        {manualGroupsState.loading ? (
+          <PageStateView
+            kind="loading"
+            title="正在加载自定义组合…"
+            surface="empty"
+            compact
+          />
+        ) : manualGroupsState.error ? (
+          <PageStateView
+            kind="error"
+            title="自定义组合不可用"
+            description={<>{manualGroupsState.error}</>}
+            technicalSummary={manualGroupsState.error}
+            surface="empty"
+            compact
+          />
+        ) : manualGroupsState.groups.length === 0 ? (
+          <PageStateView
+            kind="empty"
+            title="尚未创建自定义组合"
+            description="打开上方自动决策组后，可以把它创建为可长期编辑的手工组合。"
+            surface="empty"
+            compact
+          />
+        ) : (
+          <div className="asset-table-scroll" role="region" aria-label="自定义资产组合" tabIndex={0}>
+            <DataTable
+              className="asset-table asset-decision-manual-groups-table"
+              columns={manualGroupColumns}
+              rows={manualGroupsState.groups}
+              rowKey={(group) => group.manual_group_id}
+              onRowClick={(group) => openManualGroup(group.manual_group_id)}
+            />
+          </div>
+        )}
+      </section>
+
+      <section className="page-panel asset-decision-records animate-in d4">
         <div className="asset-decision-board__header">
           <div>
             <p className="section-heading__eyebrow">DECISION MEMORY</p>
@@ -1895,7 +2682,7 @@ export function AssetDecisionsPage() {
         )}
       </section>
 
-      <section className="page-panel asset-renewal-evidence animate-in d4">
+      <section className="page-panel asset-renewal-evidence animate-in d5">
         <div className="section-heading section-heading--inline">
           <div>
             <p className="section-heading__eyebrow">RENEWAL EVIDENCE</p>
@@ -2136,13 +2923,24 @@ export function AssetDecisionsPage() {
             <div className="asset-decision-detail__evidence">
               {renderEvidenceAssessment(detailState.detail.evidence_assessment, 'detail')}
               {renderEvidenceChips(detailState.detail.evidence_chips, 8)}
-              <button className="btn sm primary" type="button" onClick={() => startRecordSave(detailState.detail!)}>
-                保存为决策记录
-              </button>
+              <div className="asset-decision-member-actions">
+                <button
+                  className="btn sm primary"
+                  type="button"
+                  onClick={() => createManualGroupFromAuto(detailState.detail!)}
+                  disabled={manualGroupCreating}
+                >
+                  {manualGroupCreating ? '创建中…' : '创建自定义组合'}
+                </button>
+                <button className="btn sm secondary" type="button" onClick={() => startRecordSave(detailState.detail!)}>
+                  保存为决策记录
+                </button>
+              </div>
               {detailState.detail.primary_issue_summary && (
                 <span className="asset-decision-detail__issue">{detailState.detail.primary_issue_summary}</span>
               )}
             </div>
+            {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
             {recordDraft && (
               <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
                 <div className="asset-decision-record-form__header">
@@ -2263,6 +3061,297 @@ export function AssetDecisionsPage() {
                 />
               </div>
             )}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={selectedManualGroupID != null}
+        onClose={closeManualGroupDetail}
+        title={manualDetailState.detail?.title ?? '自定义组合详情'}
+        ariaLabel="自定义资产组合详情"
+        size="xl"
+        contentClassName="asset-decision-manual-modal"
+      >
+        {manualDetailState.loading ? (
+          <PageStateView kind="loading" title="正在加载自定义组合详情…" surface="empty" compact />
+        ) : manualDetailState.error ? (
+          <PageStateView
+            kind="error"
+            title="自定义组合详情不可用"
+            description={<>{manualDetailState.error}</>}
+            technicalSummary={manualDetailState.error}
+            surface="empty"
+            compact
+          />
+        ) : manualDetailState.detail ? (
+          <div className="asset-decision-detail asset-decision-manual-detail">
+            <div className="asset-decision-detail__summary">
+              <div>
+                <span>场景</span>
+                <strong>{MANUAL_GROUP_SCENARIO_LABELS[manualDetailState.detail.scenario]}</strong>
+                <small>{MANUAL_GROUP_STATUS_LABELS[manualDetailState.detail.status]}</small>
+              </div>
+              <div>
+                <span>VPS</span>
+                <strong><MonoDigits>{manualDetailState.detail.member_count}</MonoDigits></strong>
+                <small>{countSummary(manualDetailState.detail.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</small>
+              </div>
+              <div>
+                <span>成本</span>
+                <strong>{formatGroupMonthlyCost(manualDetailState.detail)}</strong>
+                <small>{formatGroupYearlyCost(manualDetailState.detail)}</small>
+              </div>
+              <div>
+                <span>证据质量</span>
+                <strong>{EVIDENCE_TIER_LABELS[manualDetailState.detail.evidence_assessment.quality_tier]}</strong>
+                <small>可信 {manualDetailState.detail.evidence_assessment.confidence_score} · 缺口 {manualDetailState.detail.evidence_assessment.gap_signal_count}</small>
+              </div>
+            </div>
+
+            <form className="asset-decision-manual-group-form" onSubmit={submitManualGroupPatch}>
+              <div className="asset-decision-record-form__header">
+                <div>
+                  <p className="section-heading__eyebrow">SCENARIO</p>
+                  <h3>组合场景</h3>
+                  <p>{manualDetailState.detail.source_type === 'auto_group' ? `来自自动组 ${manualDetailState.detail.source_group_id}` : '手工维护的资产对比篮子'}</p>
+                </div>
+                <div className="asset-decision-member-actions">
+                  <button className="btn sm primary" type="submit" disabled={manualGroupSaving}>
+                    {manualGroupSaving ? '保存中…' : '保存组合'}
+                  </button>
+                  <button
+                    className="btn sm secondary"
+                    type="button"
+                    onClick={() => startManualRecordSave(manualDetailState.detail!)}
+                    disabled={manualDetailState.detail.members.length === 0}
+                  >
+                    保存为决策记录
+                  </button>
+                </div>
+              </div>
+              {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
+              <div className="asset-decision-manual-group-form__grid">
+                <label className="input-field">
+                  <span>标题</span>
+                  <input className="input" name="title" defaultValue={manualDetailState.detail.title} />
+                </label>
+                <label className="input-field">
+                  <span>场景</span>
+                  <select className="input" name="scenario" defaultValue={manualDetailState.detail.scenario}>
+                    {MANUAL_GROUP_SCENARIO_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="input-field">
+                  <span>状态</span>
+                  <select className="input" name="status" defaultValue={manualDetailState.detail.status}>
+                    <option value="active">进行中</option>
+                    <option value="archived">已归档</option>
+                  </select>
+                </label>
+                <label className="input-field asset-decision-record-form__goal">
+                  <span>组合目标</span>
+                  <textarea className="input" name="goal" rows={2} defaultValue={manualDetailState.detail.goal} />
+                </label>
+                <label className="input-field asset-decision-record-form__goal">
+                  <span>备注</span>
+                  <textarea className="input" name="note" rows={2} defaultValue={manualDetailState.detail.note} />
+                </label>
+              </div>
+            </form>
+
+            <form className="asset-decision-manual-add-form" onSubmit={submitManualMemberAdd}>
+              <div className="asset-decision-record-form__header">
+                <div>
+                  <p className="section-heading__eyebrow">MEMBER</p>
+                  <h3>加入 VPS</h3>
+                  <p>从当前 VPS 资产目录选择成员，组合只保存意图，不修改 VPS 状态。</p>
+                </div>
+                <button className="btn sm primary" type="submit" disabled={manualGroupSaving || vpsCatalogState.loading || !manualMemberAddDraft.vpsID}>
+                  {manualGroupSaving ? '加入中…' : '加入组合'}
+                </button>
+              </div>
+              {vpsCatalogState.error && <div className="inline-alert danger">{vpsCatalogState.error}</div>}
+              <div className="asset-decision-manual-add-form__grid">
+                <label className="input-field">
+                  <span>VPS</span>
+                  <select
+                    className="input"
+                    value={manualMemberAddDraft.vpsID}
+                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, vpsID: event.target.value }))}
+                    disabled={vpsCatalogState.loading || Boolean(vpsCatalogState.error)}
+                  >
+                    <option value="">{vpsCatalogState.loading ? '正在加载 VPS…' : manualMemberCandidateRows.length === 0 ? '暂无可加入 VPS' : '选择 VPS'}</option>
+                    {manualMemberCandidateRows.map((vps) => (
+                      <option key={vps.vps_id} value={vps.vps_id}>
+                        {vps.display_name} · {formatOptional(vps.provider_name)} · {vpsLocationLabel(vps)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="input-field">
+                  <span>角色</span>
+                  <select
+                    className="input"
+                    value={manualMemberAddDraft.intendedRole}
+                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, intendedRole: event.target.value as AssetDecisionSuggestedRole }))}
+                  >
+                    {ROLE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="input-field">
+                  <span>动作</span>
+                  <select
+                    className="input"
+                    value={manualMemberAddDraft.intendedAction}
+                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, intendedAction: event.target.value as AssetDecisionSuggestedAction }))}
+                  >
+                    {ACTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="input-field">
+                  <span>排序</span>
+                  <input
+                    className="input"
+                    inputMode="numeric"
+                    value={manualMemberAddDraft.sortOrder}
+                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, sortOrder: event.target.value }))}
+                    placeholder="自动"
+                  />
+                </label>
+                <label className="input-field">
+                  <span>理由</span>
+                  <input
+                    className="input"
+                    value={manualMemberAddDraft.reason}
+                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, reason: event.target.value }))}
+                    placeholder="加入组合的原因"
+                  />
+                </label>
+                <label className="input-field">
+                  <span>备注</span>
+                  <input
+                    className="input"
+                    value={manualMemberAddDraft.note}
+                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, note: event.target.value }))}
+                    placeholder="可选"
+                  />
+                </label>
+              </div>
+            </form>
+
+            {recordDraft && recordDraft.sourceType === 'manual_group' && (
+              <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
+                <div className="asset-decision-record-form__header">
+                  <div>
+                    <p className="section-heading__eyebrow">SAVE DECISION</p>
+                    <h3>保存自定义组合决策</h3>
+                    <p>使用当前自定义组合成员意图生成一次可跟进、可回读的决策记录。</p>
+                  </div>
+                  <div className="asset-decision-member-actions">
+                    <button className="btn sm primary" type="submit" disabled={recordSaving}>
+                      {recordSaving ? '保存中…' : '保存记录'}
+                    </button>
+                    <button className="btn sm secondary" type="button" onClick={cancelRecordSave} disabled={recordSaving}>
+                      取消
+                    </button>
+                  </div>
+                </div>
+                {recordSaveError && <div className="inline-alert danger">{recordSaveError}</div>}
+                <div className="asset-decision-record-form__grid">
+                  <label className="input-field">
+                    <span>标题</span>
+                    <input
+                      className="input"
+                      value={recordDraft.title}
+                      onChange={(event) => setRecordDraft((current) => current ? { ...current, title: event.target.value } : current)}
+                    />
+                  </label>
+                  <label className="input-field">
+                    <span>状态</span>
+                    <select
+                      className="input"
+                      value={recordDraft.status}
+                      onChange={(event) => setRecordDraft((current) => current ? { ...current, status: event.target.value as AssetDecisionRecordStatus } : current)}
+                    >
+                      {RECORD_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="input-field asset-decision-record-form__goal">
+                    <span>组合目标</span>
+                    <textarea
+                      className="input"
+                      value={recordDraft.goal}
+                      rows={2}
+                      onChange={(event) => setRecordDraft((current) => current ? { ...current, goal: event.target.value } : current)}
+                    />
+                  </label>
+                </div>
+                <div className="asset-decision-record-form__members">
+                  {manualDetailState.detail.members.map((member) => {
+                    const memberDraft = recordDraft.members[member.vps_id]
+                    return (
+                      <div className="asset-decision-record-form__member" key={member.vps_id}>
+                        <div className="asset-table__identity">
+                          <strong>{member.current_fact_found ? member.vps.display_name : member.vps_id}</strong>
+                          <span>{member.vps_id}</span>
+                          {renderEvidenceChips(member.evidence_chips, 2)}
+                        </div>
+                        <label className="input-field">
+                          <span>角色</span>
+                          <select
+                            className="input"
+                            value={memberDraft?.decidedRole ?? member.intended_role}
+                            onChange={(event) => updateRecordDraftMember(member.vps_id, { decidedRole: event.target.value as AssetDecisionSuggestedRole })}
+                          >
+                            {ROLE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="input-field">
+                          <span>动作</span>
+                          <select
+                            className="input"
+                            value={memberDraft?.decidedAction ?? member.intended_action}
+                            onChange={(event) => updateRecordDraftMember(member.vps_id, { decidedAction: event.target.value as AssetDecisionSuggestedAction })}
+                          >
+                            {ACTION_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="input-field">
+                          <span>理由</span>
+                          <input
+                            className="input"
+                            value={memberDraft?.reason ?? ''}
+                            onChange={(event) => updateRecordDraftMember(member.vps_id, { reason: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                    )
+                  })}
+                </div>
+              </form>
+            )}
+
+            <div className="asset-table-scroll" role="region" aria-label="自定义组合成员对比" tabIndex={0}>
+              <DataTable
+                className="asset-table asset-decision-manual-members-table"
+                columns={manualMemberColumns}
+                rows={manualDetailState.detail.members}
+                rowKey={(member) => member.vps_id}
+              />
+            </div>
           </div>
         ) : null}
       </Modal>

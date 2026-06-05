@@ -15,8 +15,15 @@ import (
 )
 
 var ErrAssetDecisionGroupNotFound = errors.New("asset decision group not found")
+var ErrAssetDecisionManualGroupNotFound = errors.New("asset decision manual group not found")
+var ErrAssetDecisionManualGroupMemberNotFound = errors.New("asset decision manual group member not found")
 var ErrAssetDecisionRecordNotFound = errors.New("asset decision record not found")
 var ErrInvalidAssetDecisionInput = errors.New("invalid asset decision input")
+
+const (
+	RecordSourceAutoGroup   = "auto_group"
+	RecordSourceManualGroup = "manual_group"
+)
 
 type GroupType string
 
@@ -99,6 +106,7 @@ const (
 	EvidenceExchangeRateStale       EvidenceKind = "exchange_rate_stale"
 	EvidenceNoServiceContext        EvidenceKind = "no_service_context"
 	EvidenceSubscriptionUnavailable EvidenceKind = "subscription_unavailable"
+	EvidenceCurrentFactMissing      EvidenceKind = "current_fact_missing"
 )
 
 type ListFilters struct {
@@ -261,6 +269,7 @@ type RecordMember struct {
 }
 
 type CreateRecordInput struct {
+	SourceType      string                    `json:"source_type"`
 	SourceGroupID   string                    `json:"source_group_id"`
 	RenewWithinDays int                       `json:"renew_within_days"`
 	Title           string                    `json:"title"`
@@ -304,10 +313,42 @@ type PatchFollowupStatus struct {
 	Value FollowupStatus
 }
 
+type PatchSuggestedRole struct {
+	Set   bool
+	Value SuggestedRole
+}
+
+type PatchSuggestedAction struct {
+	Set   bool
+	Value SuggestedAction
+}
+
+type PatchManualGroupStatus struct {
+	Set   bool
+	Value ManualGroupStatus
+}
+
+type PatchManualGroupScenario struct {
+	Set   bool
+	Value ManualGroupScenario
+}
+
+type PatchInt struct {
+	Set   bool
+	Value int
+}
+
 type Repository interface {
 	GetOverview(context.Context, ListFilters) (Overview, error)
 	ListGroups(context.Context, ListFilters) ([]GroupSummary, error)
 	GetGroup(context.Context, string, ListFilters) (GroupDetail, error)
+	ListManualGroups(context.Context) ([]ManualGroupSummary, error)
+	CreateManualGroup(context.Context, CreateManualGroupInput) (ManualGroupDetail, error)
+	GetManualGroup(context.Context, string) (ManualGroupDetail, error)
+	PatchManualGroup(context.Context, string, PatchManualGroupInput) (ManualGroupDetail, error)
+	AddManualGroupMember(context.Context, string, CreateManualGroupMemberInput) (ManualGroupDetail, error)
+	PatchManualGroupMember(context.Context, string, string, PatchManualGroupMemberInput) (ManualGroupDetail, error)
+	DeleteManualGroupMember(context.Context, string, string) (ManualGroupDetail, error)
 	ListRecords(context.Context) ([]RecordSummary, error)
 	CreateRecord(context.Context, CreateRecordInput) (RecordDetail, error)
 	GetRecord(context.Context, string) (RecordDetail, error)
@@ -360,6 +401,10 @@ func StableGroupID(groupType GroupType, parts ...string) string {
 }
 
 func NormalizeCreateRecordInput(input CreateRecordInput) CreateRecordInput {
+	input.SourceType = strings.TrimSpace(input.SourceType)
+	if input.SourceType == "" {
+		input.SourceType = RecordSourceAutoGroup
+	}
 	input.SourceGroupID = strings.TrimSpace(input.SourceGroupID)
 	input.Title = strings.TrimSpace(input.Title)
 	input.Goal = strings.TrimSpace(input.Goal)
@@ -393,6 +438,9 @@ func NormalizePatchRecordInput(input PatchRecordInput) PatchRecordInput {
 }
 
 func ValidateCreateRecordInput(input CreateRecordInput) error {
+	if err := ValidateRecordSourceType(input.SourceType); err != nil {
+		return err
+	}
 	if input.SourceGroupID == "" {
 		return ErrInvalidAssetDecisionInput
 	}
@@ -423,6 +471,15 @@ func ValidateCreateRecordInput(input CreateRecordInput) error {
 		}
 	}
 	return nil
+}
+
+func ValidateRecordSourceType(sourceType string) error {
+	switch sourceType {
+	case RecordSourceAutoGroup, RecordSourceManualGroup:
+		return nil
+	default:
+		return ErrInvalidAssetDecisionInput
+	}
 }
 
 func ValidatePatchRecordInput(input PatchRecordInput) error {

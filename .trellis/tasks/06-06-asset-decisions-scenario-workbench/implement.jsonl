@@ -1,0 +1,4 @@
+{"file": "internal/center/assetdecisions/manual_groups.go", "reason": "manual scenario group domain and derivation"}
+{"file": "internal/center/store/asset_decision_manual_groups.go", "reason": "manual scenario group persistence and facts read model"}
+{"file": "web/src/pages/AssetDecisionsPage.tsx", "reason": "custom scenario group workbench UI"}
+{"file": "db/migrations/0037_create_asset_decision_manual_groups.sql", "reason": "manual group persistence migration"}

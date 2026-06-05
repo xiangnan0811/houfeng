@@ -857,6 +857,7 @@ export type AssetDecisionEvidenceKind =
   | 'exchange_rate_stale'
   | 'no_service_context'
   | 'subscription_unavailable'
+  | 'current_fact_missing'
 
 export type AssetDecisionSourceAvailability = {
   subscriptions: boolean
@@ -969,6 +970,83 @@ export type AssetDecisionGroupDetail = AssetDecisionGroupSummary & {
   members: AssetDecisionGroupMember[]
 }
 
+export type AssetDecisionManualGroupStatus = 'active' | 'archived'
+
+export type AssetDecisionManualGroupScenario =
+  | 'general'
+  | 'primary_standby'
+  | 'budget_reduction'
+  | 'provider_review'
+  | 'region_review'
+  | 'migration_retirement'
+  | 'evidence_cleanup'
+
+export type AssetDecisionSourceType = 'auto_group' | 'manual_group'
+
+export type AssetDecisionManualGroupSummary = {
+  manual_group_id: string
+  status: AssetDecisionManualGroupStatus
+  scenario: AssetDecisionManualGroupScenario
+  title: string
+  goal: string
+  note: string
+  source_type: 'manual' | 'auto_group' | string
+  source_group_id?: string
+  source_group_type?: AssetDecisionGroupType
+  source_view?: AssetDecisionView
+  scope_key?: string
+  scope_label?: string
+  renew_within_days: number
+  member_count: number
+  lifecycle_counts: Partial<Record<VPSLifecycleStatus, number>>
+  usage_counts: Partial<Record<VPSUsageStatus, number>>
+  renewal_decision_counts: Partial<Record<VPSRenewalDecision, number>>
+  renewal_window_count: number
+  unreviewed_count: number
+  migrate_count: number
+  cancel_count: number
+  cancellation_attention_count: number
+  idle_count: number
+  standby_count: number
+  in_use_count: number
+  service_count: number
+  domain_count: number
+  target_count: number
+  running_target_count: number
+  monitoring_link_count: number
+  abnormal_monitoring_count: number
+  active_incident_count: number
+  primary_issue_summary: string
+  monthly_cost_by_currency: AssetDecisionCostByCurrency[]
+  monthly_cost_base?: number | null
+  yearly_cost_base?: number | null
+  base_currency?: string
+  evidence_chips: AssetDecisionEvidenceChip[]
+  evidence_assessment: AssetDecisionEvidenceAssessment
+  source_availability: AssetDecisionSourceAvailability
+  created_at: string
+  updated_at: string
+  archived_at?: string | null
+}
+
+export type AssetDecisionManualGroupMember = AssetDecisionGroupMember & {
+  manual_group_id: string
+  vps_id: string
+  intended_role: AssetDecisionSuggestedRole
+  intended_action: AssetDecisionSuggestedAction
+  reason: string
+  note: string
+  sort_order: number
+  evidence_snapshot: AssetDecisionEvidenceSnapshot
+  current_fact_found: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type AssetDecisionManualGroupDetail = AssetDecisionManualGroupSummary & {
+  members: AssetDecisionManualGroupMember[]
+}
+
 export type AssetDecisionOverview = {
   snapshot_generated_at: string
   renew_within_days: number
@@ -1061,7 +1139,7 @@ export type AssetDecisionRecordSummary = {
   title: string
   goal: string
   status: AssetDecisionRecordStatus
-  source_type: string
+  source_type: AssetDecisionSourceType | string
   source_group_id: string
   source_group_type: AssetDecisionGroupType
   source_view: AssetDecisionView
@@ -1112,6 +1190,7 @@ export type CreateAssetDecisionRecordMemberInput = {
 }
 
 export type CreateAssetDecisionRecordInput = {
+  source_type?: AssetDecisionSourceType
   source_group_id: string
   renew_within_days: number
   title?: string
@@ -1129,6 +1208,43 @@ export type PatchAssetDecisionRecordInput = {
     followup_status?: AssetDecisionFollowupStatus
     followup_note?: string
   }>
+}
+
+export type CreateAssetDecisionManualGroupMemberInput = {
+  vps_id: string
+  intended_role?: AssetDecisionSuggestedRole
+  intended_action?: AssetDecisionSuggestedAction
+  reason?: string
+  note?: string
+  sort_order?: number
+}
+
+export type CreateAssetDecisionManualGroupInput = {
+  source_type?: 'manual' | 'auto_group'
+  source_group_id?: string
+  renew_within_days?: number
+  status?: AssetDecisionManualGroupStatus
+  scenario?: AssetDecisionManualGroupScenario
+  title?: string
+  goal?: string
+  note?: string
+  members?: CreateAssetDecisionManualGroupMemberInput[]
+}
+
+export type PatchAssetDecisionManualGroupInput = {
+  status?: AssetDecisionManualGroupStatus
+  scenario?: AssetDecisionManualGroupScenario
+  title?: string
+  goal?: string
+  note?: string
+}
+
+export type PatchAssetDecisionManualGroupMemberInput = {
+  intended_role?: AssetDecisionSuggestedRole
+  intended_action?: AssetDecisionSuggestedAction
+  reason?: string
+  note?: string
+  sort_order?: number
 }
 
 export type LifecycleActionStepStatus = 'completed' | 'skipped' | 'failed'

@@ -357,25 +357,109 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function manualGroupDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    manual_group_id: 'admg_001',
+    status: 'active',
+    scenario: 'primary_standby',
+    title: '德国主备自定义组合',
+    goal: '保留主力，观察备用',
+    note: '从自动组创建',
+    source_type: 'auto_group',
+    source_group_id: 'adg_auto_001',
+    source_group_type: 'renewal_attention',
+    source_view: 'renewal',
+    scope_key: 'renewal-window',
+    scope_label: '未来 30 天',
+    renew_within_days: 30,
+    member_count: 1,
+    lifecycle_counts: { active: 1 },
+    usage_counts: { in_use: 1 },
+    renewal_decision_counts: { keep: 1 },
+    renewal_window_count: 1,
+    unreviewed_count: 0,
+    migrate_count: 0,
+    cancel_count: 0,
+    cancellation_attention_count: 0,
+    idle_count: 0,
+    standby_count: 0,
+    in_use_count: 1,
+    service_count: 2,
+    domain_count: 1,
+    target_count: 1,
+    running_target_count: 1,
+    monitoring_link_count: 1,
+    abnormal_monitoring_count: 0,
+    active_incident_count: 0,
+    primary_issue_summary: '',
+    monthly_cost_by_currency: [{ currency: 'USD', monthly_total: 20, yearly_total: 240 }],
+    evidence_chips: [{ kind: 'carries_service', label: '承载服务', tone: 'normal' }],
+    evidence_assessment: evidenceAssessment(),
+    source_availability: sourceAvailability,
+    created_at: '2026-06-06T08:00:00Z',
+    updated_at: '2026-06-06T08:00:00Z',
+    archived_at: null,
+    members: [
+      {
+        ...groupDetail().members[0],
+        manual_group_id: 'admg_001',
+        vps_id: 'vps_primary',
+        intended_role: 'primary_candidate',
+        intended_action: 'keep',
+        reason: '主力稳定',
+        note: '先保留',
+        sort_order: 10,
+        evidence_snapshot: { vps_id: 'vps_primary', service_count: 2 },
+        current_fact_found: true,
+        created_at: '2026-06-06T08:00:00Z',
+        updated_at: '2026-06-06T08:00:00Z',
+      },
+    ],
+    ...overrides,
+  }
+}
+
+function manualGroupSummary(overrides: Record<string, unknown> = {}) {
+  const detail = manualGroupDetail()
+  const summary = {
+    ...detail,
+    members: undefined,
+  }
+  delete summary.members
+  return {
+    ...summary,
+    ...overrides,
+  }
+}
+
 function mockInitialWorkbench(fetchMock: ReturnType<typeof vi.fn>, options: {
   overviewBody?: unknown
   groupsBody?: unknown
+  manualGroupsBody?: unknown
   recordsBody?: unknown
   renewalEvidenceBody?: unknown
   subscriptionsBody?: unknown
   unreviewedBody?: unknown
   migrateBody?: unknown
   cancelBody?: unknown
+  vpsCatalogBody?: unknown
 } = {}) {
   fetchMock
     .mockResolvedValueOnce(mockJSONResponse(options.overviewBody ?? overview()))
     .mockResolvedValueOnce(mockJSONResponse(options.groupsBody ?? [groupSummary()]))
     .mockResolvedValueOnce(mockJSONResponse(options.recordsBody ?? [decisionRecord()]))
+    .mockResolvedValueOnce(mockJSONResponse(options.manualGroupsBody ?? [manualGroupSummary()]))
     .mockResolvedValueOnce(mockJSONResponse(options.renewalEvidenceBody ?? [subscription]))
     .mockResolvedValueOnce(mockJSONResponse(options.subscriptionsBody ?? [subscription]))
     .mockResolvedValueOnce(mockJSONResponse(options.unreviewedBody ?? [vps]))
     .mockResolvedValueOnce(mockJSONResponse(options.migrateBody ?? [migrateVPS]))
     .mockResolvedValueOnce(mockJSONResponse(options.cancelBody ?? [cancelVPS]))
+    .mockResolvedValueOnce(mockJSONResponse(options.vpsCatalogBody ?? [
+      vps,
+      migrateVPS,
+      cancelVPS,
+      ...groupDetail().members.map((member) => member.vps),
+    ]))
 }
 
 describe('AssetDecisionsPage', () => {
@@ -397,8 +481,10 @@ describe('AssetDecisionsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '资产组合决策' })).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '决策组列表' })).toBeInTheDocument()
     expect(screen.getByText('德国主力组合')).toBeInTheDocument()
-    expect(screen.getByText('判断尺度')).toBeInTheDocument()
+    expect(screen.getAllByText('判断尺度').length).toBeGreaterThan(0)
     expect(screen.getAllByText('证据强').length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: '自定义组合' })).toBeInTheDocument()
+    expect(screen.getByText('德国主备自定义组合')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '已保存组合决策' })).toBeInTheDocument()
     expect(screen.getByText('德国主备取舍记录')).toBeInTheDocument()
     expect(screen.getAllByText('需补证据').length).toBeGreaterThan(0)
@@ -422,7 +508,12 @@ describe('AssetDecisionsPage', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/asset-decisions/manual-groups', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -454,12 +545,12 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: /同区比较/ }))
 
     await waitFor(() => expect(screen.getByText('日本同区取舍')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/asset-decisions/overview?view=region&renew_within_days=30', {
+    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/asset-decisions/overview?view=region&renew_within_days=30', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(10, '/api/asset-decisions/groups?view=region&renew_within_days=30', {
+    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/groups?view=region&renew_within_days=30', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -490,7 +581,7 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getByText(/监控 1/)).toBeInTheDocument()
     expect(within(dialog).getByText('证据质量')).toBeInTheDocument()
     expect(within(dialog).getAllByText('先补证据').length).toBeGreaterThan(0)
-    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', {
+    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -531,7 +622,7 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备取舍')).toBeInTheDocument())
     expect(await screen.findByRole('dialog', { name: '资产组合决策记录详情' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(10, '/api/asset-decisions/records', {
+    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/records', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -540,6 +631,7 @@ describe('AssetDecisionsPage', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify({
+        source_type: 'auto_group',
         source_group_id: 'adg_auto_001',
         renew_within_days: 30,
         title: '德国主备取舍',
@@ -561,6 +653,117 @@ describe('AssetDecisionsPage', () => {
         ],
       }),
     })
+  })
+
+  it('creates a manual scenario group from an automatic group and opens it', async () => {
+    const createdManual = manualGroupDetail({
+      manual_group_id: 'admg_created',
+      title: '德国主力组合',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock)
+    fetchMock
+      .mockResolvedValueOnce(mockJSONResponse(groupDetail()))
+      .mockResolvedValueOnce(mockJSONResponse(createdManual, 201))
+      .mockResolvedValueOnce(mockJSONResponse(createdManual))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('德国主力组合')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '查看组' }))
+    const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建自定义组合' }))
+
+    await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
+    const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    expect(within(manualDialog).getByRole('heading', { name: '组合场景' })).toBeInTheDocument()
+    expect(within(manualDialog).getByDisplayValue('主力稳定')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/manual-groups', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        source_type: 'auto_group',
+        source_group_id: 'adg_auto_001',
+        renew_within_days: 30,
+        scenario: 'general',
+        title: '德国主力组合',
+        goal: '',
+        note: '由自动组 adg_auto_001 创建',
+      }),
+    })
+  })
+
+  it('saves a manual scenario group as a decision record without touching business assets', async () => {
+    const created = decisionRecord({
+      record_id: 'adr_manual',
+      title: '德国主备自定义组合',
+      source_type: 'manual_group',
+      source_group_id: 'admg_001',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock)
+    fetchMock
+      .mockResolvedValueOnce(mockJSONResponse(manualGroupDetail()))
+      .mockResolvedValueOnce(mockJSONResponse(created, 201))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('德国主备自定义组合')).toBeInTheDocument())
+    const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
+    expect(manualSection).not.toBeNull()
+    fireEvent.click(within(manualSection!).getByRole('button', { name: '查看组合' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存为决策记录' }))
+    fireEvent.change(within(dialog).getAllByLabelText('组合目标')[1], { target: { value: '保留主力并观察备用' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+
+    await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备自定义组合')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/records', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({
+        source_type: 'manual_group',
+        source_group_id: 'admg_001',
+        renew_within_days: 30,
+        title: '德国主备自定义组合',
+        goal: '保留主力并观察备用',
+        status: 'draft',
+        members: [
+          {
+            vps_id: 'vps_primary',
+            decided_role: 'primary_candidate',
+            decided_action: 'keep',
+            reason: '主力稳定',
+          },
+        ],
+      }),
+    })
+    const writeCalls = fetchMock.mock.calls.filter((call) => call[1]?.method && call[1]?.method !== 'GET')
+    expect(writeCalls.some((call) => String(call[0]).startsWith('/api/vps/'))).toBe(false)
+    expect(writeCalls.some((call) => String(call[0]).startsWith('/api/subscriptions/'))).toBe(false)
+    expect(writeCalls.some((call) => String(call[0]).startsWith('/api/monitoring-instances/'))).toBe(false)
+    expect(writeCalls.some((call) => String(call[0]).startsWith('/api/targets/'))).toBe(false)
   })
 
   it('opens saved decision records and patches record status', async () => {
@@ -630,12 +833,12 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '更新状态' }))
 
     await waitFor(() => expect(screen.getByText('决策记录状态已更新：德国主备取舍记录 -> 推进中')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/asset-decisions/records/adr_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/asset-decisions/records/adr_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(10, '/api/asset-decisions/records/adr_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/records/adr_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -651,7 +854,7 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '保存跟进' }))
 
     await waitFor(() => expect(screen.getByText('成员跟进已更新：Germany Primary -> 阻塞')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/asset-decisions/records/adr_001', {
+    expect(fetchMock).toHaveBeenNthCalledWith(13, '/api/asset-decisions/records/adr_001', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -709,7 +912,7 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(drawer).getByRole('button', { name: '保存续费决策' }))
 
     await waitFor(() => expect(screen.getByText('续费决策已保存：Tokyo Review -> 迁移')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_review', {
+    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/vps/vps_review', {
       method: 'PATCH',
       headers: {
         Accept: 'application/json',
@@ -730,11 +933,13 @@ describe('AssetDecisionsPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(overview()))
       .mockResolvedValueOnce(mockJSONResponse([groupSummary({ evidence_chips: [] })]))
       .mockResolvedValueOnce(mockJSONResponse([decisionRecord()]))
+      .mockResolvedValueOnce(mockJSONResponse([manualGroupSummary()]))
       .mockResolvedValueOnce(mockJSONResponse({ error: 'subscription evidence unavailable' }, 500))
       .mockResolvedValueOnce(mockJSONResponse([subscription]))
       .mockResolvedValueOnce(mockJSONResponse([vps]))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([vps]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
