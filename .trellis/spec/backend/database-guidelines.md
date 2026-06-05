@@ -721,13 +721,16 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Stable group id: `adg_auto_<12hex>`，由 group type、scope key 和续费窗口等只读 key 确定性派生；detail endpoint 每次重新计算组列表后按 ID 查找。
 - Decision record id: `adr_*`，由 `ids.New("adr")` 生成；记录只引用来源自动组 ID 作为历史来源，不把自动组 ID 当长期外键。
 - Evidence assessment: `GroupSummary` 和 `GroupMember` 必须返回 `evidence_assessment`，字段固定为 `confidence_score`、`pressure_score`、`readiness_score`、`quality_tier`（`strong|usable|weak|blocked`）、`decision_bias`（`keep|observe|complete_evidence|retire|migrate|review`）、`support_signal_count`、`risk_signal_count`、`gap_signal_count`、`summary`。
+- Record member follow-up: `asset_decision_record_members.followup_status` 固定为 `todo|in_progress|blocked|done|skipped`，`followup_note` 为 trim 后的执行备注，`followup_updated_at` 为最后一次成员跟进更新时间；`asset_decision_records_with_counts` 必须返回各状态聚合计数。
 
 #### 3. Contracts
 
 - 自动组只读派生，不写数据库，不保存手工组；用户决策只写入 `asset_decision_records` / `asset_decision_record_members`。
 - 创建决策记录时必须重新读取当前事实并通过 `FindGroup` 定位 `source_group_id`；自动组不存在返回 404，不得按前端传入的成员列表凭空创建记录。
 - 决策记录必须保存组级来源字段、标题、目标、状态、组级 `evidence_snapshot`，并为组内每台 VPS 保存系统建议角色/动作、用户决定角色/动作、成员理由和成员级 `evidence_snapshot`。
-- 决策记录状态固定为 `draft`、`decided`、`in_progress`、`completed`、`abandoned`；PATCH 只更新标题、目标和状态，不执行 VPS / Subscription / MonitoringInstance / Target 业务动作。
+- 决策记录状态固定为 `draft`、`decided`、`in_progress`、`completed`、`abandoned`；PATCH 可更新记录级标题、目标、状态，以及记录内已有成员的 `followup_status` / `followup_note`，但不执行 VPS / Subscription / MonitoringInstance / Target 业务动作。
+- 成员跟进 PATCH 的 payload 为 `members:[{vps_id, followup_status?, followup_note?}]`；`vps_id` 必须属于当前记录，同一 payload 不得重复，状态必须合法，状态或备注至少设置一项。成功更新成员跟进时必须刷新成员 `followup_updated_at`、成员 `updated_at` 与记录 `updated_at`，并返回 detail 风格的最新记录。
+- 成员全部 `done` / `skipped` 不得自动推进整条决策记录状态；组合决策记录状态仍由用户显式修改，避免在 memory layer 内扩张隐式状态机。
 - 成员级 `decided_action=cancel` 或 `open_cancellation_workbench` 只能给前端提供跳转到 VPS lifecycle workbench 的入口；后端 records API 不做批量取消、批量退役或批量迁移。
 - Group type 固定语义：`renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。
 - `renew_within_days` 默认 30，仅允许产品认可的窗口（当前 `30/60/90`）；非法值在 handler 返回 400。
@@ -753,6 +756,9 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 | create record with missing auto group | handler 返回 404 `asset decision group not found` |
 | create record with member not in group | handler 返回 400 `invalid input`，不得开启写事务 |
 | patch record with invalid status/title | handler 返回 400 `invalid input` |
+| patch record member with unknown `vps_id` | handler 返回 400 `invalid input`，事务回滚 |
+| patch record member with duplicate `vps_id` in payload | handler 返回 400 `invalid input`，不得开启写事务 |
+| patch record member with invalid follow-up status | handler 返回 400 `invalid input`，不得写入成员 |
 | repository query failure | handler 返回 500 `internal server error`，store error 用 `%w` 包装 |
 | source table query failed | 不返回 evidence gap；整体 request fail，避免误报缺订阅 / 缺监控 |
 | source query succeeded but rows empty | 返回可解释的 `evidence_gap` 或空组，不伪造健康证据 |
@@ -767,6 +773,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Good: Provider 下多台 active VPS 自动形成 `provider_portfolio`，用于服务商组合比较。
 - Good: subscription query 成功且某台 VPS 没有 active subscription，`evidence_gap` 或成员 evidence chips 标记缺订阅。
 - Good: 用户打开自动组，保存为 `adr_*` 决策记录；记录保留当时成本、服务/域名/Target、监控和成员建议快照，后续只推进记录状态。
+- Good: 用户把记录中某台 VPS 标记为 `blocked` 并记录“等待迁移窗口”，API 只更新该 record member 的跟进字段与记录 `updated_at`，不修改 VPS lifecycle 或 subscription。
 - Good: 完整证据的同区组合返回较高可信度/准备度与 `quality_tier=strong`，资料缺口或来源不可用返回较低可信度与 `decision_bias=complete_evidence`。
 - Base: 没有任何 VPS 时 overview 仍返回 0 计数和空 `top_groups`。
 - Bad: 在 store 里写入 `asset_decision_groups` 表，或把自动组 ID 当长期外键依赖。
@@ -778,8 +785,8 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 
 - Domain tests: stable group id、view/window validation、record input validation、snapshot builder、renewal/cancellation/region/provider/cost/evidence group derivation、archived/cancelled 边界、source unavailable 不误报。
 - Domain assessment tests: 完整证据、资料缺口、证据源不可用、取消联动 / 预算压力、record snapshot 均断言 `evidence_assessment` 的 tier / bias / score 方向。
-- Store tests: member facts 聚合、主订阅选择、服务 / 域名 / Target / 监控计数、成本和 evidence chips，records list/create/get/patch，且不依赖 runtime facts detail。
-- Handler tests: overview、groups list、group detail、records list/create/detail/patch success；invalid query/input、missing group/record、repo failure、method not allowed。
+- Store tests: member facts 聚合、主订阅选择、服务 / 域名 / Target / 监控计数、成本和 evidence chips，records list/create/get/patch、成员跟进计数、成员跟进事务更新与未知成员回滚，且不依赖 runtime facts detail。
+- Handler tests: overview、groups list、group detail、records list/create/detail/patch success、成员跟进 patch；invalid query/input、missing group/record、未知或重复成员、repo failure、method not allowed。
 - Router/bootstrap tests: `/api/asset-decisions/overview`、`/api/asset-decisions/groups`、`/api/asset-decisions/groups/{id}`、`/api/asset-decisions/records`、`/api/asset-decisions/records/{id}` 登录保护且不落 SPA fallback；`bootstrapCenter` wiring 非 nil。
 - Frontend tests: API helper query/payload、页面主 surface、saved records surface、tabs、group detail、保存记录、记录详情状态推进、单台 PATCH payload、evidence 请求失败边界。
 
@@ -807,6 +814,22 @@ return repo.loadPersistedGroup(ctx, groupID)
 // 正确：每次重新派生组，再按稳定 ID 查找。
 groups := DeriveGroups(facts, filters)
 return FindGroup(groups, groupID)
+```
+
+```go
+// 错误：成员跟进完成后隐式修改 VPS 或整条记录状态。
+if member.FollowupStatus == assetdecisions.FollowupDone {
+    _, _ = tx.Exec(ctx, `update vps_assets set lifecycle_status = 'cancelled' where vps_id = $1`, member.VPSID)
+}
+```
+
+```go
+// 正确：跟进只是决策记录成员的执行记忆，真实动作回到对应业务页面。
+_, err := tx.Exec(ctx, `
+    update asset_decision_record_members
+    set followup_status = $1, followup_note = $2, followup_updated_at = now(), updated_at = now()
+    where record_id = $3 and vps_id = $4`,
+    status, note, recordID, vpsID)
 ```
 
 ### Scenario: Events backfilled filter contract

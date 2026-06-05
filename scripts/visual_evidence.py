@@ -1353,6 +1353,7 @@ def asset_decision_group_detail(group_id: str) -> dict[str, object] | None:
 def asset_decision_record_summary(record_id: str = "adr_mock_eu_renewal") -> dict[str, object]:
     group = asset_decision_group_detail("adg_auto_mock_renewal")
     assert group is not None
+    member_count = len(group["members"])
     return {
         "record_id": record_id,
         "title": "欧洲主备节点续费决策",
@@ -1365,7 +1366,12 @@ def asset_decision_record_summary(record_id: str = "adr_mock_eu_renewal") -> dic
         "scope_key": group["scope_key"],
         "scope_label": group["scope_label"],
         "renew_within_days": 30,
-        "member_count": len(group["members"]),
+        "member_count": member_count,
+        "followup_todo_count": 1,
+        "followup_in_progress_count": 1 if member_count > 1 else 0,
+        "followup_blocked_count": 1 if member_count > 2 else 0,
+        "followup_done_count": 0,
+        "followup_skipped_count": 0,
         "evidence_snapshot": asset_decision_record_group_snapshot(group),
         "created_at": iso_timestamp(-2),
         "updated_at": iso_timestamp(-1),
@@ -1417,6 +1423,8 @@ def asset_decision_record_member(
     decided_role: str,
     decided_action: str,
     reason: str,
+    followup_status: str = "todo",
+    followup_note: str = "",
 ) -> dict[str, object]:
     vps = member["vps"]
     assert isinstance(vps, dict)
@@ -1461,6 +1469,9 @@ def asset_decision_record_member(
         "suggested_action": member["suggested_action"],
         "decided_action": decided_action,
         "reason": reason,
+        "followup_status": followup_status,
+        "followup_note": followup_note,
+        "followup_updated_at": iso_timestamp(-1) if followup_status != "todo" else None,
         "evidence_snapshot": evidence_snapshot,
         "created_at": iso_timestamp(-2),
         "updated_at": iso_timestamp(-1),
@@ -1489,6 +1500,8 @@ def asset_decision_record_detail(record_id: str = "adr_mock_eu_renewal") -> dict
             decided_role="standby_candidate",
             decided_action="migrate",
             reason="作为备用节点继续观察迁移窗口。",
+            followup_status="in_progress",
+            followup_note="正在准备迁移窗口。",
         ),
         asset_decision_record_member(
             members_by_id["vps_fra_legacy"],
@@ -1496,6 +1509,8 @@ def asset_decision_record_detail(record_id: str = "adr_mock_eu_renewal") -> dict
             decided_role="retire_candidate",
             decided_action="open_cancellation_workbench",
             reason="取消前需要先处理仍在运行的服务和监控联动。",
+            followup_status="blocked",
+            followup_note="等待服务迁移完成后进入取消工作台。",
         ),
     ]
     return summary
@@ -2833,6 +2848,15 @@ def fulfill_json(route: object, status: int, body: object) -> None:
     )
 
 
+def request_json_payload(request: object) -> object:
+    raw = getattr(request, "post_data", None)
+    if raw is None:
+        return {}
+    if not raw:
+        return {}
+    return json.loads(raw)
+
+
 def fulfill_asset_workflow_api(route: object) -> None:
     request = route.request
     parsed = urlparse(request.url)
@@ -2889,8 +2913,31 @@ def fulfill_asset_workflow_api(route: object) -> None:
                     return
                 if method == "PATCH":
                     patched = dict(detail)
-                    patched["status"] = "completed"
-                    patched["completed_at"] = iso_timestamp(0)
+                    payload = request_json_payload(request)
+                    if isinstance(payload, dict) and payload.get("status"):
+                        patched["status"] = payload["status"]
+                    elif not isinstance(payload, dict) or not payload.get("members"):
+                        patched["status"] = "completed"
+                        patched["completed_at"] = iso_timestamp(0)
+                    if isinstance(payload, dict):
+                        for member_patch in payload.get("members", []):
+                            if not isinstance(member_patch, dict):
+                                continue
+                            vps_id = member_patch.get("vps_id")
+                            for member in patched.get("members", []):
+                                if member.get("vps_id") != vps_id:
+                                    continue
+                                if "followup_status" in member_patch:
+                                    member["followup_status"] = member_patch["followup_status"]
+                                if "followup_note" in member_patch:
+                                    member["followup_note"] = member_patch["followup_note"]
+                                member["followup_updated_at"] = iso_timestamp(0)
+                        statuses = [member.get("followup_status") for member in patched.get("members", [])]
+                        patched["followup_todo_count"] = statuses.count("todo")
+                        patched["followup_in_progress_count"] = statuses.count("in_progress")
+                        patched["followup_blocked_count"] = statuses.count("blocked")
+                        patched["followup_done_count"] = statuses.count("done")
+                        patched["followup_skipped_count"] = statuses.count("skipped")
                     patched["updated_at"] = iso_timestamp(0)
                     fulfill_json(route, 200, patched)
                     return

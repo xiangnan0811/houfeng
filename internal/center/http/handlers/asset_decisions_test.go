@@ -266,13 +266,21 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 		},
 		patchResult: assetdecisions.RecordDetail{
 			RecordSummary: assetdecisions.RecordSummary{
-				RecordID:    "adr_001",
-				Title:       "服务商组合",
-				Status:      assetdecisions.RecordStatusInProgress,
-				MemberCount: 1,
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				RecordID:             "adr_001",
+				Title:                "服务商组合",
+				Status:               assetdecisions.RecordStatusInProgress,
+				MemberCount:          1,
+				FollowupBlockedCount: 1,
+				CreatedAt:            now,
+				UpdatedAt:            now,
 			},
+			Members: []assetdecisions.RecordMember{{
+				RecordID:       "adr_001",
+				VPSID:          "vps_001",
+				DisplayName:    "Frankfurt Primary",
+				FollowupStatus: assetdecisions.FollowupBlocked,
+				FollowupNote:   "",
+			}},
 		},
 	}
 	handler := handlers.AssetDecisionRecord(repo)
@@ -287,19 +295,23 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 	}
 
 	patchRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(patchRecorder, httptest.NewRequest(http.MethodPatch, "/api/asset-decisions/records/adr_001", bytes.NewReader([]byte(`{"status":"in_progress","goal":"推进迁移"}`))))
+	handler.ServeHTTP(patchRecorder, httptest.NewRequest(http.MethodPatch, "/api/asset-decisions/records/adr_001", bytes.NewReader([]byte(`{"status":"in_progress","goal":"推进迁移","members":[{"vps_id":"vps_001","followup_status":"blocked","followup_note":""}]}`))))
 	if patchRecorder.Code != http.StatusOK {
 		t.Fatalf("patch status = %d, want %d; body=%s", patchRecorder.Code, http.StatusOK, patchRecorder.Body.String())
 	}
-	if repo.patchID != "adr_001" || !repo.patchInput.Status.Set || repo.patchInput.Status.Value != assetdecisions.RecordStatusInProgress || !repo.patchInput.Goal.Set || repo.patchInput.Goal.Value != "推进迁移" {
+	if repo.patchID != "adr_001" || !repo.patchInput.Status.Set || repo.patchInput.Status.Value != assetdecisions.RecordStatusInProgress || !repo.patchInput.Goal.Set || repo.patchInput.Goal.Value != "推进迁移" || len(repo.patchInput.Members) != 1 {
 		t.Fatalf("patch request = id %q input %#v, want decoded patch", repo.patchID, repo.patchInput)
+	}
+	memberPatch := repo.patchInput.Members[0]
+	if memberPatch.VPSID != "vps_001" || !memberPatch.FollowupStatus.Set || memberPatch.FollowupStatus.Value != assetdecisions.FollowupBlocked || !memberPatch.FollowupNote.Set || memberPatch.FollowupNote.Value != "" {
+		t.Fatalf("member patch = %#v, want blocked status and empty note set", memberPatch)
 	}
 	var patchBody assetdecisions.RecordDetail
 	if err := json.Unmarshal(patchRecorder.Body.Bytes(), &patchBody); err != nil {
 		t.Fatalf("unmarshal patch body: %v", err)
 	}
-	if patchBody.Status != assetdecisions.RecordStatusInProgress {
-		t.Fatalf("patch body status = %q, want in_progress", patchBody.Status)
+	if patchBody.Status != assetdecisions.RecordStatusInProgress || patchBody.FollowupBlockedCount != 1 || len(patchBody.Members) != 1 || patchBody.Members[0].FollowupStatus != assetdecisions.FollowupBlocked {
+		t.Fatalf("patch body = %#v, want in_progress with blocked followup", patchBody)
 	}
 }
 

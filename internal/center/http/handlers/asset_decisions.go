@@ -203,9 +203,16 @@ func assetDecisionFiltersFromQuery(r *http.Request) (assetdecisions.ListFilters,
 }
 
 type assetDecisionRecordPatchRequest struct {
-	Title  *string                      `json:"title"`
-	Goal   *string                      `json:"goal"`
-	Status *assetdecisions.RecordStatus `json:"status"`
+	Title   *string                                 `json:"title"`
+	Goal    *string                                 `json:"goal"`
+	Status  *assetdecisions.RecordStatus            `json:"status"`
+	Members []assetDecisionRecordMemberPatchRequest `json:"members"`
+}
+
+type assetDecisionRecordMemberPatchRequest struct {
+	VPSID          string                         `json:"vps_id"`
+	FollowupStatus *assetdecisions.FollowupStatus `json:"followup_status"`
+	FollowupNote   *string                        `json:"followup_note"`
 }
 
 func (r assetDecisionRecordPatchRequest) toInput() assetdecisions.PatchRecordInput {
@@ -221,6 +228,20 @@ func (r assetDecisionRecordPatchRequest) toInput() assetdecisions.PatchRecordInp
 	if r.Status != nil {
 		input.Status.Set = true
 		input.Status.Value = *r.Status
+	}
+	for _, member := range r.Members {
+		next := assetdecisions.PatchRecordMemberInput{
+			VPSID: member.VPSID,
+		}
+		if member.FollowupStatus != nil {
+			next.FollowupStatus.Set = true
+			next.FollowupStatus.Value = *member.FollowupStatus
+		}
+		if member.FollowupNote != nil {
+			next.FollowupNote.Set = true
+			next.FollowupNote.Value = *member.FollowupNote
+		}
+		input.Members = append(input.Members, next)
 	}
 	return input
 }

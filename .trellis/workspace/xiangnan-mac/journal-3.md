@@ -1556,3 +1556,36 @@ Added evidence assessment scoring and UI display for asset decision groups, memb
 ### Next Steps
 
 - None - task complete
+
+
+## Session 164: Asset Decisions follow-up tracking
+
+**Date**: 2026-06-05
+**Task**: Asset Decisions follow-up tracking
+**Branch**: `worktree/asset-decisions-execution-tracking`
+
+### Summary
+
+Added asset decision record member follow-up tracking with migration, backend PATCH contract, frontend record-detail controls, visual mock support, code-spec updates, and full backend/frontend/browser-sanity verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0190e7c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

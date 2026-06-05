@@ -41,6 +41,7 @@ import {
   type AssetDecisionGroupSummary,
   type AssetDecisionOverview,
   type AssetDecisionRecordDetail,
+  type AssetDecisionFollowupStatus,
   type AssetDecisionRecordMember,
   type AssetDecisionRecordStatus,
   type AssetDecisionRecordSummary,
@@ -121,6 +122,11 @@ type RecordMemberDraft = {
   decidedRole: AssetDecisionSuggestedRole
   decidedAction: AssetDecisionSuggestedAction
   reason: string
+}
+
+type RecordFollowupDraft = {
+  status: AssetDecisionFollowupStatus
+  note: string
 }
 
 type RecordDraft = {
@@ -223,6 +229,14 @@ const RECORD_STATUS_LABELS: Record<AssetDecisionRecordStatus, string> = {
   abandoned: '已放弃',
 }
 
+const FOLLOWUP_STATUS_LABELS: Record<AssetDecisionFollowupStatus, string> = {
+  todo: '待处理',
+  in_progress: '处理中',
+  blocked: '阻塞',
+  done: '已完成',
+  skipped: '跳过',
+}
+
 const EVIDENCE_TIER_LABELS: Record<AssetDecisionEvidenceQualityTier, string> = {
   strong: '证据强',
   usable: '可决策',
@@ -263,6 +277,14 @@ const RECORD_STATUS_OPTIONS: ReadonlyArray<{ value: AssetDecisionRecordStatus; l
   { value: 'in_progress', label: RECORD_STATUS_LABELS.in_progress },
   { value: 'completed', label: RECORD_STATUS_LABELS.completed },
   { value: 'abandoned', label: RECORD_STATUS_LABELS.abandoned },
+]
+
+const FOLLOWUP_STATUS_OPTIONS: ReadonlyArray<{ value: AssetDecisionFollowupStatus; label: string }> = [
+  { value: 'todo', label: FOLLOWUP_STATUS_LABELS.todo },
+  { value: 'in_progress', label: FOLLOWUP_STATUS_LABELS.in_progress },
+  { value: 'blocked', label: FOLLOWUP_STATUS_LABELS.blocked },
+  { value: 'done', label: FOLLOWUP_STATUS_LABELS.done },
+  { value: 'skipped', label: FOLLOWUP_STATUS_LABELS.skipped },
 ]
 
 const WORKBENCH_TABS: ReadonlyArray<{ value: WorkbenchView; label: string }> = [
@@ -440,6 +462,32 @@ function recordStatusTone(status: AssetDecisionRecordStatus): BadgeTone {
   if (status === 'decided') return 'notice'
   if (status === 'abandoned') return 'offline'
   return 'neutral'
+}
+
+function followupStatusTone(status: AssetDecisionFollowupStatus): BadgeTone {
+  if (status === 'done' || status === 'skipped') return 'normal'
+  if (status === 'blocked') return 'critical'
+  if (status === 'in_progress') return 'maintenance'
+  return 'notice'
+}
+
+function recordFollowupDoneCount(record: AssetDecisionRecordSummary): number {
+  return (record.followup_done_count ?? 0) + (record.followup_skipped_count ?? 0)
+}
+
+function recordFollowupOpenCount(record: AssetDecisionRecordSummary): number {
+  return (record.followup_todo_count ?? 0) + (record.followup_in_progress_count ?? 0) + (record.followup_blocked_count ?? 0)
+}
+
+function buildRecordFollowupDrafts(detail: AssetDecisionRecordDetail | null): Record<string, RecordFollowupDraft> {
+  const drafts: Record<string, RecordFollowupDraft> = {}
+  for (const member of detail?.members ?? []) {
+    drafts[member.vps_id] = {
+      status: member.followup_status,
+      note: member.followup_note,
+    }
+  }
+  return drafts
 }
 
 function evidenceTierTone(tier: AssetDecisionEvidenceQualityTier): BadgeTone {
@@ -638,6 +686,8 @@ export function AssetDecisionsPage() {
   const [recordPatchStatus, setRecordPatchStatus] = useState<AssetDecisionRecordStatus>('draft')
   const [recordPatching, setRecordPatching] = useState(false)
   const [recordPatchError, setRecordPatchError] = useState<string | null>(null)
+  const [recordFollowupDrafts, setRecordFollowupDrafts] = useState<Record<string, RecordFollowupDraft>>({})
+  const [recordFollowupPatching, setRecordFollowupPatching] = useState<Record<string, boolean>>({})
   const [decisionDraft, setDecisionDraft] = useState<AssetDecisionDraft>(INITIAL_DECISION_DRAFT)
   const [decisionSubmitting, setDecisionSubmitting] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
@@ -794,6 +844,7 @@ export function AssetDecisionsPage() {
         if (cancelled) return
         setRecordDetailState({ loading: false, error: null, detail })
         setRecordPatchStatus(detail.status)
+        setRecordFollowupDrafts(buildRecordFollowupDrafts(detail))
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -802,6 +853,7 @@ export function AssetDecisionsPage() {
           error: describeError(error, '加载决策记录失败'),
           detail: null,
         })
+        setRecordFollowupDrafts({})
       })
     return () => { cancelled = true }
   }, [selectedRecordID, refreshToken])
@@ -946,6 +998,7 @@ export function AssetDecisionsPage() {
         <div className="asset-table__identity asset-decision-record-cell">
           <strong>{record.title}</strong>
           <span>{VIEW_LABELS[record.source_view]} · {record.scope_label || record.source_group_id}</span>
+          <span>{record.source_group_type} · {record.source_group_id}</span>
           <span>{record.goal || '暂无目标备注'}</span>
         </div>
       ),
@@ -965,13 +1018,19 @@ export function AssetDecisionsPage() {
     },
     {
       key: 'scope',
-      label: '来源',
+      label: '推进',
       width: '220px',
       render: (record) => (
         <div className="asset-table__stack">
-          <strong><MonoDigits>{record.member_count}</MonoDigits> 台 VPS</strong>
-          <span>{record.source_group_type}</span>
-          <span>{record.source_group_id}</span>
+          <strong>
+            推进 <MonoDigits>{recordFollowupDoneCount(record)}</MonoDigits>/<MonoDigits>{record.member_count}</MonoDigits>
+          </strong>
+          <span>
+            待处理 {record.followup_todo_count ?? 0} · 处理中 {record.followup_in_progress_count ?? 0}
+          </span>
+          <span>
+            阻塞 {record.followup_blocked_count ?? 0} · 未关闭 {recordFollowupOpenCount(record)}
+          </span>
         </div>
       ),
     },
@@ -1173,14 +1232,60 @@ export function AssetDecisionsPage() {
     },
     {
       key: 'actions',
-      label: '推进',
+      label: '跟进',
       align: 'right',
-      width: '138px',
-      render: (member) => (
-        <Link className="btn sm secondary" to={actionHrefForMember(member)}>
-          {member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel' ? '取消/退役' : 'VPS 详情'}
-        </Link>
-      ),
+      width: '286px',
+      render: (member) => {
+        const draft = recordFollowupDrafts[member.vps_id] ?? {
+          status: member.followup_status,
+          note: member.followup_note,
+        }
+        const isSaving = Boolean(recordFollowupPatching[member.vps_id])
+        const isChanged = draft.status !== member.followup_status || draft.note !== member.followup_note
+        return (
+          <form className="asset-decision-followup-form" onSubmit={(event) => submitRecordMemberFollowup(event, member)}>
+            <div className="asset-decision-followup-form__status">
+              <Badge variant="state" tone={followupStatusTone(member.followup_status)}>
+                {FOLLOWUP_STATUS_LABELS[member.followup_status]}
+              </Badge>
+              <span>{member.followup_updated_at ? `更新 ${formatDateTime(member.followup_updated_at)}` : '尚未跟进'}</span>
+            </div>
+            <label className="visually-hidden" htmlFor={`followup-status-${member.record_id}-${member.vps_id}`}>
+              {member.display_name || member.vps_id} 跟进状态
+            </label>
+            <select
+              id={`followup-status-${member.record_id}-${member.vps_id}`}
+              aria-label={`${member.display_name || member.vps_id} 跟进状态`}
+              className="input"
+              value={draft.status}
+              onChange={(event) => updateRecordFollowupDraft(member.vps_id, { status: event.target.value as AssetDecisionFollowupStatus })}
+            >
+              {FOLLOWUP_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <label className="visually-hidden" htmlFor={`followup-note-${member.record_id}-${member.vps_id}`}>
+              {member.display_name || member.vps_id} 跟进备注
+            </label>
+            <input
+              id={`followup-note-${member.record_id}-${member.vps_id}`}
+              aria-label={`${member.display_name || member.vps_id} 跟进备注`}
+              className="input"
+              value={draft.note}
+              placeholder="备注 / 阻塞原因"
+              onChange={(event) => updateRecordFollowupDraft(member.vps_id, { note: event.target.value })}
+            />
+            <div className="asset-decision-followup-form__actions">
+              <button className="btn sm primary" type="submit" disabled={isSaving || !isChanged}>
+                {isSaving ? '保存中…' : '保存跟进'}
+              </button>
+              <Link className="btn sm secondary" to={actionHrefForMember(member)}>
+                {member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel' ? '取消/退役' : 'VPS 详情'}
+              </Link>
+            </div>
+          </form>
+        )
+      },
     },
   ]
 
@@ -1327,6 +1432,8 @@ export function AssetDecisionsPage() {
     setSelectedRecordID(null)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setRecordPatchError(null)
+    setRecordFollowupDrafts({})
+    setRecordFollowupPatching({})
   }
 
   function submitRecordStatus(event: FormEvent<HTMLFormElement>) {
@@ -1350,6 +1457,55 @@ export function AssetDecisionsPage() {
         setRecordPatchError(describeError(error, '更新决策记录状态失败'))
       })
       .finally(() => setRecordPatching(false))
+  }
+
+  function updateRecordFollowupDraft(vpsID: string, patch: Partial<RecordFollowupDraft>) {
+    setRecordFollowupDrafts((current) => ({
+      ...current,
+      [vpsID]: {
+        ...current[vpsID],
+        ...patch,
+      },
+    }))
+  }
+
+  function submitRecordMemberFollowup(event: FormEvent<HTMLFormElement>, member: AssetDecisionRecordMember) {
+    event.preventDefault()
+    const detail = recordDetailState.detail
+    if (!detail) return
+    const draft = recordFollowupDrafts[member.vps_id] ?? {
+      status: member.followup_status,
+      note: member.followup_note,
+    }
+    setRecordPatchError(null)
+    setRecordFollowupPatching((current) => ({ ...current, [member.vps_id]: true }))
+    patchAssetDecisionRecord(detail.record_id, {
+      members: [{
+        vps_id: member.vps_id,
+        followup_status: draft.status,
+        followup_note: draft.note.trim(),
+      }],
+    })
+      .then((record) => {
+        setRecordDetailState({ loading: false, error: null, detail: record })
+        setRecordPatchStatus(record.status)
+        setRecordFollowupDrafts(buildRecordFollowupDrafts(record))
+        setRecordsState((current) => ({
+          loading: false,
+          error: null,
+          records: current.records.map((item) => (item.record_id === record.record_id ? record : item)),
+        }))
+        setDecisionNotice(`成员跟进已更新：${member.display_name || member.vps_id} -> ${FOLLOWUP_STATUS_LABELS[draft.status]}`)
+      })
+      .catch((error: unknown) => {
+        setRecordPatchError(describeError(error, '更新成员跟进失败'))
+      })
+      .finally(() => {
+        setRecordFollowupPatching((current) => ({
+          ...current,
+          [member.vps_id]: false,
+        }))
+      })
   }
 
   function selectVPS(vps: VPSAssetRecord) {
@@ -2027,9 +2183,11 @@ export function AssetDecisionsPage() {
                 <small>{recordDetailState.detail.scope_label || recordDetailState.detail.source_group_id}</small>
               </div>
               <div>
-                <span>来源</span>
-                <strong>{VIEW_LABELS[recordDetailState.detail.source_view]}</strong>
-                <small>{recordDetailState.detail.source_group_type}</small>
+                <span>跟进</span>
+                <strong>
+                  <MonoDigits>{recordFollowupDoneCount(recordDetailState.detail)}</MonoDigits>/<MonoDigits>{recordDetailState.detail.member_count}</MonoDigits>
+                </strong>
+                <small>阻塞 {recordDetailState.detail.followup_blocked_count ?? 0} · 待处理 {recordDetailState.detail.followup_todo_count ?? 0}</small>
               </div>
               <div>
                 <span>证据快照</span>

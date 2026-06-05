@@ -202,6 +202,85 @@ func TestRecordSnapshotsIncludeEvidenceAssessment(t *testing.T) {
 	}
 }
 
+func TestValidatePatchRecordInputMemberFollowup(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   PatchRecordInput
+		wantErr bool
+	}{
+		{
+			name: "valid member followup",
+			input: PatchRecordInput{Members: []PatchRecordMemberInput{{
+				VPSID:          " vps_001 ",
+				FollowupStatus: PatchFollowupStatus{Set: true, Value: FollowupBlocked},
+				FollowupNote:   PatchString{Set: true, Value: " 等待迁移窗口 "},
+			}}},
+		},
+		{
+			name: "note can be cleared",
+			input: PatchRecordInput{Members: []PatchRecordMemberInput{{
+				VPSID:        "vps_001",
+				FollowupNote: PatchString{Set: true, Value: ""},
+			}}},
+		},
+		{
+			name: "missing vps id",
+			input: PatchRecordInput{Members: []PatchRecordMemberInput{{
+				FollowupStatus: PatchFollowupStatus{Set: true, Value: FollowupDone},
+			}}},
+			wantErr: true,
+		},
+		{
+			name: "member patch without fields",
+			input: PatchRecordInput{Members: []PatchRecordMemberInput{{
+				VPSID: "vps_001",
+			}}},
+			wantErr: true,
+		},
+		{
+			name: "duplicate member",
+			input: PatchRecordInput{Members: []PatchRecordMemberInput{
+				{VPSID: "vps_001", FollowupStatus: PatchFollowupStatus{Set: true, Value: FollowupDone}},
+				{VPSID: " vps_001 ", FollowupNote: PatchString{Set: true, Value: "duplicate"}},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "invalid followup status",
+			input: PatchRecordInput{Members: []PatchRecordMemberInput{{
+				VPSID:          "vps_001",
+				FollowupStatus: PatchFollowupStatus{Set: true, Value: FollowupStatus("bad")},
+			}}},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := NormalizePatchRecordInput(tt.input)
+			err := ValidatePatchRecordInput(input)
+			if tt.wantErr {
+				if err != ErrInvalidAssetDecisionInput {
+					t.Fatalf("ValidatePatchRecordInput() error = %v, want invalid input", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidatePatchRecordInput() error = %v", err)
+			}
+			if len(input.Members) > 0 {
+				member := input.Members[0]
+				if member.VPSID != "vps_001" {
+					t.Fatalf("normalized member vps_id = %q, want vps_001", member.VPSID)
+				}
+				if member.FollowupNote.Set && member.FollowupNote.Value != "" && member.FollowupNote.Value != "等待迁移窗口" {
+					t.Fatalf("normalized followup note = %q, want trimmed note", member.FollowupNote.Value)
+				}
+			}
+		})
+	}
+}
+
 func fact(vpsID, name, providerID, providerName, country, region, city string, usage vpsassets.UsageStatus, subscription *subscriptions.Record) Fact {
 	providerPtr := &providerID
 	if providerID == "" {

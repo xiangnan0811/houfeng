@@ -72,6 +72,16 @@ const (
 	RecordStatusAbandoned  RecordStatus = "abandoned"
 )
 
+type FollowupStatus string
+
+const (
+	FollowupTodo       FollowupStatus = "todo"
+	FollowupInProgress FollowupStatus = "in_progress"
+	FollowupBlocked    FollowupStatus = "blocked"
+	FollowupDone       FollowupStatus = "done"
+	FollowupSkipped    FollowupStatus = "skipped"
+)
+
 type EvidenceKind string
 
 const (
@@ -202,23 +212,28 @@ type GroupMember struct {
 }
 
 type RecordSummary struct {
-	RecordID         string           `json:"record_id"`
-	Title            string           `json:"title"`
-	Goal             string           `json:"goal"`
-	Status           RecordStatus     `json:"status"`
-	SourceType       string           `json:"source_type"`
-	SourceGroupID    string           `json:"source_group_id"`
-	SourceGroupType  GroupType        `json:"source_group_type"`
-	SourceView       View             `json:"source_view"`
-	ScopeKey         string           `json:"scope_key"`
-	ScopeLabel       string           `json:"scope_label"`
-	RenewWithinDays  int              `json:"renew_within_days"`
-	MemberCount      int              `json:"member_count"`
-	EvidenceSnapshot EvidenceSnapshot `json:"evidence_snapshot"`
-	CreatedAt        time.Time        `json:"created_at"`
-	UpdatedAt        time.Time        `json:"updated_at"`
-	DecidedAt        *time.Time       `json:"decided_at,omitempty"`
-	CompletedAt      *time.Time       `json:"completed_at,omitempty"`
+	RecordID                string           `json:"record_id"`
+	Title                   string           `json:"title"`
+	Goal                    string           `json:"goal"`
+	Status                  RecordStatus     `json:"status"`
+	SourceType              string           `json:"source_type"`
+	SourceGroupID           string           `json:"source_group_id"`
+	SourceGroupType         GroupType        `json:"source_group_type"`
+	SourceView              View             `json:"source_view"`
+	ScopeKey                string           `json:"scope_key"`
+	ScopeLabel              string           `json:"scope_label"`
+	RenewWithinDays         int              `json:"renew_within_days"`
+	MemberCount             int              `json:"member_count"`
+	FollowupTodoCount       int              `json:"followup_todo_count"`
+	FollowupInProgressCount int              `json:"followup_in_progress_count"`
+	FollowupBlockedCount    int              `json:"followup_blocked_count"`
+	FollowupDoneCount       int              `json:"followup_done_count"`
+	FollowupSkippedCount    int              `json:"followup_skipped_count"`
+	EvidenceSnapshot        EvidenceSnapshot `json:"evidence_snapshot"`
+	CreatedAt               time.Time        `json:"created_at"`
+	UpdatedAt               time.Time        `json:"updated_at"`
+	DecidedAt               *time.Time       `json:"decided_at,omitempty"`
+	CompletedAt             *time.Time       `json:"completed_at,omitempty"`
 }
 
 type RecordDetail struct {
@@ -227,17 +242,20 @@ type RecordDetail struct {
 }
 
 type RecordMember struct {
-	RecordID         string           `json:"record_id"`
-	VPSID            string           `json:"vps_id"`
-	DisplayName      string           `json:"display_name"`
-	SuggestedRole    SuggestedRole    `json:"suggested_role"`
-	DecidedRole      SuggestedRole    `json:"decided_role"`
-	SuggestedAction  SuggestedAction  `json:"suggested_action"`
-	DecidedAction    SuggestedAction  `json:"decided_action"`
-	Reason           string           `json:"reason"`
-	EvidenceSnapshot EvidenceSnapshot `json:"evidence_snapshot"`
-	CreatedAt        time.Time        `json:"created_at"`
-	UpdatedAt        time.Time        `json:"updated_at"`
+	RecordID          string           `json:"record_id"`
+	VPSID             string           `json:"vps_id"`
+	DisplayName       string           `json:"display_name"`
+	SuggestedRole     SuggestedRole    `json:"suggested_role"`
+	DecidedRole       SuggestedRole    `json:"decided_role"`
+	SuggestedAction   SuggestedAction  `json:"suggested_action"`
+	DecidedAction     SuggestedAction  `json:"decided_action"`
+	Reason            string           `json:"reason"`
+	FollowupStatus    FollowupStatus   `json:"followup_status"`
+	FollowupNote      string           `json:"followup_note"`
+	FollowupUpdatedAt *time.Time       `json:"followup_updated_at,omitempty"`
+	EvidenceSnapshot  EvidenceSnapshot `json:"evidence_snapshot"`
+	CreatedAt         time.Time        `json:"created_at"`
+	UpdatedAt         time.Time        `json:"updated_at"`
 }
 
 type CreateRecordInput struct {
@@ -257,9 +275,16 @@ type CreateRecordMemberInput struct {
 }
 
 type PatchRecordInput struct {
-	Title  PatchString       `json:"title"`
-	Goal   PatchString       `json:"goal"`
-	Status PatchRecordStatus `json:"status"`
+	Title   PatchString              `json:"title"`
+	Goal    PatchString              `json:"goal"`
+	Status  PatchRecordStatus        `json:"status"`
+	Members []PatchRecordMemberInput `json:"members"`
+}
+
+type PatchRecordMemberInput struct {
+	VPSID          string              `json:"vps_id"`
+	FollowupStatus PatchFollowupStatus `json:"followup_status"`
+	FollowupNote   PatchString         `json:"followup_note"`
 }
 
 type PatchString struct {
@@ -270,6 +295,11 @@ type PatchString struct {
 type PatchRecordStatus struct {
 	Set   bool
 	Value RecordStatus
+}
+
+type PatchFollowupStatus struct {
+	Set   bool
+	Value FollowupStatus
 }
 
 type Repository interface {
@@ -347,6 +377,19 @@ func NormalizeCreateRecordInput(input CreateRecordInput) CreateRecordInput {
 	return input
 }
 
+func NormalizePatchRecordInput(input PatchRecordInput) PatchRecordInput {
+	input.Title.Value = strings.TrimSpace(input.Title.Value)
+	input.Goal.Value = strings.TrimSpace(input.Goal.Value)
+	normalizedMembers := make([]PatchRecordMemberInput, 0, len(input.Members))
+	for _, member := range input.Members {
+		member.VPSID = strings.TrimSpace(member.VPSID)
+		member.FollowupNote.Value = strings.TrimSpace(member.FollowupNote.Value)
+		normalizedMembers = append(normalizedMembers, member)
+	}
+	input.Members = normalizedMembers
+	return input
+}
+
 func ValidateCreateRecordInput(input CreateRecordInput) error {
 	if input.SourceGroupID == "" {
 		return ErrInvalidAssetDecisionInput
@@ -385,7 +428,27 @@ func ValidatePatchRecordInput(input PatchRecordInput) error {
 		return ErrInvalidAssetDecisionInput
 	}
 	if input.Status.Set {
-		return ValidateRecordStatus(input.Status.Value)
+		if err := ValidateRecordStatus(input.Status.Value); err != nil {
+			return err
+		}
+	}
+	seen := map[string]struct{}{}
+	for _, member := range input.Members {
+		if member.VPSID == "" {
+			return ErrInvalidAssetDecisionInput
+		}
+		if !member.FollowupStatus.Set && !member.FollowupNote.Set {
+			return ErrInvalidAssetDecisionInput
+		}
+		if _, ok := seen[member.VPSID]; ok {
+			return ErrInvalidAssetDecisionInput
+		}
+		seen[member.VPSID] = struct{}{}
+		if member.FollowupStatus.Set {
+			if err := ValidateFollowupStatus(member.FollowupStatus.Value); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -393,6 +456,15 @@ func ValidatePatchRecordInput(input PatchRecordInput) error {
 func ValidateRecordStatus(status RecordStatus) error {
 	switch status {
 	case RecordStatusDraft, RecordStatusDecided, RecordStatusInProgress, RecordStatusCompleted, RecordStatusAbandoned:
+		return nil
+	default:
+		return ErrInvalidAssetDecisionInput
+	}
+}
+
+func ValidateFollowupStatus(status FollowupStatus) error {
+	switch status {
+	case FollowupTodo, FollowupInProgress, FollowupBlocked, FollowupDone, FollowupSkipped:
 		return nil
 	default:
 		return ErrInvalidAssetDecisionInput
