@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 175
-- **Last Active**: 2026-06-06
+- **Total Sessions**: 176
+- **Last Active**: 2026-06-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1956 | Active |
+| `journal-3.md` | ~1989 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 176 | 2026-06-07 | Asset Decisions Evidence Insight | `e34f29c` | `worktree/asset-decisions-evidence-insight-finish` |
 | 175 | 2026-06-06 | Asset decisions scenario progression | `619e642` | `worktree/asset-decisions-scenario-progression` |
 | 174 | 2026-06-06 | Asset decisions workbench polish | `24f7f06` | `worktree/asset-decisions-workbench-polish` |
 | 173 | 2026-06-06 | 资产决策中枢集成体验收敛 | `f13f066`, `f8a3cfc` | `worktree/asset-decisions-integration-polish` |

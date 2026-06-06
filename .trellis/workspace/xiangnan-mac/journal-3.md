@@ -1954,3 +1954,36 @@ Connected Asset Decisions discovery, scenario comparison, saved decision records
 ### Next Steps
 
 - None - task complete
+
+
+## Session 176: Asset Decisions Evidence Insight
+
+**Date**: 2026-06-07
+**Task**: Asset Decisions Evidence Insight
+**Branch**: `worktree/asset-decisions-evidence-insight-finish`
+
+### Summary
+
+Implemented read-only comparison insight for asset decision groups, manual groups, members, and saved evidence snapshots; added evidence matrix and saved-evidence UI; synced visual evidence fixtures; merged PR #229, released v0.49.0, and verified CI plus publish-images.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e34f29c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
