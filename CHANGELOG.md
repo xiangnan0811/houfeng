@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.45.0](https://github.com/xiangnan0811/houfeng/compare/v0.44.2...v0.45.0) (2026-06-06)
+
+
+### Features
+
+* **web:** refine asset decisions workbench UX ([b7614ec](https://github.com/xiangnan0811/houfeng/commit/b7614ec7a4cad73397b8d3c7bd3944c78cde1e78))
+* **web:** refine asset decisions workbench UX ([8e81e0e](https://github.com/xiangnan0811/houfeng/commit/8e81e0e9bc4ee5273fc7dccf2c30097cc0aa6742))
+
+
+### Documentation
+
+* **trellis:** add asset decisions workbench UX task ([0e9b43e](https://github.com/xiangnan0811/houfeng/commit/0e9b43e6b0efcba4aa38313cd74742a3499fe72a))
+
 ## [0.44.2](https://github.com/xiangnan0811/houfeng/compare/v0.44.1...v0.44.2) (2026-06-06)
 
 
