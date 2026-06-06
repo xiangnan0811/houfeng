@@ -147,6 +147,8 @@ type RemoteError struct {
 
 请求路径**只**收原始观测、入库；**不要在 handler / service 内把 incident 失败当成 HTTP error 抛回 agent**。incident 评估失败由 `s.logger.Error("evaluate monitoring instance incidents after sync failed", ...)` 记录后继续，不阻塞 sync 应答。
 
+`active_incidents` 是当前状态投影，不是 append-only 审计事实。写入必须对重复评估、worker 重放和遗留确定性 `incident_id` 行保持幂等：替换对象当前 active 集合时，插入 active incident 必须使用 `on conflict (incident_id) do update` 刷新当前事实，避免 `active_incidents_pkey` 把 center 进程拖崩。状态变化历史仍由 `state_change_events` 承担，不要通过保留重复 active rows 模拟历史。
+
 ---
 
 ## panic 政策

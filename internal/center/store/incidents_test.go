@@ -239,8 +239,46 @@ func TestPostgresIncidentRepositoryAppliesMutationAndProjectsMonitoringInstanceS
 	}
 	assertContainsSQL(t, tx.execSQL, "delete from active_incidents")
 	assertContainsSQL(t, tx.execSQL, "insert into active_incidents")
+	assertContainsSQL(t, tx.execSQL, "on conflict (incident_id) do update")
 	assertContainsSQL(t, tx.execSQL, "insert into state_change_events")
 	assertContainsSQL(t, tx.execSQL, "insert into notification_records")
+	assertContainsSQL(t, tx.execSQL, "update monitoring_instances")
+}
+
+func TestPostgresIncidentRepositoryUpsertsExistingActiveIncident(t *testing.T) {
+	tx := &fakeIncidentTx{
+		failActiveIncidentInsertWithoutUpsert: true,
+		summaryCount:                          1,
+		summarySeverity:                       string(incidents.SeverityNotice),
+		summaryText:                           "心跳缺失",
+	}
+	repo := &PostgresIncidentRepository{beginTx: func(context.Context, pgx.TxOptions) (incidentStoreTx, error) { return tx, nil }}
+	now := time.Date(2026, time.June, 6, 9, 26, 35, 0, time.UTC)
+
+	err := repo.ApplyIncidentMutation(context.Background(), incidents.IncidentMutation{
+		ObjectType: incidents.ObjectTypeMonitoringInstance,
+		ObjectID:   "mi_1a4c1d9de957a4b7",
+		Active: []incidents.IncidentRecord{{
+			IncidentID:      "inc_monitoring_instance_mi_1a4c1d9de957a4b7_monitoring_instance_heartbeat_missing",
+			ObjectType:      incidents.ObjectTypeMonitoringInstance,
+			ObjectID:        "mi_1a4c1d9de957a4b7",
+			IncidentClass:   incidents.IncidentMonitoringInstanceHeartbeatMissing,
+			Severity:        incidents.SeverityNotice,
+			StartedAt:       now.Add(-10 * time.Minute),
+			LastEvaluatedAt: now,
+			Status:          incidents.IncidentStatusActive,
+			SourceSummary:   "监控实例超过预期心跳窗口未上报",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyIncidentMutation() error = %v", err)
+	}
+	if tx.commitCalls != 1 {
+		t.Fatalf("commitCalls = %d, want 1", tx.commitCalls)
+	}
+	assertContainsSQL(t, tx.execSQL, "on conflict (incident_id) do update")
+	assertContainsSQL(t, tx.execSQL, "started_at = least(active_incidents.started_at, excluded.started_at)")
+	assertContainsSQL(t, tx.execSQL, "last_evaluated_at = excluded.last_evaluated_at")
 	assertContainsSQL(t, tx.execSQL, "update monitoring_instances")
 }
 
@@ -291,17 +329,25 @@ func TestPostgresIncidentRepositoryFailsWhenObjectSummaryUpdateTouchesNoRows(t *
 }
 
 type fakeIncidentTx struct {
-	execSQL         []string
-	commitCalls     int
-	rollbackCalls   int
-	summaryCount    int
-	summarySeverity string
-	summaryText     string
-	updateRows      int64
+	execSQL                               []string
+	commitCalls                           int
+	rollbackCalls                         int
+	summaryCount                          int
+	summarySeverity                       string
+	summaryText                           string
+	updateRows                            int64
+	failActiveIncidentInsertWithoutUpsert bool
 }
 
 func (f *fakeIncidentTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	f.execSQL = append(f.execSQL, sql)
+	if containsSQL([]string{sql}, "insert into active_incidents") && f.failActiveIncidentInsertWithoutUpsert && !containsSQL([]string{sql}, "on conflict (incident_id)") {
+		return pgconn.CommandTag{}, &pgconn.PgError{
+			Code:           "23505",
+			Message:        "duplicate key value violates unique constraint \"active_incidents_pkey\"",
+			ConstraintName: "active_incidents_pkey",
+		}
+	}
 	if containsSQL([]string{sql}, "update monitoring_instances") || containsSQL([]string{sql}, "update targets") {
 		rows := f.updateRows
 		if rows == 0 {
