@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.0](https://github.com/xiangnan0811/houfeng/compare/v0.48.0...v0.49.0) (2026-06-06)
+
+
+### Features
+
+* add asset decision comparison insight ([#229](https://github.com/xiangnan0811/houfeng/issues/229)) ([2fb40e0](https://github.com/xiangnan0811/houfeng/commit/2fb40e0214882eae149f9618cdeb96b02006905e))
+
 ## [0.48.0](https://github.com/xiangnan0811/houfeng/compare/v0.47.0...v0.48.0) (2026-06-06)
 
 
