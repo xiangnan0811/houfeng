@@ -125,6 +125,7 @@ describe('VPSPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=needs_decision&renew_within_days=30')
     expect(screen.getAllByText('在用').length).toBeGreaterThan(0)
     expect(screen.getAllByText('保留').length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps', {
@@ -147,6 +148,7 @@ describe('VPSPage', () => {
     expect(screen.getByText('Osaka Missing')).toBeInTheDocument()
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByText('视图: 未关联')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
 
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
@@ -159,6 +161,7 @@ describe('VPSPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /移除筛选 生命周期/ }))
     fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=needs_decision&renew_within_days=30')
     fireEvent.click(screen.getByText('Tokyo Edge'))
     await waitFor(() => expect(screen.getByText('vps detail route')).toBeInTheDocument())
   })

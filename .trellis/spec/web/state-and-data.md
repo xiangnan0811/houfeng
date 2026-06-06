@@ -109,7 +109,7 @@ setInstallIssue(issue)
 - `recent_events` 默认不在 Dashboard 首屏展开成事件列表。Dashboard 只保留 `查看事件流` / `/events?time_range=24h` 这类入口；复杂历史筛选、事件列表和上下文展开交给 EventsPage。
 - Dashboard 可以在主工作台内部展示一个低权重 `运行上下文` strip，用于补充同类服务器管理系统常见的影响范围、库存状态、最近活动。该 strip 最多 3 个 link item：不得恢复独立 KPI/summary strip，不得使用 `Group 摘要` / `最近事件摘要` heading，不得展示完整 group list 或 recent event summary 列表。最近活动只展示事件类型、严重度、对象和时间语义入口，具体事件摘要交给 EventsPage。视觉上它应是工作台内的 compact context rail，而不是三个同权摘要卡片。
 - `notification_status` 只能展示配置布尔摘要，例如 Telegram / Feishu 是否已配置、Telegram runtime apply 是否生效。前端不得要求或展示 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url` 等敏感配置值；需要编辑真实配置时跳转 SettingsPage。
-- `asset_summary` 只能展示 VPS Asset Ledger 的少量决策入口：30 天续费、待决策、待取消/迁移、未关联监控实例、关联异常 VPS、按币种月付成本。它应集中出现在 Dashboard 首屏 `资产决策队列` lane 中，避免在下方工作台重复出现同权资产卡片。它不能展开资产明细，不能替代 VPS / 订阅页面，也不能把 Dashboard 变成资产字段总表。第一版没有未关联 VPS 专用筛选时，可以链接 `/vps` 作为人工核对入口。
+- `asset_summary` 只能展示 VPS Asset Ledger 的少量组合判断入口：30 天续费、待决策、待取消/迁移、未关联监控实例、关联异常 VPS、按币种月付成本。它应集中出现在 Dashboard 首屏 `资产组合决策` lane 中，避免在下方工作台重复出现同权资产卡片。它不能展开资产明细，不能替代 VPS / 订阅页面，也不能把 Dashboard 变成资产字段总表。入口必须深链到 `/asset-decisions?view=...&renew_within_days=30` 或 VPS/观测列表的明确筛选，而不是裸 `/asset-decisions` 或旧 `single_queue` 主入口。
 - 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入监控实例、暂停监控实例、退役监控实例、暂停目标、归档目标。Dashboard 深链是受支持 contract：`/monitoring?onboarding=pending` 表示待接入或绑定待处理监控实例，`/monitoring?abnormal=1` 表示异常监控实例，`/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档` 表示对应目标列表筛选，`/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1` 表示事件页筛选；新增深链必须先在目标页面用 URL-state 和可见 chip/toggle 承接。
 - AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的监控实例/目标 count 可以来自 `abnormal_monitoring_instance_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
 
@@ -137,7 +137,7 @@ overview.asset_summary.vps_assets.map(...)
 <RecentEventsContext events={overview.recent_events} />
 
 // 正确：只展示支撑当前决策路径的 dashboard contract 事实
-<DashboardCommandSurface overview={overview} lanes={['资产决策队列', '观测异常队列', '下一步动作']} />
+<DashboardCommandSurface overview={overview} lanes={['资产组合决策', '观测异常队列', '下一步动作']} />
 <DashboardWorkbench title="当前需要处理" attentionItems={attentionItems} />
 <DashboardContextStrip items={['影响范围', '库存状态', '最近活动']} />
 <span>摘要生成 <Timestamp value={overview.snapshot_generated_at} /></span>
@@ -154,7 +154,7 @@ MonitoringPage 是运行证据扫描页，不应把筛选、批量操作、趋�
 - 高级筛选使用 Drawer 的 applied/draft 分离：打开时从当前已应用筛选初始化草稿；只有点击完成/应用才提交到列表状态；取消、Esc、overlay 和头部关闭必须丢弃草稿，不能改变列表或触发隐式请求。
 - 高级筛选计数只统计已应用字段筛选，必须覆盖 lifecycle、health、monitoring/run status、group、region、labels、search 等会改变列表的维度；quick view 本身不混入字段筛选计数。
 - 批量操作区默认隐藏；只有用户显式打开批量操作、已经选择全量/部分监控实例、存在待确认批量动作、提交中或错误需要展示时才出现。批量动作按钮仍必须以明确选择为前提，不因列表有数据而默认高亮。
-- MonitoringSupportSurface 只作为资产判断支撑，不作为第二个主工作台；文案要压缩，support lane 数量保持克制，资产侧问题应导向 VPS 库存或资产决策队列。
+- MonitoringSupportSurface 只作为资产判断支撑，不作为第二个主工作台；文案要压缩，support lane 数量保持克制，资产侧问题应导向 VPS 库存或带 `view=evidence&renew_within_days=30&scenario=evidence_cleanup` 的资产组合决策入口。
 
 #### Validation & Error Matrix
 
@@ -187,7 +187,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Single queue data: `AssetDecisionsPage` 底部辅助队列继续拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
 - VPS inventory data: `VPSPage` 拉取全量 `listVPSAssets()`、`listProviders()` 和 `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views。
 - Asset Decisions URL-state: `view=needs_decision|renewal|region|provider|cost|evidence|single_queue`，`renew_within_days=30|60|90`，上下文筛选 `provider_id`、`vps_id`、`country`、`region`、`city`、`scenario`，打开对象 `group_id`、`manual_group_id`、`record_id`、`template_id`。非法 view 在前端降级为 `needs_decision`，后端 API 对非法 view/window/scenario 返回 400。筛选 chips 必须首屏可见并可单个移除/全部清空；打开对象只触发读取和展示，不触发创建或 PATCH。
-- URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|archived|cancellation_attention`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。
+- URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|archived|cancellation_attention`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`。Target inventory 支持 `coverage_gap=1` 表达执行监控实例覆盖缺口，供 TargetsSupportSurface 快捷入口和 Dashboard/资产证据支撑场景承接。
 
 #### 3. Contracts
 
@@ -248,7 +248,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | patch record status failed | 错误留在记录详情 modal 内，不改变本地状态，也不触发 VPS/订阅状态修改 |
 | patch record member follow-up failed | 错误留在记录详情 modal 内，不改变成员本地状态，不触发 VPS/订阅/监控/Target 写操作 |
 | record member follow-up note cleared | 前端发送空字符串，后端保存为空备注；不得因 falsy 值省略该字段 |
-| subscriptions list failed in Asset Decisions renewal window | 续费候选 evidence 显示错误，VPS 决策队列仍可显示已加载 VPS |
+| subscriptions list failed in Asset Decisions renewal window | 续费候选 evidence 显示错误，单台辅助队列仍可显示已加载 VPS |
 | all subscriptions failed while building single queue | 单台辅助队列显示加载错误，避免把全量缺订阅误报为真实数据质量 |
 | backend group source availability says subscriptions unavailable | 组列表 / 组详情显示证据不可用，不渲染真实 `缺订阅` chip |
 | decision record snapshot lacks `evidence_assessment` | 记录详情显示“未记录”或“无证据评估”，成员表继续展示其他 snapshot 字段 |

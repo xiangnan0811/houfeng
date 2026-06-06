@@ -220,7 +220,7 @@ export function DashboardPage() {
               <div className="wb-att-item"><span className="wb-att-text text-muted text-sm">暂无需关注项</span></div>
             )}
             {cancellationAttention > 0 ? (
-              <div className="wb-att-item" onClick={() => navigate('/asset-decisions?view=needs_decision&scenario=migration_retirement')}>
+              <div className="wb-att-item" onClick={() => navigate('/asset-decisions?view=needs_decision&renew_within_days=30&scenario=migration_retirement')}>
                 <span className="alert-dot warn"></span>
                 <div className="wb-att-body">
                   <span className="wb-att-text">取消/过期资产状态不一致</span>
@@ -229,7 +229,7 @@ export function DashboardPage() {
               </div>
             ) : null}
             {subscriptionOverview && subscriptionOverview.budget_risk_count > 0 ? (
-              <div className="wb-att-item" onClick={() => navigate('/asset-decisions?view=cost&scenario=budget_reduction')}>
+              <div className="wb-att-item" onClick={() => navigate('/asset-decisions?view=cost&renew_within_days=30&scenario=budget_reduction')}>
                 <span className="alert-dot warn"></span>
                 <div className="wb-att-body">
                   <span className="wb-att-text">订阅预算接近或超过上限</span>
@@ -305,7 +305,7 @@ export function DashboardPage() {
         <div className="wb-col">
           <div className="wb-col-header">
             <span className="wb-col-title">账单事实</span>
-            <span className="wb-col-link" onClick={() => navigate('/asset-decisions?view=evidence&scenario=evidence_cleanup')}>缺口 →</span>
+            <span className="wb-col-link" onClick={() => navigate('/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')}>缺口 →</span>
           </div>
           <div className="wb-col-list">
             {!subscriptionOverview && costEntries.length === 0 && (

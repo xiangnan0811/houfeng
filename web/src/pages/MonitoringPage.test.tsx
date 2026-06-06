@@ -81,6 +81,8 @@ describe('MonitoringPage', () => {
     await waitFor(() => expect(getMonitoringHeaderVPSLink()).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: '监控' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '资产组合决策' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
     expect(screen.getByText('观察 agent 接入后的监控实例、心跳、主机性能与运行控制。')).toBeInTheDocument()
     expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps')
     expect(screen.queryByRole('button', { name: '高级创建' })).not.toBeInTheDocument()

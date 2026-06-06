@@ -8,6 +8,7 @@ export type TargetFilterState = {
   labels: string[]
   executionLabels: string[]
   abnormal: boolean
+  coverageGap: boolean
 }
 
 export type CreateTargetFormState = {

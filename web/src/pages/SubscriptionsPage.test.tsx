@@ -291,6 +291,7 @@ describe('SubscriptionsPage', () => {
     expect(screen.queryByRole('columnheader', { name: '预算/汇率' })).not.toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'CNY 成本' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /预算风险/ })).toHaveAttribute('href', '/settings?tab=subscriptions')
+    expect(screen.getByRole('link', { name: '需要资产判断' })).toHaveAttribute('href', '/asset-decisions?view=renewal&renew_within_days=30&vps_id=vps_001')
 
     expect(fetchMock).toHaveBeenCalledWith('/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc', {
       headers: { Accept: 'application/json' },

@@ -192,6 +192,7 @@ export function describeTargetFilterContext(filterState: TargetFilterState): str
   for (const label of filterState.labels) items.push(`标签 ${label}`)
   for (const label of filterState.executionLabels) items.push(`执行监控实例标签 ${label}`)
   if (filterState.abnormal) items.push('仅看异常')
+  if (filterState.coverageGap) items.push('执行覆盖缺口')
   return items
 }
 
@@ -273,7 +274,7 @@ export function buildTargetEvidenceLead(args: {
   return {
     eyebrow: '证据稳定',
     title: 'Target 入口证据当前稳定',
-    description: '当前没有异常入口、暂停归档对象或执行覆盖缺口。下一步可回到资产决策队列核对资产侧问题。',
+    description: '当前没有异常入口、暂停归档对象或执行覆盖缺口。下一步可回到资产组合决策核对资产侧问题。',
     actionKind: 'asset',
     actionLabel: '查看资产决策',
     tone: 'normal',

@@ -20,12 +20,15 @@ import type { AssetContextForMonitoringInstance, MonitoringInstanceRecord, Monit
 import { MonitoringHero } from './monitoring/MonitoringHero'
 import { MonitoringInstancesListSection } from './monitoring/MonitoringInstancesListSection'
 import { buildMonitoringInstancesTableColumns } from './monitoring/MonitoringInstancesTableColumns'
+import { MonitoringSupportSurface } from './monitoring/MonitoringSupportSurface'
 import { MonitoringToolbar } from './monitoring/MonitoringToolbar'
 import {
   actionButtonKey,
+  buildMonitoringInstanceEvidenceLead,
   countAbnormalMonitoringInstances,
   countMaintenanceOrPausedMonitoringInstances,
   countPendingOnboardingMonitoringInstances,
+  describeMonitoringInstanceFilterContext,
   distinctSorted,
   isBindingConflictMonitoringInstance,
   isPendingOnboardingMonitoringInstance,
@@ -33,6 +36,7 @@ import {
   mergeNonMetadataMonitoringInstanceRecord,
   parseLabels,
   parseMultiValue,
+  pickTopMonitoringInstanceEvidence,
 } from './monitoring/monitoringHelpers'
 import type {
   FocusRestoreRequest,
@@ -352,6 +356,16 @@ export function MonitoringPage() {
     filterState.labels.length > 0 ||
     filterState.abnormal ||
     filterState.onboardingPending
+  const monitoringFilterContext = describeMonitoringInstanceFilterContext(filterState)
+  const monitoringEvidenceLead = buildMonitoringInstanceEvidenceLead({
+    totalMonitoringInstanceCount: monitoring.length,
+    displayedMonitoringInstanceCount: sortedFilteredMonitoringInstances.length,
+    abnormalMonitoringInstanceCount,
+    pendingOnboardingMonitoringInstanceCount,
+    maintenanceOrPausedMonitoringInstanceCount,
+    hasActiveFilters,
+  })
+  const topMonitoringEvidence = pickTopMonitoringInstanceEvidence(sortedFilteredMonitoringInstances)
 
   const healthOptions = ['正常', '关注', '告警', '严重']
   const lifecycleOptions = ['待接入', '在用', '观察中', '不续费', '已退役']
@@ -562,6 +576,21 @@ export function MonitoringPage() {
         onAbnormalClick={() => setAbnormalFilter(abnormalMonitoringInstanceCount > 0)}
         onOnboardingClick={() => setOnboardingFilter(pendingOnboardingMonitoringInstanceCount > 0)}
         onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
+      />
+
+      <MonitoringSupportSurface
+        totalMonitoringInstanceCount={monitoring.length}
+        displayedMonitoringInstanceCount={sortedFilteredMonitoringInstances.length}
+        abnormalMonitoringInstanceCount={abnormalMonitoringInstanceCount}
+        pendingOnboardingMonitoringInstanceCount={pendingOnboardingMonitoringInstanceCount}
+        evidenceLead={monitoringEvidenceLead}
+        topEvidence={topMonitoringEvidence}
+        filterContext={monitoringFilterContext}
+        hasActiveFilters={hasActiveFilters}
+        onAbnormalClick={() => setAbnormalFilter(abnormalMonitoringInstanceCount > 0)}
+        onOnboardingClick={() => setOnboardingFilter(pendingOnboardingMonitoringInstanceCount > 0)}
+        onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
+        onClearFilters={clearAllFilters}
       />
 
       <div className="animate-in d2">

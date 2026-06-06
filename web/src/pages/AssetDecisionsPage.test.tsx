@@ -655,6 +655,36 @@ describe('AssetDecisionsPage', () => {
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
   })
 
+  it('carries cross-page context filters into visible chips and asset-decision queries', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/asset-decisions?view=evidence&renew_within_days=30&provider_id=pv_001&vps_id=vps_review&scenario=evidence_cleanup']}>
+        <AssetDecisionsPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    )
+
+    const chips = await screen.findByLabelText('资产决策上下文筛选')
+    expect(within(chips).getByText('服务商: pv_001')).toBeInTheDocument()
+    expect(within(chips).getByText('VPS: vps_review')).toBeInTheDocument()
+    expect(within(chips).getByText('场景: 资料清理')).toBeInTheDocument()
+    expect(screen.getByLabelText('current-url')).toHaveTextContent('/asset-decisions?view=evidence&renew_within_days=30&provider_id=pv_001&vps_id=vps_review&scenario=evidence_cleanup')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=evidence&renew_within_days=30&provider_id=pv_001&vps_id=vps_review&scenario=evidence_cleanup')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=evidence&renew_within_days=30&provider_id=pv_001&vps_id=vps_review&scenario=evidence_cleanup')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/records?view=evidence&renew_within_days=30&provider_id=pv_001&vps_id=vps_review&scenario=evidence_cleanup')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/manual-groups?view=evidence&renew_within_days=30&provider_id=pv_001&vps_id=vps_review&scenario=evidence_cleanup')
+
+    fireEvent.click(within(chips).getByRole('button', { name: '清除上下文' }))
+
+    await waitFor(() => expect(screen.getByLabelText('current-url')).toHaveTextContent('/asset-decisions?view=evidence&renew_within_days=30'))
+    expect(screen.queryByLabelText('资产决策上下文筛选')).not.toBeInTheDocument()
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=evidence&renew_within_days=30')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=evidence&renew_within_days=30')
+  })
+
   it('switches workbench tabs through asset-decision group queries', async () => {
     const regionGroup = groupSummary({
       group_id: 'adg_auto_region',

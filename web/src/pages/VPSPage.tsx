@@ -160,6 +160,7 @@ function assetDecisionHrefForFilters(filters: FilterState): string {
   if (filters.lifecycle_status === 'to_cancel' || filters.renewal_decision === 'cancel' || filters.view === 'cancellation_attention') {
     params.set('scenario', 'migration_retirement')
   } else if (filters.view === 'missing_subscription' || filters.view === 'unlinked' || filters.view === 'missing_facts') {
+    params.set('view', 'evidence')
     params.set('scenario', 'evidence_cleanup')
   }
   return `/asset-decisions?${params.toString()}`
