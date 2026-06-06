@@ -1854,3 +1854,37 @@ Refined /asset-decisions into a portfolio workbench with card-based decision gro
 ### Next Steps
 
 - None - task complete
+
+
+## Session 173: 资产决策中枢集成体验收敛
+
+**Date**: 2026-06-06
+**Task**: 资产决策中枢集成体验收敛
+**Branch**: `worktree/asset-decisions-integration-polish`
+
+### Summary
+
+统一资产组合决策跨页深链和语义；接入 Monitoring/Target 支撑面，补齐 Target 覆盖缺口筛选、AssetDecisions 上下文 chips 测试，并同步 v2 视觉证据与 Trellis web 规范。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f13f066` | (see git log) |
+| `f8a3cfc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
