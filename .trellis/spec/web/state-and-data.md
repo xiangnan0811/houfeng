@@ -191,6 +191,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 #### 3. Contracts
 
 - Asset Decisions 首屏主 surface 必须是 `资产组合决策` 的决策组列表，不得恢复三张同权 VPS queue table，也不得把单台续费队列重新提升为主视觉主体。
+- Asset Decisions 可以在顶部 summary 与 `决策组列表` 之间展示 `下一步导览 / closed-loop` surface，用于把当前已加载的自动组、已保存记录 execution readback、自定义组合和场景模板收敛成 3-6 个只读工作项。导览排序优先级为事实漂移记录、阻塞记录、需补证据记录、当前自动组、进行中自定义组合、可用模板；点击只复用 `group_id`、`manual_group_id`、`record_id`、`template_id` 打开已有详情，不自动创建、不 PATCH record status、不写 VPS / Subscription / MonitoringInstance / Target。
+- `下一步导览 / closed-loop` 的指标只能从当前已加载 rows 派生，例如自动组数量、进行中自定义组合、未关闭记录、readback drift/blocked/needs_evidence/open、预算压力和资料缺口。任一来源加载失败时只显示局部不可用提示并跳过该来源的工作项，不得把失败解释成无问题、已对齐或真实资料缺口。
 - 已保存组合决策必须作为主工作台下方的辅助 surface 展示，承接“保存本次判断、回看当时证据、推进记录状态”的用户任务，但不得取代自动组发现入口。
 - 自定义组合必须作为自动组发现和已保存记录之间的 scenario surface：自动组回答“系统发现哪些组合问题”，自定义组合回答“用户正在比较哪些真实场景”，记录回答“某一次判断和后续跟进是什么”。自定义组合可编辑 title/goal/note/scenario/status 与成员 intended role/action/reason/note/sort，不得修改 VPS / Subscription / MonitoringInstance / Target。
 - 场景模板是 scenario surface 的入口层，位于自动组和自定义组合附近，视觉权重低于自动组列表。模板只启动场景或从手工组合保存 blueprint；内置模板不允许编辑，自定义模板只能改模板元数据/归档状态。模板失败只影响模板 surface 或模板 modal，不影响自动组、手工组合、记录、续费 evidence 和单台队列。
