@@ -192,12 +192,13 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 #### 3. Contracts
 
 - Asset Decisions 首屏主 surface 必须是 `资产组合决策` 的决策组列表，不得恢复三张同权 VPS queue table，也不得把单台续费队列重新提升为主视觉主体。
-- Asset Decisions 可以在顶部 summary 与 `决策组列表` 之间展示 `下一步导览 / closed-loop` surface，用于把当前已加载的自动组、已保存记录 execution readback、自定义组合和场景模板收敛成 3-6 个只读工作项。导览排序优先级为事实漂移记录、阻塞记录、需补证据记录、当前自动组、进行中自定义组合、可用模板；点击只复用 `group_id`、`manual_group_id`、`record_id`、`template_id` 打开已有详情，不自动创建、不 PATCH record status、不写 VPS / Subscription / MonitoringInstance / Target。
+- Asset Decisions 顶部必须先展示 portfolio command summary：从当前已加载的记录回读、自动组、自定义组合和模板中派生第一行动，并展示组合范围、续费窗口、执行闭环风险、evidence source 状态和 context filter 摘要。该 summary 是处理顺序导览，不是 KPI 卡片墙；不得把单台队列数量提升为主指标，也不得因为某来源失败而伪造无问题。
+- Asset Decisions 可以在 `决策组列表` 右侧展示 `下一步导览 / closed-loop` surface，用于把当前已加载的自动组、已保存记录 execution readback、自定义组合和场景模板收敛成 3-6 个只读工作项。导览排序优先级为事实漂移记录、阻塞记录、需补证据记录、当前自动组、进行中自定义组合、可用模板；点击只复用 `group_id`、`manual_group_id`、`record_id`、`template_id` 打开已有详情，不自动创建、不 PATCH record status、不写 VPS / Subscription / MonitoringInstance / Target。
 - `下一步导览 / closed-loop` 的指标只能从当前已加载 rows 派生，例如自动组数量、进行中自定义组合、未关闭记录、readback drift/blocked/needs_evidence/open、预算压力和资料缺口。任一来源加载失败时只显示局部不可用提示并跳过该来源的工作项，不得把失败解释成无问题、已对齐或真实资料缺口。
 - 已保存组合决策必须作为主工作台下方的辅助 surface 展示，承接“保存本次判断、回看当时证据、推进记录状态”的用户任务，但不得取代自动组发现入口。
 - 自定义组合必须作为自动组发现和已保存记录之间的 scenario surface：自动组回答“系统发现哪些组合问题”，自定义组合回答“用户正在比较哪些真实场景”，记录回答“某一次判断和后续跟进是什么”。自定义组合可编辑 title/goal/note/scenario/status 与成员 intended role/action/reason/note/sort，不得修改 VPS / Subscription / MonitoringInstance / Target。
 - 场景模板是 scenario surface 的入口层，位于自动组和自定义组合附近，视觉权重低于自动组列表。模板只启动场景或从手工组合保存 blueprint；内置模板不允许编辑，自定义模板只能改模板元数据/归档状态。模板失败只影响模板 surface 或模板 modal，不影响自动组、手工组合、记录、续费 evidence 和单台队列。
-- 自动组至少覆盖 `renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。组级摘要展示 VPS 数量、生命周期 / 用途 / 续费决策分布、成本、续费窗口、取消联动、服务 / 域名 / Target、监控关联、异常和 evidence chips。
+- 自动组至少覆盖 `renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。组卡展示顺序应优先服务扫描：组名/scope、主问题、当前压力、推荐下一步、证据评估、成员数量、用途分布、成本、服务 / 域名 / Target、监控关联、异常和 evidence chips；避免把五个以上指标做成同权小格，让用户先读表再理解问题。
 - 组详情必须展示成员 VPS 基础事实、主订阅、服务 / 域名 / Target / 监控摘要、`suggested_role`、`suggested_action` 和 evidence chips。建议只能帮助扫描和排序，不得自动提交 keep / migrate / cancel。
 - `evidence_assessment` 的视觉层级高于零散 evidence chips、低于组合事实本身：组列表展示判断尺度，组详情展示组级和成员级评估，记录详情展示保存时证据快照。UI 文案必须表达“证据质量 / 决策压力 / 准备度”，不得把 `decision_bias` 写成自动执行承诺。
 - `decision_recommendation` 的视觉层级与 evidence assessment 相邻但更偏“下一步提示”：列表里保持短摘要，详情里展示下一步和理由/阻塞 chips。不得在前端根据 recommendation 自动调用 `PATCH /api/vps/*`、`PATCH /api/asset-decisions/records/*` 或其他业务对象写接口。
@@ -206,7 +207,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - 记录详情必须展示记录状态、来源、成员判断和证据快照，并允许推进记录状态；成员动作里的 `cancel` / `open_cancellation_workbench` 只能渲染到 `/vps/{id}?workbench=cancellation` 的跳转入口。
 - 记录详情必须展示成员级跟进状态、备注与最后更新时间；单个成员保存跟进时只 PATCH 该成员 `vps_id`、`followup_status`、`followup_note`，成功后刷新当前记录详情与已保存记录列表的跟进计数。成员跟进状态只表达“组合判断后的执行记忆”，不能隐式修改记录级状态，也不能触发 VPS、Subscription、MonitoringInstance 或 Target 写操作。
 - 已保存记录列表可以低权重展示 `execution_plan` 摘要、lane 计数、actionable / blocked 计数；点击仍只打开记录详情，不直接跳业务页。
-- 记录详情必须在成员明细表上方展示执行编排 board，按 `cancel_retire / migration / keep_observe / evidence / review` lane 分组展示成员、readback badge、issue chips、当前事实、下一步 CTA 和快速跟进按钮。board 是记录详情内的执行导览，不取代自动组主 surface，也不批量执行。
+- 记录详情必须在成员明细表上方展示执行编排 board，按 `cancel_retire / migration / keep_observe / evidence / review` lane 分组展示成员、lane summary、readback badge、issue chips、当前事实块、下一步 CTA 和快速跟进按钮。board 是记录详情内的执行导览，不取代自动组主 surface，也不批量执行。
 - 执行编排 CTA 的 URL 映射只能在前端本地完成：`open_cancellation_workbench -> /vps/{id}?workbench=cancellation`，`open_subscription_context -> /subscriptions?vps_id={id}`，`open_vps_detail -> /vps/{id}`，`review_record` 留在当前记录详情复核或提供普通 VPS 详情入口。
 - 快速跟进按钮只能调用 `PATCH /api/asset-decisions/records/{record_id}` 更新成员 followup；不得自动 PATCH record status，也不得调用 VPS、Subscription、MonitoringInstance、Target 写接口。`completed` 记录若当前 facts drift，仍必须展示 drift/readback/plan，不能因为人工状态完成而隐藏问题。
 - 单台决策编辑必须在 group detail drawer 或底部单台辅助队列中完成，仍使用 `AssetDecisionWorkPanel` 与 `PATCH /api/vps/{id}`。保存成功 notice 应留在页面可见 surface 内。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。

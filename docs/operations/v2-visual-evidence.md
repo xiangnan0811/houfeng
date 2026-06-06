@@ -112,7 +112,7 @@ TMPDIR="$PWD/.tmp/playwright" /opt/homebrew/opt/python@3.11/bin/python3.11 scrip
   --viewport 390x900
 ```
 
-`--mock-api asset-workflows` intercepts `/api/auth/me`, `/api/dashboard`, `/api/asset-decisions/*`, `/api/providers`, `/api/vps`, and `/api/subscriptions` in the browser session. The fixture rows intentionally cover the asset portfolio decision workbench: automatic decision groups, context filter chips, closed-loop next work, scenario templates, manual groups, saved decision records with readback/plan snippets, renewal evidence, the single-asset auxiliary queue, missing subscription, unlinked VPS, missing facts, provider labels/ratings, subscription filters, and shell summary state.
+`--mock-api asset-workflows` intercepts `/api/auth/me`, `/api/dashboard`, `/api/asset-decisions/*`, `/api/providers`, `/api/vps`, and `/api/subscriptions` in the browser session. The fixture rows intentionally cover the asset portfolio decision workbench: portfolio command summary, automatic decision groups, context filter chips, closed-loop next work, scenario templates, manual groups, saved decision records with readback/plan snippets, record execution lane board, renewal evidence, the single-asset auxiliary queue, missing subscription, unlinked VPS, missing facts, provider labels/ratings, subscription filters, and shell summary state.
 
 Report this as `Data source: mock-api asset-workflows`. It proves the protected route layout can render with representative asset workflow states, but it does not prove backend correctness, real account completeness, import fidelity, or the real inventory result.
 
