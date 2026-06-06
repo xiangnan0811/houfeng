@@ -102,6 +102,7 @@ type ManualGroupSummary struct {
 	EvidenceChips              []EvidenceChip         `json:"evidence_chips"`
 	EvidenceAssessment         EvidenceAssessment     `json:"evidence_assessment"`
 	DecisionRecommendation     DecisionRecommendation `json:"decision_recommendation"`
+	ComparisonInsight          ComparisonInsight      `json:"comparison_insight"`
 	SourceAvailability         SourceAvailability     `json:"source_availability"`
 	CreatedAt                  time.Time              `json:"created_at"`
 	UpdatedAt                  time.Time              `json:"updated_at"`
@@ -369,6 +370,19 @@ func ManualGroupDetailFromRows(row ManualGroupRow, memberRows []ManualGroupMembe
 			}
 		} else {
 			member.CurrentFactFound = false
+			member.GroupMember = GroupMember{
+				VPS: vpsassets.Record{
+					VPSID:       memberRow.VPSID,
+					DisplayName: memberRow.VPSID,
+				},
+				SourceAvailability: SourceAvailability{
+					Subscriptions: false,
+					Services:      false,
+					Domains:       false,
+					Monitoring:    false,
+					Targets:       false,
+				},
+			}
 			if member.EvidenceSnapshot == nil {
 				member.EvidenceSnapshot = EvidenceSnapshot{}
 			}
@@ -387,6 +401,10 @@ func ManualGroupDetailFromRows(row ManualGroupRow, memberRows []ManualGroupMembe
 				RiskSignalCount: 1,
 				Summary:         "当前事实缺失，需人工核对",
 			}
+			member.GroupMember.EvidenceChips = member.EvidenceChips
+			member.GroupMember.EvidenceAssessment = member.EvidenceAssessment
+			member.GroupMember.DecisionRecommendation = MissingFactRecommendation(memberRow.VPSID)
+			member.GroupMember.ComparisonInsight = MissingFactComparison(memberRow.VPSID)
 		}
 		members = append(members, member)
 	}
@@ -405,10 +423,13 @@ func ManualGroupDetailFromRows(row ManualGroupRow, memberRows []ManualGroupMembe
 		}
 		return left < right
 	})
+	assignManualMemberComparisonRanks(members)
 
+	allMembers := make([]GroupMember, 0, len(members))
 	currentMembers := make([]GroupMember, 0, len(members))
 	missingFactCount := 0
 	for _, member := range members {
+		allMembers = append(allMembers, member.GroupMember)
 		if member.CurrentFactFound {
 			currentMembers = append(currentMembers, member.GroupMember)
 		} else {
@@ -472,7 +493,7 @@ func ManualGroupDetailFromRows(row ManualGroupRow, memberRows []ManualGroupMembe
 		BaseCurrency:               detail.BaseCurrency,
 		EvidenceChips:              detail.EvidenceChips,
 		EvidenceAssessment:         detail.EvidenceAssessment,
-		SourceAvailability:         mergeMemberSourceAvailability(currentMembers),
+		SourceAvailability:         mergeMemberSourceAvailability(allMembers),
 		CreatedAt:                  row.CreatedAt,
 		UpdatedAt:                  row.UpdatedAt,
 		ArchivedAt:                 row.ArchivedAt,
@@ -498,8 +519,10 @@ func ManualGroupDetailFromRows(row ManualGroupRow, memberRows []ManualGroupMembe
 	for index := range result.Members {
 		if !result.Members[index].CurrentFactFound {
 			result.Members[index].DecisionRecommendation = MissingFactRecommendation(result.Members[index].VPSID)
+			result.Members[index].GroupMember.DecisionRecommendation = result.Members[index].DecisionRecommendation
 		}
 	}
+	result.ComparisonInsight = CompareManualGroup(result)
 	return result
 }
 
@@ -513,6 +536,7 @@ func BuildGroupFromMembers(groupType GroupType, view View, scopeKey, title, scop
 
 func RecordSnapshotFromManualGroup(group ManualGroupDetail) EvidenceSnapshot {
 	snapshot := RecordSnapshotFromGroup(ManualGroupAsGroupDetail(group))
+	snapshot["comparison_insight"] = group.ComparisonInsight
 	snapshot["manual_group_id"] = group.ManualGroupID
 	snapshot["manual_group_status"] = string(group.Status)
 	snapshot["manual_group_scenario"] = string(group.Scenario)

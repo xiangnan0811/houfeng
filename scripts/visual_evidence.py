@@ -1183,6 +1183,133 @@ def asset_decision_member(
     }
 
 
+def asset_decision_member_comparison(
+    member: dict[str, object],
+    *,
+    rank: int,
+) -> dict[str, object]:
+    suggested_role = str(member.get("suggested_role") or "")
+    suggested_action = str(member.get("suggested_action") or "review")
+    chips = [
+        str(chip.get("kind") or "")
+        for chip in member.get("evidence_chips", [])
+        if isinstance(chip, dict)
+    ]
+    vps = member.get("vps")
+    if not isinstance(vps, dict):
+        lane = "review"
+        axis = "review"
+        summary = "当前事实缺失，需要回到记录中复核"
+    elif suggested_action == "complete_evidence" or any(kind.startswith("missing_") for kind in chips):
+        lane = "evidence"
+        axis = "evidence"
+        summary = "证据缺口明显，先补齐订阅、监控或基础资料"
+    elif suggested_action in {"open_cancellation_workbench", "cancel"}:
+        lane = "retire"
+        axis = "lifecycle"
+        summary = "退役候选，优先核对取消联动和运行对象"
+    elif suggested_action == "migrate":
+        lane = "observe"
+        axis = "renewal"
+        summary = "迁移候选，重点看续费窗口与旧承载清理"
+    elif suggested_role == "primary_candidate":
+        lane = "primary"
+        axis = "service_context"
+        summary = "主力候选，承载和证据较完整"
+    elif suggested_role == "standby_candidate":
+        lane = "standby"
+        axis = "monitoring"
+        summary = "备用候选，适合保留为容灾或观察"
+    else:
+        lane = "review"
+        axis = "review"
+        summary = "需要结合成本、承载和证据继续复核"
+    signals: list[dict[str, object]] = []
+    if "budget_risk" in chips:
+        signals.append(asset_decision_chip("budget_risk", "预算压力", "critical"))
+    if "carries_service" in chips or int(member.get("service_count") or 0) > 0:
+        signals.append(asset_decision_chip("service_context", "承载服务", "notice"))
+    if "missing_subscription" in chips:
+        signals.append(asset_decision_chip("missing_subscription", "缺订阅", "alert"))
+    if int(member.get("monitoring_link_count") or 0) == 0:
+        signals.append(asset_decision_chip("missing_monitoring", "未关联监控", "alert"))
+    return {
+        "rank": rank,
+        "lane": lane,
+        "primary_axis": axis,
+        "summary": summary,
+        "signals": signals,
+    }
+
+
+def asset_decision_assign_comparison(members: list[dict[str, object]]) -> None:
+    lane_order = {
+        "primary": 1,
+        "standby": 2,
+        "observe": 3,
+        "retire": 4,
+        "evidence": 5,
+        "review": 6,
+    }
+    staged: list[tuple[int, dict[str, object]]] = []
+    for index, member in enumerate(members):
+        comparison = asset_decision_member_comparison(member, rank=0)
+        staged.append((lane_order.get(str(comparison["lane"]), 99) * 100 + index, member))
+        member["comparison_insight"] = comparison
+    staged.sort(key=lambda item: item[0])
+    for rank, (_, member) in enumerate(staged, start=1):
+        comparison = member.get("comparison_insight")
+        if isinstance(comparison, dict):
+            comparison["rank"] = rank
+
+
+def asset_decision_group_comparison(
+    members: list[dict[str, object]],
+    group_type: str,
+) -> dict[str, object]:
+    lane_counts: dict[str, int] = {}
+    axis_counts: dict[str, int] = {}
+    priority_ids: list[str] = []
+    tradeoffs: list[dict[str, object]] = []
+    for member in members:
+        comparison = member.get("comparison_insight")
+        vps = member.get("vps")
+        if not isinstance(comparison, dict) or not isinstance(vps, dict):
+            continue
+        lane = str(comparison.get("lane") or "review")
+        axis = str(comparison.get("primary_axis") or "review")
+        lane_counts[lane] = lane_counts.get(lane, 0) + 1
+        axis_counts[axis] = axis_counts.get(axis, 0) + 1
+        if len(priority_ids) < 3:
+            priority_ids.append(str(vps.get("vps_id") or ""))
+        signals = comparison.get("signals")
+        if isinstance(signals, list):
+            for signal in signals:
+                if isinstance(signal, dict) and len(tradeoffs) < 4:
+                    tradeoffs.append(signal)
+    primary_axis = max(axis_counts.items(), key=lambda item: item[1])[0] if axis_counts else "review"
+    if group_type == "evidence_gap":
+        summary = "资料缺口主导，先补齐证据再做组合取舍"
+    elif group_type == "cancellation_attention":
+        summary = "取消联动主导，先确认退役闭环"
+    elif group_type == "cost_pressure":
+        summary = "预算压力主导，比较保留价值和续费窗口"
+    else:
+        summary = "按主力、备用、观察、退役分层比较资产组合"
+    lane_order = ["primary", "standby", "observe", "retire", "evidence", "review"]
+    return {
+        "primary_axis": primary_axis,
+        "summary": summary,
+        "lane_counts": [
+            {"lane": lane, "count": lane_counts[lane]}
+            for lane in lane_order
+            if lane_counts.get(lane, 0) > 0
+        ],
+        "priority_vps_ids": [vps_id for vps_id in priority_ids if vps_id],
+        "tradeoffs": tradeoffs,
+    }
+
+
 def asset_decision_count_by(rows: list[dict[str, object]], key: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
@@ -1244,7 +1371,8 @@ def asset_decision_group_summary(
         if row["vps_id"] in vps_ids and row["status"] == "active"
     )
     assessment = asset_decision_group_assessment(members, group_type)
-    return {
+    asset_decision_assign_comparison(members)
+    summary = {
         "group_id": group_id,
         "group_type": group_type,
         "view": view,
@@ -1287,10 +1415,12 @@ def asset_decision_group_summary(
         "evidence_chips": evidence_chips,
         "evidence_assessment": assessment,
     }
+    summary["comparison_insight"] = asset_decision_group_comparison(members, group_type)
+    return summary
 
 
 def asset_decision_group_definitions() -> list[dict[str, object]]:
-    return [
+    definitions = [
         {
             "vps_ids": ["vps_ams_core", "vps_sjc_edge", "vps_fra_legacy"],
             "summary": asset_decision_group_summary(
@@ -1494,6 +1624,16 @@ def asset_decision_group_definitions() -> list[dict[str, object]]:
             ],
         },
     ]
+    for definition in definitions:
+        members = definition.get("members")
+        summary = definition.get("summary")
+        if isinstance(members, list) and isinstance(summary, dict):
+            asset_decision_assign_comparison(members)
+            summary["comparison_insight"] = asset_decision_group_comparison(
+                members,
+                str(summary.get("group_type") or "review"),
+            )
+    return definitions
 
 
 def asset_decision_public_groups(query: dict[str, list[str]]) -> list[dict[str, object]]:
@@ -1622,6 +1762,7 @@ def asset_decision_manual_group_detail(
             sort_order=20,
         ),
     ]
+    asset_decision_assign_comparison(members)
     summary = asset_decision_manual_group_summary(manual_group_id, members)
     summary["members"] = members
     return summary
@@ -1695,6 +1836,7 @@ def asset_decision_manual_group_summary(
         "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
         "evidence_chips": base["evidence_chips"],
         "evidence_assessment": base["evidence_assessment"],
+        "comparison_insight": asset_decision_group_comparison(members, "region_portfolio"),
         "source_availability": asset_decision_source_availability(),
         "created_at": iso_timestamp(-1),
         "updated_at": iso_timestamp(-1),
@@ -1862,6 +2004,7 @@ def asset_decision_record_group_snapshot(group: dict[str, object]) -> dict[str, 
         "base_currency",
         "evidence_chips",
         "evidence_assessment",
+        "comparison_insight",
         "source_availability",
     ]
     return {key: group[key] for key in keys if key in group}
@@ -1907,6 +2050,7 @@ def asset_decision_record_member(
         "renewal_within_window": member.get("renewal_within_window", False),
         "evidence_chips": member.get("evidence_chips", []),
         "evidence_assessment": member.get("evidence_assessment", {}),
+        "comparison_insight": member.get("comparison_insight", {}),
         "source_availability": member.get("source_availability", {}),
     }
     if member.get("primary_subscription") is not None:

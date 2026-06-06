@@ -117,6 +117,38 @@ function evidenceAssessment(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function comparisonInsight(overrides: Record<string, unknown> = {}) {
+  return {
+    summary: '主力承载明确，备用仍需补齐订阅和监控证据',
+    primary_axis: 'service_context',
+    lane_counts: [
+      { lane: 'primary', count: 1 },
+      { lane: 'evidence', count: 1 },
+    ],
+    priority_vps_ids: ['vps_primary', 'vps_standby'],
+    tradeoffs: [
+      { kind: 'service_context', label: '承载差异', tone: 'notice', details: '主力承载服务，备用资料不足' },
+    ],
+    ...overrides,
+  }
+}
+
+function memberComparisonInsight(overrides: Record<string, unknown> = {}) {
+  return {
+    rank: 1,
+    lane: 'primary',
+    summary: '主力候选：承载服务且监控证据可用',
+    strengths: [
+      { kind: 'service_context', label: '承载服务', tone: 'normal' },
+      { kind: 'monitoring', label: '监控在线', tone: 'normal' },
+    ],
+    risks: [],
+    gaps: [],
+    tradeoffs: [],
+    ...overrides,
+  }
+}
+
 function groupSummary(overrides: Record<string, unknown> = {}) {
   return {
     group_id: 'adg_auto_001',
@@ -149,6 +181,7 @@ function groupSummary(overrides: Record<string, unknown> = {}) {
     monthly_cost_by_currency: [{ currency: 'USD', monthly_total: 20, yearly_total: 240 }],
     evidence_chips: [{ kind: 'renewal_due', label: '续费临近', tone: 'alert' }],
     evidence_assessment: evidenceAssessment(),
+    comparison_insight: comparisonInsight(),
     ...overrides,
   }
 }
@@ -209,6 +242,7 @@ function groupDetail() {
         suggested_action: 'keep',
         evidence_chips: [{ kind: 'carries_service', label: '承载服务', tone: 'normal' }],
         evidence_assessment: evidenceAssessment(),
+        comparison_insight: memberComparisonInsight(),
         renewal_within_window: true,
         source_availability: sourceAvailability,
       },
@@ -249,6 +283,17 @@ function groupDetail() {
           risk_signal_count: 0,
           gap_signal_count: 3,
           summary: '证据阻塞：3 项缺口，先补齐资料',
+        }),
+        comparison_insight: memberComparisonInsight({
+          rank: 2,
+          lane: 'evidence',
+          summary: '补证据候选：缺订阅和监控关联后再判断是否备用',
+          strengths: [],
+          risks: [{ kind: 'missing_subscription', label: '缺订阅', tone: 'alert' }],
+          gaps: [
+            { kind: 'missing_subscription', label: '缺订阅', tone: 'alert' },
+            { kind: 'missing_monitoring', label: '未关联监控', tone: 'alert' },
+          ],
         }),
         renewal_within_window: false,
         source_availability: sourceAvailability,
@@ -347,6 +392,10 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
       group_id: 'adg_auto_001',
       monthly_cost_base: 140,
       base_currency: 'CNY',
+      comparison_insight: comparisonInsight({
+        summary: '保存时判断：主力保留，备用补证据后再观察',
+        primary_axis: 'service_context',
+      }),
       evidence_assessment: evidenceAssessment({
         confidence_score: 68,
         pressure_score: 42,
@@ -381,6 +430,9 @@ function decisionRecord(overrides: Record<string, unknown> = {}) {
           running_monitoring_count: 1,
           monitoring_link_count: 1,
           primary_issue_summary: '',
+          comparison_insight: memberComparisonInsight({
+            summary: '保存时成员判断：主力保留',
+          }),
           evidence_assessment: evidenceAssessment(),
         },
         created_at: '2026-06-05T08:00:00Z',
@@ -429,6 +481,11 @@ function manualGroupDetail(overrides: Record<string, unknown> = {}) {
     monthly_cost_by_currency: [{ currency: 'USD', monthly_total: 20, yearly_total: 240 }],
     evidence_chips: [{ kind: 'carries_service', label: '承载服务', tone: 'normal' }],
     evidence_assessment: evidenceAssessment(),
+    comparison_insight: comparisonInsight({
+      summary: '自定义组合中主力证据清晰，可保存记录',
+      lane_counts: [{ lane: 'primary', count: 1 }],
+      priority_vps_ids: ['vps_primary'],
+    }),
     source_availability: sourceAvailability,
     created_at: '2026-06-06T08:00:00Z',
     updated_at: '2026-06-06T08:00:00Z',
@@ -627,6 +684,8 @@ describe('AssetDecisionsPage', () => {
     expect(screen.getByRole('heading', { name: '决策组列表' })).toBeInTheDocument()
     expect(screen.getByLabelText('决策组扫描列表')).toBeInTheDocument()
     expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('主力承载明确，备用仍需补齐订阅和监控证据').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('主力 1').length).toBeGreaterThan(0)
     expect(screen.getAllByText('证据强').length).toBeGreaterThan(0)
     expect(screen.getAllByText('承载证据').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/服务 2 · 域名 1 · Target 1\/1/).length).toBeGreaterThan(0)
@@ -885,12 +944,16 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getByRole('heading', { name: '场景推进建议' })).toBeInTheDocument()
     expect(within(dialog).getByText('直接保存记录')).toBeInTheDocument()
     expect(within(dialog).getByText('先创建自定义组合')).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: '证据矩阵 / 取舍对比' })).toBeInTheDocument()
+    expect(within(dialog).getByText('主力候选：承载服务且监控证据可用')).toBeInTheDocument()
+    expect(within(dialog).getByText('补证据候选：缺订阅和监控关联后再判断是否备用')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('承载差异').length).toBeGreaterThan(0)
     expect(within(dialog).getAllByText('Germany Primary').length).toBeGreaterThan(0)
-    expect(within(dialog).getByText('Germany Standby')).toBeInTheDocument()
-    expect(within(dialog).getByText('主力候选')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('Germany Standby').length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText('主力候选').length).toBeGreaterThan(0)
     expect(within(dialog).getAllByText('保留').length).toBeGreaterThan(0)
-    expect(within(dialog).getByText(/服务 2/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/监控 1/)).toBeInTheDocument()
+    expect(within(dialog).getAllByText(/服务 2/).length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText(/监控 1/).length).toBeGreaterThan(0)
     expect(within(dialog).getByText('证据质量')).toBeInTheDocument()
     expect(within(dialog).getAllByText('先补证据').length).toBeGreaterThan(0)
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30')
@@ -997,6 +1060,9 @@ describe('AssetDecisionsPage', () => {
     await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
     const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
     expect(within(manualDialog).getByRole('heading', { name: '组合推进状态' })).toBeInTheDocument()
+    expect(within(manualDialog).getByRole('heading', { name: '自定义组合证据矩阵' })).toBeInTheDocument()
+    expect(within(manualDialog).getAllByText('自定义组合中主力证据清晰，可保存记录').length).toBeGreaterThan(0)
+    expect(within(manualDialog).getByText('意图匹配')).toBeInTheDocument()
     expect(within(manualDialog).getByText(/可保存记录 5\/5|接近可保存|继续整理/)).toBeInTheDocument()
     expect(within(manualDialog).getByText('当前事实')).toBeInTheDocument()
     expect(within(manualDialog).getByRole('heading', { name: '组合场景' })).toBeInTheDocument()
@@ -1053,6 +1119,8 @@ describe('AssetDecisionsPage', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
     expect(within(dialog).getByRole('heading', { name: '组合推进状态' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: '自定义组合证据矩阵' })).toBeInTheDocument()
+    expect(within(dialog).getByText('意图匹配')).toBeInTheDocument()
     expect(within(dialog).getByText('意图')).toBeInTheDocument()
     expect(within(dialog).getByText('已设置 1/1 个成员动作')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '保存为决策记录' }))
@@ -1193,6 +1261,10 @@ describe('AssetDecisionsPage', () => {
     const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
     expect(within(dialog).getByText('主力保留')).toBeInTheDocument()
     expect(within(dialog).getByText('证据快照')).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: '保存时判断依据' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: '快照对比矩阵' })).toBeInTheDocument()
+    expect(within(dialog).getAllByText('保存时判断：主力保留，备用补证据后再观察').length).toBeGreaterThan(0)
+    expect(within(dialog).getByText('保存时成员判断：主力保留')).toBeInTheDocument()
     expect(within(dialog).getByText('执行回读')).toBeInTheDocument()
     expect(within(dialog).getByText('执行编排')).toBeInTheDocument()
     expect(within(dialog).getByRole('heading', { name: '来源与当前闭环' })).toBeInTheDocument()
@@ -1346,6 +1418,59 @@ describe('AssetDecisionsPage', () => {
     expect(subscriptionLinks[0]).toHaveAttribute('href', '/subscriptions?vps_id=vps_primary')
     const writeCalls = fetchMock.mock.calls.filter((call) => call[1]?.method && call[1]?.method !== 'GET')
     expect(writeCalls).toEqual([])
+  })
+
+  it('falls back gracefully when saved record snapshots do not include comparison insight', async () => {
+    const legacyRecord = decisionRecord({
+      evidence_snapshot: {
+        group_id: 'adg_auto_001',
+        monthly_cost_base: 140,
+        base_currency: 'CNY',
+        evidence_assessment: evidenceAssessment({
+          quality_tier: 'usable',
+          decision_bias: 'review',
+          summary: '旧记录证据可用',
+        }),
+      },
+      members: [
+        {
+          ...decisionRecord().members[0],
+          evidence_snapshot: {
+            service_count: 2,
+            domain_count: 1,
+            running_monitoring_count: 1,
+            monitoring_link_count: 1,
+            primary_issue_summary: '',
+            evidence_assessment: evidenceAssessment(),
+          },
+        },
+      ],
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      recordsBody: [legacyRecord],
+      routes: [
+        { url: '/api/asset-decisions/records/adr_001', body: legacyRecord },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
+    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    expect(within(dialog).getByRole('heading', { name: '保存时判断依据' })).toBeInTheDocument()
+    expect(within(dialog).getByText('保存时未记录对比洞察；当前仍保留证据评估快照、成员判断、执行回读和执行编排。')).toBeInTheDocument()
+    expect(within(dialog).getByText('旧记录缺少 comparison_insight 字段，不影响当前执行回读、执行计划和成员跟进。')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('旧记录证据可用').length).toBeGreaterThan(0)
+    expect(within(dialog).getByText('执行回读')).toBeInTheDocument()
   })
 
   it('keeps the single VPS renewal decision PATCH payload unchanged', async () => {

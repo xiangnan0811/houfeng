@@ -89,6 +89,56 @@ func TestEvidenceAssessmentRatesCompleteEvidenceAsDecisionReady(t *testing.T) {
 	}
 }
 
+func TestComparisonInsightRanksAndExplainsPortfolioMembers(t *testing.T) {
+	facts := []Fact{
+		fact("vps_primary", "DE Primary", "pv_hetzner", "Hetzner", "Germany", "Hesse", "Falkenstein", vpsassets.UsageInUse, sub("sub_primary", 12, 120)),
+		fact("vps_standby", "DE Standby", "pv_hetzner", "Hetzner", "Germany", "Hesse", "Falkenstein", vpsassets.UsageStandby, sub("sub_standby", 8, 120)),
+		fact("vps_idle", "DE Idle", "pv_hetzner", "Hetzner", "Germany", "Hesse", "Falkenstein", vpsassets.UsageIdle, sub("sub_idle", 30, 120)),
+	}
+	facts[0].ServiceCount = 2
+	facts[0].DomainCount = 1
+	facts[0].TargetCount = 1
+	facts[0].RunningTargetCount = 1
+	for index := range facts {
+		facts[index].MonitoringLinkCount = 1
+		facts[index].RunningMonitoringCount = 1
+	}
+
+	groups, err := DeriveGroups(facts, ListFilters{RenewWithinDays: 30, View: ViewRegion})
+	if err != nil {
+		t.Fatalf("DeriveGroups() error = %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("groups = %#v, want one region portfolio", groups)
+	}
+	group := groups[0]
+	if group.ComparisonInsight.PrimaryAxis != ComparisonAxisServiceContext {
+		t.Fatalf("comparison = %#v, want service context axis", group.ComparisonInsight)
+	}
+	for _, lane := range []ComparisonLane{ComparisonLanePrimary, ComparisonLaneStandby, ComparisonLaneRetire} {
+		if !hasComparisonLane(group.ComparisonInsight.LaneCounts, lane) {
+			t.Fatalf("lane counts = %#v, want lane %s", group.ComparisonInsight.LaneCounts, lane)
+		}
+	}
+	if len(group.ComparisonInsight.PriorityVPSIDs) == 0 || group.ComparisonInsight.PriorityVPSIDs[0] != "vps_idle" {
+		t.Fatalf("priority ids = %#v, want idle paid candidate first", group.ComparisonInsight.PriorityVPSIDs)
+	}
+
+	primary := comparisonMemberByID(group.Members, "vps_primary")
+	if primary.ComparisonInsight.Rank == 0 || primary.ComparisonInsight.Lane != ComparisonLanePrimary {
+		t.Fatalf("primary comparison = %#v, want ranked primary lane", primary.ComparisonInsight)
+	}
+	if !hasComparisonSignal(primary.ComparisonInsight.Strengths, "service_context") || !hasComparisonSignal(primary.ComparisonInsight.Strengths, "monitoring_context") {
+		t.Fatalf("primary strengths = %#v, want service and monitoring strengths", primary.ComparisonInsight.Strengths)
+	}
+
+	idle := comparisonMemberByID(group.Members, "vps_idle")
+	if idle.ComparisonInsight.Lane != ComparisonLaneRetire || !hasComparisonSignal(idle.ComparisonInsight.Risks, string(EvidenceIdlePaid)) {
+		t.Fatalf("idle comparison = %#v, risks=%#v, want retire lane with idle paid risk", idle.ComparisonInsight, idle.ComparisonInsight.Risks)
+	}
+	assertNoFutureComparisonSignals(t, group)
+}
+
 func TestDeriveGroupsCancellationAndArchivedBoundaries(t *testing.T) {
 	facts := []Fact{
 		fact("vps_cancelled_running", "Cancelled Runtime", "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageInUse, sub("sub_running", 10, 30)),
@@ -169,7 +219,7 @@ func TestFindGroupRecomputesStableGroups(t *testing.T) {
 	}
 }
 
-func TestRecordSnapshotsIncludeEvidenceAssessment(t *testing.T) {
+func TestRecordSnapshotsIncludeEvidenceAssessmentAndComparisonInsight(t *testing.T) {
 	facts := []Fact{
 		fact("vps_de_1", "DE Primary", "pv_1", "Provider", "Germany", "", "Frankfurt", vpsassets.UsageInUse, sub("sub_1", 12, 30)),
 		fact("vps_de_2", "DE Standby", "pv_1", "Provider", "Germany", "", "Frankfurt", vpsassets.UsageStandby, nil),
@@ -191,6 +241,13 @@ func TestRecordSnapshotsIncludeEvidenceAssessment(t *testing.T) {
 	if groupAssessment.GapSignalCount == 0 {
 		t.Fatalf("group assessment = %#v, want member evidence gaps rolled up", groupAssessment)
 	}
+	groupComparison, ok := groupSnapshot["comparison_insight"].(ComparisonInsight)
+	if !ok {
+		t.Fatalf("group snapshot = %#v, want comparison insight", groupSnapshot)
+	}
+	if groupComparison.PrimaryAxis == "" || len(groupComparison.LaneCounts) == 0 {
+		t.Fatalf("group comparison snapshot = %#v, want populated comparison insight", groupComparison)
+	}
 
 	memberSnapshot := RecordSnapshotFromMember(group.Members[0])
 	memberAssessment, ok := memberSnapshot["evidence_assessment"].(EvidenceAssessment)
@@ -199,6 +256,69 @@ func TestRecordSnapshotsIncludeEvidenceAssessment(t *testing.T) {
 	}
 	if memberAssessment.ConfidenceScore == 0 {
 		t.Fatalf("member assessment = %#v, want scored member snapshot", memberAssessment)
+	}
+	memberComparison, ok := memberSnapshot["comparison_insight"].(MemberComparisonInsight)
+	if !ok {
+		t.Fatalf("member snapshot = %#v, want comparison insight", memberSnapshot)
+	}
+	if memberComparison.Lane == "" || memberComparison.Rank == 0 {
+		t.Fatalf("member comparison snapshot = %#v, want populated lane and rank", memberComparison)
+	}
+}
+
+func TestManualGroupComparisonIncludesCurrentFactMissing(t *testing.T) {
+	now := time.Date(2026, time.June, 7, 9, 0, 0, 0, time.UTC)
+	row := ManualGroupRow{
+		ManualGroupID:   "admg_001",
+		Status:          ManualGroupStatusActive,
+		Scenario:        ManualGroupScenarioPrimaryStandby,
+		Title:           "德国主备复核",
+		Goal:            "保留主力，核对备用",
+		SourceType:      ManualGroupSourceManual,
+		RenewWithinDays: 30,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	memberRows := []ManualGroupMemberRow{
+		{
+			ManualGroupID:  "admg_001",
+			VPSID:          "vps_primary",
+			IntendedRole:   RolePrimaryCandidate,
+			IntendedAction: ActionKeep,
+			SortOrder:      10,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		{
+			ManualGroupID:  "admg_001",
+			VPSID:          "vps_missing",
+			IntendedRole:   RoleStandbyCandidate,
+			IntendedAction: ActionObserve,
+			SortOrder:      20,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	f := fact("vps_primary", "DE Primary", "pv_1", "Provider", "Germany", "", "Frankfurt", vpsassets.UsageInUse, sub("sub_1", 12, 120))
+	f.ServiceCount = 1
+	f.MonitoringLinkCount = 1
+	f.RunningMonitoringCount = 1
+
+	detail := ManualGroupDetailFromRows(row, memberRows, []Fact{f})
+	if detail.MemberCount != 2 || !hasComparisonLane(detail.ComparisonInsight.LaneCounts, ComparisonLaneEvidence) {
+		t.Fatalf("manual comparison = %#v, want evidence lane for missing fact member", detail.ComparisonInsight)
+	}
+	if detail.SourceAvailability.Subscriptions || detail.SourceAvailability.Monitoring || detail.SourceAvailability.Targets {
+		t.Fatalf("source availability = %#v, want missing current fact to keep summary unavailable", detail.SourceAvailability)
+	}
+	missing := manualComparisonMemberByID(detail.Members, "vps_missing")
+	if missing.CurrentFactFound || missing.ComparisonInsight.Lane != ComparisonLaneEvidence || !hasComparisonSignal(missing.ComparisonInsight.Gaps, string(EvidenceCurrentFactMissing)) {
+		t.Fatalf("missing member = %#v, want current fact missing evidence comparison", missing)
+	}
+	snapshot := RecordSnapshotFromManualGroup(detail)
+	comparison, ok := snapshot["comparison_insight"].(ComparisonInsight)
+	if !ok || !hasComparisonLane(comparison.LaneCounts, ComparisonLaneEvidence) {
+		t.Fatalf("manual snapshot = %#v, want manual comparison insight with evidence lane", snapshot)
 	}
 }
 
@@ -356,6 +476,77 @@ func firstGroup(groups []GroupDetail, groupType GroupType) GroupDetail {
 		}
 	}
 	return GroupDetail{}
+}
+
+func comparisonMemberByID(members []GroupMember, vpsID string) GroupMember {
+	for _, member := range members {
+		if member.VPS.VPSID == vpsID {
+			return member
+		}
+	}
+	return GroupMember{}
+}
+
+func manualComparisonMemberByID(members []ManualGroupMember, vpsID string) ManualGroupMember {
+	for _, member := range members {
+		if member.VPSID == vpsID {
+			return member
+		}
+	}
+	return ManualGroupMember{}
+}
+
+func hasComparisonLane(counts []ComparisonLaneCount, lane ComparisonLane) bool {
+	for _, count := range counts {
+		if count.Lane == lane && count.Count > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasComparisonSignal(signals []ComparisonSignal, kind string) bool {
+	for _, signal := range signals {
+		if signal.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func assertNoFutureComparisonSignals(t *testing.T, group GroupDetail) {
+	t.Helper()
+	forbidden := map[string]struct{}{
+		"ip_quality":     {},
+		"route_quality":  {},
+		"performance":    {},
+		"cpu":            {},
+		"io":             {},
+		"oversell":       {},
+		"cpu_trend":      {},
+		"io_trend":       {},
+		"route_latency":  {},
+		"performance_io": {},
+	}
+	for _, signal := range group.ComparisonInsight.Tradeoffs {
+		if _, ok := forbidden[signal.Kind]; ok {
+			t.Fatalf("group comparison tradeoffs = %#v, must not include future agent-derived signal %q", group.ComparisonInsight.Tradeoffs, signal.Kind)
+		}
+	}
+	for _, member := range group.Members {
+		for _, signals := range [][]ComparisonSignal{
+			member.ComparisonInsight.Strengths,
+			member.ComparisonInsight.Risks,
+			member.ComparisonInsight.Gaps,
+			member.ComparisonInsight.Tradeoffs,
+		} {
+			for _, signal := range signals {
+				if _, ok := forbidden[signal.Kind]; ok {
+					t.Fatalf("member comparison = %#v, must not include future agent-derived signal %q", member.ComparisonInsight, signal.Kind)
+				}
+			}
+		}
+	}
 }
 
 func TestExecutionReadbackCancelDetectsDoneDrift(t *testing.T) {

@@ -363,6 +363,9 @@ func TestPostgresAssetDecisionRepositoryCreateRecordPersistsGroupAndMemberSnapsh
 	if got := detail.EvidenceSnapshot["group_id"]; got != detail.SourceGroupID {
 		t.Fatalf("snapshot group_id = %#v, want source group id", got)
 	}
+	if detail.EvidenceSnapshot["comparison_insight"] == nil || detail.Members[0].EvidenceSnapshot["comparison_insight"] == nil {
+		t.Fatalf("snapshots group=%#v member=%#v, want comparison insight persisted", detail.EvidenceSnapshot, detail.Members[0].EvidenceSnapshot)
+	}
 	if len(execs) != 2 {
 		t.Fatalf("exec count = %d, want record and member inserts", len(execs))
 	}
@@ -509,6 +512,9 @@ func TestPostgresAssetDecisionRepositoryManualGroupsListAndDetailUseCurrentFacts
 	if summaries[0].EvidenceAssessment.QualityTier == "" {
 		t.Fatalf("summary assessment = %#v, want derived evidence assessment", summaries[0].EvidenceAssessment)
 	}
+	if summaries[0].ComparisonInsight.Summary == "" || len(summaries[0].ComparisonInsight.LaneCounts) == 0 {
+		t.Fatalf("summary comparison = %#v, want derived comparison insight", summaries[0].ComparisonInsight)
+	}
 	if groupQueries != 1 || batchMemberQueries != 1 || factQueries != 1 {
 		t.Fatalf("query counts group=%d batchMembers=%d facts=%d, want 1/1/1", groupQueries, batchMemberQueries, factQueries)
 	}
@@ -519,6 +525,9 @@ func TestPostgresAssetDecisionRepositoryManualGroupsListAndDetailUseCurrentFacts
 	}
 	if detail.ManualGroupID != "admg_001" || len(detail.Members) != 1 || !detail.Members[0].CurrentFactFound {
 		t.Fatalf("detail = %#v, want member current facts", detail)
+	}
+	if detail.ComparisonInsight.Summary == "" || detail.Members[0].ComparisonInsight.Summary == "" {
+		t.Fatalf("manual comparison group=%#v member=%#v, want current fact comparison insight", detail.ComparisonInsight, detail.Members[0].ComparisonInsight)
 	}
 	if detail.Members[0].IntendedRole != assetdecisions.RoleStandbyCandidate || detail.Members[0].IntendedAction != assetdecisions.ActionObserve || detail.Members[0].VPS.DisplayName != "Frankfurt Primary" {
 		t.Fatalf("member = %#v, want manual intent plus current vps facts", detail.Members[0])
@@ -671,6 +680,9 @@ func TestPostgresAssetDecisionRepositoryCreateRecordFromManualGroupUsesIntentAnd
 	}
 	if got := detail.EvidenceSnapshot["manual_group_id"]; got != "admg_001" {
 		t.Fatalf("manual snapshot id = %#v, want admg_001", got)
+	}
+	if detail.EvidenceSnapshot["comparison_insight"] == nil || detail.Members[0].EvidenceSnapshot["comparison_insight"] == nil {
+		t.Fatalf("manual record snapshots group=%#v member=%#v, want comparison insight persisted", detail.EvidenceSnapshot, detail.Members[0].EvidenceSnapshot)
 	}
 	if len(execs) != 2 || execs[0].args[1] != assetdecisions.RecordSourceManualGroup || execs[1].args[4] != string(assetdecisions.RoleStandbyCandidate) {
 		t.Fatalf("execs = %#v, want manual source record and intended member role", execs)
