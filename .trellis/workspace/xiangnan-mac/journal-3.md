@@ -1688,3 +1688,36 @@ Implemented scenario templates, recommendation read model, context filters, cros
 ### Next Steps
 
 - None - task complete
+
+
+## Session 168: Asset decisions closed-loop guide
+
+**Date**: 2026-06-06
+**Task**: Asset decisions closed-loop guide
+**Branch**: `worktree/asset-decisions-closed-loop-workbench`
+
+### Summary
+
+Added a read-only closed-loop next-work surface for AssetDecisionsPage, preserved URL-state detail openings, split overview/group loading errors, updated web/design specs, and verified with lint, tests, build, full verify, and browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5387b8c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

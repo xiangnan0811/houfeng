@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 167
+- **Total Sessions**: 168
 - **Last Active**: 2026-06-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1690 | Active |
+| `journal-3.md` | ~1723 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 168 | 2026-06-06 | Asset decisions closed-loop guide | `5387b8c` | `worktree/asset-decisions-closed-loop-workbench` |
 | 167 | 2026-06-06 | Asset decision scenario workbench | `c9372d2` | `worktree/asset-decisions-scenario-recommendations-links` |
 | 166 | 2026-06-06 | 资产组合决策场景工作台 | `956cfba` | `worktree/asset-decisions-scenario-workbench` |
 | 165 | 2026-06-05 | Asset decision execution readback | `7000b6a` | `worktree/asset-decisions-execution-readback` |
