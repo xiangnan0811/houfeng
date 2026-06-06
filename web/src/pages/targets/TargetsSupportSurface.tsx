@@ -6,6 +6,8 @@ import { ObservabilityEvidenceLead } from '../../components/ObservabilityEvidenc
 import { targetEvidenceGlyphState } from './targetHelpers'
 import type { TargetEvidenceItem, TargetEvidenceLead } from './types'
 
+const ASSET_DECISION_EVIDENCE_URL = '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup'
+
 type TargetsSupportSurfaceProps = {
   totalTargetCount: number
   displayedTargetCount: number
@@ -95,7 +97,7 @@ export function TargetsSupportSurface({
         filterAriaLabel="当前入口证据筛选"
         action={
           evidenceLead.actionKind === 'asset' ? (
-            <Link className="btn md secondary" to="/asset-decisions">
+            <Link className="btn md secondary" to={ASSET_DECISION_EVIDENCE_URL}>
               {evidenceLead.actionLabel}
             </Link>
           ) : (
@@ -195,8 +197,8 @@ export function TargetsSupportSurface({
             <Link className="observability-support-link" to="/vps">
               VPS 台账
             </Link>
-            <Link className="observability-support-link" to="/asset-decisions">
-              资产决策
+            <Link className="observability-support-link" to={ASSET_DECISION_EVIDENCE_URL}>
+              组合决策
             </Link>
           </div>
         </article>
@@ -234,10 +236,10 @@ export function TargetsSupportSurface({
             eyebrow="入口证据"
             title="没有需要优先核对的 Target"
             description="当前列表没有异常入口、暂停归档对象或执行覆盖缺口。"
-            meta="继续从 VPS 台账和资产决策队列核对资产侧事实。"
+            meta="继续从 VPS 台账和资产组合决策核对资产侧事实。"
             action={
-              <Link className="btn sm ghost" to="/asset-decisions">
-                查看资产决策
+              <Link className="btn sm ghost" to={ASSET_DECISION_EVIDENCE_URL}>
+                查看组合决策
               </Link>
             }
           />

@@ -88,7 +88,7 @@ function commandTitle(
   const pressureTotal = assetPressureCount(summary)
   if (isFreshInstall) return '建立第一条资产与观测链路'
   if (pressureTotal > 0 && severeTotal > 0) return '先处理资产压力与严重异常'
-  if (pressureTotal > 0) return '先处理资产决策队列'
+  if (pressureTotal > 0) return '先处理资产组合决策'
   if (severeTotal > 0) return '先处理严重异常'
   if (abnormalTotal > 0) return '先处理观测异常'
   if (maintenanceTotal > 0) return '维护对象正在观察'
@@ -325,10 +325,10 @@ function nextActions(
   if (pressureTotal > 0) {
     const cancellationAttentionCount = summary.cancellation_attention_vps_count ?? 0
     const actionTarget = cancellationAttentionCount > 0
-      ? DASHBOARD_LINKS.assetDecisionsNeedsDecision
+      ? DASHBOARD_LINKS.assetDecisionsMigrationRetirement
       : DASHBOARD_LINKS.assetDecisionsRenewal
     actions.push({
-      label: cancellationAttentionCount > 0 ? '处理取消联动' : '进入资产决策队列',
+      label: cancellationAttentionCount > 0 ? '处理取消联动' : '进入组合决策',
       detail: `取消联动 ${cancellationAttentionCount} · 决策 ${summary.unreviewed_vps_count} · 续费 ${summary.renewal_due_30d_vps_count}`,
       to: actionTarget,
       tone: cancellationAttentionCount > 0 ? 'alert' : summary.renewal_due_30d_vps_count > 0 ? 'notice' : 'neutral',
@@ -555,10 +555,10 @@ export function DashboardCommandSurface({
       </header>
 
       <div className="dashboard-command-grid">
-        <section className={assetLaneClass} aria-label="资产决策队列">
+        <section className={assetLaneClass} aria-label="资产组合决策">
           <div className="dashboard-command-lane__header">
             <div>
-              <p className="dashboard-command-lane__eyebrow">资产决策队列</p>
+              <p className="dashboard-command-lane__eyebrow">资产组合决策</p>
               <h2>续费 / 决策 / 关联</h2>
             </div>
             <div className="dashboard-command-lane__tools">

@@ -101,6 +101,8 @@ describe('TargetsPage', () => {
     )
 
     expect(screen.getByRole('heading', { name: '入口探测' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '组合决策' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
     expect(screen.getByText('监控入口健康与延迟')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
@@ -1127,6 +1129,41 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(screen.getByText('Failing API')).toBeInTheDocument())
 
     expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
+  })
+
+  it('focuses coverage-gap targets from the support lead instead of clearing filters', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        targetRecord({
+          target_id: 'tg_covered',
+          name: 'Covered API',
+          execution_monitoring_instance_labels: ['edge'],
+        }),
+        targetRecord({
+          target_id: 'tg_gap',
+          name: 'Coverage Gap API',
+          execution_monitoring_instance_labels: [],
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Coverage Gap API')).toBeInTheDocument())
+    expect(screen.getByText('Covered API')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '核对监控实例覆盖' }))
+
+    await waitFor(() => expect(screen.queryByText('Covered API')).not.toBeInTheDocument())
+    expect(screen.getByText('Coverage Gap API')).toBeInTheDocument()
+    expect(screen.getByText('执行覆盖缺口')).toBeInTheDocument()
   })
 
   it('uses run_status=暂停 from Dashboard deep links as the initial target filter', async () => {

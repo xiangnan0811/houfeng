@@ -200,11 +200,11 @@ parent: docs/design/v2-houfeng/design-language.md
 ## 五、页面模板
 
 ### DashboardPage
-1. Dashboard 首屏是 asset-decision-first `Command Surface`，不是 fleet KPI hero。h1 回答“今天先处理什么”：资产有压力且有严重异常 → `先处理资产压力与严重异常`；仅资产有压力 → `先处理资产决策队列`；仅严重 / 异常 → `先处理严重异常` / `先处理观测异常`；维护 → `维护对象正在观察`；正常 → `今日没有紧急处理项`；首次接入 → `建立第一条资产与观测链路`。
+1. Dashboard 首屏是 asset-decision-first `Command Surface`，不是 fleet KPI hero。h1 回答“今天先处理什么”：资产有压力且有严重异常 → `先处理资产压力与严重异常`；仅资产有压力 → `先处理资产组合决策`；仅严重 / 异常 → `先处理严重异常` / `先处理观测异常`；维护 → `维护对象正在观察`；正常 → `今日没有紧急处理项`；首次接入 → `建立第一条资产与观测链路`。
    - `snapshot_generated_at` 只能作为 command surface 内 muted inline metadata，例如 `摘要生成 <Timestamp>`；生成时间只代表 dashboard response 生成时间，不等同 AppShell SyncStatus、Center health 或 agent sync freshness。
    - 可见文案统一使用 `工作台`，不再用 `首页 / Dashboard` 或 `首页不可用`。
 2. Command Surface 固定包含三条 lane：
-   - `资产决策队列`：30 天续费、待决策、取消/迁移、未关联监控实例、关联异常、成本。它是 `asset_summary` 的唯一高权重展示位置，只展示聚合入口，不展开 VPS / subscription 明细。
+   - `资产组合决策`：30 天续费、待决策、取消/迁移、未关联监控实例、关联异常、成本。它是 `asset_summary` 的唯一高权重展示位置，只展示聚合入口，深链到带 `view` / `scenario` / `renew_within_days` 的组合决策或相关列表筛选，不展开 VPS / subscription 明细。
    - `观测异常队列`：复用最多 4 个 dashboard metric（异常对象 / 严重 / 24h 变化 / 维护，或正常态监控实例 / 目标 / 24h / 通知），保留 PR4 filtered URL contract：异常监控实例 `/monitoring?abnormal=1`、异常目标 `/targets?abnormal=1`、严重 `/events?severity=严重`、维护 `/events?maintenance_only=1`、`24h 变化` `/events?time_range=24h`、监控 / 目标管理入口按库存状态优先跳转。可在 lane 底部展示最高优先级 3 个异常对象作为跳转，不替代下方完整处理队列。
    - `下一步动作`：根据资产压力、严重/异常对象、未关联 VPS、维护态或正常态生成 3-4 条有序动作。主按钮等于第一条动作；正常态主动作是核对 VPS 库存，首次接入主动作是创建第一台 VPS，再从 VPS 详情页补录订阅和接入 agent。
 3. Command Surface 下方保留一个 DetailSection 工作台，而不是 `当前需要处理` / `系统入口` / `按 Group 分布` / `最近事件` 四个同权 section 线性堆叠。工作台 title 随状态切换：
@@ -315,7 +315,7 @@ ops-first 视图，把"当前主问题 + 8 张时序大图"前置作为视觉主
 1. Section heading「入口探测」+ 「新建目标」按钮（右对齐，primary）。文案必须把 Target 定位为服务入口和探测覆盖证据，而不是完整服务注册表。
 2. （可选）创建目标表单（page-panel，可折叠）
 3. 入口探测支撑面「服务入口支撑」放在创建面板之后、列表空态/筛选栏之前，展示四个证据 lane：异常入口、暂停/归档、执行覆盖、资产服务上下文。列表可以使用批量 `asset-context/targets` 显示 Target/实例挂载的服务、域名和 VPS 取消上下文；支撑面只能从当前 Target 列表派生数字，链接到 VPS 台账和资产决策，不扩展跨页 service registry。
-4. 筛选栏：6 项（type / run_status / health / labels / execution_monitoring_instance_labels / abnormal toggle），URL-state 承接 Dashboard 深链（`abnormal=1`、`run_status=暂停`、`run_status=已归档`）并显示对应 chip/toggle。支撑面快捷按钮可复用这些筛选，但必须保持清空和 chip 移除回写 URL。
+4. 筛选栏：6 项（type / run_status / health / labels / execution_monitoring_instance_labels / abnormal toggle），URL-state 承接 Dashboard 深链（`abnormal=1`、`run_status=暂停`、`run_status=已归档`）并显示对应 chip/toggle。执行覆盖缺口由 `coverage_gap=1` 承接。支撑面快捷按钮可复用这些筛选，但必须保持清空和 chip 移除回写 URL。
 5. **DataTable**（density compact）：列 `[StatusGlyph, 目标(名字 + Hostname target_id), 类型, Host(Hostname host[:base_port]), 标签(截断+overflow+inline 编辑), 状态(StatusBadge run_status + health + 执行监控实例标签), 最近成功/失败(Timestamp relative), 当前主问题(MonoDigits incident_count + 摘要), 操作]`
 6. 行 hover：操作列显示「快速编辑标签 / 进入维护 / 暂停 / 归档 / 恢复」等条件性 ghost 按钮（hover-only opacity 模式）
 7. 行点击：导航到目标详情；操作列内部 `event.stopPropagation()` 防误触发

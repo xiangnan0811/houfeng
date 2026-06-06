@@ -6,6 +6,8 @@ import { ObservabilityEvidenceLead } from '../../components/ObservabilityEvidenc
 import { monitoringInstanceEvidenceGlyphState } from './monitoringHelpers'
 import type { MonitoringInstanceEvidenceItem, MonitoringInstanceEvidenceLead } from './types'
 
+const ASSET_DECISION_EVIDENCE_URL = '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup'
+
 type MonitoringSupportSurfaceProps = {
   totalMonitoringInstanceCount: number
   displayedMonitoringInstanceCount: number
@@ -84,8 +86,8 @@ export function MonitoringSupportSurface({
           )
         }
         secondaryAction={
-          <Link className="observability-support-link" to="/asset-decisions">
-            资产决策队列
+          <Link className="observability-support-link" to={ASSET_DECISION_EVIDENCE_URL}>
+            资产组合决策
           </Link>
         }
       />
@@ -147,8 +149,8 @@ export function MonitoringSupportSurface({
             <Link className="observability-support-link" to="/vps?view=unlinked">
               未关联 VPS
             </Link>
-            <Link className="observability-support-link" to="/asset-decisions">
-              决策队列
+            <Link className="observability-support-link" to={ASSET_DECISION_EVIDENCE_URL}>
+              资料缺口组合
             </Link>
           </div>
         </article>

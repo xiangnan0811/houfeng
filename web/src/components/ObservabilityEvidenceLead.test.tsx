@@ -22,7 +22,7 @@ describe('ObservabilityEvidenceLead', () => {
             仅看异常
           </Button>
         }
-        secondaryAction={<a href="/asset-decisions">资产决策队列</a>}
+        secondaryAction={<a href="/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup">资产组合决策</a>}
       />,
     )
 
@@ -30,9 +30,9 @@ describe('ObservabilityEvidenceLead', () => {
     expect(screen.getByText('当前切片存在异常证据。')).toBeInTheDocument()
     expect(screen.getByLabelText('当前证据筛选')).toHaveTextContent('仅看异常')
     expect(screen.getByLabelText('当前证据筛选')).toHaveTextContent('严重')
-    expect(screen.getByRole('link', { name: '资产决策队列' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '资产组合决策' })).toHaveAttribute(
       'href',
-      '/asset-decisions',
+      '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup',
     )
 
     fireEvent.click(screen.getByRole('button', { name: '仅看异常' }))

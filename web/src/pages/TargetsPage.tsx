@@ -29,24 +29,30 @@ import {
 import { CreateTargetPanel } from './targets/CreateTargetPanel'
 import { TargetsBatchPanel } from './targets/TargetsBatchPanel'
 import { TargetsFilterPanel } from './targets/TargetsFilterPanel'
+import { TargetsSupportSurface } from './targets/TargetsSupportSurface'
 import { TargetsRuntimeOverlays } from './targets/TargetsRuntimeOverlays'
 import { TargetsActionsCell } from './targets/TargetsActionsCell'
 import { TargetsTrendCell } from './targets/TargetsTrendCell'
 import {
   actionButtonKey,
+  buildTargetEvidenceLead,
   buildCreateTargetInput,
   countAbnormalTargets,
   countArchivedTargets,
+  countCoverageGapTargets,
   countPausedTargets,
   dedupeLabels,
   describeError,
+  describeTargetFilterContext,
   distinctSorted,
   focusRestoreActionAfterSuccess,
   initialCreateForm,
+  pickTopTargetEvidence,
   mergeMetadataTargetRecord,
   mergeRuntimeTargetRecord,
   parseLabels,
   parseMultiValue,
+  isCoverageGapTarget,
   targetGlyphState,
 } from './targets/targetHelpers'
 import type {
@@ -345,6 +351,7 @@ export function TargetsPage() {
       labels: parseMultiValue(searchParams.get('labels')),
       executionLabels: parseMultiValue(searchParams.get('execution_labels')),
       abnormal: searchParams.get('abnormal') === '1',
+      coverageGap: searchParams.get('coverage_gap') === '1',
     }),
     [searchParams],
   )
@@ -375,6 +382,7 @@ export function TargetsPage() {
         if (!hasAll) return false
       }
       if (filterState.abnormal && target.current_health_status === '正常') return false
+      if (filterState.coverageGap && !isCoverageGapTarget(target)) return false
       return true
     })
   }, [targets, filterState])
@@ -383,6 +391,32 @@ export function TargetsPage() {
   const abnormalTargetCount = useMemo(() => countAbnormalTargets(targets), [targets])
   const pausedTargetCount = useMemo(() => countPausedTargets(targets), [targets])
   const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
+  const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
+  const serviceTargetCount = useMemo(() => targets.filter((target) => target.target_type === 'service').length, [targets])
+  const executionLabelCount = useMemo(
+    () => distinctSorted(targets.flatMap((target) => target.execution_monitoring_instance_labels)).length,
+    [targets],
+  )
+  const hasActiveFilters =
+    filterState.group !== null ||
+    filterState.type !== null ||
+    filterState.runStatus !== null ||
+    filterState.health !== null ||
+    filterState.labels.length > 0 ||
+    filterState.executionLabels.length > 0 ||
+    filterState.abnormal ||
+    filterState.coverageGap
+  const targetFilterContext = describeTargetFilterContext(filterState)
+  const targetEvidenceLead = buildTargetEvidenceLead({
+    totalTargetCount: targets.length,
+    displayedTargetCount: filteredTargets.length,
+    abnormalTargetCount,
+    pausedTargetCount,
+    archivedTargetCount,
+    coverageGapTargetCount,
+    hasActiveFilters,
+  })
+  const topTargetEvidence = pickTopTargetEvidence(filteredTargets)
 
   async function executeBatchTargetAction(action: TargetRuntimeAction) {
     if (action === 'pause' || action === 'archive') {
@@ -469,6 +503,10 @@ export function TargetsPage() {
     updateSearchParam(key, value)
   }
 
+  function setBooleanFilter(key: 'abnormal' | 'coverage_gap', enabled: boolean) {
+    updateSearchParam(key, enabled ? '1' : null)
+  }
+
   function clearAllFilters() {
     setSearchParams(new URLSearchParams(), { replace: true })
   }
@@ -537,6 +575,27 @@ export function TargetsPage() {
           </div>
         </div>
       </div>
+
+      <TargetsSupportSurface
+        totalTargetCount={targets.length}
+        displayedTargetCount={filteredTargets.length}
+        abnormalTargetCount={abnormalTargetCount}
+        pausedTargetCount={pausedTargetCount}
+        archivedTargetCount={archivedTargetCount}
+        coverageGapTargetCount={coverageGapTargetCount}
+        executionLabelCount={executionLabelCount}
+        serviceTargetCount={serviceTargetCount}
+        evidenceLead={targetEvidenceLead}
+        topEvidence={topTargetEvidence}
+        filterContext={targetFilterContext}
+        hasActiveFilters={hasActiveFilters}
+        onAbnormalClick={() => setSingleFilter('health', abnormalTargetCount > 0 ? '严重' : null)}
+        onPausedClick={() => setSingleFilter('run_status', pausedTargetCount > 0 ? '暂停' : null)}
+        onArchivedClick={() => setSingleFilter('run_status', archivedTargetCount > 0 ? '已归档' : null)}
+        onCoverageClick={() => setBooleanFilter('coverage_gap', coverageGapTargetCount > 0)}
+        onClearFilters={clearAllFilters}
+        onCreateClick={() => openCreateDrawer()}
+      />
 
       <Modal
         open={createOpen}

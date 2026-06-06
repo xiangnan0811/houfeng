@@ -112,7 +112,7 @@ TMPDIR="$PWD/.tmp/playwright" /opt/homebrew/opt/python@3.11/bin/python3.11 scrip
   --viewport 390x900
 ```
 
-`--mock-api asset-workflows` intercepts `/api/auth/me`, `/api/dashboard`, `/api/asset-decisions/*`, `/api/providers`, `/api/vps`, and `/api/subscriptions` in the browser session. The fixture rows intentionally cover asset decision groups, renewal due, unreviewed/migrate/cancel decisions, missing subscription, unlinked VPS, missing facts, provider labels/ratings, subscription filters, and shell summary state.
+`--mock-api asset-workflows` intercepts `/api/auth/me`, `/api/dashboard`, `/api/asset-decisions/*`, `/api/providers`, `/api/vps`, and `/api/subscriptions` in the browser session. The fixture rows intentionally cover the asset portfolio decision workbench: automatic decision groups, context filter chips, closed-loop next work, scenario templates, manual groups, saved decision records with readback/plan snippets, renewal evidence, the single-asset auxiliary queue, missing subscription, unlinked VPS, missing facts, provider labels/ratings, subscription filters, and shell summary state.
 
 Report this as `Data source: mock-api asset-workflows`. It proves the protected route layout can render with representative asset workflow states, but it does not prove backend correctness, real account completeness, import fidelity, or the real inventory result.
 
@@ -184,7 +184,7 @@ This is the current v2 core-page acceptance set. A task only needs to check rout
 | Surface | Route | Why it matters |
 | --- | --- | --- |
 | Dashboard / 工作台 | `/` | Command desk and first daily entry |
-| Asset decisions | `/asset-decisions` | Portfolio decision groups and single-asset auxiliary queue |
+| Asset decisions | `/asset-decisions` | Portfolio decision workbench with automatic groups, scenario/manual groups, saved records/readback, and auxiliary single-asset queue |
 | VPS inventory | `/vps` | Primary real-data testing entry |
 | VPS detail | `/vps/:vpsId` | Single-asset decision workbench |
 | Monitoring | `/monitoring` | Monitoring instances and runtime evidence for assets |
