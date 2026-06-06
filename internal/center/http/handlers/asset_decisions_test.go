@@ -276,6 +276,12 @@ func TestAssetDecisionGroupsFiltersView(t *testing.T) {
 		GroupType: assetdecisions.GroupRegionPortfolio,
 		View:      assetdecisions.ViewRegion,
 		Title:     "德国 · 同区取舍",
+		ComparisonInsight: assetdecisions.ComparisonInsight{
+			Summary:        "已形成主备候选",
+			PrimaryAxis:    assetdecisions.ComparisonAxisServiceContext,
+			LaneCounts:     []assetdecisions.ComparisonLaneCount{{Lane: assetdecisions.ComparisonLanePrimary, Count: 1}},
+			PriorityVPSIDs: []string{"vps_001"},
+		},
 	}}}
 	handler := handlers.AssetDecisionGroups(repo)
 	req := httptest.NewRequest(http.MethodGet, "/api/asset-decisions/groups?view=region&renew_within_days=60", nil)
@@ -296,6 +302,9 @@ func TestAssetDecisionGroupsFiltersView(t *testing.T) {
 	if len(body) != 1 || body[0].GroupID != "adg_auto_001" {
 		t.Fatalf("body = %#v, want group summary", body)
 	}
+	if body[0].ComparisonInsight.PrimaryAxis != assetdecisions.ComparisonAxisServiceContext || len(body[0].ComparisonInsight.LaneCounts) != 1 {
+		t.Fatalf("comparison = %#v, want serialized comparison insight", body[0].ComparisonInsight)
+	}
 }
 
 func TestAssetDecisionGroupReturnsDetail(t *testing.T) {
@@ -303,9 +312,20 @@ func TestAssetDecisionGroupReturnsDetail(t *testing.T) {
 		GroupSummary: assetdecisions.GroupSummary{
 			GroupID: "adg_auto_abc",
 			Title:   "预算压力与弱承载",
+			ComparisonInsight: assetdecisions.ComparisonInsight{
+				Summary:     "1 台需要补证据",
+				PrimaryAxis: assetdecisions.ComparisonAxisEvidence,
+				LaneCounts:  []assetdecisions.ComparisonLaneCount{{Lane: assetdecisions.ComparisonLaneEvidence, Count: 1}},
+			},
 		},
 		Members: []assetdecisions.GroupMember{{
 			VPS: vpsassets.Record{VPSID: "vps_001", DisplayName: "Frankfurt Worker"},
+			ComparisonInsight: assetdecisions.MemberComparisonInsight{
+				Rank:    1,
+				Lane:    assetdecisions.ComparisonLaneEvidence,
+				Summary: "缺订阅，先补证据",
+				Gaps:    []assetdecisions.ComparisonSignal{{Kind: string(assetdecisions.EvidenceMissingSubscription), Label: "缺订阅", Tone: "alert"}},
+			},
 		}},
 	}}
 	handler := handlers.AssetDecisionGroup(repo)
@@ -327,6 +347,9 @@ func TestAssetDecisionGroupReturnsDetail(t *testing.T) {
 	if len(body.Members) != 1 || body.Members[0].VPS.VPSID != "vps_001" {
 		t.Fatalf("body = %#v, want group detail member", body)
 	}
+	if body.ComparisonInsight.PrimaryAxis != assetdecisions.ComparisonAxisEvidence || body.Members[0].ComparisonInsight.Lane != assetdecisions.ComparisonLaneEvidence {
+		t.Fatalf("comparison group=%#v member=%#v, want serialized comparison insight", body.ComparisonInsight, body.Members[0].ComparisonInsight)
+	}
 }
 
 func TestAssetDecisionManualGroupsListCreateAndMemberMutations(t *testing.T) {
@@ -342,8 +365,13 @@ func TestAssetDecisionManualGroupsListCreateAndMemberMutations(t *testing.T) {
 			SourceGroupID:   "adg_auto_001",
 			RenewWithinDays: 30,
 			MemberCount:     1,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			ComparisonInsight: assetdecisions.ComparisonInsight{
+				Summary:     "已形成主力候选",
+				PrimaryAxis: assetdecisions.ComparisonAxisServiceContext,
+				LaneCounts:  []assetdecisions.ComparisonLaneCount{{Lane: assetdecisions.ComparisonLanePrimary, Count: 1}},
+			},
+			CreatedAt: now,
+			UpdatedAt: now,
 		},
 		Members: []assetdecisions.ManualGroupMember{{
 			VPSID:          "vps_001",
@@ -352,6 +380,11 @@ func TestAssetDecisionManualGroupsListCreateAndMemberMutations(t *testing.T) {
 			IntendedAction: assetdecisions.ActionKeep,
 			GroupMember: assetdecisions.GroupMember{
 				VPS: vpsassets.Record{VPSID: "vps_001", DisplayName: "Frankfurt Primary"},
+				ComparisonInsight: assetdecisions.MemberComparisonInsight{
+					Rank:    1,
+					Lane:    assetdecisions.ComparisonLanePrimary,
+					Summary: "可作为主力保留候选",
+				},
 			},
 			CurrentFactFound: true,
 		}},
@@ -379,6 +412,9 @@ func TestAssetDecisionManualGroupsListCreateAndMemberMutations(t *testing.T) {
 	if len(listBody) != 1 || listBody[0].ManualGroupID != "admg_001" {
 		t.Fatalf("list body = %#v, want manual group", listBody)
 	}
+	if listBody[0].ComparisonInsight.PrimaryAxis != assetdecisions.ComparisonAxisServiceContext {
+		t.Fatalf("list comparison = %#v, want serialized manual comparison insight", listBody[0].ComparisonInsight)
+	}
 
 	createBody := []byte(`{"source_type":"auto_group","source_group_id":"adg_auto_001","scenario":"primary_standby","title":"德国主备取舍","goal":"保留一主一备","renew_within_days":30}`)
 	createRecorder := httptest.NewRecorder()
@@ -398,6 +434,13 @@ func TestAssetDecisionManualGroupsListCreateAndMemberMutations(t *testing.T) {
 	}
 	if repo.manualGroupID != "admg_001" {
 		t.Fatalf("manualGroupID = %q, want admg_001", repo.manualGroupID)
+	}
+	var getBody assetdecisions.ManualGroupDetail
+	if err := json.Unmarshal(getRecorder.Body.Bytes(), &getBody); err != nil {
+		t.Fatalf("unmarshal get body: %v", err)
+	}
+	if getBody.ComparisonInsight.PrimaryAxis != assetdecisions.ComparisonAxisServiceContext || getBody.Members[0].ComparisonInsight.Lane != assetdecisions.ComparisonLanePrimary {
+		t.Fatalf("manual get comparison group=%#v member=%#v, want serialized comparison insight", getBody.ComparisonInsight, getBody.Members[0].ComparisonInsight)
 	}
 
 	patchRecorder := httptest.NewRecorder()
@@ -544,6 +587,12 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 			SourceGroupID:   "adg_auto_001",
 			RenewWithinDays: 30,
 			MemberCount:     2,
+			EvidenceSnapshot: assetdecisions.EvidenceSnapshot{
+				"comparison_insight": map[string]any{
+					"summary":      "保存时已形成主备候选",
+					"primary_axis": "service_context",
+				},
+			},
 			ExecutionReadback: assetdecisions.RecordExecutionReadback{
 				Status:             assetdecisions.ReadbackNeedsEvidence,
 				Summary:            "1 台 VPS 仍需补证据",
@@ -565,6 +614,12 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 				SourceGroupID:   "adg_auto_001",
 				RenewWithinDays: 30,
 				MemberCount:     1,
+				EvidenceSnapshot: assetdecisions.EvidenceSnapshot{
+					"comparison_insight": map[string]any{
+						"summary":      "保存时主力证据完整",
+						"primary_axis": "service_context",
+					},
+				},
 				ExecutionReadback: assetdecisions.RecordExecutionReadback{
 					Status:       assetdecisions.ReadbackAligned,
 					Summary:      "当前事实与组合判断一致",
@@ -586,6 +641,12 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 				DecidedAction:   assetdecisions.ActionKeep,
 				SuggestedRole:   assetdecisions.RolePrimaryCandidate,
 				SuggestedAction: assetdecisions.ActionKeep,
+				EvidenceSnapshot: assetdecisions.EvidenceSnapshot{
+					"comparison_insight": map[string]any{
+						"lane":    "primary",
+						"summary": "保存时是主力候选",
+					},
+				},
 				ExecutionReadback: assetdecisions.MemberExecutionReadback{
 					Status:  assetdecisions.ReadbackAligned,
 					Summary: "当前事实与判断一致",
@@ -624,6 +685,9 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 	if listBody[0].ExecutionPlan.Summary == "" || listBody[0].ExecutionPlan.ActionableCount != 1 {
 		t.Fatalf("list plan = %#v, want serialized execution plan", listBody[0].ExecutionPlan)
 	}
+	if listBody[0].EvidenceSnapshot["comparison_insight"] == nil {
+		t.Fatalf("list snapshot = %#v, want serialized comparison insight snapshot", listBody[0].EvidenceSnapshot)
+	}
 
 	body := []byte(`{"source_group_id":"adg_auto_001","renew_within_days":30,"title":"保存德国组","goal":"保留主力","status":"decided","members":[{"vps_id":"vps_001","decided_role":"primary_candidate","decided_action":"keep","reason":"主力"}]}`)
 	createRecorder := httptest.NewRecorder()
@@ -646,6 +710,9 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 	}
 	if createBody.ExecutionPlan.Summary == "" || createBody.Members[0].ExecutionPlan.Lane != assetdecisions.PlanLaneKeepObserve {
 		t.Fatalf("create plan = %#v member=%#v, want serialized execution plan", createBody.ExecutionPlan, createBody.Members[0].ExecutionPlan)
+	}
+	if createBody.EvidenceSnapshot["comparison_insight"] == nil || createBody.Members[0].EvidenceSnapshot["comparison_insight"] == nil {
+		t.Fatalf("create snapshots group=%#v member=%#v, want serialized comparison insight snapshot", createBody.EvidenceSnapshot, createBody.Members[0].EvidenceSnapshot)
 	}
 }
 

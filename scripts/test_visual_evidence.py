@@ -174,24 +174,29 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(provider_groups)
         self.assertTrue(all(group["view"] == "provider" for group in provider_groups))
+        self.assertIn("comparison_insight", provider_groups[0])
+        self.assertTrue(provider_groups[0]["comparison_insight"]["lane_counts"])
 
         group_id = provider_groups[0]["group_id"]
         status, group_detail = call_asset_workflow_api(f"/api/asset-decisions/groups/{group_id}")
         self.assertEqual(status, 200)
         self.assertEqual(group_detail["group_id"], group_id)
         self.assertTrue(group_detail["members"])
+        self.assertIn("comparison_insight", group_detail["members"][0])
 
         status, records = call_asset_workflow_api("/api/asset-decisions/records")
         self.assertEqual(status, 200)
         self.assertTrue(records)
         self.assertEqual(records[0]["record_id"], "adr_mock_eu_renewal")
         self.assertEqual(records[0]["source_type"], "auto_group")
+        self.assertIn("comparison_insight", records[0]["evidence_snapshot"])
 
         status, record_detail = call_asset_workflow_api("/api/asset-decisions/records/adr_mock_eu_renewal")
         self.assertEqual(status, 200)
         self.assertEqual(record_detail["record_id"], "adr_mock_eu_renewal")
         self.assertEqual(len(record_detail["members"]), 3)
         self.assertEqual(record_detail["members"][0]["decided_action"], "keep")
+        self.assertIn("comparison_insight", record_detail["members"][0]["evidence_snapshot"])
 
         status, created_record = call_asset_workflow_api("/api/asset-decisions/records", method="POST")
         self.assertEqual(status, 201)

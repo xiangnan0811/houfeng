@@ -922,6 +922,53 @@ export type AssetDecisionRecommendation = {
   confidence_label: string
 }
 
+export type AssetDecisionComparisonPrimaryAxis =
+  | 'renewal'
+  | 'cost'
+  | 'service_context'
+  | 'monitoring'
+  | 'evidence'
+  | 'lifecycle'
+  | 'review'
+
+export type AssetDecisionComparisonLane =
+  | 'primary'
+  | 'standby'
+  | 'observe'
+  | 'retire'
+  | 'evidence'
+  | 'review'
+
+export type AssetDecisionComparisonSignal = {
+  kind: string
+  label: string
+  tone: 'normal' | 'notice' | 'alert' | 'critical' | 'neutral' | string
+  details?: string
+}
+
+export type AssetDecisionComparisonLaneCount = {
+  lane: AssetDecisionComparisonLane
+  count: number
+}
+
+export type AssetDecisionComparisonInsight = {
+  summary: string
+  primary_axis: AssetDecisionComparisonPrimaryAxis
+  lane_counts: AssetDecisionComparisonLaneCount[]
+  priority_vps_ids: string[]
+  tradeoffs: AssetDecisionComparisonSignal[]
+}
+
+export type AssetDecisionMemberComparisonInsight = {
+  rank: number
+  lane: AssetDecisionComparisonLane
+  summary: string
+  strengths: AssetDecisionComparisonSignal[]
+  risks: AssetDecisionComparisonSignal[]
+  gaps: AssetDecisionComparisonSignal[]
+  tradeoffs: AssetDecisionComparisonSignal[]
+}
+
 export type AssetDecisionGroupSummary = {
   group_id: string
   group_type: AssetDecisionGroupType
@@ -957,6 +1004,7 @@ export type AssetDecisionGroupSummary = {
   evidence_chips: AssetDecisionEvidenceChip[]
   evidence_assessment: AssetDecisionEvidenceAssessment
   decision_recommendation?: AssetDecisionRecommendation
+  comparison_insight?: AssetDecisionComparisonInsight
 }
 
 export type AssetDecisionGroupMember = {
@@ -980,6 +1028,7 @@ export type AssetDecisionGroupMember = {
   evidence_chips: AssetDecisionEvidenceChip[]
   evidence_assessment: AssetDecisionEvidenceAssessment
   decision_recommendation?: AssetDecisionRecommendation
+  comparison_insight?: AssetDecisionMemberComparisonInsight
   renewal_within_window: boolean
   source_availability: AssetDecisionSourceAvailability
 }
@@ -1042,6 +1091,7 @@ export type AssetDecisionManualGroupSummary = {
   evidence_chips: AssetDecisionEvidenceChip[]
   evidence_assessment: AssetDecisionEvidenceAssessment
   decision_recommendation?: AssetDecisionRecommendation
+  comparison_insight?: AssetDecisionComparisonInsight
   source_availability: AssetDecisionSourceAvailability
   created_at: string
   updated_at: string

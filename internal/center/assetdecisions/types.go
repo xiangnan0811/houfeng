@@ -196,6 +196,7 @@ type GroupSummary struct {
 	EvidenceChips              []EvidenceChip                    `json:"evidence_chips"`
 	EvidenceAssessment         EvidenceAssessment                `json:"evidence_assessment"`
 	DecisionRecommendation     DecisionRecommendation            `json:"decision_recommendation"`
+	ComparisonInsight          ComparisonInsight                 `json:"comparison_insight"`
 }
 
 type GroupDetail struct {
@@ -204,28 +205,29 @@ type GroupDetail struct {
 }
 
 type GroupMember struct {
-	VPS                         vpsassets.Record       `json:"vps"`
-	PrimarySubscription         *subscriptions.Record  `json:"primary_subscription,omitempty"`
-	SubscriptionCount           int                    `json:"subscription_count"`
-	ActiveSubscriptionCount     int                    `json:"active_subscription_count"`
-	InactiveSubscriptionCount   int                    `json:"inactive_subscription_count"`
-	ServiceCount                int                    `json:"service_count"`
-	DomainCount                 int                    `json:"domain_count"`
-	TargetCount                 int                    `json:"target_count"`
-	RunningTargetCount          int                    `json:"running_target_count"`
-	MonitoringLinkCount         int                    `json:"monitoring_link_count"`
-	RunningMonitoringCount      int                    `json:"running_monitoring_count"`
-	AbnormalMonitoringCount     int                    `json:"abnormal_monitoring_count"`
-	ActiveIncidentCount         int                    `json:"active_incident_count"`
-	PrimaryIssueSummary         string                 `json:"primary_issue_summary"`
-	CancellationAttentionReason string                 `json:"cancellation_attention_reason,omitempty"`
-	SuggestedRole               SuggestedRole          `json:"suggested_role"`
-	SuggestedAction             SuggestedAction        `json:"suggested_action"`
-	EvidenceChips               []EvidenceChip         `json:"evidence_chips"`
-	EvidenceAssessment          EvidenceAssessment     `json:"evidence_assessment"`
-	DecisionRecommendation      DecisionRecommendation `json:"decision_recommendation"`
-	RenewalWithinWindow         bool                   `json:"renewal_within_window"`
-	SourceAvailability          SourceAvailability     `json:"source_availability"`
+	VPS                         vpsassets.Record        `json:"vps"`
+	PrimarySubscription         *subscriptions.Record   `json:"primary_subscription,omitempty"`
+	SubscriptionCount           int                     `json:"subscription_count"`
+	ActiveSubscriptionCount     int                     `json:"active_subscription_count"`
+	InactiveSubscriptionCount   int                     `json:"inactive_subscription_count"`
+	ServiceCount                int                     `json:"service_count"`
+	DomainCount                 int                     `json:"domain_count"`
+	TargetCount                 int                     `json:"target_count"`
+	RunningTargetCount          int                     `json:"running_target_count"`
+	MonitoringLinkCount         int                     `json:"monitoring_link_count"`
+	RunningMonitoringCount      int                     `json:"running_monitoring_count"`
+	AbnormalMonitoringCount     int                     `json:"abnormal_monitoring_count"`
+	ActiveIncidentCount         int                     `json:"active_incident_count"`
+	PrimaryIssueSummary         string                  `json:"primary_issue_summary"`
+	CancellationAttentionReason string                  `json:"cancellation_attention_reason,omitempty"`
+	SuggestedRole               SuggestedRole           `json:"suggested_role"`
+	SuggestedAction             SuggestedAction         `json:"suggested_action"`
+	EvidenceChips               []EvidenceChip          `json:"evidence_chips"`
+	EvidenceAssessment          EvidenceAssessment      `json:"evidence_assessment"`
+	DecisionRecommendation      DecisionRecommendation  `json:"decision_recommendation"`
+	ComparisonInsight           MemberComparisonInsight `json:"comparison_insight"`
+	RenewalWithinWindow         bool                    `json:"renewal_within_window"`
+	SourceAvailability          SourceAvailability      `json:"source_availability"`
 }
 
 type RecordSummary struct {
@@ -604,6 +606,7 @@ func RecordSnapshotFromGroup(group GroupDetail) EvidenceSnapshot {
 		"evidence_chips":               group.EvidenceChips,
 		"evidence_assessment":          group.EvidenceAssessment,
 		"decision_recommendation":      group.DecisionRecommendation,
+		"comparison_insight":           group.ComparisonInsight,
 		"source_availability":          mergeMemberSourceAvailability(group.Members),
 	}
 	if group.MonthlyCostBase != nil {
@@ -649,6 +652,7 @@ func RecordSnapshotFromMember(member GroupMember) EvidenceSnapshot {
 		"evidence_chips":                member.EvidenceChips,
 		"evidence_assessment":           member.EvidenceAssessment,
 		"decision_recommendation":       member.DecisionRecommendation,
+		"comparison_insight":            member.ComparisonInsight,
 		"source_availability":           member.SourceAvailability,
 	}
 	if member.PrimarySubscription != nil {
@@ -915,6 +919,7 @@ func buildGroup(groupType GroupType, view View, scopeKey, title, scopeLabel stri
 	sort.SliceStable(members, func(i, j int) bool {
 		return memberPriority(members[i]) > memberPriority(members[j])
 	})
+	assignMemberComparisonRanks(members)
 	summary := GroupSummary{
 		GroupID:               StableGroupID(groupType, scopeKey),
 		GroupType:             groupType,
@@ -1014,6 +1019,7 @@ func buildGroup(groupType GroupType, view View, scopeKey, title, scopeLabel stri
 	summary.EvidenceAssessment = assessGroup(groupType, priority, members)
 	detail := GroupDetail{GroupSummary: summary, Members: members}
 	detail.DecisionRecommendation = RecommendGroup(detail)
+	detail.ComparisonInsight = CompareGroup(detail)
 	return detail
 }
 
@@ -1045,6 +1051,7 @@ func buildMember(fact Fact, filters ListFilters) GroupMember {
 	member.SuggestedRole, member.SuggestedAction = suggestMember(member)
 	member.EvidenceAssessment = assessMember(member)
 	member.DecisionRecommendation = RecommendMember(member)
+	member.ComparisonInsight = CompareMember(member, 0)
 	return member
 }
 
