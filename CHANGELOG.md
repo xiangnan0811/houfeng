@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.48.0](https://github.com/xiangnan0811/houfeng/compare/v0.47.0...v0.48.0) (2026-06-06)
+
+
+### Features
+
+* **web:** guide asset decision scenario progression ([df8d340](https://github.com/xiangnan0811/houfeng/commit/df8d340e68363647e2d048d7a4b707deca5f3be1))
+* **web:** guide asset decision scenario progression ([619e642](https://github.com/xiangnan0811/houfeng/commit/619e642add13be6448273b4d5c4877193e07a5d4))
+
 ## [0.47.0](https://github.com/xiangnan0811/houfeng/compare/v0.46.0...v0.47.0) (2026-06-06)
 
 
