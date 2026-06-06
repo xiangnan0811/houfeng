@@ -432,34 +432,126 @@ function manualGroupSummary(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function mockInitialWorkbench(fetchMock: ReturnType<typeof vi.fn>, options: {
+function scenarioTemplate(overrides: Record<string, unknown> = {}) {
+  return {
+    template_id: 'adt_builtin_primary_standby',
+    builtin: true,
+    status: 'active',
+    scenario: 'primary_standby',
+    title: '主备取舍模板',
+    goal: '比较主力与备用 VPS 的保留、观察和补证据路径',
+    note: '创建组合时重新读取当前事实',
+    source_manual_group_id: null,
+    member_count: 0,
+    created_at: '2026-06-06T08:00:00Z',
+    updated_at: '2026-06-06T08:00:00Z',
+    archived_at: null,
+    members: [],
+    ...overrides,
+  }
+}
+
+type InitialWorkbenchOptions = {
   overviewBody?: unknown
   groupsBody?: unknown
   manualGroupsBody?: unknown
   recordsBody?: unknown
+  templatesBody?: unknown
   renewalEvidenceBody?: unknown
   subscriptionsBody?: unknown
   unreviewedBody?: unknown
   migrateBody?: unknown
   cancelBody?: unknown
   vpsCatalogBody?: unknown
-} = {}) {
-  fetchMock
-    .mockResolvedValueOnce(mockJSONResponse(options.overviewBody ?? overview()))
-    .mockResolvedValueOnce(mockJSONResponse(options.groupsBody ?? [groupSummary()]))
-    .mockResolvedValueOnce(mockJSONResponse(options.recordsBody ?? [decisionRecord()]))
-    .mockResolvedValueOnce(mockJSONResponse(options.manualGroupsBody ?? [manualGroupSummary()]))
-    .mockResolvedValueOnce(mockJSONResponse(options.renewalEvidenceBody ?? [subscription]))
-    .mockResolvedValueOnce(mockJSONResponse(options.subscriptionsBody ?? [subscription]))
-    .mockResolvedValueOnce(mockJSONResponse(options.unreviewedBody ?? [vps]))
-    .mockResolvedValueOnce(mockJSONResponse(options.migrateBody ?? [migrateVPS]))
-    .mockResolvedValueOnce(mockJSONResponse(options.cancelBody ?? [cancelVPS]))
-    .mockResolvedValueOnce(mockJSONResponse(options.vpsCatalogBody ?? [
+  routes?: MockFetchRoute[]
+}
+
+type MockFetchRoute = {
+  url: string
+  method?: string
+  body?: unknown
+  status?: number
+  responses?: Array<{ body: unknown; status?: number }>
+}
+
+function initialWorkbenchResponse(url: string, options: InitialWorkbenchOptions = {}) {
+  if (url.startsWith('/api/asset-decisions/overview')) {
+    return options.overviewBody ?? overview()
+  }
+  if (url.startsWith('/api/asset-decisions/groups?')) {
+    return options.groupsBody ?? [groupSummary()]
+  }
+  if (url.startsWith('/api/asset-decisions/records?') || url === '/api/asset-decisions/records') {
+    return options.recordsBody ?? [decisionRecord()]
+  }
+  if (url.startsWith('/api/asset-decisions/manual-groups?') || url === '/api/asset-decisions/manual-groups') {
+    return options.manualGroupsBody ?? [manualGroupSummary()]
+  }
+  if (url === '/api/asset-decisions/scenario-templates') {
+    return options.templatesBody ?? [scenarioTemplate()]
+  }
+  if (url.startsWith('/api/subscriptions?renew_within_days=')) {
+    return options.renewalEvidenceBody ?? [subscription]
+  }
+  if (url === '/api/subscriptions?sort=renew_at&order=asc') {
+    return options.subscriptionsBody ?? [subscription]
+  }
+  if (url === '/api/vps?renewal_decision=unreviewed') {
+    return options.unreviewedBody ?? [vps]
+  }
+  if (url === '/api/vps?renewal_decision=migrate') {
+    return options.migrateBody ?? [migrateVPS]
+  }
+  if (url === '/api/vps?renewal_decision=cancel') {
+    return options.cancelBody ?? [cancelVPS]
+  }
+  if (url === '/api/vps') {
+    return options.vpsCatalogBody ?? [
       vps,
       migrateVPS,
       cancelVPS,
       ...groupDetail().members.map((member) => member.vps),
-    ]))
+    ]
+  }
+  return undefined
+}
+
+function mockInitialWorkbench(fetchMock: ReturnType<typeof vi.fn>, options: InitialWorkbenchOptions = {}) {
+  const routes = (options.routes ?? []).map((route) => ({
+    ...route,
+    responses: route.responses ? [...route.responses] : [{ body: route.body, status: route.status }],
+  }))
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET'
+    const route = routes.find((candidate) => candidate.url === url && candidate.method === method)
+      ?? routes.find((candidate) => candidate.url === url && !candidate.method && method === 'GET')
+    if (route) {
+      const response = route.responses.length > 1 ? route.responses.shift()! : route.responses[0]
+      return Promise.resolve(mockJSONResponse(response.body, response.status ?? 200))
+    }
+    if (method !== 'GET') {
+      return Promise.reject(new Error(`unhandled ${method} request: ${url}`))
+    }
+    const body = initialWorkbenchResponse(url, options)
+    if (body !== undefined) return Promise.resolve(mockJSONResponse(body))
+    return Promise.reject(new Error(`unhandled request: ${url}`))
+  })
+}
+
+function expectFetchCalledWith(fetchMock: ReturnType<typeof vi.fn>, url: string, init?: RequestInit) {
+  if (init) {
+    expect(fetchMock).toHaveBeenCalledWith(url, init)
+    return
+  }
+  expect(fetchMock.mock.calls.some((call) => call[0] === url)).toBe(true)
+}
+
+function findFetchCall(fetchMock: ReturnType<typeof vi.fn>, url: string, method?: string) {
+  return fetchMock.mock.calls.find((call) => {
+    if (call[0] !== url) return false
+    if (!method) return true
+    return call[1]?.method === method
+  })
 }
 
 describe('AssetDecisionsPage', () => {
@@ -489,35 +581,18 @@ describe('AssetDecisionsPage', () => {
     expect(screen.getByText('德国主备取舍记录')).toBeInTheDocument()
     expect(screen.getAllByText('需补证据').length).toBeGreaterThan(0)
     expect(screen.getByText('缺口 1')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '场景模板' })).toBeInTheDocument()
+    expect(screen.getByText('主备取舍模板')).toBeInTheDocument()
     expect(screen.getByText('RENEWAL EVIDENCE')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '单台待处理队列' })).toBeInTheDocument()
     expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0)
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-decisions/records', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/asset-decisions/manual-groups', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/records?view=needs_decision&renew_within_days=30')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/scenario-templates')
+    expectFetchCalledWith(fetchMock, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc')
   })
 
   it('switches workbench tabs through asset-decision group queries', async () => {
@@ -529,10 +604,12 @@ describe('AssetDecisionsPage', () => {
       scope_label: 'JP / Kanto / Tokyo',
     })
     const fetchMock = vi.fn()
-    mockInitialWorkbench(fetchMock)
-    fetchMock
-      .mockResolvedValueOnce(mockJSONResponse(overview({ region_group_count: 1 })))
-      .mockResolvedValueOnce(mockJSONResponse([regionGroup]))
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/overview?view=region&renew_within_days=30', body: overview({ region_group_count: 1 }) },
+        { url: '/api/asset-decisions/groups?view=region&renew_within_days=30', body: [regionGroup] },
+      ],
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -545,22 +622,17 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: /同区比较/ }))
 
     await waitFor(() => expect(screen.getByText('日本同区取舍')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/asset-decisions/overview?view=region&renew_within_days=30', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/groups?view=region&renew_within_days=30', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=region&renew_within_days=30')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=region&renew_within_days=30')
   })
 
   it('opens group detail with member comparison, evidence, and single VPS entry', async () => {
     const fetchMock = vi.fn()
-    mockInitialWorkbench(fetchMock)
-    fetchMock.mockResolvedValueOnce(mockJSONResponse(groupDetail()))
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: groupDetail() },
+      ],
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -581,11 +653,7 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getByText(/监控 1/)).toBeInTheDocument()
     expect(within(dialog).getByText('证据质量')).toBeInTheDocument()
     expect(within(dialog).getAllByText('先补证据').length).toBeGreaterThan(0)
-    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30')
 
     fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
     expect(within(dialog).getAllByText('Germany Primary').length).toBeGreaterThan(0)
@@ -599,10 +667,12 @@ describe('AssetDecisionsPage', () => {
       status: 'decided',
     })
     const fetchMock = vi.fn()
-    mockInitialWorkbench(fetchMock)
-    fetchMock
-      .mockResolvedValueOnce(mockJSONResponse(groupDetail()))
-      .mockResolvedValueOnce(mockJSONResponse(created, 201))
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: groupDetail() },
+        { url: '/api/asset-decisions/records', method: 'POST', body: created, status: 201 },
+      ],
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -622,37 +692,40 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备取舍')).toBeInTheDocument())
     expect(await screen.findByRole('dialog', { name: '资产组合决策记录详情' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/records', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    expect(findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')).toEqual([
+      '/api/asset-decisions/records',
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({
+          source_type: 'auto_group',
+          source_group_id: 'adg_auto_001',
+          renew_within_days: 30,
+          title: '德国主备取舍',
+          goal: '保留主力，补齐备用证据',
+          status: 'decided',
+          members: [
+            {
+              vps_id: 'vps_primary',
+              decided_role: 'primary_candidate',
+              decided_action: 'keep',
+              reason: '',
+            },
+            {
+              vps_id: 'vps_standby',
+              decided_role: 'evidence_needed',
+              decided_action: 'complete_evidence',
+              reason: '',
+            },
+          ],
+        }),
       },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({
-        source_type: 'auto_group',
-        source_group_id: 'adg_auto_001',
-        renew_within_days: 30,
-        title: '德国主备取舍',
-        goal: '保留主力，补齐备用证据',
-        status: 'decided',
-        members: [
-          {
-            vps_id: 'vps_primary',
-            decided_role: 'primary_candidate',
-            decided_action: 'keep',
-            reason: '',
-          },
-          {
-            vps_id: 'vps_standby',
-            decided_role: 'evidence_needed',
-            decided_action: 'complete_evidence',
-            reason: '',
-          },
-        ],
-      }),
-    })
+    ])
   })
 
   it('creates a manual scenario group from an automatic group and opens it', async () => {
@@ -661,11 +734,13 @@ describe('AssetDecisionsPage', () => {
       title: '德国主力组合',
     })
     const fetchMock = vi.fn()
-    mockInitialWorkbench(fetchMock)
-    fetchMock
-      .mockResolvedValueOnce(mockJSONResponse(groupDetail()))
-      .mockResolvedValueOnce(mockJSONResponse(createdManual, 201))
-      .mockResolvedValueOnce(mockJSONResponse(createdManual))
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: groupDetail() },
+        { url: '/api/asset-decisions/manual-groups', method: 'POST', body: createdManual, status: 201 },
+        { url: '/api/asset-decisions/manual-groups/admg_created', body: createdManual },
+      ],
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -683,24 +758,27 @@ describe('AssetDecisionsPage', () => {
     const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
     expect(within(manualDialog).getByRole('heading', { name: '组合场景' })).toBeInTheDocument()
     expect(within(manualDialog).getByDisplayValue('主力稳定')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/manual-groups', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups', 'POST')).toEqual([
+      '/api/asset-decisions/manual-groups',
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({
+          source_type: 'auto_group',
+          source_group_id: 'adg_auto_001',
+          renew_within_days: 30,
+          scenario: 'general',
+          title: '德国主力组合',
+          goal: '',
+          note: '由自动组 adg_auto_001 创建',
+        }),
       },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({
-        source_type: 'auto_group',
-        source_group_id: 'adg_auto_001',
-        renew_within_days: 30,
-        scenario: 'general',
-        title: '德国主力组合',
-        goal: '',
-        note: '由自动组 adg_auto_001 创建',
-      }),
-    })
+    ])
   })
 
   it('saves a manual scenario group as a decision record without touching business assets', async () => {
@@ -711,10 +789,12 @@ describe('AssetDecisionsPage', () => {
       source_group_id: 'admg_001',
     })
     const fetchMock = vi.fn()
-    mockInitialWorkbench(fetchMock)
-    fetchMock
-      .mockResolvedValueOnce(mockJSONResponse(manualGroupDetail()))
-      .mockResolvedValueOnce(mockJSONResponse(created, 201))
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
+        { url: '/api/asset-decisions/records', method: 'POST', body: created, status: 201 },
+      ],
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -734,31 +814,34 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
 
     await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备自定义组合')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/records', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    expect(findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')).toEqual([
+      '/api/asset-decisions/records',
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({
+          source_type: 'manual_group',
+          source_group_id: 'admg_001',
+          renew_within_days: 30,
+          title: '德国主备自定义组合',
+          goal: '保留主力并观察备用',
+          status: 'draft',
+          members: [
+            {
+              vps_id: 'vps_primary',
+              decided_role: 'primary_candidate',
+              decided_action: 'keep',
+              reason: '主力稳定',
+            },
+          ],
+        }),
       },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({
-        source_type: 'manual_group',
-        source_group_id: 'admg_001',
-        renew_within_days: 30,
-        title: '德国主备自定义组合',
-        goal: '保留主力并观察备用',
-        status: 'draft',
-        members: [
-          {
-            vps_id: 'vps_primary',
-            decided_role: 'primary_candidate',
-            decided_action: 'keep',
-            reason: '主力稳定',
-          },
-        ],
-      }),
-    })
+    ])
     const writeCalls = fetchMock.mock.calls.filter((call) => call[1]?.method && call[1]?.method !== 'GET')
     expect(writeCalls.some((call) => String(call[0]).startsWith('/api/vps/'))).toBe(false)
     expect(writeCalls.some((call) => String(call[0]).startsWith('/api/subscriptions/'))).toBe(false)
@@ -804,11 +887,19 @@ describe('AssetDecisionsPage', () => {
       ],
     })
     const fetchMock = vi.fn()
-    mockInitialWorkbench(fetchMock)
-    fetchMock
-      .mockResolvedValueOnce(mockJSONResponse(decisionRecord()))
-      .mockResolvedValueOnce(mockJSONResponse(patched))
-      .mockResolvedValueOnce(mockJSONResponse(followupPatched))
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
+        {
+          url: '/api/asset-decisions/records/adr_001',
+          method: 'PATCH',
+          responses: [
+            { body: patched },
+            { body: followupPatched },
+          ],
+        },
+      ],
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -833,43 +924,51 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '更新状态' }))
 
     await waitFor(() => expect(screen.getByText('决策记录状态已更新：德国主备取舍记录 -> 推进中')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/asset-decisions/records/adr_001', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(12, '/api/asset-decisions/records/adr_001', {
-      method: 'PATCH',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/records/adr_001')
+    const firstRecordPatchCalls = fetchMock.mock.calls.filter((call) => (
+      call[0] === '/api/asset-decisions/records/adr_001' && call[1]?.method === 'PATCH'
+    ))
+    expect(firstRecordPatchCalls[0]).toEqual([
+      '/api/asset-decisions/records/adr_001',
+      {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({ status: 'in_progress' }),
       },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({ status: 'in_progress' }),
-    })
+    ])
 
     fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进状态'), { target: { value: 'blocked' } })
     fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进备注'), { target: { value: '等待迁移窗口' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存跟进' }))
 
     await waitFor(() => expect(screen.getByText('成员跟进已更新：Germany Primary -> 阻塞')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(13, '/api/asset-decisions/records/adr_001', {
-      method: 'PATCH',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    const secondRecordPatchCalls = fetchMock.mock.calls.filter((call) => (
+      call[0] === '/api/asset-decisions/records/adr_001' && call[1]?.method === 'PATCH'
+    ))
+    expect(secondRecordPatchCalls[1]).toEqual([
+      '/api/asset-decisions/records/adr_001',
+      {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({
+          members: [{
+            vps_id: 'vps_primary',
+            followup_status: 'blocked',
+            followup_note: '等待迁移窗口',
+          }],
+        }),
       },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({
-        members: [{
-          vps_id: 'vps_primary',
-          followup_status: 'blocked',
-          followup_note: '等待迁移窗口',
-        }],
-      }),
-    })
+    ])
     expect(within(dialog).getByLabelText('Germany Primary 跟进备注')).toHaveValue('等待迁移窗口')
     expect(within(dialog).getAllByText('有漂移').length).toBeGreaterThan(0)
     expect(within(dialog).getByText('仍有 active 订阅')).toBeInTheDocument()
@@ -886,13 +985,10 @@ describe('AssetDecisionsPage', () => {
       updated_at: '2026-05-09T09:00:00Z',
     }
     const fetchMock = vi.fn()
-    mockInitialWorkbench(fetchMock)
-    fetchMock.mockResolvedValueOnce(mockJSONResponse(updated))
     mockInitialWorkbench(fetchMock, {
-      overviewBody: overview(),
-      groupsBody: [groupSummary()],
-      unreviewedBody: [],
-      migrateBody: [updated, migrateVPS],
+      routes: [
+        { url: '/api/vps/vps_review', method: 'PATCH', body: updated },
+      ],
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -912,34 +1008,36 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(drawer).getByRole('button', { name: '保存续费决策' }))
 
     await waitFor(() => expect(screen.getByText('续费决策已保存：Tokyo Review -> 迁移')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(11, '/api/vps/vps_review', {
-      method: 'PATCH',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    expect(findFetchCall(fetchMock, '/api/vps/vps_review', 'PATCH')).toEqual([
+      '/api/vps/vps_review',
+      {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({
+          renewal_decision: 'migrate',
+          renewal_reason: 'move to Osaka',
+        }),
       },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({
-        renewal_decision: 'migrate',
-        renewal_reason: 'move to Osaka',
-      }),
-    })
+    ])
   })
 
   it('does not turn subscription evidence failure into missing-subscription decisions', async () => {
     const fetchMock = vi.fn()
-    fetchMock
-      .mockResolvedValueOnce(mockJSONResponse(overview()))
-      .mockResolvedValueOnce(mockJSONResponse([groupSummary({ evidence_chips: [] })]))
-      .mockResolvedValueOnce(mockJSONResponse([decisionRecord()]))
-      .mockResolvedValueOnce(mockJSONResponse([manualGroupSummary()]))
-      .mockResolvedValueOnce(mockJSONResponse({ error: 'subscription evidence unavailable' }, 500))
-      .mockResolvedValueOnce(mockJSONResponse([subscription]))
-      .mockResolvedValueOnce(mockJSONResponse([vps]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([vps]))
+    mockInitialWorkbench(fetchMock, {
+      groupsBody: [groupSummary({ evidence_chips: [] })],
+      routes: [
+        {
+          url: '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc',
+          body: { error: 'subscription evidence unavailable' },
+          status: 500,
+        },
+      ],
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(

@@ -1655,3 +1655,36 @@ Implemented execution readback for saved asset decision records across backend r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 167: Asset decision scenario workbench
+
+**Date**: 2026-06-06
+**Task**: Asset decision scenario workbench
+**Branch**: `worktree/asset-decisions-scenario-recommendations-links`
+
+### Summary
+
+Implemented scenario templates, recommendation read model, context filters, cross-page deep links, and asset decision UI/test/spec updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c9372d2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

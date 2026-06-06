@@ -711,7 +711,7 @@ export function SubscriptionsPage() {
                           </span>
                         </td>
                         <td className="data-table__cell">
-                          <Link className="btn-text sm secondary" to="/asset-decisions?view=renewal&renew_within_days=30">
+                          <Link className="btn-text sm secondary" to={`/asset-decisions?view=renewal&renew_within_days=30&vps_id=${encodeURIComponent(s.vps_id)}`}>
                             需要资产判断
                           </Link>
                         </td>

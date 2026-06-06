@@ -159,6 +159,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AssetDecisionGroupHandler:                handlers.AssetDecisionGroup(assetDecisionRepo),
 		AssetDecisionManualGroupsHandler:         handlers.AssetDecisionManualGroups(assetDecisionRepo),
 		AssetDecisionManualGroupHandler:          handlers.AssetDecisionManualGroup(assetDecisionRepo),
+		AssetDecisionScenarioTemplatesHandler:    handlers.AssetDecisionScenarioTemplates(assetDecisionRepo),
+		AssetDecisionScenarioTemplateHandler:     handlers.AssetDecisionScenarioTemplate(assetDecisionRepo),
 		AssetDecisionRecordsHandler:              handlers.AssetDecisionRecords(assetDecisionRepo),
 		AssetDecisionRecordHandler:               handlers.AssetDecisionRecord(assetDecisionRepo),
 		ProvidersCollectionHandler:               handlers.ProvidersCollection(providerRepo),

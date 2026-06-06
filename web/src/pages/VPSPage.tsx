@@ -149,6 +149,22 @@ function filterToQuery(filters: FilterState): URLSearchParams {
   return params
 }
 
+function assetDecisionHrefForFilters(filters: FilterState): string {
+  const params = new URLSearchParams()
+  params.set('view', filters.provider_id ? 'provider' : 'needs_decision')
+  params.set('renew_within_days', '30')
+  if (filters.provider_id) params.set('provider_id', filters.provider_id)
+  if (filters.view === 'renewal') {
+    params.set('view', 'renewal')
+  }
+  if (filters.lifecycle_status === 'to_cancel' || filters.renewal_decision === 'cancel' || filters.view === 'cancellation_attention') {
+    params.set('scenario', 'migration_retirement')
+  } else if (filters.view === 'missing_subscription' || filters.view === 'unlinked' || filters.view === 'missing_facts') {
+    params.set('scenario', 'evidence_cleanup')
+  }
+  return `/asset-decisions?${params.toString()}`
+}
+
 function hasActiveFilters(filters: FilterState): boolean {
   return Boolean(
     filters.view !== 'all' ||
@@ -414,7 +430,7 @@ export function VPSPage() {
           <h1 className="page-title">VPS 资产</h1>
         </div>
         <div className="header-actions">
-          <Link className="btn sm secondary" to="/asset-decisions?view=needs_decision">进入组合决策</Link>
+          <Link className="btn sm secondary" to={assetDecisionHrefForFilters(filters)}>进入组合决策</Link>
           <button type="button" className="btn sm secondary" onClick={openFilterDrawer}>筛选</button>
           <button type="button" className="btn sm primary" onClick={() => setCreateOpen(true)}>
             {state.vps.length === 0 ? '创建第一台 VPS' : '添加 VPS'}

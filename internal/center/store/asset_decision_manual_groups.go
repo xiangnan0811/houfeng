@@ -31,7 +31,11 @@ const assetDecisionManualGroupColumns = `
 	updated_at,
 	archived_at`
 
-func (r *PostgresAssetDecisionRepository) ListManualGroups(ctx context.Context) ([]assetdecisions.ManualGroupSummary, error) {
+func (r *PostgresAssetDecisionRepository) ListManualGroups(ctx context.Context, filters assetdecisions.ListFilters) ([]assetdecisions.ManualGroupSummary, error) {
+	filters = assetdecisions.NormalizeFilters(filters)
+	if err := assetdecisions.ValidateFilters(filters); err != nil {
+		return nil, err
+	}
 	rows, err := r.db.Query(ctx, `
 		select `+assetDecisionManualGroupColumns+`
 		from asset_decision_manual_groups
@@ -68,6 +72,9 @@ func (r *PostgresAssetDecisionRepository) ListManualGroups(ctx context.Context) 
 	summaries := make([]assetdecisions.ManualGroupSummary, 0, len(groupRows))
 	for _, row := range groupRows {
 		detail := assetdecisions.ManualGroupDetailFromRows(row, memberRows[row.ManualGroupID], facts)
+		if !assetdecisions.ManualGroupMatchesFilters(detail, filters) {
+			continue
+		}
 		summaries = append(summaries, detail.ManualGroupSummary)
 	}
 	return summaries, nil

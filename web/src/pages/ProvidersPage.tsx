@@ -574,7 +574,7 @@ export function ProvidersPage() {
               </Link>
             ) : null}
             {!state.contextError && row.vpsCount > 0 ? (
-              <Link className="provider-directory-entry-link" to="/asset-decisions?view=provider" aria-label={`查看 ${row.provider.name} 服务商组合决策`}>
+              <Link className="provider-directory-entry-link" to={`/asset-decisions?view=provider&provider_id=${providerID}`} aria-label={`查看 ${row.provider.name} 服务商组合决策`}>
                 组合决策
               </Link>
             ) : null}

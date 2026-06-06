@@ -110,6 +110,9 @@ export function MonitoringInstanceLinkedVPSSection({
             <Badge variant="state" tone="notice">
               需联动处理
             </Badge>
+            <Link className="btn sm secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&scenario=migration_retirement&vps_id=${encodeURIComponent(lifecycleContext.vps_id)}`}>
+              组合决策
+            </Link>
             <Link className="btn sm secondary" to={`/vps/${lifecycleContext.vps_id}?workbench=cancellation`}>
               打开工作台
             </Link>

@@ -707,34 +707,42 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 
 #### 2. Signatures
 
-- Domain package: `internal/center/assetdecisions`，包含 `Repository`、`ListFilters`、`Overview`、`GroupSummary`、`GroupDetail`、`GroupMember`、`ManualGroupSummary`、`ManualGroupDetail`、`ManualGroupMember`、`RecordSummary`、`RecordDetail`、`RecordMember`、`CreateRecordInput`、`PatchRecordInput`、`ErrAssetDecisionGroupNotFound`、`ErrAssetDecisionManualGroupNotFound`、`ErrAssetDecisionRecordNotFound`、`ErrInvalidAssetDecisionInput`。
+- Domain package: `internal/center/assetdecisions`，包含 `Repository`、`ListFilters`、`Overview`、`GroupSummary`、`GroupDetail`、`GroupMember`、`ManualGroupSummary`、`ManualGroupDetail`、`ManualGroupMember`、`ScenarioTemplateSummary`、`ScenarioTemplateDetail`、`ScenarioTemplateMember`、`RecordSummary`、`RecordDetail`、`RecordMember`、`CreateRecordInput`、`PatchRecordInput`、`ErrAssetDecisionGroupNotFound`、`ErrAssetDecisionManualGroupNotFound`、`ErrAssetDecisionScenarioTemplateNotFound`、`ErrAssetDecisionRecordNotFound`、`ErrInvalidAssetDecisionInput`。
 - Backend APIs:
-  - `GET /api/asset-decisions/overview?view=&renew_within_days=`
-  - `GET /api/asset-decisions/groups?view=&renew_within_days=`
+  - `GET /api/asset-decisions/overview?view=&renew_within_days=&provider_id=&vps_id=&country=&region=&city=&scenario=`
+  - `GET /api/asset-decisions/groups?view=&renew_within_days=&provider_id=&vps_id=&country=&region=&city=&scenario=`
   - `GET /api/asset-decisions/groups/{group_id}?renew_within_days=`
   - `GET /api/asset-decisions/records`
   - `POST /api/asset-decisions/records`
   - `GET /api/asset-decisions/records/{record_id}`
   - `PATCH /api/asset-decisions/records/{record_id}`
-  - `GET /api/asset-decisions/manual-groups`
+  - `GET /api/asset-decisions/manual-groups?view=&renew_within_days=&provider_id=&vps_id=&country=&region=&city=&scenario=`
   - `POST /api/asset-decisions/manual-groups`
   - `GET /api/asset-decisions/manual-groups/{manual_group_id}`
   - `PATCH /api/asset-decisions/manual-groups/{manual_group_id}`
   - `POST /api/asset-decisions/manual-groups/{manual_group_id}/members`
   - `PATCH /api/asset-decisions/manual-groups/{manual_group_id}/members/{vps_id}`
   - `DELETE /api/asset-decisions/manual-groups/{manual_group_id}/members/{vps_id}`
+  - `GET /api/asset-decisions/scenario-templates`
+  - `POST /api/asset-decisions/scenario-templates`
+  - `GET /api/asset-decisions/scenario-templates/{template_id}`
+  - `PATCH /api/asset-decisions/scenario-templates/{template_id}`
+  - `POST /api/asset-decisions/scenario-templates/{template_id}/manual-groups`
 - Store source tables: `vps_assets`、`providers`、`subscriptions`、`asset_services`、`asset_domains`、`vps_monitoring_instance_links`、`monitoring_instances`、`targets`。
 - Manual scenario tables: `asset_decision_manual_groups`、`asset_decision_manual_group_members`。manual group id 使用 `admg_*`；成员引用现有 `vps_assets.vps_id`，只保存 `intended_role`、`intended_action`、`reason`、`note`、`sort_order` 和创建时 evidence snapshot。
+- Scenario template tables: `asset_decision_scenario_templates`、`asset_decision_scenario_template_members`。内置模板使用确定性 ID `adt_builtin_<scenario>` 且由代码返回，不允许 PATCH；自定义模板使用 `adt_*`，只保存场景 blueprint（status、scenario、title、goal、note、source_manual_group_id 和可选成员 intended role/action/reason/note/sort_order），不得保存当前成本、订阅、监控、服务、域名或 Target 实时事实。
 - Decision memory tables: `asset_decision_records`、`asset_decision_record_members`；view: `asset_decision_records_with_counts`。`source_type` 允许 `auto_group` 与 `manual_group`；未传 source type 时默认 `auto_group` 以兼容旧调用。
 - Stable group id: `adg_auto_<12hex>`，由 group type、scope key 和续费窗口等只读 key 确定性派生；detail endpoint 每次重新计算组列表后按 ID 查找。
 - Decision record id: `adr_*`，由 `ids.New("adr")` 生成；记录只引用来源自动组 ID 作为历史来源，不把自动组 ID 当长期外键。
 - Evidence assessment: `GroupSummary` 和 `GroupMember` 必须返回 `evidence_assessment`，字段固定为 `confidence_score`、`pressure_score`、`readiness_score`、`quality_tier`（`strong|usable|weak|blocked`）、`decision_bias`（`keep|observe|complete_evidence|retire|migrate|review`）、`support_signal_count`、`risk_signal_count`、`gap_signal_count`、`summary`。
+- Decision recommendation: `GroupSummary`、`GroupMember`、`ManualGroupSummary`、`ManualGroupDetail` 和 manual members 必须返回只读 `decision_recommendation`，字段固定为 `summary`、`next_step`、`reasons[]`、`blockers[]`、`priority_vps_ids[]`、`confidence_label`。它只能解释 `evidence_assessment`、evidence chips、group type、scenario 和已有成员事实计数，不得新增评分引擎、runtime facts detail、HostSample、ProbeObservation、IP/路由/性能/超售判断。
 - Record member follow-up: `asset_decision_record_members.followup_status` 固定为 `todo|in_progress|blocked|done|skipped`，`followup_note` 为 trim 后的执行备注，`followup_updated_at` 为最后一次成员跟进更新时间；`asset_decision_records_with_counts` 必须返回各状态聚合计数。
 - Execution readback: `RecordSummary` / `RecordDetail` 和 `RecordMember` 必须返回只读派生字段 `execution_readback`。记录级字段为 `status`（`open|aligned|drift|blocked|needs_evidence|inactive`）、中文 `summary`、`open_count`、`aligned_count`、`drift_count`、`blocked_count`、`needs_evidence_count`。成员级字段为同一 status、summary、`issues[]`（`kind,label,tone,details?`）和 `current_facts`（当前 VPS lifecycle、usage、renewal decision、active subscription / service / domain / Target / monitoring 计数与 source availability）。
 
 #### 3. Contracts
 
 - 自动组只读派生，不写数据库；手工组合只写 `asset_decision_manual_groups` / `asset_decision_manual_group_members`；用户保存一次判断才写入 `asset_decision_records` / `asset_decision_record_members`。
+- 场景模板只能创建或预填自定义组合，不能直接创建决策记录，不能修改 VPS / Subscription / MonitoringInstance / Target / Service / Domain。`POST /scenario-templates/{id}/manual-groups` 必须重新读取当前 facts 后复用 manual group 创建路径；模板成员缺失、重复或非法输入必须 fail closed。
 - 手工组合支持 `source_type=manual` 和 `source_type=auto_group`。从自动组创建手工组合时，store 必须重新读取当前 facts 并定位自动组，复制当前成员建议角色/动作与 evidence snapshot；自动组不存在或请求成员不属于组时返回 invalid/not found，不得信任前端传入的成员事实。
 - 手工组合详情和列表必须复用当前 `loadFacts` 聚合实时回读成员事实；成员当前 VPS facts 缺失时仍返回 manual metadata，并展示 `current_fact_missing` evidence chip，不得静默丢成员。
 - 手工组合成员增删改只能修改 manual member 行，不得修改 VPS、Subscription、MonitoringInstance、Target、Service、Domain 或决策记录跟进状态。手工组合没有 hard delete endpoint；归档使用 `status=archived`。
@@ -749,7 +757,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - 成员级 `decided_action=cancel` 或 `open_cancellation_workbench` 只能给前端提供跳转到 VPS lifecycle workbench 的入口；后端 records API 不做批量取消、批量退役或批量迁移。
 - Group type 固定语义：`renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。
 - `renew_within_days` 默认 30，仅允许产品认可的窗口（当前 `30/60/90`）；非法值在 handler 返回 400。
-- `view` 只筛选返回的自动组，不改变底层事实读取；非法值返回 400。
+- `view` 只筛选返回的自动组，不改变底层事实读取；`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 是列表上下文筛选，只筛出相关组/手工组合/记录，不裁剪 group detail 成员；非法值返回 400。
 - Store 读取现有表后在 Go 中派生组合摘要和成员建议，避免 Dashboard / VPS / Subscription / Provider 页面各自重复 join 后语义漂移。
 - 组级摘要可以聚合成本、续费窗口、取消联动、服务 / 域名 / Target、监控关联、异常和 evidence chips；成员级建议角色 / 建议动作只能作为扫描提示，不执行写操作。
 - `evidence_assessment` 是只读、可解释评分层，只消费当前 `GroupMember` / `GroupSummary` 已有事实、source availability 和 evidence chips；它不得新增数据库读取、逐台 runtime facts 调用或执行语义，也不得把评分当成自动 keep / migrate / cancel 写入。
@@ -772,6 +780,8 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 | missing `record_id` | handler 返回 404 `asset decision record not found` |
 | missing `manual_group_id` | handler 返回 404 `asset decision manual group not found` |
 | missing manual group member | handler 返回 404 `asset decision manual group member not found` |
+| missing scenario template | handler 返回 404 `asset decision scenario template not found` |
+| patch builtin scenario template | handler 返回 400 `invalid input`，内置模板由代码版本化 |
 | create record with missing auto group | handler 返回 404 `asset decision group not found` |
 | create record with missing manual group | handler 返回 404 `asset decision manual group not found` |
 | create record with member not in group | handler 返回 400 `invalid input`，不得开启写事务 |
@@ -800,6 +810,8 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Good: subscription query 成功且某台 VPS 没有 active subscription，`evidence_gap` 或成员 evidence chips 标记缺订阅。
 - Good: 用户打开自动组，保存为 `adr_*` 决策记录；记录保留当时成本、服务/域名/Target、监控和成员建议快照，后续只推进记录状态。
 - Good: 用户把自动组保存为 `admg_*` 手工组合，随后调整成员 intended role/action/reason，再从手工组合保存为 `source_type=manual_group` 的 `adr_*` 记录。
+- Good: 用户从内置场景模板创建自定义组合，后端重新读取当前 facts；用户把手工组合另存为自定义模板时只保存成员 blueprint，不保存当前成本、监控或订阅事实。
+- Good: `/api/asset-decisions/groups?view=provider&provider_id=pv_001` 只返回与该服务商相关的组合；打开其中某个 `group_id` 的详情仍保留完整组成员，不按 provider/vps 筛选裁剪。
 - Good: 用户给手工组合新增一台现有 VPS，只保存手工组合成员行；VPS 的 lifecycle、renewal decision、订阅、监控和 Target 均不被修改。
 - Good: 用户把记录中某台 VPS 标记为 `blocked` 并记录“等待迁移窗口”，API 只更新该 record member 的跟进字段与记录 `updated_at`，不修改 VPS lifecycle 或 subscription。
 - Good: 已保存记录中 `cancel` 成员跟进标记 `done` 后，如果当前仍有 active subscription 或 running target，readback 显示 `drift`，提示“跟进已完成但事实未闭环”。
@@ -808,6 +820,8 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Base: 没有任何 VPS 时 overview 仍返回 0 计数和空 `top_groups`。
 - Bad: 在 store 里写入 `asset_decision_groups` 表，或把自动组 ID 当长期外键依赖。
 - Bad: 手工组合成员保存当前成本、订阅、监控、服务等实时事实并长期展示，不再从 `loadFacts` 回读当前状态。
+- Bad: 模板 API 直接生成 `adr_*` 决策记录，或把模板当作第二套业务状态机保存执行状态。
+- Bad: `decision_recommendation` 读取 agent CPU/IO、HostSample、ProbeObservation、IP 质量、路由质量或性能衰退数据。
 - Bad: `PATCH /api/asset-decisions/records/{id}` 同时修改 VPS renewal decision、Subscription 状态或执行取消/退役。
 - Bad: records list 为了给每条记录计算 readback 逐条调用 `GetRecord`，造成 N+1。
 - Bad: readback 使用 HostSample、ProbeObservation、IP 质量、路由质量或性能衰退数据，在 agent 语义未成熟前给出超售判断。
@@ -822,7 +836,8 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Execution readback domain tests: cancel / cancellation workbench aligned/open/drift、migrate 链路与旧承载 drift、keep / observe 一致性、complete_evidence 只检查当前已有缺口、done drift、blocked 优先、skipped 抑制普通 open、abandoned inactive、current fact missing。
 - Store tests: records list/detail/create/patch 均返回 `execution_readback`；ListRecords 批量读取成员并聚合，不逐条调用 `GetRecord`；facts 查询失败 fail closed；成员跟进 PATCH 后 readback 随响应刷新；不依赖 runtime facts detail / HostSample / ProbeObservation。
 - Handler tests: overview、groups list、group detail、manual groups list/create/detail/patch/member add/patch/delete、records list/create/detail/patch success 且 records 响应包含 readback、成员跟进 patch；invalid query/input、missing group/manual group/member/record、未知或重复成员、repo failure、method not allowed。
-- Router/bootstrap tests: `/api/asset-decisions/overview`、`/api/asset-decisions/groups`、`/api/asset-decisions/groups/{id}`、`/api/asset-decisions/manual-groups/*`、`/api/asset-decisions/records`、`/api/asset-decisions/records/{id}` 登录保护且不落 SPA fallback；`bootstrapCenter` wiring 非 nil。
+- Handler tests: scenario templates list/create/get/patch/create-manual-group success；builtin PATCH、missing template、invalid template input、repo failure、method not allowed。
+- Router/bootstrap tests: `/api/asset-decisions/overview`、`/api/asset-decisions/groups`、`/api/asset-decisions/groups/{id}`、`/api/asset-decisions/manual-groups/*`、`/api/asset-decisions/scenario-templates/*`、`/api/asset-decisions/records`、`/api/asset-decisions/records/{id}` 登录保护且不落 SPA fallback；`bootstrapCenter` wiring 非 nil。
 - Frontend tests: API helper query/payload、页面主 surface、saved records surface、tabs、group detail、保存记录、记录详情状态推进、单台 PATCH payload、evidence 请求失败边界。
 
 #### 7. Wrong vs Correct

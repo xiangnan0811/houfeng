@@ -16,53 +16,71 @@ import (
 )
 
 type fakeAssetDecisionRepository struct {
-	overviewResult      assetdecisions.Overview
-	overviewErr         error
-	overviewFilters     assetdecisions.ListFilters
-	groupsResult        []assetdecisions.GroupSummary
-	groupsErr           error
-	groupsFilters       assetdecisions.ListFilters
-	groupResult         assetdecisions.GroupDetail
-	groupErr            error
-	groupID             string
-	groupFilters        assetdecisions.ListFilters
-	manualGroupsResult  []assetdecisions.ManualGroupSummary
-	manualGroupsErr     error
-	createManualInput   assetdecisions.CreateManualGroupInput
-	createManualResult  assetdecisions.ManualGroupDetail
-	createManualErr     error
-	manualGroupResult   assetdecisions.ManualGroupDetail
-	manualGroupErr      error
-	manualGroupID       string
-	patchManualID       string
-	patchManualInput    assetdecisions.PatchManualGroupInput
-	patchManualResult   assetdecisions.ManualGroupDetail
-	patchManualErr      error
-	addMemberGroupID    string
-	addMemberInput      assetdecisions.CreateManualGroupMemberInput
-	addMemberResult     assetdecisions.ManualGroupDetail
-	addMemberErr        error
-	patchMemberGroupID  string
-	patchMemberVPSID    string
-	patchMemberInput    assetdecisions.PatchManualGroupMemberInput
-	patchMemberResult   assetdecisions.ManualGroupDetail
-	patchMemberErr      error
-	deleteMemberGroupID string
-	deleteMemberVPSID   string
-	deleteMemberResult  assetdecisions.ManualGroupDetail
-	deleteMemberErr     error
-	recordsResult       []assetdecisions.RecordSummary
-	recordsErr          error
-	createInput         assetdecisions.CreateRecordInput
-	createResult        assetdecisions.RecordDetail
-	createErr           error
-	recordResult        assetdecisions.RecordDetail
-	recordErr           error
-	recordID            string
-	patchID             string
-	patchInput          assetdecisions.PatchRecordInput
-	patchResult         assetdecisions.RecordDetail
-	patchErr            error
+	overviewResult       assetdecisions.Overview
+	overviewErr          error
+	overviewFilters      assetdecisions.ListFilters
+	groupsResult         []assetdecisions.GroupSummary
+	groupsErr            error
+	groupsFilters        assetdecisions.ListFilters
+	groupResult          assetdecisions.GroupDetail
+	groupErr             error
+	groupID              string
+	groupFilters         assetdecisions.ListFilters
+	manualGroupsResult   []assetdecisions.ManualGroupSummary
+	manualGroupsErr      error
+	manualGroupsFilters  assetdecisions.ListFilters
+	createManualInput    assetdecisions.CreateManualGroupInput
+	createManualResult   assetdecisions.ManualGroupDetail
+	createManualErr      error
+	manualGroupResult    assetdecisions.ManualGroupDetail
+	manualGroupErr       error
+	manualGroupID        string
+	patchManualID        string
+	patchManualInput     assetdecisions.PatchManualGroupInput
+	patchManualResult    assetdecisions.ManualGroupDetail
+	patchManualErr       error
+	addMemberGroupID     string
+	addMemberInput       assetdecisions.CreateManualGroupMemberInput
+	addMemberResult      assetdecisions.ManualGroupDetail
+	addMemberErr         error
+	patchMemberGroupID   string
+	patchMemberVPSID     string
+	patchMemberInput     assetdecisions.PatchManualGroupMemberInput
+	patchMemberResult    assetdecisions.ManualGroupDetail
+	patchMemberErr       error
+	deleteMemberGroupID  string
+	deleteMemberVPSID    string
+	deleteMemberResult   assetdecisions.ManualGroupDetail
+	deleteMemberErr      error
+	templatesResult      []assetdecisions.ScenarioTemplateSummary
+	templatesErr         error
+	createTemplateInput  assetdecisions.CreateScenarioTemplateInput
+	createTemplateResult assetdecisions.ScenarioTemplateDetail
+	createTemplateErr    error
+	templateResult       assetdecisions.ScenarioTemplateDetail
+	templateErr          error
+	templateID           string
+	patchTemplateID      string
+	patchTemplateInput   assetdecisions.PatchScenarioTemplateInput
+	patchTemplateResult  assetdecisions.ScenarioTemplateDetail
+	patchTemplateErr     error
+	templateManualID     string
+	templateManualInput  assetdecisions.CreateManualGroupFromTemplateInput
+	templateManualResult assetdecisions.ManualGroupDetail
+	templateManualErr    error
+	recordsResult        []assetdecisions.RecordSummary
+	recordsErr           error
+	recordsFilters       assetdecisions.ListFilters
+	createInput          assetdecisions.CreateRecordInput
+	createResult         assetdecisions.RecordDetail
+	createErr            error
+	recordResult         assetdecisions.RecordDetail
+	recordErr            error
+	recordID             string
+	patchID              string
+	patchInput           assetdecisions.PatchRecordInput
+	patchResult          assetdecisions.RecordDetail
+	patchErr             error
 }
 
 func (f *fakeAssetDecisionRepository) GetOverview(_ context.Context, filters assetdecisions.ListFilters) (assetdecisions.Overview, error) {
@@ -90,7 +108,8 @@ func (f *fakeAssetDecisionRepository) GetGroup(_ context.Context, groupID string
 	return f.groupResult, nil
 }
 
-func (f *fakeAssetDecisionRepository) ListManualGroups(context.Context) ([]assetdecisions.ManualGroupSummary, error) {
+func (f *fakeAssetDecisionRepository) ListManualGroups(_ context.Context, filters assetdecisions.ListFilters) ([]assetdecisions.ManualGroupSummary, error) {
+	f.manualGroupsFilters = filters
 	if f.manualGroupsErr != nil {
 		return nil, f.manualGroupsErr
 	}
@@ -150,7 +169,49 @@ func (f *fakeAssetDecisionRepository) DeleteManualGroupMember(_ context.Context,
 	return f.deleteMemberResult, nil
 }
 
-func (f *fakeAssetDecisionRepository) ListRecords(context.Context) ([]assetdecisions.RecordSummary, error) {
+func (f *fakeAssetDecisionRepository) ListScenarioTemplates(context.Context) ([]assetdecisions.ScenarioTemplateSummary, error) {
+	if f.templatesErr != nil {
+		return nil, f.templatesErr
+	}
+	return f.templatesResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) CreateScenarioTemplate(_ context.Context, input assetdecisions.CreateScenarioTemplateInput) (assetdecisions.ScenarioTemplateDetail, error) {
+	f.createTemplateInput = input
+	if f.createTemplateErr != nil {
+		return assetdecisions.ScenarioTemplateDetail{}, f.createTemplateErr
+	}
+	return f.createTemplateResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) GetScenarioTemplate(_ context.Context, templateID string) (assetdecisions.ScenarioTemplateDetail, error) {
+	f.templateID = templateID
+	if f.templateErr != nil {
+		return assetdecisions.ScenarioTemplateDetail{}, f.templateErr
+	}
+	return f.templateResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) PatchScenarioTemplate(_ context.Context, templateID string, input assetdecisions.PatchScenarioTemplateInput) (assetdecisions.ScenarioTemplateDetail, error) {
+	f.patchTemplateID = templateID
+	f.patchTemplateInput = input
+	if f.patchTemplateErr != nil {
+		return assetdecisions.ScenarioTemplateDetail{}, f.patchTemplateErr
+	}
+	return f.patchTemplateResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) CreateManualGroupFromTemplate(_ context.Context, templateID string, input assetdecisions.CreateManualGroupFromTemplateInput) (assetdecisions.ManualGroupDetail, error) {
+	f.templateManualID = templateID
+	f.templateManualInput = input
+	if f.templateManualErr != nil {
+		return assetdecisions.ManualGroupDetail{}, f.templateManualErr
+	}
+	return f.templateManualResult, nil
+}
+
+func (f *fakeAssetDecisionRepository) ListRecords(_ context.Context, filters assetdecisions.ListFilters) ([]assetdecisions.RecordSummary, error) {
+	f.recordsFilters = filters
 	if f.recordsErr != nil {
 		return nil, f.recordsErr
 	}
@@ -373,6 +434,103 @@ func TestAssetDecisionManualGroupsListCreateAndMemberMutations(t *testing.T) {
 	}
 	if repo.deleteMemberGroupID != "admg_001" || repo.deleteMemberVPSID != "vps_002" {
 		t.Fatalf("delete member = group %q vps %q, want decoded path", repo.deleteMemberGroupID, repo.deleteMemberVPSID)
+	}
+}
+
+func TestAssetDecisionScenarioTemplatesListCreateGetPatchAndCreateManualGroup(t *testing.T) {
+	now := time.Date(2026, time.June, 6, 10, 0, 0, 0, time.UTC)
+	template := assetdecisions.ScenarioTemplateDetail{
+		ScenarioTemplateSummary: assetdecisions.ScenarioTemplateSummary{
+			TemplateID:          "adt_custom_001",
+			Status:              assetdecisions.ScenarioTemplateStatusActive,
+			Scenario:            assetdecisions.ManualGroupScenarioRegionReview,
+			Title:               "德国同区取舍模板",
+			Goal:                "保留主力与备用",
+			SourceManualGroupID: "admg_001",
+			MemberCount:         1,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		},
+		Members: []assetdecisions.ScenarioTemplateMember{{
+			TemplateID:     "adt_custom_001",
+			MemberID:       "adtm_001",
+			VPSID:          "vps_001",
+			IntendedRole:   assetdecisions.RolePrimaryCandidate,
+			IntendedAction: assetdecisions.ActionKeep,
+			SortOrder:      1,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}},
+	}
+	manualGroup := assetdecisions.ManualGroupDetail{
+		ManualGroupSummary: assetdecisions.ManualGroupSummary{
+			ManualGroupID:   "admg_from_template",
+			Status:          assetdecisions.ManualGroupStatusActive,
+			Scenario:        assetdecisions.ManualGroupScenarioRegionReview,
+			Title:           "德国同区取舍",
+			RenewWithinDays: 60,
+			MemberCount:     1,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	repo := &fakeAssetDecisionRepository{
+		templatesResult:      []assetdecisions.ScenarioTemplateSummary{template.ScenarioTemplateSummary},
+		createTemplateResult: template,
+		templateResult:       template,
+		patchTemplateResult:  template,
+		templateManualResult: manualGroup,
+	}
+
+	collection := handlers.AssetDecisionScenarioTemplates(repo)
+	listRecorder := httptest.NewRecorder()
+	collection.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/asset-decisions/scenario-templates", nil))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d; body=%s", listRecorder.Code, http.StatusOK, listRecorder.Body.String())
+	}
+	var listBody []assetdecisions.ScenarioTemplateSummary
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	if len(listBody) != 1 || listBody[0].TemplateID != "adt_custom_001" {
+		t.Fatalf("list body = %#v, want template summary", listBody)
+	}
+
+	createRecorder := httptest.NewRecorder()
+	collection.ServeHTTP(createRecorder, httptest.NewRequest(http.MethodPost, "/api/asset-decisions/scenario-templates", bytes.NewReader([]byte(`{"source_manual_group_id":"admg_001","title":"德国同区取舍模板","scenario":"region_review"}`))))
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", createRecorder.Code, http.StatusCreated, createRecorder.Body.String())
+	}
+	if repo.createTemplateInput.SourceManualGroupID != "admg_001" || repo.createTemplateInput.Scenario != assetdecisions.ManualGroupScenarioRegionReview {
+		t.Fatalf("create template input = %#v, want manual group source and scenario", repo.createTemplateInput)
+	}
+
+	item := handlers.AssetDecisionScenarioTemplate(repo)
+	getRecorder := httptest.NewRecorder()
+	item.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/api/asset-decisions/scenario-templates/adt_custom_001", nil))
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want %d; body=%s", getRecorder.Code, http.StatusOK, getRecorder.Body.String())
+	}
+	if repo.templateID != "adt_custom_001" {
+		t.Fatalf("templateID = %q, want adt_custom_001", repo.templateID)
+	}
+
+	patchRecorder := httptest.NewRecorder()
+	item.ServeHTTP(patchRecorder, httptest.NewRequest(http.MethodPatch, "/api/asset-decisions/scenario-templates/adt_custom_001", bytes.NewReader([]byte(`{"status":"archived","note":"不再使用"}`))))
+	if patchRecorder.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want %d; body=%s", patchRecorder.Code, http.StatusOK, patchRecorder.Body.String())
+	}
+	if repo.patchTemplateID != "adt_custom_001" || !repo.patchTemplateInput.Status.Set || repo.patchTemplateInput.Status.Value != assetdecisions.ScenarioTemplateStatusArchived || !repo.patchTemplateInput.Note.Set || repo.patchTemplateInput.Note.Value != "不再使用" {
+		t.Fatalf("patch template input = id %q %#v, want archived note", repo.patchTemplateID, repo.patchTemplateInput)
+	}
+
+	createManualRecorder := httptest.NewRecorder()
+	item.ServeHTTP(createManualRecorder, httptest.NewRequest(http.MethodPost, "/api/asset-decisions/scenario-templates/adt_custom_001/manual-groups", bytes.NewReader([]byte(`{"title":"德国同区取舍","renew_within_days":60,"members":[{"vps_id":"vps_001","intended_action":"keep"}]}`))))
+	if createManualRecorder.Code != http.StatusCreated {
+		t.Fatalf("create manual status = %d, want %d; body=%s", createManualRecorder.Code, http.StatusCreated, createManualRecorder.Body.String())
+	}
+	if repo.templateManualID != "adt_custom_001" || repo.templateManualInput.RenewWithinDays != 60 || len(repo.templateManualInput.Members) != 1 || repo.templateManualInput.Members[0].VPSID != "vps_001" {
+		t.Fatalf("template manual input = id %q %#v, want decoded input", repo.templateManualID, repo.templateManualInput)
 	}
 }
 
@@ -690,6 +848,48 @@ func TestAssetDecisionHandlersMapErrors(t *testing.T) {
 			name:     "manual group member method not allowed",
 			handler:  handlers.AssetDecisionManualGroup(&fakeAssetDecisionRepository{}),
 			request:  httptest.NewRequest(http.MethodPut, "/api/asset-decisions/manual-groups/admg_001/members/vps_001", nil),
+			wantCode: http.StatusMethodNotAllowed,
+		},
+		{
+			name:     "scenario templates list failure",
+			handler:  handlers.AssetDecisionScenarioTemplates(&fakeAssetDecisionRepository{templatesErr: errors.New("boom")}),
+			request:  httptest.NewRequest(http.MethodGet, "/api/asset-decisions/scenario-templates", nil),
+			wantCode: http.StatusInternalServerError,
+		},
+		{
+			name:     "scenario templates create invalid json",
+			handler:  handlers.AssetDecisionScenarioTemplates(&fakeAssetDecisionRepository{}),
+			request:  httptest.NewRequest(http.MethodPost, "/api/asset-decisions/scenario-templates", bytes.NewReader([]byte(`{"title":`))),
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "scenario templates create invalid input",
+			handler:  handlers.AssetDecisionScenarioTemplates(&fakeAssetDecisionRepository{createTemplateErr: assetdecisions.ErrInvalidAssetDecisionInput}),
+			request:  httptest.NewRequest(http.MethodPost, "/api/asset-decisions/scenario-templates", bytes.NewReader([]byte(`{"title":""}`))),
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "scenario template missing",
+			handler:  handlers.AssetDecisionScenarioTemplate(&fakeAssetDecisionRepository{templateErr: assetdecisions.ErrAssetDecisionScenarioTemplateNotFound}),
+			request:  httptest.NewRequest(http.MethodGet, "/api/asset-decisions/scenario-templates/adt_missing", nil),
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "scenario template patch invalid",
+			handler:  handlers.AssetDecisionScenarioTemplate(&fakeAssetDecisionRepository{patchTemplateErr: assetdecisions.ErrInvalidAssetDecisionInput}),
+			request:  httptest.NewRequest(http.MethodPatch, "/api/asset-decisions/scenario-templates/adt_custom_001", bytes.NewReader([]byte(`{"status":"bad"}`))),
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "scenario template manual group missing template",
+			handler:  handlers.AssetDecisionScenarioTemplate(&fakeAssetDecisionRepository{templateManualErr: assetdecisions.ErrAssetDecisionScenarioTemplateNotFound}),
+			request:  httptest.NewRequest(http.MethodPost, "/api/asset-decisions/scenario-templates/adt_missing/manual-groups", bytes.NewReader([]byte(`{"title":"x"}`))),
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "scenario template item method not allowed",
+			handler:  handlers.AssetDecisionScenarioTemplate(&fakeAssetDecisionRepository{}),
+			request:  httptest.NewRequest(http.MethodPut, "/api/asset-decisions/scenario-templates/adt_custom_001", nil),
 			wantCode: http.StatusMethodNotAllowed,
 		},
 	}

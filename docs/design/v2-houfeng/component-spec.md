@@ -225,10 +225,13 @@ parent: docs/design/v2-houfeng/design-language.md
 4. 决策组行必须服务组合扫描和取舍：组名 / scope、成员数量、生命周期 / 用途 / 续费分布、续费窗口、未评估、服务 / 域名 / Target、监控关联、异常事件、成本、证据质量判断尺度和 evidence chips。组级 evidence 可以展示 MonitoringInstance/Target 聚合异常，但不得把它误写成单台 VPS list contract 已拥有的 linked health 字段。
 5. 点击组打开右侧 Drawer / modal detail，展示组内 VPS 对比表。成员行必须展示 VPS identity、provider/region/product、生命周期/用途/续费决策、主订阅或订阅证据不可用状态、服务 / 域名 / Target / 监控数量、建议角色、建议动作、成员证据评估和 evidence chips。建议只是扫描辅助；真正写入只通过单台 `AssetDecisionWorkPanel`。
 6. 决策编辑使用 group detail 或底部单台辅助队列中的 `AssetDecisionWorkPanel`。保存成功的 notice 留在页面可见 surface 内；取消 / 退役 action 只能跳到 VPS 详情生命周期工作台，不在组合页直接执行。
-7. `自定义组合` 是自动组与决策记录之间的 scenario surface：用户可以从自动组创建手工组合，也可以在详情内维护场景、目标、成员 intended role/action/reason，并从手工组合保存为决策记录。它只表达“正在比较这一组资产”，不得触发 VPS / Subscription / MonitoringInstance / Target 写动作。
-8. `已保存组合决策` 是 memory/readback surface，视觉层级低于自动组和自定义组合，高于单台队列与续费 evidence。列表展示 record status、followup 计数和 execution readback；详情展示保存时证据快照、当前回读和成员跟进。
-9. 页面底部保留 `单台待处理队列`，承接原有 `unreviewed / migrate / cancel` 快速处理。它视觉上低于 `决策组列表` 和 `自定义组合`，用于单台补充处理，不再是页面主体。
-10. 续费候选表是 `RENEWAL EVIDENCE` 次级证据区。它保留续费窗口切换和订阅入口，但视觉权重低于组合工作台；订阅 evidence 失败时只显示局部错误，不把所有 VPS 误判为缺订阅。
+7. `decision_recommendation` 是解释层，不是新的执行层。组列表和成员行只能展示短摘要、下一步、理由/阻塞 chips 和可信标签；详情可以展开更多理由，但不得让它盖过成本、服务/域名、Target、监控、续费窗口等组合事实。
+8. `场景模板` 是 scenario surface 的启动器，位于自动组与自定义组合之间，视觉权重低于自动组。内置模板和自定义模板都只能创建自定义组合；模板详情不直接保存决策记录，不触发 VPS / Subscription / MonitoringInstance / Target 写动作。
+9. `自定义组合` 是自动组与决策记录之间的 scenario surface：用户可以从自动组或模板创建手工组合，也可以在详情内维护场景、目标、成员 intended role/action/reason，并从手工组合保存为决策记录或另存为模板。它只表达“正在比较这一组资产”，不得触发 VPS / Subscription / MonitoringInstance / Target 写动作。
+10. `已保存组合决策` 是 memory/readback surface，视觉层级低于自动组和自定义组合，高于单台队列与续费 evidence。列表展示 record status、followup 计数和 execution readback；详情展示保存时证据快照、当前回读和成员跟进。
+11. URL context chips 是组合页承接跨页面深链的可见凭据。`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 必须能单个移除或清空；`group_id`、`manual_group_id`、`record_id`、`template_id` 只打开对应 detail，不自动创建或执行。
+12. 页面底部保留 `单台待处理队列`，承接原有 `unreviewed / migrate / cancel` 快速处理。它视觉上低于 `决策组列表`、模板和 `自定义组合`，用于单台补充处理，不再是页面主体。
+13. 续费候选表是 `RENEWAL EVIDENCE` 次级证据区。它保留续费窗口切换和订阅入口，但视觉权重低于组合工作台；订阅 evidence 失败时只显示局部错误，不把所有 VPS 误判为缺订阅。
 
 ### VPSPage
 1. VPS 页是高密度资产库存表，用于 40+ VPS 核对、比较和补录，不是普通后台资源表。首屏结构：页面标题 → quick views / chips / 高级筛选入口 → `VPS 库存表`。

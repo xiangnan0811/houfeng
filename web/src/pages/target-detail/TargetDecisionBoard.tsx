@@ -116,9 +116,14 @@ export function TargetDecisionBoard({
           {assetContextHasAttention(assetContext) ? '需联动处理' : '已同步'}
         </Badge>
         {primaryContext ? (
-          <Link className="btn sm secondary" to={`/vps/${primaryContext.vps_id}?workbench=cancellation`}>
-            打开工作台
-          </Link>
+          <>
+            <Link className="btn sm secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&scenario=migration_retirement&vps_id=${encodeURIComponent(primaryContext.vps_id)}`}>
+              组合决策
+            </Link>
+            <Link className="btn sm secondary" to={`/vps/${primaryContext.vps_id}?workbench=cancellation`}>
+              打开工作台
+            </Link>
+          </>
         ) : null}
       </div>
     </section>
