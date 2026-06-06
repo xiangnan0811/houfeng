@@ -193,6 +193,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 - Asset Decisions 首屏主 surface 必须是 `资产组合决策` 的决策组列表，不得恢复三张同权 VPS queue table，也不得把单台续费队列重新提升为主视觉主体。
 - Asset Decisions 顶部必须先展示 portfolio command summary：从当前已加载的记录回读、自动组、自定义组合和模板中派生第一行动，并展示组合范围、续费窗口、执行闭环风险、evidence source 状态和 context filter 摘要。该 summary 是处理顺序导览，不是 KPI 卡片墙；不得把单台队列数量提升为主指标，也不得因为某来源失败而伪造无问题。
+- Asset Decisions 可以在 command summary 后展示轻量 `决策路径 / decision path` rail，把当前已加载事实派生为 `发现组合压力 -> 形成真实场景 -> 保存一次判断 -> 回读执行闭环` 四个阶段。该 rail 只读、不可持久化、不新增 API；点击只能打开已有 `group_id` / `manual_group_id` / `record_id` / `template_id` detail 或切换已有 view。任一来源加载失败时该阶段必须标记不可用，不得把失败解释成健康、已闭环或真实资料缺口。
 - Asset Decisions 可以在 `决策组列表` 右侧展示 `下一步导览 / closed-loop` surface，用于把当前已加载的自动组、已保存记录 execution readback、自定义组合和场景模板收敛成 3-6 个只读工作项。导览排序优先级为事实漂移记录、阻塞记录、需补证据记录、当前自动组、进行中自定义组合、可用模板；点击只复用 `group_id`、`manual_group_id`、`record_id`、`template_id` 打开已有详情，不自动创建、不 PATCH record status、不写 VPS / Subscription / MonitoringInstance / Target。
 - `下一步导览 / closed-loop` 的指标只能从当前已加载 rows 派生，例如自动组数量、进行中自定义组合、未关闭记录、readback drift/blocked/needs_evidence/open、预算压力和资料缺口。任一来源加载失败时只显示局部不可用提示并跳过该来源的工作项，不得把失败解释成无问题、已对齐或真实资料缺口。
 - 已保存组合决策必须作为主工作台下方的辅助 surface 展示，承接“保存本次判断、回看当时证据、推进记录状态”的用户任务，但不得取代自动组发现入口。
@@ -203,8 +204,9 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - `evidence_assessment` 的视觉层级高于零散 evidence chips、低于组合事实本身：组列表展示判断尺度，组详情展示组级和成员级评估，记录详情展示保存时证据快照。UI 文案必须表达“证据质量 / 决策压力 / 准备度”，不得把 `decision_bias` 写成自动执行承诺。
 - `decision_recommendation` 的视觉层级与 evidence assessment 相邻但更偏“下一步提示”：列表里保持短摘要，详情里展示下一步和理由/阻塞 chips。不得在前端根据 recommendation 自动调用 `PATCH /api/vps/*`、`PATCH /api/asset-decisions/records/*` 或其他业务对象写接口。
 - 组详情可以把当前自动组创建为自定义组合，也可以直接保存当前自动组为决策记录。保存表单允许编辑标题、组合目标、状态，以及每个成员的决定角色、决定动作和理由。保存成功后展示记录详情，而不是继续停留在只读组详情中。
-- 自定义组合详情必须展示当前 facts 回读后的成员对比、组合属性表单、VPS 选择器新增成员、成员意图编辑和保存为决策记录入口。从自定义组合保存记录必须发送 `source_type=manual_group`，并使用当前成员 intended role/action/reason 作为默认决定值。
-- 记录详情必须展示记录状态、来源、成员判断和证据快照，并允许推进记录状态；成员动作里的 `cancel` / `open_cancellation_workbench` 只能渲染到 `/vps/{id}?workbench=cancellation` 的跳转入口。
+- 组详情必须展示场景推进分岔：`直接保存记录` 适用于当前自动组已经就是本次判断范围，`先创建自定义组合` 适用于还需要补成员、目标或人工语境。该分岔只解释现有按钮，不新增执行路径，不写业务对象。
+- 自定义组合详情必须展示当前 facts 回读后的成员对比、组合属性表单、VPS 选择器新增成员、成员意图编辑和保存为决策记录入口；同时展示只读 `组合推进状态`，从目标/标题、成员数量、成员 intended role/action、evidence gap、current fact missing 派生保存记录准备度。从自定义组合保存记录必须发送 `source_type=manual_group`，并使用当前成员 intended role/action/reason 作为默认决定值。
+- 记录详情必须展示记录状态、来源、成员判断和证据快照，并允许推进记录状态；同时展示只读 `来源与当前闭环`，说明 record 来自 auto group 还是 manual group、保存时 scope 与当前 readback/plan 状态。复核来源只能打开已有来源 detail，不能自动恢复缺失来源、创建组合或执行业务写入。成员动作里的 `cancel` / `open_cancellation_workbench` 只能渲染到 `/vps/{id}?workbench=cancellation` 的跳转入口。
 - 记录详情必须展示成员级跟进状态、备注与最后更新时间；单个成员保存跟进时只 PATCH 该成员 `vps_id`、`followup_status`、`followup_note`，成功后刷新当前记录详情与已保存记录列表的跟进计数。成员跟进状态只表达“组合判断后的执行记忆”，不能隐式修改记录级状态，也不能触发 VPS、Subscription、MonitoringInstance 或 Target 写操作。
 - 已保存记录列表可以低权重展示 `execution_plan` 摘要、lane 计数、actionable / blocked 计数；点击仍只打开记录详情，不直接跳业务页。
 - 记录详情必须在成员明细表上方展示执行编排 board，按 `cancel_retire / migration / keep_observe / evidence / review` lane 分组展示成员、lane summary、readback badge、issue chips、当前事实块、下一步 CTA 和快速跟进按钮。board 是记录详情内的执行导览，不取代自动组主 surface，也不批量执行。

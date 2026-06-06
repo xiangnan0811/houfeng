@@ -308,6 +308,42 @@ type AssetDecisionPortfolioLead = {
   primaryGroupID?: string
 }
 
+type AssetDecisionProgressStage =
+  | 'discover'
+  | 'compare'
+  | 'decide'
+  | 'execute'
+
+type AssetDecisionPathStep = {
+  stage: AssetDecisionProgressStage
+  eyebrow: string
+  title: string
+  summary: string
+  metric: string
+  meta: string
+  tone: BadgeTone
+  actionLabel: string
+  target?: AssetDecisionNextWorkTarget
+  unavailable?: boolean
+}
+
+type ManualGroupProgressItem = {
+  key: string
+  label: string
+  summary: string
+  tone: BadgeTone
+  done: boolean
+}
+
+type ManualGroupProgress = {
+  readinessLabel: string
+  readinessTone: BadgeTone
+  readyToRecord: boolean
+  doneCount: number
+  totalCount: number
+  items: ManualGroupProgressItem[]
+}
+
 const RENEWAL_WINDOWS: readonly RenewalWindow[] = [30, 60, 90]
 const DECISION_QUEUE_VALUES: VPSRenewalDecision[] = ['unreviewed', 'migrate', 'cancel']
 const INITIAL_DECISION_DRAFT: AssetDecisionDraft = {
@@ -820,6 +856,19 @@ function scenarioTemplateStatusTone(status: AssetDecisionScenarioTemplateStatus)
   return status === 'active' ? 'maintenance' : 'offline'
 }
 
+function countActiveTemplates(templates: AssetDecisionScenarioTemplateSummary[]): number {
+  return templates.filter((template) => template.status === 'active').length
+}
+
+function countRecordExecutionRisk(records: AssetDecisionRecordSummary[]): number {
+  return records.reduce((total, record) => (
+    total
+    + (record.execution_readback?.drift_count ?? 0)
+    + (record.execution_readback?.blocked_count ?? 0)
+    + (record.execution_readback?.needs_evidence_count ?? 0)
+  ), 0)
+}
+
 function deriveClosedLoopMetrics(
   groups: AssetDecisionGroupSummary[],
   records: AssetDecisionRecordSummary[],
@@ -842,6 +891,101 @@ function deriveClosedLoopMetrics(
     evidenceGapGroupCount: overview?.evidence_group_count ?? groups.filter((group) => group.view === 'evidence' || group.group_type === 'evidence_gap').length,
     partialErrorCount: Object.values(sourceErrors).filter(Boolean).length,
   }
+}
+
+function buildDecisionPathSteps(
+  groups: AssetDecisionGroupSummary[],
+  records: AssetDecisionRecordSummary[],
+  manualGroups: AssetDecisionManualGroupSummary[],
+  templates: AssetDecisionScenarioTemplateSummary[],
+  metrics: ClosedLoopMetrics,
+  sourceErrors: ClosedLoopSourceErrors,
+): AssetDecisionPathStep[] {
+  const discoverGroup = groups[0]
+  const compareGroup = manualGroups.find((group) => group.status === 'active') ?? manualGroups[0]
+  const decideRecord = records.find((record) => record.status !== 'completed' && record.status !== 'abandoned') ?? records[0]
+  const executeRecord = records.find((record) => (record.execution_readback?.drift_count ?? 0) > 0)
+    ?? records.find((record) => (record.execution_readback?.blocked_count ?? 0) > 0 || (record.followup_blocked_count ?? 0) > 0)
+    ?? records.find((record) => (record.execution_readback?.needs_evidence_count ?? 0) > 0)
+    ?? decideRecord
+  const activeTemplate = templates.find((template) => template.status === 'active')
+  const activeTemplateCount = countActiveTemplates(templates)
+  const executionRiskCount = countRecordExecutionRisk(records)
+
+  return [
+    {
+      stage: 'discover',
+      eyebrow: '01 DISCOVER',
+      title: '发现组合压力',
+      summary: sourceErrors.groups
+        ? '自动组暂不可用，不能把缺失解释为无风险。'
+        : discoverGroup?.primary_issue_summary || discoverGroup?.decision_recommendation?.summary || '自动组负责发现同区、服务商、续费、预算和资料缺口。',
+      metric: sourceErrors.groups ? '不可用' : `${groups.length} 组`,
+      meta: sourceErrors.groups ? sourceErrors.groups : discoverGroup ? `${discoverGroup.scope_label} · ${groupPressureLabel(discoverGroup)}` : '当前视图暂无自动组',
+      tone: sourceErrors.groups ? 'alert' : groups.length > 0 ? 'notice' : 'normal',
+      actionLabel: discoverGroup ? '打开自动组' : '查看需要决策',
+      target: discoverGroup ? { type: 'group', id: discoverGroup.group_id } : undefined,
+      unavailable: Boolean(sourceErrors.groups),
+    },
+    {
+      stage: 'compare',
+      eyebrow: '02 COMPARE',
+      title: '形成真实场景',
+      summary: sourceErrors.manualGroups || sourceErrors.templates
+        ? '场景数据部分不可用，只展示已加载的组合和模板。'
+        : compareGroup?.decision_recommendation?.next_step || compareGroup?.goal || '从模板或自动组创建自定义组合，沉淀真实比较篮子。',
+      metric: sourceErrors.manualGroups ? '不可用' : `${metrics.manualActiveCount} 个`,
+      meta: sourceErrors.manualGroups
+        ? sourceErrors.manualGroups
+        : compareGroup
+          ? `${MANUAL_GROUP_SCENARIO_LABELS[compareGroup.scenario]} · 成员 ${compareGroup.member_count} · 缺口 ${compareGroup.evidence_assessment.gap_signal_count}`
+          : `可用模板 ${sourceErrors.templates ? '不可用' : activeTemplateCount}`,
+      tone: sourceErrors.manualGroups ? 'alert' : metrics.manualActiveCount > 0 ? 'maintenance' : activeTemplateCount > 0 ? 'notice' : 'neutral',
+      actionLabel: compareGroup ? '继续组合' : '使用模板',
+      target: compareGroup
+        ? { type: 'manual_group', id: compareGroup.manual_group_id }
+        : activeTemplate
+          ? { type: 'template', id: activeTemplate.template_id }
+          : undefined,
+      unavailable: Boolean(sourceErrors.manualGroups),
+    },
+    {
+      stage: 'decide',
+      eyebrow: '03 DECIDE',
+      title: '保存一次判断',
+      summary: sourceErrors.records
+        ? '决策记录暂不可用，不能确认历史判断。'
+        : decideRecord?.goal || decideRecord?.execution_readback?.summary || '保存记录后才能把组合判断和证据快照纳入长期跟进。',
+      metric: sourceErrors.records ? '不可用' : `${records.length} 条`,
+      meta: sourceErrors.records
+        ? sourceErrors.records
+        : decideRecord
+          ? `${RECORD_STATUS_LABELS[decideRecord.status]} · 成员 ${decideRecord.member_count} · ${readbackCountSummary(decideRecord.execution_readback)}`
+          : '尚未保存组合决策',
+      tone: sourceErrors.records ? 'alert' : records.length > 0 ? 'notice' : 'neutral',
+      actionLabel: decideRecord ? '打开记录' : '先选组合',
+      target: decideRecord ? { type: 'record', id: decideRecord.record_id } : discoverGroup ? { type: 'group', id: discoverGroup.group_id } : undefined,
+      unavailable: Boolean(sourceErrors.records),
+    },
+    {
+      stage: 'execute',
+      eyebrow: '04 EXECUTE',
+      title: '回读执行闭环',
+      summary: sourceErrors.records
+        ? '记录回读不可用，执行闭环状态未知。'
+        : executeRecord?.execution_plan?.summary || executeRecord?.execution_readback?.summary || '执行回读只校验当前事实，不会替用户自动完成动作。',
+      metric: sourceErrors.records ? '未知' : executionRiskCount > 0 ? `${executionRiskCount} 项` : '稳定',
+      meta: sourceErrors.records
+        ? sourceErrors.records
+        : executeRecord
+          ? `${READBACK_STATUS_LABELS[executeRecord.execution_readback?.status ?? 'open']} · ${executionPlanCountSummary(executeRecord.execution_plan)}`
+          : '暂无记录需要回读',
+      tone: sourceErrors.records ? 'alert' : metrics.readbackDriftCount > 0 || metrics.readbackBlockedCount > 0 ? 'critical' : metrics.readbackNeedsEvidenceCount > 0 ? 'alert' : 'normal',
+      actionLabel: executeRecord ? '查看回读' : '查看记录',
+      target: executeRecord ? { type: 'record', id: executeRecord.record_id } : undefined,
+      unavailable: Boolean(sourceErrors.records),
+    },
+  ]
 }
 
 function deriveNextWorkItems(
@@ -1213,6 +1357,79 @@ function buildManualRecordDraft(detail: AssetDecisionManualGroupDetail): RecordD
     memberOrder,
     members,
   }
+}
+
+function memberIntentIsSet(member: AssetDecisionManualGroupMember): boolean {
+  return Boolean(member.intended_role && member.intended_action && member.intended_action !== 'review')
+}
+
+function buildManualGroupProgress(detail: AssetDecisionManualGroupDetail): ManualGroupProgress {
+  const hasGoal = Boolean(detail.goal.trim() || detail.title.trim())
+  const hasMembers = detail.members.length > 0
+  const intentReadyCount = detail.members.filter(memberIntentIsSet).length
+  const intentReady = hasMembers && intentReadyCount === detail.members.length
+  const evidenceReady = detail.evidence_assessment.quality_tier !== 'blocked' && detail.evidence_assessment.gap_signal_count === 0
+  const currentFactMissingCount = detail.members.filter((member) => !member.current_fact_found).length
+  const factReady = currentFactMissingCount === 0
+  const readyToRecord = hasGoal && hasMembers && intentReady && evidenceReady && factReady
+  const items: ManualGroupProgressItem[] = [
+    {
+      key: 'goal',
+      label: '目标',
+      summary: hasGoal ? detail.goal || detail.title : '补齐组合目标后再沉淀判断',
+      tone: hasGoal ? 'normal' : 'alert',
+      done: hasGoal,
+    },
+    {
+      key: 'members',
+      label: '成员',
+      summary: hasMembers ? `${detail.members.length} 台 VPS 已加入比较` : '至少加入一台 VPS',
+      tone: hasMembers ? 'normal' : 'alert',
+      done: hasMembers,
+    },
+    {
+      key: 'intent',
+      label: '意图',
+      summary: hasMembers ? `已设置 ${intentReadyCount}/${detail.members.length} 个成员动作` : '等待成员后设置角色和动作',
+      tone: intentReady ? 'normal' : hasMembers ? 'notice' : 'neutral',
+      done: intentReady,
+    },
+    {
+      key: 'evidence',
+      label: '证据',
+      summary: evidenceReady ? detail.evidence_assessment.summary : `仍有 ${detail.evidence_assessment.gap_signal_count} 个资料缺口`,
+      tone: evidenceReady ? 'normal' : detail.evidence_assessment.quality_tier === 'blocked' ? 'critical' : 'alert',
+      done: evidenceReady,
+    },
+    {
+      key: 'facts',
+      label: '当前事实',
+      summary: factReady ? '成员当前事实可回读' : `${currentFactMissingCount} 个成员缺少当前事实`,
+      tone: factReady ? 'normal' : 'critical',
+      done: factReady,
+    },
+  ]
+  const doneCount = items.filter((item) => item.done).length
+  return {
+    readinessLabel: readyToRecord ? '可保存记录' : doneCount >= 3 ? '接近可保存' : '继续整理',
+    readinessTone: readyToRecord ? 'normal' : doneCount >= 3 ? 'maintenance' : 'alert',
+    readyToRecord,
+    doneCount,
+    totalCount: items.length,
+    items,
+  }
+}
+
+function recordSourceLabel(record: Pick<AssetDecisionRecordSummary, 'source_type' | 'source_group_id' | 'source_group_type' | 'scope_label'>): string {
+  const scope = record.scope_label || record.source_group_id
+  if (record.source_type === 'manual_group') return `来自自定义组合 ${scope}`
+  if (record.source_type === 'auto_group') return `来自自动组 ${scope}`
+  return `来源 ${scope}`
+}
+
+function recordSourceDetail(record: AssetDecisionRecordSummary): string {
+  const sourceType = record.source_type === 'manual_group' ? '自定义组合' : record.source_type === 'auto_group' ? '自动组' : record.source_type
+  return `${sourceType} · ${record.source_group_type} · ${VIEW_LABELS[record.source_view] ?? record.source_view} · ${record.source_group_id}`
 }
 
 function manualGroupSummaryFromDetail(detail: AssetDecisionManualGroupDetail): AssetDecisionManualGroupSummary {
@@ -2089,6 +2306,9 @@ export function AssetDecisionsPage() {
   const selectedRecordAssessment = recordDetailState.detail
     ? parseEvidenceAssessment(recordDetailState.detail.evidence_snapshot)
     : null
+  const manualGroupProgress = manualDetailState.detail
+    ? buildManualGroupProgress(manualDetailState.detail)
+    : null
   const closedLoopSourceErrors: ClosedLoopSourceErrors = {
     overview: portfolioState.overviewError,
     groups: portfolioState.groupsError,
@@ -2108,6 +2328,14 @@ export function AssetDecisionsPage() {
     recordsState.records,
     manualGroupsState.groups,
     templatesState.templates,
+    closedLoopSourceErrors,
+  )
+  const decisionPathSteps = buildDecisionPathSteps(
+    portfolioState.groups,
+    recordsState.records,
+    manualGroupsState.groups,
+    templatesState.templates,
+    closedLoopMetrics,
     closedLoopSourceErrors,
   )
   const portfolioLead = buildPortfolioLead(
@@ -3582,6 +3810,39 @@ export function AssetDecisionsPage() {
     setWorkbenchView('needs_decision')
   }
 
+  function openDecisionPathStep(step: AssetDecisionPathStep) {
+    if (step.unavailable) return
+    if (step.target?.type === 'record') {
+      openRecord(step.target.id)
+      return
+    }
+    if (step.target?.type === 'manual_group') {
+      openManualGroup(step.target.id)
+      return
+    }
+    if (step.target?.type === 'template') {
+      openTemplate(step.target.id)
+      return
+    }
+    if (step.target?.type === 'group') {
+      openGroup(step.target.id)
+      return
+    }
+    setWorkbenchView('needs_decision')
+  }
+
+  function openRecordSource(record: AssetDecisionRecordSummary) {
+    if (record.source_type === 'manual_group') {
+      openManualGroup(record.source_group_id)
+      return
+    }
+    if (record.source_type === 'auto_group') {
+      openGroup(record.source_group_id)
+      return
+    }
+    setDecisionNotice(`记录来源仅作历史快照：${record.source_group_id}`)
+  }
+
   function closeDecisionDrawer() {
     setSelectedVPS(null)
     setDecisionDraft(INITIAL_DECISION_DRAFT)
@@ -3706,6 +3967,45 @@ export function AssetDecisionsPage() {
             <small>{portfolioLead.evidenceLabel}</small>
           </div>
         </div>
+      </section>
+
+      <section className="page-panel asset-decision-path animate-in d2" aria-label="资产组合决策推进路径">
+        <div className="asset-decision-path__header">
+          <div>
+            <p className="section-heading__eyebrow">DECISION PATH</p>
+            <h2>决策路径</h2>
+            <p>从自动发现、场景比较、保存判断到执行回读，按当前已加载事实推进。</p>
+          </div>
+          <Badge variant="state" tone={closedLoopMetrics.partialErrorCount > 0 ? 'alert' : 'normal'}>
+            {closedLoopMetrics.partialErrorCount > 0 ? '局部证据缺失' : '路径可用'}
+          </Badge>
+        </div>
+        <ol className="asset-decision-path__rail">
+          {decisionPathSteps.map((step, index) => (
+            <li key={step.stage} className={`asset-decision-path__step asset-decision-path__step--${step.tone}`}>
+              <div className="asset-decision-path__index">
+                <strong><MonoDigits>{index + 1}</MonoDigits></strong>
+                <span>{step.eyebrow}</span>
+              </div>
+              <div className="asset-decision-path__body">
+                <div className="asset-decision-path__title">
+                  <strong>{step.title}</strong>
+                  <Badge variant="state" tone={step.tone}>{step.metric}</Badge>
+                </div>
+                <p>{step.summary}</p>
+                <small>{step.meta}</small>
+              </div>
+              <button
+                className="btn sm secondary"
+                type="button"
+                onClick={() => openDecisionPathStep(step)}
+                disabled={step.unavailable}
+              >
+                {step.actionLabel}
+              </button>
+            </li>
+          ))}
+        </ol>
       </section>
 
       {isSingleQueueDeepLink && (
@@ -4278,6 +4578,30 @@ export function AssetDecisionsPage() {
                 <small>可信 {detailState.detail.evidence_assessment.confidence_score}，压力 {detailState.detail.evidence_assessment.pressure_score}，准备 {detailState.detail.evidence_assessment.readiness_score}</small>
               </div>
             </div>
+            <section className="asset-decision-progression-branch" aria-label="自动组场景推进建议">
+              <div className="asset-decision-progression-branch__head">
+                <div>
+                  <p className="section-heading__eyebrow">GROUP TO SCENARIO</p>
+                  <h3>场景推进建议</h3>
+                  <span>{detailState.detail.decision_recommendation?.next_step || '先判断当前自动组是否就是你的真实决策范围。'}</span>
+                </div>
+                <Badge variant="state" tone={evidenceTierTone(detailState.detail.evidence_assessment.quality_tier)}>
+                  {EVIDENCE_TIER_LABELS[detailState.detail.evidence_assessment.quality_tier]}
+                </Badge>
+              </div>
+              <div className="asset-decision-progression-branch__options">
+                <article>
+                  <span>直接保存记录</span>
+                  <strong>组成员已经就是本次判断范围</strong>
+                  <small>保存后会进入执行回读和成员跟进，适合证据足够、无需再增删 VPS 的场景。</small>
+                </article>
+                <article>
+                  <span>先创建自定义组合</span>
+                  <strong>还需要补成员、目标或人工语境</strong>
+                  <small>自定义组合只保存比较篮子和成员意图，不修改 VPS、订阅、监控或 Target。</small>
+                </article>
+              </div>
+            </section>
             <div className="asset-decision-detail__evidence">
               {renderDecisionRecommendation(detailState.detail.decision_recommendation, 'detail')}
               {renderEvidenceAssessment(detailState.detail.evidence_assessment, 'detail')}
@@ -4443,7 +4767,7 @@ export function AssetDecisionsPage() {
             surface="empty"
             compact
           />
-        ) : manualDetailState.detail ? (
+        ) : manualDetailState.detail && manualGroupProgress ? (
           <div className="asset-decision-detail asset-decision-manual-detail">
             <div className="asset-decision-detail__summary">
               <div>
@@ -4467,6 +4791,32 @@ export function AssetDecisionsPage() {
                 <small>可信 {manualDetailState.detail.evidence_assessment.confidence_score} · 缺口 {manualDetailState.detail.evidence_assessment.gap_signal_count}</small>
               </div>
             </div>
+
+            <section className="asset-decision-progress-panel" aria-label="自定义组合推进状态">
+              <div className="asset-decision-progress-panel__head">
+                <div>
+                  <p className="section-heading__eyebrow">SCENARIO PROGRESS</p>
+                  <h3>组合推进状态</h3>
+                  <span>
+                    {manualGroupProgress.readyToRecord
+                      ? '当前组合已经具备保存为决策记录的基本条件。'
+                      : '先补齐目标、成员意图、证据缺口或当前事实，再保存长期记录。'}
+                  </span>
+                </div>
+                <Badge variant="state" tone={manualGroupProgress.readinessTone}>
+                  {manualGroupProgress.readinessLabel} {manualGroupProgress.doneCount}/{manualGroupProgress.totalCount}
+                </Badge>
+              </div>
+              <div className="asset-decision-progress-panel__items">
+                {manualGroupProgress.items.map((item) => (
+                  <article key={item.key} className={`asset-decision-progress-item asset-decision-progress-item--${item.tone}`}>
+                    <Badge variant="state" tone={item.tone}>{item.done ? '完成' : '待补'}</Badge>
+                    <strong>{item.label}</strong>
+                    <span>{item.summary}</span>
+                  </article>
+                ))}
+              </div>
+            </section>
 
             <form className="asset-decision-manual-group-form" onSubmit={submitManualGroupPatch}>
               <div className="asset-decision-record-form__header">
@@ -4995,6 +5345,25 @@ export function AssetDecisionsPage() {
                 </button>
               </form>
             </div>
+            <section className="asset-decision-record-continuity" aria-label="决策记录来源连续性">
+              <div>
+                <p className="section-heading__eyebrow">SOURCE CONTINUITY</p>
+                <h3>来源与当前闭环</h3>
+                <strong>{recordSourceLabel(recordDetailState.detail)}</strong>
+                <span>{recordSourceDetail(recordDetailState.detail)}</span>
+              </div>
+              <div className="asset-decision-record-continuity__state">
+                <Badge variant="state" tone={readbackStatusTone(recordDetailState.detail.execution_readback?.status)}>
+                  {recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}
+                </Badge>
+                <Badge variant="count" tone={recordDetailState.detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
+                  可推进 {recordDetailState.detail.execution_plan?.actionable_count ?? 0}
+                </Badge>
+                <button className="btn sm secondary" type="button" onClick={() => openRecordSource(recordDetailState.detail!)}>
+                  复核来源
+                </button>
+              </div>
+            </section>
             {recordPatchError && <div className="inline-alert danger">{recordPatchError}</div>}
             {renderRecordExecutionBoard(recordDetailState.detail)}
             <div className="asset-table-scroll" role="region" aria-label="决策记录成员" tabIndex={0}>
