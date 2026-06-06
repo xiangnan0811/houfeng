@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.46.0](https://github.com/xiangnan0811/houfeng/compare/v0.45.0...v0.46.0) (2026-06-06)
+
+
+### Features
+
+* **web:** polish asset decision integration links ([cb41a9f](https://github.com/xiangnan0811/houfeng/commit/cb41a9fe20df214a349dd1dc19e9fdc51b29cfd3))
+* **web:** polish asset decision integration links ([f8a3cfc](https://github.com/xiangnan0811/houfeng/commit/f8a3cfc543ee28d30a94658e3f803de64fdeccf3))
+
+
+### Documentation
+
+* **trellis:** add asset decisions integration polish task ([f13f066](https://github.com/xiangnan0811/houfeng/commit/f13f066fa8ade0c1f5e5abd443958a851841da45))
+
 ## [0.45.0](https://github.com/xiangnan0811/houfeng/compare/v0.44.2...v0.45.0) (2026-06-06)
 
 
