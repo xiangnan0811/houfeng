@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.2](https://github.com/xiangnan0811/houfeng/compare/v0.44.1...v0.44.2) (2026-06-06)
+
+
+### Bug Fixes
+
+* **store:** upsert active incidents ([5773e03](https://github.com/xiangnan0811/houfeng/commit/5773e037d63017127cb7747036afb13c8c6c0410))
+
 ## [0.44.1](https://github.com/xiangnan0811/houfeng/compare/v0.44.0...v0.44.1) (2026-06-06)
 
 
