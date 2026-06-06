@@ -105,6 +105,7 @@ import {
 
 type RenewalWindow = 30 | 60 | 90
 type WorkbenchView = AssetDecisionView | 'single_queue'
+type MainWorkbenchView = AssetDecisionView
 type DecisionQueueView =
   | 'all'
   | 'unreviewed'
@@ -520,14 +521,13 @@ type ContextFilterChip = {
   value: string
 }
 
-const WORKBENCH_TABS: ReadonlyArray<{ value: WorkbenchView; label: string }> = [
+const WORKBENCH_TABS: ReadonlyArray<{ value: MainWorkbenchView; label: string }> = [
   { value: 'needs_decision', label: '需要决策' },
   { value: 'renewal', label: '续费取舍' },
   { value: 'region', label: '同区比较' },
   { value: 'provider', label: '服务商组合' },
   { value: 'cost', label: '预算压力' },
   { value: 'evidence', label: '资料缺口' },
-  { value: 'single_queue', label: '单台队列' },
 ]
 
 function describeError(error: unknown, fallback: string): string {
@@ -566,14 +566,14 @@ function parseWorkbenchView(value?: string | null): WorkbenchView {
   }
 }
 
-function apiViewForWorkbench(view: WorkbenchView): AssetDecisionView | undefined {
-  return view === 'single_queue' ? undefined : view
+function portfolioViewForWorkbench(view: WorkbenchView): MainWorkbenchView {
+  return view === 'single_queue' ? 'needs_decision' : view
 }
 
-function buildAssetDecisionFilter(searchParams: URLSearchParams, view: WorkbenchView, renewalWindow: RenewalWindow): AssetDecisionGroupListFilter {
+function buildAssetDecisionFilter(searchParams: URLSearchParams, view: MainWorkbenchView, renewalWindow: RenewalWindow): AssetDecisionGroupListFilter {
   const scenario = parseScenario(searchParams.get('scenario'))
   return {
-    view: apiViewForWorkbench(view),
+    view,
     renew_within_days: renewalWindow,
     provider_id: trimParam(searchParams.get('provider_id')),
     vps_id: trimParam(searchParams.get('vps_id')),
@@ -1463,10 +1463,12 @@ export function AssetDecisionsPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeView = parseWorkbenchView(searchParams.get('view'))
+  const portfolioView = portfolioViewForWorkbench(activeView)
+  const isSingleQueueDeepLink = activeView === 'single_queue'
   const renewalWindow = parseRenewalWindow(searchParams.get('renew_within_days'))
   const assetDecisionFilter = useMemo(
-    () => buildAssetDecisionFilter(searchParams, activeView, renewalWindow),
-    [activeView, renewalWindow, searchParams],
+    () => buildAssetDecisionFilter(searchParams, portfolioView, renewalWindow),
+    [portfolioView, renewalWindow, searchParams],
   )
   const contextFilterChips = useMemo(
     () => buildContextFilterChips(assetDecisionFilter),
@@ -1613,7 +1615,7 @@ export function AssetDecisionsPage() {
 
     Promise.allSettled([
       getAssetDecisionOverview(filter),
-      activeView === 'single_queue' ? Promise.resolve([]) : listAssetDecisionGroups(filter),
+      listAssetDecisionGroups(filter),
     ] as const)
       .then(([overviewResult, groupsResult]) => {
         if (cancelled) return
@@ -1635,7 +1637,7 @@ export function AssetDecisionsPage() {
       })
 
     return () => { cancelled = true }
-  }, [activeView, assetDecisionFilter, refreshToken])
+  }, [assetDecisionFilter, refreshToken])
 
   useEffect(() => {
     let cancelled = false
@@ -1994,7 +1996,7 @@ export function AssetDecisionsPage() {
             : item.value === 'provider' ? overview?.provider_group_count
               : item.value === 'cost' ? overview?.cost_group_count
                 : item.value === 'evidence' ? overview?.evidence_group_count
-                  : totalDecisionQueue,
+                  : undefined,
   }))
   const queueTabs = [
     { value: 'all', label: '全部', count: totalDecisionQueue },
@@ -2006,136 +2008,6 @@ export function AssetDecisionsPage() {
     { value: 'unlinked', label: '未关联', count: unlinkedCount },
     { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
   ] satisfies Array<{ value: DecisionQueueView; label: string; count: number }>
-
-  const templateColumns: DataTableColumn<AssetDecisionScenarioTemplateSummary>[] = [
-    {
-      key: 'template',
-      label: '场景模板',
-      width: '300px',
-      render: (template) => (
-        <div className="asset-table__identity asset-decision-group-cell">
-          <strong>{template.title}</strong>
-          <span>{MANUAL_GROUP_SCENARIO_LABELS[template.scenario]} · {template.goal || '场景启动器'}</span>
-          <span className="asset-decision-chip-row">
-            <Badge variant="state" tone={scenarioTemplateStatusTone(template.status)}>
-              {SCENARIO_TEMPLATE_STATUS_LABELS[template.status]}
-            </Badge>
-            <Badge variant="info" tone={template.builtin ? 'notice' : 'neutral'}>
-              {template.builtin ? '内置模板' : '自定义模板'}
-            </Badge>
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: 'blueprint',
-      label: '启动方式',
-      width: '248px',
-      render: (template) => (
-        <div className="asset-table__stack">
-          <strong><MonoDigits>{template.member_count}</MonoDigits> 个成员蓝图</strong>
-          <span>{template.source_manual_group_id ? `来自 ${template.source_manual_group_id}` : '从当前事实重新创建组合'}</span>
-          <span>{template.note || '不会直接修改资产状态'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'updated',
-      label: '更新',
-      width: '150px',
-      render: (template) => (
-        <div className="asset-table__stack">
-          <strong>{template.builtin ? '版本内置' : formatDateTime(template.updated_at)}</strong>
-          <span>{template.archived_at ? `归档 ${formatDateTime(template.archived_at)}` : '可创建组合'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'actions',
-      label: '入口',
-      align: 'right',
-      width: '128px',
-      render: (template) => (
-        <button className="btn sm primary" type="button" onClick={() => openTemplate(template.template_id)}>
-          使用模板
-        </button>
-      ),
-    },
-  ]
-
-  const groupColumns: DataTableColumn<AssetDecisionGroupSummary>[] = [
-    {
-      key: 'group',
-      label: '决策组',
-      width: '286px',
-      render: (group) => (
-        <div className="asset-table__identity asset-decision-group-cell">
-          <strong>{group.title}</strong>
-          <span>{VIEW_LABELS[group.view]} · {group.scope_label}</span>
-          {renderEvidenceChips(group.evidence_chips, 4)}
-          {renderDecisionRecommendation(group.decision_recommendation)}
-        </div>
-      ),
-    },
-    {
-      key: 'portfolio',
-      label: '组合',
-      width: '220px',
-      render: (group) => (
-        <div className="asset-table__stack">
-          <strong><MonoDigits>{group.member_count}</MonoDigits> 台 VPS</strong>
-          <span>{countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</span>
-          <span>{countSummary(group.lifecycle_counts, ['active', 'testing', 'to_migrate', 'to_cancel', 'cancelled'], lifecycleLabel)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'evidence',
-      label: '证据',
-      width: '238px',
-      render: (group) => (
-        <div className="asset-table__stack">
-          <strong>
-            续费 <MonoDigits>{group.renewal_window_count}</MonoDigits> · 未评估 <MonoDigits>{group.unreviewed_count}</MonoDigits>
-          </strong>
-          <span>
-            服务 {group.service_count} / 域名 {group.domain_count} / Target {group.running_target_count}/{group.target_count}
-          </span>
-          <span>
-            监控 {group.monitoring_link_count} · 异常 {group.abnormal_monitoring_count} · 事件 {group.active_incident_count}
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: 'assessment',
-      label: '判断尺度',
-      width: '238px',
-      render: (group) => renderEvidenceAssessment(group.evidence_assessment),
-    },
-    {
-      key: 'cost',
-      label: '成本',
-      width: '176px',
-      render: (group) => (
-        <div className="asset-table__stack">
-          <strong>{formatGroupMonthlyCost(group)}</strong>
-          <span>{formatGroupYearlyCost(group)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'actions',
-      label: '入口',
-      align: 'right',
-      width: '112px',
-      render: (group) => (
-        <button className="btn sm primary" type="button" onClick={() => openGroup(group.group_id)}>
-          查看组
-        </button>
-      ),
-    },
-  ]
 
   const manualGroupColumns: DataTableColumn<AssetDecisionManualGroupSummary>[] = [
     {
@@ -2718,14 +2590,13 @@ export function AssetDecisionsPage() {
     },
   ]
 
-  function setWorkbenchView(next: WorkbenchView) {
+  function setWorkbenchView(next: MainWorkbenchView) {
     setPortfolioState((current) => ({
       ...current,
       overviewLoading: true,
       overviewError: null,
-      groupsLoading: next !== 'single_queue',
+      groupsLoading: true,
       groupsError: null,
-      ...(next === 'single_queue' ? { groups: [] } : {}),
     }))
     const nextParams = new URLSearchParams(searchParams)
     nextParams.set('view', next)
@@ -2739,7 +2610,7 @@ export function AssetDecisionsPage() {
       ...current,
       overviewLoading: true,
       overviewError: null,
-      groupsLoading: activeView !== 'single_queue',
+      groupsLoading: true,
       groupsError: null,
     }))
     setQueueState((current) => ({
@@ -2748,7 +2619,7 @@ export function AssetDecisionsPage() {
       renewalsError: null,
     }))
     const nextParams = new URLSearchParams(searchParams)
-    nextParams.set('view', activeView)
+    nextParams.set('view', portfolioView)
     nextParams.set('renew_within_days', String(nextWindow))
     setSearchParams(nextParams)
   }
@@ -3451,6 +3322,91 @@ export function AssetDecisionsPage() {
     )
   }
 
+  function renderDecisionGroupCards(groups: AssetDecisionGroupSummary[]) {
+    return (
+      <div className="asset-decision-group-cards" aria-label="决策组扫描列表">
+        {groups.map((group, index) => {
+          const assessment = group.evidence_assessment
+          const recommendation = group.decision_recommendation
+          const hasOperationalRisk = group.cancellation_attention_count > 0
+            || group.active_incident_count > 0
+            || group.abnormal_monitoring_count > 0
+            || group.evidence_chips.some((chip) => chip.tone === 'critical' || chip.tone === 'alert')
+          const tone = hasOperationalRisk || assessment.gap_signal_count > 0 ? 'alert' : 'normal'
+          return (
+            <article key={group.group_id} className={`asset-decision-group-card asset-decision-group-card--${tone}`}>
+              <div className="asset-decision-group-card__rank">
+                <strong>P{index + 1}</strong>
+                <span>{VIEW_LABELS[group.view]}</span>
+              </div>
+              <div className="asset-decision-group-card__body">
+                <div className="asset-decision-group-card__head">
+                  <div>
+                    <strong>{group.title}</strong>
+                    <span>{group.scope_label} · {group.primary_issue_summary || '暂无主要问题'}</span>
+                  </div>
+                  <span className="asset-decision-chip-row">
+                    <Badge variant="state" tone={evidenceTierTone(assessment.quality_tier)}>
+                      {EVIDENCE_TIER_LABELS[assessment.quality_tier] ?? assessment.quality_tier}
+                    </Badge>
+                    <Badge variant="state" tone={evidenceBiasTone(assessment.decision_bias)}>
+                      {EVIDENCE_BIAS_LABELS[assessment.decision_bias] ?? assessment.decision_bias}
+                    </Badge>
+                  </span>
+                </div>
+
+                <div className="asset-decision-group-card__metrics" aria-label={`${group.title} 关键证据`}>
+                  <div>
+                    <span>组合</span>
+                    <strong><MonoDigits>{group.member_count}</MonoDigits> 台</strong>
+                    <small>{countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</small>
+                  </div>
+                  <div>
+                    <span>续费</span>
+                    <strong><MonoDigits>{group.renewal_window_count}</MonoDigits> / <MonoDigits>{group.unreviewed_count}</MonoDigits></strong>
+                    <small>窗口内 / 未评估</small>
+                  </div>
+                  <div>
+                    <span>承载</span>
+                    <strong>{group.service_count} / {group.domain_count}</strong>
+                    <small>服务 / 域名 · Target {group.running_target_count}/{group.target_count}</small>
+                  </div>
+                  <div>
+                    <span>监控</span>
+                    <strong>{group.abnormal_monitoring_count} / {group.active_incident_count}</strong>
+                    <small>异常关联 / active incident</small>
+                  </div>
+                  <div>
+                    <span>成本</span>
+                    <strong>{formatGroupMonthlyCost(group)}</strong>
+                    <small>{formatGroupYearlyCost(group)}</small>
+                  </div>
+                </div>
+
+                <div className="asset-decision-group-card__evidence">
+                  {renderEvidenceChips(group.evidence_chips, 5)}
+                  {recommendation ? (
+                    <div className="asset-decision-group-card__recommendation">
+                      <strong>{recommendation.summary || '等待系统建议'}</strong>
+                      <span>{recommendation.next_step || '打开组详情继续比较成员'}</span>
+                    </div>
+                  ) : (
+                    <span className="empty-inline">等待建议</span>
+                  )}
+                </div>
+              </div>
+              <div className="asset-decision-group-card__actions">
+                <button className="btn sm primary" type="button" onClick={() => openGroup(group.group_id)}>
+                  查看组
+                </button>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+    )
+  }
+
   function selectVPS(vps: VPSAssetRecord) {
     setSelectedVPS(vps)
     setDecisionDraft({ renewalDecision: vps.renewal_decision, reason: '' })
@@ -3509,7 +3465,7 @@ export function AssetDecisionsPage() {
           ...current,
           overviewLoading: true,
           overviewError: null,
-          groupsLoading: activeView !== 'single_queue',
+          groupsLoading: true,
           groupsError: null,
         }))
         setQueueState((current) => ({
@@ -3577,26 +3533,122 @@ export function AssetDecisionsPage() {
         </div>
       </div>
 
-      <section className="page-panel asset-decision-closed-loop animate-in d2">
-        <div className="asset-decision-closed-loop__header">
-          <div>
-            <p className="section-heading__eyebrow">CLOSED LOOP</p>
-            <h2>下一步导览</h2>
-            <p>
-              按执行回读、自动组、场景组合和模板生成当前最值得处理的入口；这里只读派生，不会自动修改任何资产状态。
-            </p>
+      {isSingleQueueDeepLink && (
+        <div className="inline-alert info asset-decision-deeplink-notice" role="status">
+          旧链接已承接到单台辅助队列；组合判断仍以决策组列表为主。
+          <a className="alert-action" href="#single-vps-queue">查看单台队列</a>
+        </div>
+      )}
+
+      <div className="asset-decision-primary-grid animate-in d2">
+        <section className="page-panel asset-decision-command">
+          <div className="asset-decision-board__header">
+            <div>
+              <p className="section-heading__eyebrow">PORTFOLIO WORKBENCH</p>
+              <h2>决策组列表</h2>
+              <p>
+                当前视图：{VIEW_LABELS[portfolioView]}。自动组只读派生，不会创建持久化决策记录。
+                {overview?.snapshot_generated_at ? `快照 ${formatDateTime(overview.snapshot_generated_at)}。` : ''}
+              </p>
+            </div>
+            <div className="asset-decision-board__tools">
+              <div className="asset-decision-window">
+                <span>续费窗口</span>
+                <select
+                  className="input filter-select--inline"
+                  aria-label="续费窗口"
+                  value={String(renewalWindow)}
+                  onChange={(event) => changeRenewalWindow(event.target.value)}
+                >
+                  {RENEWAL_WINDOWS.map((value) => (
+                    <option key={value} value={value}>未来 {value} 天</option>
+                  ))}
+                </select>
+              </div>
+              <p>{portfolioState.overviewError ? '组合概览不可用' : `当前显示 ${portfolioState.groups.length} 个组`}</p>
+            </div>
           </div>
-          <div className="asset-decision-closed-loop__context">
+          <div className="asset-decision-tabs">
+            <Tabs items={workbenchTabs} value={portfolioView} onChange={setWorkbenchView} variant="pill" />
+            {contextFilterChips.length > 0 && (
+              <div className="asset-decision-filter-chips" aria-label="资产决策上下文筛选">
+                {contextFilterChips.map((chip) => (
+                  <FilterChip
+                    key={chip.key}
+                    label={`${chip.label}: ${chip.value}`}
+                    onRemove={() => clearContextFilter(chip.key)}
+                  />
+                ))}
+                <button className="filter-clear" type="button" onClick={clearAllContextFilters}>清除上下文</button>
+              </div>
+            )}
+          </div>
+
+          {portfolioState.groupsLoading ? (
+            <PageStateView
+              kind="loading"
+              title="正在加载决策组…"
+              surface="empty"
+              compact
+            />
+          ) : portfolioState.groupsError ? (
+            <PageStateView
+              kind="error"
+              title="决策组不可用"
+              description={<>{portfolioState.groupsError}</>}
+              technicalSummary={portfolioState.groupsError}
+              surface="empty"
+              compact
+            />
+          ) : portfolioState.groups.length === 0 ? (
+            <PageStateView
+              kind="empty"
+              title="当前视图暂无决策组"
+              description="可切换到需要决策或资料缺口；单台队列仍在页面底部保留。"
+              action={<button className="btn sm secondary" onClick={() => setWorkbenchView('needs_decision')}>查看需要决策</button>}
+              surface="empty"
+              compact
+            />
+          ) : (
+            renderDecisionGroupCards(portfolioState.groups)
+          )}
+        </section>
+
+        <aside className="page-panel asset-decision-closed-loop" aria-label="资产决策闭环导览">
+          <div className="asset-decision-closed-loop__header">
+            <div>
+              <p className="section-heading__eyebrow">CLOSED LOOP</p>
+              <h2>下一步导览</h2>
+              <p>只读收敛当前最值得处理的组合工作，不自动修改任何资产状态。</p>
+            </div>
             <Badge variant="state" tone={closedLoopMetrics.partialErrorCount > 0 ? 'alert' : 'normal'}>
               {closedLoopMetrics.partialErrorCount > 0 ? '部分证据不可用' : '证据可导览'}
             </Badge>
-            {contextFilterChips.length > 0 && (
-              <span>上下文筛选已生效：{contextFilterChips.map((chip) => `${chip.label} ${chip.value}`).join(' · ')}</span>
-            )}
           </div>
-        </div>
 
-        <div className="asset-decision-closed-loop__grid">
+          <div className="asset-decision-closed-loop__metrics" aria-label="资产决策闭环状态">
+            <div>
+              <span>AUTO</span>
+              <strong><MonoDigits>{closedLoopMetrics.autoGroupCount}</MonoDigits></strong>
+              <small>自动组</small>
+            </div>
+            <div>
+              <span>DRIFT</span>
+              <strong><MonoDigits>{closedLoopMetrics.readbackDriftCount}</MonoDigits></strong>
+              <small>事实漂移</small>
+            </div>
+            <div>
+              <span>BLOCKED</span>
+              <strong><MonoDigits>{closedLoopMetrics.readbackBlockedCount}</MonoDigits></strong>
+              <small>阻塞</small>
+            </div>
+            <div>
+              <span>GAP</span>
+              <strong><MonoDigits>{closedLoopMetrics.readbackNeedsEvidenceCount + closedLoopMetrics.evidenceGapGroupCount}</MonoDigits></strong>
+              <small>资料缺口</small>
+            </div>
+          </div>
+
           <div className="asset-decision-next-work" aria-label="资产决策下一步工作项">
             {portfolioState.groupsLoading || recordsState.loading || manualGroupsState.loading || templatesState.loading ? (
               <PageStateView
@@ -3609,13 +3661,13 @@ export function AssetDecisionsPage() {
               <PageStateView
                 kind="empty"
                 title="暂无需要置顶的组合工作"
-                description="当前已加载数据没有漂移、阻塞、缺证据或可启动场景；可以继续查看决策组列表。"
+                description="当前已加载数据没有漂移、阻塞、缺证据或可启动场景。"
                 surface="empty"
                 compact
               />
             ) : (
               <ol className="asset-decision-next-work__list">
-                {nextWorkItems.map((item, index) => (
+                {nextWorkItems.slice(0, 5).map((item, index) => (
                   <li
                     key={item.id}
                     className={`asset-decision-next-work__item asset-decision-next-work__item--${item.tone}`}
@@ -3634,7 +3686,7 @@ export function AssetDecisionsPage() {
                       <small>{item.meta}</small>
                     </div>
                     <button
-                      className="btn sm primary"
+                      className="btn sm secondary"
                       type="button"
                       onClick={() => openNextWorkItem(item)}
                     >
@@ -3646,291 +3698,171 @@ export function AssetDecisionsPage() {
             )}
           </div>
 
-          <div className="asset-decision-closed-loop__metrics" aria-label="资产决策闭环状态">
-            <div>
-              <span>AUTO GROUPS</span>
-              <strong><MonoDigits>{closedLoopMetrics.autoGroupCount}</MonoDigits></strong>
-              <small>自动发现组合</small>
-            </div>
-            <div>
-              <span>SCENARIOS</span>
-              <strong><MonoDigits>{closedLoopMetrics.manualActiveCount}</MonoDigits></strong>
-              <small>进行中自定义组合</small>
-            </div>
-            <div>
-              <span>RECORDS</span>
-              <strong><MonoDigits>{closedLoopMetrics.recordActiveCount}</MonoDigits></strong>
-              <small>未关闭决策记录</small>
-            </div>
-            <div className={closedLoopMetrics.readbackDriftCount > 0 ? 'asset-decision-closed-loop__metric--critical' : ''}>
-              <span>DRIFT</span>
-              <strong><MonoDigits>{closedLoopMetrics.readbackDriftCount}</MonoDigits></strong>
-              <small>事实漂移成员</small>
-            </div>
-            <div className={closedLoopMetrics.readbackBlockedCount > 0 ? 'asset-decision-closed-loop__metric--critical' : ''}>
-              <span>BLOCKED</span>
-              <strong><MonoDigits>{closedLoopMetrics.readbackBlockedCount}</MonoDigits></strong>
-              <small>回读/跟进阻塞</small>
-            </div>
-            <div className={closedLoopMetrics.readbackNeedsEvidenceCount > 0 ? 'asset-decision-closed-loop__metric--alert' : ''}>
-              <span>EVIDENCE GAP</span>
-              <strong><MonoDigits>{closedLoopMetrics.readbackNeedsEvidenceCount + closedLoopMetrics.evidenceGapGroupCount}</MonoDigits></strong>
-              <small>回读缺口 + 资料组</small>
-            </div>
-            <div className={closedLoopMetrics.costPressureGroupCount > 0 ? 'asset-decision-closed-loop__metric--alert' : ''}>
-              <span>COST</span>
-              <strong><MonoDigits>{closedLoopMetrics.costPressureGroupCount}</MonoDigits></strong>
-              <small>预算压力组</small>
-            </div>
-            <div>
-              <span>OPEN</span>
-              <strong><MonoDigits>{closedLoopMetrics.readbackOpenCount}</MonoDigits></strong>
-              <small>仍待回读成员</small>
-            </div>
-          </div>
-        </div>
-
-        {closedLoopPartialErrors.length > 0 && (
-          <div className="inline-alert warn" role="status">
-            {closedLoopPartialErrors.join('、')}暂不可用，导览只展示已成功加载的事实。
-          </div>
-        )}
-      </section>
-
-      <section className="page-panel asset-decision-command animate-in d3">
-        <div className="asset-decision-board__header">
-          <div>
-            <p className="section-heading__eyebrow">PORTFOLIO WORKBENCH</p>
-            <h2>决策组列表</h2>
-            <p>
-              当前视图：{VIEW_LABELS[activeView]}。自动组只读派生，不会创建持久化决策记录。
-              {overview?.snapshot_generated_at ? `快照 ${formatDateTime(overview.snapshot_generated_at)}。` : ''}
-            </p>
-          </div>
-          <div className="asset-decision-board__tools">
-            <div className="asset-decision-window">
-              <span>续费窗口</span>
-              <select
-                className="input filter-select--inline"
-                aria-label="续费窗口"
-                value={String(renewalWindow)}
-                onChange={(event) => changeRenewalWindow(event.target.value)}
-              >
-                {RENEWAL_WINDOWS.map((value) => (
-                  <option key={value} value={value}>未来 {value} 天</option>
-                ))}
-              </select>
-            </div>
-            <p>{portfolioState.overviewError ? '组合概览不可用' : `当前显示 ${portfolioState.groups.length} 个组`}</p>
-          </div>
-        </div>
-        <div className="asset-decision-tabs">
-          <Tabs items={workbenchTabs} value={activeView} onChange={setWorkbenchView} variant="pill" />
-          {contextFilterChips.length > 0 && (
-            <div className="asset-decision-filter-chips" aria-label="资产决策上下文筛选">
-              {contextFilterChips.map((chip) => (
-                <FilterChip
-                  key={chip.key}
-                  label={`${chip.label}: ${chip.value}`}
-                  onRemove={() => clearContextFilter(chip.key)}
-                />
-              ))}
-              <button className="filter-clear" type="button" onClick={clearAllContextFilters}>清除上下文</button>
+          {closedLoopPartialErrors.length > 0 && (
+            <div className="inline-alert warn" role="status">
+              {closedLoopPartialErrors.join('、')}暂不可用，导览只展示已成功加载的事实。
             </div>
           )}
-        </div>
+        </aside>
+      </div>
 
-        {portfolioState.groupsLoading ? (
-          <PageStateView
-            kind="loading"
-            title="正在加载决策组…"
-            surface="empty"
-            compact
-          />
-        ) : portfolioState.groupsError ? (
-          <PageStateView
-            kind="error"
-            title="决策组不可用"
-            description={<>{portfolioState.groupsError}</>}
-            technicalSummary={portfolioState.groupsError}
-            surface="empty"
-            compact
-          />
-        ) : activeView === 'single_queue' ? (
-          <PageStateView
-            kind="empty"
-            title="单台队列在页面底部"
-            description="这个 tab 只切换到旧的单台续费处理入口；组合判断仍由其他视图承载。"
-            surface="empty"
-            compact
-          />
-        ) : portfolioState.groups.length === 0 ? (
-          <PageStateView
-            kind="empty"
-            title="当前视图暂无决策组"
-            description="可切换到需要决策或资料缺口；单台队列仍在页面底部保留。"
-            action={<button className="btn sm secondary" onClick={() => setWorkbenchView('needs_decision')}>查看需要决策</button>}
-            surface="empty"
-            compact
-          />
-        ) : (
-          <div className="asset-table-scroll" role="region" aria-label="决策组列表" tabIndex={0}>
-            <DataTable
-              className="asset-table asset-decision-groups-table"
-              columns={groupColumns}
-              rows={portfolioState.groups}
-              rowKey={(group) => group.group_id}
-              onRowClick={(group) => openGroup(group.group_id)}
-            />
-          </div>
-        )}
-      </section>
-
-      <section className="page-panel asset-decision-templates animate-in d3">
+      <section className="page-panel asset-decision-scenario-records animate-in d3">
         <div className="asset-decision-board__header">
           <div>
-            <p className="section-heading__eyebrow">SCENARIO TEMPLATES</p>
-            <h2>场景模板</h2>
-            <p>从主备、预算、服务商、同区和资料补齐等场景启动自定义组合；模板只创建比较篮子，不直接生成决策记录。</p>
+            <p className="section-heading__eyebrow">SCENARIOS & MEMORY</p>
+            <h2>场景与记录</h2>
+            <p>模板负责启动场景，自定义组合承接真实比较，决策记录保存判断与执行回读。</p>
           </div>
-          <span className="section-count">
-            {templatesState.loading ? '...' : templatesState.error ? '不可用' : `${templatesState.templates.length} 个`}
-          </span>
+          <div className="asset-decision-board__tools">
+            <span className="section-count">
+              模板 {templatesState.loading ? '...' : templatesState.error ? '不可用' : templatesState.templates.length}
+            </span>
+            <span className="section-count">
+              组合 {manualGroupsState.loading ? '...' : manualGroupsState.error ? '不可用' : manualGroupsState.groups.length}
+            </span>
+            <span className="section-count">
+              记录 {recordsState.loading ? '...' : recordsState.error ? '不可用' : recordsState.records.length}
+            </span>
+          </div>
         </div>
-        {templatesState.loading ? (
-          <PageStateView
-            kind="loading"
-            title="正在加载场景模板…"
-            surface="empty"
-            compact
-          />
-        ) : templatesState.error ? (
-          <PageStateView
-            kind="error"
-            title="场景模板不可用"
-            description={<>{templatesState.error}</>}
-            technicalSummary={templatesState.error}
-            surface="empty"
-            compact
-          />
-        ) : templatesState.templates.length === 0 ? (
-          <PageStateView
-            kind="empty"
-            title="暂无场景模板"
-            description="可以先从自动组创建自定义组合，再另存为模板。"
-            surface="empty"
-            compact
-          />
-        ) : (
-          <div className="asset-table-scroll" role="region" aria-label="资产决策场景模板" tabIndex={0}>
-            <DataTable
-              className="asset-table asset-decision-templates-table"
-              columns={templateColumns}
-              rows={templatesState.templates}
-              rowKey={(template) => template.template_id}
-              onRowClick={(template) => openTemplate(template.template_id)}
-            />
+
+        <div className="asset-decision-scenario-records__grid">
+          <section className="asset-decision-scenario-card asset-decision-templates" aria-label="资产决策场景模板">
+            <div className="asset-decision-scenario-card__head">
+              <div>
+                <p className="section-heading__eyebrow">SCENARIO TEMPLATES</p>
+                <h3>场景模板</h3>
+                <span>作为场景启动器使用，不直接保存决策记录。</span>
+              </div>
+            </div>
+            {templatesState.loading ? (
+              <PageStateView kind="loading" title="正在加载场景模板…" surface="empty" compact />
+            ) : templatesState.error ? (
+              <PageStateView
+                kind="error"
+                title="场景模板不可用"
+                description={<>{templatesState.error}</>}
+                technicalSummary={templatesState.error}
+                surface="empty"
+                compact
+              />
+            ) : templatesState.templates.length === 0 ? (
+              <PageStateView
+                kind="empty"
+                title="暂无场景模板"
+                description="可以先从自动组创建自定义组合，再另存为模板。"
+                surface="empty"
+                compact
+              />
+            ) : (
+              <div className="asset-decision-template-launchers">
+                {templatesState.templates.slice(0, 6).map((template) => (
+                  <article key={template.template_id} className="asset-decision-template-launcher">
+                    <div>
+                      <span className="asset-decision-chip-row">
+                        <Badge variant="state" tone={scenarioTemplateStatusTone(template.status)}>
+                          {SCENARIO_TEMPLATE_STATUS_LABELS[template.status]}
+                        </Badge>
+                        <Badge variant="info" tone={template.builtin ? 'notice' : 'neutral'}>
+                          {template.builtin ? '内置' : '自定义'}
+                        </Badge>
+                      </span>
+                      <strong>{template.title}</strong>
+                      <span>{MANUAL_GROUP_SCENARIO_LABELS[template.scenario]} · {template.goal || template.note || '场景启动器'}</span>
+                      <small>蓝图成员 <MonoDigits>{template.member_count}</MonoDigits></small>
+                    </div>
+                    <button className="btn sm secondary" type="button" onClick={() => openTemplate(template.template_id)}>
+                      使用模板
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="asset-decision-scenario-card asset-decision-manual-groups" aria-label="自定义资产组合">
+            <div className="asset-decision-scenario-card__head">
+              <div>
+                <p className="section-heading__eyebrow">SCENARIO WORKBENCH</p>
+                <h3>自定义组合</h3>
+                <span>沉淀真实比较篮子，可继续补成员和保存记录。</span>
+              </div>
+            </div>
+            {manualGroupsState.loading ? (
+              <PageStateView kind="loading" title="正在加载自定义组合…" surface="empty" compact />
+            ) : manualGroupsState.error ? (
+              <PageStateView
+                kind="error"
+                title="自定义组合不可用"
+                description={<>{manualGroupsState.error}</>}
+                technicalSummary={manualGroupsState.error}
+                surface="empty"
+                compact
+              />
+            ) : manualGroupsState.groups.length === 0 ? (
+              <PageStateView
+                kind="empty"
+                title="尚未创建自定义组合"
+                description="打开上方自动决策组后，可以把它创建为可长期编辑的手工组合。"
+                surface="empty"
+                compact
+              />
+            ) : (
+              <div className="asset-table-scroll" role="region" aria-label="自定义资产组合" tabIndex={0}>
+                <DataTable
+                  className="asset-table asset-decision-manual-groups-table"
+                  columns={manualGroupColumns}
+                  rows={manualGroupsState.groups}
+                  rowKey={(group) => group.manual_group_id}
+                  onRowClick={(group) => openManualGroup(group.manual_group_id)}
+                />
+              </div>
+            )}
+          </section>
+        </div>
+
+        <section className="asset-decision-scenario-card asset-decision-records" aria-label="已保存组合决策">
+          <div className="asset-decision-scenario-card__head">
+            <div>
+              <p className="section-heading__eyebrow">DECISION MEMORY</p>
+              <h3>已保存组合决策</h3>
+              <span>保存过的判断、跟进状态、执行回读和下一步编排。</span>
+            </div>
           </div>
-        )}
+          {recordsState.loading ? (
+            <PageStateView kind="loading" title="正在加载决策记录…" surface="empty" compact />
+          ) : recordsState.error ? (
+            <PageStateView
+              kind="error"
+              title="决策记录不可用"
+              description={<>{recordsState.error}</>}
+              technicalSummary={recordsState.error}
+              surface="empty"
+              compact
+            />
+          ) : recordsState.records.length === 0 ? (
+            <PageStateView
+              kind="empty"
+              title="尚未保存组合决策"
+              description="打开上方决策组后，可以把当前组合判断保存成长期记录。"
+              surface="empty"
+              compact
+            />
+          ) : (
+            <div className="asset-table-scroll" role="region" aria-label="已保存组合决策" tabIndex={0}>
+              <DataTable
+                className="asset-table asset-decision-records-table"
+                columns={recordColumns}
+                rows={recordsState.records}
+                rowKey={(record) => record.record_id}
+                onRowClick={(record) => openRecord(record.record_id)}
+              />
+            </div>
+          )}
+        </section>
       </section>
 
-      <section className="page-panel asset-decision-manual-groups animate-in d4">
-        <div className="asset-decision-board__header">
-          <div>
-            <p className="section-heading__eyebrow">SCENARIO WORKBENCH</p>
-            <h2>自定义组合</h2>
-            <p>把系统发现的自动组沉淀成真实问题篮子，也可以围绕预算、主备、迁移退役持续调整成员意图。</p>
-          </div>
-          <span className="section-count">
-            {manualGroupsState.loading ? '...' : manualGroupsState.error ? '不可用' : `${manualGroupsState.groups.length} 个`}
-          </span>
-        </div>
-        {manualGroupsState.loading ? (
-          <PageStateView
-            kind="loading"
-            title="正在加载自定义组合…"
-            surface="empty"
-            compact
-          />
-        ) : manualGroupsState.error ? (
-          <PageStateView
-            kind="error"
-            title="自定义组合不可用"
-            description={<>{manualGroupsState.error}</>}
-            technicalSummary={manualGroupsState.error}
-            surface="empty"
-            compact
-          />
-        ) : manualGroupsState.groups.length === 0 ? (
-          <PageStateView
-            kind="empty"
-            title="尚未创建自定义组合"
-            description="打开上方自动决策组后，可以把它创建为可长期编辑的手工组合。"
-            surface="empty"
-            compact
-          />
-        ) : (
-          <div className="asset-table-scroll" role="region" aria-label="自定义资产组合" tabIndex={0}>
-            <DataTable
-              className="asset-table asset-decision-manual-groups-table"
-              columns={manualGroupColumns}
-              rows={manualGroupsState.groups}
-              rowKey={(group) => group.manual_group_id}
-              onRowClick={(group) => openManualGroup(group.manual_group_id)}
-            />
-          </div>
-        )}
-      </section>
-
-      <section className="page-panel asset-decision-records animate-in d5">
-        <div className="asset-decision-board__header">
-          <div>
-            <p className="section-heading__eyebrow">DECISION MEMORY</p>
-            <h2>已保存组合决策</h2>
-            <p>保存组级目标、成员角色/动作/理由和当时证据快照，用于后续回看与推进。</p>
-          </div>
-          <span className="section-count">
-            {recordsState.loading ? '...' : recordsState.error ? '不可用' : `${recordsState.records.length} 条`}
-          </span>
-        </div>
-        {recordsState.loading ? (
-          <PageStateView
-            kind="loading"
-            title="正在加载决策记录…"
-            surface="empty"
-            compact
-          />
-        ) : recordsState.error ? (
-          <PageStateView
-            kind="error"
-            title="决策记录不可用"
-            description={<>{recordsState.error}</>}
-            technicalSummary={recordsState.error}
-            surface="empty"
-            compact
-          />
-        ) : recordsState.records.length === 0 ? (
-          <PageStateView
-            kind="empty"
-            title="尚未保存组合决策"
-            description="打开上方决策组后，可以把当前组合判断保存成长期记录。"
-            surface="empty"
-            compact
-          />
-        ) : (
-          <div className="asset-table-scroll" role="region" aria-label="已保存组合决策" tabIndex={0}>
-            <DataTable
-              className="asset-table asset-decision-records-table"
-              columns={recordColumns}
-              rows={recordsState.records}
-              rowKey={(record) => record.record_id}
-              onRowClick={(record) => openRecord(record.record_id)}
-            />
-          </div>
-        )}
-      </section>
-
-      <section className="page-panel asset-renewal-evidence animate-in d5">
+      <section className="page-panel asset-renewal-evidence asset-decision-support-surface animate-in d4">
         <div className="section-heading section-heading--inline">
           <div>
             <p className="section-heading__eyebrow">RENEWAL EVIDENCE</p>
@@ -3962,7 +3894,7 @@ export function AssetDecisionsPage() {
         />
       </section>
 
-      <section className="page-panel asset-decision-single-queue animate-in d5">
+      <section id="single-vps-queue" className="page-panel asset-decision-single-queue asset-decision-support-surface animate-in d5">
         <div className="asset-decision-board__header">
           <div>
             <p className="section-heading__eyebrow">SINGLE VPS QUEUE</p>

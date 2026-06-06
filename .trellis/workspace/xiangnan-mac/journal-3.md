@@ -1820,3 +1820,37 @@ Fixed the asset decision followup migration startup blocker by dropping and recr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 172: Asset decisions workbench UX refinement
+
+**Date**: 2026-06-06
+**Task**: Asset decisions workbench UX refinement
+**Branch**: `worktree/asset-decisions-workbench-ux`
+
+### Summary
+
+Refined /asset-decisions into a portfolio workbench with card-based decision groups, compact closed-loop guidance, consolidated scenario/record workspace, legacy single_queue compatibility, and responsive visual checks.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e81e0e` | (see git log) |
+| `0e9b43e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
