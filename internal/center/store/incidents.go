@@ -193,7 +193,16 @@ func replaceActiveIncidents(ctx context.Context, tx incidentStoreTx, mutation in
 				last_evaluated_at,
 				status,
 				source_summary
-			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			on conflict (incident_id) do update set
+				object_type = excluded.object_type,
+				object_id = excluded.object_id,
+				incident_class = excluded.incident_class,
+				severity = excluded.severity,
+				started_at = least(active_incidents.started_at, excluded.started_at),
+				last_evaluated_at = excluded.last_evaluated_at,
+				status = excluded.status,
+				source_summary = excluded.source_summary`,
 			incident.IncidentID,
 			string(incident.ObjectType),
 			incident.ObjectID,

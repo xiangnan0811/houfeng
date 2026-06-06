@@ -1787,3 +1787,36 @@ Fixed the asset decision followup migration startup blocker by dropping and recr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 171: 修复 active incident 重复插入崩溃
+
+**Date**: 2026-06-06
+**Task**: 修复 active incident 重复插入崩溃
+**Branch**: `worktree/fix-active-incident-duplicate-insert`
+
+### Summary
+
+将 active_incidents 写入改为 incident_id upsert，补充重复主键回归测试，并记录 incident 派生投影必须幂等的后端规范。验证通过 go test ./internal/center/store -run Incident 和 make verify-go。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8f5c2df` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
