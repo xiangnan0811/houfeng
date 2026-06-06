@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 170
+- **Total Sessions**: 171
 - **Last Active**: 2026-06-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1789 | Active |
+| `journal-3.md` | ~1822 | Active |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 171 | 2026-06-06 | 修复 active incident 重复插入崩溃 | `8f5c2df` | `worktree/fix-active-incident-duplicate-insert` |
 | 170 | 2026-06-06 | Asset decision migration startup hotfix | `2dfa13e` | `worktree/fix-asset-decision-view-migration` |
 | 169 | 2026-06-06 | Asset decisions execution orchestration | `b8415e3` | `worktree/asset-decisions-execution-orchestration` |
 | 168 | 2026-06-06 | Asset decisions closed-loop guide | `5387b8c` | `worktree/asset-decisions-closed-loop-workbench` |
