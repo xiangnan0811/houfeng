@@ -227,6 +227,9 @@ func TestPostgresAssetDecisionRepositoryListRecordsScansSnapshots(t *testing.T) 
 	if record.ExecutionReadback.Status != assetdecisions.ReadbackAligned || record.ExecutionReadback.AlignedCount != 1 {
 		t.Fatalf("readback = %#v, want aligned summary from batch members and facts", record.ExecutionReadback)
 	}
+	if record.ExecutionPlan.ActionableCount != 1 || !hasAssetDecisionPlanLane(record.ExecutionPlan, assetdecisions.PlanLaneReview) {
+		t.Fatalf("plan = %#v, want batch-derived review execution plan", record.ExecutionPlan)
+	}
 	if summaryQueries != 1 || factQueries != 1 || memberQueries != 1 {
 		t.Fatalf("query counts summary=%d facts=%d members=%d, want one batched query per source", summaryQueries, factQueries, memberQueries)
 	}
@@ -353,6 +356,9 @@ func TestPostgresAssetDecisionRepositoryCreateRecordPersistsGroupAndMemberSnapsh
 	}
 	if detail.ExecutionReadback.Status == "" || !detail.Members[0].ExecutionReadback.CurrentFacts.Found {
 		t.Fatalf("readback = %#v member=%#v, want current facts readback on created record", detail.ExecutionReadback, detail.Members[0].ExecutionReadback)
+	}
+	if detail.ExecutionPlan.Summary == "" || detail.Members[0].ExecutionPlan.Lane != assetdecisions.PlanLaneMigration {
+		t.Fatalf("plan = %#v member=%#v, want current facts execution plan on created record", detail.ExecutionPlan, detail.Members[0].ExecutionPlan)
 	}
 	if got := detail.EvidenceSnapshot["group_id"]; got != detail.SourceGroupID {
 		t.Fatalf("snapshot group_id = %#v, want source group id", got)
@@ -660,6 +666,9 @@ func TestPostgresAssetDecisionRepositoryCreateRecordFromManualGroupUsesIntentAnd
 	if detail.ExecutionReadback.Status == "" || !detail.Members[0].ExecutionReadback.CurrentFacts.Found {
 		t.Fatalf("readback = %#v member=%#v, want current facts readback", detail.ExecutionReadback, detail.Members[0].ExecutionReadback)
 	}
+	if detail.ExecutionPlan.Summary == "" || detail.Members[0].ExecutionPlan.Lane != assetdecisions.PlanLaneKeepObserve {
+		t.Fatalf("plan = %#v member=%#v, want current facts execution plan", detail.ExecutionPlan, detail.Members[0].ExecutionPlan)
+	}
 	if got := detail.EvidenceSnapshot["manual_group_id"]; got != "admg_001" {
 		t.Fatalf("manual snapshot id = %#v, want admg_001", got)
 	}
@@ -750,6 +759,9 @@ func TestPostgresAssetDecisionRepositoryGetAndPatchRecord(t *testing.T) {
 	}
 	if detail.ExecutionReadback.Status == "" || !detail.Members[0].ExecutionReadback.CurrentFacts.Found {
 		t.Fatalf("readback = %#v member=%#v, want current facts readback", detail.ExecutionReadback, detail.Members[0].ExecutionReadback)
+	}
+	if detail.ExecutionPlan.Summary == "" || detail.Members[0].ExecutionPlan.Lane != assetdecisions.PlanLaneKeepObserve {
+		t.Fatalf("plan = %#v member=%#v, want current facts execution plan", detail.ExecutionPlan, detail.Members[0].ExecutionPlan)
 	}
 }
 
@@ -865,6 +877,18 @@ func TestPostgresAssetDecisionRepositoryPatchRecordUpdatesMemberFollowup(t *test
 	if updated.ExecutionReadback.Status != assetdecisions.ReadbackBlocked || updated.Members[0].ExecutionReadback.Status != assetdecisions.ReadbackBlocked {
 		t.Fatalf("readback = %#v member=%#v, want blocked readback after followup patch", updated.ExecutionReadback, updated.Members[0].ExecutionReadback)
 	}
+	if updated.ExecutionPlan.BlockedCount != 1 || !updated.Members[0].ExecutionPlan.Blocked || !updated.Members[0].ExecutionPlan.Actionable {
+		t.Fatalf("plan = %#v member=%#v, want blocked execution plan after followup patch", updated.ExecutionPlan, updated.Members[0].ExecutionPlan)
+	}
+}
+
+func hasAssetDecisionPlanLane(plan assetdecisions.RecordExecutionPlan, lane assetdecisions.ExecutionPlanLane) bool {
+	for _, count := range plan.LaneCounts {
+		if count.Lane == lane && count.Count > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPostgresAssetDecisionRepositoryPatchRecordUnknownMemberRollsBack(t *testing.T) {

@@ -62,8 +62,10 @@ func ApplyExecutionReadback(detail RecordDetail, facts []Fact) RecordDetail {
 	factMap := FactsByVPSID(facts)
 	for index := range detail.Members {
 		detail.Members[index].ExecutionReadback = EvaluateMemberExecutionReadback(detail.Members[index], factMap)
+		detail.Members[index].ExecutionPlan = EvaluateMemberExecutionPlan(detail.Status, detail.Members[index])
 	}
 	detail.RecordSummary.ExecutionReadback = EvaluateRecordExecutionReadback(detail.Status, detail.Members)
+	detail.RecordSummary.ExecutionPlan = EvaluateRecordExecutionPlan(detail.Status, detail.ExecutionReadback, detail.Members)
 	return detail
 }
 
@@ -74,8 +76,10 @@ func ApplyExecutionReadbackToSummaries(records []RecordSummary, membersByRecord 
 		members := append([]RecordMember(nil), membersByRecord[record.RecordID]...)
 		for index := range members {
 			members[index].ExecutionReadback = EvaluateMemberExecutionReadback(members[index], factMap)
+			members[index].ExecutionPlan = EvaluateMemberExecutionPlan(record.Status, members[index])
 		}
 		record.ExecutionReadback = EvaluateRecordExecutionReadback(record.Status, members)
+		record.ExecutionPlan = EvaluateRecordExecutionPlan(record.Status, record.ExecutionReadback, members)
 		withReadback = append(withReadback, record)
 	}
 	return withReadback

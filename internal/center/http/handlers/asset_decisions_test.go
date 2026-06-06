@@ -549,6 +549,11 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 				Summary:            "1 台 VPS 仍需补证据",
 				NeedsEvidenceCount: 1,
 			},
+			ExecutionPlan: assetdecisions.RecordExecutionPlan{
+				Summary:         "1 台 VPS 需要补齐证据",
+				LaneCounts:      []assetdecisions.ExecutionPlanLaneCount{{Lane: assetdecisions.PlanLaneEvidence, Count: 1}},
+				ActionableCount: 1,
+			},
 			CreatedAt: now,
 			UpdatedAt: now,
 		}},
@@ -564,6 +569,11 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 					Status:       assetdecisions.ReadbackAligned,
 					Summary:      "当前事实与组合判断一致",
 					AlignedCount: 1,
+				},
+				ExecutionPlan: assetdecisions.RecordExecutionPlan{
+					Summary:         "1 台 VPS 仍有执行步骤",
+					LaneCounts:      []assetdecisions.ExecutionPlanLaneCount{{Lane: assetdecisions.PlanLaneKeepObserve, Count: 1}},
+					ActionableCount: 1,
 				},
 				CreatedAt: now,
 				UpdatedAt: now,
@@ -582,6 +592,14 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 					CurrentFacts: assetdecisions.ExecutionCurrentFacts{
 						Found: true,
 					},
+				},
+				ExecutionPlan: assetdecisions.MemberExecutionPlan{
+					Lane:       assetdecisions.PlanLaneKeepObserve,
+					StepKind:   assetdecisions.PlanStepOpenVPSDetail,
+					Tone:       assetdecisions.PlanToneNormal,
+					Summary:    "当前事实已对齐，待确认跟进状态",
+					StepLabel:  "打开 VPS 详情核对判断",
+					Actionable: true,
 				},
 			}},
 		},
@@ -603,6 +621,9 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 	if listBody[0].ExecutionReadback.Status != assetdecisions.ReadbackNeedsEvidence || listBody[0].ExecutionReadback.NeedsEvidenceCount != 1 {
 		t.Fatalf("list readback = %#v, want serialized execution readback", listBody[0].ExecutionReadback)
 	}
+	if listBody[0].ExecutionPlan.Summary == "" || listBody[0].ExecutionPlan.ActionableCount != 1 {
+		t.Fatalf("list plan = %#v, want serialized execution plan", listBody[0].ExecutionPlan)
+	}
 
 	body := []byte(`{"source_group_id":"adg_auto_001","renew_within_days":30,"title":"保存德国组","goal":"保留主力","status":"decided","members":[{"vps_id":"vps_001","decided_role":"primary_candidate","decided_action":"keep","reason":"主力"}]}`)
 	createRecorder := httptest.NewRecorder()
@@ -623,6 +644,9 @@ func TestAssetDecisionRecordsListAndCreate(t *testing.T) {
 	if createBody.ExecutionReadback.Status != assetdecisions.ReadbackAligned || createBody.Members[0].ExecutionReadback.Status != assetdecisions.ReadbackAligned {
 		t.Fatalf("create readback = %#v member=%#v, want serialized execution readback", createBody.ExecutionReadback, createBody.Members[0].ExecutionReadback)
 	}
+	if createBody.ExecutionPlan.Summary == "" || createBody.Members[0].ExecutionPlan.Lane != assetdecisions.PlanLaneKeepObserve {
+		t.Fatalf("create plan = %#v member=%#v, want serialized execution plan", createBody.ExecutionPlan, createBody.Members[0].ExecutionPlan)
+	}
 }
 
 func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
@@ -639,6 +663,11 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 					Summary:   "1 台 VPS 仍待执行或复核",
 					OpenCount: 1,
 				},
+				ExecutionPlan: assetdecisions.RecordExecutionPlan{
+					Summary:         "1 台 VPS 仍有执行步骤",
+					LaneCounts:      []assetdecisions.ExecutionPlanLaneCount{{Lane: assetdecisions.PlanLaneReview, Count: 1}},
+					ActionableCount: 1,
+				},
 				CreatedAt: now,
 				UpdatedAt: now,
 			},
@@ -654,6 +683,14 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 						ActiveSubscriptionCount: 1,
 					},
 				},
+				ExecutionPlan: assetdecisions.MemberExecutionPlan{
+					Lane:       assetdecisions.PlanLaneReview,
+					StepKind:   assetdecisions.PlanStepReviewRecord,
+					Tone:       assetdecisions.PlanToneNotice,
+					Summary:    "当前事实仍待处理或复核",
+					StepLabel:  "留在记录中复核",
+					Actionable: true,
+				},
 			}},
 		},
 		patchResult: assetdecisions.RecordDetail{
@@ -667,6 +704,12 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 					Status:       assetdecisions.ReadbackBlocked,
 					Summary:      "1 台 VPS 跟进阻塞",
 					BlockedCount: 1,
+				},
+				ExecutionPlan: assetdecisions.RecordExecutionPlan{
+					Summary:         "1 台 VPS 跟进阻塞，需要解除阻塞",
+					LaneCounts:      []assetdecisions.ExecutionPlanLaneCount{{Lane: assetdecisions.PlanLaneKeepObserve, Count: 1}},
+					ActionableCount: 1,
+					BlockedCount:    1,
 				},
 				CreatedAt: now,
 				UpdatedAt: now,
@@ -683,6 +726,15 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 					CurrentFacts: assetdecisions.ExecutionCurrentFacts{
 						Found: true,
 					},
+				},
+				ExecutionPlan: assetdecisions.MemberExecutionPlan{
+					Lane:       assetdecisions.PlanLaneKeepObserve,
+					StepKind:   assetdecisions.PlanStepOpenVPSDetail,
+					Tone:       assetdecisions.PlanToneCritical,
+					Summary:    "成员跟进阻塞，需要解除阻塞或调整路径",
+					StepLabel:  "打开 VPS 详情核对判断",
+					Blocked:    true,
+					Actionable: true,
 				},
 			}},
 		},
@@ -703,6 +755,9 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 	}
 	if getBody.ExecutionReadback.Status != assetdecisions.ReadbackOpen || len(getBody.Members) != 1 || !getBody.Members[0].ExecutionReadback.CurrentFacts.Found {
 		t.Fatalf("get readback = %#v members=%#v, want serialized execution readback", getBody.ExecutionReadback, getBody.Members)
+	}
+	if getBody.ExecutionPlan.Summary == "" || getBody.Members[0].ExecutionPlan.StepKind != assetdecisions.PlanStepReviewRecord {
+		t.Fatalf("get plan = %#v members=%#v, want serialized execution plan", getBody.ExecutionPlan, getBody.Members)
 	}
 
 	patchRecorder := httptest.NewRecorder()
@@ -726,6 +781,9 @@ func TestAssetDecisionRecordGetAndPatch(t *testing.T) {
 	}
 	if patchBody.ExecutionReadback.Status != assetdecisions.ReadbackBlocked || patchBody.Members[0].ExecutionReadback.Status != assetdecisions.ReadbackBlocked {
 		t.Fatalf("patch readback = %#v member=%#v, want serialized execution readback", patchBody.ExecutionReadback, patchBody.Members[0].ExecutionReadback)
+	}
+	if patchBody.ExecutionPlan.BlockedCount != 1 || !patchBody.Members[0].ExecutionPlan.Blocked {
+		t.Fatalf("patch plan = %#v member=%#v, want serialized execution plan", patchBody.ExecutionPlan, patchBody.Members[0].ExecutionPlan)
 	}
 }
 

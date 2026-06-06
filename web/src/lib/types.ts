@@ -1230,6 +1230,49 @@ export type AssetDecisionRecordExecutionReadback = {
   needs_evidence_count: number
 }
 
+export type AssetDecisionExecutionPlanLane =
+  | 'cancel_retire'
+  | 'migration'
+  | 'keep_observe'
+  | 'evidence'
+  | 'review'
+
+export type AssetDecisionExecutionPlanStepKind =
+  | 'open_cancellation_workbench'
+  | 'open_vps_detail'
+  | 'open_subscription_context'
+  | 'review_record'
+
+export type AssetDecisionExecutionPlanTone =
+  | 'critical'
+  | 'alert'
+  | 'notice'
+  | 'normal'
+  | 'neutral'
+
+export type AssetDecisionExecutionPlanLaneCount = {
+  lane: AssetDecisionExecutionPlanLane
+  count: number
+}
+
+export type AssetDecisionRecordExecutionPlan = {
+  summary: string
+  lane_counts: AssetDecisionExecutionPlanLaneCount[]
+  actionable_count: number
+  blocked_count: number
+}
+
+export type AssetDecisionMemberExecutionPlan = {
+  lane: AssetDecisionExecutionPlanLane
+  step_kind: AssetDecisionExecutionPlanStepKind
+  tone: AssetDecisionExecutionPlanTone
+  summary: string
+  step_label: string
+  issue_count: number
+  blocked: boolean
+  actionable: boolean
+}
+
 export type AssetDecisionRecordSummary = {
   record_id: string
   title: string
@@ -1250,6 +1293,7 @@ export type AssetDecisionRecordSummary = {
   followup_skipped_count: number
   evidence_snapshot: AssetDecisionEvidenceSnapshot
   execution_readback: AssetDecisionRecordExecutionReadback
+  execution_plan: AssetDecisionRecordExecutionPlan
   created_at: string
   updated_at: string
   decided_at?: string | null
@@ -1270,6 +1314,7 @@ export type AssetDecisionRecordMember = {
   followup_updated_at?: string | null
   evidence_snapshot: AssetDecisionEvidenceSnapshot
   execution_readback: AssetDecisionMemberExecutionReadback
+  execution_plan: AssetDecisionMemberExecutionPlan
   created_at: string
   updated_at: string
 }

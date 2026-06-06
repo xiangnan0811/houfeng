@@ -1721,3 +1721,36 @@ Added a read-only closed-loop next-work surface for AssetDecisionsPage, preserve
 ### Next Steps
 
 - None - task complete
+
+
+## Session 169: Asset decisions execution orchestration
+
+**Date**: 2026-06-06
+**Task**: Asset decisions execution orchestration
+**Branch**: `worktree/asset-decisions-execution-orchestration`
+
+### Summary
+
+Implemented semantic execution_plan read model for saved asset decision records, added record list/detail orchestration UI with lane board and CTA mapping, preserved record-only followup writes, updated specs and visual evidence mocks, and verified with make verify-go, make verify-web, Trellis validation, git diff --check, and desktop/mobile Playwright sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b8415e3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

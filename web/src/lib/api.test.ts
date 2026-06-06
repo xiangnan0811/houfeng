@@ -702,6 +702,12 @@ describe('api helpers', () => {
         blocked_count: 0,
         needs_evidence_count: 0,
       },
+      execution_plan: {
+        summary: '执行计划已对齐',
+        lane_counts: [{ lane: 'keep_observe', count: 2 }],
+        actionable_count: 0,
+        blocked_count: 0,
+      },
       created_at: '2026-06-05T09:00:00Z',
       updated_at: '2026-06-05T09:00:00Z',
       members: [],

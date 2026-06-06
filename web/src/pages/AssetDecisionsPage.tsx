@@ -50,6 +50,8 @@ import {
   type AssetDecisionEvidenceQualityTier,
   type AssetDecisionEvidenceSnapshot,
   type AssetDecisionExecutionCurrentFacts,
+  type AssetDecisionExecutionPlanLane,
+  type AssetDecisionExecutionPlanTone,
   type AssetDecisionExecutionReadbackStatus,
   type AssetDecisionGroupDetail,
   type AssetDecisionGroupMember,
@@ -60,7 +62,9 @@ import {
   type AssetDecisionManualGroupStatus,
   type AssetDecisionManualGroupSummary,
   type AssetDecisionMemberExecutionReadback,
+  type AssetDecisionMemberExecutionPlan,
   type AssetDecisionRecommendation,
+  type AssetDecisionRecordExecutionPlan,
   type AssetDecisionRecordExecutionReadback,
   type AssetDecisionOverview,
   type AssetDecisionRecordDetail,
@@ -428,6 +432,22 @@ const READBACK_STATUS_LABELS: Record<AssetDecisionExecutionReadbackStatus, strin
   inactive: '不活跃',
 }
 
+const EXECUTION_PLAN_LANE_LABELS: Record<AssetDecisionExecutionPlanLane, string> = {
+  cancel_retire: '取消退役',
+  migration: '迁移',
+  keep_observe: '保留观察',
+  evidence: '补证据',
+  review: '复核',
+}
+
+const EXECUTION_PLAN_LANE_ORDER: AssetDecisionExecutionPlanLane[] = [
+  'cancel_retire',
+  'migration',
+  'keep_observe',
+  'evidence',
+  'review',
+]
+
 const EVIDENCE_TIER_LABELS: Record<AssetDecisionEvidenceQualityTier, string> = {
   strong: '证据强',
   usable: '可决策',
@@ -745,6 +765,14 @@ function readbackStatusTone(status?: AssetDecisionExecutionReadbackStatus): Badg
   return 'neutral'
 }
 
+function executionPlanTone(tone?: AssetDecisionExecutionPlanTone): BadgeTone {
+  if (tone === 'normal') return 'normal'
+  if (tone === 'critical') return 'critical'
+  if (tone === 'alert') return 'alert'
+  if (tone === 'notice') return 'maintenance'
+  return 'neutral'
+}
+
 function recordFollowupDoneCount(record: AssetDecisionRecordSummary): number {
   return (record.followup_done_count ?? 0) + (record.followup_skipped_count ?? 0)
 }
@@ -762,6 +790,16 @@ function readbackCountSummary(readback?: AssetDecisionRecordExecutionReadback): 
     readback.open_count > 0 ? `待处理 ${readback.open_count}` : '',
   ].filter(Boolean)
   return parts.length > 0 ? parts.join(' · ') : `对齐 ${readback.aligned_count ?? 0}`
+}
+
+function executionPlanCountSummary(plan?: AssetDecisionRecordExecutionPlan): string {
+  if (!plan) return '等待编排'
+  const laneSummary = (plan.lane_counts ?? [])
+    .filter((item) => item.count > 0)
+    .map((item) => `${EXECUTION_PLAN_LANE_LABELS[item.lane] ?? item.lane} ${item.count}`)
+  const actionSummary = plan.actionable_count > 0 ? `可推进 ${plan.actionable_count}` : '无待推进'
+  const blockedSummary = plan.blocked_count > 0 ? `阻塞 ${plan.blocked_count}` : ''
+  return [actionSummary, blockedSummary, ...laneSummary].filter(Boolean).join(' · ')
 }
 
 function scenarioTemplateStatusTone(status: AssetDecisionScenarioTemplateStatus): BadgeTone {
@@ -1171,10 +1209,19 @@ function upsertScenarioTemplateSummary(
 }
 
 function actionHrefForMember(member: AssetDecisionRecordMember): string {
-  if (member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel') {
+  if (member.execution_plan?.step_kind === 'open_cancellation_workbench') {
     return `/vps/${member.vps_id}?workbench=cancellation`
   }
+  if (member.execution_plan?.step_kind === 'open_subscription_context') {
+    return `/subscriptions?vps_id=${encodeURIComponent(member.vps_id)}`
+  }
   return `/vps/${member.vps_id}`
+}
+
+function actionLabelForMember(member: AssetDecisionRecordMember): string {
+  if (member.execution_plan?.step_label) return member.execution_plan.step_label
+  if (member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel') return '取消/退役'
+  return 'VPS 详情'
 }
 
 function renderEvidenceChips(chips: AssetDecisionEvidenceChip[], limit = 5) {
@@ -1327,6 +1374,45 @@ function renderReadbackBadge(readback?: { status: AssetDecisionExecutionReadback
   )
 }
 
+function renderExecutionPlanBadge(plan?: AssetDecisionMemberExecutionPlan) {
+  if (!plan) {
+    return (
+      <Badge variant="state" tone="neutral">
+        等待编排
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="state" tone={executionPlanTone(plan.tone)}>
+      {EXECUTION_PLAN_LANE_LABELS[plan.lane] ?? plan.lane}
+    </Badge>
+  )
+}
+
+function renderMemberExecutionPlan(member: AssetDecisionRecordMember) {
+  const plan = member.execution_plan
+  return (
+    <div className="asset-table__stack asset-decision-plan-cell">
+      <span className="asset-decision-chip-row">
+        {renderExecutionPlanBadge(plan)}
+        {plan?.actionable && (
+          <Badge variant="count" tone={executionPlanTone(plan.tone)}>
+            可推进
+          </Badge>
+        )}
+        {plan?.blocked && (
+          <Badge variant="count" tone="critical">
+            阻塞
+          </Badge>
+        )}
+      </span>
+      <strong>{plan?.summary || '等待执行编排'}</strong>
+      <span>{plan?.step_label || actionLabelForMember(member)}</span>
+      {plan?.issue_count ? <span>关联问题 {plan.issue_count} 项</span> : <span>无额外问题</span>}
+    </div>
+  )
+}
+
 function renderMemberReadback(readback?: AssetDecisionMemberExecutionReadback) {
   if (!readback) {
     return (
@@ -1367,6 +1453,10 @@ function renderMemberReadback(readback?: AssetDecisionMemberExecutionReadback) {
       )}
     </div>
   )
+}
+
+function membersForExecutionLane(members: AssetDecisionRecordMember[], lane: AssetDecisionExecutionPlanLane): AssetDecisionRecordMember[] {
+  return members.filter((member) => (member.execution_plan?.lane ?? 'review') === lane)
 }
 
 export function AssetDecisionsPage() {
@@ -2196,6 +2286,27 @@ export function AssetDecisionsPage() {
       ),
     },
     {
+      key: 'plan',
+      label: '执行编排',
+      width: '260px',
+      render: (record) => (
+        <div className="asset-table__stack asset-decision-plan-cell">
+          <span className="asset-decision-chip-row">
+            <Badge variant="state" tone={record.execution_plan?.blocked_count > 0 ? 'critical' : record.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
+              下一步导览
+            </Badge>
+            {record.execution_plan?.actionable_count > 0 && (
+              <Badge variant="count" tone="maintenance">
+                {record.execution_plan.actionable_count} 项
+              </Badge>
+            )}
+          </span>
+          <strong>{record.execution_plan?.summary || '等待执行编排'}</strong>
+          <span>{executionPlanCountSummary(record.execution_plan)}</span>
+        </div>
+      ),
+    },
+    {
       key: 'updated',
       label: '更新时间',
       width: '168px',
@@ -2543,6 +2654,12 @@ export function AssetDecisionsPage() {
       render: (member) => renderMemberReadback(member.execution_readback),
     },
     {
+      key: 'plan',
+      label: '下一步',
+      width: '248px',
+      render: (member) => renderMemberExecutionPlan(member),
+    },
+    {
       key: 'actions',
       label: '跟进',
       align: 'right',
@@ -2592,7 +2709,7 @@ export function AssetDecisionsPage() {
                 {isSaving ? '保存中…' : '保存跟进'}
               </button>
               <Link className="btn sm secondary" to={actionHrefForMember(member)}>
-                {member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel' ? '取消/退役' : 'VPS 详情'}
+                {actionLabelForMember(member)}
               </Link>
             </div>
           </form>
@@ -3188,18 +3305,23 @@ export function AssetDecisionsPage() {
 
   function submitRecordMemberFollowup(event: FormEvent<HTMLFormElement>, member: AssetDecisionRecordMember) {
     event.preventDefault()
+    saveRecordMemberFollowup(member)
+  }
+
+  function saveRecordMemberFollowup(member: AssetDecisionRecordMember, nextStatus?: AssetDecisionFollowupStatus) {
     const detail = recordDetailState.detail
     if (!detail) return
     const draft = recordFollowupDrafts[member.vps_id] ?? {
       status: member.followup_status,
       note: member.followup_note,
     }
+    const status = nextStatus ?? draft.status
     setRecordPatchError(null)
     setRecordFollowupPatching((current) => ({ ...current, [member.vps_id]: true }))
     patchAssetDecisionRecord(detail.record_id, {
       members: [{
         vps_id: member.vps_id,
-        followup_status: draft.status,
+        followup_status: status,
         followup_note: draft.note.trim(),
       }],
     })
@@ -3212,7 +3334,7 @@ export function AssetDecisionsPage() {
           error: null,
           records: current.records.map((item) => (item.record_id === record.record_id ? record : item)),
         }))
-        setDecisionNotice(`成员跟进已更新：${member.display_name || member.vps_id} -> ${FOLLOWUP_STATUS_LABELS[draft.status]}`)
+        setDecisionNotice(`成员跟进已更新：${member.display_name || member.vps_id} -> ${FOLLOWUP_STATUS_LABELS[status]}`)
       })
       .catch((error: unknown) => {
         setRecordPatchError(describeError(error, '更新成员跟进失败'))
@@ -3223,6 +3345,110 @@ export function AssetDecisionsPage() {
           [member.vps_id]: false,
         }))
       })
+  }
+
+  function renderRecordExecutionBoard(detail: AssetDecisionRecordDetail) {
+    const lanes = EXECUTION_PLAN_LANE_ORDER
+      .map((lane) => ({ lane, members: membersForExecutionLane(detail.members, lane) }))
+      .filter((section) => section.members.length > 0)
+
+    if (lanes.length === 0) {
+      return (
+        <section className="asset-decision-execution-board" aria-label="执行编排">
+          <div className="asset-decision-execution-board__empty">
+            <strong>暂无执行编排</strong>
+            <span>当前记录没有可展示的成员步骤。</span>
+          </div>
+        </section>
+      )
+    }
+
+    return (
+      <section className="asset-decision-execution-board" aria-label="执行编排">
+        <div className="asset-decision-execution-board__header">
+          <div>
+            <p className="section-heading__eyebrow">EXECUTION PLAN</p>
+            <h3>执行编排</h3>
+          </div>
+          <div className="asset-decision-execution-board__counts">
+            <Badge variant="count" tone={detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
+              可推进 {detail.execution_plan?.actionable_count ?? 0}
+            </Badge>
+            {detail.execution_plan?.blocked_count > 0 && (
+              <Badge variant="count" tone="critical">
+                阻塞 {detail.execution_plan.blocked_count}
+              </Badge>
+            )}
+          </div>
+        </div>
+        <div className="asset-decision-execution-board__lanes">
+          {lanes.map(({ lane, members }) => (
+            <section key={lane} className={`asset-decision-execution-lane asset-decision-execution-lane--${lane}`}>
+              <div className="asset-decision-execution-lane__header">
+                <strong>{EXECUTION_PLAN_LANE_LABELS[lane]}</strong>
+                <span><MonoDigits>{members.length}</MonoDigits> 台</span>
+              </div>
+              <div className="asset-decision-execution-lane__members">
+                {members.map((member) => {
+                  const isSaving = Boolean(recordFollowupPatching[member.vps_id])
+                  const canStart = member.followup_status === 'todo'
+                  const canMarkDone = member.execution_readback?.status === 'aligned' && member.followup_status !== 'done' && member.followup_status !== 'skipped'
+                  return (
+                    <article key={member.vps_id} className="asset-decision-execution-card">
+                      <div className="asset-decision-execution-card__head">
+                        <strong><Link className="name" to={`/vps/${member.vps_id}`}>{member.display_name || member.vps_id}</Link></strong>
+                        <span className="asset-decision-chip-row">
+                          {renderExecutionPlanBadge(member.execution_plan)}
+                          {renderReadbackBadge(member.execution_readback)}
+                        </span>
+                      </div>
+                      <p>{member.execution_plan?.summary || '等待执行编排'}</p>
+                      <span>{currentFactsLabel(member.execution_readback?.current_facts)}</span>
+                      <span>{currentFactsStateLabel(member.execution_readback?.current_facts)}</span>
+                      {member.execution_readback?.issues?.length > 0 && (
+                        <span className="asset-decision-chip-row">
+                          {member.execution_readback.issues.slice(0, 3).map((issue) => (
+                            <Badge key={`${member.vps_id}-${issue.kind}-${issue.label}`} variant="info" tone={chipTone(issue.tone)}>
+                              {issue.label}
+                            </Badge>
+                          ))}
+                          {member.execution_readback.issues.length > 3 && (
+                            <Badge variant="count" tone="neutral">
+                              +{member.execution_readback.issues.length - 3}
+                            </Badge>
+                          )}
+                        </span>
+                      )}
+                      <div className="asset-decision-execution-card__actions">
+                        {member.execution_plan?.step_kind === 'review_record' ? (
+                          <button className="btn sm secondary" type="button" onClick={() => setDecisionNotice(`请在当前记录中复核：${member.display_name || member.vps_id}`)}>
+                            {actionLabelForMember(member)}
+                          </button>
+                        ) : (
+                          <Link className="btn sm secondary" to={actionHrefForMember(member)}>
+                            {actionLabelForMember(member)}
+                          </Link>
+                        )}
+                        {canStart && (
+                          <button className="btn sm secondary" type="button" disabled={isSaving} onClick={() => saveRecordMemberFollowup(member, 'in_progress')}>
+                            开始跟进
+                          </button>
+                        )}
+                        {canMarkDone && (
+                          <button className="btn sm primary" type="button" disabled={isSaving} onClick={() => saveRecordMemberFollowup(member, 'done')}>
+                            标记完成
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      </section>
+    )
   }
 
   function selectVPS(vps: VPSAssetRecord) {
@@ -4619,6 +4845,11 @@ export function AssetDecisionsPage() {
                 <small>{readbackCountSummary(recordDetailState.detail.execution_readback)}</small>
               </div>
               <div>
+                <span>执行计划</span>
+                <strong><MonoDigits>{recordDetailState.detail.execution_plan?.actionable_count ?? 0}</MonoDigits> 项</strong>
+                <small>{executionPlanCountSummary(recordDetailState.detail.execution_plan)}</small>
+              </div>
+              <div>
                 <span>证据快照</span>
                 <strong>{selectedRecordAssessment ? EVIDENCE_TIER_LABELS[selectedRecordAssessment.quality_tier] : '未记录'}</strong>
                 <small>{selectedRecordAssessment ? `可信 ${selectedRecordAssessment.confidence_score}，压力 ${selectedRecordAssessment.pressure_score}` : formatDateTime(recordDetailState.detail.updated_at)}</small>
@@ -4655,6 +4886,7 @@ export function AssetDecisionsPage() {
               </form>
             </div>
             {recordPatchError && <div className="inline-alert danger">{recordPatchError}</div>}
+            {renderRecordExecutionBoard(recordDetailState.detail)}
             <div className="asset-table-scroll" role="region" aria-label="决策记录成员" tabIndex={0}>
               <DataTable
                 className="asset-table asset-decision-record-members-table"

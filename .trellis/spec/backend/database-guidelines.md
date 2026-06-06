@@ -738,6 +738,8 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Decision recommendation: `GroupSummary`、`GroupMember`、`ManualGroupSummary`、`ManualGroupDetail` 和 manual members 必须返回只读 `decision_recommendation`，字段固定为 `summary`、`next_step`、`reasons[]`、`blockers[]`、`priority_vps_ids[]`、`confidence_label`。它只能解释 `evidence_assessment`、evidence chips、group type、scenario 和已有成员事实计数，不得新增评分引擎、runtime facts detail、HostSample、ProbeObservation、IP/路由/性能/超售判断。
 - Record member follow-up: `asset_decision_record_members.followup_status` 固定为 `todo|in_progress|blocked|done|skipped`，`followup_note` 为 trim 后的执行备注，`followup_updated_at` 为最后一次成员跟进更新时间；`asset_decision_records_with_counts` 必须返回各状态聚合计数。
 - Execution readback: `RecordSummary` / `RecordDetail` 和 `RecordMember` 必须返回只读派生字段 `execution_readback`。记录级字段为 `status`（`open|aligned|drift|blocked|needs_evidence|inactive`）、中文 `summary`、`open_count`、`aligned_count`、`drift_count`、`blocked_count`、`needs_evidence_count`。成员级字段为同一 status、summary、`issues[]`（`kind,label,tone,details?`）和 `current_facts`（当前 VPS lifecycle、usage、renewal decision、active subscription / service / domain / Target / monitoring 计数与 source availability）。
+- Execution plan: records API 响应必须在 readback 之后同步返回只读派生字段 `execution_plan`，但不新增 endpoint / migration。记录级字段为中文 `summary`、`lane_counts[]`、`actionable_count`、`blocked_count`；成员级字段为 `lane`（`cancel_retire|migration|keep_observe|evidence|review`）、`step_kind`（`open_cancellation_workbench|open_vps_detail|open_subscription_context|review_record`）、`tone`（`critical|alert|notice|normal|neutral`）、中文 `summary`、`step_label`、`issue_count`、`blocked`、`actionable`。
+- Execution plan 只能消费当前 `execution_readback` 与 `loadFacts` 已有事实，不能引入第二套执行状态机。后端只返回 step kind 等语义，不得返回 SPA 路由字符串；URL 深链由前端根据 step kind 本地映射。
 
 #### 3. Contracts
 
@@ -752,9 +754,11 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - 成员跟进 PATCH 的 payload 为 `members:[{vps_id, followup_status?, followup_note?}]`；`vps_id` 必须属于当前记录，同一 payload 不得重复，状态必须合法，状态或备注至少设置一项。成功更新成员跟进时必须刷新成员 `followup_updated_at`、成员 `updated_at` 与记录 `updated_at`，并返回 detail 风格的最新记录。
 - 成员全部 `done` / `skipped` 不得自动推进整条决策记录状态；组合决策记录状态仍由用户显式修改，避免在 memory layer 内扩张隐式状态机。
 - 执行回读只校验“保存的组合判断是否与当前事实一致”，不得变成第二套状态机：records API 不自动 PATCH record status，不自动完成成员跟进，不自动修改 VPS / Subscription / MonitoringInstance / Target。
+- 执行编排只把已保存判断组织为下一步导览，不执行真实动作：records API 不自动 PATCH VPS / Subscription / MonitoringInstance / Target，不自动 PATCH record status，不自动改写成员 `decided_action` / `decided_role`。若用户判断需要改写，路径是 abandon 旧记录后从自定义组合或自动组保存新记录。
 - 成员回读以 `decided_action` 为主，历史值为空才回退 `suggested_action`。`cancel` / `open_cancellation_workbench` 只判断 VPS 是否进入 `to_cancel|cancelled|archived` 且无 active subscription、无 running monitoring、无 running target；`migrate` 只判断是否进入迁移链路（`renewal_decision=migrate|replaced` 或 `lifecycle_status=to_migrate`），不判断新 VPS 是否已替代旧 VPS；`keep` / `observe` 只检查 lifecycle 未取消/归档和 renewal decision 是否相符；`complete_evidence` 只检查当前已有证据缺口。
 - 回读状态优先级：`record.status=abandoned` 为 `inactive`；成员 `followup_status=blocked` 优先 `blocked`，但 `done` 后关键事实不一致仍为 `drift`；`skipped` 抑制普通 open，但不隐藏关键 drift；存在证据缺口为 `needs_evidence`；事实与动作一致为 `aligned`。记录级聚合优先级为 drift > blocked > needs_evidence > aligned > open。
 - 成员级 `decided_action=cancel` 或 `open_cancellation_workbench` 只能给前端提供跳转到 VPS lifecycle workbench 的入口；后端 records API 不做批量取消、批量退役或批量迁移。
+- 成员级 execution plan 的 cancel / retire lane 只能编排到 `open_cancellation_workbench`；migration lane 只能编排到 VPS detail 复核迁移链路；evidence lane 对缺订阅优先 `open_subscription_context`，其余证据缺口走 VPS detail；`current_fact_missing`、空动作或不能安全归类的成员必须走 `review_record`。
 - Group type 固定语义：`renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。
 - `renew_within_days` 默认 30，仅允许产品认可的窗口（当前 `30/60/90`）；非法值在 handler 返回 400。
 - `view` 只筛选返回的自动组，不改变底层事实读取；`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 是列表上下文筛选，只筛出相关组/手工组合/记录，不裁剪 group detail 成员；非法值返回 400。
@@ -768,6 +772,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - 订阅、服务、域名、监控或 Target 查询失败必须返回 repository error；不得构造“健康”或“缺证据”假结果。只有查询成功且事实为空时，才生成 `missing_subscription`、`unlinked_monitoring` 等真实 evidence gap。
 - `/api/asset-decisions/*` 不逐台调用 runtime facts detail endpoint，只读 MonitoringInstance / Target 当前摘要字段和关联计数；CPU / IO / 路由 / IP 质量 / 超售判断属于后续能力。
 - 执行回读同样只能复用 `loadFacts` 聚合事实，不得逐台请求 runtime facts detail、HostSample、ProbeObservation、agent 性能趋势、IP 质量或路由质量。IP / 路由 / 性能衰退 / CPU / IO / 超售判断等待 agent 与观测语义成熟后再进入模型。
+- 执行编排同样只能复用 readback / `loadFacts` 聚合事实，不得为了生成下一步导览逐台请求 runtime facts detail、HostSample、ProbeObservation、agent 性能趋势、IP 质量、路由质量或性能衰退信号。
 - 组合页仍只通过既有 `PATCH /api/vps/{id}` 改单台 VPS renewal decision；取消 / 退役执行必须回到 VPS lifecycle workbench。
 
 #### 4. Validation & Error Matrix
@@ -799,6 +804,9 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 | record `status=abandoned` | `execution_readback.status=inactive`，不参与执行推进提示 |
 | member followup `done` but current facts still not closed | 成员 `execution_readback.status=drift`，记录级聚合为 `drift` |
 | member followup `blocked` | 成员优先显示 `blocked`，记录级无 drift 时聚合为 `blocked` |
+| record status `completed` but facts drift | `execution_readback.status=drift` 且 `execution_plan.actionable_count>0`，不得因 completed 掩盖漂移 |
+| record status `abandoned` | `execution_readback.status=inactive`，`execution_plan` 不产生可执行项 |
+| member has `current_fact_missing` | 成员 plan 使用 `lane=review` + `step_kind=review_record`，不得跳到业务执行页 |
 | record member VPS missing from current facts | 成员 `drift`，issue kind 为 `current_fact_missing` |
 | unsupported method | handler 返回 405 `method not allowed` |
 | `/api/asset-decisions/*` route missing | router test 必须失败；该路径不得落 SPA fallback |
@@ -816,6 +824,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Good: 用户把记录中某台 VPS 标记为 `blocked` 并记录“等待迁移窗口”，API 只更新该 record member 的跟进字段与记录 `updated_at`，不修改 VPS lifecycle 或 subscription。
 - Good: 已保存记录中 `cancel` 成员跟进标记 `done` 后，如果当前仍有 active subscription 或 running target，readback 显示 `drift`，提示“跟进已完成但事实未闭环”。
 - Good: 已保存记录的成员 facts 找不到对应 VPS 时，readback 显示 `current_fact_missing` 而不是伪造已对齐。
+- Good: 已保存记录的 drift / blocked / needs_evidence 成员返回 execution plan，前端据此打开记录详情、VPS 详情、订阅上下文或取消工作台；后端响应仍只包含语义 step kind。
 - Good: 完整证据的同区组合返回较高可信度/准备度与 `quality_tier=strong`，资料缺口或来源不可用返回较低可信度与 `decision_bias=complete_evidence`。
 - Base: 没有任何 VPS 时 overview 仍返回 0 计数和空 `top_groups`。
 - Bad: 在 store 里写入 `asset_decision_groups` 表，或把自动组 ID 当长期外键依赖。
@@ -824,6 +833,8 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Bad: `decision_recommendation` 读取 agent CPU/IO、HostSample、ProbeObservation、IP 质量、路由质量或性能衰退数据。
 - Bad: `PATCH /api/asset-decisions/records/{id}` 同时修改 VPS renewal decision、Subscription 状态或执行取消/退役。
 - Bad: records list 为了给每条记录计算 readback 逐条调用 `GetRecord`，造成 N+1。
+- Bad: records list 为了给每条记录计算 execution plan 逐条调用 `GetRecord`，造成 N+1。
+- Bad: 后端 `execution_plan` 返回 `/vps/{id}`、`/subscriptions?...` 等 SPA URL 字符串，把 API contract 与前端路由耦合。
 - Bad: readback 使用 HostSample、ProbeObservation、IP 质量、路由质量或性能衰退数据，在 agent 语义未成熟前给出超售判断。
 - Bad: group detail 为了展示性能趋势逐台请求 runtime facts detail endpoint，造成 N+1 和语义越界。
 - Bad: subscriptions 查询失败后把所有 VPS 标记为 `missing_subscription`，误导用户取消资产。
@@ -835,6 +846,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - Store tests: member facts 聚合、主订阅选择、服务 / 域名 / Target / 监控计数、成本和 evidence chips，manual groups list/create/get/patch/member add/patch/delete、records list/create/get/patch、成员跟进计数、成员跟进事务更新与未知成员回滚，且不依赖 runtime facts detail。
 - Execution readback domain tests: cancel / cancellation workbench aligned/open/drift、migrate 链路与旧承载 drift、keep / observe 一致性、complete_evidence 只检查当前已有缺口、done drift、blocked 优先、skipped 抑制普通 open、abandoned inactive、current fact missing。
 - Store tests: records list/detail/create/patch 均返回 `execution_readback`；ListRecords 批量读取成员并聚合，不逐条调用 `GetRecord`；facts 查询失败 fail closed；成员跟进 PATCH 后 readback 随响应刷新；不依赖 runtime facts detail / HostSample / ProbeObservation。
+- Store tests: records list/detail/create/patch 均返回 `execution_plan`；plan 派生沿用 records/facts/members 的批量读取路径，不逐条调用 `GetRecord`；成员跟进 PATCH 后 readback 与 execution plan 同步刷新。
 - Handler tests: overview、groups list、group detail、manual groups list/create/detail/patch/member add/patch/delete、records list/create/detail/patch success 且 records 响应包含 readback、成员跟进 patch；invalid query/input、missing group/manual group/member/record、未知或重复成员、repo failure、method not allowed。
 - Handler tests: scenario templates list/create/get/patch/create-manual-group success；builtin PATCH、missing template、invalid template input、repo failure、method not allowed。
 - Router/bootstrap tests: `/api/asset-decisions/overview`、`/api/asset-decisions/groups`、`/api/asset-decisions/groups/{id}`、`/api/asset-decisions/manual-groups/*`、`/api/asset-decisions/scenario-templates/*`、`/api/asset-decisions/records`、`/api/asset-decisions/records/{id}` 登录保护且不落 SPA fallback；`bootstrapCenter` wiring 非 nil。
