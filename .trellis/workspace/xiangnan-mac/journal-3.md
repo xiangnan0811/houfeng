@@ -1888,3 +1888,36 @@ Refined /asset-decisions into a portfolio workbench with card-based decision gro
 ### Next Steps
 
 - None - task complete
+
+
+## Session 174: Asset decisions workbench polish
+
+**Date**: 2026-06-06
+**Task**: Asset decisions workbench polish
+**Branch**: `worktree/asset-decisions-workbench-polish`
+
+### Summary
+
+Polished the Asset Decisions portfolio workbench hierarchy with a command summary, more scannable group cards, clearer next-work actions, and record execution lane board refinements. Updated web specs and design docs, then verified tests, lint, build, Trellis validation, and fallback browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `24f7f06` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

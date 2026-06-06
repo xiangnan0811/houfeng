@@ -220,17 +220,17 @@ parent: docs/design/v2-houfeng/design-language.md
 
 ### AssetDecisionsPage
 1. 资产决策页是 Asset Ledger 的组合决策工作台，不是三张 VPS 状态表的拼接，也不是订阅续费队列的复刻。首屏标题使用 `资产组合决策`，第一主 surface 必须是 `决策组列表`，承接后端只读自动组：需要决策、续费取舍、同区比较、服务商组合、预算压力、资料缺口。
-2. 顶部 summary 只保留能指导处理顺序的少量数字：自动组数量、涉及 VPS、续费取舍、预算压力、资料缺口和 evidence source 状态。不要恢复同权 KPI 卡片墙，也不要把单台队列数量放成唯一主指标。
-3. 顶部 summary 与 `决策组列表` 之间可以有 `CLOSED LOOP / 下一步导览` surface：左侧是最多 6 个只读工作项，右侧是闭环状态小指标。工作项来源只能是已加载的记录回读、自动组、自定义组合和场景模板；优先级依次为 drift、blocked、needs_evidence、自动组、进行中组合、可用模板。点击只打开对应 detail URL-state，不自动创建、不执行、不 PATCH record status。
+2. 顶部必须是 portfolio command summary，而不是松散 KPI 卡片墙：左侧给出当前第一行动（来自记录回读、自动组、自定义组合或模板），右侧用少量事实格展示组合范围、续费窗口、执行闭环风险和 evidence source 状态。它可以显示 context filter 摘要，但不得把单台队列数量放成唯一主指标。
+3. `决策组列表` 右侧可以有 `CLOSED LOOP / 下一步导览` surface：最多 6 个只读工作项，附带闭环状态小指标。工作项来源只能是已加载的记录回读、自动组、自定义组合和场景模板；优先级依次为 drift、blocked、needs_evidence、自动组、进行中组合、可用模板。点击只打开对应 detail URL-state，不自动创建、不执行、不 PATCH record status。
 4. 主 tabs 使用 `needs_decision / renewal / region / provider / cost / evidence / single_queue` URL-state。切换 tab 后主 surface 仍保持组合组语义；`single_queue` 是辅助视图，不应改变页面标题或首屏信息架构。
-5. 决策组行必须服务组合扫描和取舍：组名 / scope、成员数量、生命周期 / 用途 / 续费分布、续费窗口、未评估、服务 / 域名 / Target、监控关联、异常事件、成本、证据质量判断尺度和 evidence chips。组级 evidence 可以展示 MonitoringInstance/Target 聚合异常，但不得把它误写成单台 VPS list contract 已拥有的 linked health 字段。
+5. 决策组卡片必须服务组合扫描和取舍：组名 / scope、主问题、当前压力、推荐下一步、证据质量判断尺度、成员数量、用途分布、服务 / 域名 / Target、监控关联、异常事件、成本和 evidence chips。指标不得回退成 5 个同权小格；主问题和下一步必须比零散指标更容易扫到。组级 evidence 可以展示 MonitoringInstance/Target 聚合异常，但不得把它误写成单台 VPS list contract 已拥有的 linked health 字段。
 6. 点击组打开右侧 Drawer / modal detail，展示组内 VPS 对比表。成员行必须展示 VPS identity、provider/region/product、生命周期/用途/续费决策、主订阅或订阅证据不可用状态、服务 / 域名 / Target / 监控数量、建议角色、建议动作、成员证据评估和 evidence chips。建议只是扫描辅助；真正写入只通过单台 `AssetDecisionWorkPanel`。
 7. 决策编辑使用 group detail 或底部单台辅助队列中的 `AssetDecisionWorkPanel`。保存成功的 notice 留在页面可见 surface 内；取消 / 退役 action 只能跳到 VPS 详情生命周期工作台，不在组合页直接执行。
 8. `decision_recommendation` 是解释层，不是新的执行层。组列表和成员行只能展示短摘要、下一步、理由/阻塞 chips 和可信标签；详情可以展开更多理由，但不得让它盖过成本、服务/域名、Target、监控、续费窗口等组合事实。
 9. `场景模板` 是 scenario surface 的启动器，位于自动组与自定义组合之间，视觉权重低于自动组。内置模板和自定义模板都只能创建自定义组合；模板详情不直接保存决策记录，不触发 VPS / Subscription / MonitoringInstance / Target 写动作。
 10. `自定义组合` 是自动组与决策记录之间的 scenario surface：用户可以从自动组或模板创建手工组合，也可以在详情内维护场景、目标、成员 intended role/action/reason，并从手工组合保存为决策记录或另存为模板。它只表达“正在比较这一组资产”，不得触发 VPS / Subscription / MonitoringInstance / Target 写动作。
 11. `已保存组合决策` 是 memory/readback/orchestration surface，视觉层级低于自动组和自定义组合，高于单台队列与续费 evidence。列表展示 record status、followup 计数、execution readback 和低权重 execution plan 摘要；列表按钮只打开记录详情，不直接跳业务执行页。
-12. 记录详情 modal 的顶部 summary 可以增加 `执行计划` 指标；主体验证顺序为：目标与状态表单 → `EXECUTION PLAN` lane board → 成员明细表。Lane board 按 `取消退役 / 迁移 / 保留观察 / 补证据 / 复核` 分列，每张成员卡展示 plan badge、readback badge、当前事实、issue chips、下一步 CTA 和快速跟进按钮。它是执行导览，不是批量执行工具。
+12. 记录详情 modal 的顶部 summary 可以增加 `执行计划` 指标；主体验证顺序为：目标与状态表单 → `EXECUTION PLAN` lane board → 成员明细表。Lane board 按 `取消退役 / 迁移 / 保留观察 / 补证据 / 复核` 分列，每个 lane 显示成员数、可推进数、问题数和阻塞数；每张成员卡展示 plan badge、readback badge、当前事实块、issue chips、下一步 CTA 和快速跟进按钮。它是执行导览，不是批量执行工具。
 13. 记录详情成员明细表继续展示保存时证据快照、系统建议、用户判断、当前回读和跟进表单；新增“下一步”列只能解释 `execution_plan`，不得开放修改 `decided_action` / `decided_role`。
 14. URL context chips 是组合页承接跨页面深链的可见凭据。`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 必须能单个移除或清空；`group_id`、`manual_group_id`、`record_id`、`template_id` 只打开对应 detail，不自动创建或执行。
 15. 页面底部保留 `单台待处理队列`，承接原有 `unreviewed / migrate / cancel` 快速处理。它视觉上低于 `决策组列表`、模板、`自定义组合` 和已保存记录执行编排，用于单台补充处理，不再是页面主体。

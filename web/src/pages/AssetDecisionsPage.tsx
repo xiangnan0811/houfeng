@@ -294,6 +294,20 @@ type AssetDecisionNextWorkItem = {
   target: AssetDecisionNextWorkTarget
 }
 
+type AssetDecisionPortfolioLead = {
+  tone: BadgeTone
+  eyebrow: string
+  title: string
+  summary: string
+  actionLabel: string
+  contextLabel: string
+  riskLabel: string
+  evidenceLabel: string
+  renewalLabel: string
+  primaryItem?: AssetDecisionNextWorkItem
+  primaryGroupID?: string
+}
+
 const RENEWAL_WINDOWS: readonly RenewalWindow[] = [30, 60, 90]
 const DECISION_QUEUE_VALUES: VPSRenewalDecision[] = ['unreviewed', 'migrate', 'cancel']
 const INITIAL_DECISION_DRAFT: AssetDecisionDraft = {
@@ -960,6 +974,91 @@ function nextWorkTargetLabel(target: AssetDecisionNextWorkTarget): string {
   return target.id
 }
 
+function portfolioContextLabel(chips: ContextFilterChip[], view: MainWorkbenchView, renewalWindow: RenewalWindow): string {
+  if (chips.length === 0) {
+    return `全局资产组合 · ${VIEW_LABELS[view]} · ${renewalWindow} 天续费窗口`
+  }
+  return chips.map((chip) => `${chip.label} ${chip.value}`).join(' / ')
+}
+
+function portfolioRiskLabel(metrics: ClosedLoopMetrics): string {
+  if (metrics.readbackDriftCount > 0) return `事实漂移 ${metrics.readbackDriftCount}`
+  if (metrics.readbackBlockedCount > 0) return `阻塞 ${metrics.readbackBlockedCount}`
+  const gapCount = metrics.readbackNeedsEvidenceCount + metrics.evidenceGapGroupCount
+  if (gapCount > 0) return `资料缺口 ${gapCount}`
+  if (metrics.readbackOpenCount > 0) return `待回读 ${metrics.readbackOpenCount}`
+  if (metrics.recordActiveCount > 0) return `跟进中 ${metrics.recordActiveCount}`
+  return '闭环稳定'
+}
+
+function portfolioEvidenceLabel(overview?: AssetDecisionOverview | null): string {
+  if (!overview) return '等待资产证据聚合'
+  return sourceAvailabilityLabel(overview.source_availability)
+}
+
+function portfolioRenewalLabel(overview: AssetDecisionOverview | null | undefined, renewalWindow: RenewalWindow): string {
+  if (!overview) return `${renewalWindow} 天窗口等待聚合`
+  return `${renewalWindow} 天窗口 · 续费组 ${overview.renewal_group_count} · 待决策 ${overview.needs_decision_count}`
+}
+
+function buildPortfolioLead(
+  view: MainWorkbenchView,
+  renewalWindow: RenewalWindow,
+  overview: AssetDecisionOverview | null,
+  groups: AssetDecisionGroupSummary[],
+  nextWorkItems: AssetDecisionNextWorkItem[],
+  metrics: ClosedLoopMetrics,
+  contextChips: ContextFilterChip[],
+): AssetDecisionPortfolioLead {
+  const first = nextWorkItems[0]
+  const contextLabel = portfolioContextLabel(contextChips, view, renewalWindow)
+  const riskLabel = portfolioRiskLabel(metrics)
+  const evidenceLabel = portfolioEvidenceLabel(overview)
+  const renewalLabelText = portfolioRenewalLabel(overview, renewalWindow)
+  const fallbackGroup = groups[0]
+  if (first) {
+    return {
+      tone: first.tone,
+      eyebrow: first.sourceLabel,
+      title: `${first.kindLabel} · ${first.title}`,
+      summary: first.summary,
+      actionLabel: first.actionLabel,
+      contextLabel,
+      riskLabel,
+      evidenceLabel,
+      renewalLabel: renewalLabelText,
+      primaryItem: first,
+    }
+  }
+  if (fallbackGroup) {
+    return {
+      tone: fallbackGroup.evidence_assessment.gap_signal_count > 0 ? 'alert' : 'notice',
+      eyebrow: 'AUTO GROUP',
+      title: `先比较 ${fallbackGroup.title}`,
+      summary: fallbackGroup.decision_recommendation?.summary || fallbackGroup.primary_issue_summary || '当前视图有可比较的自动决策组，先打开组详情核对成员事实。',
+      actionLabel: '打开决策组',
+      contextLabel,
+      riskLabel,
+      evidenceLabel,
+      renewalLabel: renewalLabelText,
+      primaryGroupID: fallbackGroup.group_id,
+    }
+  }
+  return {
+    tone: metrics.partialErrorCount > 0 ? 'alert' : 'normal',
+    eyebrow: 'PORTFOLIO STATUS',
+    title: metrics.partialErrorCount > 0 ? '部分资产决策证据不可用' : '当前视图暂无置顶组合工作',
+    summary: metrics.partialErrorCount > 0
+      ? '请先查看局部错误边界；已加载的自动组、记录和单台辅助队列仍可继续处理。'
+      : '当前已加载数据没有漂移、阻塞或可启动场景，可切换视图继续检查其它组合压力。',
+    actionLabel: '查看需要决策',
+    contextLabel,
+    riskLabel,
+    evidenceLabel,
+    renewalLabel: renewalLabelText,
+  }
+}
+
 function renderDecisionRecommendation(
   recommendation?: AssetDecisionRecommendation | null,
   mode: 'compact' | 'detail' = 'compact',
@@ -1457,6 +1556,38 @@ function renderMemberReadback(readback?: AssetDecisionMemberExecutionReadback) {
 
 function membersForExecutionLane(members: AssetDecisionRecordMember[], lane: AssetDecisionExecutionPlanLane): AssetDecisionRecordMember[] {
   return members.filter((member) => (member.execution_plan?.lane ?? 'review') === lane)
+}
+
+function laneIssueCount(members: AssetDecisionRecordMember[]): number {
+  return members.reduce((total, member) => total + (member.execution_plan?.issue_count ?? member.execution_readback?.issues?.length ?? 0), 0)
+}
+
+function laneActionableCount(members: AssetDecisionRecordMember[]): number {
+  return members.filter((member) => member.execution_plan?.actionable).length
+}
+
+function laneBlockedCount(members: AssetDecisionRecordMember[]): number {
+  return members.filter((member) => member.execution_plan?.blocked || member.followup_status === 'blocked').length
+}
+
+function groupPressureLabel(group: AssetDecisionGroupSummary): string {
+  const parts = [
+    group.renewal_window_count > 0 ? `续费窗口 ${group.renewal_window_count}` : '',
+    group.unreviewed_count > 0 ? `未评估 ${group.unreviewed_count}` : '',
+    group.cancellation_attention_count > 0 ? `取消联动 ${group.cancellation_attention_count}` : '',
+    group.evidence_assessment.gap_signal_count > 0 ? `缺口 ${group.evidence_assessment.gap_signal_count}` : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : '暂无高压信号'
+}
+
+function groupServiceLabel(group: AssetDecisionGroupSummary): string {
+  return `服务 ${group.service_count} · 域名 ${group.domain_count} · Target ${group.running_target_count}/${group.target_count}`
+}
+
+function groupMonitoringLabel(group: AssetDecisionGroupSummary): string {
+  const abnormal = group.abnormal_monitoring_count > 0 ? `异常 ${group.abnormal_monitoring_count}` : '异常 0'
+  const incidents = group.active_incident_count > 0 ? `事件 ${group.active_incident_count}` : '事件 0'
+  return `监控 ${group.monitoring_link_count} · ${abnormal} · ${incidents}`
 }
 
 export function AssetDecisionsPage() {
@@ -1978,6 +2109,15 @@ export function AssetDecisionsPage() {
     manualGroupsState.groups,
     templatesState.templates,
     closedLoopSourceErrors,
+  )
+  const portfolioLead = buildPortfolioLead(
+    portfolioView,
+    renewalWindow,
+    overview,
+    portfolioState.groups,
+    nextWorkItems,
+    closedLoopMetrics,
+    contextFilterChips,
   )
   const closedLoopPartialErrors = [
     closedLoopSourceErrors.overview ? '组合概览' : '',
@@ -3240,6 +3380,7 @@ export function AssetDecisionsPage() {
           <div>
             <p className="section-heading__eyebrow">EXECUTION PLAN</p>
             <h3>执行编排</h3>
+            <span>{detail.execution_plan?.summary || '按成员当前事实生成下一步导览。'}</span>
           </div>
           <div className="asset-decision-execution-board__counts">
             <Badge variant="count" tone={detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
@@ -3256,8 +3397,15 @@ export function AssetDecisionsPage() {
           {lanes.map(({ lane, members }) => (
             <section key={lane} className={`asset-decision-execution-lane asset-decision-execution-lane--${lane}`}>
               <div className="asset-decision-execution-lane__header">
-                <strong>{EXECUTION_PLAN_LANE_LABELS[lane]}</strong>
-                <span><MonoDigits>{members.length}</MonoDigits> 台</span>
+                <div>
+                  <strong>{EXECUTION_PLAN_LANE_LABELS[lane]}</strong>
+                  <span><MonoDigits>{members.length}</MonoDigits> 台 · 可推进 {laneActionableCount(members)} · 问题 {laneIssueCount(members)}</span>
+                </div>
+                {laneBlockedCount(members) > 0 && (
+                  <Badge variant="count" tone="critical">
+                    阻塞 {laneBlockedCount(members)}
+                  </Badge>
+                )}
               </div>
               <div className="asset-decision-execution-lane__members">
                 {members.map((member) => {
@@ -3274,8 +3422,11 @@ export function AssetDecisionsPage() {
                         </span>
                       </div>
                       <p>{member.execution_plan?.summary || '等待执行编排'}</p>
-                      <span>{currentFactsLabel(member.execution_readback?.current_facts)}</span>
-                      <span>{currentFactsStateLabel(member.execution_readback?.current_facts)}</span>
+                      <div className="asset-decision-execution-card__facts">
+                        <span>当前事实</span>
+                        <strong>{currentFactsLabel(member.execution_readback?.current_facts)}</strong>
+                        <small>{currentFactsStateLabel(member.execution_readback?.current_facts)}</small>
+                      </div>
                       {member.execution_readback?.issues?.length > 0 && (
                         <span className="asset-decision-chip-row">
                           {member.execution_readback.issues.slice(0, 3).map((issue) => (
@@ -3346,6 +3497,9 @@ export function AssetDecisionsPage() {
                     <span>{group.scope_label} · {group.primary_issue_summary || '暂无主要问题'}</span>
                   </div>
                   <span className="asset-decision-chip-row">
+                    <Badge variant="info" tone={tone}>
+                      {groupPressureLabel(group)}
+                    </Badge>
                     <Badge variant="state" tone={evidenceTierTone(assessment.quality_tier)}>
                       {EVIDENCE_TIER_LABELS[assessment.quality_tier] ?? assessment.quality_tier}
                     </Badge>
@@ -3355,29 +3509,30 @@ export function AssetDecisionsPage() {
                   </span>
                 </div>
 
+                <div className="asset-decision-group-card__brief">
+                  <div className="asset-decision-group-card__recommendation">
+                    <span>NEXT STEP</span>
+                    <strong>{recommendation?.summary || '打开组详情继续比较成员'}</strong>
+                    <small>{recommendation?.next_step || group.primary_issue_summary || '核对成本、承载和证据缺口后保存判断。'}</small>
+                  </div>
+                  <div className="asset-decision-group-card__assessment">
+                    {renderEvidenceAssessment(assessment)}
+                  </div>
+                </div>
+
                 <div className="asset-decision-group-card__metrics" aria-label={`${group.title} 关键证据`}>
                   <div>
-                    <span>组合</span>
-                    <strong><MonoDigits>{group.member_count}</MonoDigits> 台</strong>
+                    <span>组合范围</span>
+                    <strong><MonoDigits>{group.member_count}</MonoDigits> 台 VPS</strong>
                     <small>{countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</small>
                   </div>
                   <div>
-                    <span>续费</span>
-                    <strong><MonoDigits>{group.renewal_window_count}</MonoDigits> / <MonoDigits>{group.unreviewed_count}</MonoDigits></strong>
-                    <small>窗口内 / 未评估</small>
+                    <span>承载证据</span>
+                    <strong>{groupServiceLabel(group)}</strong>
+                    <small>{groupMonitoringLabel(group)}</small>
                   </div>
                   <div>
-                    <span>承载</span>
-                    <strong>{group.service_count} / {group.domain_count}</strong>
-                    <small>服务 / 域名 · Target {group.running_target_count}/{group.target_count}</small>
-                  </div>
-                  <div>
-                    <span>监控</span>
-                    <strong>{group.abnormal_monitoring_count} / {group.active_incident_count}</strong>
-                    <small>异常关联 / active incident</small>
-                  </div>
-                  <div>
-                    <span>成本</span>
+                    <span>成本证据</span>
                     <strong>{formatGroupMonthlyCost(group)}</strong>
                     <small>{formatGroupYearlyCost(group)}</small>
                   </div>
@@ -3385,14 +3540,7 @@ export function AssetDecisionsPage() {
 
                 <div className="asset-decision-group-card__evidence">
                   {renderEvidenceChips(group.evidence_chips, 5)}
-                  {recommendation ? (
-                    <div className="asset-decision-group-card__recommendation">
-                      <strong>{recommendation.summary || '等待系统建议'}</strong>
-                      <span>{recommendation.next_step || '打开组详情继续比较成员'}</span>
-                    </div>
-                  ) : (
-                    <span className="empty-inline">等待建议</span>
-                  )}
+                  <small>{assessment.summary}</small>
                 </div>
               </div>
               <div className="asset-decision-group-card__actions">
@@ -3420,6 +3568,18 @@ export function AssetDecisionsPage() {
 
   function navigateToVPSSubscription(vpsID: string) {
     navigate(`/vps/${vpsID}?workbench=subscription`)
+  }
+
+  function openPortfolioLead() {
+    if (portfolioLead.primaryItem) {
+      openNextWorkItem(portfolioLead.primaryItem)
+      return
+    }
+    if (portfolioLead.primaryGroupID) {
+      openGroup(portfolioLead.primaryGroupID)
+      return
+    }
+    setWorkbenchView('needs_decision')
   }
 
   function closeDecisionDrawer() {
@@ -3510,28 +3670,43 @@ export function AssetDecisionsPage() {
         <div className="inline-alert ok" role="status">{decisionNotice}</div>
       )}
 
-      <div className="asset-decision-focus animate-in d1">
-        <div className="asset-decision-focus__item asset-decision-focus__item--notice">
-          <span>DECISION GROUPS</span>
-          <strong>{portfolioState.overviewLoading ? '...' : overview?.group_count ?? 0}</strong>
-          <small>涉及 {overview?.member_vps_count ?? 0} 台 VPS</small>
+      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone} animate-in d1`} aria-label="资产组合决策当前判断">
+        <div className="asset-decision-command-summary__lead">
+          <span>{portfolioLead.eyebrow}</span>
+          <h2>{portfolioLead.title}</h2>
+          <p>{portfolioLead.summary}</p>
+          <div className="asset-decision-command-summary__actions">
+            <button className="btn md primary" type="button" onClick={openPortfolioLead}>
+              {portfolioLead.actionLabel}
+            </button>
+            <Link className="btn md secondary" to={`/asset-decisions?view=evidence&renew_within_days=${renewalWindow}&scenario=evidence_cleanup`}>
+              资料缺口
+            </Link>
+          </div>
         </div>
-        <div className="asset-decision-focus__item asset-decision-focus__item--alert">
-          <span>RENEWAL</span>
-          <strong>{portfolioState.overviewLoading ? '...' : overview?.renewal_group_count ?? 0}</strong>
-          <small>{renewalWindow} 天窗口内的组合取舍</small>
+        <div className="asset-decision-command-summary__facts" aria-label="资产组合决策当前事实">
+          <div className="asset-decision-focus__item asset-decision-focus__item--notice">
+            <span>PORTFOLIO</span>
+            <strong>{portfolioState.overviewLoading ? '...' : overview?.group_count ?? portfolioState.groups.length}</strong>
+            <small>{portfolioLead.contextLabel}</small>
+          </div>
+          <div className="asset-decision-focus__item asset-decision-focus__item--alert">
+            <span>RENEWAL</span>
+            <strong>{portfolioState.overviewLoading ? '...' : overview?.renewal_group_count ?? 0}</strong>
+            <small>{portfolioLead.renewalLabel}</small>
+          </div>
+          <div className="asset-decision-focus__item asset-decision-focus__item--critical">
+            <span>CLOSED LOOP</span>
+            <strong>{closedLoopMetrics.readbackDriftCount + closedLoopMetrics.readbackBlockedCount + closedLoopMetrics.readbackNeedsEvidenceCount}</strong>
+            <small>{portfolioLead.riskLabel}</small>
+          </div>
+          <div className="asset-decision-focus__item asset-decision-focus__item--normal">
+            <span>EVIDENCE</span>
+            <strong>{overview ? '5' : '—'}</strong>
+            <small>{portfolioLead.evidenceLabel}</small>
+          </div>
         </div>
-        <div className="asset-decision-focus__item asset-decision-focus__item--critical">
-          <span>PRESSURE</span>
-          <strong>{portfolioState.overviewLoading ? '...' : (overview?.cost_group_count ?? 0) + (overview?.evidence_group_count ?? 0)}</strong>
-          <small>预算压力 + 资料缺口</small>
-        </div>
-        <div className="asset-decision-focus__item asset-decision-focus__item--normal">
-          <span>EVIDENCE SOURCES</span>
-          <strong>{overview ? '5' : '—'}</strong>
-          <small>{overview ? sourceAvailabilityLabel(overview.source_availability) : '等待聚合'}</small>
-        </div>
-      </div>
+      </section>
 
       {isSingleQueueDeepLink && (
         <div className="inline-alert info asset-decision-deeplink-notice" role="status">
@@ -3685,13 +3860,16 @@ export function AssetDecisionsPage() {
                       <span>{item.summary}</span>
                       <small>{item.meta}</small>
                     </div>
-                    <button
-                      className="btn sm secondary"
-                      type="button"
-                      onClick={() => openNextWorkItem(item)}
-                    >
-                      {item.actionLabel}
-                    </button>
+                    <div className="asset-decision-next-work__action">
+                      <span>{item.target.type === 'record' ? '回读记录' : item.target.type === 'group' ? '自动组' : item.target.type === 'manual_group' ? '自定义组合' : '场景模板'}</span>
+                      <button
+                        className="btn sm secondary"
+                        type="button"
+                        onClick={() => openNextWorkItem(item)}
+                      >
+                        {item.actionLabel}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ol>
