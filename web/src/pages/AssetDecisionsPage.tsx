@@ -240,6 +240,55 @@ type QueueState = {
   cancel: VPSAssetRecord[]
 }
 
+type ClosedLoopSourceErrors = {
+  overview?: string | null
+  groups?: string | null
+  records?: string | null
+  manualGroups?: string | null
+  templates?: string | null
+}
+
+type ClosedLoopMetrics = {
+  autoGroupCount: number
+  manualActiveCount: number
+  recordActiveCount: number
+  readbackDriftCount: number
+  readbackBlockedCount: number
+  readbackNeedsEvidenceCount: number
+  readbackOpenCount: number
+  costPressureGroupCount: number
+  evidenceGapGroupCount: number
+  partialErrorCount: number
+}
+
+type AssetDecisionNextWorkKind =
+  | 'record_drift'
+  | 'record_blocked'
+  | 'record_needs_evidence'
+  | 'auto_group'
+  | 'manual_group'
+  | 'scenario_template'
+
+type AssetDecisionNextWorkTarget =
+  | { type: 'record'; id: string }
+  | { type: 'group'; id: string }
+  | { type: 'manual_group'; id: string }
+  | { type: 'template'; id: string }
+
+type AssetDecisionNextWorkItem = {
+  id: string
+  kind: AssetDecisionNextWorkKind
+  tone: BadgeTone
+  sourceLabel: string
+  kindLabel: string
+  title: string
+  summary: string
+  meta: string
+  actionLabel: string
+  priority: number
+  target: AssetDecisionNextWorkTarget
+}
+
 const RENEWAL_WINDOWS: readonly RenewalWindow[] = [30, 60, 90]
 const DECISION_QUEUE_VALUES: VPSRenewalDecision[] = ['unreviewed', 'migrate', 'cancel']
 const INITIAL_DECISION_DRAFT: AssetDecisionDraft = {
@@ -717,6 +766,160 @@ function readbackCountSummary(readback?: AssetDecisionRecordExecutionReadback): 
 
 function scenarioTemplateStatusTone(status: AssetDecisionScenarioTemplateStatus): BadgeTone {
   return status === 'active' ? 'maintenance' : 'offline'
+}
+
+function deriveClosedLoopMetrics(
+  groups: AssetDecisionGroupSummary[],
+  records: AssetDecisionRecordSummary[],
+  manualGroups: AssetDecisionManualGroupSummary[],
+  sourceErrors: ClosedLoopSourceErrors,
+  overview?: AssetDecisionOverview | null,
+): ClosedLoopMetrics {
+  return {
+    autoGroupCount: groups.length,
+    manualActiveCount: manualGroups.filter((group) => group.status === 'active').length,
+    recordActiveCount: records.filter((record) => record.status !== 'completed' && record.status !== 'abandoned').length,
+    readbackDriftCount: records.reduce((total, record) => total + (record.execution_readback?.drift_count ?? 0), 0),
+    readbackBlockedCount: records.reduce(
+      (total, record) => total + (record.execution_readback?.blocked_count ?? 0) + (record.followup_blocked_count ?? 0),
+      0,
+    ),
+    readbackNeedsEvidenceCount: records.reduce((total, record) => total + (record.execution_readback?.needs_evidence_count ?? 0), 0),
+    readbackOpenCount: records.reduce((total, record) => total + (record.execution_readback?.open_count ?? 0), 0),
+    costPressureGroupCount: overview?.cost_group_count ?? groups.filter((group) => group.view === 'cost' || group.group_type === 'cost_pressure').length,
+    evidenceGapGroupCount: overview?.evidence_group_count ?? groups.filter((group) => group.view === 'evidence' || group.group_type === 'evidence_gap').length,
+    partialErrorCount: Object.values(sourceErrors).filter(Boolean).length,
+  }
+}
+
+function deriveNextWorkItems(
+  groups: AssetDecisionGroupSummary[],
+  records: AssetDecisionRecordSummary[],
+  manualGroups: AssetDecisionManualGroupSummary[],
+  templates: AssetDecisionScenarioTemplateSummary[],
+  sourceErrors: ClosedLoopSourceErrors,
+): AssetDecisionNextWorkItem[] {
+  const items: AssetDecisionNextWorkItem[] = []
+
+  if (!sourceErrors.records) {
+    for (const record of records) {
+      const readback = record.execution_readback
+      if (!readback) continue
+      const scope = record.scope_label || record.source_group_id
+      if (readback.drift_count > 0 || readback.status === 'drift') {
+        items.push({
+          id: `record-drift-${record.record_id}`,
+          kind: 'record_drift',
+          tone: 'critical',
+          sourceLabel: 'DECISION MEMORY',
+          kindLabel: '事实漂移',
+          title: record.title,
+          summary: readback.summary || '当前事实与已保存判断不一致，需要复核执行闭环。',
+          meta: `${scope} · ${readbackCountSummary(readback)} · 跟进未关闭 ${recordFollowupOpenCount(record)}`,
+          actionLabel: '复核记录',
+          priority: 1000 + readback.drift_count * 16 + recordFollowupOpenCount(record),
+          target: { type: 'record', id: record.record_id },
+        })
+      } else if (readback.blocked_count > 0 || record.followup_blocked_count > 0 || readback.status === 'blocked') {
+        items.push({
+          id: `record-blocked-${record.record_id}`,
+          kind: 'record_blocked',
+          tone: 'critical',
+          sourceLabel: 'DECISION MEMORY',
+          kindLabel: '跟进阻塞',
+          title: record.title,
+          summary: readback.summary || '记录中仍有成员阻塞，需要人工解除或调整跟进路径。',
+          meta: `${scope} · 阻塞 ${(readback.blocked_count ?? 0) + (record.followup_blocked_count ?? 0)} · 未关闭 ${recordFollowupOpenCount(record)}`,
+          actionLabel: '处理阻塞',
+          priority: 900 + (readback.blocked_count ?? 0) * 12 + (record.followup_blocked_count ?? 0) * 12,
+          target: { type: 'record', id: record.record_id },
+        })
+      } else if (readback.needs_evidence_count > 0 || readback.status === 'needs_evidence') {
+        items.push({
+          id: `record-needs-evidence-${record.record_id}`,
+          kind: 'record_needs_evidence',
+          tone: 'alert',
+          sourceLabel: 'DECISION MEMORY',
+          kindLabel: '回读缺证据',
+          title: record.title,
+          summary: readback.summary || '当前记录仍有证据缺口，先补齐资料再推进判断。',
+          meta: `${scope} · ${readbackCountSummary(readback)} · 成员 ${record.member_count}`,
+          actionLabel: '补证据',
+          priority: 800 + readback.needs_evidence_count * 10,
+          target: { type: 'record', id: record.record_id },
+        })
+      }
+    }
+  }
+
+  if (!sourceErrors.groups) {
+    for (const group of groups) {
+      const pressure = group.evidence_assessment.pressure_score + group.evidence_assessment.gap_signal_count * 4
+      items.push({
+        id: `auto-group-${group.group_id}`,
+        kind: 'auto_group',
+        tone: group.evidence_assessment.quality_tier === 'blocked' ? 'alert' : 'notice',
+        sourceLabel: 'AUTO GROUP',
+        kindLabel: VIEW_LABELS[group.view],
+        title: group.title,
+        summary: group.decision_recommendation?.summary || group.primary_issue_summary || '打开自动组比较成员、成本、服务承载和证据缺口。',
+        meta: `${group.scope_label} · ${group.member_count} 台 VPS · 续费 ${group.renewal_window_count} · 缺口 ${group.evidence_assessment.gap_signal_count}`,
+        actionLabel: '打开决策组',
+        priority: 620 + group.priority + pressure,
+        target: { type: 'group', id: group.group_id },
+      })
+    }
+  }
+
+  if (!sourceErrors.manualGroups) {
+    for (const group of manualGroups.filter((item) => item.status === 'active')) {
+      items.push({
+        id: `manual-group-${group.manual_group_id}`,
+        kind: 'manual_group',
+        tone: 'maintenance',
+        sourceLabel: 'SCENARIO WORKBENCH',
+        kindLabel: MANUAL_GROUP_SCENARIO_LABELS[group.scenario],
+        title: group.title,
+        summary: group.decision_recommendation?.next_step || group.goal || '继续维护成员意图，必要时保存为一次组合决策记录。',
+        meta: `${group.member_count} 台 VPS · 资料缺口 ${group.evidence_assessment.gap_signal_count} · 更新 ${formatDateTime(group.updated_at)}`,
+        actionLabel: '继续组合',
+        priority: 520 + group.member_count * 4 + group.evidence_assessment.gap_signal_count * 8,
+        target: { type: 'manual_group', id: group.manual_group_id },
+      })
+    }
+  }
+
+  if (!sourceErrors.templates) {
+    for (const template of templates.filter((item) => item.status === 'active')) {
+      items.push({
+        id: `scenario-template-${template.template_id}`,
+        kind: 'scenario_template',
+        tone: template.builtin ? 'notice' : 'maintenance',
+        sourceLabel: 'SCENARIO TEMPLATES',
+        kindLabel: MANUAL_GROUP_SCENARIO_LABELS[template.scenario],
+        title: template.title,
+        summary: template.goal || template.note || '从模板启动自定义组合，再根据当前事实补齐成员。',
+        meta: `${template.builtin ? '内置模板' : '自定义模板'} · 蓝图成员 ${template.member_count}`,
+        actionLabel: '使用模板',
+        priority: 320 + (template.builtin ? 8 : 16) + template.member_count,
+        target: { type: 'template', id: template.template_id },
+      })
+    }
+  }
+
+  return items
+    .sort((left, right) => {
+      if (left.priority !== right.priority) return right.priority - left.priority
+      return left.title.localeCompare(right.title)
+    })
+    .slice(0, 6)
+}
+
+function nextWorkTargetLabel(target: AssetDecisionNextWorkTarget): string {
+  if (target.type === 'record') return target.id
+  if (target.type === 'manual_group') return target.id
+  if (target.type === 'template') return target.id
+  return target.id
 }
 
 function renderDecisionRecommendation(
@@ -1318,31 +1521,26 @@ export function AssetDecisionsPage() {
     let cancelled = false
     const filter = assetDecisionFilter
 
-    Promise.all([
+    Promise.allSettled([
       getAssetDecisionOverview(filter),
       activeView === 'single_queue' ? Promise.resolve([]) : listAssetDecisionGroups(filter),
-    ])
-      .then(([overview, groups]) => {
+    ] as const)
+      .then(([overviewResult, groupsResult]) => {
         if (cancelled) return
-        setPortfolioState({
-          overviewLoading: false,
-          overviewError: null,
-          overview,
-          groupsLoading: false,
-          groupsError: null,
-          groups,
-        })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        const message = describeError(error, '加载资产组合决策失败')
+        const overviewError = overviewResult.status === 'rejected'
+          ? describeError(overviewResult.reason, '加载资产组合概览失败')
+          : null
+        const groupsError = groupsResult.status === 'rejected'
+          ? describeError(groupsResult.reason, '加载资产决策组失败')
+          : null
         setPortfolioState((current) => ({
           ...current,
           overviewLoading: false,
-          overviewError: message,
+          overviewError,
+          overview: overviewResult.status === 'fulfilled' ? overviewResult.value : null,
           groupsLoading: false,
-          groupsError: message,
-          groups: [],
+          groupsError,
+          groups: groupsResult.status === 'fulfilled' ? groupsResult.value : [],
         }))
       })
 
@@ -1668,6 +1866,34 @@ export function AssetDecisionsPage() {
   const selectedRecordAssessment = recordDetailState.detail
     ? parseEvidenceAssessment(recordDetailState.detail.evidence_snapshot)
     : null
+  const closedLoopSourceErrors: ClosedLoopSourceErrors = {
+    overview: portfolioState.overviewError,
+    groups: portfolioState.groupsError,
+    records: recordsState.error,
+    manualGroups: manualGroupsState.error,
+    templates: templatesState.error,
+  }
+  const closedLoopMetrics = deriveClosedLoopMetrics(
+    portfolioState.groups,
+    recordsState.records,
+    manualGroupsState.groups,
+    closedLoopSourceErrors,
+    overview,
+  )
+  const nextWorkItems = deriveNextWorkItems(
+    portfolioState.groups,
+    recordsState.records,
+    manualGroupsState.groups,
+    templatesState.templates,
+    closedLoopSourceErrors,
+  )
+  const closedLoopPartialErrors = [
+    closedLoopSourceErrors.overview ? '组合概览' : '',
+    closedLoopSourceErrors.groups ? '自动组' : '',
+    closedLoopSourceErrors.records ? '决策记录' : '',
+    closedLoopSourceErrors.manualGroups ? '自定义组合' : '',
+    closedLoopSourceErrors.templates ? '场景模板' : '',
+  ].filter(Boolean)
 
   const workbenchTabs = WORKBENCH_TABS.map((item) => ({
     ...item,
@@ -2542,6 +2768,22 @@ export function AssetDecisionsPage() {
     clearOpenState('template_id')
   }
 
+  function openNextWorkItem(item: AssetDecisionNextWorkItem) {
+    if (item.target.type === 'record') {
+      openRecord(item.target.id)
+      return
+    }
+    if (item.target.type === 'manual_group') {
+      openManualGroup(item.target.id)
+      return
+    }
+    if (item.target.type === 'template') {
+      openTemplate(item.target.id)
+      return
+    }
+    openGroup(item.target.id)
+  }
+
   function applyManualDetail(detail: AssetDecisionManualGroupDetail) {
     setManualDetailState({ loading: false, error: null, detail })
     setManualMemberDrafts(buildManualMemberDrafts(detail))
@@ -3109,7 +3351,127 @@ export function AssetDecisionsPage() {
         </div>
       </div>
 
-      <section className="page-panel asset-decision-command animate-in d2">
+      <section className="page-panel asset-decision-closed-loop animate-in d2">
+        <div className="asset-decision-closed-loop__header">
+          <div>
+            <p className="section-heading__eyebrow">CLOSED LOOP</p>
+            <h2>下一步导览</h2>
+            <p>
+              按执行回读、自动组、场景组合和模板生成当前最值得处理的入口；这里只读派生，不会自动修改任何资产状态。
+            </p>
+          </div>
+          <div className="asset-decision-closed-loop__context">
+            <Badge variant="state" tone={closedLoopMetrics.partialErrorCount > 0 ? 'alert' : 'normal'}>
+              {closedLoopMetrics.partialErrorCount > 0 ? '部分证据不可用' : '证据可导览'}
+            </Badge>
+            {contextFilterChips.length > 0 && (
+              <span>上下文筛选已生效：{contextFilterChips.map((chip) => `${chip.label} ${chip.value}`).join(' · ')}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="asset-decision-closed-loop__grid">
+          <div className="asset-decision-next-work" aria-label="资产决策下一步工作项">
+            {portfolioState.groupsLoading || recordsState.loading || manualGroupsState.loading || templatesState.loading ? (
+              <PageStateView
+                kind="loading"
+                title="正在生成下一步导览…"
+                surface="empty"
+                compact
+              />
+            ) : nextWorkItems.length === 0 ? (
+              <PageStateView
+                kind="empty"
+                title="暂无需要置顶的组合工作"
+                description="当前已加载数据没有漂移、阻塞、缺证据或可启动场景；可以继续查看决策组列表。"
+                surface="empty"
+                compact
+              />
+            ) : (
+              <ol className="asset-decision-next-work__list">
+                {nextWorkItems.map((item, index) => (
+                  <li
+                    key={item.id}
+                    className={`asset-decision-next-work__item asset-decision-next-work__item--${item.tone}`}
+                  >
+                    <div className="asset-decision-next-work__rank">
+                      <strong>P{index + 1}</strong>
+                      <span>{item.sourceLabel}</span>
+                    </div>
+                    <div className="asset-decision-next-work__body">
+                      <span className="asset-decision-chip-row">
+                        <Badge variant="state" tone={item.tone}>{item.kindLabel}</Badge>
+                        <Badge variant="info" tone="neutral">{nextWorkTargetLabel(item.target)}</Badge>
+                      </span>
+                      <strong>{item.title}</strong>
+                      <span>{item.summary}</span>
+                      <small>{item.meta}</small>
+                    </div>
+                    <button
+                      className="btn sm primary"
+                      type="button"
+                      onClick={() => openNextWorkItem(item)}
+                    >
+                      {item.actionLabel}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+
+          <div className="asset-decision-closed-loop__metrics" aria-label="资产决策闭环状态">
+            <div>
+              <span>AUTO GROUPS</span>
+              <strong><MonoDigits>{closedLoopMetrics.autoGroupCount}</MonoDigits></strong>
+              <small>自动发现组合</small>
+            </div>
+            <div>
+              <span>SCENARIOS</span>
+              <strong><MonoDigits>{closedLoopMetrics.manualActiveCount}</MonoDigits></strong>
+              <small>进行中自定义组合</small>
+            </div>
+            <div>
+              <span>RECORDS</span>
+              <strong><MonoDigits>{closedLoopMetrics.recordActiveCount}</MonoDigits></strong>
+              <small>未关闭决策记录</small>
+            </div>
+            <div className={closedLoopMetrics.readbackDriftCount > 0 ? 'asset-decision-closed-loop__metric--critical' : ''}>
+              <span>DRIFT</span>
+              <strong><MonoDigits>{closedLoopMetrics.readbackDriftCount}</MonoDigits></strong>
+              <small>事实漂移成员</small>
+            </div>
+            <div className={closedLoopMetrics.readbackBlockedCount > 0 ? 'asset-decision-closed-loop__metric--critical' : ''}>
+              <span>BLOCKED</span>
+              <strong><MonoDigits>{closedLoopMetrics.readbackBlockedCount}</MonoDigits></strong>
+              <small>回读/跟进阻塞</small>
+            </div>
+            <div className={closedLoopMetrics.readbackNeedsEvidenceCount > 0 ? 'asset-decision-closed-loop__metric--alert' : ''}>
+              <span>EVIDENCE GAP</span>
+              <strong><MonoDigits>{closedLoopMetrics.readbackNeedsEvidenceCount + closedLoopMetrics.evidenceGapGroupCount}</MonoDigits></strong>
+              <small>回读缺口 + 资料组</small>
+            </div>
+            <div className={closedLoopMetrics.costPressureGroupCount > 0 ? 'asset-decision-closed-loop__metric--alert' : ''}>
+              <span>COST</span>
+              <strong><MonoDigits>{closedLoopMetrics.costPressureGroupCount}</MonoDigits></strong>
+              <small>预算压力组</small>
+            </div>
+            <div>
+              <span>OPEN</span>
+              <strong><MonoDigits>{closedLoopMetrics.readbackOpenCount}</MonoDigits></strong>
+              <small>仍待回读成员</small>
+            </div>
+          </div>
+        </div>
+
+        {closedLoopPartialErrors.length > 0 && (
+          <div className="inline-alert warn" role="status">
+            {closedLoopPartialErrors.join('、')}暂不可用，导览只展示已成功加载的事实。
+          </div>
+        )}
+      </section>
+
+      <section className="page-panel asset-decision-command animate-in d3">
         <div className="asset-decision-board__header">
           <div>
             <p className="section-heading__eyebrow">PORTFOLIO WORKBENCH</p>
