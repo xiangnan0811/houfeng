@@ -1754,3 +1754,36 @@ Implemented semantic execution_plan read model for saved asset decision records,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 170: Asset decision migration startup hotfix
+
+**Date**: 2026-06-06
+**Task**: Asset decision migration startup hotfix
+**Branch**: `worktree/fix-asset-decision-view-migration`
+
+### Summary
+
+Fixed the asset decision followup migration startup blocker by dropping and recreating asset_decision_records_with_counts before changing its column shape, added a regression test for the PostgreSQL view replacement constraint, updated database migration guidelines, and verified with go test ./internal/center/store/migrate, make verify-go, Trellis validation, and git diff --check. Docker daemon was unavailable locally, so PostgreSQL integration smoke could not be run in this shell.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2dfa13e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

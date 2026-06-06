@@ -20,6 +20,8 @@ end $$;
 create index if not exists idx_asset_decision_record_members_followup
   on asset_decision_record_members(record_id, followup_status, updated_at desc);
 
+drop view if exists asset_decision_records_with_counts;
+
 create or replace view asset_decision_records_with_counts as
 select
   r.record_id,

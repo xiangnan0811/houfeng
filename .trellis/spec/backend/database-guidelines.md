@@ -68,6 +68,7 @@
   1. `EnsureLedger` —— 建 `schema_migrations(name primary key, applied_at)` 表
   2. 按文件名排序遍历，逐条 `HasMigration` 检查，未应用则 `ExecMigration` + `RecordMigration`
 - **每个迁移必须幂等**：`create table if not exists`、`create index if not exists`、`alter table ... add column if not exists` 是基线写法（见 `0001_initial_schema.sql`、`0009_add_observability_filter_indexes.sql`）。
+- **视图列结构变化必须先 drop 再 recreate**：PostgreSQL 的 `CREATE OR REPLACE VIEW` 不能删除列、重排列或在中间插入列；否则会出现类似 `cannot change name of view column "evidence_snapshot" to "followup_todo_count"` 的启动失败。迁移需要使用 `drop view if exists <view_name>;` 后再 `create or replace view ...`，并保证依赖对象可随迁移重建。
 
 ### 流程
 
@@ -86,6 +87,7 @@
 ### 不要做
 
 - ❌ 修改已经合并/发布过的迁移文件内容（包括加空格）。要修就再写一个新迁移。
+- 例外：如果某个已发布迁移在记录到 `schema_migrations` 前必然失败，导致后续修复迁移无法执行，可以修正该失败迁移本身；修复必须保持幂等，并增加回归测试说明原因。
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
