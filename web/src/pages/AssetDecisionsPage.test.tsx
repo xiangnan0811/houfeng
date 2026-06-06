@@ -612,6 +612,13 @@ describe('AssetDecisionsPage', () => {
     expect(within(commandSummary).getByText('证据源正常')).toBeInTheDocument()
     expect(within(commandSummary).getByRole('button', { name: '补证据' })).toBeInTheDocument()
     expect(within(commandSummary).getByRole('link', { name: '资料缺口' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
+    const decisionPath = screen.getByLabelText('资产组合决策推进路径')
+    expect(within(decisionPath).getByRole('heading', { name: '决策路径' })).toBeInTheDocument()
+    expect(within(decisionPath).getByText('发现组合压力')).toBeInTheDocument()
+    expect(within(decisionPath).getByText('形成真实场景')).toBeInTheDocument()
+    expect(within(decisionPath).getByText('保存一次判断')).toBeInTheDocument()
+    expect(within(decisionPath).getByText('回读执行闭环')).toBeInTheDocument()
+    expect(within(decisionPath).getByRole('button', { name: '打开自动组' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '下一步导览' })).toBeInTheDocument()
     expect(screen.getAllByText('CLOSED LOOP').length).toBeGreaterThan(0)
     expect(screen.getByText('回读缺证据')).toBeInTheDocument()
@@ -875,6 +882,9 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看组' }))
 
     const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    expect(within(dialog).getByRole('heading', { name: '场景推进建议' })).toBeInTheDocument()
+    expect(within(dialog).getByText('直接保存记录')).toBeInTheDocument()
+    expect(within(dialog).getByText('先创建自定义组合')).toBeInTheDocument()
     expect(within(dialog).getAllByText('Germany Primary').length).toBeGreaterThan(0)
     expect(within(dialog).getByText('Germany Standby')).toBeInTheDocument()
     expect(within(dialog).getByText('主力候选')).toBeInTheDocument()
@@ -986,6 +996,9 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
     const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    expect(within(manualDialog).getByRole('heading', { name: '组合推进状态' })).toBeInTheDocument()
+    expect(within(manualDialog).getByText(/可保存记录 5\/5|接近可保存|继续整理/)).toBeInTheDocument()
+    expect(within(manualDialog).getByText('当前事实')).toBeInTheDocument()
     expect(within(manualDialog).getByRole('heading', { name: '组合场景' })).toBeInTheDocument()
     expect(within(manualDialog).getByDisplayValue('主力稳定')).toBeInTheDocument()
     expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups', 'POST')).toEqual([
@@ -1039,6 +1052,9 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(manualSection!).getByRole('button', { name: '查看组合' }))
 
     const dialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    expect(within(dialog).getByRole('heading', { name: '组合推进状态' })).toBeInTheDocument()
+    expect(within(dialog).getByText('意图')).toBeInTheDocument()
+    expect(within(dialog).getByText('已设置 1/1 个成员动作')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '保存为决策记录' }))
     fireEvent.change(within(dialog).getAllByLabelText('组合目标')[1], { target: { value: '保留主力并观察备用' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
@@ -1148,6 +1164,7 @@ describe('AssetDecisionsPage', () => {
     mockInitialWorkbench(fetchMock, {
       routes: [
         { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
+        { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: groupDetail() },
         {
           url: '/api/asset-decisions/records/adr_001',
           method: 'PATCH',
@@ -1178,6 +1195,9 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getByText('证据快照')).toBeInTheDocument()
     expect(within(dialog).getByText('执行回读')).toBeInTheDocument()
     expect(within(dialog).getByText('执行编排')).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: '来源与当前闭环' })).toBeInTheDocument()
+    expect(within(dialog).getByText('来自自动组 未来 30 天')).toBeInTheDocument()
+    expect(within(dialog).getByText(/自动组 · renewal_attention · 续费取舍 · adg_auto_001/)).toBeInTheDocument()
     expect(within(dialog).getAllByText('保留观察').length).toBeGreaterThan(0)
     expect(within(dialog).getAllByText('当前事实已对齐，待确认跟进状态').length).toBeGreaterThan(0)
     expect(within(dialog).getAllByText('已对齐').length).toBeGreaterThan(0)
@@ -1266,6 +1286,12 @@ describe('AssetDecisionsPage', () => {
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/subscriptions/') && call[1]?.method)).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/monitoring-instances/') && call[1]?.method)).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/targets/') && call[1]?.method)).toBe(false)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '复核来源' }))
+    const sourceDialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    expect(within(sourceDialog).getByRole('heading', { name: '场景推进建议' })).toBeInTheDocument()
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30')
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/') && call[1]?.method === 'PATCH')).toBe(false)
   })
 
   it('maps execution plan subscription CTA without writing business assets', async () => {

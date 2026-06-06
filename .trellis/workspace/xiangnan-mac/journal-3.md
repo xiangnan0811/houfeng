@@ -1921,3 +1921,36 @@ Polished the Asset Decisions portfolio workbench hierarchy with a command summar
 ### Next Steps
 
 - None - task complete
+
+
+## Session 175: Asset decisions scenario progression
+
+**Date**: 2026-06-06
+**Task**: Asset decisions scenario progression
+**Branch**: `worktree/asset-decisions-scenario-progression`
+
+### Summary
+
+Connected Asset Decisions discovery, scenario comparison, saved decision records, and execution readback into a clear decision path with group/manual/record continuity surfaces. Verified web tests, lint, build, Trellis validation, and browser desktop/mobile sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `619e642` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
