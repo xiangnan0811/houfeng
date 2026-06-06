@@ -3,10 +3,13 @@ package migrate
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"houfeng/db/migrations"
 )
 
 func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
@@ -159,6 +162,28 @@ func TestApplyFSIncludesMigrationNameOnExecFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("error %q does not include underlying exec error", err)
+	}
+}
+
+func TestAssetDecisionFollowupMigrationDropsRecordsViewBeforeChangingShape(t *testing.T) {
+	sqlBytes, err := fs.ReadFile(migrations.FS, "0036_add_asset_decision_member_followups.sql")
+	if err != nil {
+		t.Fatalf("read 0036 migration: %v", err)
+	}
+	sql := strings.ToLower(string(sqlBytes))
+	dropIndex := strings.Index(sql, "drop view if exists asset_decision_records_with_counts")
+	createIndex := strings.Index(sql, "create or replace view asset_decision_records_with_counts")
+	if dropIndex < 0 {
+		t.Fatal("0036 migration must drop asset_decision_records_with_counts before changing its column shape")
+	}
+	if createIndex < 0 {
+		t.Fatal("0036 migration must recreate asset_decision_records_with_counts")
+	}
+	if dropIndex > createIndex {
+		t.Fatal("0036 migration drops asset_decision_records_with_counts after recreating it; drop must come first")
+	}
+	if !strings.Contains(sql[createIndex:], "followup_todo_count") || !strings.Contains(sql[createIndex:], "evidence_snapshot") {
+		t.Fatal("0036 recreated view must include followup counts and preserve evidence_snapshot")
 	}
 }
 
