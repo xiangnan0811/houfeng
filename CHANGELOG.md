@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/xiangnan0811/houfeng/compare/v0.43.0...v0.44.0) (2026-06-06)
+
+
+### Features
+
+* **asset-decisions:** add execution orchestration plans ([c1b6773](https://github.com/xiangnan0811/houfeng/commit/c1b677344a53f86f6e4259c21dc92a32765a70f9))
+
 ## [0.43.0](https://github.com/xiangnan0811/houfeng/compare/v0.42.0...v0.43.0) (2026-06-06)
 
 
