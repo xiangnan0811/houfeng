@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.1](https://github.com/xiangnan0811/houfeng/compare/v0.44.0...v0.44.1) (2026-06-06)
+
+
+### Bug Fixes
+
+* **db:** recreate asset decision records view during followup migration ([a1b3312](https://github.com/xiangnan0811/houfeng/commit/a1b331297812bf4d1ccc29eb34594953894f51d4))
+
 ## [0.44.0](https://github.com/xiangnan0811/houfeng/compare/v0.43.0...v0.44.0) (2026-06-06)
 
 
