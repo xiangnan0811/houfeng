@@ -18,6 +18,7 @@ var ErrAssetDecisionGroupNotFound = errors.New("asset decision group not found")
 var ErrAssetDecisionManualGroupNotFound = errors.New("asset decision manual group not found")
 var ErrAssetDecisionManualGroupMemberNotFound = errors.New("asset decision manual group member not found")
 var ErrAssetDecisionRecordNotFound = errors.New("asset decision record not found")
+var ErrAssetDecisionScenarioTemplateNotFound = errors.New("asset decision scenario template not found")
 var ErrInvalidAssetDecisionInput = errors.New("invalid asset decision input")
 
 const (
@@ -110,8 +111,14 @@ const (
 )
 
 type ListFilters struct {
-	View            View
-	RenewWithinDays int
+	View            View                `json:"view"`
+	RenewWithinDays int                 `json:"renew_within_days"`
+	ProviderID      string              `json:"provider_id,omitempty"`
+	VPSID           string              `json:"vps_id,omitempty"`
+	Country         string              `json:"country,omitempty"`
+	Region          string              `json:"region,omitempty"`
+	City            string              `json:"city,omitempty"`
+	Scenario        ManualGroupScenario `json:"scenario,omitempty"`
 }
 
 type Overview struct {
@@ -188,6 +195,7 @@ type GroupSummary struct {
 	BaseCurrency               string                            `json:"base_currency,omitempty"`
 	EvidenceChips              []EvidenceChip                    `json:"evidence_chips"`
 	EvidenceAssessment         EvidenceAssessment                `json:"evidence_assessment"`
+	DecisionRecommendation     DecisionRecommendation            `json:"decision_recommendation"`
 }
 
 type GroupDetail struct {
@@ -196,27 +204,28 @@ type GroupDetail struct {
 }
 
 type GroupMember struct {
-	VPS                         vpsassets.Record      `json:"vps"`
-	PrimarySubscription         *subscriptions.Record `json:"primary_subscription,omitempty"`
-	SubscriptionCount           int                   `json:"subscription_count"`
-	ActiveSubscriptionCount     int                   `json:"active_subscription_count"`
-	InactiveSubscriptionCount   int                   `json:"inactive_subscription_count"`
-	ServiceCount                int                   `json:"service_count"`
-	DomainCount                 int                   `json:"domain_count"`
-	TargetCount                 int                   `json:"target_count"`
-	RunningTargetCount          int                   `json:"running_target_count"`
-	MonitoringLinkCount         int                   `json:"monitoring_link_count"`
-	RunningMonitoringCount      int                   `json:"running_monitoring_count"`
-	AbnormalMonitoringCount     int                   `json:"abnormal_monitoring_count"`
-	ActiveIncidentCount         int                   `json:"active_incident_count"`
-	PrimaryIssueSummary         string                `json:"primary_issue_summary"`
-	CancellationAttentionReason string                `json:"cancellation_attention_reason,omitempty"`
-	SuggestedRole               SuggestedRole         `json:"suggested_role"`
-	SuggestedAction             SuggestedAction       `json:"suggested_action"`
-	EvidenceChips               []EvidenceChip        `json:"evidence_chips"`
-	EvidenceAssessment          EvidenceAssessment    `json:"evidence_assessment"`
-	RenewalWithinWindow         bool                  `json:"renewal_within_window"`
-	SourceAvailability          SourceAvailability    `json:"source_availability"`
+	VPS                         vpsassets.Record       `json:"vps"`
+	PrimarySubscription         *subscriptions.Record  `json:"primary_subscription,omitempty"`
+	SubscriptionCount           int                    `json:"subscription_count"`
+	ActiveSubscriptionCount     int                    `json:"active_subscription_count"`
+	InactiveSubscriptionCount   int                    `json:"inactive_subscription_count"`
+	ServiceCount                int                    `json:"service_count"`
+	DomainCount                 int                    `json:"domain_count"`
+	TargetCount                 int                    `json:"target_count"`
+	RunningTargetCount          int                    `json:"running_target_count"`
+	MonitoringLinkCount         int                    `json:"monitoring_link_count"`
+	RunningMonitoringCount      int                    `json:"running_monitoring_count"`
+	AbnormalMonitoringCount     int                    `json:"abnormal_monitoring_count"`
+	ActiveIncidentCount         int                    `json:"active_incident_count"`
+	PrimaryIssueSummary         string                 `json:"primary_issue_summary"`
+	CancellationAttentionReason string                 `json:"cancellation_attention_reason,omitempty"`
+	SuggestedRole               SuggestedRole          `json:"suggested_role"`
+	SuggestedAction             SuggestedAction        `json:"suggested_action"`
+	EvidenceChips               []EvidenceChip         `json:"evidence_chips"`
+	EvidenceAssessment          EvidenceAssessment     `json:"evidence_assessment"`
+	DecisionRecommendation      DecisionRecommendation `json:"decision_recommendation"`
+	RenewalWithinWindow         bool                   `json:"renewal_within_window"`
+	SourceAvailability          SourceAvailability     `json:"source_availability"`
 }
 
 type RecordSummary struct {
@@ -342,14 +351,19 @@ type Repository interface {
 	GetOverview(context.Context, ListFilters) (Overview, error)
 	ListGroups(context.Context, ListFilters) ([]GroupSummary, error)
 	GetGroup(context.Context, string, ListFilters) (GroupDetail, error)
-	ListManualGroups(context.Context) ([]ManualGroupSummary, error)
+	ListManualGroups(context.Context, ListFilters) ([]ManualGroupSummary, error)
 	CreateManualGroup(context.Context, CreateManualGroupInput) (ManualGroupDetail, error)
 	GetManualGroup(context.Context, string) (ManualGroupDetail, error)
 	PatchManualGroup(context.Context, string, PatchManualGroupInput) (ManualGroupDetail, error)
 	AddManualGroupMember(context.Context, string, CreateManualGroupMemberInput) (ManualGroupDetail, error)
 	PatchManualGroupMember(context.Context, string, string, PatchManualGroupMemberInput) (ManualGroupDetail, error)
 	DeleteManualGroupMember(context.Context, string, string) (ManualGroupDetail, error)
-	ListRecords(context.Context) ([]RecordSummary, error)
+	ListScenarioTemplates(context.Context) ([]ScenarioTemplateSummary, error)
+	CreateScenarioTemplate(context.Context, CreateScenarioTemplateInput) (ScenarioTemplateDetail, error)
+	GetScenarioTemplate(context.Context, string) (ScenarioTemplateDetail, error)
+	PatchScenarioTemplate(context.Context, string, PatchScenarioTemplateInput) (ScenarioTemplateDetail, error)
+	CreateManualGroupFromTemplate(context.Context, string, CreateManualGroupFromTemplateInput) (ManualGroupDetail, error)
+	ListRecords(context.Context, ListFilters) ([]RecordSummary, error)
 	CreateRecord(context.Context, CreateRecordInput) (RecordDetail, error)
 	GetRecord(context.Context, string) (RecordDetail, error)
 	PatchRecord(context.Context, string, PatchRecordInput) (RecordDetail, error)
@@ -374,6 +388,13 @@ type Fact struct {
 }
 
 func NormalizeFilters(filters ListFilters) ListFilters {
+	filters.View = View(strings.TrimSpace(string(filters.View)))
+	filters.ProviderID = strings.TrimSpace(filters.ProviderID)
+	filters.VPSID = strings.TrimSpace(filters.VPSID)
+	filters.Country = strings.TrimSpace(filters.Country)
+	filters.Region = strings.TrimSpace(filters.Region)
+	filters.City = strings.TrimSpace(filters.City)
+	filters.Scenario = ManualGroupScenario(strings.TrimSpace(string(filters.Scenario)))
 	if filters.RenewWithinDays == 0 {
 		filters.RenewWithinDays = 30
 	}
@@ -388,10 +409,15 @@ func ValidateFilters(filters ListFilters) error {
 	}
 	switch filters.View {
 	case "", ViewNeedsDecision, ViewRenewal, ViewRegion, ViewProvider, ViewCost, ViewEvidence:
-		return nil
 	default:
 		return ErrInvalidAssetDecisionInput
 	}
+	if filters.Scenario != "" {
+		if err := ValidateManualGroupScenario(filters.Scenario); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func StableGroupID(groupType GroupType, parts ...string) string {
@@ -575,6 +601,7 @@ func RecordSnapshotFromGroup(group GroupDetail) EvidenceSnapshot {
 		"primary_issue_summary":        group.PrimaryIssueSummary,
 		"evidence_chips":               group.EvidenceChips,
 		"evidence_assessment":          group.EvidenceAssessment,
+		"decision_recommendation":      group.DecisionRecommendation,
 		"source_availability":          mergeMemberSourceAvailability(group.Members),
 	}
 	if group.MonthlyCostBase != nil {
@@ -619,6 +646,7 @@ func RecordSnapshotFromMember(member GroupMember) EvidenceSnapshot {
 		"renewal_within_window":         member.RenewalWithinWindow,
 		"evidence_chips":                member.EvidenceChips,
 		"evidence_assessment":           member.EvidenceAssessment,
+		"decision_recommendation":       member.DecisionRecommendation,
 		"source_availability":           member.SourceAvailability,
 	}
 	if member.PrimarySubscription != nil {
@@ -651,19 +679,21 @@ func DeriveOverview(facts []Fact, filters ListFilters) (Overview, error) {
 	if err := ValidateFilters(filters); err != nil {
 		return Overview{}, err
 	}
-	groups, err := DeriveGroups(facts, filters)
+	countFilters := filters
+	countFilters.View = ""
+	countGroups, err := DeriveGroups(facts, countFilters)
 	if err != nil {
 		return Overview{}, err
 	}
-	allGroups, err := DeriveGroups(facts, ListFilters{RenewWithinDays: filters.RenewWithinDays})
-	if err != nil {
-		return Overview{}, err
+	groups := countGroups
+	if filters.View != "" {
+		groups = filterGroupsByView(countGroups, filters.View)
 	}
 
 	typeCounts := map[GroupType]int{}
 	viewCounts := map[View]int{}
 	memberIDs := map[string]struct{}{}
-	for _, group := range allGroups {
+	for _, group := range countGroups {
 		typeCounts[group.GroupType]++
 		viewCounts[group.View]++
 		for _, member := range group.Members {
@@ -682,7 +712,7 @@ func DeriveOverview(facts []Fact, filters ListFilters) (Overview, error) {
 	return Overview{
 		SnapshotGeneratedAt: time.Now().UTC(),
 		RenewWithinDays:     filters.RenewWithinDays,
-		GroupCount:          len(allGroups),
+		GroupCount:          len(countGroups),
 		MemberVPSCount:      len(memberIDs),
 		NeedsDecisionCount:  viewCounts[ViewNeedsDecision],
 		RenewalGroupCount:   typeCounts[GroupRenewalAttention],
@@ -727,16 +757,18 @@ func DeriveGroups(facts []Fact, filters ListFilters) ([]GroupDetail, error) {
 		return groups[i].Title < groups[j].Title
 	})
 
+	contextMatched := make([]GroupDetail, 0, len(groups))
+	for _, group := range groups {
+		if GroupMatchesFilters(group, filters) {
+			contextMatched = append(contextMatched, group)
+		}
+	}
+	groups = contextMatched
+
 	if filters.View == "" {
 		return groups, nil
 	}
-	filtered := make([]GroupDetail, 0, len(groups))
-	for _, group := range groups {
-		if group.View == filters.View {
-			filtered = append(filtered, group)
-		}
-	}
-	return filtered, nil
+	return filterGroupsByView(groups, filters.View), nil
 }
 
 func FindGroup(facts []Fact, groupID string, filters ListFilters) (GroupDetail, error) {
@@ -978,7 +1010,9 @@ func buildGroup(groupType GroupType, view View, scopeKey, title, scopeLabel stri
 	}
 	summary.PrimaryIssueSummary = topIssue(issueCounts)
 	summary.EvidenceAssessment = assessGroup(groupType, priority, members)
-	return GroupDetail{GroupSummary: summary, Members: members}
+	detail := GroupDetail{GroupSummary: summary, Members: members}
+	detail.DecisionRecommendation = RecommendGroup(detail)
+	return detail
 }
 
 func buildMember(fact Fact, filters ListFilters) GroupMember {
@@ -1008,6 +1042,7 @@ func buildMember(fact Fact, filters ListFilters) GroupMember {
 	member.EvidenceChips = buildEvidenceChips(fact, member.RenewalWithinWindow)
 	member.SuggestedRole, member.SuggestedAction = suggestMember(member)
 	member.EvidenceAssessment = assessMember(member)
+	member.DecisionRecommendation = RecommendMember(member)
 	return member
 }
 

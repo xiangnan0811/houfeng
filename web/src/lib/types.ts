@@ -906,6 +906,22 @@ export type AssetDecisionEvidenceAssessment = {
   summary: string
 }
 
+export type AssetDecisionRecommendationReason = {
+  kind: string
+  label: string
+  tone: 'normal' | 'notice' | 'alert' | 'critical' | string
+  details?: string
+}
+
+export type AssetDecisionRecommendation = {
+  summary: string
+  next_step: string
+  reasons: AssetDecisionRecommendationReason[]
+  blockers: AssetDecisionRecommendationReason[]
+  priority_vps_ids: string[]
+  confidence_label: string
+}
+
 export type AssetDecisionGroupSummary = {
   group_id: string
   group_type: AssetDecisionGroupType
@@ -940,6 +956,7 @@ export type AssetDecisionGroupSummary = {
   base_currency?: string
   evidence_chips: AssetDecisionEvidenceChip[]
   evidence_assessment: AssetDecisionEvidenceAssessment
+  decision_recommendation?: AssetDecisionRecommendation
 }
 
 export type AssetDecisionGroupMember = {
@@ -962,6 +979,7 @@ export type AssetDecisionGroupMember = {
   suggested_action: AssetDecisionSuggestedAction
   evidence_chips: AssetDecisionEvidenceChip[]
   evidence_assessment: AssetDecisionEvidenceAssessment
+  decision_recommendation?: AssetDecisionRecommendation
   renewal_within_window: boolean
   source_availability: AssetDecisionSourceAvailability
 }
@@ -1023,6 +1041,7 @@ export type AssetDecisionManualGroupSummary = {
   base_currency?: string
   evidence_chips: AssetDecisionEvidenceChip[]
   evidence_assessment: AssetDecisionEvidenceAssessment
+  decision_recommendation?: AssetDecisionRecommendation
   source_availability: AssetDecisionSourceAvailability
   created_at: string
   updated_at: string
@@ -1067,6 +1086,83 @@ export type AssetDecisionOverview = {
 export type AssetDecisionGroupListFilter = {
   view?: AssetDecisionView | '' | null
   renew_within_days?: number | null
+  provider_id?: string | null
+  vps_id?: string | null
+  country?: string | null
+  region?: string | null
+  city?: string | null
+  scenario?: AssetDecisionManualGroupScenario | '' | null
+}
+
+export type AssetDecisionScenarioTemplateStatus = 'active' | 'archived'
+
+export type AssetDecisionScenarioTemplateMember = {
+  template_id?: string
+  member_id?: string
+  vps_id?: string
+  intended_role?: AssetDecisionSuggestedRole
+  intended_action?: AssetDecisionSuggestedAction
+  reason: string
+  note: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export type AssetDecisionScenarioTemplateSummary = {
+  template_id: string
+  builtin: boolean
+  status: AssetDecisionScenarioTemplateStatus
+  scenario: AssetDecisionManualGroupScenario
+  title: string
+  goal: string
+  note: string
+  source_manual_group_id?: string
+  member_count: number
+  created_at: string
+  updated_at: string
+  archived_at?: string | null
+}
+
+export type AssetDecisionScenarioTemplateDetail = AssetDecisionScenarioTemplateSummary & {
+  members: AssetDecisionScenarioTemplateMember[]
+}
+
+export type CreateAssetDecisionScenarioTemplateMemberInput = {
+  vps_id?: string
+  intended_role?: AssetDecisionSuggestedRole
+  intended_action?: AssetDecisionSuggestedAction
+  reason?: string
+  note?: string
+  sort_order?: number
+}
+
+export type CreateAssetDecisionScenarioTemplateInput = {
+  status?: AssetDecisionScenarioTemplateStatus
+  scenario?: AssetDecisionManualGroupScenario
+  title?: string
+  goal?: string
+  note?: string
+  source_manual_group_id?: string
+  members?: CreateAssetDecisionScenarioTemplateMemberInput[]
+}
+
+export type PatchAssetDecisionScenarioTemplateInput = {
+  status?: AssetDecisionScenarioTemplateStatus
+  scenario?: AssetDecisionManualGroupScenario
+  title?: string
+  goal?: string
+  note?: string
+}
+
+export type CreateManualGroupFromScenarioTemplateInput = {
+  renew_within_days?: number
+  status?: AssetDecisionManualGroupStatus
+  scenario?: AssetDecisionManualGroupScenario
+  title?: string
+  goal?: string
+  note?: string
+  members?: CreateAssetDecisionManualGroupMemberInput[]
 }
 
 export type AssetDecisionRecordStatus =

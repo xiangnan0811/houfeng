@@ -14,14 +14,19 @@ type AssetDecisionRepository interface {
 	GetOverview(context.Context, assetdecisions.ListFilters) (assetdecisions.Overview, error)
 	ListGroups(context.Context, assetdecisions.ListFilters) ([]assetdecisions.GroupSummary, error)
 	GetGroup(context.Context, string, assetdecisions.ListFilters) (assetdecisions.GroupDetail, error)
-	ListManualGroups(context.Context) ([]assetdecisions.ManualGroupSummary, error)
+	ListManualGroups(context.Context, assetdecisions.ListFilters) ([]assetdecisions.ManualGroupSummary, error)
 	CreateManualGroup(context.Context, assetdecisions.CreateManualGroupInput) (assetdecisions.ManualGroupDetail, error)
 	GetManualGroup(context.Context, string) (assetdecisions.ManualGroupDetail, error)
 	PatchManualGroup(context.Context, string, assetdecisions.PatchManualGroupInput) (assetdecisions.ManualGroupDetail, error)
 	AddManualGroupMember(context.Context, string, assetdecisions.CreateManualGroupMemberInput) (assetdecisions.ManualGroupDetail, error)
 	PatchManualGroupMember(context.Context, string, string, assetdecisions.PatchManualGroupMemberInput) (assetdecisions.ManualGroupDetail, error)
 	DeleteManualGroupMember(context.Context, string, string) (assetdecisions.ManualGroupDetail, error)
-	ListRecords(context.Context) ([]assetdecisions.RecordSummary, error)
+	ListScenarioTemplates(context.Context) ([]assetdecisions.ScenarioTemplateSummary, error)
+	CreateScenarioTemplate(context.Context, assetdecisions.CreateScenarioTemplateInput) (assetdecisions.ScenarioTemplateDetail, error)
+	GetScenarioTemplate(context.Context, string) (assetdecisions.ScenarioTemplateDetail, error)
+	PatchScenarioTemplate(context.Context, string, assetdecisions.PatchScenarioTemplateInput) (assetdecisions.ScenarioTemplateDetail, error)
+	CreateManualGroupFromTemplate(context.Context, string, assetdecisions.CreateManualGroupFromTemplateInput) (assetdecisions.ManualGroupDetail, error)
+	ListRecords(context.Context, assetdecisions.ListFilters) ([]assetdecisions.RecordSummary, error)
 	CreateRecord(context.Context, assetdecisions.CreateRecordInput) (assetdecisions.RecordDetail, error)
 	GetRecord(context.Context, string) (assetdecisions.RecordDetail, error)
 	PatchRecord(context.Context, string, assetdecisions.PatchRecordInput) (assetdecisions.RecordDetail, error)
@@ -113,7 +118,16 @@ func AssetDecisionManualGroups(repo AssetDecisionRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			groups, err := repo.ListManualGroups(r.Context())
+			filters, err := assetDecisionFiltersFromQuery(r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			groups, err := repo.ListManualGroups(r.Context(), filters)
+			if errors.Is(err, assetdecisions.ErrInvalidAssetDecisionInput) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
@@ -166,7 +180,16 @@ func AssetDecisionRecords(repo AssetDecisionRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			records, err := repo.ListRecords(r.Context())
+			filters, err := assetDecisionFiltersFromQuery(r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
+			records, err := repo.ListRecords(r.Context(), filters)
+			if errors.Is(err, assetdecisions.ErrInvalidAssetDecisionInput) {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
@@ -196,6 +219,53 @@ func AssetDecisionRecords(repo AssetDecisionRepository) http.Handler {
 			writeJSON(w, http.StatusCreated, record)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})
+}
+
+func AssetDecisionScenarioTemplates(repo AssetDecisionRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			templates, err := repo.ListScenarioTemplates(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			writeJSON(w, http.StatusOK, templates)
+		case http.MethodPost:
+			var input assetdecisions.CreateScenarioTemplateInput
+			if err := decodeJSON(r, &input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+			template, err := repo.CreateScenarioTemplate(r.Context(), input)
+			writeScenarioTemplateResult(w, template, err, http.StatusCreated)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})
+}
+
+func AssetDecisionScenarioTemplate(repo AssetDecisionRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := assetDecisionScenarioTemplatePathParts(r.URL.Path)
+		if len(parts) == 0 || parts[0] == "" {
+			writeError(w, http.StatusNotFound, "asset decision scenario template not found")
+			return
+		}
+		templateID := parts[0]
+		switch len(parts) {
+		case 1:
+			handleAssetDecisionScenarioTemplateItem(w, r, repo, templateID)
+		case 2:
+			if parts[1] != "manual-groups" {
+				writeError(w, http.StatusNotFound, "asset decision scenario template not found")
+				return
+			}
+			handleAssetDecisionScenarioTemplateManualGroups(w, r, repo, templateID)
+		default:
+			writeError(w, http.StatusNotFound, "asset decision scenario template not found")
 		}
 	})
 }
@@ -260,6 +330,8 @@ func writeManualGroupResult(w http.ResponseWriter, group assetdecisions.ManualGr
 		writeError(w, http.StatusNotFound, "asset decision manual group not found")
 	case errors.Is(err, assetdecisions.ErrAssetDecisionManualGroupMemberNotFound):
 		writeError(w, http.StatusNotFound, "asset decision manual group member not found")
+	case errors.Is(err, assetdecisions.ErrAssetDecisionScenarioTemplateNotFound):
+		writeError(w, http.StatusNotFound, "asset decision scenario template not found")
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "internal server error")
 	default:
@@ -267,8 +339,64 @@ func writeManualGroupResult(w http.ResponseWriter, group assetdecisions.ManualGr
 	}
 }
 
+func handleAssetDecisionScenarioTemplateItem(w http.ResponseWriter, r *http.Request, repo AssetDecisionRepository, templateID string) {
+	switch r.Method {
+	case http.MethodGet:
+		template, err := repo.GetScenarioTemplate(r.Context(), templateID)
+		writeScenarioTemplateResult(w, template, err, http.StatusOK)
+	case http.MethodPatch:
+		var request assetDecisionScenarioTemplatePatchRequest
+		if err := decodeJSON(r, &request); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		template, err := repo.PatchScenarioTemplate(r.Context(), templateID, request.toInput())
+		writeScenarioTemplateResult(w, template, err, http.StatusOK)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func handleAssetDecisionScenarioTemplateManualGroups(w http.ResponseWriter, r *http.Request, repo AssetDecisionRepository, templateID string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var input assetdecisions.CreateManualGroupFromTemplateInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	group, err := repo.CreateManualGroupFromTemplate(r.Context(), templateID, input)
+	writeManualGroupResult(w, group, err, http.StatusCreated)
+}
+
+func writeScenarioTemplateResult(w http.ResponseWriter, template assetdecisions.ScenarioTemplateDetail, err error, status int) {
+	switch {
+	case errors.Is(err, assetdecisions.ErrInvalidAssetDecisionInput):
+		writeError(w, http.StatusBadRequest, "invalid input")
+	case errors.Is(err, assetdecisions.ErrAssetDecisionManualGroupNotFound):
+		writeError(w, http.StatusNotFound, "asset decision manual group not found")
+	case errors.Is(err, assetdecisions.ErrAssetDecisionScenarioTemplateNotFound):
+		writeError(w, http.StatusNotFound, "asset decision scenario template not found")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal server error")
+	default:
+		writeJSON(w, status, template)
+	}
+}
+
 func assetDecisionManualGroupPathParts(path string) []string {
 	rest := strings.TrimPrefix(path, "/api/asset-decisions/manual-groups/")
+	rest = strings.Trim(rest, "/")
+	if rest == "" {
+		return nil
+	}
+	return strings.Split(rest, "/")
+}
+
+func assetDecisionScenarioTemplatePathParts(path string) []string {
+	rest := strings.TrimPrefix(path, "/api/asset-decisions/scenario-templates/")
 	rest = strings.Trim(rest, "/")
 	if rest == "" {
 		return nil
@@ -325,7 +453,13 @@ func AssetDecisionRecord(repo AssetDecisionRepository) http.Handler {
 func assetDecisionFiltersFromQuery(r *http.Request) (assetdecisions.ListFilters, error) {
 	query := r.URL.Query()
 	filters := assetdecisions.ListFilters{
-		View: assetdecisions.View(strings.TrimSpace(query.Get("view"))),
+		View:       assetdecisions.View(strings.TrimSpace(query.Get("view"))),
+		ProviderID: strings.TrimSpace(query.Get("provider_id")),
+		VPSID:      strings.TrimSpace(query.Get("vps_id")),
+		Country:    strings.TrimSpace(query.Get("country")),
+		Region:     strings.TrimSpace(query.Get("region")),
+		City:       strings.TrimSpace(query.Get("city")),
+		Scenario:   assetdecisions.ManualGroupScenario(strings.TrimSpace(query.Get("scenario"))),
 	}
 	if raw := strings.TrimSpace(query.Get("renew_within_days")); raw != "" {
 		days, err := strconv.Atoi(raw)
@@ -346,6 +480,39 @@ type assetDecisionRecordPatchRequest struct {
 	Goal    *string                                 `json:"goal"`
 	Status  *assetdecisions.RecordStatus            `json:"status"`
 	Members []assetDecisionRecordMemberPatchRequest `json:"members"`
+}
+
+type assetDecisionScenarioTemplatePatchRequest struct {
+	Status   *assetdecisions.ScenarioTemplateStatus `json:"status"`
+	Scenario *assetdecisions.ManualGroupScenario    `json:"scenario"`
+	Title    *string                                `json:"title"`
+	Goal     *string                                `json:"goal"`
+	Note     *string                                `json:"note"`
+}
+
+func (r assetDecisionScenarioTemplatePatchRequest) toInput() assetdecisions.PatchScenarioTemplateInput {
+	var input assetdecisions.PatchScenarioTemplateInput
+	if r.Status != nil {
+		input.Status.Set = true
+		input.Status.Value = *r.Status
+	}
+	if r.Scenario != nil {
+		input.Scenario.Set = true
+		input.Scenario.Value = *r.Scenario
+	}
+	if r.Title != nil {
+		input.Title.Set = true
+		input.Title.Value = *r.Title
+	}
+	if r.Goal != nil {
+		input.Goal.Set = true
+		input.Goal.Value = *r.Goal
+	}
+	if r.Note != nil {
+		input.Note.Set = true
+		input.Note.Value = *r.Note
+	}
+	return input
 }
 
 type assetDecisionRecordMemberPatchRequest struct {

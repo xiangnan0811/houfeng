@@ -243,6 +243,14 @@ func TestRouterKeepsAssetDecisionsOutOfSPAFallback(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"manual_group_id":"admg_001","members":[]}`))
 		}),
+		AssetDecisionScenarioTemplatesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"template_id":"adt_builtin_region_review"}]`))
+		}),
+		AssetDecisionScenarioTemplateHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"template_id":"adt_builtin_region_review","members":[]}`))
+		}),
 		AssetDecisionRecordsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"record_id":"adr_001"}]`))
@@ -264,6 +272,9 @@ func TestRouterKeepsAssetDecisionsOutOfSPAFallback(t *testing.T) {
 		{name: "manual groups", path: "/api/asset-decisions/manual-groups", wantBodySnippet: `"manual_group_id":"admg_001"`},
 		{name: "manual group detail", path: "/api/asset-decisions/manual-groups/admg_001", wantBodySnippet: `"members":[]`},
 		{name: "manual group members", path: "/api/asset-decisions/manual-groups/admg_001/members/vps_001", wantBodySnippet: `"manual_group_id":"admg_001"`},
+		{name: "scenario templates", path: "/api/asset-decisions/scenario-templates", wantBodySnippet: `"template_id":"adt_builtin_region_review"`},
+		{name: "scenario template detail", path: "/api/asset-decisions/scenario-templates/adt_builtin_region_review", wantBodySnippet: `"members":[]`},
+		{name: "scenario template manual group", path: "/api/asset-decisions/scenario-templates/adt_builtin_region_review/manual-groups", wantBodySnippet: `"members":[]`},
 		{name: "records", path: "/api/asset-decisions/records", wantBodySnippet: `"record_id":"adr_001"`},
 		{name: "record detail", path: "/api/asset-decisions/records/adr_001", wantBodySnippet: `"members":[]`},
 	}

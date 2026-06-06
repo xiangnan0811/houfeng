@@ -207,7 +207,7 @@ func TestPostgresAssetDecisionRepositoryListRecordsScansSnapshots(t *testing.T) 
 		},
 	}}
 
-	records, err := repo.ListRecords(context.Background())
+	records, err := repo.ListRecords(context.Background(), assetdecisions.ListFilters{})
 	if err != nil {
 		t.Fatalf("ListRecords() error = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestPostgresAssetDecisionRepositoryListRecordsSkipsReadbackForEmptyList(t *
 		},
 	}}
 
-	records, err := repo.ListRecords(context.Background())
+	records, err := repo.ListRecords(context.Background(), assetdecisions.ListFilters{})
 	if err != nil {
 		t.Fatalf("ListRecords() error = %v", err)
 	}
@@ -293,7 +293,7 @@ func TestPostgresAssetDecisionRepositoryListRecordsFailsClosedWhenFactsFail(t *t
 		},
 	}}
 
-	_, err = repo.ListRecords(context.Background())
+	_, err = repo.ListRecords(context.Background(), assetdecisions.ListFilters{})
 	if err == nil || !strings.Contains(err.Error(), "query asset decision facts") {
 		t.Fatalf("ListRecords() error = %v, want facts query failure", err)
 	}
@@ -493,7 +493,7 @@ func TestPostgresAssetDecisionRepositoryManualGroupsListAndDetailUseCurrentFacts
 		},
 	}}
 
-	summaries, err := repo.ListManualGroups(context.Background())
+	summaries, err := repo.ListManualGroups(context.Background(), assetdecisions.ListFilters{})
 	if err != nil {
 		t.Fatalf("ListManualGroups() error = %v", err)
 	}

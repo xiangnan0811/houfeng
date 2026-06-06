@@ -62,49 +62,50 @@ type ManualGroupMemberRow struct {
 }
 
 type ManualGroupSummary struct {
-	ManualGroupID              string              `json:"manual_group_id"`
-	Status                     ManualGroupStatus   `json:"status"`
-	Scenario                   ManualGroupScenario `json:"scenario"`
-	Title                      string              `json:"title"`
-	Goal                       string              `json:"goal"`
-	Note                       string              `json:"note"`
-	SourceType                 string              `json:"source_type"`
-	SourceGroupID              string              `json:"source_group_id,omitempty"`
-	SourceGroupType            GroupType           `json:"source_group_type,omitempty"`
-	SourceView                 View                `json:"source_view,omitempty"`
-	ScopeKey                   string              `json:"scope_key,omitempty"`
-	ScopeLabel                 string              `json:"scope_label,omitempty"`
-	RenewWithinDays            int                 `json:"renew_within_days"`
-	MemberCount                int                 `json:"member_count"`
-	LifecycleCounts            map[string]int      `json:"lifecycle_counts"`
-	UsageCounts                map[string]int      `json:"usage_counts"`
-	RenewalDecisionCounts      map[string]int      `json:"renewal_decision_counts"`
-	RenewalWindowCount         int                 `json:"renewal_window_count"`
-	UnreviewedCount            int                 `json:"unreviewed_count"`
-	MigrateCount               int                 `json:"migrate_count"`
-	CancelCount                int                 `json:"cancel_count"`
-	CancellationAttentionCount int                 `json:"cancellation_attention_count"`
-	IdleCount                  int                 `json:"idle_count"`
-	StandbyCount               int                 `json:"standby_count"`
-	InUseCount                 int                 `json:"in_use_count"`
-	ServiceCount               int                 `json:"service_count"`
-	DomainCount                int                 `json:"domain_count"`
-	TargetCount                int                 `json:"target_count"`
-	RunningTargetCount         int                 `json:"running_target_count"`
-	MonitoringLinkCount        int                 `json:"monitoring_link_count"`
-	AbnormalMonitoringCount    int                 `json:"abnormal_monitoring_count"`
-	ActiveIncidentCount        int                 `json:"active_incident_count"`
-	PrimaryIssueSummary        string              `json:"primary_issue_summary"`
-	MonthlyCostByCurrency      []CostByCurrency    `json:"monthly_cost_by_currency"`
-	MonthlyCostBase            *float64            `json:"monthly_cost_base,omitempty"`
-	YearlyCostBase             *float64            `json:"yearly_cost_base,omitempty"`
-	BaseCurrency               string              `json:"base_currency,omitempty"`
-	EvidenceChips              []EvidenceChip      `json:"evidence_chips"`
-	EvidenceAssessment         EvidenceAssessment  `json:"evidence_assessment"`
-	SourceAvailability         SourceAvailability  `json:"source_availability"`
-	CreatedAt                  time.Time           `json:"created_at"`
-	UpdatedAt                  time.Time           `json:"updated_at"`
-	ArchivedAt                 *time.Time          `json:"archived_at,omitempty"`
+	ManualGroupID              string                 `json:"manual_group_id"`
+	Status                     ManualGroupStatus      `json:"status"`
+	Scenario                   ManualGroupScenario    `json:"scenario"`
+	Title                      string                 `json:"title"`
+	Goal                       string                 `json:"goal"`
+	Note                       string                 `json:"note"`
+	SourceType                 string                 `json:"source_type"`
+	SourceGroupID              string                 `json:"source_group_id,omitempty"`
+	SourceGroupType            GroupType              `json:"source_group_type,omitempty"`
+	SourceView                 View                   `json:"source_view,omitempty"`
+	ScopeKey                   string                 `json:"scope_key,omitempty"`
+	ScopeLabel                 string                 `json:"scope_label,omitempty"`
+	RenewWithinDays            int                    `json:"renew_within_days"`
+	MemberCount                int                    `json:"member_count"`
+	LifecycleCounts            map[string]int         `json:"lifecycle_counts"`
+	UsageCounts                map[string]int         `json:"usage_counts"`
+	RenewalDecisionCounts      map[string]int         `json:"renewal_decision_counts"`
+	RenewalWindowCount         int                    `json:"renewal_window_count"`
+	UnreviewedCount            int                    `json:"unreviewed_count"`
+	MigrateCount               int                    `json:"migrate_count"`
+	CancelCount                int                    `json:"cancel_count"`
+	CancellationAttentionCount int                    `json:"cancellation_attention_count"`
+	IdleCount                  int                    `json:"idle_count"`
+	StandbyCount               int                    `json:"standby_count"`
+	InUseCount                 int                    `json:"in_use_count"`
+	ServiceCount               int                    `json:"service_count"`
+	DomainCount                int                    `json:"domain_count"`
+	TargetCount                int                    `json:"target_count"`
+	RunningTargetCount         int                    `json:"running_target_count"`
+	MonitoringLinkCount        int                    `json:"monitoring_link_count"`
+	AbnormalMonitoringCount    int                    `json:"abnormal_monitoring_count"`
+	ActiveIncidentCount        int                    `json:"active_incident_count"`
+	PrimaryIssueSummary        string                 `json:"primary_issue_summary"`
+	MonthlyCostByCurrency      []CostByCurrency       `json:"monthly_cost_by_currency"`
+	MonthlyCostBase            *float64               `json:"monthly_cost_base,omitempty"`
+	YearlyCostBase             *float64               `json:"yearly_cost_base,omitempty"`
+	BaseCurrency               string                 `json:"base_currency,omitempty"`
+	EvidenceChips              []EvidenceChip         `json:"evidence_chips"`
+	EvidenceAssessment         EvidenceAssessment     `json:"evidence_assessment"`
+	DecisionRecommendation     DecisionRecommendation `json:"decision_recommendation"`
+	SourceAvailability         SourceAvailability     `json:"source_availability"`
+	CreatedAt                  time.Time              `json:"created_at"`
+	UpdatedAt                  time.Time              `json:"updated_at"`
+	ArchivedAt                 *time.Time             `json:"archived_at,omitempty"`
 }
 
 type ManualGroupDetail struct {
@@ -492,7 +493,14 @@ func ManualGroupDetailFromRows(row ManualGroupRow, memberRows []ManualGroupMembe
 	if len(members) == 0 {
 		summary.SourceAvailability = mergeSourceAvailability(facts)
 	}
-	return ManualGroupDetail{ManualGroupSummary: summary, Members: members}
+	result := ManualGroupDetail{ManualGroupSummary: summary, Members: members}
+	result.DecisionRecommendation = RecommendManualGroup(result)
+	for index := range result.Members {
+		if !result.Members[index].CurrentFactFound {
+			result.Members[index].DecisionRecommendation = MissingFactRecommendation(result.Members[index].VPSID)
+		}
+	}
+	return result
 }
 
 func GroupMemberFromFact(fact Fact, filters ListFilters) GroupMember {

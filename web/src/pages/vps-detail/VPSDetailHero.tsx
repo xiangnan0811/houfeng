@@ -59,6 +59,9 @@ export function VPSDetailHero({
         <div className="watchtower-header__actions-block">
           <div className="watchtower-header__actions">
             <Button variant="primary" size="sm" onClick={onDecisionEdit}>处理决策</Button>
+            <Link className="btn sm secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&vps_id=${encodeURIComponent(detail.vps_id)}`}>
+              组合决策
+            </Link>
             <Button variant="secondary" size="sm" onClick={onSubscriptionCreate}>创建订阅</Button>
             <Button variant="secondary" size="sm" onClick={onValidityExtend}>延长有效期</Button>
             <Button variant="secondary" size="sm" onClick={onMonitoringInstanceCreate}>接入 agent</Button>

@@ -234,7 +234,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText('月均成本')).toBeInTheDocument()
     expect(screen.getAllByText('预算风险').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByText('订阅预算接近或超过上限').closest('.wb-att-item')!)
-    expect(screen.getByTestId('location-probe')).toHaveTextContent('/settings?tab=subscriptions')
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/asset-decisions?view=cost&scenario=budget_reduction')
 
     // Attention column shows abnormal monitoring and targets
     expect(screen.getByText('关注')).toBeInTheDocument()

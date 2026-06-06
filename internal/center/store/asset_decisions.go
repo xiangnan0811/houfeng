@@ -106,7 +106,11 @@ func (r *PostgresAssetDecisionRepository) GetGroup(ctx context.Context, groupID 
 	return assetdecisions.FindGroup(facts, groupID, filters)
 }
 
-func (r *PostgresAssetDecisionRepository) ListRecords(ctx context.Context) ([]assetdecisions.RecordSummary, error) {
+func (r *PostgresAssetDecisionRepository) ListRecords(ctx context.Context, filters assetdecisions.ListFilters) ([]assetdecisions.RecordSummary, error) {
+	filters = assetdecisions.NormalizeFilters(filters)
+	if err := assetdecisions.ValidateFilters(filters); err != nil {
+		return nil, err
+	}
 	rows, err := r.db.Query(ctx, `
 		select `+assetDecisionRecordSummaryColumns+`
 		from asset_decision_records_with_counts
@@ -138,7 +142,8 @@ func (r *PostgresAssetDecisionRepository) ListRecords(ctx context.Context) ([]as
 	if err != nil {
 		return nil, err
 	}
-	return assetdecisions.ApplyExecutionReadbackToSummaries(records, membersByRecord, facts), nil
+	records = assetdecisions.ApplyExecutionReadbackToSummaries(records, membersByRecord, facts)
+	return assetdecisions.FilterRecordSummaries(records, membersByRecord, facts, filters), nil
 }
 
 func (r *PostgresAssetDecisionRepository) CreateRecord(ctx context.Context, input assetdecisions.CreateRecordInput) (assetdecisions.RecordDetail, error) {

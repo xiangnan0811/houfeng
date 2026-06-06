@@ -12,6 +12,8 @@ import type {
   AssetDecisionOverview,
   AssetDecisionRecordDetail,
   AssetDecisionRecordSummary,
+  AssetDecisionScenarioTemplateDetail,
+  AssetDecisionScenarioTemplateSummary,
   AssetServiceListFilter,
   AssetServiceRecord,
   ApplyCancellationInput,
@@ -24,6 +26,8 @@ import type {
   CreateProviderInput,
   CreateAssetServiceInput,
   CreateAssetDecisionRecordInput,
+  CreateAssetDecisionScenarioTemplateInput,
+  CreateManualGroupFromScenarioTemplateInput,
   CreateMonitoringInstanceInput,
   CreateProbeItemInput,
   CreateSubscriptionInput,
@@ -73,6 +77,7 @@ import type {
   PatchAssetDecisionManualGroupInput,
   PatchAssetDecisionManualGroupMemberInput,
   PatchAssetDecisionRecordInput,
+  PatchAssetDecisionScenarioTemplateInput,
   UpdateTargetMetadataInput,
   UpdateVPSAssetInput,
   VPSAssetDetail,
@@ -535,19 +540,13 @@ export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promi
 
 export function getAssetDecisionOverview(filter?: AssetDecisionGroupListFilter) {
   return requestJSON<AssetDecisionOverview>(
-    withQuery('/api/asset-decisions/overview', {
-      view: filter?.view,
-      renew_within_days: filter?.renew_within_days,
-    }),
+    withQuery('/api/asset-decisions/overview', assetDecisionFilterQuery(filter)),
   )
 }
 
 export function listAssetDecisionGroups(filter?: AssetDecisionGroupListFilter) {
   return requestJSON<AssetDecisionGroupSummary[]>(
-    withQuery('/api/asset-decisions/groups', {
-      view: filter?.view,
-      renew_within_days: filter?.renew_within_days,
-    }),
+    withQuery('/api/asset-decisions/groups', assetDecisionFilterQuery(filter)),
   )
 }
 
@@ -559,8 +558,10 @@ export function getAssetDecisionGroup(groupId: string, filter?: Pick<AssetDecisi
   )
 }
 
-export function listAssetDecisionManualGroups() {
-  return requestJSON<AssetDecisionManualGroupSummary[]>('/api/asset-decisions/manual-groups')
+export function listAssetDecisionManualGroups(filter?: AssetDecisionGroupListFilter) {
+  return requestJSON<AssetDecisionManualGroupSummary[]>(
+    withQuery('/api/asset-decisions/manual-groups', assetDecisionFilterQuery(filter)),
+  )
 }
 
 export function createAssetDecisionManualGroup(
@@ -616,8 +617,46 @@ export function deleteAssetDecisionManualGroupMember(
   )
 }
 
-export function listAssetDecisionRecords() {
-  return requestJSON<AssetDecisionRecordSummary[]>('/api/asset-decisions/records')
+export function listAssetDecisionScenarioTemplates() {
+  return requestJSON<AssetDecisionScenarioTemplateSummary[]>('/api/asset-decisions/scenario-templates')
+}
+
+export function createAssetDecisionScenarioTemplate(
+  input: CreateAssetDecisionScenarioTemplateInput,
+): Promise<AssetDecisionScenarioTemplateDetail> {
+  return postJSONBody<AssetDecisionScenarioTemplateDetail>('/api/asset-decisions/scenario-templates', input)
+}
+
+export function getAssetDecisionScenarioTemplate(templateId: string) {
+  return requestJSON<AssetDecisionScenarioTemplateDetail>(
+    `/api/asset-decisions/scenario-templates/${encodeURIComponent(templateId)}`,
+  )
+}
+
+export function patchAssetDecisionScenarioTemplate(
+  templateId: string,
+  input: PatchAssetDecisionScenarioTemplateInput,
+): Promise<AssetDecisionScenarioTemplateDetail> {
+  return patchJSONBody<AssetDecisionScenarioTemplateDetail>(
+    `/api/asset-decisions/scenario-templates/${encodeURIComponent(templateId)}`,
+    input,
+  )
+}
+
+export function createManualGroupFromScenarioTemplate(
+  templateId: string,
+  input: CreateManualGroupFromScenarioTemplateInput,
+): Promise<AssetDecisionManualGroupDetail> {
+  return postJSONBody<AssetDecisionManualGroupDetail>(
+    `/api/asset-decisions/scenario-templates/${encodeURIComponent(templateId)}/manual-groups`,
+    input,
+  )
+}
+
+export function listAssetDecisionRecords(filter?: AssetDecisionGroupListFilter) {
+  return requestJSON<AssetDecisionRecordSummary[]>(
+    withQuery('/api/asset-decisions/records', assetDecisionFilterQuery(filter)),
+  )
 }
 
 export function createAssetDecisionRecord(input: CreateAssetDecisionRecordInput): Promise<AssetDecisionRecordDetail> {
@@ -630,6 +669,19 @@ export function getAssetDecisionRecord(recordId: string) {
 
 export function patchAssetDecisionRecord(recordId: string, input: PatchAssetDecisionRecordInput): Promise<AssetDecisionRecordDetail> {
   return patchJSONBody<AssetDecisionRecordDetail>(`/api/asset-decisions/records/${encodeURIComponent(recordId)}`, input)
+}
+
+function assetDecisionFilterQuery(filter?: AssetDecisionGroupListFilter) {
+  return {
+    view: filter?.view,
+    renew_within_days: filter?.renew_within_days,
+    provider_id: filter?.provider_id,
+    vps_id: filter?.vps_id,
+    country: filter?.country,
+    region: filter?.region,
+    city: filter?.city,
+    scenario: filter?.scenario,
+  }
 }
 
 export function getVPSCancellationPreview(vpsId: string) {

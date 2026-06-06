@@ -204,6 +204,9 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
         </div>
         <div className="section-heading__actions">
           <Button variant="primary" size="sm" onClick={onDecisionEdit}>调整决策</Button>
+          <Link className="btn sm secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&vps_id=${encodeURIComponent(detail.vps_id)}`}>
+            进入组合决策
+          </Link>
         </div>
       </div>
 

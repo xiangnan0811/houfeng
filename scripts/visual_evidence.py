@@ -1608,6 +1608,94 @@ def asset_decision_manual_groups() -> list[dict[str, object]]:
     return [asset_decision_manual_group_summary("admg_mock_primary_standby")]
 
 
+def asset_decision_scenario_template_member(
+    member: dict[str, object],
+    *,
+    template_id: str,
+    sort_order: int,
+) -> dict[str, object]:
+    vps = member["vps"]
+    assert isinstance(vps, dict)
+    return {
+        "template_id": template_id,
+        "vps_id": vps["vps_id"],
+        "display_name": vps["display_name"],
+        "intended_role": member.get("suggested_role", "observe_candidate"),
+        "intended_action": member.get("suggested_action", "review"),
+        "reason": "从代表性资产事实生成的场景成员蓝图。",
+        "note": "创建组合时后端会重新读取当前事实。",
+        "sort_order": sort_order,
+    }
+
+
+def asset_decision_scenario_template_detail(
+    template_id: str = "adt_builtin_primary_standby",
+) -> dict[str, object] | None:
+    manual = asset_decision_manual_group_detail()
+    assert manual is not None
+    members = list(manual.get("members", []))
+    if template_id == "adt_builtin_primary_standby":
+        blueprint = [
+            asset_decision_scenario_template_member(
+                member,
+                template_id=template_id,
+                sort_order=index * 10,
+            )
+            for index, member in enumerate(members, start=1)
+            if isinstance(member, dict)
+        ]
+        return {
+            "template_id": template_id,
+            "builtin": True,
+            "status": "active",
+            "scenario": "primary_standby",
+            "title": "主备取舍模板",
+            "goal": "比较主力、备用与可退役 VPS，先形成自定义组合再保存决策。",
+            "note": "内置模板只保存场景 blueprint，不保存当前成本、订阅或监控事实。",
+            "source_manual_group_id": None,
+            "member_count": len(blueprint),
+            "created_at": iso_timestamp(-1),
+            "updated_at": iso_timestamp(-1),
+            "archived_at": None,
+            "members": blueprint,
+        }
+    if template_id == "adt_mock_manual_primary_standby":
+        blueprint = [
+            asset_decision_scenario_template_member(
+                member,
+                template_id=template_id,
+                sort_order=index * 10,
+            )
+            for index, member in enumerate(members, start=1)
+            if isinstance(member, dict)
+        ]
+        return {
+            "template_id": template_id,
+            "builtin": False,
+            "status": "active",
+            "scenario": "primary_standby",
+            "title": "欧洲主备手工组合 模板",
+            "goal": str(manual.get("goal") or ""),
+            "note": "从手工组合另存的模板 fixture。",
+            "source_manual_group_id": manual["manual_group_id"],
+            "member_count": len(blueprint),
+            "created_at": iso_timestamp(-1),
+            "updated_at": iso_timestamp(0),
+            "archived_at": None,
+            "members": blueprint,
+        }
+    return None
+
+
+def asset_decision_scenario_templates() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for template_id in ["adt_builtin_primary_standby", "adt_mock_manual_primary_standby"]:
+        detail = asset_decision_scenario_template_detail(template_id)
+        assert detail is not None
+        rows.append({key: value for key, value in detail.items() if key != "members"})
+    return rows
+
+
 def asset_decision_record_summary(
     record_id: str = "adr_mock_eu_renewal",
     members: list[dict[str, object]] | None = None,
@@ -3159,6 +3247,64 @@ def fulfill_asset_workflow_api(route: object) -> None:
     if method == "GET" and path == "/api/asset-decisions/groups":
         fulfill_json(route, 200, asset_decision_public_groups(query))
         return
+
+    if path == "/api/asset-decisions/scenario-templates":
+        if method == "GET":
+            fulfill_json(route, 200, asset_decision_scenario_templates())
+            return
+        if method == "POST":
+            detail = asset_decision_scenario_template_detail("adt_mock_manual_primary_standby")
+            assert detail is not None
+            created = dict(detail)
+            payload = request_json_payload(request)
+            created["template_id"] = "adt_mock_created"
+            created["builtin"] = False
+            if isinstance(payload, dict):
+                for key in ["scenario", "title", "goal", "note", "source_manual_group_id"]:
+                    if key in payload:
+                        created[key] = payload[key]
+            for member in created.get("members", []):
+                if isinstance(member, dict):
+                    member["template_id"] = "adt_mock_created"
+            fulfill_json(route, 201, created)
+            return
+
+    if path.startswith("/api/asset-decisions/scenario-templates/"):
+        parts = [part for part in path.split("/") if part]
+        if len(parts) >= 4:
+            template_id = parts[3]
+            detail = asset_decision_scenario_template_detail(template_id)
+            if detail is None and template_id == "adt_mock_created":
+                detail = asset_decision_scenario_template_detail("adt_mock_manual_primary_standby")
+            if detail is None:
+                fulfill_json(route, 404, {"error": "asset decision scenario template not found"})
+                return
+            if len(parts) == 4:
+                if method == "GET":
+                    fulfill_json(route, 200, detail)
+                    return
+                if method == "PATCH":
+                    patched = dict(detail)
+                    payload = request_json_payload(request)
+                    if isinstance(payload, dict) and not patched.get("builtin"):
+                        for key in ["status", "title", "goal", "note"]:
+                            if key in payload:
+                                patched[key] = payload[key]
+                    patched["updated_at"] = iso_timestamp(0)
+                    if patched.get("status") == "archived":
+                        patched["archived_at"] = iso_timestamp(0)
+                    fulfill_json(route, 200, patched)
+                    return
+            if len(parts) == 5 and parts[4] == "manual-groups" and method == "POST":
+                created = asset_decision_manual_group_detail("admg_mock_created")
+                assert created is not None
+                payload = request_json_payload(request)
+                if isinstance(payload, dict):
+                    for key in ["scenario", "title", "goal", "note", "status", "renew_within_days"]:
+                        if key in payload:
+                            created[key] = payload[key]
+                fulfill_json(route, 201, created)
+                return
 
     if path == "/api/asset-decisions/manual-groups":
         if method == "GET":
