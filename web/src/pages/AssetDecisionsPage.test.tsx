@@ -608,12 +608,13 @@ describe('AssetDecisionsPage', () => {
     expect(screen.getByRole('heading', { name: '下一步导览' })).toBeInTheDocument()
     expect(screen.getByText('CLOSED LOOP')).toBeInTheDocument()
     expect(screen.getByText('回读缺证据')).toBeInTheDocument()
-    expect(screen.getByText('AUTO GROUPS')).toBeInTheDocument()
+    expect(screen.getByText('AUTO')).toBeInTheDocument()
     expect(screen.getByText('DRIFT')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '决策组列表' })).toBeInTheDocument()
+    expect(screen.getByLabelText('决策组扫描列表')).toBeInTheDocument()
     expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('判断尺度').length).toBeGreaterThan(0)
     expect(screen.getAllByText('证据强').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('窗口内 / 未评估').length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: '自定义组合' })).toBeInTheDocument()
     expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: '已保存组合决策' })).toBeInTheDocument()
@@ -632,6 +633,26 @@ describe('AssetDecisionsPage', () => {
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/scenario-templates')
     expectFetchCalledWith(fetchMock, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc')
+  })
+
+  it('keeps legacy single_queue URLs on the portfolio workbench and points to the support queue', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/asset-decisions?view=single_queue&renew_within_days=30']}>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '决策组列表' })).toBeInTheDocument())
+    expect(screen.getByRole('status')).toHaveTextContent('旧链接已承接到单台辅助队列')
+    expect(screen.getByRole('link', { name: '查看单台队列' })).toHaveAttribute('href', '#single-vps-queue')
+    expect(screen.queryByRole('tab', { name: /单台队列/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '单台待处理队列' })).toBeInTheDocument()
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
+    expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
   })
 
   it('switches workbench tabs through asset-decision group queries', async () => {
@@ -788,9 +809,10 @@ describe('AssetDecisionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '下一步导览' })).toBeInTheDocument())
-    expect(screen.queryByText('事实漂移')).not.toBeInTheDocument()
-    expect(screen.queryByText('跟进阻塞')).not.toBeInTheDocument()
-    expect(screen.queryByText('回读缺证据')).not.toBeInTheDocument()
+    const nextWork = screen.getByLabelText('资产决策下一步工作项')
+    expect(within(nextWork).queryByText('事实漂移')).not.toBeInTheDocument()
+    expect(within(nextWork).queryByText('跟进阻塞')).not.toBeInTheDocument()
+    expect(within(nextWork).queryByText('回读缺证据')).not.toBeInTheDocument()
     expect(screen.getByText('决策记录暂不可用，导览只展示已成功加载的事实。')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '暂无需要置顶的组合工作' })).toBeInTheDocument()
   })
