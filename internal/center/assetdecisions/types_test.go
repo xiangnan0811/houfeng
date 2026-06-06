@@ -462,6 +462,125 @@ func TestExecutionReadbackMissingCurrentFact(t *testing.T) {
 	}
 }
 
+func TestExecutionPlanMapsActionsToLanesAndSteps(t *testing.T) {
+	tests := []struct {
+		name     string
+		action   SuggestedAction
+		readback MemberExecutionReadback
+		lane     ExecutionPlanLane
+		step     ExecutionPlanStepKind
+	}{
+		{
+			name:     "cancel opens cancellation workbench",
+			action:   ActionOpenCancellationWorkbench,
+			readback: MemberExecutionReadback{Status: ReadbackOpen},
+			lane:     PlanLaneCancelRetire,
+			step:     PlanStepOpenCancellationWorkbench,
+		},
+		{
+			name:     "migrate opens vps detail",
+			action:   ActionMigrate,
+			readback: MemberExecutionReadback{Status: ReadbackOpen},
+			lane:     PlanLaneMigration,
+			step:     PlanStepOpenVPSDetail,
+		},
+		{
+			name:     "keep opens vps detail",
+			action:   ActionKeep,
+			readback: MemberExecutionReadback{Status: ReadbackAligned},
+			lane:     PlanLaneKeepObserve,
+			step:     PlanStepOpenVPSDetail,
+		},
+		{
+			name:   "subscription evidence opens subscription context",
+			action: ActionCompleteEvidence,
+			readback: MemberExecutionReadback{Status: ReadbackNeedsEvidence, Issues: []ExecutionReadbackIssue{{
+				Kind:  "evidence_gap",
+				Label: "缺订阅",
+				Tone:  "alert",
+			}}},
+			lane: PlanLaneEvidence,
+			step: PlanStepOpenSubscriptionContext,
+		},
+		{
+			name:     "review stays on record",
+			action:   ActionReview,
+			readback: MemberExecutionReadback{Status: ReadbackOpen},
+			lane:     PlanLaneReview,
+			step:     PlanStepReviewRecord,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := EvaluateMemberExecutionPlan(RecordStatusInProgress, RecordMember{
+				VPSID:             "vps_001",
+				DecidedAction:     tt.action,
+				FollowupStatus:    FollowupTodo,
+				ExecutionReadback: tt.readback,
+			})
+			if plan.Lane != tt.lane || plan.StepKind != tt.step {
+				t.Fatalf("plan = %#v, want lane=%s step=%s", plan, tt.lane, tt.step)
+			}
+		})
+	}
+}
+
+func TestExecutionPlanPreservesCompletedDriftAndAbandonedInactive(t *testing.T) {
+	f := fact("vps_cancel", "Cancel Candidate", "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageIdle, sub("sub_1", 10, 30))
+	detail := ApplyExecutionReadback(RecordDetail{
+		RecordSummary: RecordSummary{Status: RecordStatusCompleted},
+		Members: []RecordMember{{
+			VPSID:          "vps_cancel",
+			DecidedAction:  ActionCancel,
+			FollowupStatus: FollowupDone,
+		}},
+	}, []Fact{f})
+	if detail.ExecutionReadback.Status != ReadbackDrift || detail.ExecutionPlan.ActionableCount != 1 {
+		t.Fatalf("completed detail readback=%#v plan=%#v, want drift/actionable", detail.ExecutionReadback, detail.ExecutionPlan)
+	}
+	if detail.Members[0].ExecutionPlan.Lane != PlanLaneCancelRetire || detail.Members[0].ExecutionPlan.StepKind != PlanStepOpenCancellationWorkbench {
+		t.Fatalf("member plan = %#v, want cancellation workbench drift plan", detail.Members[0].ExecutionPlan)
+	}
+
+	abandoned := ApplyExecutionReadback(RecordDetail{
+		RecordSummary: RecordSummary{Status: RecordStatusAbandoned},
+		Members: []RecordMember{{
+			VPSID:          "vps_cancel",
+			DecidedAction:  ActionCancel,
+			FollowupStatus: FollowupTodo,
+		}},
+	}, []Fact{f})
+	if abandoned.ExecutionReadback.Status != ReadbackInactive || abandoned.ExecutionPlan.ActionableCount != 0 || abandoned.Members[0].ExecutionPlan.Actionable {
+		t.Fatalf("abandoned readback=%#v plan=%#v member=%#v, want inactive non-actionable", abandoned.ExecutionReadback, abandoned.ExecutionPlan, abandoned.Members[0].ExecutionPlan)
+	}
+}
+
+func TestExecutionPlanBlockedAndCurrentFactMissing(t *testing.T) {
+	blocked := EvaluateMemberExecutionPlan(RecordStatusInProgress, RecordMember{
+		VPSID:          "vps_blocked",
+		DecidedAction:  ActionKeep,
+		FollowupStatus: FollowupBlocked,
+		ExecutionReadback: MemberExecutionReadback{
+			Status: ReadbackBlocked,
+		},
+	})
+	if !blocked.Blocked || !blocked.Actionable || blocked.Tone != PlanToneCritical {
+		t.Fatalf("blocked plan = %#v, want critical actionable blocked plan", blocked)
+	}
+
+	missing := EvaluateMemberExecutionReadback(RecordMember{VPSID: "vps_missing", DecidedAction: ActionKeep}, map[string]Fact{})
+	plan := EvaluateMemberExecutionPlan(RecordStatusInProgress, RecordMember{
+		VPSID:             "vps_missing",
+		DecidedAction:     ActionKeep,
+		FollowupStatus:    FollowupTodo,
+		ExecutionReadback: missing,
+	})
+	if plan.Lane != PlanLaneReview || plan.StepKind != PlanStepReviewRecord || !plan.Actionable || plan.IssueCount != 1 {
+		t.Fatalf("missing fact plan = %#v, want review step with stable issue", plan)
+	}
+}
+
 func hasReadbackIssue(readback MemberExecutionReadback, kind string) bool {
 	for _, issue := range readback.Issues {
 		if issue.Kind == kind {

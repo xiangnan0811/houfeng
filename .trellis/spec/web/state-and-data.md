@@ -181,6 +181,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Manual scenario data: 页面读取 `/api/asset-decisions/manual-groups` 展示“自定义组合” surface；点击组合读取 `/api/asset-decisions/manual-groups/{manual_group_id}`。从自动组创建手工组合 POST `source_type=auto_group`、`source_group_id`、`renew_within_days`、`scenario`、`title`、`goal`、`note`；成员增删改只调用 manual group member endpoints。新增成员必须用 VPS selector，从 `listVPSAssets()` 候选选择，不要求用户复制内部 ID。
 - Scenario template data: 页面读取 `/api/asset-decisions/scenario-templates` 展示“场景模板” surface。内置模板只能用于创建自定义组合，不能 PATCH；自定义模板可从手工组合另存并可归档/启用。模板详情 `template_id` 深链只读取模板；从模板创建组合必须调用 `createManualGroupFromScenarioTemplate`，成功后打开新 manual group。模板不能直接创建 record，不能写 VPS / Subscription / MonitoringInstance / Target。
 - Asset decision records data: 页面读取 `/api/asset-decisions/records` 展示“已保存组合决策”辅助 surface；点击记录读取 `/api/asset-decisions/records/{record_id}`；推进记录状态 PATCH `/api/asset-decisions/records/{record_id}` 的 `title` / `goal` / `status` 字段，成员跟进 PATCH 同 endpoint 的 `members:[{vps_id, followup_status?, followup_note?}]`，但不得修改 VPS/订阅/监控/Target。
+- Asset decision execution plan data: `RecordSummary`、`RecordDetail` 和 `RecordMember` 可以包含只读 `execution_plan`，字段与后端 snake_case 对齐。记录级展示 `summary`、`lane_counts`、`actionable_count`、`blocked_count`；成员级展示 `lane`、`step_kind`、`tone`、`summary`、`step_label`、`issue_count`、`blocked`、`actionable`。前端只根据 `step_kind` 生成本地深链，后端不得返回 URL。
 - Evidence assessment data: `AssetDecisionGroupSummary` 与 `AssetDecisionGroupMember` 必须包含 `evidence_assessment`；字段为 `confidence_score`、`pressure_score`、`readiness_score`、`quality_tier`、`decision_bias`、`support_signal_count`、`risk_signal_count`、`gap_signal_count`、`summary`。记录详情从 `evidence_snapshot.evidence_assessment` 读取保存时快照；历史记录缺失该字段时只显示降级文案。
 - Decision recommendation data: `AssetDecisionGroupSummary`、`AssetDecisionGroupMember`、`AssetDecisionManualGroupSummary` 和 manual members 可以包含 `decision_recommendation`；UI 只展示短摘要、下一步、理由/阻塞 chips 和优先 VPS，不在前端重新评分，不把 recommendation 当作自动执行承诺。
 - Single queue data: `AssetDecisionsPage` 底部辅助队列继续拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
@@ -204,6 +205,10 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - 自定义组合详情必须展示当前 facts 回读后的成员对比、组合属性表单、VPS 选择器新增成员、成员意图编辑和保存为决策记录入口。从自定义组合保存记录必须发送 `source_type=manual_group`，并使用当前成员 intended role/action/reason 作为默认决定值。
 - 记录详情必须展示记录状态、来源、成员判断和证据快照，并允许推进记录状态；成员动作里的 `cancel` / `open_cancellation_workbench` 只能渲染到 `/vps/{id}?workbench=cancellation` 的跳转入口。
 - 记录详情必须展示成员级跟进状态、备注与最后更新时间；单个成员保存跟进时只 PATCH 该成员 `vps_id`、`followup_status`、`followup_note`，成功后刷新当前记录详情与已保存记录列表的跟进计数。成员跟进状态只表达“组合判断后的执行记忆”，不能隐式修改记录级状态，也不能触发 VPS、Subscription、MonitoringInstance 或 Target 写操作。
+- 已保存记录列表可以低权重展示 `execution_plan` 摘要、lane 计数、actionable / blocked 计数；点击仍只打开记录详情，不直接跳业务页。
+- 记录详情必须在成员明细表上方展示执行编排 board，按 `cancel_retire / migration / keep_observe / evidence / review` lane 分组展示成员、readback badge、issue chips、当前事实、下一步 CTA 和快速跟进按钮。board 是记录详情内的执行导览，不取代自动组主 surface，也不批量执行。
+- 执行编排 CTA 的 URL 映射只能在前端本地完成：`open_cancellation_workbench -> /vps/{id}?workbench=cancellation`，`open_subscription_context -> /subscriptions?vps_id={id}`，`open_vps_detail -> /vps/{id}`，`review_record` 留在当前记录详情复核或提供普通 VPS 详情入口。
+- 快速跟进按钮只能调用 `PATCH /api/asset-decisions/records/{record_id}` 更新成员 followup；不得自动 PATCH record status，也不得调用 VPS、Subscription、MonitoringInstance、Target 写接口。`completed` 记录若当前 facts drift，仍必须展示 drift/readback/plan，不能因为人工状态完成而隐藏问题。
 - 单台决策编辑必须在 group detail drawer 或底部单台辅助队列中完成，仍使用 `AssetDecisionWorkPanel` 与 `PATCH /api/vps/{id}`。保存成功 notice 应留在页面可见 surface 内。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
 - 取消 / 退役不是 Phase 1 的组合页写动作；任何取消 / 退役执行入口必须跳到 `/vps/{id}?workbench=cancellation`，由 VPS 详情生命周期工作台加载 preview 并提交用户确认步骤。
 - Asset Decisions、Dashboard 和 VPS 列表只能把 Subscription / MonitoringInstance / Target / Service / Domain 作为 VPS 的证据和缺口展示；主处理入口必须回到 `/vps/{id}`、VPS 筛选视图或组合决策组。不要把订阅或监控实例作为与 VPS 同级的“待处理主体”。
@@ -248,6 +253,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | backend group source availability says subscriptions unavailable | 组列表 / 组详情显示证据不可用，不渲染真实 `缺订阅` chip |
 | decision record snapshot lacks `evidence_assessment` | 记录详情显示“未记录”或“无证据评估”，成员表继续展示其他 snapshot 字段 |
 | decision record API returns `execution_readback` | 已保存记录列表显示 readback status badge、summary 和 drift / blocked / needs_evidence / open 计数；记录详情 summary 增加执行回读指标，成员表显示当前事实摘要与 issue chips |
+| decision record API returns `execution_plan` | 已保存记录列表显示 plan summary / lane counts / actionable count；记录详情显示 execution board 和成员下一步列；CTA 按 step kind 本地映射 URL |
 | readback status is `drift` | 只显示事实漂移证据和跳转入口，不自动 PATCH record status，也不调用 VPS / Subscription / MonitoringInstance / Target 写接口 |
 | readback current facts missing for member | 成员表显示“当前事实缺失”与 issue chip，不把该成员渲染成已对齐 |
 | VPS inventory subscriptions empty | 行级展示 `缺订阅`，quick view `缺订阅` 可筛出对应 VPS |
@@ -271,6 +277,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: 打开已保存记录后，把单台 VPS 成员跟进从 `todo` 改为 `blocked` 并保存备注；记录详情显示更新时间，记录列表的阻塞 / 未关闭计数同步更新，业务动作入口仍只是跳到 VPS 详情或取消工作台。
 - Good: 已保存记录列表低权重展示执行回读；`drift` / `blocked` / `needs_evidence` 只作为复核证据，不抢走组合工作台主 surface。
 - Good: 记录详情成员表展示“当前回读”，包括 lifecycle / usage / renewal decision、active subscription、服务 / 域名 / Target / 监控计数和 issue chips；成员跟进 PATCH 成功后刷新记录详情和记录列表，readback 随 API 响应更新。
+- Good: 记录详情 execution board 将取消退役成员导向 `/vps/{id}?workbench=cancellation`，将缺订阅证据导向 `/subscriptions?vps_id={id}`，同时快速跟进只 PATCH 当前 record member。
 - Good: 组列表和记录详情展示 `evidence_assessment` 的 tier、bias、可信 / 压力 / 准备刻度；旧记录没有该字段时不崩溃。
 - Good: 资产决策保存 `migrate` 后，VPS 从 `待评估` tab 消失并出现在 `迁移` tab，notice 留在队列 surface。
 - Good: 资产决策保存 `cancel` 后，notice 继续展示 `VPS -> 取消`，并追加 API 返回的订阅联动消息 / 订阅页 action。
@@ -284,6 +291,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Bad: 模板详情点击打开后自动创建手工组合，或从模板直接保存为决策记录。
 - Bad: 前端用 IP/路由/性能趋势填充 recommendation 文案；这些语义在 agent 未成熟前不属于资产决策推荐。
 - Bad: 前端看到 readback `drift` 后自动把记录状态改成 `in_progress` / `completed`，或自动调用 `/api/vps/*`、`/api/subscriptions/*`、`/api/monitoring-instances/*`、`/api/targets/*` 写接口。
+- Bad: 前端把 `execution_plan` 当作真实执行系统，点击 CTA 后直接 PATCH VPS / Subscription / MonitoringInstance / Target，或根据 `actionable_count=0` 自动把 record status 改成 completed。
 - Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked monitoring instance health。
 - Bad: Page 直接 `fetch('/api/vps')` 或在组件层调 API；业务请求必须走 `lib/api.ts`。
 - Bad: 在 VPS 详情表单里让用户输入 `mi_...`、`tg_...`、`svc_...` 作为常规路径，且不给候选列表或落地入口。
@@ -291,8 +299,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 6. Tests Required
 
-- `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；manual group helper list/create/get/patch/member add/patch/delete；scenario template helpers list/create/get/patch/create-manual-group；记录 fixture 覆盖 `execution_readback`。
-- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、tabs query、上下文筛选 chips、深链打开 group/manual group/record/template、场景模板列表/详情/创建组合、自定义组合另存模板、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 与 `decision_recommendation` 展示、保存记录、记录详情状态推进、执行回读状态 / 计数 / 当前事实 / issue chips、成员跟进 PATCH payload 与计数刷新、readback drift 不触发业务对象写请求、模板打开不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅、错误/空态。
+- `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；manual group helper list/create/get/patch/member add/patch/delete；scenario template helpers list/create/get/patch/create-manual-group；记录 fixture 覆盖 `execution_readback` 和 `execution_plan`。
+- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、tabs query、上下文筛选 chips、深链打开 group/manual group/record/template、场景模板列表/详情/创建组合、自定义组合另存模板、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 与 `decision_recommendation` 展示、保存记录、记录详情状态推进、执行回读状态 / 计数 / 当前事实 / issue chips、execution plan 列表片段 / lane board / CTA URL 映射 / 快速跟进、成员跟进 PATCH payload 与计数刷新、readback drift 不触发业务对象写请求、plan CTA 不触发业务对象写请求、模板打开不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅、错误/空态。
 - `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
 - `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。

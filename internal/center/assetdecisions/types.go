@@ -252,6 +252,7 @@ type RecordSummary struct {
 	DecidedAt               *time.Time              `json:"decided_at,omitempty"`
 	CompletedAt             *time.Time              `json:"completed_at,omitempty"`
 	ExecutionReadback       RecordExecutionReadback `json:"execution_readback"`
+	ExecutionPlan           RecordExecutionPlan     `json:"execution_plan"`
 }
 
 type RecordDetail struct {
@@ -275,6 +276,7 @@ type RecordMember struct {
 	CreatedAt         time.Time               `json:"created_at"`
 	UpdatedAt         time.Time               `json:"updated_at"`
 	ExecutionReadback MemberExecutionReadback `json:"execution_readback"`
+	ExecutionPlan     MemberExecutionPlan     `json:"execution_plan"`
 }
 
 type CreateRecordInput struct {

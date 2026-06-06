@@ -842,6 +842,104 @@ def asset_decision_record_readback(members: list[dict[str, object]]) -> dict[str
     return {"status": status, "summary": summary, **counts}
 
 
+def asset_decision_member_execution_plan(member: dict[str, object]) -> dict[str, object]:
+    action = str(member.get("decided_action") or member.get("suggested_action") or "review")
+    readback = member.get("execution_readback")
+    if not isinstance(readback, dict):
+        readback = {"status": "open", "issues": []}
+    issues = readback.get("issues")
+    if not isinstance(issues, list):
+        issues = []
+    missing_fact = any(isinstance(issue, dict) and issue.get("kind") == "current_fact_missing" for issue in issues)
+    subscription_gap = any(
+        isinstance(issue, dict)
+        and issue.get("kind") == "evidence_gap"
+        and ("订阅" in str(issue.get("label") or "") or "subscription" in str(issue.get("details") or "").lower())
+        for issue in issues
+    )
+    if missing_fact or action == "review":
+        lane = "review"
+        step_kind = "review_record"
+        step_label = "留在记录中复核"
+    elif action in {"cancel", "open_cancellation_workbench"}:
+        lane = "cancel_retire"
+        step_kind = "open_cancellation_workbench"
+        step_label = "打开取消/退役工作台"
+    elif action == "migrate":
+        lane = "migration"
+        step_kind = "open_vps_detail"
+        step_label = "打开 VPS 详情推进迁移"
+    elif action in {"keep", "observe"}:
+        lane = "keep_observe"
+        step_kind = "open_vps_detail"
+        step_label = "打开 VPS 详情核对判断"
+    elif action == "complete_evidence":
+        lane = "evidence"
+        step_kind = "open_subscription_context" if subscription_gap else "open_vps_detail"
+        step_label = "核对订阅上下文" if subscription_gap else "打开 VPS 详情补证据"
+    else:
+        lane = "review"
+        step_kind = "review_record"
+        step_label = "留在记录中复核"
+
+    status = str(readback.get("status") or "open")
+    tone_by_status = {
+        "drift": "critical",
+        "blocked": "critical",
+        "needs_evidence": "alert",
+        "open": "notice",
+        "aligned": "normal",
+        "inactive": "neutral",
+    }
+    summary_by_status = {
+        "drift": "当前事实与判断不一致，需要复核闭环",
+        "blocked": "成员跟进阻塞，需要解除阻塞或调整路径",
+        "needs_evidence": "证据仍未补齐，先补上下文再确认判断",
+        "open": "当前事实仍待处理或复核",
+        "aligned": "当前事实已对齐，待确认跟进状态",
+        "inactive": "记录已失效，不需要推进",
+    }
+    followup_status = str(member.get("followup_status") or "todo")
+    actionable = status in {"drift", "blocked", "needs_evidence", "open"} or (status == "aligned" and followup_status not in {"done", "skipped"})
+    return {
+        "lane": lane,
+        "step_kind": step_kind,
+        "tone": tone_by_status.get(status, "neutral"),
+        "summary": summary_by_status.get(status, "需要复核执行路径"),
+        "step_label": step_label,
+        "issue_count": len(issues),
+        "blocked": status == "blocked" or followup_status == "blocked",
+        "actionable": actionable,
+    }
+
+
+def asset_decision_record_execution_plan(members: list[dict[str, object]], readback: dict[str, object]) -> dict[str, object]:
+    lane_order = ["cancel_retire", "migration", "keep_observe", "evidence", "review"]
+    lane_counts: list[dict[str, object]] = []
+    for lane in lane_order:
+        count = sum(1 for member in members if isinstance(member.get("execution_plan"), dict) and member["execution_plan"].get("lane") == lane)
+        if count:
+            lane_counts.append({"lane": lane, "count": count})
+    actionable_count = sum(1 for member in members if isinstance(member.get("execution_plan"), dict) and member["execution_plan"].get("actionable"))
+    blocked_count = sum(1 for member in members if isinstance(member.get("execution_plan"), dict) and member["execution_plan"].get("blocked"))
+    if int(readback.get("drift_count") or 0) > 0:
+        summary = f"{readback['drift_count']} 台 VPS 事实漂移，优先复核闭环"
+    elif blocked_count > 0:
+        summary = f"{blocked_count} 台 VPS 跟进阻塞，需要解除阻塞"
+    elif int(readback.get("needs_evidence_count") or 0) > 0:
+        summary = f"{readback['needs_evidence_count']} 台 VPS 需要补齐证据"
+    elif actionable_count > 0:
+        summary = f"{actionable_count} 台 VPS 仍有执行步骤"
+    else:
+        summary = "执行计划已对齐"
+    return {
+        "summary": summary,
+        "lane_counts": lane_counts,
+        "actionable_count": actionable_count,
+        "blocked_count": blocked_count,
+    }
+
+
 def asset_decision_chip(
     kind: str,
     label: str,
@@ -1704,6 +1802,7 @@ def asset_decision_record_summary(
     assert group is not None
     member_count = len(group["members"])
     readback = asset_decision_record_readback(members or [])
+    plan = asset_decision_record_execution_plan(members or [], readback)
     return {
         "record_id": record_id,
         "title": "欧洲主备节点续费决策",
@@ -1724,6 +1823,7 @@ def asset_decision_record_summary(
         "followup_skipped_count": 0,
         "evidence_snapshot": asset_decision_record_group_snapshot(group),
         "execution_readback": readback,
+        "execution_plan": plan,
         "created_at": iso_timestamp(-2),
         "updated_at": iso_timestamp(-1),
         "decided_at": iso_timestamp(-1),
@@ -1811,7 +1911,12 @@ def asset_decision_record_member(
     }
     if member.get("primary_subscription") is not None:
         evidence_snapshot["primary_subscription"] = member["primary_subscription"]
-    return {
+    readback = asset_decision_member_readback(
+        member,
+        decided_action,
+        followup_status,
+    )
+    record_member = {
         "record_id": record_id,
         "vps_id": vps_id,
         "display_name": display_name,
@@ -1824,14 +1929,12 @@ def asset_decision_record_member(
         "followup_note": followup_note,
         "followup_updated_at": iso_timestamp(-1) if followup_status != "todo" else None,
         "evidence_snapshot": evidence_snapshot,
-        "execution_readback": asset_decision_member_readback(
-            member,
-            decided_action,
-            followup_status,
-        ),
+        "execution_readback": readback,
         "created_at": iso_timestamp(-2),
         "updated_at": iso_timestamp(-1),
     }
+    record_member["execution_plan"] = asset_decision_member_execution_plan(record_member)
+    return record_member
 
 
 def asset_decision_record_detail(record_id: str = "adr_mock_eu_renewal") -> dict[str, object] | None:
