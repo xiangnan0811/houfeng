@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.0](https://github.com/xiangnan0811/houfeng/compare/v0.42.0...v0.43.0) (2026-06-06)
+
+
+### Features
+
+* **web:** add asset decision closed-loop guide ([5c42049](https://github.com/xiangnan0811/houfeng/commit/5c4204963dbde90276eca0767c2f022651769ef6))
+
 ## [0.42.0](https://github.com/xiangnan0811/houfeng/compare/v0.41.0...v0.42.0) (2026-06-06)
 
 
