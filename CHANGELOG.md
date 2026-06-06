@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.42.0](https://github.com/xiangnan0811/houfeng/compare/v0.41.0...v0.42.0) (2026-06-06)
+
+
+### Features
+
+* enhance asset decision scenario workbench ([861099f](https://github.com/xiangnan0811/houfeng/commit/861099fd4b66880796ee98f5eee2057e5cba15f9))
+* enhance asset decision scenario workbench ([c9372d2](https://github.com/xiangnan0811/houfeng/commit/c9372d2946aa0c75b8be5bd885b443a26e836eca))
+
 ## [0.41.0](https://github.com/xiangnan0811/houfeng/compare/v0.40.0...v0.41.0) (2026-06-05)
 
 
