@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/xiangnan0811/houfeng/compare/v0.46.0...v0.47.0) (2026-06-06)
+
+
+### Features
+
+* **web:** polish asset decisions workbench ([08f417e](https://github.com/xiangnan0811/houfeng/commit/08f417e74e83c448c40f531b2a1199e5e06282d9))
+
 ## [0.46.0](https://github.com/xiangnan0811/houfeng/compare/v0.45.0...v0.46.0) (2026-06-06)
 
 
