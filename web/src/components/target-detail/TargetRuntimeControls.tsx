@@ -1,4 +1,4 @@
-import { ActionConfirmationCard } from '../ActionConfirmationCard'
+import { ActionConfirmationModal } from '../ActionConfirmationModal'
 import { DetailSection } from '../DetailSection'
 import type { TargetRecord } from '../../lib/types'
 
@@ -89,7 +89,8 @@ export function TargetRuntimeControls({
           ))}
         </div>
         {pendingConfirmation ? (
-          <ActionConfirmationCard
+          <ActionConfirmationModal
+            open
             title={
               pendingConfirmation.action === 'pause'
                 ? '确认暂停目标监控'

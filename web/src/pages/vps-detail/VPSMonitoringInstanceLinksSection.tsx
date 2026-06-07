@@ -6,22 +6,30 @@ import { HealthBadge } from '../assetPageBadges'
 type VPSMonitoringInstanceLinksSectionProps = {
   monitoring: VPSMonitoringInstanceSummary[]
   unlinkingMonitoringInstanceId: string | null
+  pendingUnlinkMonitoringInstance: VPSMonitoringInstanceSummary | null
   linkFeedback: string | null
   linkFeedbackIsError: boolean
   onCreateMonitoringInstance: () => void
   onOpenLink: () => void
-  onUnlinkMonitoringInstance: (monitoringInstance: VPSMonitoringInstanceSummary) => void
+  onRequestUnlinkMonitoringInstance: (monitoringInstance: VPSMonitoringInstanceSummary) => void
+  onCancelUnlinkMonitoringInstance: () => void
+  onConfirmUnlinkMonitoringInstance: (monitoringInstance: VPSMonitoringInstanceSummary) => void
 }
 
 export function VPSMonitoringInstanceLinksSection({
   monitoring,
   unlinkingMonitoringInstanceId,
+  pendingUnlinkMonitoringInstance,
   linkFeedback,
   linkFeedbackIsError,
   onCreateMonitoringInstance,
   onOpenLink,
-  onUnlinkMonitoringInstance,
+  onRequestUnlinkMonitoringInstance,
+  onCancelUnlinkMonitoringInstance,
+  onConfirmUnlinkMonitoringInstance,
 }: VPSMonitoringInstanceLinksSectionProps) {
+  const pendingUnlinkName = pendingUnlinkMonitoringInstance?.display_name ?? pendingUnlinkMonitoringInstance?.monitoring_instance_id ?? ''
+
   return (
     <section className="page-panel">
       <div className="section-heading">
@@ -51,6 +59,38 @@ export function VPSMonitoringInstanceLinksSection({
           {linkFeedback}
         </p>
       ) : null}
+      {pendingUnlinkMonitoringInstance ? (
+        <section className="asset-lifecycle-confirm" role="alertdialog" aria-label="确认解除监控实例关联">
+          <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
+          <h4>确认解除监控实例关联</h4>
+          <div className="asset-lifecycle-confirm__flow">
+            <span>当前：{pendingUnlinkName} 正作为该 VPS 的监控证据。</span>
+            <span>操作后：该监控实例不再关联到这个 VPS。</span>
+          </div>
+          <div className="asset-lifecycle-confirm__callouts">
+            <p>会移除 VPS 台账中的监控实例证据关联，后续资产判断不再把它计入该 VPS。</p>
+            <p>不会删除监控实例、历史事件、agent 绑定或观测数据。</p>
+          </div>
+          <div className="asset-operation-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id}
+              onClick={onCancelUnlinkMonitoringInstance}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id}
+              onClick={() => onConfirmUnlinkMonitoringInstance(pendingUnlinkMonitoringInstance)}
+            >
+              {unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id ? '解除中…' : '确认解除关联'}
+            </Button>
+          </div>
+        </section>
+      ) : null}
       {monitoring.length > 0 ? (
         <div className="vps-monitoring-instance-evidence-strip" aria-label="监控实例证据摘要">
           {monitoring.map((monitoringInstance) => (
@@ -78,7 +118,7 @@ export function VPSMonitoringInstanceLinksSection({
                   variant="ghost"
                   size="sm"
                   disabled={unlinkingMonitoringInstanceId !== null}
-                  onClick={() => onUnlinkMonitoringInstance(monitoringInstance)}
+                  onClick={() => onRequestUnlinkMonitoringInstance(monitoringInstance)}
                 >
                   {unlinkingMonitoringInstanceId === monitoringInstance.monitoring_instance_id ? '解除中…' : '解除关联'}
                 </Button>

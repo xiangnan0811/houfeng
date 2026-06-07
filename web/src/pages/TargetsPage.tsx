@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Modal, Hostname, MonoDigits, StatusGlyph, Timestamp } from '../components/atoms'
+import { Button, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { StatusBadge } from '../components/StatusBadge'
 import {
@@ -533,6 +533,10 @@ export function TargetsPage() {
     return true
   }
 
+  const editingTarget = metadataEditingTargetId
+    ? targets.find((target) => target.target_id === metadataEditingTargetId) ?? null
+    : null
+
   return (
     <div className="page-stack animate-in">
       <div className="page-header animate-in">
@@ -612,6 +616,58 @@ export function TargetsPage() {
           onSubmit={handleCreate}
           onFieldChange={updateCreateField}
         />
+      </Modal>
+
+      <Modal
+        open={editingTarget !== null}
+        onClose={() => {
+          if (editingTarget) cancelMetadataEdit(editingTarget.target_id)
+        }}
+        title={editingTarget ? `${editingTarget.name} · 快速编辑标签` : '快速编辑标签'}
+        size="md"
+      >
+        {editingTarget ? (
+          <div className="page-stack">
+            <p className="page-panel__description">
+              更新列表扫描使用的 group 与标签，不会修改备注或运行状态。
+            </p>
+            <Input
+              label="Group"
+              name={`target-group-${editingTarget.target_id}`}
+              value={metadataGroupInput}
+              onChange={(event) => setMetadataGroupInput(event.target.value)}
+              placeholder="Group"
+            />
+            <Input
+              label="标签"
+              name={`target-labels-${editingTarget.target_id}`}
+              value={metadataLabelInput}
+              onChange={(event) => setMetadataLabelInput(event.target.value)}
+              hint="用逗号分隔多个标签。"
+            />
+            {metadataErrors[editingTarget.target_id] ? (
+              <p className="targets-table__inline-error" role="alert">
+                {metadataErrors[editingTarget.target_id]}
+              </p>
+            ) : null}
+            <div className="action-confirm__actions">
+              <Button
+                variant="secondary"
+                disabled={metadataSavingTargetId === editingTarget.target_id}
+                onClick={() => cancelMetadataEdit(editingTarget.target_id)}
+              >
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                disabled={metadataSavingTargetId === editingTarget.target_id}
+                onClick={() => void saveMetadataLabels(editingTarget)}
+              >
+                {metadataSavingTargetId === editingTarget.target_id ? '正在保存…' : '保存标签'}
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
 
       <div className="animate-in d2">
@@ -721,65 +777,10 @@ export function TargetsPage() {
                         </td>
                         <td>
                           <div className="name">{target.name}</div>
-                          {metadataEditingTargetId === target.target_id ? (
-                            <div
-                              className="targets-table__label-editor"
-                              onClick={(event) => event.stopPropagation()}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.stopPropagation()
-                                }
-                              }}
-                            >
-                              <label className="targets-table__label-editor-field">
-                                <span className="visually-hidden">Group</span>
-                                <input
-                                  name={`target-group-${target.target_id}`}
-                                  value={metadataGroupInput}
-                                  onChange={(event) => setMetadataGroupInput(event.target.value)}
-                                  aria-label="Group"
-                                  placeholder="Group"
-                                />
-                              </label>
-                              <label className="targets-table__label-editor-field">
-                                <span className="visually-hidden">标签</span>
-                                <input
-                                  name={`target-labels-${target.target_id}`}
-                                  value={metadataLabelInput}
-                                  onChange={(event) => setMetadataLabelInput(event.target.value)}
-                                  aria-label="标签"
-                                />
-                              </label>
-                              <div className="targets-table__label-editor-actions">
-                                <button
-                                  type="button"
-                                  className="btn sm primary"
-                                  disabled={metadataSavingTargetId === target.target_id}
-                                  onClick={() => void saveMetadataLabels(target)}
-                                >
-                                  {metadataSavingTargetId === target.target_id ? '正在保存…' : '保存标签'}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn sm secondary"
-                                  disabled={metadataSavingTargetId === target.target_id}
-                                  onClick={() => cancelMetadataEdit(target.target_id)}
-                                >
-                                  取消
-                                </button>
-                              </div>
-                              {metadataErrors[target.target_id] ? (
-                                <p className="targets-table__inline-error" role="alert">
-                                  {metadataErrors[target.target_id]}
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <div className="sub">
-                              成功 <Timestamp value={target.last_success_at ?? null} mode="relative" />
-                              {' '}· 失败 <Timestamp value={target.last_failure_at ?? null} mode="relative" />
-                            </div>
-                          )}
+                          <div className="sub">
+                            成功 <Timestamp value={target.last_success_at ?? null} mode="relative" />
+                            {' '}· 失败 <Timestamp value={target.last_failure_at ?? null} mode="relative" />
+                          </div>
                         </td>
                         <td><span className="probe-kind">{target.target_type}</span></td>
                         <td className="mono">

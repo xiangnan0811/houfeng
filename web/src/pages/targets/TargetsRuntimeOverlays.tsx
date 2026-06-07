@@ -1,4 +1,4 @@
-import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import type { TargetRecord } from '../../lib/types'
 import { pauseConfirmationCurrent } from './targetHelpers'
 import type { PendingTargetConfirmation, TargetRuntimeAction } from './types'
@@ -32,7 +32,8 @@ export function TargetsRuntimeOverlays({
         return (
           <div key={`runtime-${target.target_id}`} className="targets-table__row-overlay">
             {showConfirmation ? (
-              <ActionConfirmationCard
+              <ActionConfirmationModal
+                open
                 title={
                   pendingConfirmation.action === 'pause' ? '确认暂停目标监控' : '确认归档目标'
                 }

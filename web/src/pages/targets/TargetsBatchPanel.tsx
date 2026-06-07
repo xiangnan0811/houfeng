@@ -1,4 +1,4 @@
-import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 
 type TargetsBatchPanelProps = {
   show: boolean
@@ -75,7 +75,8 @@ export function TargetsBatchPanel({
         </div>
       ) : null}
       {pendingBatchAction === 'pause' ? (
-        <ActionConfirmationCard
+        <ActionConfirmationModal
+          open
           title="确认批量暂停目标"
           current={`将对当前筛选范围内的 ${filteredTargetCount} 个目标执行暂停操作。`}
           result="操作后：所有已选目标运行状态变为暂停。"

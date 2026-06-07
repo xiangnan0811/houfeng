@@ -1,4 +1,4 @@
-import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { Button } from '../../components/atoms/Button'
 import type { TargetRuntimeAction } from '../../components/target-detail'
 
@@ -67,7 +67,8 @@ export function TargetLifecycleSection({
           </div>
         </div>
         {!isArchived && showArchiveConfirmation ? (
-          <ActionConfirmationCard
+          <ActionConfirmationModal
+            open
             title="确认归档目标"
             current="当前：目标仍在当前工作集中。"
             result="操作后：目标退出当前工作集，运行状态变为已归档。"

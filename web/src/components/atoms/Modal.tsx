@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useId, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalFocus } from '../../lib/useModalFocus'
 
@@ -12,10 +12,23 @@ export interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl'
   contentClassName?: string
   ariaLabel?: string
+  dialogRole?: 'dialog' | 'alertdialog'
 }
 
-export function Modal({ open, onClose, title, children, footer, persistent, size, contentClassName, ariaLabel }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+  persistent,
+  size,
+  contentClassName,
+  ariaLabel,
+  dialogRole = 'dialog',
+}: ModalProps) {
   const modalRef = useModalFocus<HTMLDivElement>(open, onClose)
+  const titleId = useId()
 
   useEffect(() => {
     if (open) {
@@ -47,13 +60,13 @@ export function Modal({ open, onClose, title, children, footer, persistent, size
       <div
         ref={modalRef}
         className={['modal-content', size && `modal-content--${size}`, contentClassName].filter(Boolean).join(' ')}
-        role="dialog"
+        role={dialogRole}
         aria-modal="true"
-        {...(ariaLabel ? { 'aria-label': ariaLabel } : { 'aria-labelledby': 'modal-title' })}
+        {...(ariaLabel ? { 'aria-label': ariaLabel } : { 'aria-labelledby': titleId })}
         tabIndex={-1}
       >
         <div className="modal-header">
-          <h3 id="modal-title">{title}</h3>
+          <h3 id={titleId}>{title}</h3>
           <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">
             ✕
           </button>

@@ -1545,6 +1545,9 @@ describe('VPSDetailPage', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '查看监控实例详情' })[0])
     const unlinkEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
     fireEvent.click(within(unlinkEvidenceDrawer).getByRole('button', { name: '解除关联' }))
+    const unlinkConfirmation = within(unlinkEvidenceDrawer).getByRole('alertdialog', { name: '确认解除监控实例关联' })
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/vps/vps_001/unlink-monitoring-instance', expect.anything())
+    fireEvent.click(within(unlinkConfirmation).getByRole('button', { name: '确认解除关联' }))
     await waitFor(() => expect(screen.queryByText('Seoul Monitoring Instance')).not.toBeInTheDocument())
     expect(screen.getByText('监控实例关联已解除')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/unlink-monitoring-instance', {
@@ -1851,10 +1854,12 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Archive Fail Edge' })).toBeInTheDocument())
 
     clickVPSAction('归档 VPS')
-    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+    const archiveDialog = screen.getByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.click(within(archiveDialog).getByRole('button', { name: '确认归档' }))
 
-    await waitFor(() => expect(screen.getByText('archive failed')).toBeInTheDocument())
-    expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(within(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).getByRole('alert')).toHaveTextContent('archive failed'),
+    )
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_archive_fail', {
       method: 'PATCH',
       headers: {

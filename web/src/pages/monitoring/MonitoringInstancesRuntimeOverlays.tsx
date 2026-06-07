@@ -1,4 +1,4 @@
-import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import type { MonitoringInstanceRecord } from '../../lib/types'
 import { pauseConfirmationCurrent } from './monitoringHelpers'
 import type { PendingMonitoringInstanceConfirmation } from './types'
@@ -31,7 +31,8 @@ export function MonitoringInstancesRuntimeOverlays({
         return (
           <div key={`runtime-${monitoringInstance.monitoring_instance_id}`} className="monitoring-table__row-overlay">
             {showPauseConfirmation ? (
-              <ActionConfirmationCard
+              <ActionConfirmationModal
+                open
                 title="确认暂停监控实例监控"
                 current={pauseConfirmationCurrent(monitoringInstance)}
                 result="操作后：监控运行状态变为暂停。"

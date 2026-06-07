@@ -53,6 +53,10 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+function getTargetQuickEditDialog(name = /快速编辑标签/) {
+  return screen.getByRole('dialog', { name })
+}
+
 
 
 describe('TargetsPage', () => {
@@ -765,12 +769,13 @@ describe('TargetsPage', () => {
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(row!).getByLabelText('标签'), {
+    const editorDialog = getTargetQuickEditDialog(/Blog · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByLabelText('标签'), {
       target: { value: 'alpha, beta, alpha, beta' },
     })
-    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
-    await waitFor(() => expect(within(row!).queryByLabelText('标签')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Blog · 快速编辑标签/ })).not.toBeInTheDocument())
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets/tg_001', {
       method: 'PATCH',
       headers: {
@@ -825,16 +830,17 @@ describe('TargetsPage', () => {
     expect(cacheRow).not.toBeNull()
 
     fireEvent.click(within(blogRow!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(blogRow!).getByLabelText('标签'), {
+    const editorDialog = getTargetQuickEditDialog(/Blog · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByLabelText('标签'), {
       target: { value: 'alpha, beta' },
     })
-    fireEvent.click(within(blogRow!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
     await waitFor(() =>
-      expect(within(blogRow!).getByRole('alert')).toHaveTextContent('metadata failed'),
+      expect(within(editorDialog).getByRole('alert')).toHaveTextContent('metadata failed'),
     )
-    expect(within(blogRow!).getByRole('button', { name: '保存标签' })).toBeInTheDocument()
-    expect(within(cacheRow!).queryByText('metadata failed')).not.toBeInTheDocument()
+    expect(within(editorDialog).getByRole('button', { name: '保存标签' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Cache · 快速编辑标签/ })).not.toBeInTheDocument()
   })
 
   it('blocks opening another row label editor while a metadata save is in flight', async () => {
@@ -876,17 +882,18 @@ describe('TargetsPage', () => {
     expect(cacheRow).not.toBeNull()
 
     fireEvent.click(within(blogRow!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(blogRow!).getByLabelText('标签'), {
+    const editorDialog = getTargetQuickEditDialog(/Blog · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByLabelText('标签'), {
       target: { value: 'alpha, beta' },
     })
-    fireEvent.click(within(blogRow!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
     await waitFor(() =>
       expect(within(cacheRow!).getByRole('button', { name: '快速编辑标签' })).toBeDisabled(),
     )
 
     fireEvent.click(within(cacheRow!).getByRole('button', { name: '快速编辑标签' }))
-    expect(within(cacheRow!).queryByLabelText('标签')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Cache · 快速编辑标签/ })).not.toBeInTheDocument()
 
     await act(async () => {
       saveResponse.resolve(
@@ -903,7 +910,7 @@ describe('TargetsPage', () => {
     })
 
     await waitFor(() =>
-      expect(within(blogRow!).queryByRole('button', { name: '保存标签' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('dialog', { name: /Blog · 快速编辑标签/ })).not.toBeInTheDocument(),
     )
     expect(within(cacheRow!).getByRole('button', { name: '快速编辑标签' })).toBeEnabled()
   })
@@ -942,10 +949,11 @@ describe('TargetsPage', () => {
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(row!).getByLabelText('标签'), {
+    const editorDialog = getTargetQuickEditDialog(/Blog · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByLabelText('标签'), {
       target: { value: 'alpha, beta' },
     })
-    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 
@@ -968,7 +976,7 @@ describe('TargetsPage', () => {
       )
     })
 
-    await waitFor(() => expect(within(row!).queryByLabelText('标签')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Blog · 快速编辑标签/ })).not.toBeInTheDocument())
 
     await act(async () => {
       runtimeResponse.resolve(
@@ -1022,10 +1030,11 @@ describe('TargetsPage', () => {
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(row!).getByLabelText('标签'), {
+    const editorDialog = getTargetQuickEditDialog(/Blog · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByLabelText('标签'), {
       target: { value: 'alpha, beta' },
     })
-    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 
@@ -1065,7 +1074,7 @@ describe('TargetsPage', () => {
       )
     })
 
-    await waitFor(() => expect(within(row!).queryByLabelText('标签')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Blog · 快速编辑标签/ })).not.toBeInTheDocument())
     expect(within(row!).getByText('维护中')).toBeInTheDocument()
   })
 
@@ -1329,12 +1338,13 @@ describe('TargetsPage', () => {
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(row!).getByLabelText('标签'), {
+    const editorDialog = getTargetQuickEditDialog(/Blog · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByLabelText('标签'), {
       target: { value: 'alpha, beta' },
     })
-    fireEvent.click(within(row!).getByRole('button', { name: '取消' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '取消' }))
 
-    expect(within(row!).queryByLabelText('标签')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Blog · 快速编辑标签/ })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -1393,8 +1403,7 @@ describe('TargetsPage', () => {
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    // Inline editor opened on the same row, navigation must NOT have triggered.
-    expect(within(row!).getByRole('textbox', { name: '标签' })).toBeInTheDocument()
+    expect(getTargetQuickEditDialog(/Blog · 快速编辑标签/)).toBeInTheDocument()
     expect(screen.queryByText('target detail')).not.toBeInTheDocument()
   })
 

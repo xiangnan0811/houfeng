@@ -2292,6 +2292,7 @@ export function AssetDecisionsPage() {
   const [manualGroupError, setManualGroupError] = useState<string | null>(null)
   const [manualMemberDrafts, setManualMemberDrafts] = useState<Record<string, ManualMemberDraft>>({})
   const [manualMemberSaving, setManualMemberSaving] = useState<Record<string, boolean>>({})
+  const [pendingManualMemberRemoval, setPendingManualMemberRemoval] = useState<AssetDecisionManualGroupMember | null>(null)
   const [manualMemberAddDraft, setManualMemberAddDraft] = useState<ManualMemberAddDraft>({
     vpsID: '',
     intendedRole: 'observe_candidate',
@@ -2307,6 +2308,7 @@ export function AssetDecisionsPage() {
   const [recordFollowupPatching, setRecordFollowupPatching] = useState<Record<string, boolean>>({})
   const [templateSaving, setTemplateSaving] = useState(false)
   const [templateError, setTemplateError] = useState<string | null>(null)
+  const [pendingTemplateStatus, setPendingTemplateStatus] = useState<AssetDecisionScenarioTemplateStatus | null>(null)
   const [templateManualDraft, setTemplateManualDraft] = useState<TemplateManualGroupDraft>({
     title: '',
     goal: '',
@@ -2333,6 +2335,8 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
+    setPendingManualMemberRemoval(null)
+    setPendingTemplateStatus(null)
   }
 
   function applyURLGroupOpenState(groupID: string) {
@@ -2348,6 +2352,8 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
+    setPendingManualMemberRemoval(null)
+    setPendingTemplateStatus(null)
     setDetailState({ loading: true, error: null, detail: null })
     setSelectedGroupID(groupID)
   }
@@ -2365,6 +2371,8 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
+    setPendingManualMemberRemoval(null)
+    setPendingTemplateStatus(null)
     setManualDetailState({ loading: true, error: null, detail: null })
     setSelectedManualGroupID(manualGroupID)
   }
@@ -2381,6 +2389,8 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
+    setPendingManualMemberRemoval(null)
+    setPendingTemplateStatus(null)
     setSelectedRecordID(recordID)
     setRecordDetailState({ loading: true, error: null, detail: null })
     setRecordPatchError(null)
@@ -3237,7 +3247,7 @@ export function AssetDecisionsPage() {
               <button className="btn sm primary" type="submit" disabled={isSaving}>
                 {isSaving ? '保存中…' : '保存意图'}
               </button>
-              <button className="btn sm secondary" type="button" onClick={() => deleteManualMember(member)} disabled={isSaving}>
+              <button className="btn sm secondary" type="button" onClick={() => requestManualMemberRemoval(member)} disabled={isSaving}>
                 移除
               </button>
             </div>
@@ -3526,6 +3536,7 @@ export function AssetDecisionsPage() {
     setManualGroupError(null)
     setManualMemberDrafts({})
     setManualMemberSaving({})
+    setPendingManualMemberRemoval(null)
     setManualMemberAddDraft({
       vpsID: '',
       intendedRole: 'observe_candidate',
@@ -3561,6 +3572,7 @@ export function AssetDecisionsPage() {
     setSelectedTemplateID(null)
     setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
     setTemplateError(null)
+    setPendingTemplateStatus(null)
     setTemplateManualDraft({
       title: '',
       goal: '',
@@ -3589,6 +3601,9 @@ export function AssetDecisionsPage() {
   function applyManualDetail(detail: AssetDecisionManualGroupDetail) {
     setManualDetailState({ loading: false, error: null, detail })
     setManualMemberDrafts(buildManualMemberDrafts(detail))
+    setPendingManualMemberRemoval((current) =>
+      current && detail.members.some((member) => member.vps_id === current.vps_id) ? current : null,
+    )
     setManualGroupsState((current) => ({
       loading: false,
       error: null,
@@ -3598,6 +3613,7 @@ export function AssetDecisionsPage() {
 
   function applyTemplateDetail(detail: AssetDecisionScenarioTemplateDetail) {
     setTemplateDetailState({ loading: false, error: null, detail })
+    setPendingTemplateStatus(null)
     setTemplateManualDraft({
       title: detail.title,
       goal: detail.goal,
@@ -3790,6 +3806,7 @@ export function AssetDecisionsPage() {
     const detail = templateDetailState.detail
     if (!detail || detail.builtin) return
     setTemplateError(null)
+    setPendingTemplateStatus(null)
     setTemplateSaving(true)
     patchAssetDecisionScenarioTemplate(detail.template_id, { status })
       .then((updated) => {
@@ -3800,6 +3817,18 @@ export function AssetDecisionsPage() {
         setTemplateError(describeError(error, '更新模板状态失败'))
       })
       .finally(() => setTemplateSaving(false))
+  }
+
+  function requestTemplateStatusUpdate(status: AssetDecisionScenarioTemplateStatus) {
+    const detail = templateDetailState.detail
+    if (!detail || detail.builtin || templateSaving) return
+    setTemplateError(null)
+    setPendingTemplateStatus(status)
+  }
+
+  function cancelTemplateStatusUpdate() {
+    setPendingTemplateStatus(null)
+    setTemplateError(null)
   }
 
   function saveManualGroupAsTemplate(detail: AssetDecisionManualGroupDetail) {
@@ -3964,6 +3993,7 @@ export function AssetDecisionsPage() {
     const detail = manualDetailState.detail
     if (!detail) return
     setManualGroupError(null)
+    setPendingManualMemberRemoval(null)
     setManualMemberSaving((current) => ({ ...current, [member.vps_id]: true }))
     deleteAssetDecisionManualGroupMember(detail.manual_group_id, member.vps_id)
       .then((updated) => {
@@ -3976,6 +4006,17 @@ export function AssetDecisionsPage() {
       .finally(() => {
         setManualMemberSaving((current) => ({ ...current, [member.vps_id]: false }))
       })
+  }
+
+  function requestManualMemberRemoval(member: AssetDecisionManualGroupMember) {
+    if (manualMemberSaving[member.vps_id]) return
+    setManualGroupError(null)
+    setPendingManualMemberRemoval(member)
+  }
+
+  function cancelManualMemberRemoval() {
+    setPendingManualMemberRemoval(null)
+    setManualGroupError(null)
   }
 
   function updateRecordFollowupDraft(vpsID: string, patch: Partial<RecordFollowupDraft>) {
@@ -5537,6 +5578,41 @@ export function AssetDecisionsPage() {
               </form>
             )}
 
+            {pendingManualMemberRemoval ? (
+              <section className="asset-lifecycle-confirm" role="alertdialog" aria-label="确认移除组合成员">
+                <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
+                <h3>确认移除组合成员</h3>
+                <div className="asset-lifecycle-confirm__flow">
+                  <span>
+                    当前：{pendingManualMemberRemoval.current_fact_found ? pendingManualMemberRemoval.vps.display_name : pendingManualMemberRemoval.vps_id} 在这个自定义组合中。
+                  </span>
+                  <span>操作后：该 VPS 会从当前自定义组合中移除。</span>
+                </div>
+                <div className="asset-lifecycle-confirm__callouts">
+                  <p>会删除这个组合里的成员意图、理由、备注和排序。</p>
+                  <p>不会修改 VPS、订阅、监控实例、Target 或已保存决策记录。</p>
+                </div>
+                <div className="asset-operation-actions">
+                  <button
+                    className="btn sm secondary"
+                    type="button"
+                    disabled={Boolean(manualMemberSaving[pendingManualMemberRemoval.vps_id])}
+                    onClick={cancelManualMemberRemoval}
+                  >
+                    取消
+                  </button>
+                  <button
+                    className="btn sm danger"
+                    type="button"
+                    disabled={Boolean(manualMemberSaving[pendingManualMemberRemoval.vps_id])}
+                    onClick={() => deleteManualMember(pendingManualMemberRemoval)}
+                  >
+                    {manualMemberSaving[pendingManualMemberRemoval.vps_id] ? '移除中…' : '确认移除'}
+                  </button>
+                </div>
+              </section>
+            ) : null}
+
             <div className="asset-table-scroll" role="region" aria-label="自定义组合成员对比" tabIndex={0}>
               <DataTable
                 className="asset-table asset-decision-manual-members-table"
@@ -5607,7 +5683,7 @@ export function AssetDecisionsPage() {
                   <button
                     className="btn sm secondary"
                     type="button"
-                    onClick={() => updateTemplateStatus(templateDetailState.detail!.status === 'active' ? 'archived' : 'active')}
+                    onClick={() => requestTemplateStatusUpdate(templateDetailState.detail!.status === 'active' ? 'archived' : 'active')}
                     disabled={templateSaving}
                   >
                     {templateSaving ? '更新中…' : templateDetailState.detail.status === 'active' ? '归档模板' : '重新启用'}
@@ -5615,6 +5691,29 @@ export function AssetDecisionsPage() {
                 </div>
               )}
             </div>
+
+            {pendingTemplateStatus ? (
+              <section className="asset-lifecycle-confirm" role="alertdialog" aria-label={pendingTemplateStatus === 'archived' ? '确认归档模板' : '确认重新启用模板'}>
+                <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
+                <h3>{pendingTemplateStatus === 'archived' ? '确认归档模板' : '确认重新启用模板'}</h3>
+                <div className="asset-lifecycle-confirm__flow">
+                  <span>当前：模板状态为 {SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status]}。</span>
+                  <span>操作后：模板状态变为 {SCENARIO_TEMPLATE_STATUS_LABELS[pendingTemplateStatus]}。</span>
+                </div>
+                <div className="asset-lifecycle-confirm__callouts">
+                  <p>{pendingTemplateStatus === 'archived' ? '归档后不能直接从该模板创建新组合。' : '重新启用后可继续从该模板创建自定义组合。'}</p>
+                  <p>不会修改已经创建的自定义组合、决策记录或任何 VPS 资产事实。</p>
+                </div>
+                <div className="asset-operation-actions">
+                  <button className="btn sm secondary" type="button" disabled={templateSaving} onClick={cancelTemplateStatusUpdate}>
+                    取消
+                  </button>
+                  <button className="btn sm primary" type="button" disabled={templateSaving} onClick={() => updateTemplateStatus(pendingTemplateStatus)}>
+                    {templateSaving ? '更新中…' : pendingTemplateStatus === 'archived' ? '确认归档模板' : '确认重新启用'}
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
             <form className="asset-decision-template-form" onSubmit={submitTemplateManualGroup}>
               <div className="asset-decision-record-form__header">

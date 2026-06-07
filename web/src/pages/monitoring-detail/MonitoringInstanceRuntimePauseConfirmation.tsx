@@ -1,4 +1,4 @@
-import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import type { MonitoringInstanceRecord } from '../../lib/types'
 import { pauseConfirmationCurrent } from './monitoringDetailHelpers'
 
@@ -16,7 +16,8 @@ export function MonitoringInstanceRuntimePauseConfirmation({
   onCancel,
 }: MonitoringInstanceRuntimePauseConfirmationProps) {
   return (
-    <ActionConfirmationCard
+    <ActionConfirmationModal
+      open
       title="确认暂停监控实例监控"
       current={pauseConfirmationCurrent(monitoringInstance)}
       result="操作后：监控运行状态变为暂停。"

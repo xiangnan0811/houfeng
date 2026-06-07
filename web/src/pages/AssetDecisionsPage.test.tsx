@@ -1163,6 +1163,116 @@ describe('AssetDecisionsPage', () => {
     expect(writeCalls.some((call) => String(call[0]).startsWith('/api/targets/'))).toBe(false)
   })
 
+  it('requires an internal confirmation step before removing a manual group member', async () => {
+    const updatedManual = manualGroupDetail({
+      member_count: 0,
+      members: [],
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
+        {
+          url: '/api/asset-decisions/manual-groups/admg_001/members/vps_primary',
+          method: 'DELETE',
+          body: updatedManual,
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
+    const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
+    expect(manualSection).not.toBeNull()
+    fireEvent.click(within(manualSection!).getByRole('button', { name: '查看组合' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '移除' }))
+    const confirmation = within(dialog).getByRole('alertdialog', { name: '确认移除组合成员' })
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1)
+    expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups/admg_001/members/vps_primary', 'DELETE')).toBeUndefined()
+
+    fireEvent.click(within(confirmation).getByRole('button', { name: '确认移除' }))
+
+    await waitFor(() => expect(screen.getByText('成员已移出自定义组合：Germany Primary')).toBeInTheDocument())
+    expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups/admg_001/members/vps_primary', 'DELETE')).toEqual([
+      '/api/asset-decisions/manual-groups/admg_001/members/vps_primary',
+      {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      },
+    ])
+  })
+
+  it('requires an internal confirmation step before archiving a custom scenario template', async () => {
+    const customTemplate = scenarioTemplate({
+      template_id: 'adt_custom_primary_standby',
+      builtin: false,
+      title: '自定义主备模板',
+      status: 'active',
+    })
+    const archivedTemplate = scenarioTemplate({
+      ...customTemplate,
+      status: 'archived',
+      archived_at: '2026-06-06T09:00:00Z',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      templatesBody: [customTemplate],
+      routes: [
+        { url: '/api/asset-decisions/scenario-templates/adt_custom_primary_standby', body: customTemplate },
+        {
+          url: '/api/asset-decisions/scenario-templates/adt_custom_primary_standby',
+          method: 'PATCH',
+          body: archivedTemplate,
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('自定义主备模板').length).toBeGreaterThan(0))
+    const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
+    expect(templatesSection).not.toBeNull()
+    fireEvent.click(within(templatesSection!).getByRole('button', { name: '使用模板' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '归档模板' }))
+    const confirmation = within(dialog).getByRole('alertdialog', { name: '确认归档模板' })
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1)
+    expect(findFetchCall(fetchMock, '/api/asset-decisions/scenario-templates/adt_custom_primary_standby', 'PATCH')).toBeUndefined()
+
+    fireEvent.click(within(confirmation).getByRole('button', { name: '确认归档模板' }))
+
+    await waitFor(() => expect(screen.getByText('模板状态已更新：自定义主备模板 -> 已归档')).toBeInTheDocument())
+    expect(findFetchCall(fetchMock, '/api/asset-decisions/scenario-templates/adt_custom_primary_standby', 'PATCH')).toEqual([
+      '/api/asset-decisions/scenario-templates/adt_custom_primary_standby',
+      {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({ status: 'archived' }),
+      },
+    ])
+  })
+
   it('opens saved decision records and patches record status', async () => {
     const patched = decisionRecord({
       status: 'in_progress',

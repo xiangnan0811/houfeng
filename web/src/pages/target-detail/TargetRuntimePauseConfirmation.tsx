@@ -1,4 +1,4 @@
-import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import type { TargetRecord } from '../../lib/types'
 
 type TargetRuntimePauseConfirmationProps = {
@@ -15,7 +15,8 @@ export function TargetRuntimePauseConfirmation({
   onCancel,
 }: TargetRuntimePauseConfirmationProps) {
   return (
-    <ActionConfirmationCard
+    <ActionConfirmationModal
+      open
       title="确认暂停目标监控"
       current={
         target.run_status === '维护中'

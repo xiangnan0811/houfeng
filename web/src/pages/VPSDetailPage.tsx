@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { Button, Modal } from '../components/atoms'
+import { ActionConfirmationModal } from '../components/ActionConfirmationModal'
 import { VPSCancellationWorkbench } from '../components/VPSCancellationWorkbench'
 import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
 import {
@@ -61,6 +62,7 @@ import { VPSSubscriptionForm } from './vps-detail/VPSSubscriptionForm'
 import { VPSValidityExtensionForm } from './vps-detail/VPSValidityExtensionForm'
 import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
+import { vpsLifecycleConfirmationCopy } from './vps-detail/vpsLifecycleConfirmationCopy'
 import type {
   DecisionDraftState,
   DomainDraftState,
@@ -234,6 +236,7 @@ export function VPSDetailPage() {
   const [validityExtensionNotice, setValidityExtensionNotice] = useState<string | null>(null)
   const [unlinkingMonitoringInstanceId, setUnlinkingMonitoringInstanceId] = useState<string | null>(null)
   const [unlinkError, setUnlinkError] = useState<string | null>(null)
+  const [pendingUnlinkMonitoringInstance, setPendingUnlinkMonitoringInstance] = useState<VPSMonitoringInstanceSummary | null>(null)
   const [lifecycleConfirmingAction, setLifecycleConfirmingAction] = useState<'archive' | 'restore' | null>(null)
   const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
@@ -321,6 +324,7 @@ export function VPSDetailPage() {
         setValidityExtensionError(null)
         setValidityExtensionNotice(null)
         setUnlinkError(null)
+        setPendingUnlinkMonitoringInstance(null)
         setLifecycleConfirmingAction(null)
         setLifecycleError(null)
         setLifecycleNotice(null)
@@ -545,11 +549,13 @@ export function VPSDetailPage() {
     if (mode === 'monitoring-instance-link') {
       clearLinkFormFeedback()
       setUnlinkError(null)
+      setPendingUnlinkMonitoringInstance(null)
       ensureMonitoringInstancesLoaded()
     }
     if (mode === 'monitoring-instance-create') {
       clearMonitoringCreateFeedback()
       setUnlinkError(null)
+      setPendingUnlinkMonitoringInstance(null)
       if (state.detail) {
         setMonitoringCreateDraft(monitoringInstanceCreateDraftFromDetail(state.detail))
       }
@@ -627,6 +633,7 @@ export function VPSDetailPage() {
     }
     if (activeDrawer === 'monitoring-instance-evidence') {
       setUnlinkError(null)
+      setPendingUnlinkMonitoringInstance(null)
     }
     if (activeDrawer === 'cancellation') {
       setCancellationError(null)
@@ -854,11 +861,24 @@ export function VPSDetailPage() {
       })
       await refreshDetail(detail.vps_id)
       setLinkNotice('监控实例关联已解除')
+      setPendingUnlinkMonitoringInstance(null)
     } catch (error: unknown) {
       setUnlinkError(describeError(error, '解除监控实例关联失败'))
     } finally {
       setUnlinkingMonitoringInstanceId(null)
     }
+  }
+
+  function requestUnlinkMonitoringInstance(monitoringInstance: VPSMonitoringInstanceSummary) {
+    setUnlinkError(null)
+    setLinkError(null)
+    setLinkNotice(null)
+    setPendingUnlinkMonitoringInstance(monitoringInstance)
+  }
+
+  function cancelUnlinkMonitoringInstance() {
+    setPendingUnlinkMonitoringInstance(null)
+    setUnlinkError(null)
   }
 
   async function handleArchiveVPS() {
@@ -1253,11 +1273,14 @@ export function VPSDetailPage() {
         <VPSMonitoringInstanceLinksSection
           monitoring={detail.monitoring_instance_links ?? []}
           unlinkingMonitoringInstanceId={unlinkingMonitoringInstanceId}
+          pendingUnlinkMonitoringInstance={pendingUnlinkMonitoringInstance}
           linkFeedback={linkFeedback}
           linkFeedbackIsError={linkFeedbackIsError}
           onCreateMonitoringInstance={() => openDrawer('monitoring-instance-create')}
           onOpenLink={() => openDrawer('monitoring-instance-link')}
-          onUnlinkMonitoringInstance={(monitoringInstance) => void handleUnlinkMonitoringInstance(monitoringInstance)}
+          onRequestUnlinkMonitoringInstance={requestUnlinkMonitoringInstance}
+          onCancelUnlinkMonitoringInstance={cancelUnlinkMonitoringInstance}
+          onConfirmUnlinkMonitoringInstance={(monitoringInstance) => void handleUnlinkMonitoringInstance(monitoringInstance)}
         />
       )
     }
@@ -1438,12 +1461,36 @@ export function VPSDetailPage() {
         <VPSLifecycleCard
           detail={detail}
           action={lifecycleConfirmingAction}
-          submitting={lifecycleSubmitting}
           error={lifecycleError}
           notice={lifecycleNotice}
+        />
+      ) : null}
+
+      {lifecycleConfirmingAction ? (
+        <ActionConfirmationModal
+          open
+          title={vpsLifecycleConfirmationCopy(detail, lifecycleConfirmingAction).title}
+          current={vpsLifecycleConfirmationCopy(detail, lifecycleConfirmingAction).current}
+          result={vpsLifecycleConfirmationCopy(detail, lifecycleConfirmingAction).result}
+          impact={vpsLifecycleConfirmationCopy(detail, lifecycleConfirmingAction).impact}
+          unchanged={vpsLifecycleConfirmationCopy(detail, lifecycleConfirmingAction).unchanged}
+          confirmLabel={
+            lifecycleSubmitting
+              ? lifecycleConfirmingAction === 'restore'
+                ? '恢复中…'
+                : '归档中…'
+              : vpsLifecycleConfirmationCopy(detail, lifecycleConfirmingAction).confirmLabel
+          }
+          disabled={lifecycleSubmitting}
+          error={lifecycleError}
           onCancel={closeLifecycleConfirmation}
-          onArchive={() => void handleArchiveVPS()}
-          onRestore={() => void handleRestoreVPS()}
+          onConfirm={() => {
+            if (lifecycleConfirmingAction === 'restore') {
+              void handleRestoreVPS()
+            } else {
+              void handleArchiveVPS()
+            }
+          }}
         />
       ) : null}
 
