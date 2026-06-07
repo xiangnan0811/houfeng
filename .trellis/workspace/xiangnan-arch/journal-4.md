@@ -38,3 +38,37 @@ Copied the previous primary xiangnan-mac Trellis workspace memory into xiangnan-
 ### Next Steps
 
 - None - task complete
+
+
+## Session 178: Unify interaction confirmation modals
+
+**Date**: 2026-06-07
+**Task**: Unify interaction confirmation modals
+**Branch**: `fix/unified-interaction-modals`
+
+### Summary
+
+Migrated inline confirmation/edit interactions to Modal-based flows, removed Probe DOM injection, added coverage, and updated React Router to clear audit risk.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a5460c5` | (see git log) |
+| `cf228fd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
