@@ -27,7 +27,8 @@ workspace/
 
 | Developer | Last Active | Sessions | Active File |
 |-----------|-------------|----------|-------------|
-| (none yet) | - | - | - |
+| xiangnan-arch | 2026-06-07 | 176 | journal-3.md |
+| xiangnan-mac | 2026-06-07 | 176 | journal-3.md |
 
 ---
 
@@ -62,6 +63,10 @@ This will:
 ---
 
 ## Guidelines
+
+### Device Migration Note
+
+`xiangnan-mac` was the previous primary device. Its workspace memory has been copied into `xiangnan-arch`, which is now the current primary workspace identity.
 
 ### Journal File Rules
 
