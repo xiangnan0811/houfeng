@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.1](https://github.com/xiangnan0811/houfeng/compare/v0.49.0...v0.49.1) (2026-06-07)
+
+
+### Bug Fixes
+
+* unify interaction confirmation modals ([017cf9b](https://github.com/xiangnan0811/houfeng/commit/017cf9b8e5fd5d040a848ac332dadc57eac9e1c0))
+
 ## [0.49.0](https://github.com/xiangnan0811/houfeng/compare/v0.48.0...v0.49.0) (2026-06-06)
 
 
