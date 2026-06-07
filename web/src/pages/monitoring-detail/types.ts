@@ -28,6 +28,10 @@ export type BindingConflictState = {
 
 export type BindingConflictAction = 'confirm' | 'reject' | 'reset'
 
+export type PendingBindingConfirmation = {
+  action: BindingConflictAction
+}
+
 export type PendingRuntimeConfirmation = {
   action: 'pause'
 }

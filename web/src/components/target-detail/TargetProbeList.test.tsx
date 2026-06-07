@@ -1,5 +1,4 @@
-import { createRef } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { TargetProbeList } from './TargetProbeList'
@@ -59,7 +58,6 @@ describe('TargetProbeList', () => {
         actionsDisabled={false}
         pendingProbeConfirmation={null}
         confirmationCardDisabled={false}
-        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
         {...noopHandlers}
       />,
     )
@@ -75,7 +73,6 @@ describe('TargetProbeList', () => {
         actionsDisabled={false}
         pendingProbeConfirmation={null}
         confirmationCardDisabled={false}
-        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
         {...noopHandlers}
       />,
     )
@@ -95,7 +92,6 @@ describe('TargetProbeList', () => {
         actionsDisabled={false}
         pendingProbeConfirmation={null}
         confirmationCardDisabled={false}
-        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
         {...noopHandlers}
         onDelete={onDelete}
       />,
@@ -115,12 +111,13 @@ describe('TargetProbeList', () => {
         actionsDisabled={false}
         pendingProbeConfirmation={{ probeItemId: 'pb_001', action: 'delete' }}
         confirmationCardDisabled={false}
-        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
         {...noopHandlers}
       />,
     )
 
-    expect(screen.getByRole('heading', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
+    const dialog = screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByText('path: /healthz · method: GET')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
   })
 
@@ -149,7 +146,6 @@ describe('TargetProbeList', () => {
         actionsDisabled={false}
         pendingProbeConfirmation={null}
         confirmationCardDisabled={false}
-        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
         {...noopHandlers}
       />,
     )
@@ -186,7 +182,6 @@ describe('TargetProbeList', () => {
         actionsDisabled={false}
         pendingProbeConfirmation={null}
         confirmationCardDisabled={false}
-        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
         {...noopHandlers}
       />,
     )
@@ -208,7 +203,6 @@ describe('TargetProbeList', () => {
         actionsDisabled={false}
         pendingProbeConfirmation={null}
         confirmationCardDisabled={false}
-        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
         {...noopHandlers}
         onAddProbe={onAddProbe}
       />,
@@ -241,7 +235,6 @@ describe('TargetProbeList', () => {
         actionsDisabled={false}
         pendingProbeConfirmation={null}
         confirmationCardDisabled={false}
-        pendingProbeConfirmationCardRef={createRef<HTMLDivElement>()}
         {...noopHandlers}
       />,
     )

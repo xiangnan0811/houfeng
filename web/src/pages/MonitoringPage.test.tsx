@@ -57,6 +57,10 @@ function getMonitoringHeaderVPSLink() {
   return screen.getByRole('link', { name: '从 VPS 接入 agent' })
 }
 
+function getMonitoringQuickEditDialog(name = /快速编辑标签/) {
+  return screen.getByRole('dialog', { name })
+}
+
 
 
 describe('MonitoringPage', () => {
@@ -405,7 +409,7 @@ describe('MonitoringPage', () => {
 
     const confirmation = screen.getByRole('alertdialog', { name: '确认暂停监控实例监控' })
     expect(confirmation).toBeInTheDocument()
-    expect(confirmation).toHaveFocus()
+    expect(confirmation).toContainElement(document.activeElement as HTMLElement)
     expect(screen.getByText('当前：监控运行状态为启用。')).toBeInTheDocument()
     expect(screen.getByText('操作后：监控运行状态变为暂停。')).toBeInTheDocument()
     expect(
@@ -552,18 +556,20 @@ describe('MonitoringPage', () => {
     expect(within(tokyoRow!).getByText('edge')).toBeInTheDocument()
 
     fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
-    const editor = within(tokyoRow!).getByRole('textbox', { name: '标签' })
+    let editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
+    const editor = within(editorDialog).getByRole('textbox', { name: '标签' })
     fireEvent.change(editor, { target: { value: 'edge, core, edge' } })
-    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '取消' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '取消' }))
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('button', { name: '保存标签' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Tokyo Edge · 快速编辑标签/ })).not.toBeInTheDocument()
 
     fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(tokyoRow!).getByRole('textbox', { name: '标签' }), {
+    editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByRole('textbox', { name: '标签' }), {
       target: { value: 'edge, core, edge' },
     })
-    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001', {
@@ -617,10 +623,11 @@ describe('MonitoringPage', () => {
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(row!).getByRole('textbox', { name: '标签' }), {
+    const editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByRole('textbox', { name: '标签' }), {
       target: { value: 'edge, core' },
     })
-    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
     fireEvent.click(within(row!).getByRole('button', { name: '进入维护' }))
 
@@ -694,10 +701,11 @@ describe('MonitoringPage', () => {
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(row!).getByRole('textbox', { name: '标签' }), {
+    const editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByRole('textbox', { name: '标签' }), {
       target: { value: 'edge, core' },
     })
-    fireEvent.click(within(row!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
     fireEvent.click(within(row!).getByRole('button', { name: '进入维护' }))
 
@@ -778,20 +786,21 @@ describe('MonitoringPage', () => {
     expect(seoulRow).not.toBeNull()
 
     fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
-    fireEvent.change(within(tokyoRow!).getByRole('textbox', { name: '标签' }), {
+    const editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
+    fireEvent.change(within(editorDialog).getByRole('textbox', { name: '标签' }), {
       target: { value: 'edge, core' },
     })
-    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '保存标签' }))
+    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
 
-    expect(within(tokyoRow!).getByRole('button', { name: '正在保存…' })).toBeDisabled()
+    expect(within(editorDialog).getByRole('button', { name: '正在保存…' })).toBeDisabled()
     expect(within(seoulRow!).getByRole('button', { name: '快速编辑标签' })).toBeDisabled()
 
     rowASave.resolve(mockJSONResponse({ error: 'metadata write failed' }, 409))
 
     await waitFor(() =>
-      expect(within(tokyoRow!).getByRole('alert')).toHaveTextContent('metadata write failed'),
+      expect(within(editorDialog).getByRole('alert')).toHaveTextContent('metadata write failed'),
     )
-    expect(within(seoulRow!).queryByRole('textbox', { name: '标签' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Seoul Edge · 快速编辑标签/ })).not.toBeInTheDocument()
   })
 
   it('filters the list by lifecycle via the inline filter select', async () => {
@@ -981,8 +990,7 @@ describe('MonitoringPage', () => {
     expect(row).not.toBeNull()
 
     fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    // Inline editor opened on the same row, navigation must NOT have triggered.
-    expect(within(row!).getByRole('textbox', { name: '标签' })).toBeInTheDocument()
+    expect(getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)).toBeInTheDocument()
     expect(screen.queryByText('monitoring detail')).not.toBeInTheDocument()
   })
 

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -1188,6 +1188,9 @@ describe('MonitoringDetailPage', () => {
     )
 
     fireEvent.click(await waitForEnabledButton('确认重绑定'))
+    const rebindDialog = screen.getByRole('alertdialog', { name: '确认重绑定' })
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    fireEvent.click(within(rebindDialog).getByRole('button', { name: '确认重绑定' }))
 
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
@@ -1229,6 +1232,9 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getByRole('button', { name: '重置绑定' })).toBeEnabled()
 
     fireEvent.click(rejectButton)
+    const rejectDialog = screen.getByRole('alertdialog', { name: '拒绝新指纹' })
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    fireEvent.click(within(rejectDialog).getByRole('button', { name: '拒绝新指纹' }))
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_conflict/binding/reject-pending', {
         method: 'POST',
@@ -1271,6 +1277,9 @@ describe('MonitoringDetailPage', () => {
     )
 
     fireEvent.click(await waitForEnabledButton('重置绑定'))
+    const resetDialog = screen.getByRole('alertdialog', { name: '重置绑定' })
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    fireEvent.click(within(resetDialog).getByRole('button', { name: '重置绑定' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_conflict/binding/reset', {
@@ -1287,7 +1296,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getAllByText('未绑定').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('keeps binding action errors local to the conflict card', async () => {
+  it('keeps binding action errors inside the confirmation modal and preserves the conflict card', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord()))
@@ -1307,9 +1316,12 @@ describe('MonitoringDetailPage', () => {
     )
 
     fireEvent.click(await waitForEnabledButton('重置绑定'))
+    const resetDialog = screen.getByRole('alertdialog', { name: '重置绑定' })
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    fireEvent.click(within(resetDialog).getByRole('button', { name: '重置绑定' }))
 
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('invalid binding transition'),
+      expect(within(screen.getByRole('alertdialog', { name: '重置绑定' })).getByRole('alert')).toHaveTextContent('invalid binding transition'),
     )
     expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument()
@@ -2005,6 +2017,8 @@ describe('MonitoringDetailPage', () => {
     )
 
     fireEvent.click(await waitForEnabledButton('确认重绑定'))
+    const rebindDialog = screen.getByRole('alertdialog', { name: '确认重绑定' })
+    fireEvent.click(within(rebindDialog).getByRole('button', { name: '确认重绑定' }))
     fireEvent.click(screen.getByRole('button', { name: 'switch monitoring instance' }))
 
     await waitFor(() =>

@@ -109,7 +109,6 @@ type TargetDetailPageBodyProps = {
   onMetadataSubmit: (event: FormEvent<HTMLFormElement>) => void
   probeMutationBusyId: string | null
   pendingProbeConfirmation: PendingProbeConfirmation | null
-  pendingProbeConfirmationCardRef: RefObject<HTMLDivElement | null>
   registerDeleteButtonRef: (probeItemId: string, element: HTMLButtonElement | null) => void
   onAddProbe: () => void
   onEditProbe: (probeItem: ProbeItemRecord) => void
@@ -178,7 +177,6 @@ export function TargetDetailPageBody({
   onMetadataSubmit,
   probeMutationBusyId,
   pendingProbeConfirmation,
-  pendingProbeConfirmationCardRef,
   registerDeleteButtonRef,
   onAddProbe,
   onEditProbe,
@@ -315,7 +313,6 @@ export function TargetDetailPageBody({
         actionsDisabled={probeActionsDisabled}
         pendingProbeConfirmation={pendingProbeConfirmation}
         confirmationCardDisabled={probeCreateSubmitting || probeRowMutationBusy}
-        pendingProbeConfirmationCardRef={pendingProbeConfirmationCardRef}
         registerDeleteButtonRef={registerDeleteButtonRef}
         onAddProbe={onAddProbe}
         onEdit={onEditProbe}

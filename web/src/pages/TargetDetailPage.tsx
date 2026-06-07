@@ -27,7 +27,6 @@ import {
   updateTargetMetadata,
   updateProbeItem,
 } from '../lib/api'
-import { formatConfigSummary } from '../lib/format'
 import type {
   ActiveIncidentRecord,
   AssetContextForTarget,
@@ -117,7 +116,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const probeDeleteButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const addProbeButtonRef = useRef<HTMLButtonElement | null>(null)
   const pendingProbeFocusRestoreRef = useRef<ProbeFocusRestoreRequest | null>(null)
-  const pendingProbeConfirmationCardRef = useRef<HTMLDivElement | null>(null)
   const metadataRequestRef = useRef(0)
   const [assetContextState, setAssetContextState] = useState<{
     requestedTargetId: string | null
@@ -207,28 +205,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
 
     target?.focus()
     pendingProbeFocusRestoreRef.current = null
-  }, [pendingProbeConfirmation, state.probeItems])
-
-  useEffect(() => {
-    const stack = pendingProbeConfirmationCardRef.current?.querySelector('.page-stack')
-    const existingSummary = stack?.querySelector('[data-probe-confirmation-summary="true"]')
-    existingSummary?.remove()
-
-    if (!pendingProbeConfirmation || !stack) return
-
-    const probeItem = state.probeItems.find(
-      (item) => item.probe_item_id === pendingProbeConfirmation.probeItemId,
-    )
-    if (!probeItem) return
-
-    const summary = document.createElement('p')
-    summary.dataset.probeConfirmationSummary = 'true'
-    summary.textContent = formatConfigSummary(probeItem.config)
-    stack.appendChild(summary)
-
-    return () => {
-      summary.remove()
-    }
   }, [pendingProbeConfirmation, state.probeItems])
 
   useEffect(() => {
@@ -945,7 +921,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       onMetadataSubmit={handleMetadataSave}
       probeMutationBusyId={probeMutationBusyId}
       pendingProbeConfirmation={pendingProbeConfirmation}
-      pendingProbeConfirmationCardRef={pendingProbeConfirmationCardRef}
       registerDeleteButtonRef={(probeItemId, element) => {
         probeDeleteButtonRefs.current[probeItemId] = element
       }}

@@ -16,7 +16,6 @@ type TargetProbeListSectionProps = {
   actionsDisabled: boolean
   pendingProbeConfirmation: PendingProbeConfirmation | null
   confirmationCardDisabled: boolean
-  pendingProbeConfirmationCardRef: RefObject<HTMLDivElement | null>
   registerDeleteButtonRef: (probeItemId: string, element: HTMLButtonElement | null) => void
   onAddProbe: () => void
   onEdit: (probeItem: ProbeItemRecord) => void
@@ -38,7 +37,6 @@ export function TargetProbeListSection({
   actionsDisabled,
   pendingProbeConfirmation,
   confirmationCardDisabled,
-  pendingProbeConfirmationCardRef,
   registerDeleteButtonRef,
   onAddProbe,
   onEdit,
@@ -93,7 +91,6 @@ export function TargetProbeListSection({
         actionsDisabled={actionsDisabled}
         pendingProbeConfirmation={pendingProbeConfirmation}
         confirmationCardDisabled={confirmationCardDisabled}
-        pendingProbeConfirmationCardRef={pendingProbeConfirmationCardRef}
         registerDeleteButtonRef={registerDeleteButtonRef}
         onAddProbe={onAddProbe}
         onEdit={onEdit}

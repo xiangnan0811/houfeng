@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { type DataTableSortState } from '../components/atoms'
+import { Button, Input, Modal, type DataTableSortState } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
@@ -538,11 +538,15 @@ export function MonitoringPage() {
     })
   }
 
+  const editingMonitoringInstance = editingLabelMonitoringInstanceId
+    ? monitoring.find((monitoringInstance) => monitoringInstance.monitoring_instance_id === editingLabelMonitoringInstanceId) ?? null
+    : null
+
   const columns = buildMonitoringInstancesTableColumns({
     compareSet,
     sparklines,
     assetContexts: monitoringInstanceAssetContexts,
-    editingLabelMonitoringInstanceId,
+    editingLabelMonitoringInstanceId: null,
     labelDraft,
     groupDraft,
     metadataBusyMonitoringInstanceId,
@@ -592,6 +596,58 @@ export function MonitoringPage() {
         onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
         onClearFilters={clearAllFilters}
       />
+
+      <Modal
+        open={editingMonitoringInstance !== null}
+        onClose={() => {
+          if (editingMonitoringInstance) cancelLabelEdit(editingMonitoringInstance)
+        }}
+        title={editingMonitoringInstance ? `${editingMonitoringInstance.display_name} · 快速编辑标签` : '快速编辑标签'}
+        size="md"
+      >
+        {editingMonitoringInstance ? (
+          <div className="page-stack">
+            <p className="page-panel__description">
+              更新列表扫描使用的 group 与标签，不会修改备注或运行状态。
+            </p>
+            <Input
+              label="Group"
+              name={`group-${editingMonitoringInstance.monitoring_instance_id}`}
+              value={groupDraft}
+              onChange={(event) => setGroupDraft(event.target.value)}
+              placeholder="Group"
+            />
+            <Input
+              label="标签"
+              name={`labels-${editingMonitoringInstance.monitoring_instance_id}`}
+              value={labelDraft}
+              onChange={(event) => setLabelDraft(event.target.value)}
+              hint="用逗号分隔多个标签。"
+            />
+            {metadataErrors[editingMonitoringInstance.monitoring_instance_id] ? (
+              <p className="monitoring-table__inline-error" role="alert">
+                {metadataErrors[editingMonitoringInstance.monitoring_instance_id]}
+              </p>
+            ) : null}
+            <div className="action-confirm__actions">
+              <Button
+                variant="secondary"
+                disabled={metadataBusyMonitoringInstanceId === editingMonitoringInstance.monitoring_instance_id}
+                onClick={() => cancelLabelEdit(editingMonitoringInstance)}
+              >
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                disabled={metadataBusyMonitoringInstanceId === editingMonitoringInstance.monitoring_instance_id}
+                onClick={() => void handleSaveLabels(editingMonitoringInstance)}
+              >
+                {metadataBusyMonitoringInstanceId === editingMonitoringInstance.monitoring_instance_id ? '正在保存…' : '保存标签'}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <div className="animate-in d2">
         <MonitoringToolbar

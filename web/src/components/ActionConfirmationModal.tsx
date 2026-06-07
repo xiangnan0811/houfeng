@@ -1,8 +1,9 @@
-import { useEffect, useId, useRef } from 'react'
+import type { ReactNode } from 'react'
 
-import { Button } from './atoms'
+import { Button, Modal } from './atoms'
 
-export type ActionConfirmationCardProps = {
+export type ActionConfirmationModalProps = {
+  open: boolean
   title: string
   current: string
   result: string
@@ -14,24 +15,11 @@ export type ActionConfirmationCardProps = {
   disabled?: boolean
   onConfirm: () => void
   onCancel: () => void
+  children?: ReactNode
 }
 
-/**
- * v2 visual: state-migration card.
- *
- *   ┌───── 操作确认 ribbon ─────┐
- *   │  {title}                  │
- *   │  ┌──────┐ → 操作 ┌──────┐ │
- *   │  │ 当前 │       │ 之后 │ │
- *   │  └──────┘       └──────┘ │
- *   │  ✓ 会发生：{impact}       │
- *   │  ◯ 不变：{unchanged}      │
- *   │                  确认 取消 │
- *   └───────────────────────────┘
- *
- * Props are unchanged from v1 — every existing caller works as-is.
- */
-export function ActionConfirmationCard({
+export function ActionConfirmationModal({
+  open,
   title,
   current,
   result,
@@ -43,34 +31,12 @@ export function ActionConfirmationCard({
   disabled = false,
   onConfirm,
   onCancel,
-}: ActionConfirmationCardProps) {
-  const titleId = useId()
-  const descriptionId = useId()
-  const containerRef = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    containerRef.current?.focus()
-  }, [])
-
+  children,
+}: ActionConfirmationModalProps) {
   return (
-    <section
-      ref={containerRef}
-      className="page-panel action-confirm"
-      role="alertdialog"
-      aria-labelledby={titleId}
-      aria-describedby={descriptionId}
-      tabIndex={-1}
-    >
-      <p className="page-panel__eyebrow">操作确认</p>
-      <h3 id={titleId} className="page-panel__title">
-        {title}
-      </h3>
-      {/* page-stack class preserved for imperative DOM contracts.
-       * TargetDetailPage's probe-delete confirmation effect appends a
-       * <p data-probe-confirmation-summary> into this body via
-       * querySelector('.page-stack'). Removing the class silently breaks
-       * that flow. The class also gives the inserted <p> sane spacing. */}
-      <div id={descriptionId} className="action-confirm__body page-stack">
+    <Modal open={open} onClose={onCancel} title={title} dialogRole="alertdialog" size="md">
+      <div className="action-confirm__body page-stack">
+        <p className="page-panel__eyebrow">操作确认</p>
         <div className="action-confirm__migration">
           <div className="action-confirm__pane action-confirm__pane--current">
             <span className="action-confirm__pane-label">当前</span>
@@ -98,6 +64,7 @@ export function ActionConfirmationCard({
             {unchanged}
           </p>
         </div>
+        {children}
         {error ? (
           <p className="watchtower-runtime-error" role="alert">
             {error}
@@ -112,6 +79,6 @@ export function ActionConfirmationCard({
           </Button>
         </div>
       </div>
-    </section>
+    </Modal>
   )
 }

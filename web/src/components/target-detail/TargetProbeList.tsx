@@ -1,6 +1,4 @@
-import type { RefObject } from 'react'
-
-import { ActionConfirmationCard } from '../ActionConfirmationCard'
+import { ActionConfirmationModal } from '../ActionConfirmationModal'
 import { PageState } from '../PageState'
 import { StatusBadge } from '../StatusBadge'
 import {
@@ -96,7 +94,6 @@ type TargetProbeListProps = {
   actionsDisabled: boolean
   pendingProbeConfirmation: PendingProbeConfirmation | null
   confirmationCardDisabled: boolean
-  pendingProbeConfirmationCardRef: RefObject<HTMLDivElement | null>
   registerDeleteButtonRef: (probeItemId: string, element: HTMLButtonElement | null) => void
   onEdit: (probeItem: ProbeItemRecord) => void
   onToggle: (probeItem: ProbeItemRecord) => void
@@ -112,7 +109,6 @@ export function TargetProbeList({
   actionsDisabled,
   pendingProbeConfirmation,
   confirmationCardDisabled,
-  pendingProbeConfirmationCardRef,
   registerDeleteButtonRef,
   onEdit,
   onToggle,
@@ -193,19 +189,20 @@ export function TargetProbeList({
               </button>
             </div>
             {pendingProbeConfirmation?.probeItemId === probeItem.probe_item_id ? (
-              <div ref={pendingProbeConfirmationCardRef}>
-                <ActionConfirmationCard
-                  title="确认删除 ProbeItem"
-                  current="当前：这条 ProbeItem 仍属于当前目标。"
-                  result="操作后：这条观测方式会被移除。"
-                  impact="仅用于误建场景。删除后该 ProbeItem 不再产生新的观测记录。"
-                  unchanged="不会删除目标，也不会删除既有事件或历史观测记录。"
-                  confirmLabel="确认删除 ProbeItem"
-                  disabled={confirmationCardDisabled}
-                  onConfirm={() => onConfirmDelete(probeItem)}
-                  onCancel={() => onCancelDeleteConfirmation(probeItem)}
-                />
-              </div>
+              <ActionConfirmationModal
+                open
+                title="确认删除 ProbeItem"
+                current="当前：这条 ProbeItem 仍属于当前目标。"
+                result="操作后：这条观测方式会被移除。"
+                impact="仅用于误建场景。删除后该 ProbeItem 不再产生新的观测记录。"
+                unchanged="不会删除目标，也不会删除既有事件或历史观测记录。"
+                confirmLabel="确认删除 ProbeItem"
+                disabled={confirmationCardDisabled}
+                onConfirm={() => onConfirmDelete(probeItem)}
+                onCancel={() => onCancelDeleteConfirmation(probeItem)}
+              >
+                <p>{formatConfigSummary(probeItem.config)}</p>
+              </ActionConfirmationModal>
             ) : null}
 
             <dl className="probe-card__meta">

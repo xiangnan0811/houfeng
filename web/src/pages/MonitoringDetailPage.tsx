@@ -42,6 +42,7 @@ import type {
   HistoryTab,
   LinkedVPSState,
   MonitoringDetailPageState,
+  PendingBindingConfirmation,
   PendingRuntimeConfirmation,
   RuntimeStreamStatus,
   TimeWindow,
@@ -109,6 +110,8 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     error: null,
   })
   const [bindingAction, setBindingAction] = useState<BindingConflictAction | null>(null)
+  const [pendingBindingConfirmation, setPendingBindingConfirmation] =
+    useState<PendingBindingConfirmation | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyTab, setHistoryTab] = useState<HistoryTab>('events')
   const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(null)
@@ -573,6 +576,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
         loading: false,
         error: null,
       })
+      setPendingBindingConfirmation(null)
       return
     }
 
@@ -587,6 +591,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
         loading: false,
         error: null,
       })
+      setPendingBindingConfirmation(null)
       return
     }
 
@@ -829,6 +834,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       loading: false,
       error: null,
     })
+    if (onboarding.binding_status !== MONITORING_INSTANCE_BINDING_CONFLICT_STATUS) {
+      setPendingBindingConfirmation(null)
+    }
   }
 
   async function handleBindingAction(
@@ -854,6 +862,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
         return
       }
       applyOnboardingToMonitoringInstance(actionMonitoringInstanceId, nextOnboarding)
+      setPendingBindingConfirmation((current) => (current?.action === action ? null : current))
     } catch (error: unknown) {
       if (
         !isMountedRef.current ||
@@ -876,6 +885,20 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
         setBindingAction(null)
       }
     }
+  }
+
+  function requestBindingAction(action: BindingConflictAction) {
+    if (!monitoringInstance || !bindingConflict || bindingConflictLoading || bindingAction !== null) return
+    setBindingConflictState((current) => ({
+      ...current,
+      requestedMonitoringInstanceId: monitoringInstance.monitoring_instance_id,
+      error: null,
+    }))
+    setPendingBindingConfirmation({ action })
+  }
+
+  function cancelBindingConfirmation() {
+    setPendingBindingConfirmation(null)
   }
 
   if (!missingMonitoringInstanceId && !isCurrentMonitoringInstance) {
@@ -1015,9 +1038,12 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       bindingConflictLoading={bindingConflictLoading}
       bindingConflictError={bindingConflictError}
       bindingAction={bindingAction}
+      pendingBindingConfirmation={pendingBindingConfirmation}
       onBindingConfirm={() => void handleBindingAction('confirm', confirmMonitoringInstanceRebind)}
       onBindingReject={() => void handleBindingAction('reject', rejectPendingMonitoringInstanceBinding)}
       onBindingReset={() => void handleBindingAction('reset', resetMonitoringInstanceBinding)}
+      onRequestBindingAction={requestBindingAction}
+      onCancelBindingConfirmation={cancelBindingConfirmation}
       timeWindow={timeWindow}
       onTimeWindowChange={handleTimeWindowChange}
       realtimeSamples={realtimeSamples}

@@ -1,4 +1,5 @@
-import { ActionConfirmationCard } from '../../components/ActionConfirmationCard'
+import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
+import { Button, Input, Modal } from '../../components/atoms'
 
 type MonitoringInstancesBatchPanelProps = {
   hasActiveFilters: boolean
@@ -94,46 +95,50 @@ export function MonitoringInstancesBatchPanel({
         </div>
       ) : null}
 
-      {commandOpen ? (
-        <div className="page-panel">
+      <Modal
+        open={commandOpen}
+        onClose={() => {
+          onCommandOpenChange(false)
+          onCommandIDChange('')
+        }}
+        title="下发命令到已选监控实例"
+        size="md"
+      >
+        <div className="page-stack">
           <p className="page-panel__eyebrow">批量命令执行</p>
-          <h3 className="page-panel__title">下发命令到已选监控实例</h3>
           <p className="page-panel__description">
             将对当前筛选范围内的 {filteredMonitoringInstanceCount} 个监控实例下发命令。请输入命令 ID。
           </p>
-          <p>
-            <label>
-              命令 ID
-              <input
-                value={commandID}
-                onChange={(event) => onCommandIDChange(event.target.value)}
-                placeholder="例如：whoami"
-              />
-            </label>
-          </p>
-          <div className="batch-command__actions">
-            <button
-              className="btn md primary"
-              disabled={!commandID.trim() || batchSubmitting}
-              onClick={onExecuteBatchCommand}
-            >
-              下发命令
-            </button>
-            <button
-              className="btn md ghost"
+          <Input
+            label="命令 ID"
+            value={commandID}
+            onChange={(event) => onCommandIDChange(event.target.value)}
+            placeholder="例如：whoami"
+          />
+          <div className="action-confirm__actions">
+            <Button
+              variant="secondary"
               onClick={() => {
                 onCommandOpenChange(false)
                 onCommandIDChange('')
               }}
             >
               取消
-            </button>
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!commandID.trim() || batchSubmitting}
+              onClick={onExecuteBatchCommand}
+            >
+              下发命令
+            </Button>
           </div>
         </div>
-      ) : null}
+      </Modal>
 
       {pendingBatchAction === 'pause' ? (
-        <ActionConfirmationCard
+        <ActionConfirmationModal
+          open
           title="确认批量暂停监控实例监控"
           current={`将对当前筛选范围内的 ${filteredMonitoringInstanceCount} 个监控实例执行暂停操作。`}
           result="操作后：所有已选监控实例的监控运行状态变为暂停。"
