@@ -143,3 +143,36 @@ Implemented controlled VPS archive review/archive/restore APIs, split archive li
 ### Next Steps
 
 - None - task complete
+
+
+## Session 181: Polish monitoring list display
+
+**Date**: 2026-06-08
+**Task**: Polish monitoring list display
+**Branch**: `feature/monitor-list-polish`
+
+### Summary
+
+Removed monitoring-list row actions, moved heartbeat/current issue semantics into the issue column, normalized short asset-context statuses, added monitoring-detail metadata maintenance, and verified web checks plus browser layout sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `442a0d8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

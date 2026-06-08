@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 180
+- **Total Sessions**: 181
 - **Last Active**: 2026-06-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~145 | Active |
+| `journal-4.md` | ~178 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 181 | 2026-06-08 | Polish monitoring list display | `442a0d8` | `feature/monitor-list-polish` |
 | 180 | 2026-06-08 | Archive UX hardening | `47e9636` | `feature/archive-ux-hardening` |
 | 179 | 2026-06-08 | Archive asset visibility | `106a59c` | `feature/archive-asset-visibility` |
 | 178 | 2026-06-07 | Unify interaction confirmation modals | `a5460c5`, `cf228fd` | `fix/unified-interaction-modals` |
