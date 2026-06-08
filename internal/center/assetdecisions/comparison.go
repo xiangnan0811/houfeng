@@ -153,8 +153,11 @@ func memberComparisonLane(member GroupMember) ComparisonLane {
 		member.VPS.LifecycleStatus == vpsassets.LifecycleCancelled {
 		return ComparisonLaneRetire
 	}
-	if member.SuggestedAction == ActionCompleteEvidence || hasAnyEvidence(member, EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext) {
+	if member.SuggestedAction == ActionCompleteEvidence || hasAnyEvidence(member, EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceIPQualityMissing, EvidenceIPQualityStale) {
 		return ComparisonLaneEvidence
+	}
+	if hasAnyEvidence(member, EvidenceIPQualityRisk, EvidenceIPEgressMismatch, EvidenceMediaUnlockBlocked) {
+		return ComparisonLaneReview
 	}
 	if member.SuggestedAction == ActionMigrate || member.VPS.RenewalDecision == vpsassets.RenewalMigrate || member.VPS.LifecycleStatus == vpsassets.LifecycleToMigrate {
 		return ComparisonLaneObserve
@@ -230,7 +233,7 @@ func memberComparisonRisks(member GroupMember) []ComparisonSignal {
 	}
 	for _, chip := range member.EvidenceChips {
 		switch chip.Kind {
-		case EvidenceIdlePaid, EvidenceBudgetRisk, EvidenceExchangeRateStale, EvidenceAbnormalMonitoring:
+		case EvidenceIdlePaid, EvidenceBudgetRisk, EvidenceExchangeRateStale, EvidenceAbnormalMonitoring, EvidenceIPQualityRisk, EvidenceIPEgressMismatch, EvidenceMediaUnlockBlocked:
 			signals = appendUniqueComparisonSignal(signals, ComparisonSignal{
 				Kind:    string(chip.Kind),
 				Label:   chip.Label,
@@ -261,7 +264,9 @@ func memberComparisonGaps(member GroupMember) []ComparisonSignal {
 			EvidenceMissingAccess,
 			EvidenceNoServiceContext,
 			EvidenceSubscriptionUnavailable,
-			EvidenceCurrentFactMissing:
+			EvidenceCurrentFactMissing,
+			EvidenceIPQualityMissing,
+			EvidenceIPQualityStale:
 			signals = appendUniqueComparisonSignal(signals, ComparisonSignal{
 				Kind:    string(chip.Kind),
 				Label:   chip.Label,

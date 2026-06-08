@@ -108,6 +108,11 @@ const (
 	EvidenceNoServiceContext        EvidenceKind = "no_service_context"
 	EvidenceSubscriptionUnavailable EvidenceKind = "subscription_unavailable"
 	EvidenceCurrentFactMissing      EvidenceKind = "current_fact_missing"
+	EvidenceIPQualityMissing        EvidenceKind = "ip_quality_missing"
+	EvidenceIPQualityStale          EvidenceKind = "ip_quality_stale"
+	EvidenceIPQualityRisk           EvidenceKind = "ip_quality_risk"
+	EvidenceIPEgressMismatch        EvidenceKind = "ip_egress_mismatch"
+	EvidenceMediaUnlockBlocked      EvidenceKind = "media_unlock_blocked"
 )
 
 type ListFilters struct {
@@ -374,21 +379,24 @@ type Repository interface {
 }
 
 type Fact struct {
-	VPS                       vpsassets.Record
-	PrimarySubscription       *subscriptions.Record
-	SubscriptionCount         int
-	ActiveSubscriptionCount   int
-	InactiveSubscriptionCount int
-	ServiceCount              int
-	DomainCount               int
-	TargetCount               int
-	RunningTargetCount        int
-	MonitoringLinkCount       int
-	RunningMonitoringCount    int
-	AbnormalMonitoringCount   int
-	ActiveIncidentCount       int
-	PrimaryIssueSummary       string
-	SourceAvailability        SourceAvailability
+	VPS                              vpsassets.Record
+	PrimarySubscription              *subscriptions.Record
+	SubscriptionCount                int
+	ActiveSubscriptionCount          int
+	InactiveSubscriptionCount        int
+	ServiceCount                     int
+	DomainCount                      int
+	TargetCount                      int
+	RunningTargetCount               int
+	MonitoringLinkCount              int
+	RunningMonitoringCount           int
+	AbnormalMonitoringCount          int
+	ActiveIncidentCount              int
+	PrimaryIssueSummary              string
+	IPQualityProviderRiskSignalCount int
+	IPQualityProviderRiskSummary     string
+	IPQualityBlockedServices         []string
+	SourceAvailability               SourceAvailability
 }
 
 func NormalizeFilters(filters ListFilters) ListFilters {
@@ -894,7 +902,7 @@ func deriveEvidenceGroups(facts []Fact, filters ListFilters) []GroupDetail {
 			continue
 		}
 		member := buildMember(fact, filters)
-		if hasAnyEvidence(member, EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceSubscriptionUnavailable) {
+		if hasAnyEvidence(member, EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceSubscriptionUnavailable, EvidenceIPQualityMissing, EvidenceIPQualityStale, EvidenceIPQualityRisk, EvidenceIPEgressMismatch, EvidenceMediaUnlockBlocked) {
 			members = append(members, member)
 		}
 	}
@@ -1102,6 +1110,7 @@ func buildEvidenceChips(fact Fact, renewalWindow bool) []EvidenceChip {
 	if strings.TrimSpace(fact.VPS.IPv4+fact.VPS.IPv6+fact.VPS.SSHHost) == "" {
 		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceMissingAccess, Label: "缺访问资料", Tone: "notice"})
 	}
+	appendIPQualityEvidence(&chips, fact)
 	return chips
 }
 
@@ -1109,8 +1118,11 @@ func suggestMember(member GroupMember) (SuggestedRole, SuggestedAction) {
 	if member.CancellationAttentionReason != "" || member.VPS.LifecycleStatus == vpsassets.LifecycleToCancel || member.VPS.LifecycleStatus == vpsassets.LifecycleCancelled || member.VPS.RenewalDecision == vpsassets.RenewalCancel || member.VPS.RenewalDecision == vpsassets.RenewalAutoRenewCancelled {
 		return RoleRetireCandidate, ActionOpenCancellationWorkbench
 	}
-	if hasAnyEvidence(member, EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceSubscriptionUnavailable) {
+	if hasAnyEvidence(member, EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceSubscriptionUnavailable, EvidenceIPQualityMissing, EvidenceIPQualityStale) {
 		return RoleEvidenceNeeded, ActionCompleteEvidence
+	}
+	if hasAnyEvidence(member, EvidenceIPQualityRisk, EvidenceIPEgressMismatch, EvidenceMediaUnlockBlocked) {
+		return RoleObserveCandidate, ActionReview
 	}
 	if member.VPS.UsageStatus == vpsassets.UsageIdle && member.ActiveSubscriptionCount > 0 {
 		return RoleRetireCandidate, ActionCancel
@@ -1260,7 +1272,104 @@ func memberPriority(member GroupMember) int {
 	if member.VPS.UsageStatus == vpsassets.UsageIdle && member.ActiveSubscriptionCount > 0 {
 		score += 18
 	}
+	if hasAnyEvidence(member, EvidenceIPQualityRisk, EvidenceIPEgressMismatch, EvidenceMediaUnlockBlocked) {
+		score += 16
+	}
+	if hasAnyEvidence(member, EvidenceIPQualityMissing, EvidenceIPQualityStale) {
+		score += 8
+	}
 	return score
+}
+
+func appendIPQualityEvidence(chips *[]EvidenceChip, fact Fact) {
+	summary := fact.VPS.IPQualitySummary
+	if summary == nil {
+		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPQualityMissing, Label: "缺 IP 质量", Tone: "notice", Details: "尚未采集 IP 质量"})
+		return
+	}
+	if summary.Ambiguous {
+		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPQualityMissing, Label: "IP 归属不唯一", Tone: "notice", Details: "同一出口 IP 匹配多个 VPS，暂不参与评分"})
+		return
+	}
+	if !ipQualitySummarySucceeded(summary.Status) {
+		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPQualityMissing, Label: "IP 质量未完成", Tone: "notice", Details: ipQualityCollectionDetails(summary.Status, summary.ErrorSummary)})
+		return
+	}
+	if summary.Stale {
+		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPQualityStale, Label: "IP 质量过期", Tone: "notice", Details: "最新 IP 质量报告已超过有效窗口"})
+	}
+	if ipQualityRiskSignal(fact) {
+		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPQualityRisk, Label: "IP 风险", Tone: "alert", Details: ipQualityRiskDetails(fact)})
+	}
+	if ipQualityEgressMismatch(fact) {
+		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPEgressMismatch, Label: "出口不一致", Tone: "alert", Details: "采集出口 IP 与 VPS 当前 IPv4/IPv6 不一致"})
+	}
+	if len(fact.IPQualityBlockedServices) > 0 {
+		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceMediaUnlockBlocked, Label: "解锁受阻", Tone: "alert", Details: strings.Join(fact.IPQualityBlockedServices, ", ")})
+	}
+}
+
+func ipQualitySummarySucceeded(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "success")
+}
+
+func ipQualityCollectionDetails(status, summary string) string {
+	status = strings.TrimSpace(status)
+	summary = strings.TrimSpace(summary)
+	if summary != "" {
+		return summary
+	}
+	if status == "" {
+		return "IP 质量报告状态未知"
+	}
+	return "IP 质量报告状态：" + status
+}
+
+func ipQualityRiskSignal(fact Fact) bool {
+	summary := fact.VPS.IPQualitySummary
+	if summary == nil || summary.Ambiguous || !ipQualitySummarySucceeded(summary.Status) {
+		return false
+	}
+	return ipQualityRiskLevelRisky(summary.RiskLevel) || fact.IPQualityProviderRiskSignalCount > 0
+}
+
+func ipQualityRiskLevelRisky(level string) bool {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "medium", "moderate", "high", "critical", "risk", "risky", "danger", "dangerous":
+		return true
+	default:
+		return false
+	}
+}
+
+func ipQualityRiskDetails(fact Fact) string {
+	parts := []string{}
+	if summary := fact.VPS.IPQualitySummary; summary != nil && strings.TrimSpace(summary.RiskLevel) != "" {
+		parts = append(parts, "risk="+strings.TrimSpace(summary.RiskLevel))
+	}
+	if strings.TrimSpace(fact.IPQualityProviderRiskSummary) != "" {
+		parts = append(parts, strings.TrimSpace(fact.IPQualityProviderRiskSummary))
+	} else if fact.IPQualityProviderRiskSignalCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d 个 provider 风险信号", fact.IPQualityProviderRiskSignalCount))
+	}
+	return strings.Join(parts, "；")
+}
+
+func ipQualityEgressMismatch(fact Fact) bool {
+	summary := fact.VPS.IPQualitySummary
+	if summary == nil || summary.Ambiguous || !ipQualitySummarySucceeded(summary.Status) {
+		return false
+	}
+	ip := strings.TrimSpace(summary.IPAddress)
+	if ip == "" {
+		return false
+	}
+	vpsIPv4 := strings.TrimSpace(fact.VPS.IPv4)
+	vpsIPv6 := strings.TrimSpace(fact.VPS.IPv6)
+	if vpsIPv4 == "" && vpsIPv6 == "" {
+		return false
+	}
+	return ip != vpsIPv4 && ip != vpsIPv6
 }
 
 func topIssue(counts map[string]int) string {

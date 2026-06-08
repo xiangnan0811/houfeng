@@ -25,6 +25,7 @@ type settingsResponse struct {
 	OverrideRules            centersettings.OverrideRules          `json:"override_rules"`
 	RetentionPolicy          centersettings.RetentionPolicy        `json:"retention_policy"`
 	SubscriptionCostSettings subscriptionCostSettingsResponse      `json:"subscription_cost_settings"`
+	IPQualitySettings        centersettings.IPQualitySettings      `json:"ip_quality_settings"`
 }
 
 type telegramSettingsResponse struct {
@@ -44,6 +45,7 @@ type settingsUpdateRequest struct {
 	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
 	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
 	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
+	IPQualitySettings        *centersettings.IPQualitySettings      `json:"ip_quality_settings,omitempty"`
 }
 
 type feishuSettingsResponse struct {
@@ -141,6 +143,7 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 		OverrideRules:           input.OverrideRules,
 		RetentionPolicy:         input.RetentionPolicy,
 		SubscriptionCost:        current.SubscriptionCost,
+		IPQuality:               current.IPQuality,
 	}
 
 	if input.Telegram.BotToken != nil {
@@ -160,6 +163,9 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 	}
 	if input.SubscriptionCostSettings != nil {
 		merged.SubscriptionCost = mergeSubscriptionCostSettingsUpdate(current.SubscriptionCost, *input.SubscriptionCostSettings)
+	}
+	if input.IPQualitySettings != nil {
+		merged.IPQuality = *input.IPQualitySettings
 	}
 
 	return merged
@@ -185,6 +191,7 @@ func newSettingsResponse(record centersettings.CenterSettings) settingsResponse 
 		OverrideRules:            record.OverrideRules,
 		RetentionPolicy:          record.RetentionPolicy,
 		SubscriptionCostSettings: newSubscriptionCostSettingsResponse(record.SubscriptionCost),
+		IPQualitySettings:        record.IPQuality,
 	}
 }
 

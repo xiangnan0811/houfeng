@@ -3,6 +3,7 @@ package assetdecisions
 import (
 	"fmt"
 
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -25,20 +26,23 @@ type ExecutionReadbackIssue struct {
 }
 
 type ExecutionCurrentFacts struct {
-	Found                   bool                      `json:"found"`
-	LifecycleStatus         vpsassets.LifecycleStatus `json:"lifecycle_status,omitempty"`
-	UsageStatus             vpsassets.UsageStatus     `json:"usage_status,omitempty"`
-	RenewalDecision         vpsassets.RenewalDecision `json:"renewal_decision,omitempty"`
-	ActiveSubscriptionCount int                       `json:"active_subscription_count"`
-	ServiceCount            int                       `json:"service_count"`
-	DomainCount             int                       `json:"domain_count"`
-	TargetCount             int                       `json:"target_count"`
-	RunningTargetCount      int                       `json:"running_target_count"`
-	MonitoringLinkCount     int                       `json:"monitoring_link_count"`
-	RunningMonitoringCount  int                       `json:"running_monitoring_count"`
-	AbnormalMonitoringCount int                       `json:"abnormal_monitoring_count"`
-	ActiveIncidentCount     int                       `json:"active_incident_count"`
-	SourceAvailability      SourceAvailability        `json:"source_availability"`
+	Found                            bool                      `json:"found"`
+	LifecycleStatus                  vpsassets.LifecycleStatus `json:"lifecycle_status,omitempty"`
+	UsageStatus                      vpsassets.UsageStatus     `json:"usage_status,omitempty"`
+	RenewalDecision                  vpsassets.RenewalDecision `json:"renewal_decision,omitempty"`
+	ActiveSubscriptionCount          int                       `json:"active_subscription_count"`
+	ServiceCount                     int                       `json:"service_count"`
+	DomainCount                      int                       `json:"domain_count"`
+	TargetCount                      int                       `json:"target_count"`
+	RunningTargetCount               int                       `json:"running_target_count"`
+	MonitoringLinkCount              int                       `json:"monitoring_link_count"`
+	RunningMonitoringCount           int                       `json:"running_monitoring_count"`
+	AbnormalMonitoringCount          int                       `json:"abnormal_monitoring_count"`
+	ActiveIncidentCount              int                       `json:"active_incident_count"`
+	IPQualitySummary                 *ipquality.Summary        `json:"ip_quality_summary,omitempty"`
+	IPQualityProviderRiskSignalCount int                       `json:"ip_quality_provider_risk_signal_count"`
+	IPQualityBlockedServices         []string                  `json:"ip_quality_blocked_services,omitempty"`
+	SourceAvailability               SourceAvailability        `json:"source_availability"`
 }
 
 type MemberExecutionReadback struct {
@@ -265,7 +269,7 @@ func executionEvidenceGaps(fact Fact) []ExecutionReadbackIssue {
 	issues := []ExecutionReadbackIssue{}
 	for _, chip := range member.EvidenceChips {
 		switch chip.Kind {
-		case EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceSubscriptionUnavailable:
+		case EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceSubscriptionUnavailable, EvidenceIPQualityMissing, EvidenceIPQualityStale:
 			issues = append(issues, ExecutionReadbackIssue{Kind: "evidence_gap", Label: chip.Label, Tone: chip.Tone, Details: chip.Details})
 		}
 	}
@@ -273,22 +277,29 @@ func executionEvidenceGaps(fact Fact) []ExecutionReadbackIssue {
 }
 
 func currentFactsFromFact(fact Fact) ExecutionCurrentFacts {
-	return ExecutionCurrentFacts{
-		Found:                   true,
-		LifecycleStatus:         fact.VPS.LifecycleStatus,
-		UsageStatus:             fact.VPS.UsageStatus,
-		RenewalDecision:         fact.VPS.RenewalDecision,
-		ActiveSubscriptionCount: fact.ActiveSubscriptionCount,
-		ServiceCount:            fact.ServiceCount,
-		DomainCount:             fact.DomainCount,
-		TargetCount:             fact.TargetCount,
-		RunningTargetCount:      fact.RunningTargetCount,
-		MonitoringLinkCount:     fact.MonitoringLinkCount,
-		RunningMonitoringCount:  fact.RunningMonitoringCount,
-		AbnormalMonitoringCount: fact.AbnormalMonitoringCount,
-		ActiveIncidentCount:     fact.ActiveIncidentCount,
-		SourceAvailability:      fact.SourceAvailability,
+	current := ExecutionCurrentFacts{
+		Found:                            true,
+		LifecycleStatus:                  fact.VPS.LifecycleStatus,
+		UsageStatus:                      fact.VPS.UsageStatus,
+		RenewalDecision:                  fact.VPS.RenewalDecision,
+		ActiveSubscriptionCount:          fact.ActiveSubscriptionCount,
+		ServiceCount:                     fact.ServiceCount,
+		DomainCount:                      fact.DomainCount,
+		TargetCount:                      fact.TargetCount,
+		RunningTargetCount:               fact.RunningTargetCount,
+		MonitoringLinkCount:              fact.MonitoringLinkCount,
+		RunningMonitoringCount:           fact.RunningMonitoringCount,
+		AbnormalMonitoringCount:          fact.AbnormalMonitoringCount,
+		ActiveIncidentCount:              fact.ActiveIncidentCount,
+		IPQualityProviderRiskSignalCount: fact.IPQualityProviderRiskSignalCount,
+		IPQualityBlockedServices:         append([]string(nil), fact.IPQualityBlockedServices...),
+		SourceAvailability:               fact.SourceAvailability,
 	}
+	if fact.VPS.IPQualitySummary != nil {
+		summary := *fact.VPS.IPQualitySummary
+		current.IPQualitySummary = &summary
+	}
+	return current
 }
 
 func memberAction(member RecordMember) SuggestedAction {

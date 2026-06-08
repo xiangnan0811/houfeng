@@ -7,6 +7,7 @@ import (
 
 	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/enrollment"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
@@ -135,6 +136,22 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 			return false
 		}
 	}
+	for _, report := range req.IPQualityReports {
+		if report.ObservedAt.IsZero() || report.AgentVersion == "" || report.Fingerprint == "" || report.SyncBatchID == "" ||
+			report.IPAddress == "" || report.IPVersion == 0 || report.Status == "" {
+			return false
+		}
+		for _, provider := range report.ProviderResults {
+			if provider.Provider == "" {
+				return false
+			}
+		}
+		for _, unlock := range report.ServiceUnlocks {
+			if unlock.Service == "" || unlock.Status == "" {
+				return false
+			}
+		}
+	}
 
 	return true
 }
@@ -226,6 +243,9 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 	if observationBatch, ok := observationBatchFromSyncRequest(req); ok {
 		batch.Observations = observationBatch
 	}
+	if len(req.IPQualityReports) > 0 {
+		batch.IPQualityReports = ipQualityReportsFromRequest(req)
+	}
 
 	if len(req.CommandResults) > 0 {
 		results := make([]syncing.CommandResult, 0, len(req.CommandResults))
@@ -242,6 +262,68 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 	}
 
 	return batch
+}
+
+func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWrite {
+	reports := make([]ipquality.ReportWrite, 0, len(req.IPQualityReports))
+	for _, report := range req.IPQualityReports {
+		write := ipquality.ReportWrite{
+			MonitoringInstanceID: req.MonitoringInstanceID,
+			ObservedAt:           report.ObservedAt,
+			AgentVersion:         report.AgentVersion,
+			Fingerprint:          report.Fingerprint,
+			SyncBatchID:          report.SyncBatchID,
+			IPAddress:            report.IPAddress,
+			IPVersion:            report.IPVersion,
+			Status:               report.Status,
+			ASN:                  report.ASN,
+			Organization:         report.Organization,
+			Latitude:             report.Latitude,
+			Longitude:            report.Longitude,
+			UseRegionCode:        report.UseRegionCode,
+			UseRegionName:        report.UseRegionName,
+			RegisteredRegionCode: report.RegisteredRegionCode,
+			RegisteredRegionName: report.RegisteredRegionName,
+			RiskLevel:            report.RiskLevel,
+			ErrorCode:            report.ErrorCode,
+			ErrorSummary:         report.ErrorSummary,
+			IsBackfilled:         report.IsBackfilled,
+			RawJSON:              ipquality.SanitizeRawJSON(report.RawJSON),
+			ProviderResults:      make([]ipquality.ProviderResultWrite, 0, len(report.ProviderResults)),
+			ServiceUnlocks:       make([]ipquality.ServiceUnlockWrite, 0, len(report.ServiceUnlocks)),
+		}
+		for _, provider := range report.ProviderResults {
+			write.ProviderResults = append(write.ProviderResults, ipquality.ProviderResultWrite{
+				Provider:     provider.Provider,
+				UsageType:    provider.UsageType,
+				CompanyType:  provider.CompanyType,
+				RiskLevel:    provider.RiskLevel,
+				RiskScore:    provider.RiskScore,
+				RegionCode:   provider.RegionCode,
+				RegionName:   provider.RegionName,
+				IsProxy:      provider.IsProxy,
+				IsTor:        provider.IsTor,
+				IsVPN:        provider.IsVPN,
+				IsServer:     provider.IsServer,
+				IsAbuser:     provider.IsAbuser,
+				IsRobot:      provider.IsRobot,
+				ErrorCode:    provider.ErrorCode,
+				ErrorSummary: provider.ErrorSummary,
+			})
+		}
+		for _, unlock := range report.ServiceUnlocks {
+			write.ServiceUnlocks = append(write.ServiceUnlocks, ipquality.ServiceUnlockWrite{
+				Service:      unlock.Service,
+				Status:       unlock.Status,
+				Region:       unlock.Region,
+				UnlockType:   unlock.UnlockType,
+				ErrorCode:    unlock.ErrorCode,
+				ErrorSummary: unlock.ErrorSummary,
+			})
+		}
+		reports = append(reports, write)
+	}
+	return reports
 }
 
 func syncPlanToAPI(plan agentplan.SyncPlan) *agentapi.SyncPlan {
@@ -270,6 +352,14 @@ func syncPlanToAPI(plan agentplan.SyncPlan) *agentapi.SyncPlan {
 		apiPlan.PendingAction = &agentapi.PendingAction{
 			CommandID: plan.PendingAction.CommandID,
 			ActionID:  plan.PendingAction.ActionID,
+		}
+	}
+	if plan.IPQualityPlan != nil {
+		apiPlan.IPQualityPlan = &agentapi.IPQualityPlan{
+			Enabled:          plan.IPQualityPlan.Enabled,
+			FrequencySeconds: plan.IPQualityPlan.FrequencySeconds,
+			TimeoutSeconds:   plan.IPQualityPlan.TimeoutSeconds,
+			Services:         append([]string(nil), plan.IPQualityPlan.Services...),
 		}
 	}
 
