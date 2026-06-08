@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
@@ -21,6 +22,10 @@ type vpsRunningTargetCounter interface {
 	CountRunningTargetsForVPS(context.Context, string) (int, error)
 }
 
+type vpsIPQualitySummaryRepository interface {
+	ListLatestSummariesForVPS(context.Context, []string) (map[string]ipquality.Summary, error)
+}
+
 type vpsPatchResponse struct {
 	vpsassets.Record
 	RenewalSubscriptionLinkage *vpsassets.RenewalSubscriptionLinkage `json:"renewal_subscription_linkage,omitempty"`
@@ -29,12 +34,15 @@ type vpsPatchResponse struct {
 func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 	var linkRepo assetlinks.Repository
 	var targetCounter vpsRunningTargetCounter
+	var ipQualityRepo vpsIPQualitySummaryRepository
 	for _, dep := range optionalDeps {
 		switch typed := dep.(type) {
 		case assetlinks.Repository:
 			linkRepo = typed
 		case vpsRunningTargetCounter:
 			targetCounter = typed
+		case vpsIPQualitySummaryRepository:
+			ipQualityRepo = typed
 		}
 	}
 
@@ -71,6 +79,12 @@ func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler 
 						writeError(w, http.StatusInternalServerError, "internal server error")
 						return
 					}
+				}
+			}
+			if ipQualityRepo != nil {
+				if err := enrichVPSAssetIPQualitySummaries(r.Context(), ipQualityRepo, records); err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
 				}
 			}
 			writeJSON(w, http.StatusOK, records)
@@ -112,12 +126,15 @@ func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler 
 func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 	var linkRepo assetlinks.Repository
 	var targetCounter vpsRunningTargetCounter
+	var ipQualityRepo vpsIPQualitySummaryRepository
 	for _, dep := range optionalDeps {
 		switch typed := dep.(type) {
 		case assetlinks.Repository:
 			linkRepo = typed
 		case vpsRunningTargetCounter:
 			targetCounter = typed
+		case vpsIPQualitySummaryRepository:
+			ipQualityRepo = typed
 		}
 	}
 
@@ -139,6 +156,12 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
+			}
+			if ipQualityRepo != nil {
+				if err := enrichVPSAssetIPQualitySummary(r.Context(), ipQualityRepo, &record); err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
 			}
 			if linkRepo != nil {
 				monitoringInstanceLinks, err := linkRepo.ListMonitoringInstancesForVPS(r.Context(), vpsID)
@@ -251,6 +274,21 @@ func enrichVPSAssetRuntimeSummary(ctx context.Context, linkRepo assetlinks.Repos
 	return nil
 }
 
+func enrichVPSAssetIPQualitySummary(ctx context.Context, repo vpsIPQualitySummaryRepository, record *vpsassets.Record) error {
+	if repo == nil || record == nil {
+		return nil
+	}
+	summaries, err := repo.ListLatestSummariesForVPS(ctx, []string{record.VPSID})
+	if err != nil {
+		return err
+	}
+	if summary, ok := summaries[record.VPSID]; ok {
+		value := summary
+		record.IPQualitySummary = &value
+	}
+	return nil
+}
+
 func countRunningVPSMonitoringInstances(lifecycle vpsassets.LifecycleStatus, monitoringInstanceLinks []assetlinks.MonitoringInstanceSummary) int {
 	if lifecycle != vpsassets.LifecycleToCancel && lifecycle != vpsassets.LifecycleCancelled {
 		return 0
@@ -272,6 +310,27 @@ func countRunningVPSTargets(ctx context.Context, targetCounter vpsRunningTargetC
 		return 0, nil
 	}
 	return targetCounter.CountRunningTargetsForVPS(ctx, vpsID)
+}
+
+func enrichVPSAssetIPQualitySummaries(ctx context.Context, repo vpsIPQualitySummaryRepository, records []vpsassets.Record) error {
+	if repo == nil || len(records) == 0 {
+		return nil
+	}
+	vpsIDs := make([]string, 0, len(records))
+	for _, record := range records {
+		vpsIDs = append(vpsIDs, record.VPSID)
+	}
+	summaries, err := repo.ListLatestSummariesForVPS(ctx, vpsIDs)
+	if err != nil {
+		return err
+	}
+	for i := range records {
+		if summary, ok := summaries[records[i].VPSID]; ok {
+			value := summary
+			records[i].IPQualitySummary = &value
+		}
+	}
+	return nil
 }
 
 type vpsDetailResponse struct {

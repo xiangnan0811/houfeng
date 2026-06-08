@@ -38,6 +38,7 @@ import {
   getVPSAsset,
   getVPSArchiveReview,
   getVPSCancellationPreview,
+  getVPSIPQuality,
   getVPSTimeline,
   issueMonitoringInstanceInstallCommand,
   linkVPSMonitoringInstance,
@@ -211,6 +212,14 @@ const settingsResponseBody = {
     event_layer_days: 90,
     notification_layer_days: 180,
   },
+  ip_quality_settings: {
+    enabled: true,
+    frequency_seconds: 86400,
+    timeout_seconds: 15,
+    raw_retention_days: 90,
+    history_retention_days: 365,
+    services: ['netflix', 'chatgpt'],
+  },
   subscription_cost_settings: {
     base_currency: 'CNY',
     exchange_rate_provider: 'frankfurter',
@@ -292,6 +301,14 @@ const settingsUpdateBody = {
     aggregate_layer_days: 30,
     event_layer_days: 90,
     notification_layer_days: 180,
+  },
+  ip_quality_settings: {
+    enabled: true,
+    frequency_seconds: 86400,
+    timeout_seconds: 15,
+    raw_retention_days: 90,
+    history_retention_days: 365,
+    services: ['netflix', 'chatgpt'],
   },
 } satisfies SettingsUpdateInput
 
@@ -526,6 +543,25 @@ describe('api helpers', () => {
       note: '',
     } satisfies CreateVPSAssetInput
     const detail = { ...vps, monitoring_instance_links: [] }
+    const ipQuality = {
+      summary: {
+        vps_id: 'vps_001',
+        observed_at: '2026-06-08T12:00:00Z',
+        ip_address: '192.0.2.1',
+        ip_version: 4,
+        status: 'success',
+        risk_level: 'low',
+        stale: false,
+        ambiguous: false,
+        assignment_mode: 'link',
+        provider_count: 1,
+        unlockable_count: 2,
+      },
+      latest_report: null,
+      provider_results: [],
+      service_unlocks: [],
+      history: [],
+    }
     const timeline = {
       vps_id: 'vps_001',
       renewal_decisions: [],
@@ -538,12 +574,14 @@ describe('api helpers', () => {
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([vps])))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(detail)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(ipQuality)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(timeline)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(vps)))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep', asset_scope: 'archived' })).resolves.toEqual([vps])
     await expect(getVPSAsset('vps_001')).resolves.toEqual(detail)
+    await expect(getVPSIPQuality('vps_001')).resolves.toEqual(ipQuality)
     await expect(getVPSTimeline('vps_001')).resolves.toEqual(timeline)
     await expect(createVPSAsset(input)).resolves.toEqual(vps)
 
@@ -561,12 +599,17 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/timeline', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/ip-quality', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/timeline', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps', {
       method: 'POST',
       headers: {
         Accept: 'application/json',

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"houfeng/internal/center/ipquality"
 )
 
 var ErrVPSAssetNotFound = errors.New("vps asset not found")
@@ -70,35 +72,36 @@ const (
 )
 
 type Record struct {
-	VPSID                             string          `json:"vps_id"`
-	DisplayName                       string          `json:"display_name"`
-	ProviderID                        *string         `json:"provider_id"`
-	ProviderName                      string          `json:"provider_name"`
-	ProductName                       string          `json:"product_name"`
-	OrderRef                          string          `json:"order_ref"`
-	Country                           string          `json:"country"`
-	Region                            string          `json:"region"`
-	City                              string          `json:"city"`
-	Datacenter                        string          `json:"datacenter"`
-	IPv4                              string          `json:"ipv4"`
-	IPv6                              string          `json:"ipv6"`
-	SSHHost                           string          `json:"ssh_host"`
-	SSHPort                           int             `json:"ssh_port"`
-	SSHUser                           string          `json:"ssh_user"`
-	OSName                            string          `json:"os_name"`
-	Virtualization                    string          `json:"virtualization"`
-	LifecycleStatus                   LifecycleStatus `json:"lifecycle_status"`
-	UsageStatus                       UsageStatus     `json:"usage_status"`
-	RenewalDecision                   RenewalDecision `json:"renewal_decision"`
-	Importance                        string          `json:"importance"`
-	Labels                            []string        `json:"labels"`
-	Note                              string          `json:"note"`
-	ActiveMonitoringInstanceLinkCount int             `json:"active_monitoring_instance_link_count"`
-	RunningMonitoringInstanceCount    int             `json:"running_monitoring_instance_count"`
-	RunningTargetCount                int             `json:"running_target_count"`
-	CreatedAt                         time.Time       `json:"created_at"`
-	UpdatedAt                         time.Time       `json:"updated_at"`
-	ArchivedAt                        *time.Time      `json:"archived_at"`
+	VPSID                             string             `json:"vps_id"`
+	DisplayName                       string             `json:"display_name"`
+	ProviderID                        *string            `json:"provider_id"`
+	ProviderName                      string             `json:"provider_name"`
+	ProductName                       string             `json:"product_name"`
+	OrderRef                          string             `json:"order_ref"`
+	Country                           string             `json:"country"`
+	Region                            string             `json:"region"`
+	City                              string             `json:"city"`
+	Datacenter                        string             `json:"datacenter"`
+	IPv4                              string             `json:"ipv4"`
+	IPv6                              string             `json:"ipv6"`
+	SSHHost                           string             `json:"ssh_host"`
+	SSHPort                           int                `json:"ssh_port"`
+	SSHUser                           string             `json:"ssh_user"`
+	OSName                            string             `json:"os_name"`
+	Virtualization                    string             `json:"virtualization"`
+	LifecycleStatus                   LifecycleStatus    `json:"lifecycle_status"`
+	UsageStatus                       UsageStatus        `json:"usage_status"`
+	RenewalDecision                   RenewalDecision    `json:"renewal_decision"`
+	Importance                        string             `json:"importance"`
+	Labels                            []string           `json:"labels"`
+	Note                              string             `json:"note"`
+	ActiveMonitoringInstanceLinkCount int                `json:"active_monitoring_instance_link_count"`
+	RunningMonitoringInstanceCount    int                `json:"running_monitoring_instance_count"`
+	RunningTargetCount                int                `json:"running_target_count"`
+	IPQualitySummary                  *ipquality.Summary `json:"ip_quality_summary,omitempty"`
+	CreatedAt                         time.Time          `json:"created_at"`
+	UpdatedAt                         time.Time          `json:"updated_at"`
+	ArchivedAt                        *time.Time         `json:"archived_at"`
 }
 
 type RenewalSubscriptionLinkage struct {

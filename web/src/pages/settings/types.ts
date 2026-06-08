@@ -32,6 +32,15 @@ export type SettingsRetentionPolicyForm = {
   notificationLayerDays: string
 }
 
+export type SettingsIPQualityForm = {
+  enabled: boolean
+  frequencySeconds: string
+  timeoutSeconds: string
+  rawRetentionDays: string
+  historyRetentionDays: string
+  servicesText: string
+}
+
 export type SettingsFormState = {
   telegramBotToken: string
   telegramChatId: string
@@ -45,4 +54,5 @@ export type SettingsFormState = {
   targetTypeOverridesText: string
   targetLabelOverridesText: string
   retentionPolicy: SettingsRetentionPolicyForm
+  ipQuality: SettingsIPQualityForm
 }

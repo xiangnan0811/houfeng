@@ -90,6 +90,14 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 			MaxReminderLeadDays:         45,
 			ExchangeRateStaleAfterHours: 24,
 		},
+		IPQuality: centersettings.IPQualitySettings{
+			Enabled:              true,
+			FrequencySeconds:     86400,
+			TimeoutSeconds:       20,
+			RawRetentionDays:     45,
+			HistoryRetentionDays: 180,
+			Services:             []string{"netflix", "chatgpt"},
+		},
 	}
 
 	var seenArgs []any
@@ -101,8 +109,8 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 			seenArgs = append([]any(nil), args...)
 			return fakeSettingsRow{scan: func(dest ...any) error {
 				scanCenterSettingsRow(dest, input)
-				*(dest[12].(*time.Time)) = now
 				*(dest[13].(*time.Time)) = now
+				*(dest[14].(*time.Time)) = now
 				return nil
 			}}
 		},
@@ -118,11 +126,14 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 	if got.SubscriptionCost.BaseCurrency != "USD" || got.SubscriptionCost.ExchangeRateProvider != string(centersettings.SubscriptionExchangeRateProviderFixer) {
 		t.Fatalf("SubscriptionCost = %#v, want USD/fixer", got.SubscriptionCost)
 	}
+	if got.IPQuality.TimeoutSeconds != 20 || got.IPQuality.Services[1] != "chatgpt" {
+		t.Fatalf("IPQuality = %#v, want timeout/services preserved", got.IPQuality)
+	}
 	if len(got.OverrideRules.MonitoringInstanceLabels) != 1 {
 		t.Fatalf("len(MonitoringInstanceLabels) = %d, want 1", len(got.OverrideRules.MonitoringInstanceLabels))
 	}
-	if len(seenArgs) != 12 {
-		t.Fatalf("len(args) = %d, want 12", len(seenArgs))
+	if len(seenArgs) != 13 {
+		t.Fatalf("len(args) = %d, want 13", len(seenArgs))
 	}
 	if seenArgs[0] != centersettings.SingletonID {
 		t.Fatalf("settings_id = %#v, want %q", seenArgs[0], centersettings.SingletonID)
@@ -133,6 +144,7 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 	assertJSONArgContains(t, seenArgs[9], `"monitoring_instance_labels":[{"label":"core"`)
 	assertJSONArgContains(t, seenArgs[10], `"raw_layer_days":30`)
 	assertJSONArgContains(t, seenArgs[11], `"base_currency":"USD"`)
+	assertJSONArgContains(t, seenArgs[12], `"frequency_seconds":86400`)
 }
 
 func TestCenterSettingsRepositoryPutSettingsValidatesBeforeWriting(t *testing.T) {
@@ -175,6 +187,9 @@ func TestCenterSettingsRepositorySQLUsesSingletonUpsertAndJSONBSections(t *testi
 	if !strings.Contains(upsertCenterSettingsSQL, "$8::jsonb") {
 		t.Fatalf("upsertCenterSettingsSQL = %q, want jsonb cast for probe defaults", upsertCenterSettingsSQL)
 	}
+	if !strings.Contains(upsertCenterSettingsSQL, "ip_quality_settings") {
+		t.Fatalf("upsertCenterSettingsSQL = %q, want ip_quality_settings column", upsertCenterSettingsSQL)
+	}
 	if !strings.Contains(getCenterSettingsSQL, "where settings_id = $1") {
 		t.Fatalf("getCenterSettingsSQL = %q, want singleton filter", getCenterSettingsSQL)
 	}
@@ -200,6 +215,7 @@ func scanCenterSettingsRow(dest []any, value centersettings.CenterSettings) {
 	overrideJSON, _ := json.Marshal(value.OverrideRules)
 	retentionJSON, _ := json.Marshal(value.RetentionPolicy)
 	subscriptionCostJSON, _ := json.Marshal(value.SubscriptionCost)
+	ipQualityJSON, _ := json.Marshal(value.IPQuality)
 
 	*(dest[0].(*string)) = centersettings.SingletonID
 	*(dest[1].(*string)) = value.Telegram.BotToken
@@ -213,10 +229,11 @@ func scanCenterSettingsRow(dest []any, value centersettings.CenterSettings) {
 	*(dest[9].(*[]byte)) = overrideJSON
 	*(dest[10].(*[]byte)) = retentionJSON
 	*(dest[11].(*[]byte)) = subscriptionCostJSON
+	*(dest[12].(*[]byte)) = ipQualityJSON
 	createdAt := time.Date(2026, time.April, 26, 8, 0, 0, 0, time.UTC)
 	updatedAt := createdAt.Add(time.Minute)
-	*(dest[12].(*time.Time)) = createdAt
-	*(dest[13].(*time.Time)) = updatedAt
+	*(dest[13].(*time.Time)) = createdAt
+	*(dest[14].(*time.Time)) = updatedAt
 }
 
 func assertJSONArgContains(t *testing.T, value any, snippet string) {

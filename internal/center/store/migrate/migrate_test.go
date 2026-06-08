@@ -76,6 +76,8 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 		"0036_add_asset_decision_member_followups.sql",
 		"0037_create_asset_decision_manual_groups.sql",
 		"0038_create_asset_decision_scenario_templates.sql",
+		"0039_add_ip_quality_settings.sql",
+		"0040_create_ip_quality_reports.sql",
 	}
 	offset := 0
 	for _, name := range names {
@@ -85,6 +87,20 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 	if offset != len(expectedTail) {
 		t.Fatalf("migration names missing expected asset ledger tail order %#v in %#v", expectedTail, names)
+	}
+}
+
+func TestIPQualityMigrationViewUsesAssignedReportsAlias(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0040_create_ip_quality_reports.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := string(payload)
+	if strings.Contains(sql, "pr.report_id = ranked.report_id") {
+		t.Fatalf("ip quality migration contains stale ranked alias in assigned view")
+	}
+	if !strings.Contains(sql, "pr.report_id = assigned_reports.report_id") {
+		t.Fatalf("ip quality migration missing provider join on assigned_reports")
 	}
 }
 

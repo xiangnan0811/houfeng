@@ -16,6 +16,7 @@ import type {
 import { FeishuSettingsSection } from './settings/FeishuSettingsSection'
 import { FrequencyDefaultsSection } from './settings/FrequencyDefaultsSection'
 import { IncidentDefaultsSection } from './settings/IncidentDefaultsSection'
+import { IPQualitySettingsSection } from './settings/IPQualitySettingsSection'
 import { OverrideRulesSection } from './settings/OverrideRulesSection'
 import { RetentionPolicySection } from './settings/RetentionPolicySection'
 import { SubscriptionSettingsSection } from './settings/SubscriptionSettingsSection'
@@ -96,6 +97,14 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
       eventLayerDays: String(settings.retention_policy.event_layer_days),
       notificationLayerDays: String(settings.retention_policy.notification_layer_days),
     },
+    ipQuality: {
+      enabled: settings.ip_quality_settings.enabled,
+      frequencySeconds: String(settings.ip_quality_settings.frequency_seconds),
+      timeoutSeconds: String(settings.ip_quality_settings.timeout_seconds),
+      rawRetentionDays: String(settings.ip_quality_settings.raw_retention_days),
+      historyRetentionDays: String(settings.ip_quality_settings.history_retention_days),
+      servicesText: settings.ip_quality_settings.services.join(', '),
+    },
   }
 }
 
@@ -115,6 +124,15 @@ function parsePositiveNumber(value: string, label: string) {
   const num = Number(value.trim())
   if (!Number.isFinite(num) || num <= 0) throw new Error(`${label}必须为正数。`)
   return num
+}
+
+function parseCommaList(value: string, label: string) {
+  const items = value
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+  if (items.length === 0) throw new Error(`${label}不能为空。`)
+  return Array.from(new Set(items))
 }
 
 function parseOverrideRuleArray<T>(value: string, label: string): T[] {
@@ -154,6 +172,26 @@ function buildIncidentDefaults(f: SettingsFormState) {
   }
 }
 
+function buildIPQualitySettings(f: SettingsFormState) {
+  const frequencySeconds = parsePositiveInteger(f.ipQuality.frequencySeconds, 'IP 质量采集周期')
+  if (frequencySeconds < 60) throw new Error('IP 质量采集周期必须至少为 60 秒。')
+  const timeoutSeconds = parsePositiveInteger(f.ipQuality.timeoutSeconds, 'IP 质量请求超时')
+  if (timeoutSeconds > 300) throw new Error('IP 质量请求超时必须不超过 300 秒。')
+  const rawRetentionDays = parsePositiveInteger(f.ipQuality.rawRetentionDays, 'IP 质量原始 JSON 保留天数')
+  if (rawRetentionDays < 7) throw new Error('IP 质量原始 JSON 保留天数必须至少为 7 天。')
+  const historyRetentionDays = parsePositiveInteger(f.ipQuality.historyRetentionDays, 'IP 质量历史保留天数')
+  if (historyRetentionDays < rawRetentionDays) throw new Error('IP 质量历史保留天数必须大于或等于原始 JSON 保留天数。')
+
+  return {
+    enabled: f.ipQuality.enabled,
+    frequency_seconds: frequencySeconds,
+    timeout_seconds: timeoutSeconds,
+    raw_retention_days: rawRetentionDays,
+    history_retention_days: historyRetentionDays,
+    services: parseCommaList(f.ipQuality.servicesText, 'IP 质量采集服务集合'),
+  }
+}
+
 function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): SettingsUpdateDraft {
   const botToken = form.telegramBotToken.trim()
   const chatId = form.telegramChatId.trim()
@@ -182,6 +220,7 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
       event_layer_days: parsePositiveInteger(form.retentionPolicy.eventLayerDays, '事件层天数'),
       notification_layer_days: parsePositiveInteger(form.retentionPolicy.notificationLayerDays, '通知层天数'),
     },
+    ip_quality_settings: buildIPQualitySettings(form),
   }
   return { ...common, telegram: { ...(newToken ? { bot_token: botToken } : {}), chat_id: chatId, runtime_managed: rm } }
 }
@@ -333,6 +372,12 @@ export function SettingsPage() {
                   probeFrequencyDefaults={systemForm.probeFrequencyDefaults}
                   onHostSampleFrequencyChange={(v) => patchForm((f) => ({ ...f, hostSampleFrequencyTier: v }))}
                   onProbeFrequencyDefaultsChange={(patch) => patchForm((f) => ({ ...f, probeFrequencyDefaults: { ...f.probeFrequencyDefaults, ...patch } }))}
+                />
+              </div>
+              <div className="settings-section animate-in">
+                <IPQualitySettingsSection
+                  value={systemForm.ipQuality}
+                  onChange={(patch) => patchForm((f) => ({ ...f, ipQuality: { ...f.ipQuality, ...patch } }))}
                 />
               </div>
               <div className="settings-section animate-in">

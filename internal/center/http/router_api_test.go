@@ -219,6 +219,36 @@ func TestRouterKeepsAssetDomainsOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsVPSIPQualityOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		VPSIPQualityHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"summary":{"vps_id":"vps_001","ip_address":"203.0.113.10"}}`))
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/ip-quality", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	body, err := io.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if strings.TrimSpace(string(body)) == spaShell {
+		t.Fatalf("expected VPS IP quality API response, got SPA fallback body %q", string(body))
+	}
+	if !strings.Contains(string(body), `"ip_address":"203.0.113.10"`) {
+		t.Fatalf("expected VPS IP quality payload, got %q", string(body))
+	}
+}
+
 func TestRouterKeepsVPSArchiveLifecycleOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",

@@ -41,6 +41,12 @@ const (
 )
 
 const (
+	IPQualityStatusSuccess = "success"
+	IPQualityStatusPartial = "partial"
+	IPQualityStatusFailure = "failure"
+)
+
+const (
 	FrequencyTier5s  = "5s"
 	FrequencyTier1m  = "1m"
 	FrequencyTier5m  = "5m"
@@ -134,6 +140,58 @@ type ProbeObservationPayload struct {
 	IsBackfilled       bool   `json:"is_backfilled,omitempty"`
 }
 
+type IPQualityProviderResultPayload struct {
+	Provider     string `json:"provider"`
+	UsageType    string `json:"usage_type,omitempty"`
+	CompanyType  string `json:"company_type,omitempty"`
+	RiskLevel    string `json:"risk_level,omitempty"`
+	RiskScore    string `json:"risk_score,omitempty"`
+	RegionCode   string `json:"region_code,omitempty"`
+	RegionName   string `json:"region_name,omitempty"`
+	IsProxy      *bool  `json:"is_proxy,omitempty"`
+	IsTor        *bool  `json:"is_tor,omitempty"`
+	IsVPN        *bool  `json:"is_vpn,omitempty"`
+	IsServer     *bool  `json:"is_server,omitempty"`
+	IsAbuser     *bool  `json:"is_abuser,omitempty"`
+	IsRobot      *bool  `json:"is_robot,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	ErrorSummary string `json:"error_summary,omitempty"`
+}
+
+type IPQualityServiceUnlockPayload struct {
+	Service      string `json:"service"`
+	Status       string `json:"status"`
+	Region       string `json:"region,omitempty"`
+	UnlockType   string `json:"unlock_type,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	ErrorSummary string `json:"error_summary,omitempty"`
+}
+
+type IPQualityReportPayload struct {
+	ObservedAt           time.Time                        `json:"observed_at"`
+	AgentVersion         string                           `json:"agent_version"`
+	Fingerprint          string                           `json:"fingerprint"`
+	SyncBatchID          string                           `json:"sync_batch_id"`
+	IPAddress            string                           `json:"ip_address"`
+	IPVersion            int                              `json:"ip_version"`
+	Status               string                           `json:"status"`
+	ASN                  string                           `json:"asn,omitempty"`
+	Organization         string                           `json:"organization,omitempty"`
+	Latitude             *float64                         `json:"latitude,omitempty"`
+	Longitude            *float64                         `json:"longitude,omitempty"`
+	UseRegionCode        string                           `json:"use_region_code,omitempty"`
+	UseRegionName        string                           `json:"use_region_name,omitempty"`
+	RegisteredRegionCode string                           `json:"registered_region_code,omitempty"`
+	RegisteredRegionName string                           `json:"registered_region_name,omitempty"`
+	RiskLevel            string                           `json:"risk_level,omitempty"`
+	ErrorCode            string                           `json:"error_code,omitempty"`
+	ErrorSummary         string                           `json:"error_summary,omitempty"`
+	IsBackfilled         bool                             `json:"is_backfilled,omitempty"`
+	RawJSON              json.RawMessage                  `json:"raw_json,omitempty"`
+	ProviderResults      []IPQualityProviderResultPayload `json:"provider_results,omitempty"`
+	ServiceUnlocks       []IPQualityServiceUnlockPayload  `json:"service_unlocks,omitempty"`
+}
+
 // SyncRequest keeps heartbeat sync as the canonical carrier; host_samples and
 // probe_observations are optional adjunct facts attached to the same sync batch.
 // CommandResults carries back outputs from pending actions that were executed
@@ -144,6 +202,7 @@ type SyncRequest struct {
 	Heartbeats           []MonitoringInstanceHeartbeat `json:"heartbeats,omitempty"`
 	HostSamples          []HostSamplePayload           `json:"host_samples,omitempty"`
 	ProbeObservations    []ProbeObservationPayload     `json:"probe_observations,omitempty"`
+	IPQualityReports     []IPQualityReportPayload      `json:"ip_quality_reports,omitempty"`
 	CommandResults       []CommandResult               `json:"command_results,omitempty"`
 }
 
@@ -164,7 +223,15 @@ type SyncPlan struct {
 	HostSampleFrequencyTier      string            `json:"host_sample_frequency_tier"`
 	HostSampleMaintenanceContext bool              `json:"host_sample_maintenance_context"`
 	ProbeAssignments             []ProbeAssignment `json:"probe_assignments,omitempty"`
+	IPQualityPlan                *IPQualityPlan    `json:"ip_quality_plan,omitempty"`
 	PendingAction                *PendingAction    `json:"pending_action,omitempty"`
+}
+
+type IPQualityPlan struct {
+	Enabled          bool     `json:"enabled"`
+	FrequencySeconds int      `json:"frequency_seconds"`
+	TimeoutSeconds   int      `json:"timeout_seconds"`
+	Services         []string `json:"services,omitempty"`
 }
 
 // PendingAction describes a command the center wants the agent to execute.

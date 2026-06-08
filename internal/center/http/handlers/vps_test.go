@@ -12,9 +12,11 @@ import (
 
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
+	"houfeng/internal/contracts/agentapi"
 )
 
 type fakeVPSAssetRepository struct {
@@ -88,6 +90,20 @@ type fakeVPSTargetCounter struct {
 func (f *fakeVPSTargetCounter) CountRunningTargetsForVPS(_ context.Context, vpsID string) (int, error) {
 	f.countRunningTargetsForVPSID = vpsID
 	return f.countRunningTargetsForVPSResult, f.countRunningTargetsForVPSErr
+}
+
+type fakeVPSIPQualitySummaryRepository struct {
+	result map[string]ipquality.Summary
+	err    error
+	vpsIDs []string
+}
+
+func (f *fakeVPSIPQualitySummaryRepository) ListLatestSummariesForVPS(_ context.Context, vpsIDs []string) (map[string]ipquality.Summary, error) {
+	f.vpsIDs = append([]string(nil), vpsIDs...)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.result, nil
 }
 
 type fakeRenewalTimelineRepository struct {
@@ -225,6 +241,61 @@ func TestVPSCollectionAddsActiveMonitoringInstanceLinkCountsWhenAvailable(t *tes
 	}
 	if body[0].RunningMonitoringInstanceCount != 0 {
 		t.Fatalf("running_monitoring_instance_count = %d, want 0 for active VPS", body[0].RunningMonitoringInstanceCount)
+	}
+}
+
+func TestVPSCollectionAddsIPQualitySummariesWhenAvailable(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+		RenewalDecision: vpsassets.RenewalKeep,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}, {
+		VPSID:           "vps_002",
+		DisplayName:     "Osaka Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+		RenewalDecision: vpsassets.RenewalKeep,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}}}
+	ipQualityRepo := &fakeVPSIPQualitySummaryRepository{result: map[string]ipquality.Summary{
+		"vps_001": {
+			VPSID:     "vps_001",
+			IPAddress: "203.0.113.10",
+			IPVersion: 4,
+			Status:    agentapi.IPQualityStatusSuccess,
+			RiskLevel: "low",
+		},
+	}}
+
+	handler := handlers.VPSCollection(repo, ipQualityRepo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if len(ipQualityRepo.vpsIDs) != 2 || ipQualityRepo.vpsIDs[0] != "vps_001" || ipQualityRepo.vpsIDs[1] != "vps_002" {
+		t.Fatalf("ip quality summary vps ids = %#v, want both records", ipQualityRepo.vpsIDs)
+	}
+	var body []vpsassets.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body[0].IPQualitySummary == nil || body[0].IPQualitySummary.IPAddress != "203.0.113.10" {
+		t.Fatalf("IPQualitySummary = %#v, want latest summary", body[0].IPQualitySummary)
+	}
+	if body[1].IPQualitySummary != nil {
+		t.Fatalf("second IPQualitySummary = %#v, want nil when no summary exists", body[1].IPQualitySummary)
 	}
 }
 
@@ -400,6 +471,50 @@ func TestVPSItemGetsAsset(t *testing.T) {
 	}
 	if body.VPSID != "vps_001" {
 		t.Fatalf("vps_id = %q, want vps_001", body.VPSID)
+	}
+}
+
+func TestVPSItemAddsIPQualitySummaryWhenAvailable(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+		RenewalDecision: vpsassets.RenewalKeep,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}}
+	ipQualityRepo := &fakeVPSIPQualitySummaryRepository{result: map[string]ipquality.Summary{
+		"vps_001": {
+			VPSID:      "vps_001",
+			ObservedAt: now,
+			IPAddress:  "203.0.113.10",
+			IPVersion:  4,
+			Status:     agentapi.IPQualityStatusSuccess,
+			RiskLevel:  "low",
+		},
+	}}
+
+	handler := handlers.VPSItem(repo, ipQualityRepo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if len(ipQualityRepo.vpsIDs) != 1 || ipQualityRepo.vpsIDs[0] != "vps_001" {
+		t.Fatalf("ip quality summary vps ids = %#v, want vps_001", ipQualityRepo.vpsIDs)
+	}
+	var body vpsassets.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.IPQualitySummary == nil || body.IPQualitySummary.IPAddress != "203.0.113.10" {
+		t.Fatalf("IPQualitySummary = %#v, want latest summary", body.IPQualitySummary)
 	}
 }
 

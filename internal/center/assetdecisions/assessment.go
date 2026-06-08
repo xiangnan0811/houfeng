@@ -102,6 +102,18 @@ func assessMember(member GroupMember) EvidenceAssessment {
 		riskSignals++
 		pressure += 28 + minInt(member.ActiveIncidentCount*4, 16)
 	}
+	if hasEvidence(member, EvidenceIPQualityRisk) {
+		riskSignals++
+		pressure += 22
+	}
+	if hasEvidence(member, EvidenceIPEgressMismatch) {
+		riskSignals++
+		pressure += 18
+	}
+	if hasEvidence(member, EvidenceMediaUnlockBlocked) {
+		riskSignals++
+		pressure += 20
+	}
 
 	gapPenalty := 0
 	for _, item := range []struct {
@@ -114,6 +126,8 @@ func assessMember(member GroupMember) EvidenceAssessment {
 		{EvidenceMissingProvider, 7},
 		{EvidenceMissingLocation, 7},
 		{EvidenceMissingAccess, 8},
+		{EvidenceIPQualityMissing, 8},
+		{EvidenceIPQualityStale, 6},
 	} {
 		if hasEvidence(member, item.kind) {
 			gapSignals++

@@ -1530,6 +1530,99 @@ describe('AssetDecisionsPage', () => {
     expect(writeCalls).toEqual([])
   })
 
+  it('renders IP quality evidence and current facts in saved decision readback', async () => {
+    const ipRiskRecord = decisionRecord({
+      execution_readback: recordReadback({
+        status: 'blocked',
+        summary: 'IP 质量阻塞迁移判断',
+        blocked_count: 1,
+        needs_evidence_count: 0,
+      }),
+      members: [
+        {
+          ...decisionRecord().members[0],
+          decided_action: 'migrate',
+          execution_readback: memberReadback({
+            status: 'blocked',
+            summary: 'IP 质量风险仍未解除',
+            issues: [
+              { kind: 'ip_quality_risk', label: 'IP 高风险', tone: 'critical', details: 'provider 风险过高' },
+              { kind: 'media_unlock_blocked', label: 'ChatGPT 受阻', tone: 'alert', details: '解锁区域不可用' },
+            ],
+            current_facts: {
+              found: true,
+              lifecycle_status: 'active',
+              usage_status: 'in_use',
+              renewal_decision: 'migrate',
+              active_subscription_count: 1,
+              service_count: 2,
+              domain_count: 1,
+              target_count: 1,
+              running_target_count: 1,
+              monitoring_link_count: 1,
+              running_monitoring_count: 1,
+              abnormal_monitoring_count: 0,
+              active_incident_count: 0,
+              ip_quality_summary: {
+                observed_at: '2026-06-07T08:00:00Z',
+                ip_address: '203.0.113.9',
+                ip_version: 4,
+                status: 'success',
+                risk_level: 'high',
+                use_region_code: 'JP',
+                use_region_name: 'Japan',
+                asn: 'AS64500',
+                organization: 'Example Transit',
+                stale: false,
+                ambiguous: false,
+                assignment_mode: 'monitoring_link',
+                provider_count: 3,
+                unlockable_count: 1,
+              },
+              ip_quality_provider_risk_signal_count: 2,
+              ip_quality_blocked_services: ['ChatGPT', 'Netflix'],
+              source_availability: sourceAvailability,
+            },
+          }),
+          execution_plan: memberExecutionPlan({
+            lane: 'migration',
+            step_kind: 'open_vps_detail',
+            tone: 'critical',
+            summary: '先复核 IP 质量再推进迁移',
+            step_label: '打开 VPS 详情',
+            issue_count: 2,
+            blocked: true,
+            actionable: true,
+          }),
+        },
+      ],
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/records/adr_001', body: ipRiskRecord },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
+    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    expect(within(dialog).getAllByText('IP 高风险').length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText('ChatGPT 受阻').length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText(/IP 203\.0\.113\.9/).length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText(/风险 provider 2/).length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText(/受阻 ChatGPT、Netflix/).length).toBeGreaterThan(0)
+  })
+
   it('falls back gracefully when saved record snapshots do not include comparison insight', async () => {
     const legacyRecord = decisionRecord({
       evidence_snapshot: {

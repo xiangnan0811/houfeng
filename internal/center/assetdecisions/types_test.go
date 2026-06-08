@@ -4,8 +4,10 @@ import (
 	"testing"
 	"time"
 
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
+	"houfeng/internal/contracts/agentapi"
 )
 
 func TestDeriveGroupsBuildsPortfolioDecisionGroups(t *testing.T) {
@@ -192,6 +194,100 @@ func TestDeriveGroupsEvidenceGapDoesNotMisreportUnavailableSubscriptions(t *test
 	}
 	if groups[0].EvidenceAssessment.DecisionBias != EvidenceBiasCompleteEvidence {
 		t.Fatalf("group assessment = %#v, want complete evidence bias", groups[0].EvidenceAssessment)
+	}
+}
+
+func TestIPQualityEvidenceDistinguishesGapsAndRisks(t *testing.T) {
+	missing := fact("vps_ip_missing", "Missing IP Quality", "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageInUse, sub("sub_1", 10, 120))
+	missing.VPS.IPQualitySummary = nil
+	missingMember := buildMember(missing, ListFilters{RenewWithinDays: 30})
+	if !hasEvidence(missingMember, EvidenceIPQualityMissing) {
+		t.Fatalf("missing member chips = %#v, want ip quality missing", missingMember.EvidenceChips)
+	}
+	if hasEvidence(missingMember, EvidenceIPQualityRisk) {
+		t.Fatalf("missing member chips = %#v, must not mark missing report as risk", missingMember.EvidenceChips)
+	}
+
+	risky := fact("vps_ip_risk", "Risky IP", "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageInUse, sub("sub_2", 10, 120))
+	risky.IPQualityProviderRiskSignalCount = 2
+	risky.IPQualityProviderRiskSummary = "ipinfo: vpn; fraud: high"
+	risky.VPS.IPQualitySummary.RiskLevel = "high"
+	riskyMember := buildMember(risky, ListFilters{RenewWithinDays: 30})
+	if !hasEvidence(riskyMember, EvidenceIPQualityRisk) {
+		t.Fatalf("risky member chips = %#v, want ip quality risk", riskyMember.EvidenceChips)
+	}
+	if riskyMember.EvidenceAssessment.RiskSignalCount == 0 {
+		t.Fatalf("risky member assessment = %#v, want risk signal counted", riskyMember.EvidenceAssessment)
+	}
+}
+
+func TestIPQualityFailedPartialAndAmbiguousReportsDoNotCreateNegativeRisk(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary ipquality.Summary
+	}{
+		{
+			name: "failure",
+			summary: ipquality.Summary{
+				Status:       agentapi.IPQualityStatusFailure,
+				RiskLevel:    "high",
+				ErrorSummary: "provider unavailable",
+			},
+		},
+		{
+			name: "partial",
+			summary: ipquality.Summary{
+				Status:    agentapi.IPQualityStatusPartial,
+				RiskLevel: "high",
+			},
+		},
+		{
+			name: "ambiguous",
+			summary: ipquality.Summary{
+				Status:    agentapi.IPQualityStatusSuccess,
+				RiskLevel: "high",
+				Ambiguous: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := fact("vps_"+tt.name, "IP Quality "+tt.name, "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageInUse, sub("sub_"+tt.name, 10, 120))
+			f.VPS.IPQualitySummary = &tt.summary
+			f.IPQualityProviderRiskSignalCount = 3
+
+			member := buildMember(f, ListFilters{RenewWithinDays: 30})
+
+			if hasEvidence(member, EvidenceIPQualityRisk) {
+				t.Fatalf("%s chips = %#v, must not create ip quality risk", tt.name, member.EvidenceChips)
+			}
+			if hasEvidence(member, EvidenceIPEgressMismatch) {
+				t.Fatalf("%s chips = %#v, must not create egress mismatch", tt.name, member.EvidenceChips)
+			}
+			if !hasEvidence(member, EvidenceIPQualityMissing) {
+				t.Fatalf("%s chips = %#v, want evidence gap instead", tt.name, member.EvidenceChips)
+			}
+		})
+	}
+}
+
+func TestIPQualityEgressMismatchAndMediaUnlockBlockedEvidence(t *testing.T) {
+	f := fact("vps_media", "Media VPS", "pv_1", "Provider", "US", "CA", "Los Angeles", vpsassets.UsageInUse, sub("sub_media", 20, 120))
+	f.VPS.IPv4 = "198.51.100.10"
+	f.VPS.IPQualitySummary.IPAddress = "203.0.113.20"
+	f.IPQualityBlockedServices = []string{"netflix:US", "chatgpt"}
+
+	member := buildMember(f, ListFilters{RenewWithinDays: 30})
+
+	if !hasEvidence(member, EvidenceIPEgressMismatch) {
+		t.Fatalf("member chips = %#v, want egress mismatch", member.EvidenceChips)
+	}
+	if !hasEvidence(member, EvidenceMediaUnlockBlocked) {
+		t.Fatalf("member chips = %#v, want media unlock blocked", member.EvidenceChips)
+	}
+	if !hasComparisonSignal(member.ComparisonInsight.Risks, string(EvidenceMediaUnlockBlocked)) {
+		t.Fatalf("comparison risks = %#v, want media unlock blocked signal", member.ComparisonInsight.Risks)
 	}
 }
 
@@ -416,8 +512,18 @@ func fact(vpsID, name, providerID, providerName, country, region, city string, u
 			LifecycleStatus: vpsassets.LifecycleActive,
 			UsageStatus:     usage,
 			RenewalDecision: vpsassets.RenewalUnreviewed,
-			CreatedAt:       time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
-			UpdatedAt:       time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
+			IPQualitySummary: &ipquality.Summary{
+				ObservedAt:      time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
+				IPAddress:       "192.0.2.1",
+				IPVersion:       4,
+				Status:          agentapi.IPQualityStatusSuccess,
+				RiskLevel:       "low",
+				AssignmentMode:  "link",
+				ProviderCount:   1,
+				UnlockableCount: 1,
+			},
+			CreatedAt: time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
 		},
 		PrimarySubscription: subscription,
 		SubscriptionCount: func() int {
@@ -602,6 +708,26 @@ func TestExecutionReadbackCompleteEvidenceUsesOnlyCurrentEvidenceGaps(t *testing
 		if issue.Kind == "performance" || issue.Kind == "route_quality" || issue.Kind == "ip_quality" {
 			t.Fatalf("issues = %#v, must not include future agent-derived signals", readback.Issues)
 		}
+	}
+}
+
+func TestExecutionReadbackCurrentFactsIncludeIPQuality(t *testing.T) {
+	f := fact("vps_ip_readback", "Readback IP", "pv_1", "Provider", "US", "CA", "Los Angeles", vpsassets.UsageInUse, sub("sub_1", 12, 30))
+	f.VPS.IPQualitySummary.IPAddress = "203.0.113.10"
+	f.VPS.IPQualitySummary.RiskLevel = "high"
+	f.IPQualityProviderRiskSignalCount = 1
+	f.IPQualityBlockedServices = []string{"chatgpt"}
+
+	readback := EvaluateMemberExecutionReadback(RecordMember{VPSID: "vps_ip_readback", DecidedAction: ActionReview}, FactsByVPSID([]Fact{f}))
+
+	if readback.CurrentFacts.IPQualitySummary == nil || readback.CurrentFacts.IPQualitySummary.IPAddress != "203.0.113.10" {
+		t.Fatalf("current facts = %#v, want ip quality summary", readback.CurrentFacts)
+	}
+	if readback.CurrentFacts.IPQualityProviderRiskSignalCount != 1 {
+		t.Fatalf("risk signal count = %d, want 1", readback.CurrentFacts.IPQualityProviderRiskSignalCount)
+	}
+	if len(readback.CurrentFacts.IPQualityBlockedServices) != 1 || readback.CurrentFacts.IPQualityBlockedServices[0] != "chatgpt" {
+		t.Fatalf("blocked services = %#v, want chatgpt", readback.CurrentFacts.IPQualityBlockedServices)
 	}
 }
 

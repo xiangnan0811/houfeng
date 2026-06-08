@@ -27,7 +27,15 @@ type SyncPlan struct {
 	HostSampleFrequencyTier      string
 	HostSampleMaintenanceContext bool
 	ProbeAssignments             []ProbeAssignment
+	IPQualityPlan                *IPQualityPlan
 	PendingAction                *PendingAction
+}
+
+type IPQualityPlan struct {
+	Enabled          bool
+	FrequencySeconds int
+	TimeoutSeconds   int
+	Services         []string
 }
 
 type Repository interface {

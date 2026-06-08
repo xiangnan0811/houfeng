@@ -44,6 +44,8 @@ func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy
 	aggregateCutoff := startOfUTCDay(now.UTC().AddDate(0, 0, -policy.AggregateLayerDays))
 	eventCutoff := now.UTC().AddDate(0, 0, -policy.EventLayerDays)
 	notificationCutoff := now.UTC().AddDate(0, 0, -policy.NotificationLayerDays)
+	ipQualityRawCutoff := now.UTC().AddDate(0, 0, -policy.IPQualityRawRetentionDays)
+	ipQualityHistoryCutoff := now.UTC().AddDate(0, 0, -policy.IPQualityHistoryRetentionDays)
 
 	var result retention.Result
 	if result.MonitoringInstanceAggregateRows, err = execRows(ctx, tx, upsertMonitoringInstanceHostDailyAggregatesSQL, "upsert monitoringInstance host daily aggregates", stableBefore); err != nil {
@@ -72,6 +74,16 @@ func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy
 	}
 	if result.DeletedNotifications, err = execRows(ctx, tx, deleteExpiredNotificationsSQL, "delete expired notifications", notificationCutoff); err != nil {
 		return retention.Result{}, err
+	}
+	if policy.IPQualityRawRetentionDays > 0 {
+		if result.ClearedIPQualityRawJSON, err = execRows(ctx, tx, clearExpiredIPQualityRawJSONSQL, "clear expired ip quality raw json", ipQualityRawCutoff); err != nil {
+			return retention.Result{}, err
+		}
+	}
+	if policy.IPQualityHistoryRetentionDays > 0 {
+		if result.DeletedIPQualityReports, err = execRows(ctx, tx, deleteExpiredIPQualityReportsSQL, "delete expired ip quality reports", ipQualityHistoryCutoff); err != nil {
+			return retention.Result{}, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -180,3 +192,5 @@ const deleteExpiredMonitoringInstanceAggregatesSQL = `delete from monitoring_ins
 const deleteExpiredTargetAggregatesSQL = `delete from target_probe_daily_aggregates where bucket_date < $1::date`
 const deleteExpiredEventsSQL = `delete from state_change_events where created_at < $1`
 const deleteExpiredNotificationsSQL = `delete from notification_records where created_at < $1`
+const clearExpiredIPQualityRawJSONSQL = `update ip_quality_reports set raw_json = null where raw_json is not null and observed_at < $1`
+const deleteExpiredIPQualityReportsSQL = `delete from ip_quality_reports where observed_at < $1`

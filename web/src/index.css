@@ -1918,6 +1918,10 @@ select.input::-ms-expand{display:none}
 .vps-cost-card__empty{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) dashed color-mix(in srgb,var(--border-dashed) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 10%,transparent)}
 .vps-cost-card__empty strong{color:var(--text-primary);font-size:var(--type-body-size)}
 .vps-cost-card__empty span{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45}
+.vps-ip-quality-card{display:flex;flex-direction:column;gap:var(--space-3)}
+.vps-ip-quality-card__matrix{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,0.8fr);gap:var(--space-4)}
+.vps-ip-quality-card__matrix h3{margin:0 0 var(--space-2);color:var(--text-primary);font-size:var(--type-body-size);font-weight:600}
+.vps-ip-quality-card__table{min-width:520px}
 .asset-cost-signal{max-width:220px}
 .asset-cost-signal .badge{width:max-content}
 .asset-cost-signal .asset-context-pill{min-height:22px}

@@ -12,6 +12,7 @@ import (
 	"houfeng/agent/enroll"
 	agentexec "houfeng/agent/exec"
 	"houfeng/agent/hostsample"
+	agentipquality "houfeng/agent/ipquality"
 	"houfeng/agent/probe"
 	"houfeng/agent/syncqueue"
 	"houfeng/internal/contracts/agentapi"
@@ -62,6 +63,11 @@ type ProbeProvider interface {
 	CollectDue(context.Context, *agentapi.SyncPlan, time.Time) ([]agentapi.ProbeObservationPayload, error)
 }
 
+type IPQualityProvider interface {
+	MaybeStart(context.Context, *agentapi.IPQualityPlan, time.Time) error
+	DrainReports() []agentapi.IPQualityReportPayload
+}
+
 type SyncQueue interface {
 	Enqueue(context.Context, agentapi.SyncRequest) (string, error)
 	List(context.Context) ([]syncqueue.Entry, error)
@@ -79,6 +85,7 @@ type Runtime struct {
 	fingerprintSource   FingerprintSource
 	hostSampleProvider  HostSampleProvider
 	probeProvider       ProbeProvider
+	ipQualityProvider   IPQualityProvider
 	interval            time.Duration
 	syncQueue           SyncQueue
 	currentPlan         *agentapi.SyncPlan
@@ -91,7 +98,10 @@ func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSour
 		MaxEntries: cfg.BufferMaxEntries,
 		MaxAge:     cfg.BufferMaxAge,
 	})
-	return NewWithRuntimeDeps(cfg, logger, enroll.NewClient(cfg.ServerURL), tokenSource, fingerprintSource, hostsample.New(), probe.New(), defaultInterval, queue)
+	ipStateStore := agentipquality.NewFileStateStore(cfg.IPQualityStateFile)
+	ipCollector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{})
+	ipProvider := agentipquality.NewManager(ipStateStore, ipCollector)
+	return NewWithRuntimeDeps(cfg, logger, enroll.NewClient(cfg.ServerURL), tokenSource, fingerprintSource, hostsample.New(), probe.New(), defaultInterval, queue, ipProvider)
 }
 
 func NewWithDeps(cfg agentconfig.AgentConfig, logger *slog.Logger, client Client, tokenSource TokenSource, fingerprintSource FingerprintSource, interval time.Duration) *Runtime {
@@ -107,7 +117,7 @@ func NewWithRuntimeDeps(
 	hostSampleProvider HostSampleProvider,
 	probeProvider ProbeProvider,
 	interval time.Duration,
-	queues ...SyncQueue,
+	optionalDeps ...any,
 ) *Runtime {
 	if logger == nil {
 		logger = slog.Default()
@@ -116,8 +126,18 @@ func NewWithRuntimeDeps(
 		interval = defaultInterval
 	}
 	var queue SyncQueue
-	if len(queues) > 0 {
-		queue = queues[0]
+	var ipQualityProvider IPQualityProvider
+	for _, dep := range optionalDeps {
+		switch typed := dep.(type) {
+		case nil:
+			continue
+		case SyncQueue:
+			if queue == nil {
+				queue = typed
+			}
+		case IPQualityProvider:
+			ipQualityProvider = typed
+		}
 	}
 	var syncCredentialStore SyncCredentialStore
 	if store, ok := tokenSource.(SyncCredentialStore); ok {
@@ -133,6 +153,7 @@ func NewWithRuntimeDeps(
 		fingerprintSource:   fingerprintSource,
 		hostSampleProvider:  hostSampleProvider,
 		probeProvider:       probeProvider,
+		ipQualityProvider:   ipQualityProvider,
 		interval:            interval,
 		syncQueue:           queue,
 	}
@@ -267,6 +288,9 @@ func (r *Runtime) buildSyncRequest(ctx context.Context, monitoringInstanceID, sy
 	} else {
 		request.ProbeObservations = append(request.ProbeObservations, probeObservations...)
 	}
+
+	request.IPQualityReports = append(request.IPQualityReports, r.drainIPQualityReports(observedAt, fingerprint, syncBatchID)...)
+	r.startIPQualityCollection(ctx, observedAt)
 
 	// Flush any pending command results from executed actions.
 	for _, pr := range r.pendingResults {
@@ -406,6 +430,37 @@ func (r *Runtime) collectProbeObservations(ctx context.Context, observedAt time.
 	return observations, nil
 }
 
+func (r *Runtime) drainIPQualityReports(observedAt time.Time, fingerprint, syncBatchID string) []agentapi.IPQualityReportPayload {
+	if r.ipQualityProvider == nil {
+		return nil
+	}
+	reports := r.ipQualityProvider.DrainReports()
+	for i := range reports {
+		if reports[i].ObservedAt.IsZero() {
+			reports[i].ObservedAt = observedAt
+		}
+		if reports[i].AgentVersion == "" {
+			reports[i].AgentVersion = agentVersion
+		}
+		if reports[i].Fingerprint == "" {
+			reports[i].Fingerprint = fingerprint
+		}
+		if reports[i].SyncBatchID == "" {
+			reports[i].SyncBatchID = syncBatchID
+		}
+	}
+	return reports
+}
+
+func (r *Runtime) startIPQualityCollection(ctx context.Context, observedAt time.Time) {
+	if r.ipQualityProvider == nil || r.currentPlan == nil || r.currentPlan.IPQualityPlan == nil || !r.currentPlan.IPQualityPlan.Enabled {
+		return
+	}
+	if err := r.ipQualityProvider.MaybeStart(ctx, r.currentPlan.IPQualityPlan, observedAt); err != nil {
+		r.logger.Error("start ip quality collection failed", "error", err)
+	}
+}
+
 func hostSampleDue(frequencyTier string, lastAt, observedAt time.Time) bool {
 	duration, ok := frequencyTierDuration(frequencyTier)
 	if !ok {
@@ -447,6 +502,14 @@ func cloneSyncPlan(plan *agentapi.SyncPlan) *agentapi.SyncPlan {
 		cloned.PendingAction = &agentapi.PendingAction{
 			CommandID: plan.PendingAction.CommandID,
 			ActionID:  plan.PendingAction.ActionID,
+		}
+	}
+	if plan.IPQualityPlan != nil {
+		cloned.IPQualityPlan = &agentapi.IPQualityPlan{
+			Enabled:          plan.IPQualityPlan.Enabled,
+			FrequencySeconds: plan.IPQualityPlan.FrequencySeconds,
+			TimeoutSeconds:   plan.IPQualityPlan.TimeoutSeconds,
+			Services:         append([]string(nil), plan.IPQualityPlan.Services...),
 		}
 	}
 	for _, assignment := range plan.ProbeAssignments {

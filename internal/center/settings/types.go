@@ -29,6 +29,7 @@ type CenterSettings struct {
 	OverrideRules           OverrideRules            `json:"override_rules"`
 	RetentionPolicy         RetentionPolicy          `json:"retention_policy"`
 	SubscriptionCost        SubscriptionCostSettings `json:"subscription_cost_settings"`
+	IPQuality               IPQualitySettings        `json:"ip_quality_settings"`
 }
 
 type TelegramSettings struct {
@@ -157,6 +158,25 @@ type SubscriptionCostSettings struct {
 	ExchangeRateStaleAfterHours int    `json:"exchange_rate_stale_after_hours"`
 }
 
+type IPQualitySettings struct {
+	Enabled              bool     `json:"enabled"`
+	FrequencySeconds     int      `json:"frequency_seconds"`
+	TimeoutSeconds       int      `json:"timeout_seconds"`
+	RawRetentionDays     int      `json:"raw_retention_days"`
+	HistoryRetentionDays int      `json:"history_retention_days"`
+	Services             []string `json:"services"`
+}
+
+var defaultIPQualityServices = []string{
+	"netflix",
+	"chatgpt",
+	"youtube-premium",
+	"amazon-prime-video",
+	"disney-plus",
+	"tiktok",
+	"reddit",
+}
+
 func Default() CenterSettings {
 	return CenterSettings{
 		HostSampleFrequencyTier: targets.FrequencyTier5s,
@@ -208,6 +228,14 @@ func Default() CenterSettings {
 			MaxReminderLeadDays:         30,
 			ExchangeRateStaleAfterHours: 36,
 		},
+		IPQuality: IPQualitySettings{
+			Enabled:              false,
+			FrequencySeconds:     24 * 60 * 60,
+			TimeoutSeconds:       15,
+			RawRetentionDays:     90,
+			HistoryRetentionDays: 365,
+			Services:             append([]string(nil), defaultIPQualityServices...),
+		},
 	}
 }
 
@@ -253,6 +281,12 @@ func Validate(input CenterSettings) (CenterSettings, error) {
 		return CenterSettings{}, err
 	}
 	input.SubscriptionCost = subscriptionCost
+
+	ipQuality, err := validateIPQualitySettings(input.IPQuality)
+	if err != nil {
+		return CenterSettings{}, err
+	}
+	input.IPQuality = ipQuality
 
 	return input, nil
 }
@@ -605,6 +639,71 @@ func validateSubscriptionCostSettings(input SubscriptionCostSettings) (Subscript
 	}
 
 	return input, nil
+}
+
+func validateIPQualitySettings(input IPQualitySettings) (IPQualitySettings, error) {
+	defaults := Default().IPQuality
+	if isZeroIPQualitySettings(input) {
+		return defaults, nil
+	}
+	if input.FrequencySeconds < 60 {
+		return IPQualitySettings{}, invalidSettings("ip quality frequency seconds must be at least 60")
+	}
+	if input.TimeoutSeconds < 1 || input.TimeoutSeconds > 300 {
+		return IPQualitySettings{}, invalidSettings("ip quality timeout seconds must be between 1 and 300")
+	}
+	if input.RawRetentionDays < 7 {
+		return IPQualitySettings{}, invalidSettings("ip quality raw retention days must be at least 7")
+	}
+	if input.HistoryRetentionDays < input.RawRetentionDays {
+		return IPQualitySettings{}, invalidSettings("ip quality history retention days must be at least raw retention days")
+	}
+	if input.Services == nil {
+		input.Services = append([]string(nil), defaults.Services...)
+	} else {
+		services, err := normalizeIPQualityServices(input.Services)
+		if err != nil {
+			return IPQualitySettings{}, err
+		}
+		input.Services = services
+	}
+	if len(input.Services) == 0 {
+		return IPQualitySettings{}, invalidSettings("ip quality services must not be empty")
+	}
+	return input, nil
+}
+
+func isZeroIPQualitySettings(input IPQualitySettings) bool {
+	return !input.Enabled &&
+		input.FrequencySeconds == 0 &&
+		input.TimeoutSeconds == 0 &&
+		input.RawRetentionDays == 0 &&
+		input.HistoryRetentionDays == 0 &&
+		len(input.Services) == 0
+}
+
+func normalizeIPQualityServices(values []string) ([]string, error) {
+	allowed := make(map[string]struct{}, len(defaultIPQualityServices))
+	for _, service := range defaultIPQualityServices {
+		allowed[service] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(values))
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		service := strings.ToLower(strings.TrimSpace(value))
+		if service == "" {
+			continue
+		}
+		if _, ok := allowed[service]; !ok {
+			return nil, invalidSettings("ip quality service is invalid")
+		}
+		if _, ok := seen[service]; ok {
+			continue
+		}
+		seen[service] = struct{}{}
+		normalized = append(normalized, service)
+	}
+	return normalized, nil
 }
 
 func normalizeReminderOffsets(values []int) []int {

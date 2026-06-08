@@ -58,6 +58,23 @@ const vps = {
   active_monitoring_instance_link_count: 1,
   running_monitoring_instance_count: 0,
   running_target_count: 0,
+  ip_quality_summary: {
+    vps_id: 'vps_001',
+    observed_at: '2026-06-08T12:00:00Z',
+    ip_address: '192.0.2.1',
+    ip_version: 4,
+    status: 'success',
+    risk_level: 'low',
+    use_region_code: 'JP',
+    use_region_name: 'Japan',
+    asn: 'AS64500',
+    organization: 'Example Transit',
+    stale: false,
+    ambiguous: false,
+    assignment_mode: 'link',
+    provider_count: 2,
+    unlockable_count: 1,
+  },
   created_at: '2026-05-09T08:00:00Z',
   updated_at: '2026-05-09T08:00:00Z',
   archived_at: null,
@@ -80,6 +97,7 @@ const missingFactsVPS = {
   active_monitoring_instance_link_count: 0,
   running_monitoring_instance_count: 0,
   running_target_count: 0,
+  ip_quality_summary: null,
 }
 
 const subscription = {
@@ -130,6 +148,7 @@ describe('VPSPage', () => {
     expect(screen.queryByRole('tab', { name: /已归档/ })).not.toBeInTheDocument()
     expect(screen.getAllByText('在用').length).toBeGreaterThan(0)
     expect(screen.getAllByText('保留').length).toBeGreaterThan(0)
+    expect(screen.getByText('IP 低风险 · JP')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',

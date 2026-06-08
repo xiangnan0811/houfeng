@@ -13,6 +13,7 @@ import type {
   VPSAssetDetail,
   VPSExperienceCategory,
   VPSExperienceSeverity,
+  VPSIPQualityReport,
   BillingPeriodUnit,
   RenewalMode,
   VPSRenewalDecision,
@@ -29,6 +30,8 @@ export type VPSDetailPageState = {
   domains: AssetDomainRecord[]
   subscriptions: SubscriptionRecord[]
   subscriptionsError: string | null
+  ipQuality: VPSIPQualityReport | null
+  ipQualityError: string | null
   cancellationPreview: CancellationPreview | null
   cancellationPreviewError: string | null
   cancellationResult: LifecycleActionResult | null

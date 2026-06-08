@@ -7,6 +7,7 @@ import (
 
 	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/enrollment"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/observations"
 )
 
@@ -32,6 +33,7 @@ type Batch struct {
 	SyncToken            string
 	Heartbeats           []HeartbeatPayload
 	Observations         observations.BatchWrite
+	IPQualityReports     []ipquality.ReportWrite
 	CommandResults       []CommandResult
 }
 

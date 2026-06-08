@@ -78,6 +78,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	assetDomainRepo := store.NewPostgresAssetDomainRepository(db.Pool())
 	assetServiceRepo := store.NewPostgresAssetServiceRepository(db.Pool())
 	assetLifecycleRepo := store.NewPostgresAssetLifecycleRepository(db.Pool())
+	ipQualityRepo := store.NewPostgresIPQualityRepository(db.Pool())
 	subscriptionRepo := store.NewPostgresSubscriptionRepository(db.Pool())
 	subscriptionCostRepo := store.NewPostgresSubscriptionCostRepository(db.Pool())
 	vpsMonitoringInstanceLinkRepo := store.NewPostgresVPSMonitoringInstanceLinkRepository(db.Pool())
@@ -165,8 +166,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AssetDecisionRecordHandler:               handlers.AssetDecisionRecord(assetDecisionRepo),
 		ProvidersCollectionHandler:               handlers.ProvidersCollection(providerRepo),
 		ProviderItemHandler:                      handlers.ProviderItem(providerRepo),
-		VPSCollectionHandler:                     handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo),
-		VPSItemHandler:                           handlers.VPSItem(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo),
+		VPSCollectionHandler:                     handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
+		VPSItemHandler:                           handlers.VPSItem(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
 		VPSMonitoringInstancesHandler:            handlers.VPSMonitoringInstances(vpsMonitoringInstanceLinkRepo, vpsAssetRepo, monitoringInstanceRepo),
 		VPSSubscriptionsHandler:                  handlers.VPSSubscriptions(subscriptionRepo),
 		VPSLinkMonitoringInstanceHandler:         handlers.VPSLinkMonitoringInstance(vpsMonitoringInstanceLinkRepo),
@@ -175,6 +176,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSExperienceLogsHandler:                 handlers.VPSExperienceLogs(renewalDecisionRepo),
 		VPSDomainsHandler:                        handlers.VPSDomains(assetDomainRepo),
 		VPSServicesHandler:                       handlers.VPSServices(assetServiceRepo),
+		VPSIPQualityHandler:                      handlers.VPSIPQuality(ipQualityRepo),
 		VPSCancellationPreviewHandler:            handlers.VPSCancellationPreview(assetLifecycleRepo),
 		VPSCancellationHandler:                   handlers.VPSCancellation(assetLifecycleRepo),
 		VPSExtendValidityHandler:                 handlers.VPSExtendValidity(assetLifecycleRepo),

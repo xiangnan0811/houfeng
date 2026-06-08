@@ -14,6 +14,7 @@ import (
 
 	"houfeng/internal/center/assetdecisions"
 	"houfeng/internal/center/ids"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/subscriptions"
 )
 
@@ -526,6 +527,43 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 			left join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
 			where l.unlinked_at is null
 			group by l.vps_id
+		),
+		ip_quality_provider_risk_rollup as (
+			select
+				report_id,
+				(count(*) filter (
+					where lower(risk_level) in ('medium', 'moderate', 'high', 'critical', 'risk', 'risky', 'danger', 'dangerous')
+						or coalesce(is_proxy, false)
+						or coalesce(is_tor, false)
+						or coalesce(is_vpn, false)
+						or coalesce(is_abuser, false)
+						or coalesce(is_robot, false)
+				))::int as risk_signal_count,
+				coalesce(string_agg(
+					provider || case when nullif(risk_level, '') is null then '' else ':' || risk_level end,
+					'; ' order by provider
+				) filter (
+					where lower(risk_level) in ('medium', 'moderate', 'high', 'critical', 'risk', 'risky', 'danger', 'dangerous')
+						or coalesce(is_proxy, false)
+						or coalesce(is_tor, false)
+						or coalesce(is_vpn, false)
+						or coalesce(is_abuser, false)
+						or coalesce(is_robot, false)
+				), '') as risk_summary
+			from ip_quality_provider_results
+			group by report_id
+		),
+		ip_quality_unlock_rollup as (
+			select
+				report_id,
+				coalesce(array_agg(
+					service || case when nullif(region, '') is null then '' else ':' || region end
+					order by service
+				) filter (
+					where lower(status) in ('blocked', 'locked', 'not_unlocked', 'unavailable', 'restricted', 'unsupported')
+				), '{}'::text[]) as blocked_services
+			from ip_quality_service_unlocks
+			group by report_id
 		)
 		select
 			v.vps_id,
@@ -593,7 +631,27 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 			ps.ends_at,
 			coalesce(ps.note, ''),
 			ps.created_at,
-			ps.updated_at
+			ps.updated_at,
+			ipq.report_id is not null,
+			coalesce(ipq.observed_at, 'epoch'::timestamptz),
+			coalesce(ipq.ip_address, ''),
+			coalesce(ipq.ip_version, 0),
+			coalesce(ipq.status, ''),
+			coalesce(ipq.risk_level, ''),
+			coalesce(ipq.use_region_code, ''),
+			coalesce(ipq.use_region_name, ''),
+			coalesce(ipq.asn, ''),
+			coalesce(ipq.organization, ''),
+			coalesce(ipq.stale, false),
+			coalesce(ipq.ambiguous, false),
+			coalesce(ipq.assignment_mode, ''),
+			coalesce(ipq.error_code, ''),
+			coalesce(ipq.error_summary, ''),
+			coalesce(ipq.provider_count, 0),
+			coalesce(ipq.unlockable_count, 0),
+			coalesce(ipqr.risk_signal_count, 0),
+			coalesce(ipqr.risk_summary, ''),
+			coalesce(ipqu.blocked_services, '{}'::text[])
 		from vps_assets v
 		left join providers p on p.provider_id = v.provider_id
 		left join subscription_rollup sr on sr.vps_id = v.vps_id
@@ -602,6 +660,9 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 		left join domain_rollup dr on dr.vps_id = v.vps_id
 		left join target_rollup tr on tr.vps_id = v.vps_id
 		left join monitoring_rollup mr on mr.vps_id = v.vps_id
+		left join ip_quality_latest_vps_summaries ipq on ipq.vps_id = v.vps_id
+		left join ip_quality_provider_risk_rollup ipqr on ipqr.report_id = ipq.report_id
+		left join ip_quality_unlock_rollup ipqu on ipqu.report_id = ipq.report_id
 		where v.lifecycle_status not in ('cancelled', 'archived')
 		order by lower(v.display_name), v.vps_id`)
 	if err != nil {
@@ -718,15 +779,17 @@ type assetDecisionFactScanner interface {
 
 func scanAssetDecisionFact(row assetDecisionFactScanner) (assetdecisions.Fact, error) {
 	var (
-		fact        assetdecisions.Fact
-		hasSub      bool
-		sub         subscriptions.Record
-		startedAt   *time.Time
-		renewAt     *time.Time
-		trialEndsAt *time.Time
-		endsAt      *time.Time
-		subCreated  *time.Time
-		subUpdated  *time.Time
+		fact             assetdecisions.Fact
+		hasSub           bool
+		sub              subscriptions.Record
+		startedAt        *time.Time
+		renewAt          *time.Time
+		trialEndsAt      *time.Time
+		endsAt           *time.Time
+		subCreated       *time.Time
+		subUpdated       *time.Time
+		hasIPQuality     bool
+		ipQualitySummary ipquality.Summary
 	)
 	if err := row.Scan(
 		&fact.VPS.VPSID,
@@ -795,6 +858,26 @@ func scanAssetDecisionFact(row assetDecisionFactScanner) (assetdecisions.Fact, e
 		&sub.Note,
 		&subCreated,
 		&subUpdated,
+		&hasIPQuality,
+		&ipQualitySummary.ObservedAt,
+		&ipQualitySummary.IPAddress,
+		&ipQualitySummary.IPVersion,
+		&ipQualitySummary.Status,
+		&ipQualitySummary.RiskLevel,
+		&ipQualitySummary.UseRegionCode,
+		&ipQualitySummary.UseRegionName,
+		&ipQualitySummary.ASN,
+		&ipQualitySummary.Organization,
+		&ipQualitySummary.Stale,
+		&ipQualitySummary.Ambiguous,
+		&ipQualitySummary.AssignmentMode,
+		&ipQualitySummary.ErrorCode,
+		&ipQualitySummary.ErrorSummary,
+		&ipQualitySummary.ProviderCount,
+		&ipQualitySummary.UnlockableCount,
+		&fact.IPQualityProviderRiskSignalCount,
+		&fact.IPQualityProviderRiskSummary,
+		&fact.IPQualityBlockedServices,
 	); err != nil {
 		return assetdecisions.Fact{}, err
 	}
@@ -818,6 +901,10 @@ func scanAssetDecisionFact(row assetDecisionFactScanner) (assetdecisions.Fact, e
 			sub.UpdatedAt = *subUpdated
 		}
 		fact.PrimarySubscription = &sub
+	}
+	if hasIPQuality {
+		ipQualitySummary.VPSID = fact.VPS.VPSID
+		fact.VPS.IPQualitySummary = &ipQualitySummary
 	}
 	return fact, nil
 }

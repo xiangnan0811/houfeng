@@ -117,13 +117,18 @@ func TestFileStoreMarksAttemptsAndBuildsBackfilledRequests(t *testing.T) {
 	if !backfilled.ProbeObservations[0].IsBackfilled {
 		t.Fatal("probe observation IsBackfilled = false, want true")
 	}
+	if !backfilled.IPQualityReports[0].IsBackfilled {
+		t.Fatal("ip quality report IsBackfilled = false, want true")
+	}
 
 	entries[0].Request.HostSamples[0].IsBackfilled = false
 	entries[0].Request.ProbeObservations[0].IsBackfilled = false
+	entries[0].Request.IPQualityReports[0].IsBackfilled = false
 	entries[0].Request.Heartbeats[0].IsBackfilled = false
 	if backfilled.Heartbeats[0].IsBackfilled != true ||
 		backfilled.HostSamples[0].IsBackfilled != true ||
-		backfilled.ProbeObservations[0].IsBackfilled != true {
+		backfilled.ProbeObservations[0].IsBackfilled != true ||
+		backfilled.IPQualityReports[0].IsBackfilled != true {
 		t.Fatal("WithBackfilledFacts() did not deep-copy payload slices")
 	}
 }
@@ -381,6 +386,20 @@ func syncRequest(batchID string, backfilled bool) agentapi.SyncRequest {
 			SyncBatchID:  batchID,
 			ResultKind:   agentapi.ProbeResultSuccess,
 			IsBackfilled: backfilled,
+		}},
+		IPQualityReports: []agentapi.IPQualityReportPayload{{
+			ObservedAt:    observedAt,
+			AgentVersion:  "dev",
+			Fingerprint:   "fp-001",
+			SyncBatchID:   batchID,
+			IPAddress:     "203.0.113.10",
+			IPVersion:     4,
+			Status:        agentapi.IPQualityStatusSuccess,
+			ASN:           "AS64500",
+			Organization:  "Example Network",
+			UseRegionCode: "US",
+			RiskLevel:     "low",
+			IsBackfilled:  backfilled,
 		}},
 	}
 }

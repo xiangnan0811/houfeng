@@ -184,6 +184,12 @@ func TestSyncPlan(t *testing.T) {
 	plan := agentapi.SyncPlan{
 		HostSampleFrequencyTier:      agentapi.FrequencyTier15m,
 		HostSampleMaintenanceContext: true,
+		IPQualityPlan: &agentapi.IPQualityPlan{
+			Enabled:          true,
+			FrequencySeconds: 86400,
+			TimeoutSeconds:   12,
+			Services:         []string{"netflix", "chatgpt"},
+		},
 		ProbeAssignments: []agentapi.ProbeAssignment{{
 			TargetID:           "target-nil-port",
 			TargetHost:         "cache.internal.test",
@@ -210,6 +216,13 @@ func TestSyncPlan(t *testing.T) {
 	if got["host_sample_maintenance_context"] != true {
 		t.Fatalf("host_sample_maintenance_context = %#v, want true", got["host_sample_maintenance_context"])
 	}
+	ipQualityPlan, ok := got["ip_quality_plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("ip_quality_plan = %#v, want object", got["ip_quality_plan"])
+	}
+	if ipQualityPlan["frequency_seconds"] != float64(86400) || ipQualityPlan["timeout_seconds"] != float64(12) {
+		t.Fatalf("ip_quality_plan = %#v, want frequency/timeout seconds", ipQualityPlan)
+	}
 
 	assignments, ok := got["probe_assignments"].([]any)
 	if !ok || len(assignments) != 1 {
@@ -231,6 +244,12 @@ func TestSyncPlan(t *testing.T) {
 
 	if !roundTrip.HostSampleMaintenanceContext {
 		t.Fatal("HostSampleMaintenanceContext = false, want true")
+	}
+	if roundTrip.IPQualityPlan == nil {
+		t.Fatal("IPQualityPlan = nil, want non-nil")
+	}
+	if roundTrip.IPQualityPlan.FrequencySeconds != 86400 || roundTrip.IPQualityPlan.Services[1] != "chatgpt" {
+		t.Fatalf("IPQualityPlan = %#v, want frequency and services preserved", roundTrip.IPQualityPlan)
 	}
 	if len(roundTrip.ProbeAssignments) != 1 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(roundTrip.ProbeAssignments))

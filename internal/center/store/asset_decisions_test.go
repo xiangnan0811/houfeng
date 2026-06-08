@@ -14,6 +14,7 @@ import (
 	"houfeng/internal/center/assetdecisions"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
+	"houfeng/internal/contracts/agentapi"
 )
 
 func TestPostgresAssetDecisionRepositoryLoadsFactsWithAggregateQuery(t *testing.T) {
@@ -126,6 +127,70 @@ func TestPostgresAssetDecisionRepositoryLoadsFactsWithAggregateQuery(t *testing.
 	factSourceClause := capturedSQL[factSourceStart:factSourceOrder]
 	if !strings.Contains(factSourceClause, "where v.lifecycle_status not in ('cancelled', 'archived')") {
 		t.Fatalf("fact source SQL = %q, want current VPS lifecycle filter", factSourceClause)
+	}
+}
+
+func TestPostgresAssetDecisionRepositoryLoadsIPQualityFacts(t *testing.T) {
+	now := time.Date(2026, time.June, 4, 9, 0, 0, 0, time.UTC)
+	capturedSQL := ""
+	repo := &PostgresAssetDecisionRepository{db: fakeAssetDecisionQueryer{
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedSQL = sql
+			baseRows := fakeAssetDecisionFactRows(now).(*fakeAssetDecisionRows)
+			return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: func(dest ...any) error {
+				if err := baseRows.rows[0].scan(dest...); err != nil {
+					return err
+				}
+				*(dest[66].(*bool)) = true
+				*(dest[67].(*time.Time)) = now.Add(-time.Hour)
+				*(dest[68].(*string)) = "203.0.113.10"
+				*(dest[69].(*int)) = 4
+				*(dest[70].(*string)) = agentapi.IPQualityStatusSuccess
+				*(dest[71].(*string)) = "high"
+				*(dest[72].(*string)) = "US"
+				*(dest[73].(*string)) = "United States"
+				*(dest[74].(*string)) = "AS64500"
+				*(dest[75].(*string)) = "Example Network"
+				*(dest[76].(*bool)) = false
+				*(dest[77].(*bool)) = false
+				*(dest[78].(*string)) = "link"
+				*(dest[79].(*string)) = ""
+				*(dest[80].(*string)) = ""
+				*(dest[81].(*int)) = 2
+				*(dest[82].(*int)) = 2
+				*(dest[83].(*int)) = 1
+				*(dest[84].(*string)) = "ipinfo: vpn"
+				*(dest[85].(*[]string)) = []string{"netflix:US"}
+				return nil
+			}}}}, nil
+		},
+	}}
+
+	facts, err := repo.loadFacts(context.Background())
+	if err != nil {
+		t.Fatalf("loadFacts() error = %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("facts = %#v, want one fact", facts)
+	}
+	for _, want := range []string{
+		"ip_quality_latest_vps_summaries",
+		"ip_quality_provider_results",
+		"ip_quality_service_unlocks",
+	} {
+		if !strings.Contains(capturedSQL, want) {
+			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
+		}
+	}
+	summary := facts[0].VPS.IPQualitySummary
+	if summary == nil || summary.IPAddress != "203.0.113.10" || summary.RiskLevel != "high" {
+		t.Fatalf("IPQualitySummary = %#v, want loaded latest summary", summary)
+	}
+	if facts[0].IPQualityProviderRiskSignalCount != 1 || facts[0].IPQualityProviderRiskSummary != "ipinfo: vpn" {
+		t.Fatalf("ip quality risk facts = (%d,%q), want provider risk", facts[0].IPQualityProviderRiskSignalCount, facts[0].IPQualityProviderRiskSummary)
+	}
+	if len(facts[0].IPQualityBlockedServices) != 1 || facts[0].IPQualityBlockedServices[0] != "netflix:US" {
+		t.Fatalf("blocked services = %#v, want netflix:US", facts[0].IPQualityBlockedServices)
 	}
 }
 

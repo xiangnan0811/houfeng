@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/agentplan"
+	"houfeng/internal/center/ids"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
@@ -25,13 +28,17 @@ type syncBatchTx interface {
 }
 
 type PostgresSyncRepository struct {
-	beginTx func(context.Context, pgx.TxOptions) (syncBatchTx, error)
+	beginTx              func(context.Context, pgx.TxOptions) (syncBatchTx, error)
+	newIPQualityReportID func() (string, error)
 }
 
 func NewPostgresSyncRepository(db *pgxpool.Pool) *PostgresSyncRepository {
 	return &PostgresSyncRepository{
 		beginTx: func(ctx context.Context, options pgx.TxOptions) (syncBatchTx, error) {
 			return db.BeginTx(ctx, options)
+		},
+		newIPQualityReportID: func() (string, error) {
+			return ids.New("ipq")
 		},
 	}
 }
@@ -73,6 +80,9 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 	if err := recordObservationBatch(ctx, tx, observationBatch); err != nil {
 		return syncing.Result{}, err
 	}
+	if err := recordIPQualityReports(ctx, tx, r.newIPQualityReportID, batch.IPQualityReports, receivedAt); err != nil {
+		return syncing.Result{}, err
+	}
 	nextLifecycleStatus := lifecycleStatusAfterAcceptedSync(syncState.LifecycleStatus, len(batch.Observations.HostSamples) > 0)
 	if err := advanceMonitoringInstanceSyncState(ctx, tx, batch.MonitoringInstanceID, lastHeartbeatAt, receivedAt, nextLifecycleStatus); err != nil {
 		return syncing.Result{}, err
@@ -103,6 +113,161 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		AcceptedAt: receivedAt,
 		Plan:       plan,
 	}, nil
+}
+
+func recordIPQualityReports(ctx context.Context, tx syncBatchTx, newReportID func() (string, error), reports []ipquality.ReportWrite, receivedAt time.Time) error {
+	if len(reports) == 0 {
+		return nil
+	}
+	if newReportID == nil {
+		newReportID = func() (string, error) { return ids.New("ipq") }
+	}
+	for _, report := range reports {
+		if err := ipquality.ValidateReportWrite(report); err != nil {
+			return err
+		}
+		reportID, err := newReportID()
+		if err != nil {
+			return fmt.Errorf("generate ip quality report id: %w", err)
+		}
+		reportReceivedAt := report.ReceivedAt
+		if reportReceivedAt.IsZero() {
+			reportReceivedAt = receivedAt
+		}
+		rawJSON := []byte(nil)
+		if len(report.RawJSON) > 0 {
+			rawJSON = ipquality.SanitizeRawJSON(report.RawJSON)
+		} else {
+			rawJSON = json.RawMessage(`null`)
+		}
+		if _, err := tx.Exec(ctx, `
+			insert into ip_quality_reports (
+				report_id,
+				monitoring_instance_id,
+				observed_at,
+				received_at,
+				agent_version,
+				fingerprint,
+				sync_batch_id,
+				ip_address,
+				ip_version,
+				status,
+				asn,
+				organization,
+				latitude,
+				longitude,
+				use_region_code,
+				use_region_name,
+				registered_region_code,
+				registered_region_name,
+				risk_level,
+				error_code,
+				error_summary,
+				is_backfilled,
+				raw_json
+			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb)`,
+			reportID,
+			report.MonitoringInstanceID,
+			report.ObservedAt,
+			reportReceivedAt,
+			report.AgentVersion,
+			report.Fingerprint,
+			report.SyncBatchID,
+			report.IPAddress,
+			report.IPVersion,
+			report.Status,
+			report.ASN,
+			report.Organization,
+			report.Latitude,
+			report.Longitude,
+			report.UseRegionCode,
+			report.UseRegionName,
+			report.RegisteredRegionCode,
+			report.RegisteredRegionName,
+			report.RiskLevel,
+			report.ErrorCode,
+			report.ErrorSummary,
+			report.IsBackfilled,
+			rawJSON,
+		); err != nil {
+			return fmt.Errorf("insert ip quality report for monitoring instance %q: %w", report.MonitoringInstanceID, err)
+		}
+		for _, provider := range report.ProviderResults {
+			resultID, err := ids.New("ipqp")
+			if err != nil {
+				return fmt.Errorf("generate ip quality provider result id: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				insert into ip_quality_provider_results (
+					result_id,
+					report_id,
+					provider,
+					usage_type,
+					company_type,
+					risk_level,
+					risk_score,
+					region_code,
+					region_name,
+					is_proxy,
+					is_tor,
+					is_vpn,
+					is_server,
+					is_abuser,
+					is_robot,
+					error_code,
+					error_summary
+				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+				resultID,
+				reportID,
+				provider.Provider,
+				provider.UsageType,
+				provider.CompanyType,
+				provider.RiskLevel,
+				provider.RiskScore,
+				provider.RegionCode,
+				provider.RegionName,
+				provider.IsProxy,
+				provider.IsTor,
+				provider.IsVPN,
+				provider.IsServer,
+				provider.IsAbuser,
+				provider.IsRobot,
+				provider.ErrorCode,
+				provider.ErrorSummary,
+			); err != nil {
+				return fmt.Errorf("insert ip quality provider result for report %q: %w", reportID, err)
+			}
+		}
+		for _, unlock := range report.ServiceUnlocks {
+			unlockID, err := ids.New("ipqu")
+			if err != nil {
+				return fmt.Errorf("generate ip quality service unlock id: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				insert into ip_quality_service_unlocks (
+					unlock_id,
+					report_id,
+					service,
+					status,
+					region,
+					unlock_type,
+					error_code,
+					error_summary
+				) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+				unlockID,
+				reportID,
+				unlock.Service,
+				unlock.Status,
+				unlock.Region,
+				unlock.UnlockType,
+				unlock.ErrorCode,
+				unlock.ErrorSummary,
+			); err != nil {
+				return fmt.Errorf("insert ip quality service unlock for report %q: %w", reportID, err)
+			}
+		}
+	}
+	return nil
 }
 
 type acceptedSyncBatchState struct {
@@ -150,6 +315,11 @@ func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncin
 	}
 	for _, observation := range batch.Observations.ProbeObservations {
 		if observation.Fingerprint != bindingFingerprint {
+			return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
+		}
+	}
+	for _, report := range batch.IPQualityReports {
+		if report.Fingerprint != bindingFingerprint {
 			return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
 		}
 	}

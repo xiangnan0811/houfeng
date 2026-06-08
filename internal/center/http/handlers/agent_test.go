@@ -155,6 +155,12 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 			Plan: agentplan.SyncPlan{
 				HostSampleFrequencyTier:      agentapi.FrequencyTier5m,
 				HostSampleMaintenanceContext: true,
+				IPQualityPlan: &agentplan.IPQualityPlan{
+					Enabled:          true,
+					FrequencySeconds: 86400,
+					TimeoutSeconds:   15,
+					Services:         []string{"netflix", "chatgpt"},
+				},
 				ProbeAssignments: []agentplan.ProbeAssignment{{
 					TargetID:           "tg_001",
 					TargetHost:         "api.example.test",
@@ -196,6 +202,12 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 	if body.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier5m {
 		t.Fatalf("HostSampleFrequencyTier = %q, want %q", body.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier5m)
+	}
+	if body.Plan.IPQualityPlan == nil {
+		t.Fatal("IPQualityPlan = nil, want non-nil")
+	}
+	if body.Plan.IPQualityPlan.FrequencySeconds != 86400 || body.Plan.IPQualityPlan.Services[1] != "chatgpt" {
+		t.Fatalf("IPQualityPlan = %#v, want frequency/services preserved", body.Plan.IPQualityPlan)
 	}
 	if !body.Plan.HostSampleMaintenanceContext {
 		t.Fatal("HostSampleMaintenanceContext = false, want true")
@@ -318,6 +330,90 @@ func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
 	if !svc.syncBatch.Observations.ProbeObservations[0].ReceivedAt.IsZero() {
 		t.Fatal("ProbeObservations[0].ReceivedAt should remain zero in handler DTO")
 	}
+}
+
+func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentSyncService{}
+
+	handler := handlers.AgentSync(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+		"monitoring_instance_id":"mi_001",
+		"sync_token":"sync-token-001",
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"ip_quality_reports":[{
+			"observed_at":"2026-04-23T09:00:01Z",
+			"agent_version":"dev",
+			"fingerprint":"fp-001",
+			"sync_batch_id":"sync_001",
+			"ip_address":"203.0.113.10",
+			"ip_version":4,
+			"status":"success",
+			"asn":"AS64500",
+			"organization":"Example Network",
+			"use_region_code":"US",
+			"risk_level":"low",
+			"raw_json":{"Info":{"ASN":"AS64500"},"token":"secret-token"},
+			"provider_results":[{"provider":"ipinfo","usage_type":"hosting","company_type":"hosting","risk_level":"low","is_server":true,"is_vpn":false}],
+			"service_unlocks":[{"service":"netflix","status":"unlocked","region":"US","unlock_type":"full"}]
+		}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if len(svc.syncBatch.IPQualityReports) != 1 {
+		t.Fatalf("len(IPQualityReports) = %d, want 1", len(svc.syncBatch.IPQualityReports))
+	}
+	report := svc.syncBatch.IPQualityReports[0]
+	if report.MonitoringInstanceID != "mi_001" {
+		t.Fatalf("MonitoringInstanceID = %q, want mi_001", report.MonitoringInstanceID)
+	}
+	if report.IPAddress != "203.0.113.10" || report.Status != agentapi.IPQualityStatusSuccess {
+		t.Fatalf("report identity = %#v, want ip/status preserved", report)
+	}
+	if len(report.ProviderResults) != 1 || report.ProviderResults[0].Provider != "ipinfo" {
+		t.Fatalf("ProviderResults = %#v, want ipinfo result", report.ProviderResults)
+	}
+	if report.ProviderResults[0].IsVPN == nil || *report.ProviderResults[0].IsVPN {
+		t.Fatalf("ProviderResults[0].IsVPN = %#v, want false pointer", report.ProviderResults[0].IsVPN)
+	}
+	if len(report.ServiceUnlocks) != 1 || report.ServiceUnlocks[0].Service != "netflix" {
+		t.Fatalf("ServiceUnlocks = %#v, want netflix result", report.ServiceUnlocks)
+	}
+	rawJSON := string(report.RawJSON)
+	if strings.Contains(rawJSON, "secret-token") {
+		t.Fatalf("RawJSON leaked secret: %s", rawJSON)
+	}
+	if !strings.Contains(rawJSON, `"token":"[redacted]"`) || !strings.Contains(rawJSON, `"Info":{"ASN":"AS64500"}`) {
+		t.Fatalf("RawJSON = %s, want sanitized raw JSON preserved for store layer", report.RawJSON)
+	}
+}
+
+func TestAgentSyncHandlerRejectsInvalidIPQualityReport(t *testing.T) {
+	t.Parallel()
+
+	handler := handlers.AgentSync(&fakeAgentSyncService{})
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+		"monitoring_instance_id":"mi_001",
+		"sync_token":"sync-token-001",
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"ip_quality_reports":[{"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","ip_address":"","ip_version":4,"status":"success"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
 }
 
 func TestAgentSyncHandlerDoesNotReturn200WhenObservationIngestFails(t *testing.T) {

@@ -29,6 +29,7 @@ type settingsHandlerResponse struct {
 	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
 	OverrideRules           centersettings.OverrideRules          `json:"override_rules"`
 	RetentionPolicy         centersettings.RetentionPolicy        `json:"retention_policy"`
+	IPQualitySettings       centersettings.IPQualitySettings      `json:"ip_quality_settings"`
 }
 
 type telegramSettingsResponse struct {
@@ -99,6 +100,9 @@ func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing
 	if body.HostSampleFrequencyTier != centersettings.Default().HostSampleFrequencyTier {
 		t.Fatalf("expected host sample frequency tier %q, got %q", centersettings.Default().HostSampleFrequencyTier, body.HostSampleFrequencyTier)
 	}
+	if body.IPQualitySettings.FrequencySeconds != centersettings.Default().IPQuality.FrequencySeconds {
+		t.Fatalf("expected ip quality frequency %d, got %d", centersettings.Default().IPQuality.FrequencySeconds, body.IPQualitySettings.FrequencySeconds)
+	}
 }
 
 func TestSettingsHandlerReturnsManagedTelegramDisableStateTruthfully(t *testing.T) {
@@ -141,10 +145,16 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	updated.Telegram.RuntimeManaged = true
 	updated.HostSampleFrequencyTier = "5s"
 	updated.ProbeFrequencyDefaults.HTTP = "5s"
+	updated.IPQuality.Enabled = false
+	updated.IPQuality.FrequencySeconds = 259200
+	updated.IPQuality.TimeoutSeconds = 20
+	updated.IPQuality.RawRetentionDays = 45
+	updated.IPQuality.HistoryRetentionDays = 180
+	updated.IPQuality.Services = []string{"netflix", "chatgpt"}
 	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180},"ip_quality_settings":{"enabled":false,"frequency_seconds":259200,"timeout_seconds":20,"raw_retention_days":45,"history_retention_days":180,"services":["netflix","chatgpt"]}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -161,6 +171,12 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	}
 	if !repo.putSettingsInput.Telegram.RuntimeManaged {
 		t.Fatal("expected repository input runtime_managed to be true")
+	}
+	if repo.putSettingsInput.IPQuality.FrequencySeconds != 259200 {
+		t.Fatalf("expected repository input ip quality frequency 259200, got %d", repo.putSettingsInput.IPQuality.FrequencySeconds)
+	}
+	if len(repo.putSettingsInput.IPQuality.Services) != 2 || repo.putSettingsInput.IPQuality.Services[1] != "chatgpt" {
+		t.Fatalf("expected repository input ip quality services to preserve request, got %#v", repo.putSettingsInput.IPQuality.Services)
 	}
 
 	var body settingsHandlerResponse
@@ -181,6 +197,12 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	}
 	if !body.Telegram.RuntimeApplyActive {
 		t.Fatal("expected runtime_apply_active to be true once persisted Telegram settings drive the live notifier path")
+	}
+	if body.IPQualitySettings.Enabled {
+		t.Fatal("expected ip_quality_settings.enabled false in response")
+	}
+	if body.IPQualitySettings.TimeoutSeconds != 20 {
+		t.Fatalf("expected ip_quality_settings.timeout_seconds 20, got %d", body.IPQualitySettings.TimeoutSeconds)
 	}
 }
 

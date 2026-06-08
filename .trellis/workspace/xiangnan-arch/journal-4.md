@@ -176,3 +176,40 @@ Removed monitoring-list row actions, moved heartbeat/current issue semantics int
 ### Next Steps
 
 - None - task complete
+
+
+## Session 182: VPS IP quality collection
+
+**Date**: 2026-06-08
+**Task**: VPS IP quality collection
+**Branch**: `feature/vps-ip-quality`
+
+### Summary
+
+Implemented low-frequency VPS IP quality collection, sync ingest, center storage/API, Web display, asset decision evidence integration, and backend IP quality contract docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c7ca628` | (see git log) |
+| `967338b` | (see git log) |
+| `94709e8` | (see git log) |
+| `eb4cbcf` | (see git log) |
+| `12796aa` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

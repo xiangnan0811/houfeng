@@ -89,6 +89,14 @@ const settingsResponseBody = {
     event_layer_days: 90,
     notification_layer_days: 180,
   },
+  ip_quality_settings: {
+    enabled: true,
+    frequency_seconds: 86400,
+    timeout_seconds: 15,
+    raw_retention_days: 90,
+    history_retention_days: 365,
+    services: ['netflix', 'chatgpt', 'youtube-premium'],
+  },
   subscription_cost_settings: {
     base_currency: 'CNY',
     exchange_rate_provider: 'frankfurter',
@@ -138,6 +146,9 @@ describe('SettingsPage', () => {
     // Switch to monitoring tab to check frequency
     switchTab('监控策略')
     expect(screen.getByLabelText('当前监控实例主机样本频率')).toHaveValue('5s')
+    expect(screen.getByRole('switch', { name: '启用 IP 质量采集' })).toBeChecked()
+    expect(screen.getByLabelText('IP 质量采集周期秒数')).toHaveValue('86400')
+    expect(screen.getByLabelText('IP 质量采集服务集合')).toHaveValue('netflix, chatgpt, youtube-premium')
 
     // Switch to notification tab to check Telegram
     await expandTelegram()
@@ -260,6 +271,52 @@ describe('SettingsPage', () => {
         aggregate_layer_days: 30,
         event_layer_days: 90,
         notification_layer_days: 180,
+      },
+      ip_quality_settings: settingsResponseBody.ip_quality_settings,
+    })
+  })
+
+  it('saves IP quality settings from the monitoring policy tab', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          ...settingsResponseBody,
+          ip_quality_settings: {
+            enabled: false,
+            frequency_seconds: 259200,
+            timeout_seconds: 20,
+            raw_retention_days: 45,
+            history_retention_days: 180,
+            services: ['netflix', 'chatgpt'],
+          },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+
+    switchTab('监控策略')
+    fireEvent.click(screen.getByRole('switch', { name: '启用 IP 质量采集' }))
+    fireEvent.change(screen.getByLabelText('IP 质量采集周期秒数'), { target: { value: '259200' } })
+    fireEvent.change(screen.getByLabelText('IP 质量请求超时秒数'), { target: { value: '20' } })
+    fireEvent.change(screen.getByLabelText('IP 质量原始 JSON 保留天数'), { target: { value: '45' } })
+    fireEvent.change(screen.getByLabelText('IP 质量历史保留天数'), { target: { value: '180' } })
+    fireEvent.change(screen.getByLabelText('IP 质量采集服务集合'), { target: { value: 'netflix, chatgpt' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      ip_quality_settings: {
+        enabled: false,
+        frequency_seconds: 259200,
+        timeout_seconds: 20,
+        raw_retention_days: 45,
+        history_retention_days: 180,
+        services: ['netflix', 'chatgpt'],
       },
     })
   })
@@ -458,6 +515,7 @@ describe('SettingsPage', () => {
         event_layer_days: 90,
         notification_layer_days: 180,
       },
+      ip_quality_settings: settingsResponseBody.ip_quality_settings,
     })
   })
 
@@ -549,6 +607,7 @@ describe('SettingsPage', () => {
       },
       override_rules: settingsResponseBody.override_rules,
       retention_policy: settingsResponseBody.retention_policy,
+      ip_quality_settings: settingsResponseBody.ip_quality_settings,
     })
   })
 

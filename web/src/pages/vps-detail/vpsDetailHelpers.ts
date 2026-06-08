@@ -41,6 +41,8 @@ export const INITIAL_STATE: VPSDetailPageState = {
   domains: [],
   subscriptions: [],
   subscriptionsError: null,
+  ipQuality: null,
+  ipQualityError: null,
   cancellationPreview: null,
   cancellationPreviewError: null,
   cancellationResult: null,
