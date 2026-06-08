@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.51.0](https://github.com/xiangnan0811/houfeng/compare/v0.50.0...v0.51.0) (2026-06-08)
+
+
+### Features
+
+* harden archived VPS lifecycle UX ([23c374f](https://github.com/xiangnan0811/houfeng/commit/23c374f071d05dbe58bf1dc0fee360f3d191452b))
+* harden archived VPS lifecycle UX ([47e9636](https://github.com/xiangnan0811/houfeng/commit/47e96361f4e4b4b32714c061185134aee0f1489a))
+
+
+### Documentation
+
+* require full PR release delivery flow ([606af8f](https://github.com/xiangnan0811/houfeng/commit/606af8f18bba85d76c14bc81310e57502a2253e4))
+
 ## [0.50.0](https://github.com/xiangnan0811/houfeng/compare/v0.49.1...v0.50.0) (2026-06-08)
 
 
