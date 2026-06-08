@@ -170,6 +170,25 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
+			if input.LifecycleStatus.Set {
+				if input.LifecycleStatus.Value == vpsassets.LifecycleArchived {
+					writeError(w, http.StatusBadRequest, "invalid input")
+					return
+				}
+				current, err := repo.GetVPSAsset(r.Context(), vpsID)
+				if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+					writeError(w, http.StatusNotFound, "vps asset not found")
+					return
+				}
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				if current.LifecycleStatus == vpsassets.LifecycleArchived {
+					writeError(w, http.StatusBadRequest, "invalid input")
+					return
+				}
+			}
 
 			var linkage *vpsassets.RenewalSubscriptionLinkage
 			var record vpsassets.Record

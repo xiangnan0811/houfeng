@@ -16,7 +16,9 @@ import type {
   AssetDecisionScenarioTemplateSummary,
   AssetServiceListFilter,
   AssetServiceRecord,
+  ApplyArchiveInput,
   ApplyCancellationInput,
+  ArchiveReview,
   CancellationPreview,
   BulkUpsertSubscriptionMonthlyBudgetInput,
   BulkUpsertSubscriptionMonthlyBudgetResult,
@@ -689,8 +691,20 @@ export function getVPSCancellationPreview(vpsId: string) {
   return requestJSON<CancellationPreview>(`/api/vps/${vpsId}/cancellation-preview`)
 }
 
+export function getVPSArchiveReview(vpsId: string) {
+  return requestJSON<ArchiveReview>(`/api/vps/${vpsId}/archive-review`)
+}
+
 export function applyVPSCancellation(vpsId: string, input: ApplyCancellationInput): Promise<LifecycleActionResult> {
   return postJSONBody<LifecycleActionResult>(`/api/vps/${vpsId}/cancellation`, input)
+}
+
+export function archiveVPS(vpsId: string, input: ApplyArchiveInput): Promise<ArchiveReview> {
+  return postJSONBody<ArchiveReview>(`/api/vps/${vpsId}/archive`, input)
+}
+
+export function restoreVPSFromArchive(vpsId: string): Promise<VPSAssetRecord> {
+  return postJSON<VPSAssetRecord>(`/api/vps/${vpsId}/restore-from-archive`)
 }
 
 export function extendVPSValidity(vpsId: string, input: ExtendVPSValidityInput): Promise<LifecycleActionResult> {

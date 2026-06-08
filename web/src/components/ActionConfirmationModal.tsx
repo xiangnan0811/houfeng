@@ -13,6 +13,7 @@ export type ActionConfirmationModalProps = {
   cancelLabel?: string
   error?: string | null
   disabled?: boolean
+  cancelDisabled?: boolean
   onConfirm: () => void
   onCancel: () => void
   children?: ReactNode
@@ -29,10 +30,13 @@ export function ActionConfirmationModal({
   cancelLabel,
   error = null,
   disabled = false,
+  cancelDisabled,
   onConfirm,
   onCancel,
   children,
 }: ActionConfirmationModalProps) {
+  const resolvedCancelDisabled = cancelDisabled ?? disabled
+
   return (
     <Modal open={open} onClose={onCancel} title={title} dialogRole="alertdialog" size="md">
       <div className="action-confirm__body page-stack">
@@ -71,7 +75,7 @@ export function ActionConfirmationModal({
           </p>
         ) : null}
         <div className="action-confirm__actions">
-          <Button variant="secondary" disabled={disabled} onClick={onCancel}>
+          <Button variant="secondary" disabled={resolvedCancelDisabled} onClick={onCancel}>
             {cancelLabel ?? '取消'}
           </Button>
           <Button variant="primary" disabled={disabled} onClick={onConfirm}>

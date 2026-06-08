@@ -247,6 +247,18 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 			called = "extend-validity"
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSArchiveReviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "archive-review"
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "archive"
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSRestoreFromArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "restore-from-archive"
+			w.WriteHeader(http.StatusOK)
+		}),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
@@ -282,6 +294,9 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusOK, called: "cancellation-preview"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/cancellation", want: http.StatusOK, called: "cancellation"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", want: http.StatusOK, called: "extend-validity"},
+		{method: http.MethodGet, path: "/api/vps/vps_001/archive-review", want: http.StatusOK, called: "archive-review"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/archive", want: http.StatusOK, called: "archive"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusOK, called: "restore-from-archive"},
 	} {
 		req = httptest.NewRequest(tt.method, tt.path, nil)
 		recorder = httptest.NewRecorder()
@@ -302,6 +317,9 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	cancellationPreviewCalled := false
 	cancellationCalled := false
 	extendValidityCalled := false
+	archiveReviewCalled := false
+	archiveCalled := false
+	restoreFromArchiveCalled := false
 	middlewareCalls := 0
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
@@ -329,6 +347,18 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 			extendValidityCalled = true
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSArchiveReviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			archiveReviewCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			archiveCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		VPSRestoreFromArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			restoreFromArchiveCalled = true
+			w.WriteHeader(http.StatusOK)
+		}),
 		AuthMiddleware: func(_ http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				middlewareCalls++
@@ -337,7 +367,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 		},
 	})
 
-	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/monitoring-instances", "/api/vps/vps_001/subscriptions", "/api/vps/vps_001/link-monitoring-instance", "/api/vps/vps_001/unlink-monitoring-instance", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation", "/api/vps/vps_001/extend-validity"} {
+	for _, path := range []string{"/api/vps", "/api/vps/vps_001", "/api/vps/vps_001/monitoring-instances", "/api/vps/vps_001/subscriptions", "/api/vps/vps_001/link-monitoring-instance", "/api/vps/vps_001/unlink-monitoring-instance", "/api/vps/vps_001/cancellation-preview", "/api/vps/vps_001/cancellation", "/api/vps/vps_001/extend-validity", "/api/vps/vps_001/archive-review", "/api/vps/vps_001/archive", "/api/vps/vps_001/restore-from-archive"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
 
@@ -365,8 +395,17 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	if extendValidityCalled {
 		t.Fatal("vps extend validity handler was called despite auth middleware blocking")
 	}
-	if middlewareCalls != 9 {
-		t.Fatalf("middleware calls = %d, want 9", middlewareCalls)
+	if archiveReviewCalled {
+		t.Fatal("vps archive review handler was called despite auth middleware blocking")
+	}
+	if archiveCalled {
+		t.Fatal("vps archive handler was called despite auth middleware blocking")
+	}
+	if restoreFromArchiveCalled {
+		t.Fatal("vps restore from archive handler was called despite auth middleware blocking")
+	}
+	if middlewareCalls != 12 {
+		t.Fatalf("middleware calls = %d, want 12", middlewareCalls)
 	}
 }
 

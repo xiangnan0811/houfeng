@@ -1,46 +1,17 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { MonoDigits } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
-import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
-import {
-  ApiError,
-  getVPSAsset,
-  getVPSTimeline,
-  listSubscriptions,
-  listVPSAssets,
-  listVPSDomains,
-  listVPSServices,
-} from '../lib/api'
-import {
-  type AssetDomainRecord,
-  type AssetServiceRecord,
-  type SubscriptionRecord,
-  type VPSAssetDetail,
-  type VPSAssetRecord,
-  type VPSTimeline,
-} from '../lib/types'
-import { ArchiveMonitoringPanel, ArchiveServicesPanel, ArchiveDomainsPanel } from './archive/ArchiveContextPanels'
+import { ApiError, listSubscriptions, listVPSAssets } from '../lib/api'
+import type { SubscriptionRecord, VPSAssetRecord } from '../lib/types'
 import { ArchiveVPSWorkspace } from './archive/ArchiveVPSWorkspace'
-import { selectedVPS, subscriptionsForVPS } from './archive/archivePageHelpers'
 
 type PageState = {
   loading: boolean
   error: string | null
   vps: VPSAssetRecord[]
   subscriptions: SubscriptionRecord[]
-  selectedVPSID: string | null
-  archiveResult: ArchiveResult | null
-}
-
-type ArchiveResult = {
-  vpsID: string
-  detail: VPSAssetDetail | null
-  services: AssetServiceRecord[]
-  domains: AssetDomainRecord[]
-  timeline: VPSTimeline | null
-  error: string | null
 }
 
 const INITIAL_STATE: PageState = {
@@ -48,8 +19,6 @@ const INITIAL_STATE: PageState = {
   error: null,
   vps: [],
   subscriptions: [],
-  selectedVPSID: null,
-  archiveResult: null,
 }
 
 function describeError(error: unknown, fallback: string): string {
@@ -82,88 +51,27 @@ export function ArchivePage() {
     ])
       .then(([vps, subscriptions]) => {
         if (cancelled) return
-        setState((current) => ({
-          ...current,
+        setState({
           loading: false,
           error: null,
           vps,
           subscriptions,
-          selectedVPSID: current.selectedVPSID ?? vps[0]?.vps_id ?? null,
-        }))
+        })
       })
       .catch((error: unknown) => {
         if (cancelled) return
-        setState((current) => ({
-          ...current,
+        setState({
           loading: false,
           error: describeError(error, '加载归档资产失败'),
           vps: [],
           subscriptions: [],
-          selectedVPSID: null,
-        }))
+        })
       })
 
     return () => {
       cancelled = true
     }
   }, [])
-
-  useEffect(() => {
-    if (!state.selectedVPSID) {
-      return
-    }
-
-    let cancelled = false
-    const vpsID = state.selectedVPSID
-
-    Promise.all([
-      getVPSAsset(vpsID),
-      listVPSServices(vpsID),
-      listVPSDomains(vpsID),
-      getVPSTimeline(vpsID),
-    ])
-      .then(([detail, services, domains, timeline]) => {
-        if (cancelled) return
-        setState((current) => ({
-          ...current,
-          archiveResult: { vpsID, detail, services, domains, timeline, error: null },
-        }))
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setState((current) => ({
-          ...current,
-          archiveResult: {
-            vpsID,
-            detail: null,
-            services: [],
-            domains: [],
-            timeline: null,
-            error: describeError(error, '加载归档资产上下文失败'),
-          },
-        }))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [state.selectedVPSID])
-
-  const currentVPS = useMemo(
-    () => selectedVPS(state.vps, state.selectedVPSID),
-    [state.vps, state.selectedVPSID],
-  )
-  const currentSubscriptions = useMemo(
-    () => subscriptionsForVPS(state.subscriptions, state.selectedVPSID),
-    [state.subscriptions, state.selectedVPSID],
-  )
-  const currentArchiveResult = state.archiveResult?.vpsID === state.selectedVPSID
-    ? state.archiveResult
-    : null
-  const archiveContextLoading = Boolean(state.selectedVPSID && !currentArchiveResult)
-  const currentMonitoring = currentArchiveResult?.detail?.monitoring_instance_links ?? []
-  const currentServices = currentArchiveResult?.services ?? []
-  const currentDomains = currentArchiveResult?.domains ?? []
 
   return (
     <div className="page-stack archive-page animate-in">
@@ -208,37 +116,16 @@ export function ArchivePage() {
                 <strong><MonoDigits>{state.subscriptions.length}</MonoDigits></strong>
               </div>
               <div className="hero-meta-card">
-                <span>当前查看</span>
-                <strong>{currentVPS?.display_name ?? '未选择'}</strong>
+                <span>查看方式</span>
+                <strong>列表进入详情</strong>
               </div>
             </div>
           </section>
 
           <ArchiveVPSWorkspace
             vpsRows={state.vps}
-            selectedVPS={currentVPS}
-            subscriptions={currentSubscriptions}
-            onSelectVPS={(vpsID) => setState((current) => ({ ...current, selectedVPSID: vpsID }))}
+            subscriptions={state.subscriptions}
           />
-
-          {archiveContextLoading ? (
-            <PageStateView kind="loading" title="正在加载归档上下文" compact />
-          ) : currentArchiveResult?.error ? (
-            <PageStateView
-              kind="error"
-              title="归档上下文加载失败"
-              description="归档资产基础信息仍可查看。"
-              technicalSummary={currentArchiveResult.error}
-              compact
-            />
-          ) : currentArchiveResult ? (
-            <>
-              <ArchiveMonitoringPanel monitoring={currentMonitoring} />
-              <ArchiveServicesPanel services={currentServices} />
-              <ArchiveDomainsPanel domains={currentDomains} />
-              {currentArchiveResult.timeline ? <VPSTimelinePanel timeline={currentArchiveResult.timeline} /> : null}
-            </>
-          ) : null}
         </>
       )}
     </div>

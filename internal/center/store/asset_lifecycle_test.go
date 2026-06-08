@@ -14,7 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/assetlifecycle"
+	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/assetservices"
+	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/subscriptions"
+	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -139,6 +143,253 @@ func TestApplyVPSCancellationRejectsArchivedVPSBeforeMutation(t *testing.T) {
 	}
 	if businessTx.rollbackCount == 0 {
 		t.Fatalf("business tx rollback count = %d, want rollback", businessTx.rollbackCount)
+	}
+}
+
+func TestGetVPSArchiveReviewBuildsArchiveBlockers(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	targetID := "tg_running"
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleCancelled, vpsassets.RenewalCancel, now, nil))
+					return nil
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return pgx.ErrNoRows
+			})
+		},
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			switch {
+			case strings.Contains(sql, "from subscriptions"):
+				return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{{scan: func(dest ...any) error {
+					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
+						SubscriptionID: "sub_active",
+						VPSID:          "vps_001",
+						Price:          12,
+						Currency:       "USD",
+						MonthlyPrice:   12,
+						Status:         subscriptions.StatusActive,
+						CreatedAt:      now,
+						UpdatedAt:      now,
+					})
+					return nil
+				}}}}, nil
+			case strings.Contains(sql, "from vps_monitoring_instance_links"):
+				return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{{scan: func(dest ...any) error {
+					scanMonitoringInstanceSummaryDestinations(dest, assetlinks.MonitoringInstanceSummary{
+						MonitoringInstanceID: "mi_running",
+						DisplayName:          "Tokyo Monitor",
+						LifecycleStatus:      monitoringinstances.LifecycleInUse,
+						MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+						BindingStatus:        monitoringinstances.BindingBound,
+						CurrentHealthStatus:  monitoringinstances.HealthNormal,
+						LinkedAt:             now,
+					})
+					return nil
+				}}}}, nil
+			case strings.Contains(sql, "from asset_services"):
+				return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{{scan: func(dest ...any) error {
+					scanAssetServiceRecordDestinations(dest, assetservices.Record{
+						ServiceID:   "svc_001",
+						VPSID:       "vps_001",
+						TargetID:    &targetID,
+						Name:        "API",
+						ServiceType: assetservices.ServiceTypeAPI,
+						Status:      assetservices.ServiceStatusRetired,
+						CreatedAt:   now,
+						UpdatedAt:   now,
+					})
+					return nil
+				}}}}, nil
+			case strings.Contains(sql, "from asset_domains"):
+				return &fakeSubscriptionRows{}, nil
+			case strings.Contains(sql, "from targets"):
+				return &fakeSubscriptionRows{rows: []fakeSubscriptionScan{{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = targetID
+					*(dest[1].(*string)) = "Running target"
+					*(dest[2].(*string)) = targets.RunStatusEnabled
+					return nil
+				}}}}, nil
+			default:
+				return nil, errors.New("unexpected query")
+			}
+		},
+	}}
+
+	review, err := repo.GetVPSArchiveReview(context.Background(), "vps_001")
+	if err != nil {
+		t.Fatalf("GetVPSArchiveReview() error = %v", err)
+	}
+	if review.Eligible {
+		t.Fatalf("review eligible = true, want false because active subscription, monitoring and target block archive")
+	}
+	for _, want := range []string{"active 订阅", "MonitoringInstance", "Target"} {
+		if !containsString(review.Blockers, want) {
+			t.Fatalf("blockers = %#v, want blocker containing %q", review.Blockers, want)
+		}
+	}
+	if len(review.Subscriptions) != 1 || len(review.MonitoringInstanceLinks) != 1 || len(review.Services) != 1 || len(review.TargetLinks) != 1 {
+		t.Fatalf("review = %#v, want full archive evidence graph", review)
+	}
+}
+
+func TestApplyVPSArchiveRequiresConfirmationAndPatchesArchivedInTransaction(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	archivedAt := now.Add(time.Minute)
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			switch {
+			case strings.Contains(sql, "from subscriptions"),
+				strings.Contains(sql, "from vps_monitoring_instance_links"),
+				strings.Contains(sql, "from asset_services"),
+				strings.Contains(sql, "from asset_domains"):
+				return &fakeSubscriptionRows{}, nil
+			default:
+				return nil, errors.New("unexpected query")
+			}
+		},
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleCancelled, vpsassets.RenewalCancel, now, nil))
+					return nil
+				})
+			case strings.Contains(sql, "update vps_assets"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleArchived, vpsassets.RenewalCancel, now, &archivedAt))
+					return nil
+				})
+			default:
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					return errors.New("unexpected query row")
+				})
+			}
+		},
+	}
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}}
+
+	review, err := repo.ApplyVPSArchive(context.Background(), "vps_001", assetlifecycle.ApplyArchiveInput{
+		ConfirmationName: "Frankfurt Legacy",
+	})
+	if err != nil {
+		t.Fatalf("ApplyVPSArchive() error = %v", err)
+	}
+	if tx.commitCount != 1 {
+		t.Fatalf("commit count = %d, want 1", tx.commitCount)
+	}
+	if review.VPS.LifecycleStatus != vpsassets.LifecycleArchived || review.VPS.ArchivedAt == nil {
+		t.Fatalf("archive result = %#v, want archived VPS with archived_at", review.VPS)
+	}
+	if len(tx.execCalls) != 0 {
+		t.Fatalf("exec calls = %#v, want archive to patch VPS without lifecycle action audit schema writes", tx.execCalls)
+	}
+}
+
+func TestApplyVPSArchiveRejectsWrongConfirmationBeforePatch(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			switch {
+			case strings.Contains(sql, "from subscriptions"),
+				strings.Contains(sql, "from vps_monitoring_instance_links"),
+				strings.Contains(sql, "from asset_services"),
+				strings.Contains(sql, "from asset_domains"):
+				return &fakeSubscriptionRows{}, nil
+			default:
+				return nil, errors.New("unexpected query")
+			}
+		},
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleCancelled, vpsassets.RenewalCancel, now, nil))
+					return nil
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return errors.New("unexpected query row")
+			})
+		},
+	}
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}}
+
+	_, err := repo.ApplyVPSArchive(context.Background(), "vps_001", assetlifecycle.ApplyArchiveInput{
+		ConfirmationName: "Wrong Name",
+	})
+	if !errors.Is(err, assetlifecycle.ErrInvalidLifecycleActionInput) {
+		t.Fatalf("ApplyVPSArchive() error = %v, want invalid lifecycle action input", err)
+	}
+	if tx.commitCount != 0 {
+		t.Fatalf("commit count = %d, want 0", tx.commitCount)
+	}
+}
+
+func TestRestoreVPSFromArchiveOnlyAllowsArchivedAssets(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name      string
+		lifecycle vpsassets.LifecycleStatus
+		wantErr   error
+	}{
+		{name: "archived restores", lifecycle: vpsassets.LifecycleArchived},
+		{name: "cancelled blocks", lifecycle: vpsassets.LifecycleCancelled, wantErr: assetlifecycle.ErrLifecycleActionBlocked},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			archivedAt := now.Add(-time.Hour)
+			tx := &fakeAssetLifecycleTx{
+				queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					switch {
+					case strings.Contains(sql, "from vps_assets"):
+						return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+							scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", tt.lifecycle, vpsassets.RenewalCancel, now, &archivedAt))
+							return nil
+						})
+					case strings.Contains(sql, "update vps_assets"):
+						return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+							scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleIdle, vpsassets.RenewalCancel, now, nil))
+							return nil
+						})
+					default:
+						return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+							return errors.New("unexpected query row")
+						})
+					}
+				},
+			}
+			repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}}
+
+			restored, err := repo.RestoreVPSFromArchive(context.Background(), "vps_001")
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("RestoreVPSFromArchive() error = %v, want %v", err, tt.wantErr)
+				}
+				if tx.commitCount != 0 {
+					t.Fatalf("commit count = %d, want 0", tx.commitCount)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RestoreVPSFromArchive() error = %v", err)
+			}
+			if tx.commitCount != 1 {
+				t.Fatalf("commit count = %d, want 1", tx.commitCount)
+			}
+			if restored.LifecycleStatus != vpsassets.LifecycleIdle || restored.ArchivedAt != nil {
+				t.Fatalf("restored = %#v, want idle VPS with archived_at cleared", restored)
+			}
+		})
 	}
 }
 
@@ -550,6 +801,25 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func scanMonitoringInstanceSummaryDestinations(dest []any, summary assetlinks.MonitoringInstanceSummary) {
+	*(dest[0].(*string)) = summary.MonitoringInstanceID
+	*(dest[1].(*string)) = summary.DisplayName
+	*(dest[2].(*string)) = summary.Group
+	*(dest[3].(*string)) = summary.Region
+	*(dest[4].(*string)) = summary.City
+	*(dest[5].(*string)) = summary.Provider
+	*(dest[6].(*string)) = summary.LifecycleStatus
+	*(dest[7].(*string)) = summary.MonitoringStatus
+	*(dest[8].(*string)) = summary.BindingStatus
+	*(dest[9].(*string)) = summary.CurrentHealthStatus
+	*(dest[10].(**time.Time)) = cloneTimePtr(summary.LastHeartbeatAt)
+	*(dest[11].(**time.Time)) = cloneTimePtr(summary.LastSyncAt)
+	*(dest[12].(*int)) = summary.CurrentActiveIncidentCount
+	*(dest[13].(*string)) = summary.CurrentPrimaryIssueSummary
+	*(dest[14].(*time.Time)) = summary.LinkedAt
+	*(dest[15].(*string)) = summary.Note
 }
 
 type fakeAssetLifecycleDB struct {

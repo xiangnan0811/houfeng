@@ -455,29 +455,27 @@ func TestVPSItemReturnsMonitoringInstanceLinksWhenAvailable(t *testing.T) {
 
 func TestVPSItemPatchesAsset(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
-	archivedAt := now.Add(-time.Hour)
 	repo := &fakeVPSAssetRepository{patchVPSAssetResult: vpsassets.Record{
 		VPSID:           "vps_001",
-		DisplayName:     "Tokyo Edge Archived",
+		DisplayName:     "Tokyo Edge Updated",
 		ProviderID:      nil,
 		SSHPort:         2200,
-		LifecycleStatus: vpsassets.LifecycleArchived,
+		LifecycleStatus: vpsassets.LifecycleActive,
 		UsageStatus:     vpsassets.UsageIdle,
-		RenewalDecision: vpsassets.RenewalCancel,
+		RenewalDecision: vpsassets.RenewalKeep,
 		Labels:          []string{"edge", "backup"},
 		CreatedAt:       now.Add(-2 * time.Hour),
 		UpdatedAt:       now,
-		ArchivedAt:      &archivedAt,
 	}}
 
 	handler := handlers.VPSItem(repo)
 	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
-		"display_name":" Tokyo Edge Archived ",
+		"display_name":" Tokyo Edge Updated ",
 		"provider_id":null,
 		"ssh_port":2200,
-		"lifecycle_status":"archived",
+		"lifecycle_status":"active",
 		"usage_status":"idle",
-		"renewal_decision":"cancel",
+		"renewal_decision":"keep",
 		"labels":[" edge ","backup","edge"]
 	}`))
 	recorder := httptest.NewRecorder()
@@ -490,7 +488,7 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	if repo.patchVPSAssetID != "vps_001" {
 		t.Fatalf("patch vps id = %q, want vps_001", repo.patchVPSAssetID)
 	}
-	if !repo.patchVPSAssetInput.DisplayName.Set || repo.patchVPSAssetInput.DisplayName.Value != "Tokyo Edge Archived" {
+	if !repo.patchVPSAssetInput.DisplayName.Set || repo.patchVPSAssetInput.DisplayName.Value != "Tokyo Edge Updated" {
 		t.Fatalf("patch display name = %#v, want trimmed set name", repo.patchVPSAssetInput.DisplayName)
 	}
 	if !repo.patchVPSAssetInput.ProviderID.Set || repo.patchVPSAssetInput.ProviderID.Value != nil {
@@ -499,11 +497,11 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	if !repo.patchVPSAssetInput.SSHPort.Set || repo.patchVPSAssetInput.SSHPort.Value != 2200 {
 		t.Fatalf("patch ssh port = %#v, want 2200", repo.patchVPSAssetInput.SSHPort)
 	}
-	if !repo.patchVPSAssetInput.LifecycleStatus.Set || repo.patchVPSAssetInput.LifecycleStatus.Value != vpsassets.LifecycleArchived {
-		t.Fatalf("patch lifecycle = %#v, want archived", repo.patchVPSAssetInput.LifecycleStatus)
+	if !repo.patchVPSAssetInput.LifecycleStatus.Set || repo.patchVPSAssetInput.LifecycleStatus.Value != vpsassets.LifecycleActive {
+		t.Fatalf("patch lifecycle = %#v, want active", repo.patchVPSAssetInput.LifecycleStatus)
 	}
-	if !repo.patchVPSAssetInput.RenewalDecision.Set || repo.patchVPSAssetInput.RenewalDecision.Value != vpsassets.RenewalCancel {
-		t.Fatalf("patch renewal = %#v, want cancel", repo.patchVPSAssetInput.RenewalDecision)
+	if !repo.patchVPSAssetInput.RenewalDecision.Set || repo.patchVPSAssetInput.RenewalDecision.Value != vpsassets.RenewalKeep {
+		t.Fatalf("patch renewal = %#v, want keep", repo.patchVPSAssetInput.RenewalDecision)
 	}
 	if !repo.patchVPSAssetInput.Labels.Set || len(repo.patchVPSAssetInput.Labels.Values) != 2 {
 		t.Fatalf("patch labels = %#v, want normalized labels", repo.patchVPSAssetInput.Labels)
@@ -512,8 +510,59 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body.DisplayName != "Tokyo Edge Archived" || body.ArchivedAt == nil {
-		t.Fatalf("body = %#v, want archived asset", body)
+	if body.DisplayName != "Tokyo Edge Updated" || body.LifecycleStatus != vpsassets.LifecycleActive {
+		t.Fatalf("body = %#v, want updated current asset", body)
+	}
+}
+
+func TestVPSItemRejectsDirectArchivePatch(t *testing.T) {
+	repo := &fakeVPSAssetRepository{}
+	handler := handlers.VPSItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
+		"lifecycle_status":"archived"
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	if repo.patchVPSAssetID != "" {
+		t.Fatalf("patch vps id = %q, want no patch when archive is requested through ordinary PATCH", repo.patchVPSAssetID)
+	}
+}
+
+func TestVPSItemRejectsDirectRestoreFromArchivedPatch(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	archivedAt := now.Add(-time.Hour)
+	repo := &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleArchived,
+		UsageStatus:     vpsassets.UsageIdle,
+		RenewalDecision: vpsassets.RenewalCancel,
+		ArchivedAt:      &archivedAt,
+		CreatedAt:       now.Add(-2 * time.Hour),
+		UpdatedAt:       now,
+	}}
+	handler := handlers.VPSItem(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
+		"lifecycle_status":"idle"
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	if repo.getVPSAssetID != "vps_001" {
+		t.Fatalf("get vps id = %q, want current state lookup before archived restore guard", repo.getVPSAssetID)
+	}
+	if repo.patchVPSAssetID != "" {
+		t.Fatalf("patch vps id = %q, want no patch when archived asset is restored through ordinary PATCH", repo.patchVPSAssetID)
 	}
 }
 

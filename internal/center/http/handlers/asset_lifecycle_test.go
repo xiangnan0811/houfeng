@@ -30,6 +30,16 @@ type fakeAssetLifecycleRepository struct {
 	extendErr                     error
 	extendVPSID                   string
 	extendInput                   assetlifecycle.ExtendValidityInput
+	archiveReviewResult           assetlifecycle.ArchiveReview
+	archiveReviewErr              error
+	archiveReviewVPSID            string
+	archiveResult                 assetlifecycle.ArchiveReview
+	archiveErr                    error
+	archiveVPSID                  string
+	archiveInput                  assetlifecycle.ApplyArchiveInput
+	restoreResult                 vpsassets.Record
+	restoreErr                    error
+	restoreVPSID                  string
 	monitoringInstanceContexts    []assetlifecycle.AssetContextForMonitoringInstance
 	monitoringInstanceContextsErr error
 	targetContexts                []assetlifecycle.AssetContextForTarget
@@ -60,6 +70,31 @@ func (f *fakeAssetLifecycleRepository) ExtendVPSValidity(_ context.Context, vpsI
 		return assetlifecycle.LifecycleActionResult{}, f.extendErr
 	}
 	return f.extendResult, nil
+}
+
+func (f *fakeAssetLifecycleRepository) GetVPSArchiveReview(_ context.Context, vpsID string) (assetlifecycle.ArchiveReview, error) {
+	f.archiveReviewVPSID = vpsID
+	if f.archiveReviewErr != nil {
+		return assetlifecycle.ArchiveReview{}, f.archiveReviewErr
+	}
+	return f.archiveReviewResult, nil
+}
+
+func (f *fakeAssetLifecycleRepository) ApplyVPSArchive(_ context.Context, vpsID string, input assetlifecycle.ApplyArchiveInput) (assetlifecycle.ArchiveReview, error) {
+	f.archiveVPSID = vpsID
+	f.archiveInput = input
+	if f.archiveErr != nil {
+		return assetlifecycle.ArchiveReview{}, f.archiveErr
+	}
+	return f.archiveResult, nil
+}
+
+func (f *fakeAssetLifecycleRepository) RestoreVPSFromArchive(_ context.Context, vpsID string) (vpsassets.Record, error) {
+	f.restoreVPSID = vpsID
+	if f.restoreErr != nil {
+		return vpsassets.Record{}, f.restoreErr
+	}
+	return f.restoreResult, nil
 }
 
 func (f *fakeAssetLifecycleRepository) ListMonitoringInstanceAssetContexts(context.Context) ([]assetlifecycle.AssetContextForMonitoringInstance, error) {
@@ -228,6 +263,118 @@ func TestVPSExtendValidityUpdatesActiveSubscription(t *testing.T) {
 	}
 }
 
+func TestVPSArchiveReviewReturnsEligibilityAndBlockers(t *testing.T) {
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	repo := &fakeAssetLifecycleRepository{archiveReviewResult: assetlifecycle.ArchiveReview{
+		VPS: vpsassets.Record{
+			VPSID:           "vps_001",
+			DisplayName:     "Tokyo Edge",
+			LifecycleStatus: vpsassets.LifecycleCancelled,
+			UsageStatus:     vpsassets.UsageIdle,
+			RenewalDecision: vpsassets.RenewalCancel,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		Subscriptions: []assetlifecycle.SubscriptionImpact{{
+			Record:            subscriptions.Record{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusCancelled, CreatedAt: now, UpdatedAt: now},
+			Role:              "inactive",
+			RecommendedAction: "keep_inactive",
+			Message:           "订阅账单记录已无续费动作。",
+		}},
+		Eligible: true,
+		Blockers: []string{},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/archive-review", nil)
+	recorder := httptest.NewRecorder()
+	handlers.VPSArchiveReview(repo).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.archiveReviewVPSID != "vps_001" {
+		t.Fatalf("archive review vps id = %q, want vps_001", repo.archiveReviewVPSID)
+	}
+	var body assetlifecycle.ArchiveReview
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.VPS.VPSID != "vps_001" || !body.Eligible || len(body.Subscriptions) != 1 {
+		t.Fatalf("archive review body = %#v, want eligible review with subscription evidence", body)
+	}
+}
+
+func TestVPSArchiveAppliesStrongConfirmation(t *testing.T) {
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	repo := &fakeAssetLifecycleRepository{archiveResult: assetlifecycle.ArchiveReview{
+		VPS: vpsassets.Record{
+			VPSID:           "vps_001",
+			DisplayName:     "Tokyo Edge",
+			LifecycleStatus: vpsassets.LifecycleArchived,
+			UsageStatus:     vpsassets.UsageIdle,
+			RenewalDecision: vpsassets.RenewalCancel,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		Eligible: false,
+		Blockers: []string{"VPS 已归档，只读保留历史。"},
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/archive", strings.NewReader(`{
+		"confirmation_name":" Tokyo Edge "
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handlers.VPSArchive(repo).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.archiveVPSID != "vps_001" {
+		t.Fatalf("archive vps id = %q, want vps_001", repo.archiveVPSID)
+	}
+	if repo.archiveInput.ConfirmationName != "Tokyo Edge" {
+		t.Fatalf("confirmation name = %q, want trimmed display name", repo.archiveInput.ConfirmationName)
+	}
+	var body assetlifecycle.ArchiveReview
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.VPS.LifecycleStatus != vpsassets.LifecycleArchived {
+		t.Fatalf("archive response = %#v, want archived review", body)
+	}
+}
+
+func TestVPSRestoreFromArchiveReturnsRestoredAsset(t *testing.T) {
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	repo := &fakeAssetLifecycleRepository{restoreResult: vpsassets.Record{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		LifecycleStatus: vpsassets.LifecycleIdle,
+		UsageStatus:     vpsassets.UsageIdle,
+		RenewalDecision: vpsassets.RenewalCancel,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/restore-from-archive", nil)
+	recorder := httptest.NewRecorder()
+
+	handlers.VPSRestoreFromArchive(repo).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.restoreVPSID != "vps_001" {
+		t.Fatalf("restore vps id = %q, want vps_001", repo.restoreVPSID)
+	}
+	var body vpsassets.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.VPSID != "vps_001" || body.LifecycleStatus != vpsassets.LifecycleIdle {
+		t.Fatalf("restore response = %#v, want idle vps", body)
+	}
+}
+
 func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -250,6 +397,18 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 		{name: "extend invalid json", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{`, want: http.StatusBadRequest},
 		{name: "extend missing date", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{"reason":"outage"}`, want: http.StatusBadRequest},
 		{name: "extend blocked lifecycle action", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{extendErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{"extend_to":"2026-12-01","reason":"outage"}`, want: http.StatusConflict},
+		{name: "archive review wrong method", handler: handlers.VPSArchiveReview(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/archive-review", want: http.StatusMethodNotAllowed},
+		{name: "archive review malformed path", handler: handlers.VPSArchiveReview(&fakeAssetLifecycleRepository{}), method: http.MethodGet, path: "/api/vps/vps_001/archive-review/extra", want: http.StatusNotFound},
+		{name: "archive review missing vps", handler: handlers.VPSArchiveReview(&fakeAssetLifecycleRepository{archiveReviewErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodGet, path: "/api/vps/vps_missing/archive-review", want: http.StatusNotFound},
+		{name: "archive invalid json", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{`, want: http.StatusBadRequest},
+		{name: "archive missing confirmation", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{}`, want: http.StatusBadRequest},
+		{name: "archive blocked lifecycle action", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"confirmation_name":"Tokyo Edge"}`, want: http.StatusConflict},
+		{name: "archive missing vps", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/archive", body: `{"confirmation_name":"Tokyo Edge"}`, want: http.StatusNotFound},
+		{name: "archive repo failure", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"confirmation_name":"Tokyo Edge"}`, want: http.StatusInternalServerError},
+		{name: "restore wrong method", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{}), method: http.MethodGet, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusMethodNotAllowed},
+		{name: "restore blocked lifecycle action", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_cancelled/restore-from-archive", want: http.StatusConflict},
+		{name: "restore missing vps", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/restore-from-archive", want: http.StatusNotFound},
+		{name: "restore repo failure", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {

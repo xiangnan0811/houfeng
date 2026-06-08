@@ -121,6 +121,98 @@ func (r *PostgresAssetLifecycleRepository) GetVPSCancellationPreview(ctx context
 	return preview, nil
 }
 
+func (r *PostgresAssetLifecycleRepository) GetVPSArchiveReview(ctx context.Context, vpsID string) (assetlifecycle.ArchiveReview, error) {
+	vpsID = strings.TrimSpace(vpsID)
+	if vpsID == "" {
+		return assetlifecycle.ArchiveReview{}, fmt.Errorf("%w: vps_id is required", assetlifecycle.ErrInvalidLifecycleActionInput)
+	}
+
+	vps, err := getLifecycleVPSAsset(ctx, r.db, vpsID, false)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	return buildVPSArchiveReview(ctx, r.db, vps, vpsID, false)
+}
+
+func (r *PostgresAssetLifecycleRepository) ApplyVPSArchive(ctx context.Context, vpsID string, input assetlifecycle.ApplyArchiveInput) (assetlifecycle.ArchiveReview, error) {
+	vpsID = strings.TrimSpace(vpsID)
+	if vpsID == "" {
+		return assetlifecycle.ArchiveReview{}, fmt.Errorf("%w: vps_id is required", assetlifecycle.ErrInvalidLifecycleActionInput)
+	}
+	input = assetlifecycle.NormalizeApplyArchiveInput(input)
+	if err := assetlifecycle.ValidateApplyArchiveInput(input); err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, fmt.Errorf("begin vps archive transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	currentVPS, err := getLifecycleVPSAsset(ctx, tx, vpsID, true)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	review, err := buildVPSArchiveReview(ctx, tx, currentVPS, vpsID, true)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	if strings.TrimSpace(input.ConfirmationName) != strings.TrimSpace(currentVPS.DisplayName) {
+		return assetlifecycle.ArchiveReview{}, fmt.Errorf("%w: confirmation_name does not match vps display_name", assetlifecycle.ErrInvalidLifecycleActionInput)
+	}
+	if len(review.Blockers) > 0 {
+		return assetlifecycle.ArchiveReview{}, fmt.Errorf("%w: archive blockers remain", assetlifecycle.ErrLifecycleActionBlocked)
+	}
+
+	updated, err := patchVPSAssetRow(ctx, tx, currentVPS.VPSID, vpsassets.PatchInput{
+		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleArchived),
+	})
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return assetlifecycle.ArchiveReview{}, fmt.Errorf("commit vps archive transaction for %q: %w", currentVPS.VPSID, err)
+	}
+
+	review.VPS = updated
+	review.Warnings, review.Blockers = buildArchiveReviewFindings(review)
+	review.Eligible = len(review.Blockers) == 0
+	return review, nil
+}
+
+func (r *PostgresAssetLifecycleRepository) RestoreVPSFromArchive(ctx context.Context, vpsID string) (vpsassets.Record, error) {
+	vpsID = strings.TrimSpace(vpsID)
+	if vpsID == "" {
+		return vpsassets.Record{}, fmt.Errorf("%w: vps_id is required", assetlifecycle.ErrInvalidLifecycleActionInput)
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return vpsassets.Record{}, fmt.Errorf("begin restore vps from archive transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	currentVPS, err := getLifecycleVPSAsset(ctx, tx, vpsID, true)
+	if err != nil {
+		return vpsassets.Record{}, err
+	}
+	if currentVPS.LifecycleStatus != vpsassets.LifecycleArchived {
+		return vpsassets.Record{}, fmt.Errorf("%w: only archived vps %q can be restored from archive", assetlifecycle.ErrLifecycleActionBlocked, currentVPS.VPSID)
+	}
+
+	updated, err := patchVPSAssetRow(ctx, tx, currentVPS.VPSID, vpsassets.PatchInput{
+		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleIdle),
+	})
+	if err != nil {
+		return vpsassets.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return vpsassets.Record{}, fmt.Errorf("commit restore vps from archive transaction for %q: %w", currentVPS.VPSID, err)
+	}
+	return updated, nil
+}
+
 func (r *PostgresAssetLifecycleRepository) ApplyVPSCancellation(ctx context.Context, vpsID string, input assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionResult, error) {
 	vpsID = strings.TrimSpace(vpsID)
 	if vpsID == "" {
@@ -265,6 +357,41 @@ func ensureVPSCancellationNotBlocked(current vpsassets.Record) error {
 		return fmt.Errorf("%w: archived vps %q cannot be cancelled by lifecycle action", assetlifecycle.ErrLifecycleActionBlocked, current.VPSID)
 	}
 	return nil
+}
+
+func buildVPSArchiveReview(ctx context.Context, queryer assetLifecycleQueryer, vps vpsassets.Record, vpsID string, lockSubscriptions bool) (assetlifecycle.ArchiveReview, error) {
+	subscriptionRecords, err := listLifecycleSubscriptionsForVPS(ctx, queryer, vpsID, lockSubscriptions)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	monitoringInstanceLinks, err := listLifecycleMonitoringInstancesForVPS(ctx, queryer, vpsID)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	services, err := listLifecycleAssetServicesForVPS(ctx, queryer, vpsID)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	domains, err := listLifecycleAssetDomainsForVPS(ctx, queryer, vpsID)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	targetLinks, err := listLifecycleTargetImpacts(ctx, queryer, services, domains)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+
+	review := assetlifecycle.ArchiveReview{
+		VPS:                     vps,
+		Subscriptions:           buildSubscriptionImpacts(subscriptionRecords),
+		MonitoringInstanceLinks: monitoringInstanceLinks,
+		Services:                services,
+		Domains:                 domains,
+		TargetLinks:             targetLinks,
+	}
+	review.Warnings, review.Blockers = buildArchiveReviewFindings(review)
+	review.Eligible = len(review.Blockers) == 0
+	return review, nil
 }
 
 func (r *PostgresAssetLifecycleRepository) recordFailedVPSCancellation(
@@ -864,6 +991,54 @@ func buildCancellationPreviewFindings(preview assetlifecycle.CancellationPreview
 	}
 	if runningTargets > 0 {
 		warnings = append(warnings, fmt.Sprintf("仍有 %d 个关联 Target/实例处于运行或维护状态。", runningTargets))
+	}
+
+	return warnings, blockers
+}
+
+func buildArchiveReviewFindings(review assetlifecycle.ArchiveReview) ([]string, []string) {
+	warnings := make([]string, 0)
+	blockers := make([]string, 0)
+
+	switch review.VPS.LifecycleStatus {
+	case vpsassets.LifecycleArchived:
+		blockers = append(blockers, "VPS 已归档，只能在归档详情页只读查看或执行受控恢复。")
+	case vpsassets.LifecycleCancelled:
+		warnings = append(warnings, "VPS 已取消，可以归档为只读历史资产。")
+	}
+
+	activeSubscriptions := 0
+	for _, impact := range review.Subscriptions {
+		if impact.Record.Status == subscriptions.StatusActive {
+			activeSubscriptions++
+		}
+	}
+	if activeSubscriptions > 0 {
+		blockers = append(blockers, fmt.Sprintf("存在 %d 条 active 订阅，必须先取消或结束订阅后才能归档。", activeSubscriptions))
+	}
+
+	runningMonitoringInstances := 0
+	for _, link := range review.MonitoringInstanceLinks {
+		if link.LifecycleStatus != monitoringinstances.LifecycleNoRenewal && link.LifecycleStatus != monitoringinstances.LifecycleRetired {
+			runningMonitoringInstances++
+			continue
+		}
+		if link.MonitoringStatus != monitoringinstances.MonitoringPaused {
+			runningMonitoringInstances++
+		}
+	}
+	if runningMonitoringInstances > 0 {
+		blockers = append(blockers, fmt.Sprintf("仍有 %d 个关联 MonitoringInstance 未同时满足不续费/已退役且监控暂停。", runningMonitoringInstances))
+	}
+
+	runningTargets := 0
+	for _, target := range review.TargetLinks {
+		if target.RunStatus != targets.RunStatusPaused && target.RunStatus != targets.RunStatusArchived {
+			runningTargets++
+		}
+	}
+	if runningTargets > 0 {
+		blockers = append(blockers, fmt.Sprintf("仍有 %d 个关联 Target 未暂停或归档。", runningTargets))
 	}
 
 	return warnings, blockers

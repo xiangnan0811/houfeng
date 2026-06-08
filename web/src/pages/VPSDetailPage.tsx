@@ -8,12 +8,14 @@ import { VPSTimelinePanel } from '../components/VPSTimelinePanel'
 import {
   ApiError,
   applyVPSCancellation,
+  archiveVPS,
   createVPSDomain,
   createVPSMonitoringInstance,
   createVPSService,
   createVPSExperienceLog,
   createVPSSubscription,
   extendVPSValidity,
+  getVPSArchiveReview,
   getVPSAsset,
   getVPSCancellationPreview,
   getVPSTimeline,
@@ -29,6 +31,7 @@ import {
 } from '../lib/api'
 import { formatDate, formatMoney } from '../lib/format'
 import type {
+  ArchiveReview,
   AssetDomainRecord,
   AssetServiceRecord,
   ApplyCancellationInput,
@@ -241,6 +244,9 @@ export function VPSDetailPage() {
   const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [lifecycleNotice, setLifecycleNotice] = useState<string | null>(null)
+  const [archiveReview, setArchiveReview] = useState<ArchiveReview | null>(null)
+  const [archiveReviewLoading, setArchiveReviewLoading] = useState(false)
+  const [archiveConfirmationName, setArchiveConfirmationName] = useState('')
   const [cancellationSubmitting, setCancellationSubmitting] = useState(false)
   const [cancellationError, setCancellationError] = useState<string | null>(null)
   const [experienceDraft, setExperienceDraft] = useState<ExperienceDraftState>(INITIAL_EXPERIENCE_DRAFT)
@@ -291,6 +297,10 @@ export function VPSDetailPage() {
       .then(([detail, timeline, services, domains, subscriptionState, cancellationState]) => {
         if (cancelled) return
         const normalizedDetail = normalizeVPSDetail(detail)
+        if (normalizedDetail.lifecycle_status === 'archived' || normalizedDetail.lifecycle_status === 'cancelled') {
+          navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true })
+          return
+        }
         setState({
           vpsId,
           error: null,
@@ -328,6 +338,9 @@ export function VPSDetailPage() {
         setLifecycleConfirmingAction(null)
         setLifecycleError(null)
         setLifecycleNotice(null)
+        setArchiveReview(null)
+        setArchiveReviewLoading(false)
+        setArchiveConfirmationName('')
         setCancellationError(null)
         setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
         setExperienceError(null)
@@ -360,7 +373,7 @@ export function VPSDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [initialDrawerFromQuery, openCancellationFromQuery, vpsId])
+  }, [initialDrawerFromQuery, navigate, openCancellationFromQuery, vpsId])
 
   const refreshCancellationPreview = useCallback(async (targetVPSId: string) => {
     const cancellationState = await loadCancellationPreview(targetVPSId)
@@ -511,6 +524,9 @@ export function VPSDetailPage() {
   function closeLifecycleConfirmation() {
     setLifecycleConfirmingAction(null)
     setLifecycleError(null)
+    setArchiveReview(null)
+    setArchiveReviewLoading(false)
+    setArchiveConfirmationName('')
   }
 
   function ensureMonitoringInstancesLoaded() {
@@ -645,6 +661,26 @@ export function VPSDetailPage() {
     setLifecycleConfirmingAction(action)
     setLifecycleError(null)
     setLifecycleNotice(null)
+    setArchiveConfirmationName('')
+    if (action !== 'archive') {
+      setArchiveReview(null)
+      setArchiveReviewLoading(false)
+      return
+    }
+    const detail = state.detail
+    if (!detail) return
+    setArchiveReview(null)
+    setArchiveReviewLoading(true)
+    getVPSArchiveReview(detail.vps_id)
+      .then((review) => {
+        setArchiveReview(review)
+        setLifecycleError(null)
+      })
+      .catch((error: unknown) => {
+        setArchiveReview(null)
+        setLifecycleError(describeError(error, '加载归档资格失败'))
+      })
+      .finally(() => setArchiveReviewLoading(false))
   }
 
   async function handleDecisionSubmit(event: FormEvent<HTMLFormElement>) {
@@ -884,17 +920,28 @@ export function VPSDetailPage() {
   async function handleArchiveVPS() {
     const detail = state.detail
     if (!detail) return
+    if (archiveReviewLoading) return
+    if (!archiveReview) {
+      setLifecycleError('归档资格尚未加载完成')
+      return
+    }
+    if (!archiveReview.eligible || archiveReview.blockers.length > 0) {
+      setLifecycleError('仍有归档阻止项，不能归档')
+      return
+    }
+    const confirmationName = archiveConfirmationName.trim()
+    if (confirmationName !== detail.display_name.trim()) {
+      setLifecycleError('请输入完整 VPS 展示名后再确认归档')
+      return
+    }
 
     setLifecycleSubmitting(true)
     setLifecycleError(null)
     setLifecycleNotice(null)
 
     try {
-      await updateVPSAsset(detail.vps_id, { lifecycle_status: 'archived' })
-      const refreshed = await refreshDetailAndTimeline(detail.vps_id)
-      setFactDraft(detailToFactEditForm(refreshed))
-      setLifecycleConfirmingAction(null)
-      setLifecycleNotice('VPS 已归档，资产历史已刷新')
+      await archiveVPS(detail.vps_id, { confirmation_name: confirmationName })
+      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true })
     } catch (error: unknown) {
       setLifecycleError(describeError(error, '归档 VPS 失败'))
     } finally {
@@ -905,22 +952,11 @@ export function VPSDetailPage() {
   async function handleRestoreVPS() {
     const detail = state.detail
     if (!detail) return
-
-    setLifecycleSubmitting(true)
-    setLifecycleError(null)
-    setLifecycleNotice(null)
-
-    try {
-      await updateVPSAsset(detail.vps_id, { lifecycle_status: 'idle' })
-      const refreshed = await refreshDetailAndTimeline(detail.vps_id)
-      setFactDraft(detailToFactEditForm(refreshed))
-      setLifecycleConfirmingAction(null)
-      setLifecycleNotice('VPS 已恢复为闲置，资产历史已刷新')
-    } catch (error: unknown) {
-      setLifecycleError(describeError(error, '恢复 VPS 失败'))
-    } finally {
-      setLifecycleSubmitting(false)
+    if (detail.lifecycle_status === 'archived') {
+      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true })
+      return
     }
+    setLifecycleError('归档恢复请在归档详情页执行')
   }
 
   async function handleCancellationSubmit(input: ApplyCancellationInput) {
@@ -1069,6 +1105,14 @@ export function VPSDetailPage() {
   const activeSubscription = selectActiveSubscription(state.subscriptions)
   const subscriptionLoadFailed = state.subscriptionsError !== null
   const showCancellationWorkbench = shouldExposeCancellationWorkbench(detail, state.cancellationPreview)
+  const archiveBlockers = archiveReview?.blockers ?? []
+  const archiveCanConfirm = lifecycleConfirmingAction === 'archive' &&
+    !archiveReviewLoading &&
+    Boolean(archiveReview?.eligible) &&
+    archiveBlockers.length === 0 &&
+    archiveConfirmationName.trim() === detail.display_name.trim()
+  const lifecycleConfirmDisabled = lifecycleSubmitting ||
+    (lifecycleConfirmingAction === 'archive' ? !archiveCanConfirm : false)
 
   function drawerTitle(): string {
     if (activeDrawer === 'decision') return '续费决策'
@@ -1481,7 +1525,8 @@ export function VPSDetailPage() {
                 : '归档中…'
               : vpsLifecycleConfirmationCopy(detail, lifecycleConfirmingAction).confirmLabel
           }
-          disabled={lifecycleSubmitting}
+          disabled={lifecycleConfirmDisabled}
+          cancelDisabled={lifecycleSubmitting}
           error={lifecycleError}
           onCancel={closeLifecycleConfirmation}
           onConfirm={() => {
@@ -1491,7 +1536,46 @@ export function VPSDetailPage() {
               void handleArchiveVPS()
             }
           }}
-        />
+        >
+          {lifecycleConfirmingAction === 'archive' ? (
+            <div className="asset-lifecycle-confirm">
+              <p className="asset-lifecycle-confirm__eyebrow">ARCHIVE REVIEW</p>
+              {archiveReviewLoading ? (
+                <p className="asset-lifecycle-confirm__callouts">正在检查归档资格…</p>
+              ) : archiveBlockers.length > 0 ? (
+                <>
+                  <h4>归档前仍有需要处理的事项。</h4>
+                  <ul className="asset-lifecycle-confirm__blockers">
+                    {archiveBlockers.map((blocker) => (
+                      <li key={blocker}>{blocker}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : archiveReview ? (
+                <>
+                  <h4>输入 VPS 展示名后才能归档，服务端会再次校验资格。</h4>
+                  <label className="input-field">
+                    <span className="input-field__label">输入 VPS 名称确认归档</span>
+                    <input
+                      className="input"
+                      aria-label="输入 VPS 名称确认归档"
+                      value={archiveConfirmationName}
+                      onChange={(event) => {
+                        setArchiveConfirmationName(event.target.value)
+                        setLifecycleError(null)
+                      }}
+                      placeholder={detail.display_name}
+                      disabled={lifecycleSubmitting}
+                    />
+                    <span className="input-field__hint">需要完整匹配：{detail.display_name}</span>
+                  </label>
+                </>
+              ) : (
+                <p className="asset-lifecycle-confirm__callouts">归档资格暂未加载成功，请关闭后重试。</p>
+              )}
+            </div>
+          ) : null}
+        </ActionConfirmationModal>
       ) : null}
 
       <Modal

@@ -1524,6 +1524,22 @@ export type CancellationPreview = {
   blockers: string[]
 }
 
+export type ArchiveReview = {
+  vps: VPSAssetRecord
+  subscriptions: SubscriptionImpact[]
+  monitoring_instance_links: VPSMonitoringInstanceSummary[]
+  services: AssetServiceRecord[]
+  domains: AssetDomainRecord[]
+  target_links: TargetImpact[]
+  warnings: string[]
+  blockers: string[]
+  eligible: boolean
+}
+
+export type ApplyArchiveInput = {
+  confirmation_name: string
+}
+
 export type MonitoringInstanceLifecycleActionInput = {
   monitoring_instance_id: string
   lifecycle_status?: string

@@ -119,13 +119,29 @@ When the user asks to continue through delivery, or task requirements include PR
 
 1. Push the selected feature branch from the current checkout or worktree.
 2. Open a pull request targeting the protected base branch.
-3. Monitor required PR checks until they pass, fail, or are clearly blocked.
+3. Monitor required PR checks until they pass, fail, or are clearly blocked. Creating the PR is not a completion point.
 4. Fix failures on the same feature branch and re-run the relevant local checks before waiting for CI again.
 5. Merge only after required checks pass.
 6. After merge, monitor post-merge automation that is relevant to the change, such as main CI, Release Please, GitHub Release, Docker/image publishing, or deploy jobs.
-7. Sync or clean up the local working location after merge. Do not directly commit, merge, reset, or push local/remote `main` as a shortcut.
+7. For release-worthy changes, watch the Release Please PR lifecycle as part of the same delivery flow:
+   - wait for the release PR to be created or updated;
+   - monitor its PR checks;
+   - merge it only when checks pass and repository policy allows the agent to merge;
+   - monitor the GitHub Release and any image or artifact publishing jobs triggered by that release.
+8. Verify the final release artifact before declaring completion. For this repository, `publish-images` publishes `docker.io/linnea7171/houfeng` and its success evidence must include the successful workflow run and image inspection/published tag evidence from that run.
+9. Sync or clean up the local working location after merge. Do not directly commit, merge, reset, or push local/remote `main` as a shortcut.
 
-If no release or post-merge automation is expected, record that explicitly in the final report instead of leaving the status ambiguous.
+Use concrete GitHub checks instead of assumptions:
+
+```bash
+gh pr checks <pr-number> --watch
+gh pr view <pr-number> --json state,mergeable,statusCheckRollup
+gh run list --branch main --workflow ci --limit 5
+gh pr list --head release-please--branches--main --state open
+gh run list --workflow publish-images --limit 5
+```
+
+If no release PR, GitHub Release, image workflow, or deploy job is expected for the change, record the exact evidence for that conclusion in the final report instead of leaving the status ambiguous.
 
 ---
 
