@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.1](https://github.com/xiangnan0811/houfeng/compare/v0.51.0...v0.51.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* polish monitoring list display ([442a0d8](https://github.com/xiangnan0811/houfeng/commit/442a0d8fc632fe4c1f5108337ba4e2229e43e6e8))
+
 ## [0.51.0](https://github.com/xiangnan0811/houfeng/compare/v0.50.0...v0.51.0) (2026-06-08)
 
 
