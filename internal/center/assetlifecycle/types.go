@@ -49,6 +49,9 @@ type Repository interface {
 	GetVPSCancellationPreview(context.Context, string) (CancellationPreview, error)
 	ApplyVPSCancellation(context.Context, string, ApplyCancellationInput) (LifecycleActionResult, error)
 	ExtendVPSValidity(context.Context, string, ExtendValidityInput) (LifecycleActionResult, error)
+	GetVPSArchiveReview(context.Context, string) (ArchiveReview, error)
+	ApplyVPSArchive(context.Context, string, ApplyArchiveInput) (ArchiveReview, error)
+	RestoreVPSFromArchive(context.Context, string) (vpsassets.Record, error)
 	ListMonitoringInstanceAssetContexts(context.Context) ([]AssetContextForMonitoringInstance, error)
 	ListTargetAssetContexts(context.Context) ([]AssetContextForTarget, error)
 }
@@ -63,6 +66,18 @@ type CancellationPreview struct {
 	RecommendedSteps        []RecommendedLifecycleStep             `json:"recommended_steps"`
 	Warnings                []string                               `json:"warnings"`
 	Blockers                []string                               `json:"blockers"`
+}
+
+type ArchiveReview struct {
+	VPS                     vpsassets.Record                       `json:"vps"`
+	Subscriptions           []SubscriptionImpact                   `json:"subscriptions"`
+	MonitoringInstanceLinks []assetlinks.MonitoringInstanceSummary `json:"monitoring_instance_links"`
+	Services                []assetservices.Record                 `json:"services"`
+	Domains                 []assetdomains.Record                  `json:"domains"`
+	TargetLinks             []TargetImpact                         `json:"target_links"`
+	Warnings                []string                               `json:"warnings"`
+	Blockers                []string                               `json:"blockers"`
+	Eligible                bool                                   `json:"eligible"`
 }
 
 type SubscriptionImpact struct {
@@ -106,6 +121,10 @@ type ExtendValidityInput struct {
 	Fee         float64             `json:"fee"`
 	FeeCurrency string              `json:"fee_currency"`
 	SourceType  string              `json:"source_type"`
+}
+
+type ApplyArchiveInput struct {
+	ConfirmationName string `json:"confirmation_name"`
 }
 
 type MonitoringInstanceActionInput struct {
@@ -200,6 +219,18 @@ func NormalizeExtendValidityInput(input ExtendValidityInput) ExtendValidityInput
 	input.FeeCurrency = subscriptions.NormalizeCurrency(input.FeeCurrency)
 	input.SourceType = strings.TrimSpace(input.SourceType)
 	return input
+}
+
+func NormalizeApplyArchiveInput(input ApplyArchiveInput) ApplyArchiveInput {
+	input.ConfirmationName = strings.TrimSpace(input.ConfirmationName)
+	return input
+}
+
+func ValidateApplyArchiveInput(input ApplyArchiveInput) error {
+	if strings.TrimSpace(input.ConfirmationName) == "" {
+		return fmt.Errorf("%w: confirmation_name is required", ErrInvalidLifecycleActionInput)
+	}
+	return nil
 }
 
 func ValidateExtendValidityInput(input ExtendValidityInput) error {

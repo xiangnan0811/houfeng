@@ -219,6 +219,59 @@ func TestRouterKeepsAssetDomainsOutOfSPAFallback(t *testing.T) {
 	}
 }
 
+func TestRouterKeepsVPSArchiveLifecycleOutOfSPAFallback(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:    "dev",
+		WebDistDir: "testdata/web",
+		VPSArchiveReviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"vps":{"vps_id":"vps_001"},"eligible":true}`))
+		}),
+		VPSArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"vps":{"vps_id":"vps_001","lifecycle_status":"archived"},"eligible":false}`))
+		}),
+		VPSRestoreFromArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"vps_id":"vps_001","lifecycle_status":"idle"}`))
+		}),
+	})
+
+	tests := []struct {
+		name            string
+		method          string
+		path            string
+		wantBodySnippet string
+	}{
+		{name: "archive review", method: http.MethodGet, path: "/api/vps/vps_001/archive-review", wantBodySnippet: `"eligible":true`},
+		{name: "archive", method: http.MethodPost, path: "/api/vps/vps_001/archive", wantBodySnippet: `"lifecycle_status":"archived"`},
+		{name: "restore", method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", wantBodySnippet: `"lifecycle_status":"idle"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			}
+			body, err := io.ReadAll(recorder.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+			if strings.TrimSpace(string(body)) == spaShell {
+				t.Fatalf("expected VPS archive API response, got SPA fallback body %q", string(body))
+			}
+			if !strings.Contains(string(body), tt.wantBodySnippet) {
+				t.Fatalf("expected VPS archive payload, got %q", string(body))
+			}
+		})
+	}
+}
+
 func TestRouterKeepsAssetDecisionsOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",

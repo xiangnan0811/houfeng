@@ -17,6 +17,9 @@ type AssetLifecycleRepository interface {
 	GetVPSCancellationPreview(context.Context, string) (assetlifecycle.CancellationPreview, error)
 	ApplyVPSCancellation(context.Context, string, assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionResult, error)
 	ExtendVPSValidity(context.Context, string, assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionResult, error)
+	GetVPSArchiveReview(context.Context, string) (assetlifecycle.ArchiveReview, error)
+	ApplyVPSArchive(context.Context, string, assetlifecycle.ApplyArchiveInput) (assetlifecycle.ArchiveReview, error)
+	RestoreVPSFromArchive(context.Context, string) (vpsassets.Record, error)
 	ListMonitoringInstanceAssetContexts(context.Context) ([]assetlifecycle.AssetContextForMonitoringInstance, error)
 	ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error)
 }
@@ -109,6 +112,86 @@ func VPSExtendValidity(repo AssetLifecycleRepository) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
+	})
+}
+
+func VPSArchiveReview(repo AssetLifecycleRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "archive-review")
+		if !ok {
+			writeError(w, http.StatusNotFound, "vps asset not found")
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		review, err := repo.GetVPSArchiveReview(r.Context(), vpsID)
+		if handled := writeAssetLifecycleError(w, err); handled {
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		writeJSON(w, http.StatusOK, review)
+	})
+}
+
+func VPSArchive(repo AssetLifecycleRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "archive")
+		if !ok {
+			writeError(w, http.StatusNotFound, "vps asset not found")
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var input assetlifecycle.ApplyArchiveInput
+		if err := decodeJSON(r, &input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		input = assetlifecycle.NormalizeApplyArchiveInput(input)
+		if err := assetlifecycle.ValidateApplyArchiveInput(input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid input")
+			return
+		}
+
+		review, err := repo.ApplyVPSArchive(r.Context(), vpsID, input)
+		if handled := writeAssetLifecycleError(w, err); handled {
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		writeJSON(w, http.StatusOK, review)
+	})
+}
+
+func VPSRestoreFromArchive(repo AssetLifecycleRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "restore-from-archive")
+		if !ok {
+			writeError(w, http.StatusNotFound, "vps asset not found")
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		record, err := repo.RestoreVPSFromArchive(r.Context(), vpsID)
+		if handled := writeAssetLifecycleError(w, err); handled {
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		writeJSON(w, http.StatusOK, record)
 	})
 }
 

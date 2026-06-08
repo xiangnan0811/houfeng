@@ -11,6 +11,9 @@ const assetDecisionsPage = lazy(() =>
 const archivePage = lazy(() =>
   import('../pages/ArchivePage').then((module) => ({ default: module.ArchivePage })),
 )
+const archiveDetailPage = lazy(() =>
+  import('../pages/ArchiveDetailPage').then((module) => ({ default: module.ArchiveDetailPage })),
+)
 const dashboardPage = lazy(() =>
   import('../pages/DashboardPage').then((module) => ({ default: module.DashboardPage })),
 )
@@ -72,6 +75,7 @@ export const appRoutes: RouteObject[] = [
           { path: 'vps', element: routeElement(vpsPage, '正在加载 VPS 库存') },
           { path: 'vps/:vpsId', element: routeElement(vpsDetailPage, '正在加载 VPS 详情') },
           { path: 'archive', element: routeElement(archivePage, '正在加载归档资产') },
+          { path: 'archive/:vpsId', element: routeElement(archiveDetailPage, '正在加载归档详情') },
           { path: 'providers', element: routeElement(providersPage, '正在加载服务商') },
           { path: 'subscriptions', element: routeElement(subscriptionsPage, '正在加载订阅') },
           {

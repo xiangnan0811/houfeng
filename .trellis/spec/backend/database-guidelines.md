@@ -302,6 +302,8 @@ _, err := tx.Exec(ctx, `
 - `vps_monitoring_instance_links` 默认保留为历史证据；取消 / 退役 action 不自动 unlink，除非未来新增单独的“解除错误关联”显式动作。
 - 执行事务必须先锁定 VPS，再写 action 与各步骤；任何一步失败时业务状态与步骤写入整体回滚，避免部分取消造成新割裂。失败审计是例外：必须先显式回滚业务事务，再用独立事务写入 `status='failed'` 的 action 和 failed step，避免失败记录随业务回滚消失，也避免复用同一 `action_id` 时被未回滚事务锁住。
 - preview 的 blocker 必须在 POST 执行路径重新校验；例如 `lifecycle_status='archived'` 的 VPS 不允许通过 cancellation POST 改回 cancelled/to_cancel，handler 应返回冲突而不是清空 `archived_at`。
+- VPS 归档 / 恢复必须走受控 archive API：`GET /api/vps/{vps_id}/archive-review` 返回 VPS、订阅、MonitoringInstance、服务、域名、Target、warnings/blockers/eligible；`POST /api/vps/{vps_id}/archive` 在事务中锁定 VPS、重新计算 review、校验 `confirmation_name` 与 blockers 后才写 `lifecycle_status='archived'`；`POST /api/vps/{vps_id}/restore-from-archive` 只允许 `archived -> idle`。普通 `PATCH /api/vps/{vps_id}` 不得写入 `archived`，也不得从 `archived` 恢复。
+- archive blockers 至少包括：任一关联订阅仍为 `active`；任一关联 MonitoringInstance lifecycle 非 `不续费` / `已退役` 或 monitoring status 非 `暂停`；任一关联 Target 非 `暂停` / `已归档`。这些 blockers 必须在 archive POST 内重新计算，前端 review 只能作为提示，不能作为权限来源。
 - Dashboard asset summary 只返回聚合计数；成本只统计 active subscriptions，取消待处理 / 已取消 VPS、状态割裂 VPS、仍运行的关联 MonitoringInstance/Target 进入告警计数。
 
 #### Scenario: VPS renewal decision links subscription auto-renew

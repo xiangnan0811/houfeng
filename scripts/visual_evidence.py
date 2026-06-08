@@ -2212,6 +2212,61 @@ def asset_workflow_cancellation_preview(vps_id: str) -> dict[str, object] | None
     }
 
 
+def asset_workflow_archive_review(vps_id: str) -> dict[str, object] | None:
+    detail = asset_workflow_vps_detail(vps_id)
+    if detail is None:
+        return None
+    subscriptions = [
+        {
+            "record": row,
+            "role": "active" if row["status"] == "active" else "inactive",
+            "recommended_action": (
+                "cancel_subscription_first"
+                if row["status"] == "active"
+                else "read_only_history"
+            ),
+            "message": (
+                "订阅仍为 active，不能归档。"
+                if row["status"] == "active"
+                else "历史订阅只读保留。"
+            ),
+        }
+        for row in asset_workflow_subscriptions()
+        if row["vps_id"] == vps_id
+    ]
+    services = asset_workflow_services(vps_id)
+    domains = asset_workflow_domains(vps_id)
+    target_links = []
+    if vps_id == "vps_archive_old":
+        target_links.append(
+            {
+                "target_id": "target_legacy_archived",
+                "name": "archive-old.example.test",
+                "run_status": "已归档",
+                "service_ids": [service["service_id"] for service in services],
+                "domain_ids": [domain["domain_id"] for domain in domains],
+                "last_linked_at": iso_timestamp(-30),
+            }
+        )
+    blockers = []
+    if detail["lifecycle_status"] == "archived":
+        blockers.append("VPS 已归档，只能在归档详情页只读查看或执行受控恢复。")
+    active_subscription_count = sum(1 for row in subscriptions if row["record"]["status"] == "active")
+    if active_subscription_count > 0:
+        blockers.append(f"存在 {active_subscription_count} 条 active 订阅，必须先取消或结束订阅后才能归档。")
+    return {
+        "vps": detail,
+        "subscriptions": subscriptions,
+        "monitoring_instance_links": detail["monitoring_instance_links"],
+        "services": services,
+        "domains": domains,
+        "target_links": target_links,
+        "warnings": [],
+        "blockers": blockers,
+        "eligible": len(blockers) == 0,
+    }
+
+
 def asset_workflow_dashboard() -> dict[str, object]:
     return {
         "snapshot_generated_at": iso_timestamp(0),
@@ -3751,6 +3806,11 @@ def fulfill_asset_workflow_api(route: object) -> None:
                 preview = asset_workflow_cancellation_preview(vps_id)
                 if preview is not None:
                     fulfill_json(route, 200, preview)
+                    return
+            if len(parts) == 4 and parts[3] == "archive-review":
+                review = asset_workflow_archive_review(vps_id)
+                if review is not None:
+                    fulfill_json(route, 200, review)
                     return
 
     if method == "GET" and path == "/api/subscriptions":

@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { matchRoutes } from 'react-router-dom'
 
-import type { ApplyCancellationInput } from './types'
+import type { ApplyArchiveInput, ApplyCancellationInput } from './types'
 import {
   addAssetDecisionManualGroupMember,
+  archiveVPS,
   applyVPSCancellation,
   archiveTarget,
   bulkUpsertSubscriptionMonthlyBudgets,
@@ -35,6 +36,7 @@ import {
   getSettings,
   getSubscription,
   getVPSAsset,
+  getVPSArchiveReview,
   getVPSCancellationPreview,
   getVPSTimeline,
   issueMonitoringInstanceInstallCommand,
@@ -59,6 +61,7 @@ import {
   rejectPendingMonitoringInstanceBinding,
   resetMonitoringInstanceBinding,
   restoreTargetToPaused,
+  restoreVPSFromArchive,
   resumeMonitoringInstanceMonitoring,
   resumeTarget,
   postMonitoringInstanceAction,
@@ -1332,6 +1335,81 @@ describe('api helpers', () => {
     })
   })
 
+  it('serializes VPS archive review, archive confirmation, and restore endpoints', async () => {
+    const review = {
+      vps: {
+        vps_id: 'vps_001',
+        display_name: 'Tokyo Edge',
+        provider_name: 'Hetzner',
+        product_name: 'cx22',
+        lifecycle_status: 'active',
+        usage_status: 'in_use',
+        renewal_decision: 'cancel',
+        active_monitoring_instance_link_count: 0,
+        ssh_port: 22,
+        labels: [],
+        created_at: '2026-05-30T08:00:00Z',
+        updated_at: '2026-05-30T08:00:00Z',
+      },
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: [],
+      eligible: true,
+    }
+    const archivedReview = {
+      ...review,
+      vps: {
+        ...review.vps,
+        lifecycle_status: 'archived',
+        archived_at: '2026-05-30T09:00:00Z',
+      },
+      blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
+      eligible: false,
+    }
+    const restored = {
+      ...review.vps,
+      lifecycle_status: 'idle',
+      archived_at: null,
+    }
+    const input = { confirmation_name: 'Tokyo Edge' } satisfies ApplyArchiveInput
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(review)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(archivedReview)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(restored)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getVPSArchiveReview('vps_001')).resolves.toEqual(review)
+    await expect(archiveVPS('vps_001', input)).resolves.toEqual(archivedReview)
+    await expect(restoreVPSFromArchive('vps_001')).resolves.toEqual(restored)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/archive-review', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001/archive', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(input),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/restore-from-archive', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
   it('serializes VPS asset updates and link operations', async () => {
     const updatedVPS = {
       vps_id: 'vps_001',
@@ -2306,6 +2384,12 @@ describe('router onboarding route', () => {
     const matches = matchRoutes(appRoutes, '/archive')
 
     expect(matches?.at(-1)?.route.path).toBe('archive')
+  })
+
+  it('matches /archive/:vpsId', () => {
+    const matches = matchRoutes(appRoutes, '/archive/vps_001')
+
+    expect(matches?.at(-1)?.route.path).toBe('archive/:vpsId')
   })
 
   it('no longer matches the removed onboarding route (falls through to catch-all)', () => {

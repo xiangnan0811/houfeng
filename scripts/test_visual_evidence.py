@@ -229,6 +229,15 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertEqual(preview["vps"]["vps_id"], "vps_fra_legacy")
         self.assertTrue(preview["target_links"])
 
+        status, archive_review = call_asset_workflow_api("/api/vps/vps_archive_old/archive-review")
+        self.assertEqual(status, 200)
+        self.assertEqual(archive_review["vps"]["vps_id"], "vps_archive_old")
+        self.assertEqual(archive_review["vps"]["lifecycle_status"], "archived")
+        self.assertFalse(archive_review["eligible"])
+        self.assertTrue(archive_review["subscriptions"])
+        self.assertIn("monitoring_instance_links", archive_review)
+        self.assertIn("target_links", archive_review)
+
         status, monitoring = call_asset_workflow_api("/api/monitoring-instances")
         self.assertEqual(status, 200)
         self.assertIn("mi_hkg_edge_01", {monitoring_instance["monitoring_instance_id"] for monitoring_instance in monitoring})

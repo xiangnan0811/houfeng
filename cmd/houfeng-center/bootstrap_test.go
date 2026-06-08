@@ -264,6 +264,15 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSExtendValidityHandler == nil {
 		t.Fatal("router vps extend validity handler = nil, want non-nil")
 	}
+	if gotOpts.VPSArchiveReviewHandler == nil {
+		t.Fatal("router vps archive review handler = nil, want non-nil")
+	}
+	if gotOpts.VPSArchiveHandler == nil {
+		t.Fatal("router vps archive handler = nil, want non-nil")
+	}
+	if gotOpts.VPSRestoreFromArchiveHandler == nil {
+		t.Fatal("router vps restore from archive handler = nil, want non-nil")
+	}
 	if gotOpts.AssetContextMonitoringInstancesHandler == nil {
 		t.Fatal("router asset context monitoringInstances handler = nil, want non-nil")
 	}

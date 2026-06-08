@@ -197,7 +197,12 @@ function clickVPSAction(name: string) {
 
 function LocationProbe() {
   const location = useLocation()
-  return <div data-testid="location-search">{location.search}</div>
+  return (
+    <>
+      <div data-testid="location-path">{location.pathname}</div>
+      <div data-testid="location-search">{location.search}</div>
+    </>
+  )
 }
 
 describe('VPSDetailPage', () => {
@@ -1689,7 +1694,7 @@ describe('VPSDetailPage', () => {
     })
   })
 
-  it('archives a VPS through the lifecycle card and refreshes detail plus timeline', async () => {
+  it.each(['archived', 'cancelled'] as const)('redirects %s VPS detail requests to archive detail', async (lifecycleStatus) => {
     const detailBody = {
       vps_id: 'vps_001',
       display_name: 'Tokyo Edge',
@@ -1708,7 +1713,7 @@ describe('VPSDetailPage', () => {
       ssh_user: 'root',
       os_name: 'Debian',
       virtualization: 'kvm',
-      lifecycle_status: 'active',
+      lifecycle_status: lifecycleStatus,
       usage_status: 'in_use',
       renewal_decision: 'keep',
       importance: 'normal',
@@ -1717,22 +1722,8 @@ describe('VPSDetailPage', () => {
       active_monitoring_instance_link_count: 0,
       created_at: '2026-05-09T08:00:00Z',
       updated_at: '2026-05-09T08:00:00Z',
-      archived_at: null,
+      archived_at: lifecycleStatus === 'archived' ? '2026-05-09T10:00:00Z' : null,
       monitoring_instance_links: [],
-    }
-    const archivedRecord = {
-      ...detailBody,
-      lifecycle_status: 'archived',
-      updated_at: '2026-05-09T10:00:00Z',
-      archived_at: '2026-05-09T10:00:00Z',
-    }
-    const refreshedTimeline = {
-      vps_id: 'vps_001',
-      renewal_decisions: [],
-      price_histories: [],
-      ip_histories: [],
-      spec_snapshots: [],
-      experience_logs: [],
     }
     const fetchMock = vi
       .fn()
@@ -1741,12 +1732,53 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse(archivedRecord))
-      .mockResolvedValueOnce(mockJSONResponse({ ...archivedRecord, monitoring_instance_links: [] }))
-      .mockResolvedValueOnce(mockJSONResponse(refreshedTimeline))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+          <Route path="/archive/:vpsId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_001'))
+    expect(screen.queryByRole('heading', { name: 'Tokyo Edge' })).not.toBeInTheDocument()
+  })
+
+  it('loads archive review and blocks archive when active subscriptions or runtime evidence remain', async () => {
+    const detailBody = {
+      ...vpsDetailBody,
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+      running_monitoring_instance_count: 0,
+      running_target_count: 0,
+    }
+    const archiveReview = {
+      vps: detailBody,
+      subscriptions: [{
+        record: subscriptionBody,
+        role: 'active',
+        recommended_action: 'cancel_subscription_first',
+        message: '订阅仍为 active。',
+      }],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: ['存在 1 条 active 订阅，必须先取消或结束订阅后才能归档。'],
+      eligible: false,
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+      .mockResolvedValueOnce(mockJSONResponse(archiveReview))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -1758,54 +1790,23 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-
     clickVPSAction('归档 VPS')
 
-    expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
-    expect(screen.getByText('不会删除 VPS、订阅、监控实例关联或资产历史。后续可恢复为闲置。')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
-
-    await waitFor(() => expect(screen.getByText('VPS 已归档，资产历史已刷新')).toBeInTheDocument())
-    expect(screen.getAllByText('已归档').length).toBeGreaterThan(0)
-    openVPSActionsMenu()
-    expect(screen.getByRole('button', { name: '恢复为闲置' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
-      method: 'PATCH',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({ lifecycle_status: 'archived' }),
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001', {
+    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    expect(within(dialog).getByText('存在 1 条 active 订阅，必须先取消或结束订阅后才能归档。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/archive-review', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/vps/vps_001/timeline', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(9, '/api/vps/vps_001/services', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(10, '/api/vps/vps_001/domains', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
+    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
-  it('keeps the archive confirmation visible and shows a lifecycle-local error when archive fails', async () => {
+  it('requires typed display name, archives through controlled API, and navigates to archive detail', async () => {
     const detailBody = {
-      vps_id: 'vps_archive_fail',
-      display_name: 'Archive Fail Edge',
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
       provider_id: null,
       provider_name: 'Unknown',
       product_name: 'cx22',
@@ -1833,6 +1834,32 @@ describe('VPSDetailPage', () => {
       archived_at: null,
       monitoring_instance_links: [],
     }
+    const archiveReview = {
+      vps: detailBody,
+      subscriptions: [{
+        record: { ...subscriptionBody, status: 'cancelled' },
+        role: 'inactive',
+        recommended_action: 'read_only_history',
+        message: '历史订阅只读保留。',
+      }],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: [],
+      eligible: true,
+    }
+    const archivedReview = {
+      ...archiveReview,
+      vps: {
+        ...detailBody,
+        lifecycle_status: 'archived',
+        archived_at: '2026-05-09T10:00:00Z',
+      },
+      blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
+      eligible: false,
+    }
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(detailBody))
@@ -1840,121 +1867,48 @@ describe('VPSDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
       .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse({ error: 'archive failed' }, 409))
+      .mockResolvedValueOnce(mockJSONResponse(archiveReview))
+      .mockResolvedValueOnce(mockJSONResponse(archivedReview))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <MemoryRouter initialEntries={['/vps/vps_archive_fail']}>
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
         <Routes>
           <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+          <Route path="/archive/:vpsId" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Archive Fail Edge' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     clickVPSAction('归档 VPS')
-    const archiveDialog = screen.getByRole('alertdialog', { name: '确认归档 VPS' })
-    fireEvent.click(within(archiveDialog).getByRole('button', { name: '确认归档' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    expect(within(dialog).getByText('输入 VPS 展示名后才能归档，服务端会再次校验资格。')).toBeInTheDocument()
+    const confirmButton = within(dialog).getByRole('button', { name: '确认归档' })
+    expect(confirmButton).toBeDisabled()
 
-    await waitFor(() =>
-      expect(within(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).getByRole('alert')).toHaveTextContent('archive failed'),
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_archive_fail', {
-      method: 'PATCH',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
+    fireEvent.change(within(dialog).getByLabelText('输入 VPS 名称确认归档'), { target: { value: 'Tokyo' } })
+    expect(confirmButton).toBeDisabled()
+    fireEvent.change(within(dialog).getByLabelText('输入 VPS 名称确认归档'), { target: { value: 'Tokyo Edge' } })
+    expect(confirmButton).toBeEnabled()
+    fireEvent.click(confirmButton)
+
+    await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_001'))
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/archive-review', {
+      headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({ lifecycle_status: 'archived' }),
     })
-  })
-
-  it('restores an archived VPS to idle through the lifecycle card', async () => {
-    const archivedDetail = {
-      vps_id: 'vps_archived',
-      display_name: 'Archived Edge',
-      provider_id: 'pv_001',
-      provider_name: 'Hetzner',
-      product_name: 'cx22',
-      order_ref: 'ord-1',
-      country: 'JP',
-      region: 'Kanto',
-      city: 'Tokyo',
-      datacenter: 'nrt',
-      ipv4: '192.0.2.3',
-      ipv6: '',
-      ssh_host: '192.0.2.3',
-      ssh_port: 22,
-      ssh_user: 'root',
-      os_name: 'Debian',
-      virtualization: 'kvm',
-      lifecycle_status: 'archived',
-      usage_status: 'idle',
-      renewal_decision: 'cancel',
-      importance: 'normal',
-      labels: ['legacy'],
-      note: 'archived',
-      active_monitoring_instance_link_count: 0,
-      created_at: '2026-05-09T08:00:00Z',
-      updated_at: '2026-05-09T08:00:00Z',
-      archived_at: '2026-05-09T08:30:00Z',
-      monitoring_instance_links: [],
-    }
-    const restoredRecord = {
-      ...archivedDetail,
-      lifecycle_status: 'idle',
-      updated_at: '2026-05-09T11:00:00Z',
-      archived_at: null,
-    }
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse(archivedDetail))
-      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
-      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
-      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse(restoredRecord))
-      .mockResolvedValueOnce(mockJSONResponse({ ...restoredRecord, monitoring_instance_links: [] }))
-      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
-      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
-      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/vps/vps_archived']}>
-        <Routes>
-          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Archived Edge' })).toBeInTheDocument())
-    expect(screen.getAllByText('已归档').length).toBeGreaterThan(0)
-    expect(screen.queryByText(/已归档时间：/)).not.toBeInTheDocument()
-
-    clickVPSAction('恢复为闲置')
-
-    expect(screen.getByRole('alertdialog', { name: '确认恢复 VPS' })).toBeInTheDocument()
-    expect(screen.getByText('不会删除或重建 VPS、订阅、监控实例关联或资产历史。')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '确认恢复' }))
-
-    await waitFor(() => expect(screen.getByText('VPS 已恢复为闲置，资产历史已刷新')).toBeInTheDocument())
-    openVPSActionsMenu()
-    expect(screen.getByRole('button', { name: '归档 VPS' })).toBeInTheDocument()
-    expect(screen.getAllByText('闲置').length).toBeGreaterThan(0)
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_archived', {
-      method: 'PATCH',
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/archive', {
+      method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({ lifecycle_status: 'idle' }),
+      body: JSON.stringify({ confirmation_name: 'Tokyo Edge' }),
     })
   })
 

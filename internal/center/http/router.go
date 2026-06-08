@@ -41,6 +41,9 @@ type RouterOptions struct {
 	VPSCancellationPreviewHandler                 stdhttp.Handler
 	VPSCancellationHandler                        stdhttp.Handler
 	VPSExtendValidityHandler                      stdhttp.Handler
+	VPSArchiveReviewHandler                       stdhttp.Handler
+	VPSArchiveHandler                             stdhttp.Handler
+	VPSRestoreFromArchiveHandler                  stdhttp.Handler
 	AssetContextMonitoringInstancesHandler        stdhttp.Handler
 	AssetContextTargetsHandler                    stdhttp.Handler
 	SubscriptionsCollectionHandler                stdhttp.Handler
@@ -171,7 +174,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil {
+	if opts.VPSItemHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil || opts.VPSArchiveReviewHandler != nil || opts.VPSArchiveHandler != nil || opts.VPSRestoreFromArchiveHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -252,6 +255,24 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSExtendValidityHandler.ServeHTTP(w, r)
+			case vpsSubtreeArchiveReview:
+				if opts.VPSArchiveReviewHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSArchiveReviewHandler.ServeHTTP(w, r)
+			case vpsSubtreeArchive:
+				if opts.VPSArchiveHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSArchiveHandler.ServeHTTP(w, r)
+			case vpsSubtreeRestoreFromArchive:
+				if opts.VPSRestoreFromArchiveHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSRestoreFromArchiveHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -458,6 +479,9 @@ const (
 	vpsSubtreeCancellationPreview      vpsSubtree = "cancellation-preview"
 	vpsSubtreeCancellation             vpsSubtree = "cancellation"
 	vpsSubtreeExtendValidity           vpsSubtree = "extend-validity"
+	vpsSubtreeArchiveReview            vpsSubtree = "archive-review"
+	vpsSubtreeArchive                  vpsSubtree = "archive"
+	vpsSubtreeRestoreFromArchive       vpsSubtree = "restore-from-archive"
 )
 
 func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
@@ -499,6 +523,12 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeCancellation
 	case "extend-validity":
 		return segments[0], vpsSubtreeExtendValidity
+	case "archive-review":
+		return segments[0], vpsSubtreeArchiveReview
+	case "archive":
+		return segments[0], vpsSubtreeArchive
+	case "restore-from-archive":
+		return segments[0], vpsSubtreeRestoreFromArchive
 	default:
 		return segments[0], vpsSubtreeUnknown
 	}
