@@ -262,6 +262,7 @@ _, err := tx.Exec(ctx, `
 - `provider_name` 是导入 / 展示兼容字符串，不能创建、更新或回填 `providers`。
 - `display_name` 必须由数据库 `vps_assets_display_name_not_blank` 约束保证 trim 后非空；领域层 create / patch 也必须校验。
 - `lifecycle_status`、`usage_status`、`renewal_decision` 使用稳定英文机器值，并分别由数据库 check 约束和领域校验共同保护。
+- VPS 列表查询支持 `AssetScope`：未显式传入时 handler 默认 `current`，排除 `lifecycle_status in ('cancelled','archived')`；`archived` 只返回这两个最终不可访问状态；`all` 不按生命周期裁剪。显式 `lifecycle_status` 精确筛选优先于 scope，避免旧状态筛选与归档入口互相冲突。
 - VPS 是业务状态主体：人工生命周期、用途、续费 / 迁移 / 取消决策只写在 `vps_assets`。Subscription 和 MonitoringInstance 只能提供账单事实与运行观测事实，不得在普通创建 / 编辑流程里要求用户重复选择业务状态。
 - `ssh_port` 默认为 `22`，数据库约束为 `1..65535`；领域 create 中 `0` 表示省略并默认，patch 中显式 `0` 必须拒绝。
 - `archived_at` 是派生字段：生命周期切到 `archived` 时补时间，从 `archived` 切出时清空；API 输入不得任意写入 `archived_at`。
@@ -280,6 +281,7 @@ _, err := tx.Exec(ctx, `
 - `monthly_price` 是后端派生字段，按 `price / billing_months` 计算并四舍五入到 4 位小数；create / patch JSON 不接受 `monthly_price`，patch 修改 `price` 或 `billing_months` 时必须重新计算。
 - `started_at` 与 `renew_at` 是 nullable `date`：未知日期用 `null`，不要写假日期。
 - `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。新用户流程不得把它暴露为必填业务状态；VPS-scoped create 默认只收 price / currency / billing cycle / dates / auto-renew / payment / note 等账单事实，内部可保留 legacy status 作为兼容和历史解释字段。
+- 订阅列表查询同样支持 `AssetScope`，通过关联 `vps_assets.lifecycle_status` 裁剪；默认 `current` 排除归档/已取消 VPS 的订阅，`asset_scope=archived` 供只读归档页查看历史订阅。订阅自身 `status='cancelled'|'expired'` 不能让 VPS 自动进入归档范围，归档边界只能来自 VPS lifecycle。
 - 订阅 CRUD 不得创建 `vps_monitoring_instance_links`、不得改写 `monitoring_instances.provider`、不得增加 Dashboard / import / currency exchange 行为。
 - 订阅 CRUD 仍不得反向改写 VPS、MonitoringInstance 或 Target；订阅取消 / 过期后如资产状态不一致，前端必须暴露 lifecycle action 入口，而不是在订阅 PATCH 中隐式停机或退役。
 - 受控例外：用户显式在 `PATCH /api/vps/{vps_id}` 将 VPS `renewal_decision` 改成取消类决策（当前为 `cancel` 或 `auto_renew_cancelled`）时，VPS patch 事务可以同步处理该 VPS 的明确订阅事实。只有恰好一条 `status='active'` 的订阅候选时，才能在同一事务里把该订阅 `auto_renew=false`、`auto_renew_cancelled=true`，并按既有 `price_histories` 机制记录自动续费字段变化；无 active 订阅或多 active 订阅时只返回 linkage status/message，不批量写订阅。
@@ -696,7 +698,7 @@ postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, 
 - active link 口径：`vps_monitoring_instance_links.unlinked_at is null`。
 - 异常关联 VPS 口径：active link 关联到 `monitoring_instances.current_health_status <> '正常'` 的 MonitoringInstance；只读 MonitoringInstance 派生状态，不改写 MonitoringInstance。
 - 成本口径：`sum(active subscriptions monthly_price)` 按 `currency` 分组，`yearly_total = monthly_total * 12`；第一阶段不做汇率换算。
-- 取消联动口径：`cancelled_vps_count` 统计 `lifecycle_status='cancelled'`；`cancellation_attention_vps_count` 统计订阅非活跃但 VPS 未取消、VPS 取消/待取消但订阅仍 active、VPS 取消/待取消但 MonitoringInstance/Target 仍运行、或取消类续费决策与 lifecycle 未对齐的 VPS；`running_cancelled_asset_count` 统计取消/待取消 VPS 下仍运行的 active MonitoringInstance link 与未归档/未暂停 Target。
+- 取消联动口径：Dashboard 只处理 current VPS，最终 `cancelled` / `archived` 不进入 `asset_summary`；`to_cancel_vps_count` 统计仍需处理的 `lifecycle_status='to_cancel'`，`cancelled_vps_count` 当前为 0 兼容字段；`cancellation_attention_vps_count` 统计 current VPS 中订阅非活跃但 lifecycle 未进入 `to_cancel`、`to_cancel` 但订阅仍 active、`to_cancel` 但 MonitoringInstance/Target 仍运行，或取消类续费决策与 lifecycle 未对齐的 VPS；`running_cancelled_asset_count` 只统计 `to_cancel` VPS 下仍运行的 active MonitoringInstance link 与未归档/未暂停 Target。
 - 该查询不得改变 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target、Agent、VPS、subscription 或 link 记录。
 - `limit` 只限制异常队列和 recent events；不得限制 `asset_summary`。
 

@@ -78,6 +78,7 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsMarksInsufficient
 	}
 	for _, snippet := range []string{
 		"price_histories",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
 		"to_monthly_price",
 		"from_monthly_price",
 		"to_currency",
@@ -113,6 +114,57 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsSkipsQueryForInva
 	}
 	if len(got) != 0 {
 		t.Fatalf("ListCostMonthBuckets() = %#v, want empty slice", got)
+	}
+}
+
+func TestPostgresSubscriptionCostRepositoryListCostRowsExcludesArchivedAndCancelledVPS(t *testing.T) {
+	t.Parallel()
+
+	var seenSQL string
+	repo := &PostgresSubscriptionCostRepository{db: fakeSubscriptionCostDB{
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			seenSQL = sql
+			return &fakeSubscriptionCostRows{}, nil
+		},
+	}}
+
+	if _, err := repo.ListCostRows(context.Background(), centersettings.SubscriptionCostSettings{
+		BaseCurrency:         "CNY",
+		ExchangeRateProvider: "frankfurter",
+	}); err != nil {
+		t.Fatalf("ListCostRows() error = %v", err)
+	}
+	for _, snippet := range []string{
+		"where s.status = 'active'",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("ListCostRows SQL missing %q in %s", snippet, seenSQL)
+		}
+	}
+}
+
+func TestPostgresSubscriptionCostRepositoryListActiveCurrenciesExcludesArchivedAndCancelledVPS(t *testing.T) {
+	t.Parallel()
+
+	var seenSQL string
+	repo := &PostgresSubscriptionCostRepository{db: fakeSubscriptionCostDB{
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			seenSQL = sql
+			return &fakeSubscriptionCostRows{}, nil
+		},
+	}}
+
+	if _, err := repo.ListActiveCurrencies(context.Background()); err != nil {
+		t.Fatalf("ListActiveCurrencies() error = %v", err)
+	}
+	for _, snippet := range []string{
+		"join vps_assets v on v.vps_id = subscriptions.vps_id",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("ListActiveCurrencies SQL missing %q in %s", snippet, seenSQL)
+		}
 	}
 }
 

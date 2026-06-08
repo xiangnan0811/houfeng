@@ -14,6 +14,7 @@ import (
 
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
+	"houfeng/internal/center/vpsassets"
 )
 
 func TestPostgresSubscriptionMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
@@ -293,6 +294,7 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 		RenewWithinDays: intPtr(30),
 		Sort:            "renew_at",
 		Order:           "desc",
+		AssetScope:      vpsassets.AssetScopeCurrent,
 	})
 	if err != nil {
 		t.Fatalf("ListSubscriptions() error = %v", err)
@@ -306,6 +308,8 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 		"renew_at <= $3::date",
 		"renew_at >= $4::date",
 		"renew_at >= current_date and renew_at <= current_date + $5::integer",
+		"exists (",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
 		"order by renew_at desc nulls last, subscription_id",
 	} {
 		if !strings.Contains(queryCalls[0], snippet) {
@@ -369,6 +373,41 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 		if !strings.Contains(rowCalls[2], snippet) {
 			t.Fatalf("PatchSubscription SQL missing %q in %q", snippet, rowCalls[2])
 		}
+	}
+}
+
+func TestPostgresSubscriptionListAppliesAssetScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		scope     vpsassets.AssetScope
+		wantSQL   string
+		rejectSQL string
+	}{
+		{name: "current", scope: vpsassets.AssetScopeCurrent, wantSQL: "v.lifecycle_status not in ('cancelled', 'archived')"},
+		{name: "archived", scope: vpsassets.AssetScopeArchived, wantSQL: "v.lifecycle_status in ('cancelled', 'archived')"},
+		{name: "all", scope: vpsassets.AssetScopeAll, rejectSQL: "lifecycle_status in ("},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var query string
+			repo := &PostgresSubscriptionRepository{db: fakeSubscriptionDB{
+				query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+					query = sql
+					return &fakeSubscriptionRows{}, nil
+				},
+			}}
+
+			if _, err := repo.ListSubscriptions(context.Background(), subscriptions.ListFilters{AssetScope: tt.scope}); err != nil {
+				t.Fatalf("ListSubscriptions() error = %v", err)
+			}
+			if tt.wantSQL != "" && !strings.Contains(query, tt.wantSQL) {
+				t.Fatalf("query = %q, want %q", query, tt.wantSQL)
+			}
+			if tt.rejectSQL != "" && strings.Contains(query, tt.rejectSQL) {
+				t.Fatalf("query = %q, do not want %q", query, tt.rejectSQL)
+			}
+		})
 	}
 }
 

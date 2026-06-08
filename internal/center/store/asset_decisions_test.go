@@ -118,6 +118,15 @@ func TestPostgresAssetDecisionRepositoryLoadsFactsWithAggregateQuery(t *testing.
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
 		}
 	}
+	factSourceStart := strings.Index(capturedSQL, "from vps_assets v")
+	factSourceOrder := strings.Index(capturedSQL, "order by lower(v.display_name)")
+	if factSourceStart < 0 || factSourceOrder < factSourceStart {
+		t.Fatalf("capturedSQL = %q, want vps asset fact source before order by", capturedSQL)
+	}
+	factSourceClause := capturedSQL[factSourceStart:factSourceOrder]
+	if !strings.Contains(factSourceClause, "where v.lifecycle_status not in ('cancelled', 'archived')") {
+		t.Fatalf("fact source SQL = %q, want current VPS lifecycle filter", factSourceClause)
+	}
 }
 
 func TestPostgresAssetDecisionRepositoryGetGroupMissing(t *testing.T) {

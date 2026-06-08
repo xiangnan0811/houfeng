@@ -174,11 +174,12 @@ func TestValidateListFilters(t *testing.T) {
 		want    error
 	}{
 		{name: "empty"},
-		{name: "valid", filters: ListFilters{VPSID: " vps_001 ", Status: " active ", RenewWithinDays: &days, Sort: " renew_at ", Order: " DESC "}},
+		{name: "valid", filters: ListFilters{VPSID: " vps_001 ", Status: " active ", RenewWithinDays: &days, Sort: " renew_at ", Order: " DESC ", AssetScope: " archived "}},
 		{name: "invalid status", filters: ListFilters{Status: "online"}, want: ErrInvalidSubscriptionInput},
 		{name: "negative renew within", filters: ListFilters{RenewWithinDays: intPtr(-1)}, want: ErrInvalidSubscriptionInput},
 		{name: "invalid sort", filters: ListFilters{Sort: "price"}, want: ErrInvalidSubscriptionInput},
 		{name: "invalid order", filters: ListFilters{Order: "later"}, want: ErrInvalidSubscriptionInput},
+		{name: "invalid asset scope", filters: ListFilters{AssetScope: "deleted"}, want: ErrInvalidSubscriptionInput},
 	}
 
 	for _, tt := range tests {
@@ -189,7 +190,7 @@ func TestValidateListFilters(t *testing.T) {
 				t.Fatalf("ValidateListFilters() error = %v, want %v", err, tt.want)
 			}
 			if tt.name == "valid" {
-				if filters.VPSID != "vps_001" || filters.Status != StatusActive || filters.Sort != SortRenewAt || filters.Order != OrderDesc {
+				if filters.VPSID != "vps_001" || filters.Status != StatusActive || filters.Sort != SortRenewAt || filters.Order != OrderDesc || filters.AssetScope != "archived" {
 					t.Fatalf("filters = %#v, want normalized filters", filters)
 				}
 			}

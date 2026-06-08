@@ -238,15 +238,109 @@ func TestPostgresDashboardRepositoryBuildsAbnormalSummaryQueries(t *testing.T) {
 		t.Fatalf("GetDashboardOverview() error = %v", err)
 	}
 
+	monitoringSQL := firstSQLContaining(capturedSQL, "mi.current_primary_issue_summary")
+	if monitoringSQL == "" {
+		t.Fatalf("capturedSQL = %#v, want monitoring instance abnormal summary query", capturedSQL)
+	}
 	for _, want := range []string{
-		"from monitoring_instances",
-		"from targets",
+		"mi.current_health_status <> '正常'",
+		"from vps_monitoring_instance_links l",
+		"l.unlinked_at is null",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"when '严重' then 3",
+		"mi.current_active_incident_count desc",
+	} {
+		if !strings.Contains(monitoringSQL, want) {
+			t.Fatalf("monitoringSQL = %q, want %q", monitoringSQL, want)
+		}
+	}
+
+	targetSQL := firstSQLContaining(capturedSQL, "t.current_primary_issue_summary")
+	if targetSQL == "" {
+		t.Fatalf("capturedSQL = %#v, want target abnormal summary query", capturedSQL)
+	}
+	for _, want := range []string{
+		"t.current_health_status <> '正常'",
+		"from asset_services",
+		"from asset_domains",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
 		"current_health_status <> '正常'",
 		"when '严重' then 3",
-		"current_active_incident_count desc",
+		"t.current_active_incident_count desc",
 	} {
-		if !containsSQL(capturedSQL, want) {
-			t.Fatalf("capturedSQL = %#v, want %q", capturedSQL, want)
+		if !strings.Contains(targetSQL, want) {
+			t.Fatalf("targetSQL = %q, want %q", targetSQL, want)
+		}
+	}
+}
+
+func TestPostgresDashboardRepositoryBuildsVisibleCurrentRuntimeCountQuery(t *testing.T) {
+	capturedSQL := ""
+	_, err := loadDashboardCounts(context.Background(), fakeDashboardQueryer{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			capturedSQL = sql
+			return fakeRow{scan: func(dest ...any) error { return nil }}
+		},
+		query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+			t.Fatal("Query() should not be called")
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("loadDashboardCounts() error = %v", err)
+	}
+	for _, want := range []string{
+		"visible_monitoring_instances as",
+		"visible_targets as",
+		"visible_events as",
+		"from vps_monitoring_instance_links l",
+		"from asset_services",
+		"from asset_domains",
+		"l.unlinked_at is null",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"from visible_monitoring_instances where current_health_status <> '正常'",
+		"from visible_targets where current_health_status <> '正常'",
+		"from visible_monitoring_instances where monitoring_status = '维护中'",
+		"from visible_targets where run_status = '维护中'",
+		"from visible_events where event_type = 'incident_started'",
+		"from visible_events where event_type = 'incident_recovered'",
+	} {
+		if !strings.Contains(capturedSQL, want) {
+			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
+		}
+	}
+}
+
+func TestLoadDashboardTrends24hDefaultsToCurrentAssetVisibility(t *testing.T) {
+	capturedSQL := ""
+	_, _, err := loadDashboardTrends24h(context.Background(), fakeDashboardQueryer{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			t.Fatal("QueryRow() should not be called")
+			return fakeRow{scan: func(dest ...any) error { return nil }}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedSQL = sql
+			return &fakeDashboardRows{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("loadDashboardTrends24h() error = %v", err)
+	}
+	for _, want := range []string{
+		"visible_events as",
+		"from state_change_events e",
+		"from visible_events e",
+		"e.object_type = 'monitoring_instance'",
+		"from monitoring_instances mi",
+		"from vps_monitoring_instance_links l",
+		"e.object_type = 'target'",
+		"from targets t",
+		"from asset_services",
+		"from asset_domains",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+	} {
+		if !strings.Contains(capturedSQL, want) {
+			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
 		}
 	}
 }
@@ -273,8 +367,16 @@ func TestPostgresDashboardRepositoryBuildsFullGroupSummaryQuery(t *testing.T) {
 		t.Fatalf("capturedSQL = %#v, want full group summary query", capturedSQL)
 	}
 	for _, want := range []string{
-		"from monitoring_instances",
-		"from targets",
+		"visible_monitoring_instances as",
+		"visible_targets as",
+		"from monitoring_instances mi",
+		"from targets t",
+		"from vps_monitoring_instance_links l",
+		"from asset_services",
+		"from asset_domains",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"from visible_monitoring_instances",
+		"from visible_targets",
 		"full outer join target_groups",
 		`coalesce(nullif(btrim("group"), ''), '未分组')`,
 		"count(*) filter (where current_health_status <> '正常')",
@@ -346,7 +448,7 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 	}
 	for _, want := range []string{
 		"from vps_assets",
-		"lifecycle_status <> 'archived'",
+		"lifecycle_status not in ('cancelled', 'archived')",
 		"cancellation_attention",
 		"cancelled_asset_runtime",
 		"from vps_monitoring_instance_links",
@@ -356,7 +458,6 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 		"renew_at <= current_date + 30",
 		"renewal_decision = 'unreviewed'",
 		"lifecycle_status = 'to_cancel'",
-		"lifecycle_status = 'cancelled'",
 		"lifecycle_status = 'to_migrate'",
 		"current_health_status <> '正常'",
 	} {
@@ -371,7 +472,9 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 	}
 	for _, want := range []string{
 		"sum(monthly_price)",
-		"where status = 'active'",
+		"join vps_assets v on v.vps_id = subscriptions.vps_id",
+		"where subscriptions.status = 'active'",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
 		"group by currency",
 		"order by currency asc",
 	} {
@@ -455,6 +558,41 @@ func TestPostgresDashboardRepositoryListEventsBuildsFilters(t *testing.T) {
 	}
 	for _, want := range []string{"object_type = $1", "object_id = $2", "severity = $3", "event_type = $4"} {
 		if !containsSQL([]string{capturedSQL}, want) {
+			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
+		}
+	}
+}
+
+func TestPostgresDashboardRepositoryListEventsDefaultsToCurrentAssetVisibility(t *testing.T) {
+	capturedSQL := ""
+	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeRow{scan: func(dest ...any) error { return nil }}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedSQL = sql
+			return &fakeDashboardRows{}, nil
+		},
+	}}
+
+	_, err := repo.ListEvents(context.Background(), EventsFilter{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	for _, want := range []string{
+		"visible_events as",
+		"from state_change_events e",
+		"e.object_type = 'monitoring_instance'",
+		"from monitoring_instances mi",
+		"from vps_monitoring_instance_links l",
+		"l.unlinked_at is null",
+		"e.object_type = 'target'",
+		"from targets t",
+		"from asset_services",
+		"from asset_domains",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+	} {
+		if !strings.Contains(capturedSQL, want) {
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
 		}
 	}

@@ -121,7 +121,7 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 		left join latest_rates lr on lr.quote_currency = s.currency
 		left join next_reminders nr on nr.subscription_id = s.subscription_id
 		where s.status = 'active'
-		  and v.lifecycle_status <> 'archived'
+		  and v.lifecycle_status not in ('cancelled', 'archived')
 		order by s.renew_at asc nulls last, s.subscription_id asc`,
 		settings.ExchangeRateProvider,
 		settings.BaseCurrency,
@@ -261,7 +261,7 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 			from buckets b
 			join subscriptions s on s.created_at < (b.bucket_start + interval '1 month')
 			join vps_assets v on v.vps_id = s.vps_id
-			where v.lifecycle_status <> 'archived'
+			where v.lifecycle_status not in ('cancelled', 'archived')
 		)
 		select
 			to_char(b.bucket_start, 'YYYY-MM') as bucket,
@@ -828,7 +828,9 @@ func (r *PostgresSubscriptionCostRepository) ListActiveCurrencies(ctx context.Co
 	rows, err := r.db.Query(ctx, `
 		select distinct currency
 		from subscriptions
+		join vps_assets v on v.vps_id = subscriptions.vps_id
 		where status = 'active'
+		  and v.lifecycle_status not in ('cancelled', 'archived')
 		order by currency asc`)
 	if err != nil {
 		return nil, fmt.Errorf("query active subscription currencies: %w", err)

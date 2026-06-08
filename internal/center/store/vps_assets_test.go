@@ -367,6 +367,41 @@ func TestPostgresVPSAssetPatchWithoutChangesReturnsExistingAsset(t *testing.T) {
 	}
 }
 
+func TestPostgresVPSAssetListAppliesAssetScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		scope     vpsassets.AssetScope
+		wantSQL   string
+		rejectSQL string
+	}{
+		{name: "current", scope: vpsassets.AssetScopeCurrent, wantSQL: "lifecycle_status not in ('cancelled', 'archived')"},
+		{name: "archived", scope: vpsassets.AssetScopeArchived, wantSQL: "lifecycle_status in ('cancelled', 'archived')"},
+		{name: "all", scope: vpsassets.AssetScopeAll, rejectSQL: "lifecycle_status in ("},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var query string
+			repo := &PostgresVPSAssetRepository{db: fakeVPSAssetDB{
+				query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+					query = sql
+					return &fakeVPSAssetRows{}, nil
+				},
+			}}
+
+			if _, err := repo.ListVPSAssets(context.Background(), vpsassets.ListFilters{AssetScope: tt.scope}); err != nil {
+				t.Fatalf("ListVPSAssets() error = %v", err)
+			}
+			if tt.wantSQL != "" && !strings.Contains(query, tt.wantSQL) {
+				t.Fatalf("query = %q, want %q", query, tt.wantSQL)
+			}
+			if tt.rejectSQL != "" && strings.Contains(query, tt.rejectSQL) {
+				t.Fatalf("query = %q, do not want %q", query, tt.rejectSQL)
+			}
+		})
+	}
+}
+
 func TestPostgresVPSAssetPatchRecordsRenewalDecisionHistory(t *testing.T) {
 	t.Parallel()
 

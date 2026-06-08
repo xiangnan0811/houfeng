@@ -54,6 +54,68 @@ func NewPostgresDashboardRepository(db *pgxpool.Pool) *PostgresDashboardReposito
 	return &PostgresDashboardRepository{db: db}
 }
 
+func dashboardCurrentMonitoringInstanceVisibilitySQL(alias string) string {
+	return fmt.Sprintf(`(
+		not exists (
+			select 1
+			from vps_monitoring_instance_links l
+			where l.monitoring_instance_id = %s.monitoring_instance_id
+			  and l.unlinked_at is null
+		)
+		or exists (
+			select 1
+			from vps_monitoring_instance_links l
+			join vps_assets v on v.vps_id = l.vps_id
+			where l.monitoring_instance_id = %s.monitoring_instance_id
+			  and l.unlinked_at is null
+			  and v.lifecycle_status not in ('cancelled', 'archived')
+		)
+	)`, alias, alias)
+}
+
+func dashboardCurrentTargetVisibilitySQL(alias string) string {
+	return fmt.Sprintf(`(
+		not exists (
+			select 1
+			from (
+				select vps_id, target_id from asset_services where target_id is not null
+				union all
+				select vps_id, target_id from asset_domains where target_id is not null
+			) a
+			where a.target_id = %s.target_id
+		)
+		or exists (
+			select 1
+			from (
+				select vps_id, target_id from asset_services where target_id is not null
+				union all
+				select vps_id, target_id from asset_domains where target_id is not null
+			) a
+			join vps_assets v on v.vps_id = a.vps_id
+			where a.target_id = %s.target_id
+			  and v.lifecycle_status not in ('cancelled', 'archived')
+		)
+	)`, alias, alias)
+}
+
+func dashboardCurrentEventVisibilitySQL(alias string) string {
+	return fmt.Sprintf(`(
+		(%s.object_type = 'monitoring_instance' and exists (
+			select 1
+			from monitoring_instances mi
+			where mi.monitoring_instance_id = %s.object_id
+			  and `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
+		))
+		or (%s.object_type = 'target' and exists (
+			select 1
+			from targets t
+			where t.target_id = %s.object_id
+			  and `+dashboardCurrentTargetVisibilitySQL("t")+`
+		))
+		or %s.object_type not in ('monitoring_instance', 'target')
+	)`, alias, alias, alias, alias, alias)
+}
+
 func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, limit int) (incidents.DashboardOverview, error) {
 	if limit <= 0 {
 		limit = 10
@@ -111,29 +173,30 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 func loadAbnormalMonitoringInstanceSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardMonitoringInstanceSummary, error) {
 	rows, err := queryer.Query(ctx, `
 		select
-			monitoring_instance_id,
-			display_name,
-			"group",
-			region,
-			city,
-			provider,
-			lifecycle_status,
-			monitoring_status,
-			current_health_status,
-			last_heartbeat_at,
-			current_active_incident_count,
-			current_primary_issue_summary
-		from monitoring_instances
-		where current_health_status <> '正常'
-		order by case current_health_status
+			mi.monitoring_instance_id,
+			mi.display_name,
+			mi."group",
+			mi.region,
+			mi.city,
+			mi.provider,
+			mi.lifecycle_status,
+			mi.monitoring_status,
+			mi.current_health_status,
+			mi.last_heartbeat_at,
+			mi.current_active_incident_count,
+			mi.current_primary_issue_summary
+		from monitoring_instances mi
+		where mi.current_health_status <> '正常'
+		  and `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
+		order by case mi.current_health_status
 			when '严重' then 3
 			when '告警' then 2
 			when '关注' then 1
 			else 0
 		end desc,
-		current_active_incident_count desc,
-		updated_at desc,
-		monitoring_instance_id asc
+		mi.current_active_incident_count desc,
+		mi.updated_at desc,
+		mi.monitoring_instance_id asc
 		limit $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query dashboard abnormal monitoring instances: %w", err)
@@ -170,29 +233,30 @@ func loadAbnormalMonitoringInstanceSummaries(ctx context.Context, queryer dashbo
 func loadAbnormalTargetSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardTargetSummary, error) {
 	rows, err := queryer.Query(ctx, `
 		select
-			target_id,
-			name,
-			target_type,
-			host,
-			base_port,
-			run_status,
-			"group",
-			current_health_status,
-			last_success_at,
-			last_failure_at,
-			current_active_incident_count,
-			current_primary_issue_summary
-		from targets
-		where current_health_status <> '正常'
-		order by case current_health_status
+			t.target_id,
+			t.name,
+			t.target_type,
+			t.host,
+			t.base_port,
+			t.run_status,
+			t."group",
+			t.current_health_status,
+			t.last_success_at,
+			t.last_failure_at,
+			t.current_active_incident_count,
+			t.current_primary_issue_summary
+		from targets t
+		where t.current_health_status <> '正常'
+		  and `+dashboardCurrentTargetVisibilitySQL("t")+`
+		order by case t.current_health_status
 			when '严重' then 3
 			when '告警' then 2
 			when '关注' then 1
 			else 0
 		end desc,
-		current_active_incident_count desc,
-		updated_at desc,
-		target_id asc
+		t.current_active_incident_count desc,
+		t.updated_at desc,
+		t.target_id asc
 		limit $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query dashboard abnormal targets: %w", err)
@@ -238,17 +302,22 @@ func loadDashboardTrends24h(ctx context.Context, queryer dashboardQueryer) ([]in
 				date_trunc('hour', now()),
 				interval '1 hour'
 			) as bucket_start
+		),
+		visible_events as (
+			select e.*
+			from state_change_events e
+			where `+dashboardCurrentEventVisibilitySQL("e")+`
 		)
 		select
 			coalesce((
 				select count(*)::int
-				from state_change_events e
+				from visible_events e
 				where e.event_type = 'incident_started'
 					and date_trunc('hour', e.created_at) = hb.bucket_start
 			), 0),
 			coalesce((
 				select count(*)::int
-				from state_change_events e
+				from visible_events e
 				where e.event_type = 'incident_recovered'
 					and date_trunc('hour', e.created_at) = hb.bucket_start
 			), 0)
@@ -278,22 +347,37 @@ func loadDashboardTrends24h(ctx context.Context, queryer dashboardQueryer) ([]in
 func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardOverview, error) {
 	var overview incidents.DashboardOverview
 	if err := queryer.QueryRow(ctx, `
+		with visible_monitoring_instances as (
+			select mi.*
+			from monitoring_instances mi
+			where `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
+		),
+		visible_targets as (
+			select t.*
+			from targets t
+			where `+dashboardCurrentTargetVisibilitySQL("t")+`
+		),
+		visible_events as (
+			select e.*
+			from state_change_events e
+			where `+dashboardCurrentEventVisibilitySQL("e")+`
+		)
 		select
-			(select count(*)::int from monitoring_instances),
-			(select count(*)::int from targets),
-			(select count(*)::int from monitoring_instances where current_health_status <> '正常'),
-			(select count(*)::int from targets where current_health_status <> '正常'),
-			(select count(*)::int from monitoring_instances where current_health_status = '严重'),
-			(select count(*)::int from targets where current_health_status = '严重'),
-			(select count(*)::int from monitoring_instances where monitoring_status = '维护中'),
-			(select count(*)::int from targets where run_status = '维护中'),
-			(select count(*)::int from monitoring_instances where lifecycle_status = '待接入' or binding_status in ('未绑定', '指纹变更待确认')),
-			(select count(*)::int from monitoring_instances where monitoring_status = '暂停'),
-			(select count(*)::int from monitoring_instances where lifecycle_status = '已退役'),
-			(select count(*)::int from targets where run_status = '暂停'),
-			(select count(*)::int from targets where run_status = '已归档'),
-			(select count(*)::int from state_change_events where event_type = 'incident_started' and created_at >= now() - interval '24 hours'),
-			(select count(*)::int from state_change_events where event_type = 'incident_recovered' and created_at >= now() - interval '24 hours')
+			(select count(*)::int from visible_monitoring_instances),
+			(select count(*)::int from visible_targets),
+			(select count(*)::int from visible_monitoring_instances where current_health_status <> '正常'),
+			(select count(*)::int from visible_targets where current_health_status <> '正常'),
+			(select count(*)::int from visible_monitoring_instances where current_health_status = '严重'),
+			(select count(*)::int from visible_targets where current_health_status = '严重'),
+			(select count(*)::int from visible_monitoring_instances where monitoring_status = '维护中'),
+			(select count(*)::int from visible_targets where run_status = '维护中'),
+			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '待接入' or binding_status in ('未绑定', '指纹变更待确认')),
+			(select count(*)::int from visible_monitoring_instances where monitoring_status = '暂停'),
+			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '已退役'),
+			(select count(*)::int from visible_targets where run_status = '暂停'),
+			(select count(*)::int from visible_targets where run_status = '已归档'),
+			(select count(*)::int from visible_events where event_type = 'incident_started' and created_at >= now() - interval '24 hours'),
+			(select count(*)::int from visible_events where event_type = 'incident_recovered' and created_at >= now() - interval '24 hours')
 	`).Scan(
 		&overview.TotalMonitoringInstanceCount,
 		&overview.TotalTargetCount,
@@ -318,14 +402,24 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 
 func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) ([]incidents.DashboardGroupSummary, error) {
 	rows, err := queryer.Query(ctx, `
-		with monitoring_instance_groups as (
+		with visible_monitoring_instances as (
+			select mi.*
+			from monitoring_instances mi
+			where `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
+		),
+		visible_targets as (
+			select t.*
+			from targets t
+			where `+dashboardCurrentTargetVisibilitySQL("t")+`
+		),
+		monitoring_instance_groups as (
 			select
 				coalesce(nullif(btrim("group"), ''), '未分组') as group_name,
 				count(*)::int as monitoring_instance_count,
 				(count(*) filter (where current_health_status <> '正常'))::int as abnormal_monitoring_instance_count,
 				(count(*) filter (where current_health_status = '严重'))::int as severe_monitoring_instance_count,
 				(count(*) filter (where monitoring_status = '维护中'))::int as maintenance_monitoring_instance_count
-			from monitoring_instances
+			from visible_monitoring_instances
 			group by 1
 		),
 		target_groups as (
@@ -335,7 +429,7 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 				(count(*) filter (where current_health_status <> '正常'))::int as abnormal_target_count,
 				(count(*) filter (where current_health_status = '严重'))::int as severe_target_count,
 				(count(*) filter (where run_status = '维护中'))::int as maintenance_target_count
-			from targets
+			from visible_targets
 			group by 1
 		)
 		select
@@ -414,12 +508,11 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 		with inventory_vps as (
 			select vps_id, lifecycle_status, renewal_decision
 			from vps_assets
-			where lifecycle_status <> 'archived'
+			where lifecycle_status not in ('cancelled', 'archived')
 		),
 		active_vps as (
 			select vps_id, lifecycle_status, renewal_decision
 			from inventory_vps
-			where lifecycle_status <> 'cancelled'
 		),
 		active_links as (
 			select distinct vps_id, monitoring_instance_id
@@ -440,7 +533,7 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 			from inventory_vps v
 			join vps_monitoring_instance_links l on l.vps_id = v.vps_id and l.unlinked_at is null
 			join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
-			where v.lifecycle_status in ('to_cancel', 'cancelled')
+			where v.lifecycle_status = 'to_cancel'
 			  and n.lifecycle_status not in ('不续费', '已退役')
 			union
 			select distinct v.vps_id, t.target_id::text as object_id
@@ -451,7 +544,7 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 				select vps_id, target_id from asset_domains where target_id is not null
 			) a on a.vps_id = v.vps_id
 			join targets t on t.target_id = a.target_id
-			where v.lifecycle_status in ('to_cancel', 'cancelled')
+			where v.lifecycle_status = 'to_cancel'
 			  and t.run_status not in ('已归档', '暂停')
 		),
 		cancellation_attention as (
@@ -459,9 +552,9 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
 			from inventory_vps v
 			join subscription_rollup sr on sr.vps_id = v.vps_id
 			where
-				(sr.inactive_subscription_count > 0 and v.lifecycle_status not in ('to_cancel', 'cancelled'))
-				or (sr.active_subscription_count > 0 and v.lifecycle_status in ('to_cancel', 'cancelled'))
-				or (v.renewal_decision in ('cancel', 'auto_renew_cancelled') and v.lifecycle_status not in ('to_cancel', 'cancelled'))
+				(sr.inactive_subscription_count > 0 and v.lifecycle_status <> 'to_cancel')
+				or (sr.active_subscription_count > 0 and v.lifecycle_status = 'to_cancel')
+				or (v.renewal_decision in ('cancel', 'auto_renew_cancelled') and v.lifecycle_status <> 'to_cancel')
 			union
 			select distinct vps_id from cancelled_asset_runtime
 		),
@@ -520,7 +613,9 @@ func loadDashboardAssetCostByCurrency(ctx context.Context, queryer dashboardQuer
 			round(sum(monthly_price)::numeric, 4)::float8 as monthly_total,
 			round((sum(monthly_price) * 12)::numeric, 4)::float8 as yearly_total
 		from subscriptions
-		where status = 'active'
+		join vps_assets v on v.vps_id = subscriptions.vps_id
+		where subscriptions.status = 'active'
+		  and v.lifecycle_status not in ('cancelled', 'archived')
 		group by currency
 		order by currency asc`)
 	if err != nil {
@@ -618,8 +713,13 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 	limitArg := len(args)
 
 	query := `
+		with visible_events as (
+			select e.*
+			from state_change_events e
+			where ` + dashboardCurrentEventVisibilitySQL("e") + `
+		)
 		select e.event_id, e.object_type, e.object_id, e.event_type, coalesce(e.severity, ''), e.summary, e.payload, e.created_at
-		from state_change_events e`
+		from visible_events e`
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
 	}

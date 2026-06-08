@@ -142,6 +142,54 @@ func TestApplyVPSCancellationRejectsArchivedVPSBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestListMonitoringInstanceAssetContextsExcludesArchivedAndCancelledVPS(t *testing.T) {
+	t.Parallel()
+
+	var seenSQL string
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			seenSQL = sql
+			return &fakeSubscriptionRows{}, nil
+		},
+	}}
+
+	if _, err := repo.ListMonitoringInstanceAssetContexts(context.Background()); err != nil {
+		t.Fatalf("ListMonitoringInstanceAssetContexts() error = %v", err)
+	}
+	for _, snippet := range []string{
+		"join vps_assets v on v.vps_id = l.vps_id",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("ListMonitoringInstanceAssetContexts SQL missing %q in %s", snippet, seenSQL)
+		}
+	}
+}
+
+func TestListTargetAssetContextsExcludesArchivedAndCancelledVPS(t *testing.T) {
+	t.Parallel()
+
+	var seenSQL string
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			seenSQL = sql
+			return &fakeSubscriptionRows{}, nil
+		},
+	}}
+
+	if _, err := repo.ListTargetAssetContexts(context.Background()); err != nil {
+		t.Fatalf("ListTargetAssetContexts() error = %v", err)
+	}
+	for _, snippet := range []string{
+		"join vps_assets v on v.vps_id = ta.vps_id",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("ListTargetAssetContexts SQL missing %q in %s", snippet, seenSQL)
+		}
+	}
+}
+
 func TestApplyVPSCancellationPersistsFailedAuditAfterRollback(t *testing.T) {
 	t.Parallel()
 
@@ -505,15 +553,23 @@ func containsString(values []string, want string) bool {
 }
 
 type fakeAssetLifecycleDB struct {
-	txs        []*fakeAssetLifecycleTx
-	beginCount int
+	txs          []*fakeAssetLifecycleTx
+	queryFunc    func(context.Context, string, ...any) (pgx.Rows, error)
+	queryRowFunc func(context.Context, string, ...any) pgx.Row
+	beginCount   int
 }
 
-func (f *fakeAssetLifecycleDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (f *fakeAssetLifecycleDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.queryFunc != nil {
+		return f.queryFunc(ctx, sql, args...)
+	}
 	return nil, errors.New("unexpected query on fake asset lifecycle db")
 }
 
-func (f *fakeAssetLifecycleDB) QueryRow(context.Context, string, ...any) pgx.Row {
+func (f *fakeAssetLifecycleDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if f.queryRowFunc != nil {
+		return f.queryRowFunc(ctx, sql, args...)
+	}
 	return fakeAssetLifecycleRowFunc(func(dest ...any) error {
 		return errors.New("unexpected query row on fake asset lifecycle db")
 	})

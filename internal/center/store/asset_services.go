@@ -43,6 +43,20 @@ const assetServiceSelectColumns = `
 	created_at,
 	updated_at`
 
+const assetServiceQualifiedSelectColumns = `
+	asset_services.service_id,
+	asset_services.vps_id,
+	asset_services.target_id,
+	asset_services.name,
+	asset_services.service_type,
+	asset_services.status,
+	asset_services.url,
+	asset_services.port,
+	asset_services.labels,
+	asset_services.note,
+	asset_services.created_at,
+	asset_services.updated_at`
+
 type assetServiceScanner interface {
 	Scan(dest ...any) error
 }
@@ -69,6 +83,10 @@ func scanAssetService(row assetServiceScanner) (assetservices.Record, error) {
 }
 
 func (r *PostgresAssetServiceRepository) ListAssetServices(ctx context.Context, filters assetservices.ListFilters) ([]assetservices.Record, error) {
+	return r.listAssetServices(ctx, filters, true)
+}
+
+func (r *PostgresAssetServiceRepository) listAssetServices(ctx context.Context, filters assetservices.ListFilters, currentAssetScope bool) ([]assetservices.Record, error) {
 	filters = assetservices.NormalizeListFilters(filters)
 	if err := assetservices.ValidateListFilters(filters); err != nil {
 		return nil, err
@@ -78,28 +96,39 @@ func (r *PostgresAssetServiceRepository) ListAssetServices(ctx context.Context, 
 	conditions := []string{}
 	if filters.VPSID != "" {
 		args = append(args, filters.VPSID)
-		conditions = append(conditions, fmt.Sprintf("vps_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("asset_services.vps_id = $%d", len(args)))
 	}
 	if filters.TargetID != "" {
 		args = append(args, filters.TargetID)
-		conditions = append(conditions, fmt.Sprintf("target_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("asset_services.target_id = $%d", len(args)))
 	}
 	if filters.ServiceType != "" {
 		args = append(args, string(filters.ServiceType))
-		conditions = append(conditions, fmt.Sprintf("service_type = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("asset_services.service_type = $%d", len(args)))
 	}
 	if filters.Status != "" {
 		args = append(args, string(filters.Status))
-		conditions = append(conditions, fmt.Sprintf("status = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("asset_services.status = $%d", len(args)))
+	}
+	if currentAssetScope {
+		conditions = append(conditions, "v.lifecycle_status not in ('cancelled', 'archived')")
 	}
 
+	selectColumns := assetServiceSelectColumns
+	if currentAssetScope {
+		selectColumns = assetServiceQualifiedSelectColumns
+	}
 	query := `
-		select ` + assetServiceSelectColumns + `
+		select ` + selectColumns + `
 		from asset_services`
+	if currentAssetScope {
+		query += `
+		join vps_assets v on v.vps_id = asset_services.vps_id`
+	}
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
 	}
-	query += " order by lower(name), service_id"
+	query += " order by lower(asset_services.name), asset_services.service_id"
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -133,7 +162,7 @@ func (r *PostgresAssetServiceRepository) ListAssetServicesForVPS(ctx context.Con
 	if !exists {
 		return nil, assetservices.ErrServiceOwnerNotFound
 	}
-	return r.ListAssetServices(ctx, assetservices.ListFilters{VPSID: vpsID})
+	return r.listAssetServices(ctx, assetservices.ListFilters{VPSID: vpsID}, false)
 }
 
 func (r *PostgresAssetServiceRepository) CreateAssetService(ctx context.Context, input assetservices.CreateInput) (assetservices.Record, error) {

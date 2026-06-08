@@ -1328,6 +1328,42 @@ func TestMonitoringInstanceRuntimeControlRejectsInvalidTransition(t *testing.T) 
 	}
 }
 
+func TestPostgresMonitoringInstanceListHidesInstancesLinkedOnlyToArchivedVPS(t *testing.T) {
+	var seenSQL string
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			seenSQL = sql
+			return &fakeMonitoringInstanceRows{}, nil
+		},
+	}}
+
+	if _, err := repo.ListMonitoringInstances(context.Background()); err != nil {
+		t.Fatalf("ListMonitoringInstances() error = %v", err)
+	}
+	for _, snippet := range []string{
+		"not exists",
+		"vps_monitoring_instance_links",
+		"unlinked_at is null",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("ListMonitoringInstances SQL missing %q in %s", snippet, seenSQL)
+		}
+	}
+}
+
+type fakeMonitoringInstanceRows struct{}
+
+func (r *fakeMonitoringInstanceRows) Close()                                       {}
+func (r *fakeMonitoringInstanceRows) Err() error                                   { return nil }
+func (r *fakeMonitoringInstanceRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (r *fakeMonitoringInstanceRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (r *fakeMonitoringInstanceRows) Next() bool                                   { return false }
+func (r *fakeMonitoringInstanceRows) Scan(...any) error                            { return nil }
+func (r *fakeMonitoringInstanceRows) Values() ([]any, error)                       { return nil, nil }
+func (r *fakeMonitoringInstanceRows) RawValues() [][]byte                          { return nil }
+func (r *fakeMonitoringInstanceRows) Conn() *pgx.Conn                              { return nil }
+
 func sourceBetween(t *testing.T, source, start, end string) string {
 	t.Helper()
 

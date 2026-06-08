@@ -602,6 +602,7 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 		left join domain_rollup dr on dr.vps_id = v.vps_id
 		left join target_rollup tr on tr.vps_id = v.vps_id
 		left join monitoring_rollup mr on mr.vps_id = v.vps_id
+		where v.lifecycle_status not in ('cancelled', 'archived')
 		order by lower(v.display_name), v.vps_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query asset decision facts: %w", err)

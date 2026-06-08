@@ -72,3 +72,41 @@ Migrated inline confirmation/edit interactions to Modal-based flows, removed Pro
 ### Next Steps
 
 - None - task complete
+
+
+## Session 179: Archive asset visibility
+
+**Date**: 2026-06-08
+**Task**: Archive asset visibility
+**Branch**: `feature/archive-asset-visibility`
+
+### Summary
+
+Moved cancelled and archived VPS out of current operations while adding a read-only archive view.
+
+### Main Changes
+
+- Added current/archived/all asset scope handling for VPS and subscriptions, with default current behavior on normal operational pages.
+- Added read-only `/archive` frontend entry and archive workspace for historical VPS, subscriptions, services, domains, and timeline data.
+- Filtered archived/cancelled VPS out of Dashboard, Monitoring/Targets visibility, asset contexts, subscription costs, and asset-decision fact sources.
+- Updated backend and web specs with archived-asset visibility contracts.
+- Verification: `git diff --check`; `./scripts/verify.sh`.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `106a59c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
