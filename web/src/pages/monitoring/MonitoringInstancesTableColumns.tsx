@@ -1,72 +1,55 @@
 import { Link } from 'react-router-dom'
 
-import { StatusBadge } from '../../components/StatusBadge'
 import {
   type DataTableColumn,
   MonoDigits,
   StatusGlyph,
   Timestamp,
-  Badge,
 } from '../../components/atoms'
 import type { AssetContextForMonitoringInstance, MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../../lib/types'
 import {
   assetContextHasAttention,
-  assetContextMessage,
   assetContextPrimarySummary,
-  subscriptionStateLabel,
-  vpsLifecycleLabel,
 } from '../assetContextSummary'
 import {
   isBindingConflictMonitoringInstance,
-  MONITORING_INSTANCE_BINDING_CONFLICT_STATUS,
   MONITORING_INSTANCE_BINDING_CONFLICT_SUMMARY,
   monitoringInstanceGlyphState,
 } from './monitoringHelpers'
-import { MonitoringInstancesActionsCell } from './MonitoringInstancesActionsCell'
 import { MonitoringInstancesLabelsCell } from './MonitoringInstancesLabelsCell'
 import { MonitoringInstancesTrendCell } from './MonitoringInstancesTrendCell'
-import type { MonitoringInstanceRuntimeAction } from './types'
 
 type BuildMonitoringInstancesTableColumnsArgs = {
   compareSet: Set<string>
   sparklines: MonitoringInstanceSparklinesResponse | null
   assetContexts: Map<string, AssetContextForMonitoringInstance>
-  editingLabelMonitoringInstanceId: string | null
-  labelDraft: string
-  groupDraft: string
-  metadataBusyMonitoringInstanceId: string | null
-  metadataErrors: Record<string, string>
-  runtimeBusyMonitoringInstanceId: string | null
-  actionButtonRefs: { current: Record<string, HTMLButtonElement | null> }
   onToggleCompare: (monitoringInstanceId: string) => void
-  onLabelDraftChange: (value: string) => void
-  onGroupDraftChange: (value: string) => void
-  onSaveLabels: (monitoringInstance: MonitoringInstanceRecord) => void
-  onCancelLabels: (monitoringInstance: MonitoringInstanceRecord) => void
-  onStartLabelEdit: (monitoringInstance: MonitoringInstanceRecord) => void
-  onRuntimeAction: (monitoringInstance: MonitoringInstanceRecord, action: MonitoringInstanceRuntimeAction) => void
-  onQueueFocusRestore: (monitoringInstanceId: string, action: MonitoringInstanceRuntimeAction) => void
+}
+
+function assetContextStatus(context: AssetContextForMonitoringInstance | undefined): { label: string; attention: boolean; detail: string | null } {
+  const primary = assetContextPrimarySummary(context)
+  if (!context || !primary) return { label: '未关联', attention: true, detail: null }
+  if (primary.lifecycle_status === 'to_cancel') return { label: '待取消', attention: true, detail: primary.display_name }
+  if (primary.lifecycle_status === 'cancelled') return { label: '已取消', attention: true, detail: primary.display_name }
+  if (primary.subscription_state === 'expired') return { label: '已过期', attention: true, detail: primary.display_name }
+  if (primary.subscription_state === 'cancelled') return { label: '已取消', attention: true, detail: primary.display_name }
+  if (primary.subscription_state === 'paused') return { label: '已暂停', attention: true, detail: primary.display_name }
+  if (primary.subscription_state === 'missing') return { label: '缺订阅', attention: true, detail: primary.display_name }
+  return { label: '已关联', attention: assetContextHasAttention(context), detail: primary.display_name }
+}
+
+function issueSummary(monitoringInstance: MonitoringInstanceRecord): string {
+  if (isBindingConflictMonitoringInstance(monitoringInstance)) return MONITORING_INSTANCE_BINDING_CONFLICT_SUMMARY
+  if (monitoringInstance.current_primary_issue_summary.trim()) return monitoringInstance.current_primary_issue_summary
+  if (!monitoringInstance.last_heartbeat_at) return '未收到心跳'
+  return '心跳'
 }
 
 export function buildMonitoringInstancesTableColumns({
   compareSet,
   sparklines,
   assetContexts,
-  editingLabelMonitoringInstanceId,
-  labelDraft,
-  groupDraft,
-  metadataBusyMonitoringInstanceId,
-  metadataErrors,
-  runtimeBusyMonitoringInstanceId,
-  actionButtonRefs,
   onToggleCompare,
-  onLabelDraftChange,
-  onGroupDraftChange,
-  onSaveLabels,
-  onCancelLabels,
-  onStartLabelEdit,
-  onRuntimeAction,
-  onQueueFocusRestore,
 }: BuildMonitoringInstancesTableColumnsArgs): DataTableColumn<MonitoringInstanceRecord>[] {
   return [
     {
@@ -106,6 +89,7 @@ export function buildMonitoringInstancesTableColumns({
     {
       key: 'identity',
       label: '监控实例',
+      width: 180,
       sortable: true,
       render: (monitoringInstance) => (
         <div className="monitoring-table__identity">
@@ -117,23 +101,14 @@ export function buildMonitoringInstancesTableColumns({
             >
               {monitoringInstance.display_name}
             </Link>
-            {monitoringInstance.monitoring_status !== '启用' ? (
-              <Badge tone={monitoringInstance.monitoring_status === '维护中' ? 'maintenance' : 'offline'}>{monitoringInstance.monitoring_status}</Badge>
-            ) : null}
-            {monitoringInstance.lifecycle_status !== '在用' && monitoringInstance.lifecycle_status !== '待接入' ? (
-              <Badge tone={monitoringInstance.lifecycle_status === '已退役' ? 'offline' : 'notice'}>{monitoringInstance.lifecycle_status}</Badge>
-            ) : null}
           </div>
-          <span className="monitoring-table__freshness">
-            心跳 <Timestamp value={monitoringInstance.last_heartbeat_at} mode="relative" />
-            {monitoringInstance.last_sync_at ? <> · 同步 <Timestamp value={monitoringInstance.last_sync_at} mode="relative" /></> : null}
-          </span>
         </div>
       ),
     },
     {
       key: 'location',
       label: '位置',
+      width: 168,
       sortable: true,
       render: (monitoringInstance) => (
         <span className="monitoring-table__location">
@@ -144,20 +119,16 @@ export function buildMonitoringInstancesTableColumns({
     {
       key: 'asset_context',
       label: '资产上下文',
+      width: 144,
       render: (monitoringInstance) => {
         const context = assetContexts.get(monitoringInstance.monitoring_instance_id)
-        const primary = assetContextPrimarySummary(context)
-        if (!context || !primary) {
-          return <span className="asset-context-pill">未关联 VPS</span>
-        }
+        const status = assetContextStatus(context)
         return (
           <div className="asset-context-cell">
-            <span className={assetContextHasAttention(context) ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
-              {assetContextMessage(context)}
+            <span className={status.attention ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
+              {status.label}
             </span>
-            <small>
-              {vpsLifecycleLabel(primary.lifecycle_status)} · {subscriptionStateLabel(primary.subscription_state)}
-            </small>
+            {status.detail ? <small>{status.detail}</small> : null}
           </div>
         )
       },
@@ -165,38 +136,32 @@ export function buildMonitoringInstancesTableColumns({
     {
       key: 'labels',
       label: '标签',
+      width: 132,
       render: (monitoringInstance) => (
-        <MonitoringInstancesLabelsCell
-          monitoringInstance={monitoringInstance}
-          editing={editingLabelMonitoringInstanceId === monitoringInstance.monitoring_instance_id}
-          labelDraft={labelDraft}
-          groupDraft={groupDraft}
-          metadataBusyMonitoringInstanceId={metadataBusyMonitoringInstanceId}
-          metadataError={metadataErrors[monitoringInstance.monitoring_instance_id]}
-          onLabelDraftChange={onLabelDraftChange}
-          onGroupDraftChange={onGroupDraftChange}
-          onSaveLabels={onSaveLabels}
-          onCancelLabels={onCancelLabels}
-        />
+        <MonitoringInstancesLabelsCell monitoringInstance={monitoringInstance} />
       ),
     },
     {
       key: 'issue',
       label: '当前主问题',
+      width: 220,
       sortable: true,
       render: (monitoringInstance) => {
-        const summary = isBindingConflictMonitoringInstance(monitoringInstance)
-          ? MONITORING_INSTANCE_BINDING_CONFLICT_SUMMARY
-          : monitoringInstance.current_primary_issue_summary || '暂无明显异常'
+        const summary = issueSummary(monitoringInstance)
         return (
           <div className="monitoring-table__issue">
             <MonoDigits className="monitoring-table__issue-count">
               {monitoringInstance.current_active_incident_count}
             </MonoDigits>
-            <span className="monitoring-table__issue-summary">{summary}</span>
-            {isBindingConflictMonitoringInstance(monitoringInstance) ? (
-              <StatusBadge label={MONITORING_INSTANCE_BINDING_CONFLICT_STATUS} />
-            ) : null}
+            <span className="monitoring-table__issue-main">
+              <span className="monitoring-table__issue-summary">{summary}</span>
+              {monitoringInstance.last_heartbeat_at ? (
+                <span className="monitoring-table__issue-heartbeat">
+                  {summary === '心跳' ? null : '心跳 '}
+                  <Timestamp value={monitoringInstance.last_heartbeat_at} mode="relative" />
+                </span>
+              ) : null}
+            </span>
           </div>
         )
       },
@@ -204,25 +169,9 @@ export function buildMonitoringInstancesTableColumns({
     {
       key: 'trends',
       label: '近 24h',
+      width: 212,
       cellClassName: 'monitoring-table__trends',
       render: (monitoringInstance) => <MonitoringInstancesTrendCell monitoringInstance={monitoringInstance} sparklines={sparklines} />,
-    },
-    {
-      key: 'actions',
-      label: '操作',
-      align: 'right',
-      render: (monitoringInstance) => (
-        <MonitoringInstancesActionsCell
-          monitoringInstance={monitoringInstance}
-          editingLabelMonitoringInstanceId={editingLabelMonitoringInstanceId}
-          metadataBusyMonitoringInstanceId={metadataBusyMonitoringInstanceId}
-          runtimeBusyMonitoringInstanceId={runtimeBusyMonitoringInstanceId}
-          actionButtonRefs={actionButtonRefs}
-          onStartLabelEdit={onStartLabelEdit}
-          onRuntimeAction={onRuntimeAction}
-          onQueueFocusRestore={onQueueFocusRestore}
-        />
-      ),
     },
   ]
 }

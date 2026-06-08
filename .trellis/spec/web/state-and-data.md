@@ -91,6 +91,37 @@ const issue = await issueMonitoringInstanceInstallCommand(monitoringInstanceId)
 setInstallIssue(issue)
 ```
 
+### MonitoringInstance 详情 metadata 与运行态合并
+
+#### Contracts
+
+- `MonitoringDetailPage` 把 `group`、`labels`、`note` 视为资料维护字段；保存必须走 `updateMonitoringInstanceMetadata(monitoringInstanceId, input, { expectedUpdatedAt })`，并通过 `If-Match` 使用当前 `updated_at`。
+- 运行控制、绑定接入确认、命令轮询、实时样本等非资料更新即使返回整条 `MonitoringInstanceRecord`，前端合并到当前 state 时也必须保留当前 `group`、`labels`、`note`。这些响应可能来自资料保存之前发出的请求，不能覆盖用户刚保存的资料。
+- 资料保存成功后只把 `group`、`labels`、`note`、`updated_at` 合并回当前监控实例，不能把保存响应里的运行态字段反向覆盖掉更新后的 `monitoring_status`、`binding_status`、`last_action` 或心跳事实。
+- 切换 `monitoringInstanceId` 时必须重建 metadata draft、清理提交中状态和错误，避免旧实例的资料草稿或错误泄漏到新实例。
+
+#### Tests Required
+
+- `MonitoringDetailPage.test.tsx` 覆盖：编辑 Group / labels / note、取消后 draft 重置、PATCH payload 含 `If-Match`、保存后页面显示新资料。
+- `MonitoringDetailPage.test.tsx` 覆盖：非资料运行态响应返回旧 `group` / `labels` / `note` 时，详情页仍保留当前资料字段。
+
+#### Wrong vs Correct
+
+```tsx
+// 错误：运行态响应整条覆盖，可能把刚保存的 Group/标签/备注打回旧值。
+setMonitoringInstance(updated)
+```
+
+```tsx
+// 正确：非资料响应只更新运行态字段，保留当前资料字段。
+setMonitoringInstance({
+  ...updated,
+  group: current.group,
+  labels: current.labels,
+  note: current.note,
+})
+```
+
 ### 数据格式化
 
 - **所有面向用户的展示格式化都集中在 `web/src/lib/format.ts`**：时间 (`formatDateTime`)、百分比 (`formatPercent`)、数值 (`formatNumber`)、字节 (`formatBytes` / `formatBytesPerSecond`)、延迟 (`formatLatency`)、运行时长 (`formatUptime`)、标签拼接 (`formatLabelList`)。

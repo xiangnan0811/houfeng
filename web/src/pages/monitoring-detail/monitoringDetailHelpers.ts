@@ -28,6 +28,19 @@ export function describeError(error: unknown, fallback: string) {
   return fallback
 }
 
+export function parseLabels(value: string) {
+  const result: string[] = []
+  const seen = new Set<string>()
+
+  for (const label of value.split(/[,，]/).map((item) => item.trim()).filter(Boolean)) {
+    if (seen.has(label)) continue
+    seen.add(label)
+    result.push(label)
+  }
+
+  return result
+}
+
 export function maskFingerprint(value?: string | null) {
   if (!value) return '尚无'
   const normalized = value.trim()
@@ -88,6 +101,7 @@ export function pauseConfirmationCurrent(monitoringInstance: MonitoringInstanceR
 export function mergeNonMetadataMonitoringInstanceRecord<T extends MonitoringInstanceRecord>(current: MonitoringInstanceRecord, updated: T): T {
   return {
     ...updated,
+    group: current.group,
     labels: current.labels,
     note: current.note,
   }

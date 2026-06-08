@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 import type { MonitoringInstanceRuntimeAction } from '../components/monitoring-detail'
@@ -20,6 +20,7 @@ import {
   rejectPendingMonitoringInstanceBinding,
   resetMonitoringInstanceBinding,
   resumeMonitoringInstanceMonitoring,
+  updateMonitoringInstanceMetadata,
 } from '../lib/api'
 import type { ActiveIncidentRecord, HostSample, HostSampleStreamMessage, MonitoringInstanceOnboardingState } from '../lib/types'
 import { MonitoringDetailPageBody } from './monitoring-detail/MonitoringDetailPageBody'
@@ -35,12 +36,14 @@ import {
   applyOnboardingRecordToMonitoringInstance,
   describeError,
   mergeNonMetadataMonitoringInstanceRecord,
+  parseLabels,
 } from './monitoring-detail/monitoringDetailHelpers'
 import type {
   BindingConflictAction,
   BindingConflictState,
   HistoryTab,
   LinkedVPSState,
+  MetadataFormState,
   MonitoringDetailPageState,
   PendingBindingConfirmation,
   PendingRuntimeConfirmation,
@@ -103,6 +106,10 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] =
     useState<PendingRuntimeConfirmation | null>(null)
+  const [metadataEditing, setMetadataEditing] = useState(false)
+  const [metadataForm, setMetadataForm] = useState<MetadataFormState>({ group: '', labels: '', note: '' })
+  const [metadataSubmitting, setMetadataSubmitting] = useState(false)
+  const [metadataError, setMetadataError] = useState<string | null>(null)
   const [bindingConflictState, setBindingConflictState] = useState<BindingConflictState>({
     requestedMonitoringInstanceId: null,
     onboarding: null,
@@ -143,6 +150,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const linkedVPSInteractionBusyRef = useRef(false)
   const currentRouteMonitoringInstanceIdRef = useRef<string | null>(monitoringInstanceId ?? null)
   const currentRequestedMonitoringInstanceIdRef = useRef<string | null>(null)
+  const metadataRequestRef = useRef(0)
   const isMountedRef = useRef(true)
   const actionButtonRefs = useRef<Record<MonitoringInstanceRuntimeAction, HTMLButtonElement | null>>({
     'enter-maintenance': null,
@@ -154,6 +162,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
 
   useEffect(() => {
     currentRouteMonitoringInstanceIdRef.current = monitoringInstanceId ?? null
+    metadataRequestRef.current += 1
   }, [monitoringInstanceId])
 
   // Deep-link: create/list redirects land here with ?onboarding=1 to open the
@@ -350,6 +359,14 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
           monitoringInstance,
           runtimeFacts,
         }))
+        setMetadataEditing(false)
+        setMetadataSubmitting(false)
+        setMetadataError(null)
+        setMetadataForm({
+          group: monitoringInstance.group || '',
+          labels: monitoringInstance.labels.join(', '),
+          note: monitoringInstance.note,
+        })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -820,6 +837,106 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     }
   }
 
+  function updateMetadataField<K extends keyof MetadataFormState>(
+    field: K,
+    value: MetadataFormState[K],
+  ) {
+    setMetadataForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function startMetadataEdit() {
+    if (!monitoringInstance) return
+    setMetadataForm({
+      group: monitoringInstance.group || '',
+      labels: monitoringInstance.labels.join(', '),
+      note: monitoringInstance.note,
+    })
+    setMetadataError(null)
+    setMetadataEditing(true)
+  }
+
+  function cancelMetadataEdit() {
+    if (!monitoringInstance) return
+    setMetadataForm({
+      group: monitoringInstance.group || '',
+      labels: monitoringInstance.labels.join(', '),
+      note: monitoringInstance.note,
+    })
+    setMetadataError(null)
+    setMetadataEditing(false)
+  }
+
+  async function handleMetadataSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!monitoringInstance || !monitoringInstanceId) return
+
+    const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
+    const requestId = metadataRequestRef.current + 1
+    metadataRequestRef.current = requestId
+    setMetadataSubmitting(true)
+    setMetadataError(null)
+
+    try {
+      const updated = await updateMonitoringInstanceMetadata(
+        actionMonitoringInstanceId,
+        {
+          group: metadataForm.group.trim() || undefined,
+          labels: parseLabels(metadataForm.labels),
+          note: metadataForm.note.trim(),
+        },
+        {
+          expectedUpdatedAt: monitoringInstance.updated_at,
+        },
+      )
+      if (
+        !isMountedRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        metadataRequestRef.current !== requestId
+      ) {
+        return
+      }
+      setState((current) => ({
+        ...current,
+        monitoringInstance:
+          current.requestedMonitoringInstanceId === actionMonitoringInstanceId && current.monitoringInstance
+            ? {
+                ...current.monitoringInstance,
+                group: updated.group,
+                labels: updated.labels,
+                note: updated.note,
+                updated_at: updated.updated_at,
+              }
+            : current.monitoringInstance,
+      }))
+      setMetadataForm({
+        group: updated.group || '',
+        labels: updated.labels.join(', '),
+        note: updated.note,
+      })
+      setMetadataEditing(false)
+    } catch (error: unknown) {
+      if (
+        !isMountedRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        metadataRequestRef.current !== requestId
+      ) {
+        return
+      }
+      setMetadataError(describeError(error, '标签或备注更新失败'))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
+        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
+        metadataRequestRef.current === requestId
+      ) {
+        setMetadataSubmitting(false)
+      }
+    }
+  }
+
   function applyOnboardingToMonitoringInstance(actionMonitoringInstanceId: string, onboarding: MonitoringInstanceOnboardingState) {
     setState((current) => {
       if (current.requestedMonitoringInstanceId !== actionMonitoringInstanceId) return current
@@ -1021,12 +1138,24 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       runtimeSubmitting={runtimeSubmitting}
       runtimeError={runtimeError}
       pendingRuntimeConfirmation={pendingRuntimeConfirmation}
+      metadataEditing={metadataEditing}
+      metadataGroupDraft={metadataForm.group}
+      metadataLabelDraft={metadataForm.labels}
+      metadataNoteDraft={metadataForm.note}
+      metadataSubmitting={metadataSubmitting}
+      metadataError={metadataError}
       onRuntimeAction={(action, confirmed) => void handleRuntimeAction(action, confirmed)}
       onCancelRuntimeConfirmation={() => {
         pendingFocusRestoreRef.current = 'pause'
         setPendingRuntimeConfirmation(null)
       }}
       registerActionRef={registerActionRef}
+      onMetadataGroupDraftChange={(value) => updateMetadataField('group', value)}
+      onMetadataLabelDraftChange={(value) => updateMetadataField('labels', value)}
+      onMetadataNoteDraftChange={(value) => updateMetadataField('note', value)}
+      onMetadataStartEdit={startMetadataEdit}
+      onMetadataCancelEdit={cancelMetadataEdit}
+      onMetadataSubmit={(event) => void handleMetadataSave(event)}
       incidents={incidents}
       events={events}
       eventsError={eventsError}

@@ -12,6 +12,7 @@ type MonitoringToolbarProps = {
   compareSet: Set<string>
   onFilterChange: (key: string, value: string | null) => void
   onAbnormalChange: (checked: boolean) => void
+  onOpenBatchPanel: () => void
 }
 
 export function MonitoringToolbar({
@@ -24,6 +25,7 @@ export function MonitoringToolbar({
   compareSet,
   onFilterChange,
   onAbnormalChange,
+  onOpenBatchPanel,
 }: MonitoringToolbarProps) {
   return (
     <>
@@ -92,7 +94,7 @@ export function MonitoringToolbar({
           </label>
         </div>
       </div>
-      <div className="mt-4 flex-row gap-2">
+      <div className="monitoring-toolbar__secondary-row">
         {compareSet.size === 2 ? (
           <Link
             className="btn sm secondary"
@@ -108,6 +110,9 @@ export function MonitoringToolbar({
         <span className="text-sm text-muted">
           勾选 2 个监控实例可进入对比视图
         </span>
+        <button type="button" className="btn sm secondary" onClick={onOpenBatchPanel}>
+          批量操作
+        </button>
       </div>
     </>
   )

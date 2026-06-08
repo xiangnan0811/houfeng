@@ -1,7 +1,7 @@
 import type { HealthState } from '../../components/atoms'
 import { formatDateTime } from '../../lib/format'
 import type { MonitoringInstanceRecord } from '../../lib/types'
-import type { MonitoringInstanceEvidenceItem, MonitoringInstanceEvidenceLead, MonitoringInstanceFilterState, MonitoringInstanceRuntimeAction } from './types'
+import type { MonitoringInstanceEvidenceItem, MonitoringInstanceEvidenceLead, MonitoringInstanceFilterState } from './types'
 
 export const MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS = [
   { value: '待接入', label: '待接入' },
@@ -75,41 +75,6 @@ export function monitoringInstanceEvidenceGlyphState(monitoringInstance: Monitor
   }
   if (isBindingConflictMonitoringInstance(monitoringInstance) || isPendingOnboardingMonitoringInstance(monitoringInstance)) return 'notice'
   return monitoringInstanceGlyphState(monitoringInstance)
-}
-
-export function parseLabels(value: string) {
-  const result: string[] = []
-  const seen = new Set<string>()
-
-  for (const label of value.split(/[,，]/).map((item) => item.trim()).filter(Boolean)) {
-    if (seen.has(label)) continue
-    seen.add(label)
-    result.push(label)
-  }
-
-  return result
-}
-
-export function monitoringInstanceRuntimeActions(
-  monitoringInstance: MonitoringInstanceRecord,
-): Array<{ action: MonitoringInstanceRuntimeAction; label: string }> {
-  const actions: Array<{ action: MonitoringInstanceRuntimeAction; label: string }> = []
-
-  if (monitoringInstance.monitoring_status === '启用') {
-    actions.push(
-      { action: 'enter-maintenance', label: '进入维护' },
-      { action: 'pause', label: '暂停监控' },
-    )
-  } else if (monitoringInstance.monitoring_status === '维护中') {
-    actions.push(
-      { action: 'exit-maintenance', label: '退出维护' },
-      { action: 'pause', label: '暂停监控' },
-    )
-  } else if (monitoringInstance.monitoring_status === '暂停') {
-    actions.push({ action: 'resume', label: '恢复监控' })
-  }
-
-  return actions
 }
 
 export function isBindingConflictMonitoringInstance(monitoringInstance: MonitoringInstanceRecord) {
@@ -298,22 +263,4 @@ export function buildMonitoringInstanceEvidenceLead(args: {
 
 export function isRuntimeAttentionMonitoringInstance(monitoringInstance: MonitoringInstanceRecord) {
   return monitoringInstance.monitoring_status === '维护中' || monitoringInstance.monitoring_status === '暂停'
-}
-
-export function pauseConfirmationCurrent(monitoringInstance: MonitoringInstanceRecord) {
-  return monitoringInstance.monitoring_status === '维护中'
-    ? '当前：监控运行状态为维护中。'
-    : '当前：监控运行状态为启用。'
-}
-
-export function mergeNonMetadataMonitoringInstanceRecord(current: MonitoringInstanceRecord, updated: MonitoringInstanceRecord): MonitoringInstanceRecord {
-  return {
-    ...updated,
-    labels: current.labels,
-    note: current.note,
-  }
-}
-
-export function actionButtonKey(monitoringInstanceId: string, action: MonitoringInstanceRuntimeAction) {
-  return `${monitoringInstanceId}:${action}`
 }

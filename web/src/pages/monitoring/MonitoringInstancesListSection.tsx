@@ -2,11 +2,7 @@ import type { DataTableColumn, DataTableSortState } from '../../components/atoms
 import { PageState } from '../../components/PageState'
 import type { MonitoringInstanceRecord } from '../../lib/types'
 import { MonitoringInstancesBatchPanel } from './MonitoringInstancesBatchPanel'
-import { MonitoringInstancesRuntimeOverlays } from './MonitoringInstancesRuntimeOverlays'
-import type {
-  MonitoringInstanceListView,
-  PendingMonitoringInstanceConfirmation,
-} from './types'
+import type { MonitoringInstanceListView } from './types'
 
 const INTERACTIVE_SELECTOR = [
   'a[href]',
@@ -37,9 +33,6 @@ type MonitoringInstancesListSectionProps = {
   commandOpen: boolean
   commandID: string
   pendingBatchAction: string | null
-  runtimeErrors: Record<string, string>
-  pendingConfirmation: PendingMonitoringInstanceConfirmation | null
-  runtimeBusyMonitoringInstanceId: string | null
   onClearAllFilters: () => void
   onSelectAllChange: (checked: boolean) => void
   onBatchAction: (action: string) => void
@@ -50,8 +43,6 @@ type MonitoringInstancesListSectionProps = {
   onCancelBatchPause: () => void
   onSortChange: (key: string) => void
   onRowClick: (monitoringInstance: MonitoringInstanceRecord) => void
-  onConfirmPause: (monitoringInstance: MonitoringInstanceRecord) => void
-  onCancelPause: (monitoringInstance: MonitoringInstanceRecord) => void
   onOpenVPSInventory: () => void
 }
 
@@ -70,9 +61,6 @@ export function MonitoringInstancesListSection({
   commandOpen,
   commandID,
   pendingBatchAction,
-  runtimeErrors,
-  pendingConfirmation,
-  runtimeBusyMonitoringInstanceId,
   onClearAllFilters,
   onSelectAllChange,
   onBatchAction,
@@ -83,8 +71,6 @@ export function MonitoringInstancesListSection({
   onCancelBatchPause,
   onSortChange,
   onRowClick,
-  onConfirmPause,
-  onCancelPause,
   onOpenVPSInventory,
 }: MonitoringInstancesListSectionProps) {
   const firstRunEmpty = baseMonitoringInstances.length === 0 && !hasActiveFilters && monitoringInstanceListView === 'all'
@@ -235,14 +221,6 @@ export function MonitoringInstancesListSection({
         </div>
       )}
 
-      <MonitoringInstancesRuntimeOverlays
-        monitoring={monitoring}
-        runtimeErrors={runtimeErrors}
-        pendingConfirmation={pendingConfirmation}
-        runtimeBusyMonitoringInstanceId={runtimeBusyMonitoringInstanceId}
-        onConfirmPause={onConfirmPause}
-        onCancelPause={onCancelPause}
-      />
     </>
   )
 }

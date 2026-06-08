@@ -36,6 +36,12 @@ export type PendingRuntimeConfirmation = {
   action: 'pause'
 }
 
+export type MetadataFormState = {
+  group: string
+  labels: string
+  note: string
+}
+
 export type LinkedVPSState = {
   requestedMonitoringInstanceId: string | null
   records: VPSSummary[]
