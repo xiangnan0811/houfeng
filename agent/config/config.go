@@ -9,17 +9,19 @@ import (
 )
 
 const (
-	DefaultBufferFile       = "/var/lib/houfeng-agent/sync-buffer.json"
-	DefaultBufferMaxEntries = 65536
-	DefaultBufferMaxAge     = 72 * time.Hour
+	DefaultBufferFile         = "/var/lib/houfeng-agent/sync-buffer.json"
+	DefaultIPQualityStateFile = "/var/lib/houfeng-agent/ip-quality-state.json"
+	DefaultBufferMaxEntries   = 65536
+	DefaultBufferMaxAge       = 72 * time.Hour
 )
 
 type AgentConfig struct {
-	ServerURL        string
-	TokenFile        string
-	BufferFile       string
-	BufferMaxEntries int
-	BufferMaxAge     time.Duration
+	ServerURL          string
+	TokenFile          string
+	BufferFile         string
+	IPQualityStateFile string
+	BufferMaxEntries   int
+	BufferMaxAge       time.Duration
 }
 
 func LoadAgentConfig() (AgentConfig, error) {
@@ -44,11 +46,12 @@ func LoadAgentConfig() (AgentConfig, error) {
 	}
 
 	return AgentConfig{
-		ServerURL:        serverURL,
-		TokenFile:        tokenFile,
-		BufferFile:       optionalEnv("HOUFENG_AGENT_BUFFER_FILE", DefaultBufferFile),
-		BufferMaxEntries: bufferMaxEntries,
-		BufferMaxAge:     bufferMaxAge,
+		ServerURL:          serverURL,
+		TokenFile:          tokenFile,
+		BufferFile:         optionalEnv("HOUFENG_AGENT_BUFFER_FILE", DefaultBufferFile),
+		IPQualityStateFile: optionalEnv("HOUFENG_AGENT_IP_QUALITY_STATE_FILE", DefaultIPQualityStateFile),
+		BufferMaxEntries:   bufferMaxEntries,
+		BufferMaxAge:       bufferMaxAge,
 	}, nil
 }
 

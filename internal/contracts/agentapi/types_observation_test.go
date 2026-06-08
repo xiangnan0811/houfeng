@@ -12,6 +12,10 @@ func intPtr(v int) *int {
 	return &v
 }
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 	observedAt, err := time.Parse(time.RFC3339, "2026-04-24T10:00:00Z")
 	if err != nil {
@@ -66,6 +70,34 @@ func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 			HTTPStatus:    intPtr(200),
 			TLSExpiryDays: intPtr(30),
 		}},
+		IPQualityReports: []agentapi.IPQualityReportPayload{{
+			ObservedAt:    observedAt,
+			AgentVersion:  "v1.2.3",
+			Fingerprint:   "fp_001",
+			SyncBatchID:   "batch_001",
+			IPAddress:     "203.0.113.10",
+			IPVersion:     4,
+			Status:        agentapi.IPQualityStatusSuccess,
+			ASN:           "AS64500",
+			Organization:  "Example Network",
+			UseRegionCode: "US",
+			RiskLevel:     "low",
+			RawJSON:       json.RawMessage(`{"Info":{"ASN":"AS64500"}}`),
+			ProviderResults: []agentapi.IPQualityProviderResultPayload{{
+				Provider:    "ipinfo",
+				UsageType:   "hosting",
+				CompanyType: "hosting",
+				RegionCode:  "US",
+				IsServer:    boolPtr(true),
+				IsVPN:       boolPtr(false),
+			}},
+			ServiceUnlocks: []agentapi.IPQualityServiceUnlockPayload{{
+				Service:    "netflix",
+				Status:     "unlocked",
+				Region:     "US",
+				UnlockType: "full",
+			}},
+		}},
 	}
 
 	payload, err := json.Marshal(original)
@@ -85,9 +117,18 @@ func TestSyncRequestRoundTripWithObservations(t *testing.T) {
 	if len(roundTrip.ProbeObservations) != 1 {
 		t.Fatalf("len(ProbeObservations) = %d, want %d", len(roundTrip.ProbeObservations), 1)
 	}
+	if len(roundTrip.IPQualityReports) != 1 {
+		t.Fatalf("len(IPQualityReports) = %d, want %d", len(roundTrip.IPQualityReports), 1)
+	}
 
 	if roundTrip.ProbeObservations[0].TargetID != "tg_001" {
 		t.Fatalf("ProbeObservations[0].TargetID = %q, want %q", roundTrip.ProbeObservations[0].TargetID, "tg_001")
+	}
+	if roundTrip.IPQualityReports[0].ProviderResults[0].Provider != "ipinfo" {
+		t.Fatalf("Provider = %q, want ipinfo", roundTrip.IPQualityReports[0].ProviderResults[0].Provider)
+	}
+	if roundTrip.IPQualityReports[0].ServiceUnlocks[0].Service != "netflix" {
+		t.Fatalf("Service = %q, want netflix", roundTrip.IPQualityReports[0].ServiceUnlocks[0].Service)
 	}
 }
 
@@ -110,6 +151,9 @@ func TestSyncRequestOmitsObservationAdjunctsWithoutHeartbeatCarrier(t *testing.T
 	}
 	if _, ok := got["probe_observations"]; ok {
 		t.Fatalf("payload unexpectedly included probe_observations: %s", payload)
+	}
+	if _, ok := got["ip_quality_reports"]; ok {
+		t.Fatalf("payload unexpectedly included ip_quality_reports: %s", payload)
 	}
 }
 

@@ -40,6 +40,7 @@ func TestLoadAgentConfigProvidesDurableBufferDefaults(t *testing.T) {
 	t.Setenv("HOUFENG_AGENT_BUFFER_FILE", "")
 	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_ENTRIES", "")
 	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_AGE", "")
+	t.Setenv("HOUFENG_AGENT_IP_QUALITY_STATE_FILE", "")
 
 	cfg, err := agentconfig.LoadAgentConfig()
 	if err != nil {
@@ -54,6 +55,9 @@ func TestLoadAgentConfigProvidesDurableBufferDefaults(t *testing.T) {
 	if cfg.BufferMaxAge != 72*time.Hour {
 		t.Fatalf("BufferMaxAge = %s, want 72h", cfg.BufferMaxAge)
 	}
+	if cfg.IPQualityStateFile != "/var/lib/houfeng-agent/ip-quality-state.json" {
+		t.Fatalf("IPQualityStateFile = %q, want default", cfg.IPQualityStateFile)
+	}
 }
 
 func TestLoadAgentConfigAcceptsDurableBufferOverrides(t *testing.T) {
@@ -62,12 +66,16 @@ func TestLoadAgentConfigAcceptsDurableBufferOverrides(t *testing.T) {
 	t.Setenv("HOUFENG_AGENT_BUFFER_FILE", "/tmp/houfeng-buffer.json")
 	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_ENTRIES", "17")
 	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_AGE", "2h")
+	t.Setenv("HOUFENG_AGENT_IP_QUALITY_STATE_FILE", "/tmp/ip-quality-state.json")
 
 	cfg, err := agentconfig.LoadAgentConfig()
 	if err != nil {
 		t.Fatalf("LoadAgentConfig() error = %v", err)
 	}
-	if cfg.BufferFile != "/tmp/houfeng-buffer.json" || cfg.BufferMaxEntries != 17 || cfg.BufferMaxAge != 2*time.Hour {
+	if cfg.BufferFile != "/tmp/houfeng-buffer.json" ||
+		cfg.BufferMaxEntries != 17 ||
+		cfg.BufferMaxAge != 2*time.Hour ||
+		cfg.IPQualityStateFile != "/tmp/ip-quality-state.json" {
 		t.Fatalf("config = %#v, want buffer overrides", cfg)
 	}
 }

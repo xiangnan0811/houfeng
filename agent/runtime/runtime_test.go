@@ -158,6 +158,42 @@ func (f *fakeProbeProvider) CollectDue(_ context.Context, plan *agentapi.SyncPla
 	return out, nil
 }
 
+type fakeIPQualityProvider struct {
+	startCalls        int
+	drainCalls        int
+	lastPlan          *agentapi.IPQualityPlan
+	startErr          error
+	reports           []agentapi.IPQualityReportPayload
+	reportsAfterStart []agentapi.IPQualityReportPayload
+}
+
+func (f *fakeIPQualityProvider) MaybeStart(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) error {
+	f.startCalls++
+	f.lastPlan = plan
+	if f.startErr != nil {
+		return f.startErr
+	}
+	if plan == nil || !plan.Enabled {
+		return nil
+	}
+	if len(f.reportsAfterStart) > 0 {
+		f.reports = append(f.reports, f.reportsAfterStart...)
+		f.reportsAfterStart = nil
+	}
+	go func() {
+		<-ctx.Done()
+	}()
+	_ = observedAt
+	return nil
+}
+
+func (f *fakeIPQualityProvider) DrainReports() []agentapi.IPQualityReportPayload {
+	f.drainCalls++
+	out := append([]agentapi.IPQualityReportPayload(nil), f.reports...)
+	f.reports = nil
+	return out
+}
+
 type fakeSyncQueue struct {
 	enqueueErr error
 	listErr    error
@@ -429,7 +465,7 @@ func TestRuntimeReturnsMissingSyncTokenErrorForBoundEnrollment(t *testing.T) {
 func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
-		cancelAfterSyncs: 2,
+		cancelAfterSyncs: 3,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -448,6 +484,7 @@ func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testi
 					}},
 				},
 			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 		},
 	}
@@ -515,7 +552,7 @@ func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testi
 func TestRuntimeLogsHostSampleFailureAndContinuesHeartbeatSync(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
-		cancelAfterSyncs: 2,
+		cancelAfterSyncs: 3,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -524,6 +561,7 @@ func TestRuntimeLogsHostSampleFailureAndContinuesHeartbeatSync(t *testing.T) {
 					HostSampleFrequencyTier: agentapi.FrequencyTier1m,
 				},
 			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 		},
 	}
@@ -752,7 +790,7 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 	actionID := "act_001"
 	commandID := "uptime"
 	client := &fakeClient{
-		cancelAfterSyncs: 2,
+		cancelAfterSyncs: 3,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -765,6 +803,7 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 					},
 				},
 			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 		},
 	}
@@ -807,7 +846,7 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
-		cancelAfterSyncs: 2,
+		cancelAfterSyncs: 3,
 		syncResponses: []agentapi.SyncResponse{
 			{
 				AcceptedAt: time.Now().UTC(),
@@ -820,6 +859,7 @@ func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
 					},
 				},
 			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 		},
 	}
@@ -842,6 +882,202 @@ func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
 	secondSync := client.syncRequests[1]
 	if len(secondSync.CommandResults) != 0 {
 		t.Fatalf("secondSync.CommandResults = %d, want 0 for unknown command ID", len(secondSync.CommandResults))
+	}
+}
+
+func TestRuntimeStartsIPQualityCollectionAfterPlanWithoutBlockingHeartbeat(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	ipProvider := &fakeIPQualityProvider{}
+	client := &fakeClient{
+		cancelAfterSyncs: 3,
+		syncResponses: []agentapi.SyncResponse{
+			{
+				AcceptedAt: time.Now().UTC(),
+				Status:     "accepted",
+				Plan: &agentapi.SyncPlan{
+					IPQualityPlan: &agentapi.IPQualityPlan{
+						Enabled:          true,
+						FrequencySeconds: 86400,
+						TimeoutSeconds:   15,
+						Services:         []string{"netflix"},
+					},
+				},
+			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+		},
+	}
+
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client.cancel = cancel
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if client.syncCalls < 2 {
+		t.Fatalf("Sync() calls = %d, want at least 2", client.syncCalls)
+	}
+	if len(client.syncRequests[0].IPQualityReports) != 0 {
+		t.Fatalf("first sync IPQualityReports = %#v, want none before plan", client.syncRequests[0].IPQualityReports)
+	}
+	if ipProvider.startCalls == 0 {
+		t.Fatal("IP quality provider was not started after plan")
+	}
+	if ipProvider.lastPlan == nil || !ipProvider.lastPlan.Enabled || ipProvider.lastPlan.Services[0] != "netflix" {
+		t.Fatalf("last IP quality plan = %#v, want enabled plan", ipProvider.lastPlan)
+	}
+}
+
+func TestRuntimeDrainsCompletedIPQualityReportIntoNextSync(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	ipProvider := &fakeIPQualityProvider{
+		reportsAfterStart: []agentapi.IPQualityReportPayload{{
+			ObservedAt: time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC),
+			IPAddress:  "203.0.113.10",
+			IPVersion:  4,
+			Status:     agentapi.IPQualityStatusSuccess,
+		}},
+	}
+	client := &fakeClient{
+		cancelAfterSyncs: 3,
+		syncResponses: []agentapi.SyncResponse{
+			{
+				AcceptedAt: time.Now().UTC(),
+				Status:     "accepted",
+				Plan: &agentapi.SyncPlan{
+					IPQualityPlan: &agentapi.IPQualityPlan{
+						Enabled:          true,
+						FrequencySeconds: 86400,
+						TimeoutSeconds:   15,
+					},
+				},
+			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+		},
+	}
+
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client.cancel = cancel
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if client.syncCalls < 3 {
+		t.Fatalf("Sync() calls = %d, want at least 3", client.syncCalls)
+	}
+	secondSync := client.syncRequests[1]
+	if len(secondSync.IPQualityReports) != 0 {
+		t.Fatalf("second sync IPQualityReports = %#v, want collection to start without blocking heartbeat", secondSync.IPQualityReports)
+	}
+	thirdSync := client.syncRequests[2]
+	if len(thirdSync.IPQualityReports) != 1 {
+		t.Fatalf("len(thirdSync.IPQualityReports) = %d, want 1", len(thirdSync.IPQualityReports))
+	}
+	report := thirdSync.IPQualityReports[0]
+	if report.AgentVersion != "dev" || report.Fingerprint != "fp-001" || report.SyncBatchID == "" {
+		t.Fatalf("report metadata = %#v, want runtime-filled metadata", report)
+	}
+	if report.IPAddress != "203.0.113.10" || report.Status != agentapi.IPQualityStatusSuccess {
+		t.Fatalf("report = %#v, want completed report", report)
+	}
+}
+
+func TestRuntimeDoesNotStartIPQualityWhenPlanDisabled(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	ipProvider := &fakeIPQualityProvider{}
+	client := &fakeClient{
+		cancelAfterSyncs: 3,
+		syncResponses: []agentapi.SyncResponse{
+			{
+				AcceptedAt: time.Now().UTC(),
+				Status:     "accepted",
+				Plan: &agentapi.SyncPlan{
+					IPQualityPlan: &agentapi.IPQualityPlan{
+						Enabled:          false,
+						FrequencySeconds: 86400,
+					},
+				},
+			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+		},
+	}
+
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client.cancel = cancel
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if ipProvider.startCalls != 0 {
+		t.Fatalf("IP quality start calls = %d, want 0 for disabled plan", ipProvider.startCalls)
+	}
+}
+
+func TestRuntimeUploadsIPQualityFailureReport(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	ipProvider := &fakeIPQualityProvider{
+		reportsAfterStart: []agentapi.IPQualityReportPayload{{
+			ObservedAt:      time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC),
+			IPAddress:       "0.0.0.0",
+			IPVersion:       4,
+			Status:          agentapi.IPQualityStatusFailure,
+			ErrorCode:       "lookup_failed",
+			ErrorSummary:    "upstream unavailable",
+			AgentVersion:    "collector-version",
+			Fingerprint:     "collector-fp",
+			SyncBatchID:     "collector-batch",
+			IsBackfilled:    false,
+			ProviderResults: nil,
+		}},
+	}
+	client := &fakeClient{
+		cancelAfterSyncs: 3,
+		syncResponses: []agentapi.SyncResponse{
+			{
+				AcceptedAt: time.Now().UTC(),
+				Status:     "accepted",
+				Plan: &agentapi.SyncPlan{
+					IPQualityPlan: &agentapi.IPQualityPlan{Enabled: true, FrequencySeconds: 86400},
+				},
+			},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
+		},
+	}
+
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client.cancel = cancel
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if client.syncCalls < 3 {
+		t.Fatalf("Sync() calls = %d, want at least 3", client.syncCalls)
+	}
+	thirdSync := client.syncRequests[2]
+	if len(thirdSync.IPQualityReports) != 1 {
+		t.Fatalf("len(thirdSync.IPQualityReports) = %d, want 1", len(thirdSync.IPQualityReports))
+	}
+	report := thirdSync.IPQualityReports[0]
+	if report.Status != agentapi.IPQualityStatusFailure || report.ErrorCode != "lookup_failed" {
+		t.Fatalf("failure report = %#v, want failure uploaded", report)
+	}
+	if report.AgentVersion != "collector-version" || report.Fingerprint != "collector-fp" || report.SyncBatchID != "collector-batch" {
+		t.Fatalf("report metadata overwritten = %#v, want collector metadata preserved when present", report)
 	}
 }
 

@@ -226,6 +226,9 @@ func WithBackfilledFacts(request agentapi.SyncRequest, backfilled bool) agentapi
 	for i := range cloned.ProbeObservations {
 		cloned.ProbeObservations[i].IsBackfilled = backfilled
 	}
+	for i := range cloned.IPQualityReports {
+		cloned.IPQualityReports[i].IsBackfilled = backfilled
+	}
 	return cloned
 }
 
@@ -425,5 +428,20 @@ func cloneRequest(request agentapi.SyncRequest) agentapi.SyncRequest {
 	cloned.Heartbeats = append([]agentapi.MonitoringInstanceHeartbeat(nil), request.Heartbeats...)
 	cloned.HostSamples = append([]agentapi.HostSamplePayload(nil), request.HostSamples...)
 	cloned.ProbeObservations = append([]agentapi.ProbeObservationPayload(nil), request.ProbeObservations...)
+	cloned.IPQualityReports = cloneIPQualityReports(request.IPQualityReports)
+	return cloned
+}
+
+func cloneIPQualityReports(reports []agentapi.IPQualityReportPayload) []agentapi.IPQualityReportPayload {
+	if len(reports) == 0 {
+		return nil
+	}
+	cloned := make([]agentapi.IPQualityReportPayload, len(reports))
+	for i, report := range reports {
+		cloned[i] = report
+		cloned[i].RawJSON = append([]byte(nil), report.RawJSON...)
+		cloned[i].ProviderResults = append([]agentapi.IPQualityProviderResultPayload(nil), report.ProviderResults...)
+		cloned[i].ServiceUnlocks = append([]agentapi.IPQualityServiceUnlockPayload(nil), report.ServiceUnlocks...)
+	}
 	return cloned
 }
