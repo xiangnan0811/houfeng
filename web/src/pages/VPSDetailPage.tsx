@@ -18,6 +18,7 @@ import {
   getVPSArchiveReview,
   getVPSAsset,
   getVPSCancellationPreview,
+  getVPSIPQuality,
   getVPSTimeline,
   linkVPSMonitoringInstance,
   listMonitoringInstances,
@@ -44,6 +45,7 @@ import type {
   SubscriptionRecord,
   UpdateVPSAssetInput,
   VPSAssetDetail,
+  VPSIPQualityReport,
   VPSMonitoringInstanceSummary,
 } from '../lib/types'
 import { VPSDecisionBoard } from './vps-detail/VPSDecisionBoard'
@@ -56,6 +58,7 @@ import { VPSDomainsSection } from './vps-detail/VPSDomainsSection'
 import { VPSExperienceLogForm } from './vps-detail/VPSExperienceLogForm'
 import { VPSFactsEditForm } from './vps-detail/VPSFactsEditForm'
 import { VPSFactsSection } from './vps-detail/VPSFactsSection'
+import { VPSIPQualitySection } from './vps-detail/VPSIPQualitySection'
 import { VPSLifecycleCard } from './vps-detail/VPSLifecycleCard'
 import { VPSMonitoringInstanceCreateForm } from './vps-detail/VPSMonitoringInstanceCreateForm'
 import { VPSMonitoringInstanceLinkForm } from './vps-detail/VPSMonitoringInstanceLinkForm'
@@ -133,6 +136,39 @@ async function loadCancellationPreview(targetVPSId: string): Promise<{
     return {
       cancellationPreview: null,
       cancellationPreviewError: describeError(error, '加载取消/退役预览失败'),
+    }
+  }
+}
+
+async function loadIPQuality(targetVPSId: string, detail: VPSAssetDetail): Promise<{
+  ipQuality: VPSIPQualityReport | null
+  ipQualityError: string | null
+}> {
+  if (!detail.ip_quality_summary) {
+    return {
+      ipQuality: {
+        summary: null,
+        latest_report: null,
+        provider_results: [],
+        service_unlocks: [],
+        history: [],
+      },
+      ipQualityError: null,
+    }
+  }
+  try {
+    const ipQuality = await getVPSIPQuality(targetVPSId)
+    return { ipQuality, ipQualityError: null }
+  } catch (error: unknown) {
+    return {
+      ipQuality: {
+        summary: detail.ip_quality_summary,
+        latest_report: null,
+        provider_results: [],
+        service_unlocks: [],
+        history: [],
+      },
+      ipQualityError: describeError(error, '加载 IP 质量报告失败'),
     }
   }
 }
@@ -286,17 +322,21 @@ export function VPSDetailPage() {
 
     let cancelled = false
 
-    Promise.all([
-      getVPSAsset(vpsId),
-      getVPSTimeline(vpsId),
-      listVPSServices(vpsId),
-      listVPSDomains(vpsId),
-      loadSubscriptions(vpsId),
-      openCancellationFromQuery ? loadCancellationPreview(vpsId) : Promise.resolve({ cancellationPreview: null, cancellationPreviewError: null }),
-    ])
-      .then(([detail, timeline, services, domains, subscriptionState, cancellationState]) => {
-        if (cancelled) return
+    getVPSAsset(vpsId)
+      .then(async (detail) => {
         const normalizedDetail = normalizeVPSDetail(detail)
+        const [timeline, services, domains, subscriptionState, ipQualityState, cancellationState] = await Promise.all([
+          getVPSTimeline(vpsId),
+          listVPSServices(vpsId),
+          listVPSDomains(vpsId),
+          loadSubscriptions(vpsId),
+          loadIPQuality(vpsId, normalizedDetail),
+          openCancellationFromQuery ? loadCancellationPreview(vpsId) : Promise.resolve({ cancellationPreview: null, cancellationPreviewError: null }),
+        ])
+        return { normalizedDetail, timeline, services, domains, subscriptionState, ipQualityState, cancellationState }
+      })
+      .then(({ normalizedDetail, timeline, services, domains, subscriptionState, ipQualityState, cancellationState }) => {
+        if (cancelled) return
         if (normalizedDetail.lifecycle_status === 'archived' || normalizedDetail.lifecycle_status === 'cancelled') {
           navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true })
           return
@@ -310,6 +350,8 @@ export function VPSDetailPage() {
           domains,
           subscriptions: subscriptionState.subscriptions,
           subscriptionsError: subscriptionState.subscriptionsError,
+          ipQuality: ipQualityState.ipQuality,
+          ipQualityError: ipQualityState.ipQualityError,
           cancellationPreview: cancellationState.cancellationPreview,
           cancellationPreviewError: cancellationState.cancellationPreviewError,
           cancellationResult: null,
@@ -364,6 +406,8 @@ export function VPSDetailPage() {
           domains: [],
           subscriptions: [],
           subscriptionsError: null,
+          ipQuality: null,
+          ipQualityError: null,
           cancellationPreview: null,
           cancellationPreviewError: null,
           cancellationResult: null,
@@ -397,14 +441,14 @@ export function VPSDetailPage() {
   }
 
   async function refreshDetailAndTimeline(targetVPSId: string): Promise<VPSAssetDetail> {
-    const [detailResult, timeline, services, domains, subscriptionState] = await Promise.all([
-      getVPSAsset(targetVPSId),
+    const detailResult = normalizeVPSDetail(await getVPSAsset(targetVPSId))
+    const [timeline, services, domains, subscriptionState, ipQualityState] = await Promise.all([
       getVPSTimeline(targetVPSId),
       listVPSServices(targetVPSId),
       listVPSDomains(targetVPSId),
       loadSubscriptions(targetVPSId),
+      loadIPQuality(targetVPSId, detailResult),
     ])
-    const detail = normalizeVPSDetail(detailResult)
     setState((current) => {
       const keepCancellationResult = current.vpsId === targetVPSId ? current.cancellationResult : null
       const keepCancellationPreview = current.vpsId === targetVPSId ? current.cancellationPreview : null
@@ -412,18 +456,20 @@ export function VPSDetailPage() {
       return {
         vpsId: targetVPSId,
         error: null,
-        detail,
+        detail: detailResult,
         timeline,
         services,
         domains,
         subscriptions: subscriptionState.subscriptions,
         subscriptionsError: subscriptionState.subscriptionsError,
+        ipQuality: ipQualityState.ipQuality,
+        ipQualityError: ipQualityState.ipQualityError,
         cancellationPreview: keepCancellationPreview,
         cancellationPreviewError: keepCancellationPreviewError,
         cancellationResult: keepCancellationResult,
       }
     })
-    return detail
+    return detailResult
   }
 
   async function refreshServices(targetVPSId: string): Promise<AssetServiceRecord[]> {
@@ -1441,6 +1487,8 @@ export function VPSDetailPage() {
         onOpenDomains={() => openDrawer('domains-detail')}
         onOpenTimeline={() => openDrawer('timeline-detail')}
       />
+
+      <VPSIPQualitySection report={state.ipQuality} error={state.ipQualityError} />
 
       <section className="page-panel vps-cost-card">
         <div className="section-heading section-heading--inline">

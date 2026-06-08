@@ -1,6 +1,7 @@
 import { Badge, type BadgeTone } from '../components/atoms'
 import type {
   SubscriptionStatus,
+  IPQualitySummary,
   VPSLifecycleStatus,
   VPSRenewalDecision,
   VPSUsageStatus,
@@ -39,6 +40,42 @@ function statusBadge(label: string) {
   return (
     <Badge variant="state" tone={badgeToneForLabel(label)}>
       {label}
+    </Badge>
+  )
+}
+
+function normalizeRiskLevel(value?: string): string {
+  const risk = (value ?? '').trim().toLowerCase()
+  if (risk === 'low' || risk === 'clean' || risk === 'safe') return '低风险'
+  if (risk === 'medium' || risk === 'moderate') return '中风险'
+  if (risk === 'high') return '高风险'
+  if (risk === 'critical') return '严重风险'
+  return risk || '未评级'
+}
+
+function ipQualityTone(summary?: IPQualitySummary | null): BadgeTone {
+  if (!summary || summary.ambiguous || summary.stale || summary.status !== 'success') return 'notice'
+  const risk = (summary.risk_level ?? '').trim().toLowerCase()
+  if (risk === 'high') return 'alert'
+  if (risk === 'critical') return 'critical'
+  if (risk === 'medium' || risk === 'moderate') return 'notice'
+  return 'normal'
+}
+
+export function IPQualityBadge({ summary }: { summary?: IPQualitySummary | null }) {
+  if (!summary) {
+    return <Badge variant="state" tone="notice">IP 未采集</Badge>
+  }
+  if (summary.ambiguous) {
+    return <Badge variant="state" tone="notice">IP 归属不唯一</Badge>
+  }
+  if (summary.status !== 'success') {
+    return <Badge variant="state" tone="notice">IP 未完成</Badge>
+  }
+  const suffix = summary.use_region_code || summary.use_region_name
+  return (
+    <Badge variant="state" tone={ipQualityTone(summary)}>
+      {`IP ${normalizeRiskLevel(summary.risk_level)}${summary.stale ? ' · 过期' : suffix ? ` · ${suffix}` : ''}`}
     </Badge>
   )
 }

@@ -603,7 +603,17 @@ export type SettingsRecord = {
   incident_defaults: IncidentDefaults
   override_rules: OverrideRules
   retention_policy: RetentionPolicy
+  ip_quality_settings: IPQualitySettings
   subscription_cost_settings: SubscriptionCostSettings
+}
+
+export type IPQualitySettings = {
+  enabled: boolean
+  frequency_seconds: number
+  timeout_seconds: number
+  raw_retention_days: number
+  history_retention_days: number
+  services: string[]
 }
 
 export type MonitoringInstanceSparklinesResponse = {
@@ -793,9 +803,92 @@ export type VPSAssetRecord = {
   active_monitoring_instance_link_count: number
   running_monitoring_instance_count?: number
   running_target_count?: number
+  ip_quality_summary?: IPQualitySummary | null
   created_at: string
   updated_at: string
   archived_at?: string | null
+}
+
+export type IPQualityProviderResult = {
+  provider: string
+  usage_type?: string
+  company_type?: string
+  risk_level?: string
+  risk_score?: string
+  region_code?: string
+  region_name?: string
+  is_proxy?: boolean | null
+  is_tor?: boolean | null
+  is_vpn?: boolean | null
+  is_server?: boolean | null
+  is_abuser?: boolean | null
+  is_robot?: boolean | null
+  error_code?: string
+  error_summary?: string
+}
+
+export type IPQualityServiceUnlock = {
+  service: string
+  status: string
+  region?: string
+  unlock_type?: string
+  error_code?: string
+  error_summary?: string
+}
+
+export type IPQualitySummary = {
+  vps_id?: string
+  observed_at: string
+  ip_address: string
+  ip_version: number
+  status: string
+  risk_level?: string
+  use_region_code?: string
+  use_region_name?: string
+  asn?: string
+  organization?: string
+  stale: boolean
+  ambiguous: boolean
+  assignment_mode?: string
+  error_code?: string
+  error_summary?: string
+  provider_count: number
+  unlockable_count: number
+}
+
+export type IPQualityReport = {
+  report_id: string
+  monitoring_instance_id: string
+  observed_at: string
+  received_at: string
+  agent_version: string
+  fingerprint: string
+  sync_batch_id: string
+  ip_address: string
+  ip_version: number
+  status: string
+  asn?: string
+  organization?: string
+  latitude?: number | null
+  longitude?: number | null
+  use_region_code?: string
+  use_region_name?: string
+  registered_region_code?: string
+  registered_region_name?: string
+  risk_level?: string
+  error_code?: string
+  error_summary?: string
+  is_backfilled: boolean
+  created_at: string
+  raw_json?: unknown
+}
+
+export type VPSIPQualityReport = {
+  summary?: IPQualitySummary | null
+  latest_report?: IPQualityReport | null
+  provider_results: IPQualityProviderResult[]
+  service_unlocks: IPQualityServiceUnlock[]
+  history: IPQualitySummary[]
 }
 
 export type RenewalSubscriptionLinkage = {
@@ -858,6 +951,11 @@ export type AssetDecisionEvidenceKind =
   | 'no_service_context'
   | 'subscription_unavailable'
   | 'current_fact_missing'
+  | 'ip_quality_missing'
+  | 'ip_quality_stale'
+  | 'ip_quality_risk'
+  | 'ip_egress_mismatch'
+  | 'media_unlock_blocked'
 
 export type AssetDecisionSourceAvailability = {
   subscriptions: boolean
@@ -1260,6 +1358,9 @@ export type AssetDecisionExecutionCurrentFacts = {
   running_monitoring_count: number
   abnormal_monitoring_count: number
   active_incident_count: number
+  ip_quality_summary?: IPQualitySummary | null
+  ip_quality_provider_risk_signal_count?: number
+  ip_quality_blocked_services?: string[]
   source_availability: AssetDecisionSourceAvailability
 }
 
@@ -2180,5 +2281,6 @@ export type SettingsUpdateInput = {
   incident_defaults: IncidentDefaults
   override_rules: OverrideRules
   retention_policy: RetentionPolicy
+  ip_quality_settings: IPQualitySettings
   subscription_cost_settings?: SubscriptionCostSettingsUpdateInput
 }

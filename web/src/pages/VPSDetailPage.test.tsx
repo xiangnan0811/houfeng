@@ -16,6 +16,73 @@ const timelineEmptyBody = {
 const servicesEmptyBody: unknown[] = []
 const domainsEmptyBody: unknown[] = []
 
+const ipQualitySummaryBody = {
+  vps_id: 'vps_001',
+  observed_at: '2026-06-08T12:00:00Z',
+  ip_address: '192.0.2.1',
+  ip_version: 4,
+  status: 'success',
+  risk_level: 'high',
+  use_region_code: 'JP',
+  use_region_name: 'Japan',
+  asn: 'AS64500',
+  organization: 'Example Transit',
+  stale: false,
+  ambiguous: false,
+  assignment_mode: 'link',
+  provider_count: 2,
+  unlockable_count: 1,
+}
+
+const ipQualityReportBody = {
+  summary: ipQualitySummaryBody,
+  latest_report: {
+    report_id: 'ipq_001',
+    monitoring_instance_id: 'mi_001',
+    observed_at: '2026-06-08T12:00:00Z',
+    received_at: '2026-06-08T12:00:05Z',
+    agent_version: 'dev',
+    fingerprint: 'fp-001',
+    sync_batch_id: 'sync_001',
+    ip_address: '192.0.2.1',
+    ip_version: 4,
+    status: 'success',
+    asn: 'AS64500',
+    organization: 'Example Transit',
+    latitude: 35.68,
+    longitude: 139.76,
+    use_region_code: 'JP',
+    use_region_name: 'Japan',
+    registered_region_code: 'US',
+    registered_region_name: 'United States',
+    risk_level: 'high',
+    is_backfilled: false,
+    created_at: '2026-06-08T12:00:06Z',
+  },
+  provider_results: [
+    {
+      provider: 'ipinfo',
+      usage_type: 'hosting',
+      company_type: 'business',
+      risk_level: 'high',
+      risk_score: '80',
+      region_code: 'JP',
+      region_name: 'Japan',
+      is_proxy: false,
+      is_tor: false,
+      is_vpn: true,
+      is_server: true,
+      is_abuser: false,
+      is_robot: false,
+    },
+  ],
+  service_unlocks: [
+    { service: 'chatgpt', status: 'unlocked', region: 'JP', unlock_type: 'native' },
+    { service: 'netflix', status: 'blocked', region: 'US', unlock_type: 'none' },
+  ],
+  history: [ipQualitySummaryBody],
+}
+
 const subscriptionBody = {
   subscription_id: 'sub_001',
   vps_id: 'vps_001',
@@ -461,6 +528,47 @@ describe('VPSDetailPage', () => {
     const factsDrawer = screen.getByRole('dialog', { name: '基础资料详情' })
     expect(within(factsDrawer).getByRole('heading', { name: '基础信息' })).toBeInTheDocument()
     expect(within(factsDrawer).getByText('vps_001')).toBeInTheDocument()
+  })
+
+  it('loads and renders IP quality report details when the VPS has a latest summary', async () => {
+    const responseBody = {
+      ...vpsDetailBody,
+      ip_quality_summary: ipQualitySummaryBody,
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(responseBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+      .mockResolvedValueOnce(mockJSONResponse(ipQualityReportBody))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量' })).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/ip-quality', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(screen.getAllByText('IP 高风险 · JP').length).toBeGreaterThan(0)
+    expect(screen.getByText('AS64500')).toBeInTheDocument()
+    expect(screen.getByText('Example Transit')).toBeInTheDocument()
+    expect(screen.getByText('ipinfo')).toBeInTheDocument()
+    expect(screen.getByText('VPN')).toBeInTheDocument()
+    expect(screen.getByText('ChatGPT')).toBeInTheDocument()
+    expect(screen.getByText('解锁 · JP')).toBeInTheDocument()
+    expect(screen.getByText('Netflix')).toBeInTheDocument()
+    expect(screen.getByText('受阻 · US')).toBeInTheDocument()
   })
 
   it('does not treat subscription load failures as missing subscription facts', async () => {

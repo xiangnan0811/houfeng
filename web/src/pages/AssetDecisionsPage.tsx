@@ -47,6 +47,7 @@ import {
   type AssetDecisionEvidenceChip,
   type AssetDecisionEvidenceAssessment,
   type AssetDecisionEvidenceDecisionBias,
+  type AssetDecisionEvidenceKind,
   type AssetDecisionEvidenceQualityTier,
   type AssetDecisionEvidenceSnapshot,
   type AssetDecisionExecutionCurrentFacts,
@@ -564,6 +565,14 @@ const EVIDENCE_BIAS_LABELS: Record<AssetDecisionEvidenceDecisionBias, string> = 
   retire: '偏退役',
   migrate: '偏迁移',
   review: '待复核',
+}
+
+const EVIDENCE_KIND_LABELS: Partial<Record<AssetDecisionEvidenceKind, string>> = {
+  ip_quality_missing: 'IP 质量缺失',
+  ip_quality_stale: 'IP 质量过期',
+  ip_quality_risk: 'IP 质量风险',
+  ip_egress_mismatch: '出口 IP 不一致',
+  media_unlock_blocked: '服务解锁受阻',
 }
 
 const ROLE_OPTIONS: ReadonlyArray<{ value: AssetDecisionSuggestedRole; label: string }> = [
@@ -1676,8 +1685,8 @@ function renderEvidenceChips(chips: AssetDecisionEvidenceChip[], limit = 5) {
   return (
     <span className="asset-decision-chip-row">
       {visible.map((chip) => (
-        <Badge key={chip.kind} variant="info" tone={chipTone(chip.tone)}>
-          {chip.label}
+        <Badge key={`${chip.kind}-${chip.label}`} variant="info" tone={chipTone(chip.tone)}>
+          {chip.label || EVIDENCE_KIND_LABELS[chip.kind] || chip.kind}
         </Badge>
       ))}
       {chips.length > visible.length && (
@@ -2105,7 +2114,8 @@ function currentFactsLabel(facts?: AssetDecisionExecutionCurrentFacts): string {
     `域名 ${facts.domain_count}`,
     `Target ${facts.running_target_count}/${facts.target_count}`,
     `监控 ${facts.running_monitoring_count}/${facts.monitoring_link_count}`,
-  ].join(' · ')
+    currentFactsIPQualityLabel(facts),
+  ].filter(Boolean).join(' · ')
 }
 
 function currentFactsStateLabel(facts?: AssetDecisionExecutionCurrentFacts): string {
@@ -2117,7 +2127,62 @@ function currentFactsStateLabel(facts?: AssetDecisionExecutionCurrentFacts): str
     facts.renewal_decision ? renewalLabel(facts.renewal_decision) : '',
     facts.abnormal_monitoring_count > 0 ? `异常监控 ${facts.abnormal_monitoring_count}` : '',
     facts.active_incident_count > 0 ? `事件 ${facts.active_incident_count}` : '',
+    ...currentFactsIPQualityStateLabels(facts),
   ].filter(Boolean).join(' · ') || '基础状态正常'
+}
+
+function currentFactsIPQualityLabel(facts: AssetDecisionExecutionCurrentFacts): string {
+  const summary = facts.ip_quality_summary
+  if (!summary) return ''
+  const parts = [`IP ${summary.ip_address}`]
+  if (summary.status === 'success') {
+    parts.push(ipQualityRiskLabel(summary.risk_level))
+    const region = summary.use_region_code || summary.use_region_name
+    if (region) parts.push(region)
+  } else {
+    parts.push('采集未完成')
+  }
+  return parts.filter(Boolean).join(' ')
+}
+
+function currentFactsIPQualityStateLabels(facts: AssetDecisionExecutionCurrentFacts): string[] {
+  const labels: string[] = []
+  const summary = facts.ip_quality_summary
+  if (summary?.ambiguous) labels.push('IP 归属不唯一')
+  if (summary?.stale) labels.push('IP 质量过期')
+  if (summary && summary.status !== 'success') labels.push(summary.error_summary || 'IP 采集未完成')
+  if ((facts.ip_quality_provider_risk_signal_count ?? 0) > 0) {
+    labels.push(`风险 provider ${facts.ip_quality_provider_risk_signal_count}`)
+  }
+  if (facts.ip_quality_blocked_services && facts.ip_quality_blocked_services.length > 0) {
+    const visible = facts.ip_quality_blocked_services.slice(0, 3).map(ipQualityServiceLabel)
+    const suffix = facts.ip_quality_blocked_services.length > visible.length
+      ? ` 等 ${facts.ip_quality_blocked_services.length} 项`
+      : ''
+    labels.push(`受阻 ${visible.join('、')}${suffix}`)
+  }
+  return labels
+}
+
+function ipQualityRiskLabel(value?: string): string {
+  const risk = (value ?? '').trim().toLowerCase()
+  if (risk === 'low' || risk === 'clean' || risk === 'safe') return '低风险'
+  if (risk === 'medium' || risk === 'moderate') return '中风险'
+  if (risk === 'high') return '高风险'
+  if (risk === 'critical') return '严重风险'
+  return risk || '未评级'
+}
+
+function ipQualityServiceLabel(value: string): string {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'chatgpt' || normalized === 'openai') return 'ChatGPT'
+  if (normalized === 'netflix') return 'Netflix'
+  if (normalized === 'youtube-premium') return 'YouTube Premium'
+  if (normalized === 'amazon-prime-video') return 'Amazon Prime Video'
+  if (normalized === 'disney-plus') return 'Disney+'
+  if (normalized === 'tiktok') return 'TikTok'
+  if (normalized === 'reddit') return 'Reddit'
+  return value
 }
 
 function renderReadbackBadge(readback?: { status: AssetDecisionExecutionReadbackStatus }) {

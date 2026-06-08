@@ -87,6 +87,7 @@ import type {
   VPSAssetRecord,
   VPSAssetUpdateResult,
   VPSExperienceLogRecord,
+  VPSIPQualityReport,
   VPSMonitoringInstanceLinkRecord,
   VPSMonitoringInstanceSummary,
   VPSSummary,
@@ -535,6 +536,10 @@ export function createVPSAsset(input: CreateVPSAssetInput): Promise<VPSAssetReco
 
 export function getVPSAsset(vpsId: string) {
   return requestJSON<VPSAssetDetail>(`/api/vps/${vpsId}`)
+}
+
+export function getVPSIPQuality(vpsId: string) {
+  return requestJSON<VPSIPQualityReport>(`/api/vps/${vpsId}/ip-quality`)
 }
 
 export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promise<VPSAssetUpdateResult> {

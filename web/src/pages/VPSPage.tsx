@@ -25,6 +25,7 @@ import {
 } from '../lib/types'
 import {
   LifecycleBadge,
+  IPQualityBadge,
   RenewalBadge,
 } from './assetPageBadges'
 import {
@@ -480,6 +481,7 @@ export function VPSPage() {
                 <th>VPS</th>
                 <th>服务商</th>
                 <th>IP</th>
+                <th>IP 质量</th>
                 <th>生命周期</th>
                 <th>续费决策</th>
                 <th>到期</th>
@@ -495,6 +497,7 @@ export function VPSPage() {
                     <td className="name">{row.vps.display_name}</td>
                     <td>{formatOptional(row.vps.provider_name)}</td>
                     <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>
+                    <td><IPQualityBadge summary={row.vps.ip_quality_summary} /></td>
                     <td><LifecycleBadge value={row.vps.lifecycle_status} /></td>
                     <td><RenewalBadge value={row.vps.renewal_decision} /></td>
                     <td className="time">{renderRenewalDate(row)}</td>
