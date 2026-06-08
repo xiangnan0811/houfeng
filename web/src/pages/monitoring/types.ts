@@ -13,21 +13,9 @@ export type MonitoringInstanceFilterState = {
   onboardingPending: boolean
 }
 
-export type MonitoringInstanceRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
-
 export type MonitoringInstanceListView = 'all' | 'runtime-attention' | 'binding-conflict'
 
 export type MonitoringInstanceQuickView = 'all' | 'abnormal' | 'onboarding' | 'runtime-attention' | 'binding-conflict'
-
-export type PendingMonitoringInstanceConfirmation = {
-  monitoringInstanceId: string
-  action: 'pause'
-}
-
-export type FocusRestoreRequest = {
-  monitoringInstanceId: string
-  preferredAction: MonitoringInstanceRuntimeAction
-}
 
 export type MonitoringInstanceFilterOption = {
   value: string

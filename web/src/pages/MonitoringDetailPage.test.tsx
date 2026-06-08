@@ -301,6 +301,174 @@ describe('MonitoringDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
+  it('edits monitoring instance group labels and note from the detail metadata section', async () => {
+    const initialRecord = monitoringInstanceRecord({
+      monitoring_instance_id: 'mi_metadata',
+      display_name: 'Tokyo Metadata Edge',
+      binding_status: '已绑定',
+      group: 'prod',
+      labels: ['edge'],
+      note: 'keep visible',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      updated_at: '2026-04-27T09:05:00Z',
+    })
+    const updatedRecord = {
+      ...initialRecord,
+      group: 'core',
+      labels: ['edge', 'db'],
+      note: 'new note',
+      updated_at: '2026-04-27T09:08:00Z',
+    }
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_metadata' && init?.method === 'PATCH') {
+        return Promise.resolve(mockJSONResponse(updatedRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_metadata') {
+        return Promise.resolve(mockJSONResponse(initialRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_metadata/runtime-facts?window=realtime') {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_metadata')))
+      }
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_metadata') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_metadata') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/monitoring-instances/mi_metadata/vps') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_metadata']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Metadata Edge' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText('标签与备注', { selector: 'summary' }))
+    expect(screen.getByText('Group：prod')).toBeInTheDocument()
+    expect(screen.getByText('标签：edge')).toBeInTheDocument()
+    expect(screen.getByText('备注：keep visible')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'draft' } })
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'draft' } })
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'discarded' } })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
+    expect(screen.getByLabelText('Group')).toHaveValue('prod')
+    expect(screen.getByLabelText('标签')).toHaveValue('edge')
+    expect(screen.getByLabelText('备注')).toHaveValue('keep visible')
+    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'core' } })
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'edge, db, edge' } })
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'new note' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_metadata', {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'If-Match': '"2026-04-27T09:05:00Z"',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({ group: 'core', labels: ['edge', 'db'], note: 'new note' }),
+      }),
+    )
+    expect(screen.queryByRole('button', { name: '保存标签与备注' })).not.toBeInTheDocument()
+    expect(screen.getByText('Group：core')).toBeInTheDocument()
+    expect(screen.getByText('标签：edge · db')).toBeInTheDocument()
+    expect(screen.getByText('备注：new note')).toBeInTheDocument()
+  })
+
+  it('keeps detail metadata when runtime updates return stale metadata fields', async () => {
+    const currentRecord = monitoringInstanceRecord({
+      monitoring_instance_id: 'mi_metadata_runtime',
+      display_name: 'Tokyo Metadata Runtime',
+      binding_status: '已绑定',
+      group: 'core',
+      labels: ['edge'],
+      note: 'fresh note',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      updated_at: '2026-04-27T09:05:00Z',
+    })
+    const runtimeUpdatedRecord = {
+      ...currentRecord,
+      group: 'stale',
+      labels: ['stale'],
+      note: 'stale note',
+      monitoring_status: '维护中',
+      updated_at: '2026-04-27T09:09:00Z',
+    }
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_metadata_runtime/runtime/enter-maintenance') {
+        return Promise.resolve(mockJSONResponse(runtimeUpdatedRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_metadata_runtime') {
+        return Promise.resolve(mockJSONResponse(currentRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_metadata_runtime/runtime-facts?window=realtime') {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_metadata_runtime')))
+      }
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_metadata_runtime') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_metadata_runtime') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/monitoring-instances/mi_metadata_runtime/vps') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_metadata_runtime']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Metadata Runtime' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText('标签与备注', { selector: 'summary' }))
+    expect(screen.getByText('Group：core')).toBeInTheDocument()
+
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_metadata_runtime/runtime/enter-maintenance', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      }),
+    )
+    expect(screen.getByText('Group：core')).toBeInTheDocument()
+    expect(screen.getByText('标签：edge')).toBeInTheDocument()
+    expect(screen.getByText('备注：fresh note')).toBeInTheDocument()
+    expect(screen.queryByText('Group：stale')).not.toBeInTheDocument()
+  })
+
   it('renders monitoringInstance header and latest host sample cards', async () => {
     const fetchMock = vi
       .fn()
@@ -1083,7 +1251,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getByText(formatDateTime('2026-04-27T09:04:00Z'))).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()
     expect(screen.getByText(/同一台机器重装或合法替换/)).toBeInTheDocument()
-    expect(screen.queryByText('标签与备注')).not.toBeInTheDocument()
+    expect(screen.getByText('标签与备注', { selector: 'summary' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '生命周期' })).not.toBeInTheDocument()
     expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
     openRuntimeMenu()
@@ -2254,7 +2422,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     expect(container.querySelectorAll('.collapsible-section.watchtower-secondary').length).toBe(0)
-    expect(screen.queryByText('标签与备注')).not.toBeInTheDocument()
+    expect(screen.getByText('标签与备注', { selector: 'summary' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '生命周期' })).not.toBeInTheDocument()
     expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '关联 VPS' })).not.toBeInTheDocument()

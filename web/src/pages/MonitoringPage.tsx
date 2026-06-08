@@ -1,20 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, Input, Modal, type DataTableSortState } from '../components/atoms'
+import { type DataTableSortState } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
-  enterMonitoringInstanceMaintenance,
-  exitMonitoringInstanceMaintenance,
   listMonitoringInstanceAssetContexts,
   listMonitoringInstances,
   listMonitoringInstanceSparklines,
-  pauseMonitoringInstanceMonitoring,
   postMonitoringInstanceAction,
   postMonitoringInstanceBatch,
-  resumeMonitoringInstanceMonitoring,
-  updateMonitoringInstanceMetadata,
 } from '../lib/api'
 import type { AssetContextForMonitoringInstance, MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../lib/types'
 import { MonitoringHero } from './monitoring/MonitoringHero'
@@ -23,7 +18,6 @@ import { buildMonitoringInstancesTableColumns } from './monitoring/MonitoringIns
 import { MonitoringSupportSurface } from './monitoring/MonitoringSupportSurface'
 import { MonitoringToolbar } from './monitoring/MonitoringToolbar'
 import {
-  actionButtonKey,
   buildMonitoringInstanceEvidenceLead,
   countAbnormalMonitoringInstances,
   countMaintenanceOrPausedMonitoringInstances,
@@ -33,17 +27,15 @@ import {
   isBindingConflictMonitoringInstance,
   isPendingOnboardingMonitoringInstance,
   isRuntimeAttentionMonitoringInstance,
-  mergeNonMetadataMonitoringInstanceRecord,
-  parseLabels,
+  MONITORING_INSTANCE_HEALTH_STATUS_FILTER_OPTIONS,
+  MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS,
+  MONITORING_INSTANCE_RUN_STATUS_FILTER_OPTIONS,
   parseMultiValue,
   pickTopMonitoringInstanceEvidence,
 } from './monitoring/monitoringHelpers'
 import type {
-  FocusRestoreRequest,
   MonitoringInstanceFilterState,
   MonitoringInstanceListView,
-  MonitoringInstanceRuntimeAction,
-  PendingMonitoringInstanceConfirmation,
 } from './monitoring/types'
 
 function describeError(error: unknown, fallback: string) {
@@ -59,18 +51,9 @@ export function MonitoringPage() {
   const [monitoringInstanceListView, setMonitoringInstanceListView] = useState<MonitoringInstanceListView>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [runtimeBusyMonitoringInstanceId, setRuntimeBusyMonitoringInstanceId] = useState<string | null>(null)
-  const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
-  const [editingLabelMonitoringInstanceId, setEditingLabelMonitoringInstanceId] = useState<string | null>(null)
-  const [labelDraft, setLabelDraft] = useState('')
-  const [groupDraft, setGroupDraft] = useState('')
-  const [metadataBusyMonitoringInstanceId, setMetadataBusyMonitoringInstanceId] = useState<string | null>(null)
-  const [metadataErrors, setMetadataErrors] = useState<Record<string, string>>({})
-  const [pendingConfirmation, setPendingConfirmation] = useState<PendingMonitoringInstanceConfirmation | null>(null)
-  const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
   const [sparklines, setSparklines] = useState<MonitoringInstanceSparklinesResponse | null>(null)
   const [selectAll, setSelectAll] = useState(false)
+  const [batchPanelOpen, setBatchPanelOpen] = useState(false)
   const [batchSubmitting, setBatchSubmitting] = useState(false)
   const [pendingBatchAction, setPendingBatchAction] = useState<string | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
@@ -130,120 +113,6 @@ export function MonitoringPage() {
       cancelled = true
     }
   }, [])
-
-  function queueFocusRestore(monitoringInstanceId: string, preferredAction: MonitoringInstanceRuntimeAction) {
-    pendingFocusRestoreRef.current = { monitoringInstanceId, preferredAction }
-  }
-
-  useEffect(() => {
-    if (pendingConfirmation) return
-
-    const request = pendingFocusRestoreRef.current
-    if (!request) return
-
-    const preferred = actionButtonRefs.current[actionButtonKey(request.monitoringInstanceId, request.preferredAction)]
-    const fallback =
-      request.preferredAction === 'pause'
-        ? actionButtonRefs.current[actionButtonKey(request.monitoringInstanceId, 'resume')]
-        : null
-    const target = [preferred, fallback].find((element) => element?.isConnected)
-
-    target?.focus()
-    pendingFocusRestoreRef.current = null
-  }, [monitoring, pendingConfirmation])
-
-  async function handleRuntimeAction(
-    monitoringInstance: MonitoringInstanceRecord,
-    action: MonitoringInstanceRuntimeAction,
-    confirmed = false,
-  ) {
-    if (action === 'pause' && !confirmed) {
-      setPendingConfirmation({ monitoringInstanceId: monitoringInstance.monitoring_instance_id, action })
-      return
-    }
-
-    setRuntimeBusyMonitoringInstanceId(monitoringInstance.monitoring_instance_id)
-    setRuntimeErrors((current) => {
-      if (!current[monitoringInstance.monitoring_instance_id]) return current
-      const next = { ...current }
-      delete next[monitoringInstance.monitoring_instance_id]
-      return next
-    })
-
-    try {
-      const updated =
-        action === 'enter-maintenance'
-          ? await enterMonitoringInstanceMaintenance(monitoringInstance.monitoring_instance_id)
-          : action === 'exit-maintenance'
-            ? await exitMonitoringInstanceMaintenance(monitoringInstance.monitoring_instance_id)
-            : action === 'pause'
-              ? await pauseMonitoringInstanceMonitoring(monitoringInstance.monitoring_instance_id)
-              : await resumeMonitoringInstanceMonitoring(monitoringInstance.monitoring_instance_id)
-      setMonitoringInstances((current) =>
-        current.map((item) =>
-          item.monitoring_instance_id === updated.monitoring_instance_id ? mergeNonMetadataMonitoringInstanceRecord(item, updated) : item,
-        ),
-      )
-      queueFocusRestore(updated.monitoring_instance_id, action)
-      setPendingConfirmation((current) =>
-        current?.monitoringInstanceId === updated.monitoring_instance_id ? null : current,
-      )
-    } catch (runtimeError) {
-      setRuntimeErrors((current) => ({
-        ...current,
-        [monitoringInstance.monitoring_instance_id]: describeError(runtimeError, '监控实例运行控制操作失败'),
-      }))
-    } finally {
-      setRuntimeBusyMonitoringInstanceId((current) => (current === monitoringInstance.monitoring_instance_id ? null : current))
-    }
-  }
-
-  async function handleSaveLabels(monitoringInstance: MonitoringInstanceRecord) {
-    setMetadataBusyMonitoringInstanceId(monitoringInstance.monitoring_instance_id)
-    setMetadataErrors((current) => {
-      if (!current[monitoringInstance.monitoring_instance_id]) return current
-      const next = { ...current }
-      delete next[monitoringInstance.monitoring_instance_id]
-      return next
-    })
-
-    try {
-      const updated = await updateMonitoringInstanceMetadata(
-        monitoringInstance.monitoring_instance_id,
-        {
-          group: groupDraft.trim() || undefined,
-          labels: parseLabels(labelDraft),
-          note: monitoringInstance.note,
-        },
-        {
-          expectedUpdatedAt: monitoringInstance.updated_at,
-        },
-      )
-      setMonitoringInstances((current) =>
-        current.map((item) =>
-          item.monitoring_instance_id === updated.monitoring_instance_id
-            ? {
-                ...item,
-                group: updated.group,
-                labels: updated.labels,
-                note: updated.note,
-                updated_at: updated.updated_at,
-              }
-            : item,
-        ),
-      )
-      setEditingLabelMonitoringInstanceId((current) => (current === monitoringInstance.monitoring_instance_id ? null : current))
-      setLabelDraft('')
-      setGroupDraft('')
-    } catch (metadataError) {
-      setMetadataErrors((current) => ({
-        ...current,
-        [monitoringInstance.monitoring_instance_id]: describeError(metadataError, '标签更新失败'),
-      }))
-    } finally {
-      setMetadataBusyMonitoringInstanceId((current) => (current === monitoringInstance.monitoring_instance_id ? null : current))
-    }
-  }
 
   const bindingConflictMonitoringInstances = useMemo(
     () => monitoring.filter(isBindingConflictMonitoringInstance),
@@ -367,9 +236,9 @@ export function MonitoringPage() {
   })
   const topMonitoringEvidence = pickTopMonitoringInstanceEvidence(sortedFilteredMonitoringInstances)
 
-  const healthOptions = ['正常', '关注', '告警', '严重']
-  const lifecycleOptions = ['待接入', '在用', '观察中', '不续费', '已退役']
-  const runStatusOptions = ['monitoring', 'paused', 'maintenance']
+  const healthOptions = MONITORING_INSTANCE_HEALTH_STATUS_FILTER_OPTIONS.map((option) => option.value)
+  const lifecycleOptions = MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS.map((option) => option.value)
+  const runStatusOptions = MONITORING_INSTANCE_RUN_STATUS_FILTER_OPTIONS.map((option) => option.value)
 
   async function executeBatchAction(action: string) {
     if (action === 'pause') {
@@ -390,6 +259,7 @@ export function MonitoringPage() {
     } finally {
       setBatchSubmitting(false)
       setSelectAll(false)
+      setBatchPanelOpen(false)
     }
   }
 
@@ -409,6 +279,7 @@ export function MonitoringPage() {
     } finally {
       setBatchSubmitting(false)
       setSelectAll(false)
+      setBatchPanelOpen(false)
     }
   }
 
@@ -428,6 +299,7 @@ export function MonitoringPage() {
     }
     setBatchSubmitting(false)
     setSelectAll(false)
+    setBatchPanelOpen(false)
     if (failCount > 0) {
       setBatchError(`${monitoringInstanceIDs.length - failCount} 个监控实例已下发，${failCount} 个失败，等待 agent 执行`)
     }
@@ -495,7 +367,7 @@ export function MonitoringPage() {
     }, { replace: true })
   }
 
-  const batchPanelVisible = selectAll || commandOpen || pendingBatchAction !== null || batchError !== null || batchSubmitting
+  const batchPanelVisible = batchPanelOpen || selectAll || commandOpen || pendingBatchAction !== null || batchError !== null || batchSubmitting
 
   function toggleCompare(monitoringInstanceId: string) {
     setCompareSet((current) => {
@@ -511,64 +383,12 @@ export function MonitoringPage() {
     })
   }
 
-  function cancelLabelEdit(monitoringInstance: MonitoringInstanceRecord) {
-    setEditingLabelMonitoringInstanceId((current) =>
-      current === monitoringInstance.monitoring_instance_id ? null : current,
-    )
-    setLabelDraft('')
-    setGroupDraft('')
-    setMetadataErrors((current) => {
-      if (!current[monitoringInstance.monitoring_instance_id]) return current
-      const next = { ...current }
-      delete next[monitoringInstance.monitoring_instance_id]
-      return next
-    })
-  }
-
-  function startLabelEdit(monitoringInstance: MonitoringInstanceRecord) {
-    if (metadataBusyMonitoringInstanceId !== null) return
-    setEditingLabelMonitoringInstanceId(monitoringInstance.monitoring_instance_id)
-    setLabelDraft(monitoringInstance.labels.join(', '))
-    setGroupDraft(monitoringInstance.group || '')
-    setMetadataErrors((current) => {
-      if (!current[monitoringInstance.monitoring_instance_id]) return current
-      const next = { ...current }
-      delete next[monitoringInstance.monitoring_instance_id]
-      return next
-    })
-  }
-
-  const editingMonitoringInstance = editingLabelMonitoringInstanceId
-    ? monitoring.find((monitoringInstance) => monitoringInstance.monitoring_instance_id === editingLabelMonitoringInstanceId) ?? null
-    : null
-
   const columns = buildMonitoringInstancesTableColumns({
     compareSet,
     sparklines,
     assetContexts: monitoringInstanceAssetContexts,
-    editingLabelMonitoringInstanceId: null,
-    labelDraft,
-    groupDraft,
-    metadataBusyMonitoringInstanceId,
-    metadataErrors,
-    runtimeBusyMonitoringInstanceId,
-    actionButtonRefs,
     onToggleCompare: toggleCompare,
-    onLabelDraftChange: setLabelDraft,
-    onGroupDraftChange: setGroupDraft,
-    onSaveLabels: (monitoringInstance) => void handleSaveLabels(monitoringInstance),
-    onCancelLabels: cancelLabelEdit,
-    onStartLabelEdit: startLabelEdit,
-    onRuntimeAction: (monitoringInstance, action) => void handleRuntimeAction(monitoringInstance, action),
-    onQueueFocusRestore: queueFocusRestore,
   })
-
-  function shouldNavigateOnRowClick(monitoringInstance: MonitoringInstanceRecord): boolean {
-    // Block navigation while the row is in edit mode or has a pending pause confirmation.
-    if (editingLabelMonitoringInstanceId === monitoringInstance.monitoring_instance_id) return false
-    if (pendingConfirmation?.monitoringInstanceId === monitoringInstance.monitoring_instance_id) return false
-    return true
-  }
 
   return (
     <div className="page-stack animate-in">
@@ -597,58 +417,6 @@ export function MonitoringPage() {
         onClearFilters={clearAllFilters}
       />
 
-      <Modal
-        open={editingMonitoringInstance !== null}
-        onClose={() => {
-          if (editingMonitoringInstance) cancelLabelEdit(editingMonitoringInstance)
-        }}
-        title={editingMonitoringInstance ? `${editingMonitoringInstance.display_name} · 快速编辑标签` : '快速编辑标签'}
-        size="md"
-      >
-        {editingMonitoringInstance ? (
-          <div className="page-stack">
-            <p className="page-panel__description">
-              更新列表扫描使用的 group 与标签，不会修改备注或运行状态。
-            </p>
-            <Input
-              label="Group"
-              name={`group-${editingMonitoringInstance.monitoring_instance_id}`}
-              value={groupDraft}
-              onChange={(event) => setGroupDraft(event.target.value)}
-              placeholder="Group"
-            />
-            <Input
-              label="标签"
-              name={`labels-${editingMonitoringInstance.monitoring_instance_id}`}
-              value={labelDraft}
-              onChange={(event) => setLabelDraft(event.target.value)}
-              hint="用逗号分隔多个标签。"
-            />
-            {metadataErrors[editingMonitoringInstance.monitoring_instance_id] ? (
-              <p className="monitoring-table__inline-error" role="alert">
-                {metadataErrors[editingMonitoringInstance.monitoring_instance_id]}
-              </p>
-            ) : null}
-            <div className="action-confirm__actions">
-              <Button
-                variant="secondary"
-                disabled={metadataBusyMonitoringInstanceId === editingMonitoringInstance.monitoring_instance_id}
-                onClick={() => cancelLabelEdit(editingMonitoringInstance)}
-              >
-                取消
-              </Button>
-              <Button
-                variant="primary"
-                disabled={metadataBusyMonitoringInstanceId === editingMonitoringInstance.monitoring_instance_id}
-                onClick={() => void handleSaveLabels(editingMonitoringInstance)}
-              >
-                {metadataBusyMonitoringInstanceId === editingMonitoringInstance.monitoring_instance_id ? '正在保存…' : '保存标签'}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
-
       <div className="animate-in d2">
         <MonitoringToolbar
           filterState={filterState}
@@ -660,6 +428,7 @@ export function MonitoringPage() {
           compareSet={compareSet}
           onFilterChange={updateSearchParam}
           onAbnormalChange={(checked) => setAbnormalFilter(checked)}
+          onOpenBatchPanel={() => setBatchPanelOpen(true)}
         />
         {monitoringInstanceAssetContextError ? (
           <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
@@ -682,9 +451,6 @@ export function MonitoringPage() {
           commandOpen={commandOpen}
           commandID={commandID}
           pendingBatchAction={pendingBatchAction}
-          runtimeErrors={runtimeErrors}
-          pendingConfirmation={pendingConfirmation}
-          runtimeBusyMonitoringInstanceId={runtimeBusyMonitoringInstanceId}
           onClearAllFilters={clearAllFilters}
           onSelectAllChange={setSelectAll}
           onBatchAction={(action) => void executeBatchAction(action)}
@@ -695,15 +461,7 @@ export function MonitoringPage() {
           onCancelBatchPause={() => setPendingBatchAction(null)}
           onSortChange={handleSortChange}
           onRowClick={(monitoringInstance) => {
-            if (!shouldNavigateOnRowClick(monitoringInstance)) return
             navigate(`/monitoring/${monitoringInstance.monitoring_instance_id}`)
-          }}
-          onConfirmPause={(monitoringInstance) => void handleRuntimeAction(monitoringInstance, 'pause', true)}
-          onCancelPause={(monitoringInstance) => {
-            queueFocusRestore(monitoringInstance.monitoring_instance_id, 'pause')
-            setPendingConfirmation((current) =>
-              current?.monitoringInstanceId === monitoringInstance.monitoring_instance_id ? null : current,
-            )
           }}
           onOpenVPSInventory={() => navigate('/vps')}
         />

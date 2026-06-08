@@ -22,16 +22,6 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
-function deferredResponse() {
-  let resolve!: (response: Response) => void
-  let reject!: (error?: unknown) => void
-  const promise = new Promise<Response>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
-}
-
 function monitoringInstanceRecord(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     monitoring_instance_id: 'mi_001',
@@ -56,12 +46,6 @@ function monitoringInstanceRecord(overrides: Partial<Record<string, unknown>> = 
 function getMonitoringHeaderVPSLink() {
   return screen.getByRole('link', { name: '从 VPS 接入 agent' })
 }
-
-function getMonitoringQuickEditDialog(name = /快速编辑标签/) {
-  return screen.getByRole('dialog', { name })
-}
-
-
 
 describe('MonitoringPage', () => {
   afterEach(() => {
@@ -130,7 +114,7 @@ describe('MonitoringPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('shows a clear onboarding workspace path for an existing monitoringInstance', async () => {
+  it('routes an existing pending onboarding monitoring instance to detail for onboarding work', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(
@@ -164,13 +148,12 @@ describe('MonitoringPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('link', { name: '接入 agent' })).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    expect(screen.getByRole('link', { name: '接入 agent' })).toHaveAttribute(
+    expect(screen.queryByRole('link', { name: '接入 agent' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Tokyo Edge' })).toHaveAttribute(
       'href',
-      '/monitoring/mi_001?onboarding=1',
+      '/monitoring/mi_001',
     )
   })
 
@@ -207,7 +190,7 @@ describe('MonitoringPage', () => {
 
     const conflictRow = screen.getByText('Tokyo Edge').closest('tr')
     expect(conflictRow).not.toBeNull()
-    expect(within(conflictRow!).getByText('指纹变更待确认')).toBeInTheDocument()
+    expect(within(conflictRow!).queryByText('指纹变更待确认')).not.toBeInTheDocument()
     expect(within(conflictRow!).getByText('等待绑定确认')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '确认重绑定' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '拒绝新指纹' })).not.toBeInTheDocument()
@@ -242,212 +225,25 @@ describe('MonitoringPage', () => {
     expect(screen.getByText('Seoul Edge')).toBeInTheDocument()
   })
 
-  it('renders runtime quick actions by monitoringInstance monitoring status and applies light actions immediately', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse([
-          {
-            monitoring_instance_id: 'mi_enabled',
-            display_name: 'Tokyo Edge',
-            region: 'ap-northeast-1',
-            city: 'Tokyo',
-            provider: 'Vultr',
-            lifecycle_status: '在用',
-            monitoring_status: '启用',
-            binding_status: '已绑定',
-            labels: [],
-            note: '',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-            created_at: '2026-04-26T09:00:00Z',
-            updated_at: '2026-04-26T09:00:00Z',
-          },
-          {
-            monitoring_instance_id: 'mi_paused',
-            display_name: 'Seoul Edge',
-            region: 'ap-northeast-2',
-            city: 'Seoul',
-            provider: 'Hetzner',
-            lifecycle_status: '在用',
-            monitoring_status: '暂停',
-            binding_status: '已绑定',
-            labels: [],
-            note: '',
-            current_health_status: '正常',
-            current_active_incident_count: 0,
-            current_primary_issue_summary: '',
-            created_at: '2026-04-26T09:00:00Z',
-            updated_at: '2026-04-26T09:00:00Z',
-          },
-        ]),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse({
+  it('keeps monitoring rows scan-focused without row-level operations', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        monitoringInstanceRecord({
           monitoring_instance_id: 'mi_enabled',
           display_name: 'Tokyo Edge',
-          region: 'ap-northeast-1',
-          city: 'Tokyo',
-          provider: 'Vultr',
-          lifecycle_status: '在用',
-          monitoring_status: '维护中',
-          binding_status: '已绑定',
-          labels: [],
-          note: '',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          created_at: '2026-04-26T09:00:00Z',
-          updated_at: '2026-04-26T09:10:00Z',
+          monitoring_status: '启用',
+          labels: ['edge'],
+          last_heartbeat_at: '2026-04-26T09:00:00Z',
+          last_sync_at: '2026-04-26T08:55:00Z',
         }),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse({
+        monitoringInstanceRecord({
           monitoring_instance_id: 'mi_paused',
           display_name: 'Seoul Edge',
           region: 'ap-northeast-2',
           city: 'Seoul',
           provider: 'Hetzner',
-          lifecycle_status: '在用',
-          monitoring_status: '启用',
-          binding_status: '已绑定',
-          labels: [],
-          note: '',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          created_at: '2026-04-26T09:00:00Z',
-          updated_at: '2026-04-26T09:12:00Z',
-        }),
-      )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-
-    const enabledRow = screen.getByText('Tokyo Edge').closest('tr')
-    const pausedRow = screen.getByText('Seoul Edge').closest('tr')
-    expect(enabledRow).not.toBeNull()
-    expect(pausedRow).not.toBeNull()
-
-    expect(within(enabledRow!).getByRole('button', { name: '进入维护' })).toBeInTheDocument()
-    expect(within(enabledRow!).getByRole('button', { name: '暂停监控' })).toBeInTheDocument()
-    expect(within(pausedRow!).queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
-    expect(within(pausedRow!).getByRole('button', { name: '恢复监控' })).toBeInTheDocument()
-
-    fireEvent.click(within(enabledRow!).getByRole('button', { name: '进入维护' }))
-
-    await waitFor(() =>
-      expect(within(enabledRow!).getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
-    )
-
-    fireEvent.click(within(pausedRow!).getByRole('button', { name: '恢复监控' }))
-
-    await waitFor(() =>
-      expect(within(pausedRow!).getByRole('button', { name: '进入维护' })).toBeInTheDocument(),
-    )
-
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_enabled/runtime/enter-maintenance', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/monitoring-instances/mi_paused/runtime/resume', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-  })
-
-  it('uses an inline stateful confirmation before pausing monitoringInstance monitoring from an enabled row', async () => {
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse([
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
-            display_name: 'Tokyo Edge',
-            binding_status: '已绑定',
-          }),
-        ]),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
-            display_name: 'Tokyo Edge',
-            binding_status: '已绑定',
-            monitoring_status: '暂停',
-          }),
-        ),
-      )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-
-    const pauseTrigger = screen.getByRole('button', { name: '暂停监控' })
-    fireEvent.click(pauseTrigger)
-
-    const confirmation = screen.getByRole('alertdialog', { name: '确认暂停监控实例监控' })
-    expect(confirmation).toBeInTheDocument()
-    expect(confirmation).toContainElement(document.activeElement as HTMLElement)
-    expect(screen.getByText('当前：监控运行状态为启用。')).toBeInTheDocument()
-    expect(screen.getByText('操作后：监控运行状态变为暂停。')).toBeInTheDocument()
-    expect(
-      screen.getByText('会停止主机指标采集，并停止该监控实例承担的探针执行。趋势图会从此开始出现数据空档。'),
-    ).toBeInTheDocument()
-    expect(screen.getByText('不会删除历史事件、观测记录或 agent 绑定关系。')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('heading', { name: '确认暂停监控实例监控' })).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: '暂停监控' })).toHaveFocus()
-
-    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
-
-    expect(confirmMock).not.toHaveBeenCalled()
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
-    )
-    await waitFor(() => expect(screen.getByRole('button', { name: '恢复监控' })).toHaveFocus())
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/runtime/pause', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-  })
-
-  it('shows the maintenance current-state copy before pausing a maintenance row', async () => {
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const fetchMock = vi.fn().mockResolvedValueOnce(
-      mockJSONResponse([
-        monitoringInstanceRecord({
-          monitoring_instance_id: 'mi_maint',
-          display_name: 'Osaka Edge',
-          monitoring_status: '维护中',
-          binding_status: '已绑定',
+          monitoring_status: '暂停',
+          labels: ['seoul'],
         }),
       ]),
     )
@@ -457,323 +253,7 @@ describe('MonitoringPage', () => {
       <MemoryRouter initialEntries={['/monitoring']}>
         <Routes>
           <Route path="/monitoring" element={<MonitoringPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Osaka Edge')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
-
-    expect(screen.getByRole('alertdialog', { name: '确认暂停监控实例监控' })).toBeInTheDocument()
-    expect(screen.getByText('当前：监控运行状态为维护中。')).toBeInTheDocument()
-    expect(screen.queryByText('当前：监控运行状态为启用。')).not.toBeInTheDocument()
-    expect(confirmMock).not.toHaveBeenCalled()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps the pause confirmation and local error visible when pause fails', async () => {
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse([
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
-            display_name: 'Tokyo Edge',
-            binding_status: '已绑定',
-          }),
-        ]),
-      )
-      .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid runtime transition' }, 409))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
-
-    expect(confirmMock).not.toHaveBeenCalled()
-    await waitFor(() =>
-      expect(screen.getByText(/invalid runtime transition/)).toBeInTheDocument(),
-    )
-    expect(screen.getByRole('alertdialog', { name: '确认暂停监控实例监控' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '确认暂停监控' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '监控' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/runtime/pause', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-  })
-
-
-  it('edits row labels without changing the existing note and cancels locally', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse([
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
-            display_name: 'Tokyo Edge',
-            labels: ['edge'],
-            note: 'keep me',
-          }),
-        ]),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse(
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
-            display_name: 'Tokyo Edge',
-            labels: ['edge', 'core'],
-            note: 'keep me',
-          }),
-        ),
-      )
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-    const tokyoRow = screen.getByText('Tokyo Edge').closest('tr')
-    expect(tokyoRow).not.toBeNull()
-    expect(within(tokyoRow!).getByText('edge')).toBeInTheDocument()
-
-    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
-    let editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
-    const editor = within(editorDialog).getByRole('textbox', { name: '标签' })
-    fireEvent.change(editor, { target: { value: 'edge, core, edge' } })
-    fireEvent.click(within(editorDialog).getByRole('button', { name: '取消' }))
-
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('dialog', { name: /Tokyo Edge · 快速编辑标签/ })).not.toBeInTheDocument()
-
-    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
-    editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
-    fireEvent.change(within(editorDialog).getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core, edge' },
-    })
-    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001', {
-        method: 'PATCH',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'If-Match': '"2026-04-26T09:00:00Z"',
-        },
-        cache: 'no-store',
-      credentials: 'include',
-        body: JSON.stringify({ labels: ['edge', 'core'], note: 'keep me' }),
-      }),
-    )
-    expect(within(tokyoRow!).getByText('edge · core')).toBeInTheDocument()
-  })
-
-
-  it('preserves saved metadata when a later runtime response returns stale labels and note', async () => {
-    const metadataSave = deferredResponse()
-    const runtimeUpdate = deferredResponse()
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse([
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
-            display_name: 'Tokyo Edge',
-            monitoring_status: '启用',
-            labels: ['edge'],
-            note: 'keep me',
-            updated_at: '2026-04-26T09:00:00Z',
-          }),
-        ]),
-      )
-      .mockImplementationOnce(() => metadataSave.promise)
-      .mockImplementationOnce(() => runtimeUpdate.promise)
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-
-    const row = screen.getByText('Tokyo Edge').closest('tr')
-    expect(row).not.toBeNull()
-
-    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    const editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
-    fireEvent.change(within(editorDialog).getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core' },
-    })
-    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
-
-    fireEvent.click(within(row!).getByRole('button', { name: '进入维护' }))
-
-    metadataSave.resolve(
-      mockJSONResponse(
-        monitoringInstanceRecord({
-          monitoring_instance_id: 'mi_001',
-          display_name: 'Tokyo Edge',
-          monitoring_status: '启用',
-          labels: ['edge', 'core'],
-          note: 'keep me',
-          updated_at: '2026-04-26T09:01:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() => expect(within(row!).getByText('edge · core')).toBeInTheDocument())
-
-    runtimeUpdate.resolve(
-      mockJSONResponse(
-        monitoringInstanceRecord({
-          monitoring_instance_id: 'mi_001',
-          display_name: 'Tokyo Edge',
-          monitoring_status: '维护中',
-          labels: ['edge'],
-          note: 'stale note',
-          updated_at: '2026-04-26T09:02:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() =>
-      expect(within(row!).getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
-    )
-    expect(within(row!).getByText('edge · core')).toBeInTheDocument()
-    expect(within(row!).queryByText(/^edge$/)).not.toBeInTheDocument()
-  })
-
-  it('preserves newer runtime fields when a stale metadata save resolves later', async () => {
-    const metadataSave = deferredResponse()
-    const runtimeUpdate = deferredResponse()
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse([
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
-            display_name: 'Tokyo Edge',
-            monitoring_status: '启用',
-            labels: ['edge'],
-            note: 'keep me',
-            updated_at: '2026-04-26T09:00:00Z',
-          }),
-        ]),
-      )
-      .mockImplementationOnce(() => metadataSave.promise)
-      .mockImplementationOnce(() => runtimeUpdate.promise)
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-
-    const row = screen.getByText('Tokyo Edge').closest('tr')
-    expect(row).not.toBeNull()
-
-    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    const editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
-    fireEvent.change(within(editorDialog).getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core' },
-    })
-    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
-
-    fireEvent.click(within(row!).getByRole('button', { name: '进入维护' }))
-
-    runtimeUpdate.resolve(
-      mockJSONResponse(
-        monitoringInstanceRecord({
-          monitoring_instance_id: 'mi_001',
-          display_name: 'Tokyo Edge',
-          monitoring_status: '维护中',
-          labels: ['edge'],
-          note: 'keep me',
-          updated_at: '2026-04-26T09:02:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() =>
-      expect(within(row!).getByRole('button', { name: '退出维护' })).toBeInTheDocument(),
-    )
-
-    metadataSave.resolve(
-      mockJSONResponse(
-        monitoringInstanceRecord({
-          monitoring_instance_id: 'mi_001',
-          display_name: 'Tokyo Edge',
-          monitoring_status: '启用',
-          labels: ['edge', 'core'],
-          note: 'keep me',
-          updated_at: '2026-04-26T09:01:00Z',
-        }),
-      ),
-    )
-
-    await waitFor(() => expect(within(row!).getByText('edge · core')).toBeInTheDocument())
-    expect(within(row!).getByRole('button', { name: '退出维护' })).toBeInTheDocument()
-    expect(within(row!).queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
-  })
-
-  it('blocks opening another row editor during metadata save and exposes row errors as alerts', async () => {
-    const rowASave = deferredResponse()
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse([
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
-            display_name: 'Tokyo Edge',
-            labels: ['edge'],
-            note: 'keep me',
-          }),
-          monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_002',
-            display_name: 'Seoul Edge',
-            region: 'ap-northeast-2',
-            city: 'Seoul',
-            provider: 'Hetzner',
-            labels: ['seoul'],
-            note: 'other note',
-          }),
-        ]),
-      )
-      .mockImplementationOnce(() => rowASave.promise)
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
+          <Route path="/monitoring/:monitoringInstanceId" element={<div>monitoring detail</div>} />
         </Routes>
       </MemoryRouter>,
     )
@@ -785,22 +265,126 @@ describe('MonitoringPage', () => {
     expect(tokyoRow).not.toBeNull()
     expect(seoulRow).not.toBeNull()
 
-    fireEvent.click(within(tokyoRow!).getByRole('button', { name: '快速编辑标签' }))
-    const editorDialog = getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)
-    fireEvent.change(within(editorDialog).getByRole('textbox', { name: '标签' }), {
-      target: { value: 'edge, core' },
-    })
-    fireEvent.click(within(editorDialog).getByRole('button', { name: '保存标签' }))
+    expect(screen.queryByRole('columnheader', { name: '操作' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '快速编辑标签' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '接入 agent' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '暂停监控' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复监控' })).not.toBeInTheDocument()
 
-    expect(within(editorDialog).getByRole('button', { name: '正在保存…' })).toBeDisabled()
-    expect(within(seoulRow!).getByRole('button', { name: '快速编辑标签' })).toBeDisabled()
+    expect(within(tokyoRow!).getByText('edge')).toBeInTheDocument()
+    expect(within(seoulRow!).getByText('seoul')).toBeInTheDocument()
+    expect(within(tokyoRow!).queryByText('同步')).not.toBeInTheDocument()
+    expect(within(tokyoRow!).queryByText('暂停')).not.toBeInTheDocument()
 
-    rowASave.resolve(mockJSONResponse({ error: 'metadata write failed' }, 409))
+    fireEvent.click(tokyoRow!)
+    await waitFor(() => expect(screen.getByText('monitoring detail')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps batch runtime actions available behind explicit selection', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_001',
+            display_name: 'Tokyo Edge',
+          }),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({ results: [{ monitoring_instance_id: 'mi_001', ok: true }] }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring']}>
+        <Routes>
+          <Route path="/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+
+    expect(screen.queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByLabelText('全选 (1)'))
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
 
     await waitFor(() =>
-      expect(within(editorDialog).getByRole('alert')).toHaveTextContent('metadata write failed'),
+      expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/batch', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({ monitoring_instance_ids: ['mi_001'], action: 'enter-maintenance' }),
+      }),
     )
-    expect(screen.queryByRole('dialog', { name: /Seoul Edge · 快速编辑标签/ })).not.toBeInTheDocument()
+  })
+
+  it('renders asset context as one short status plus compact detail', async () => {
+    vi.stubGlobal('IntersectionObserver', vi.fn())
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances') {
+        return Promise.resolve(
+          mockJSONResponse([
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_asset',
+              display_name: 'Asset Edge',
+            }),
+          ]),
+        )
+      }
+      if (path === '/api/asset-context/monitoring-instances') {
+        return Promise.resolve(
+          mockJSONResponse([
+            {
+              monitoring_instance_id: 'mi_asset',
+              linked_vps_count: 1,
+              cancellation_attention: true,
+              summaries: [
+                {
+                  vps_id: 'vps_asset',
+                  display_name: 'Tokyo VPS',
+                  lifecycle_status: 'active',
+                  renewal_decision: 'keep',
+                  subscription_state: 'expired',
+                  message: '关联 VPS 订阅已过期，监控实例仍需确认状态。',
+                },
+              ],
+            },
+          ]),
+        )
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring']}>
+        <Routes>
+          <Route path="/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Asset Edge')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('已过期')).toBeInTheDocument())
+
+    const row = screen.getByText('Asset Edge').closest('tr')
+    expect(row).not.toBeNull()
+    expect(within(row!).getByText('已过期')).toBeInTheDocument()
+    expect(within(row!).getByText('Tokyo VPS')).toBeInTheDocument()
+    expect(within(row!).queryByText('关联 VPS 订阅已过期，监控实例仍需确认状态。')).not.toBeInTheDocument()
+    expect(within(row!).queryByText(/active/)).not.toBeInTheDocument()
+    expect(within(row!).queryByText(/expired/)).not.toBeInTheDocument()
   })
 
   it('filters the list by lifecycle via the inline filter select', async () => {
@@ -842,6 +426,52 @@ describe('MonitoringPage', () => {
       expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument(),
     )
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
+  })
+
+  it('filters the list by unified Chinese monitoring status values', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        mockJSONResponse([
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_running',
+            display_name: 'Running Edge',
+            monitoring_status: '启用',
+          }),
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_paused',
+            display_name: 'Paused Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            monitoring_status: '暂停',
+          }),
+        ]),
+      ),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring']}>
+        <Routes>
+          <Route path="/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Running Edge')).toBeInTheDocument())
+    expect(screen.getByText('Paused Edge')).toBeInTheDocument()
+
+    const runStatusSelect = screen.getByDisplayValue('运行状态: 全部')
+    expect(within(runStatusSelect).getByRole('option', { name: '启用' })).toHaveValue('启用')
+    expect(within(runStatusSelect).getByRole('option', { name: '暂停' })).toHaveValue('暂停')
+    expect(within(runStatusSelect).getByRole('option', { name: '维护中' })).toHaveValue('维护中')
+    expect(within(runStatusSelect).queryByRole('option', { name: 'paused' })).not.toBeInTheDocument()
+
+    fireEvent.change(runStatusSelect, { target: { value: '暂停' } })
+
+    await waitFor(() =>
+      expect(screen.queryByText('Running Edge')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('Paused Edge')).toBeInTheDocument()
   })
 
   it('uses onboarding=pending from Dashboard deep links to filter monitoring', async () => {
@@ -925,9 +555,6 @@ describe('MonitoringPage', () => {
     expect(screen.getByText('Alerting Edge')).toBeInTheDocument()
   })
 
-
-
-
   it('navigates to the monitoring detail page when a row is clicked', async () => {
     vi.stubGlobal(
       'fetch',
@@ -958,42 +585,6 @@ describe('MonitoringPage', () => {
     fireEvent.click(row!)
     await waitFor(() => expect(screen.getByText('monitoring detail')).toBeInTheDocument())
   })
-
-  it('does not navigate when a row action button is clicked', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          mockJSONResponse([
-            monitoringInstanceRecord({
-              monitoring_instance_id: 'mi_actions',
-              display_name: 'Tokyo Edge',
-              labels: ['edge'],
-            }),
-          ]),
-        ),
-    )
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring']}>
-        <Routes>
-          <Route path="/monitoring" element={<MonitoringPage />} />
-          <Route path="/monitoring/:monitoringInstanceId" element={<div>monitoring detail</div>} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-
-    const row = screen.getByText('Tokyo Edge').closest('tr')
-    expect(row).not.toBeNull()
-
-    fireEvent.click(within(row!).getByRole('button', { name: '快速编辑标签' }))
-    expect(getMonitoringQuickEditDialog(/Tokyo Edge · 快速编辑标签/)).toBeInTheDocument()
-    expect(screen.queryByText('monitoring detail')).not.toBeInTheDocument()
-  })
-
 
   it('does not expose the standalone monitoringInstance create drawer from the page chrome', async () => {
     vi.stubGlobal(
@@ -1112,19 +703,32 @@ describe('MonitoringPage', () => {
     expect(placeholder!.textContent).toBe('—')
   })
 
-
-
-
-  it('renders heartbeat and sync timestamps inside the identity column freshness row', async () => {
+  it('shows heartbeat and missing-heartbeat problems in the current issue column, not under identity', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(
         mockJSONResponse([
           monitoringInstanceRecord({
-            monitoring_instance_id: 'mi_001',
+            monitoring_instance_id: 'mi_healthy',
             display_name: 'Tokyo Edge',
             last_heartbeat_at: '2026-04-26T09:00:00Z',
             last_sync_at: '2026-04-26T08:55:00Z',
+          }),
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_missing',
+            display_name: 'Seoul Edge',
+            region: 'ap-northeast-2',
+            city: 'Seoul',
+            last_heartbeat_at: undefined,
+          }),
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_issue',
+            display_name: 'Osaka Edge',
+            region: 'ap-northeast-3',
+            city: 'Osaka',
+            last_heartbeat_at: '2026-04-26T09:10:00Z',
+            current_primary_issue_summary: 'CPU 使用率过高',
+            current_active_incident_count: 2,
           }),
         ]),
       ),
@@ -1140,12 +744,19 @@ describe('MonitoringPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
 
-    const freshnessEl = document.querySelector('.monitoring-table__freshness')
-    expect(freshnessEl).not.toBeNull()
-    // Should contain "心跳" label and timestamp content
-    expect(freshnessEl!.textContent).toMatch(/心跳/)
-    // Should contain "同步" label when last_sync_at is present
-    expect(freshnessEl!.textContent).toMatch(/同步/)
+    const healthyRow = screen.getByText('Tokyo Edge').closest('tr')
+    const missingRow = screen.getByText('Seoul Edge').closest('tr')
+    const issueRow = screen.getByText('Osaka Edge').closest('tr')
+    expect(healthyRow).not.toBeNull()
+    expect(missingRow).not.toBeNull()
+    expect(issueRow).not.toBeNull()
+
+    expect(healthyRow!.querySelector('.monitoring-table__freshness')).toBeNull()
+    expect(within(healthyRow!).getByText(/心跳/)).toBeInTheDocument()
+    expect(within(healthyRow!).queryByText(/同步/)).not.toBeInTheDocument()
+    expect(within(missingRow!).getByText('未收到心跳')).toBeInTheDocument()
+    expect(within(issueRow!).getByText('CPU 使用率过高')).toBeInTheDocument()
+    expect(within(issueRow!).getByText(/心跳/)).toBeInTheDocument()
   })
 
 })

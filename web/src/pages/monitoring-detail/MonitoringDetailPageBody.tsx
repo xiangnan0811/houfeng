@@ -1,3 +1,5 @@
+import type { FormEvent } from 'react'
+
 import {
   MonitoringInstanceWatchtowerHeader,
   MonitoringInstanceWatchtowerMetrics,
@@ -17,6 +19,7 @@ import { MonitoringInstanceBindingConflictSection } from './MonitoringInstanceBi
 import { MonitoringInstanceCommandDrawer } from './MonitoringInstanceCommandDrawer'
 import { MonitoringInstanceDangerCard } from './MonitoringInstanceDangerCard'
 import { MonitoringInstanceHistoryDrawer } from './MonitoringInstanceHistoryDrawer'
+import { MonitoringInstanceMetadataSection } from './MonitoringInstanceMetadataSection'
 import { MonitoringInstanceOnboardingDrawer } from './MonitoringInstanceOnboardingDrawer'
 import { MonitoringInstanceRuntimePauseConfirmation } from './MonitoringInstanceRuntimePauseConfirmation'
 import { MonitoringInstanceSnapshotMeta } from './MonitoringInstanceSnapshotMeta'
@@ -86,9 +89,21 @@ type MonitoringDetailPageBodyProps = {
   runtimeSubmitting: boolean
   runtimeError: string | null
   pendingRuntimeConfirmation: PendingRuntimeConfirmation | null
+  metadataEditing: boolean
+  metadataGroupDraft: string
+  metadataLabelDraft: string
+  metadataNoteDraft: string
+  metadataSubmitting: boolean
+  metadataError: string | null
   onRuntimeAction: (action: MonitoringInstanceRuntimeAction, confirmed?: boolean) => void
   onCancelRuntimeConfirmation: () => void
   registerActionRef: (action: MonitoringInstanceRuntimeAction, element: HTMLButtonElement | null) => void
+  onMetadataGroupDraftChange: (value: string) => void
+  onMetadataLabelDraftChange: (value: string) => void
+  onMetadataNoteDraftChange: (value: string) => void
+  onMetadataStartEdit: () => void
+  onMetadataCancelEdit: () => void
+  onMetadataSubmit: (event: FormEvent<HTMLFormElement>) => void
   incidents: ActiveIncidentRecord[]
   events: StateChangeEventRecord[]
   eventsError: string | null
@@ -138,9 +153,21 @@ export function MonitoringDetailPageBody({
   runtimeSubmitting,
   runtimeError,
   pendingRuntimeConfirmation,
+  metadataEditing,
+  metadataGroupDraft,
+  metadataLabelDraft,
+  metadataNoteDraft,
+  metadataSubmitting,
+  metadataError,
   onRuntimeAction,
   onCancelRuntimeConfirmation,
   registerActionRef,
+  onMetadataGroupDraftChange,
+  onMetadataLabelDraftChange,
+  onMetadataNoteDraftChange,
+  onMetadataStartEdit,
+  onMetadataCancelEdit,
+  onMetadataSubmit,
   incidents,
   events,
   eventsError,
@@ -230,6 +257,22 @@ export function MonitoringDetailPageBody({
         />
       ) : null}
       {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
+
+      <MonitoringInstanceMetadataSection
+        monitoringInstance={monitoringInstance}
+        editing={metadataEditing}
+        groupDraft={metadataGroupDraft}
+        labelDraft={metadataLabelDraft}
+        noteDraft={metadataNoteDraft}
+        submitting={metadataSubmitting}
+        error={metadataError}
+        onGroupDraftChange={onMetadataGroupDraftChange}
+        onLabelDraftChange={onMetadataLabelDraftChange}
+        onNoteDraftChange={onMetadataNoteDraftChange}
+        onStartEdit={onMetadataStartEdit}
+        onCancelEdit={onMetadataCancelEdit}
+        onSubmit={onMetadataSubmit}
+      />
 
       {showDangerZone ? (
         <MonitoringInstanceDangerCard
