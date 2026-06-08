@@ -255,6 +255,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSServicesHandler == nil {
 		t.Fatal("router vps services handler = nil, want non-nil")
 	}
+	if gotOpts.VPSIPQualityHandler == nil {
+		t.Fatal("router vps ip quality handler = nil, want non-nil")
+	}
 	if gotOpts.VPSCancellationPreviewHandler == nil {
 		t.Fatal("router vps cancellation preview handler = nil, want non-nil")
 	}

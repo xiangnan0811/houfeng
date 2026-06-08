@@ -95,6 +95,12 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 	if plan.HostSampleFrequencyTier != agentapi.FrequencyTier15m {
 		t.Fatalf("HostSampleFrequencyTier = %q, want %q", plan.HostSampleFrequencyTier, agentapi.FrequencyTier15m)
 	}
+	if plan.IPQualityPlan == nil {
+		t.Fatal("IPQualityPlan = nil, want persisted default plan")
+	}
+	if plan.IPQualityPlan.FrequencySeconds != centersettings.Default().IPQuality.FrequencySeconds {
+		t.Fatalf("IPQualityPlan.FrequencySeconds = %d, want %d", plan.IPQualityPlan.FrequencySeconds, centersettings.Default().IPQuality.FrequencySeconds)
+	}
 	if len(plan.ProbeAssignments) != 2 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 2", len(plan.ProbeAssignments))
 	}
@@ -118,6 +124,58 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 	}
 	if len(seenLabels) != 2 || seenLabels[0] != "edge" || seenLabels[1] != "核心" {
 		t.Fatalf("labels = %#v, want edge+核心", seenLabels)
+	}
+}
+
+func TestBuildSyncPlanIncludesIPQualityPlanFromSettings(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
+			}
+			if args[0] != "mi_001" {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected monitoringInstance id") }}
+			}
+			return fakeAgentPlanRow{scan: func(dest ...any) error {
+				*(dest[0].(*[]string)) = []string{"edge"}
+				*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
+				*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
+				*(dest[3].(*string)) = agentapi.FrequencyTier15m
+				*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{})
+				*(dest[5].(*bool)) = true
+				*(dest[6].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.IPQualitySettings{
+					Enabled:              true,
+					FrequencySeconds:     259200,
+					TimeoutSeconds:       20,
+					RawRetentionDays:     45,
+					HistoryRetentionDays: 180,
+					Services:             []string{"netflix", "chatgpt"},
+				})
+				return nil
+			}}
+		},
+	}}
+
+	plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
+	if err != nil {
+		t.Fatalf("BuildSyncPlan() error = %v", err)
+	}
+	if plan.IPQualityPlan == nil {
+		t.Fatal("IPQualityPlan = nil, want non-nil")
+	}
+	if !plan.IPQualityPlan.Enabled {
+		t.Fatal("IPQualityPlan.Enabled = false, want true")
+	}
+	if plan.IPQualityPlan.FrequencySeconds != 259200 {
+		t.Fatalf("IPQualityPlan.FrequencySeconds = %d, want 259200", plan.IPQualityPlan.FrequencySeconds)
+	}
+	if plan.IPQualityPlan.TimeoutSeconds != 20 {
+		t.Fatalf("IPQualityPlan.TimeoutSeconds = %d, want 20", plan.IPQualityPlan.TimeoutSeconds)
+	}
+	if len(plan.IPQualityPlan.Services) != 2 || plan.IPQualityPlan.Services[1] != "chatgpt" {
+		t.Fatalf("IPQualityPlan.Services = %#v, want netflix/chatgpt", plan.IPQualityPlan.Services)
 	}
 }
 
@@ -438,6 +496,9 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredMonitoringInstances(t *testing.T
 			if plan.HostSampleFrequencyTier != "" {
 				t.Fatalf("HostSampleFrequencyTier = %q, want empty", plan.HostSampleFrequencyTier)
 			}
+			if plan.IPQualityPlan != nil {
+				t.Fatalf("IPQualityPlan = %#v, want nil for suppressed monitoringInstance", plan.IPQualityPlan)
+			}
 			if plan.HostSampleMaintenanceContext {
 				t.Fatalf("HostSampleMaintenanceContext = true, want false")
 			}
@@ -560,7 +621,41 @@ type fakeAgentPlanRow struct {
 	scan func(dest ...any) error
 }
 
-func (f fakeAgentPlanRow) Scan(dest ...any) error { return f.scan(dest...) }
+func (f fakeAgentPlanRow) Scan(dest ...any) error {
+	if err := f.scan(dest...); err != nil {
+		return err
+	}
+	fillDefaultAgentPlanScanFields(dest)
+	return nil
+}
+
+func fillDefaultAgentPlanScanFields(dest []any) {
+	if len(dest) > 1 {
+		if value, ok := dest[1].(*string); ok && *value == "" {
+			*value = monitoringinstances.LifecycleInUse
+		}
+	}
+	if len(dest) > 2 {
+		if value, ok := dest[2].(*string); ok && *value == "" {
+			*value = monitoringinstances.MonitoringEnabled
+		}
+	}
+	if len(dest) > 3 {
+		if value, ok := dest[3].(*string); ok && *value == "" {
+			*value = agentapi.FrequencyTier5s
+		}
+	}
+	if len(dest) > 4 {
+		if value, ok := dest[4].(*[]byte); ok && len(*value) == 0 {
+			*value = []byte(`{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]}`)
+		}
+	}
+	if len(dest) > 6 {
+		if value, ok := dest[6].(*[]byte); ok && len(*value) == 0 {
+			*value = []byte(`{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"raw_retention_days":90,"history_retention_days":365,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}`)
+		}
+	}
+}
 
 type fakeAgentPlanScan struct{ scan func(dest ...any) error }
 

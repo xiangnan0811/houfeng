@@ -299,6 +299,77 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if got.FeishuWebhookURL != "" {
 		t.Fatalf("FeishuWebhookURL = %q, want empty by default", got.FeishuWebhookURL)
 	}
+	if got.IPQuality.Enabled {
+		t.Fatal("IPQuality.Enabled = true, want false by default")
+	}
+	if got.IPQuality.FrequencySeconds != 86400 {
+		t.Fatalf("IPQuality.FrequencySeconds = %d, want 86400", got.IPQuality.FrequencySeconds)
+	}
+	if got.IPQuality.TimeoutSeconds != 15 {
+		t.Fatalf("IPQuality.TimeoutSeconds = %d, want 15", got.IPQuality.TimeoutSeconds)
+	}
+	if got.IPQuality.RawRetentionDays != 90 {
+		t.Fatalf("IPQuality.RawRetentionDays = %d, want 90", got.IPQuality.RawRetentionDays)
+	}
+	if got.IPQuality.HistoryRetentionDays != 365 {
+		t.Fatalf("IPQuality.HistoryRetentionDays = %d, want 365", got.IPQuality.HistoryRetentionDays)
+	}
+	if len(got.IPQuality.Services) == 0 {
+		t.Fatal("IPQuality.Services = empty, want default service set")
+	}
+	if got.IPQuality.Services[0] != "netflix" {
+		t.Fatalf("IPQuality.Services[0] = %q, want netflix", got.IPQuality.Services[0])
+	}
+}
+
+func TestSettingsValidateNormalizesIPQualitySettings(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.IPQuality = IPQualitySettings{
+		Enabled:              true,
+		FrequencySeconds:     3 * 86400,
+		TimeoutSeconds:       20,
+		RawRetentionDays:     30,
+		HistoryRetentionDays: 120,
+		Services:             []string{" Netflix ", "chatgpt", "netflix", "YouTube-Premium"},
+	}
+
+	got, err := Validate(input)
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got.IPQuality.FrequencySeconds != 259200 {
+		t.Fatalf("FrequencySeconds = %d, want 259200", got.IPQuality.FrequencySeconds)
+	}
+	if got.IPQuality.Services[0] != "netflix" || got.IPQuality.Services[1] != "chatgpt" || got.IPQuality.Services[2] != "youtube-premium" {
+		t.Fatalf("Services = %#v, want normalized unique services", got.IPQuality.Services)
+	}
+}
+
+func TestSettingsValidateRejectsInvalidIPQualitySettings(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.IPQuality.FrequencySeconds = 59
+	_, err := Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings for too-small frequency", err)
+	}
+
+	input = Default()
+	input.IPQuality.TimeoutSeconds = 0
+	_, err = Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings for invalid timeout", err)
+	}
+
+	input = Default()
+	input.IPQuality.Services = []string{"netflix", "unknown"}
+	_, err = Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings for invalid service", err)
+	}
 }
 
 func TestSettingsValidateRejectsOutOfRangeThreshold(t *testing.T) {

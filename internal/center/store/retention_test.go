@@ -19,7 +19,14 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
 	now := time.Date(2026, time.April, 28, 12, 30, 0, 0, time.UTC)
 
-	result, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180}, now)
+	result, err := repo.ApplyRetention(context.Background(), retention.Policy{
+		RawLayerDays:                  7,
+		AggregateLayerDays:            30,
+		EventLayerDays:                90,
+		NotificationLayerDays:         180,
+		IPQualityRawRetentionDays:     45,
+		IPQualityHistoryRetentionDays: 180,
+	}, now)
 	if err != nil {
 		t.Fatalf("ApplyRetention() error = %v", err)
 	}
@@ -33,6 +40,8 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 		"delete from target_probe_daily_aggregates",
 		"delete from state_change_events",
 		"delete from notification_records",
+		"update ip_quality_reports",
+		"delete from ip_quality_reports",
 	} {
 		if !containsSQL(tx.execSQL, want) {
 			t.Fatalf("execSQL = %#v, want %q", tx.execSQL, want)
@@ -44,7 +53,12 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 	if tx.commitCalls != 1 || tx.rollbackCalls == 0 {
 		t.Fatalf("commitCalls=%d rollbackCalls=%d, want commit and deferred rollback", tx.commitCalls, tx.rollbackCalls)
 	}
-	if result.MonitoringInstanceAggregateRows != 1 || result.TargetAggregateRows != 1 || result.DeletedHeartbeats != 1 || result.DeletedNotifications != 1 {
+	if result.MonitoringInstanceAggregateRows != 1 ||
+		result.TargetAggregateRows != 1 ||
+		result.DeletedHeartbeats != 1 ||
+		result.DeletedNotifications != 1 ||
+		result.ClearedIPQualityRawJSON != 1 ||
+		result.DeletedIPQualityReports != 1 {
 		t.Fatalf("result = %#v, want command-tag counts", result)
 	}
 }
@@ -60,7 +74,7 @@ func TestPostgresRetentionRepositoryUsesRepeatableReadTransaction(t *testing.T) 
 		},
 	}
 
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
+	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180, IPQualityRawRetentionDays: 45, IPQualityHistoryRetentionDays: 180}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("ApplyRetention() error = %v", err)
 	}
@@ -76,7 +90,7 @@ func TestPostgresRetentionRepositoryUsesExpectedCutoffs(t *testing.T) {
 	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
 	now := time.Date(2026, time.April, 28, 12, 30, 0, 0, time.UTC)
 
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180}, now)
+	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180, IPQualityRawRetentionDays: 45, IPQualityHistoryRetentionDays: 180}, now)
 	if err != nil {
 		t.Fatalf("ApplyRetention() error = %v", err)
 	}
@@ -89,6 +103,12 @@ func TestPostgresRetentionRepositoryUsesExpectedCutoffs(t *testing.T) {
 	if got := tx.argsForSQL("delete from state_change_events")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -90)) {
 		t.Fatalf("event cutoff = %s, want %s", got, now.AddDate(0, 0, -90))
 	}
+	if got := tx.argsForSQL("update ip_quality_reports")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -45)) {
+		t.Fatalf("ip quality raw cutoff = %s, want %s", got, now.AddDate(0, 0, -45))
+	}
+	if got := tx.argsForSQL("delete from ip_quality_reports")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -180)) {
+		t.Fatalf("ip quality history cutoff = %s, want %s", got, now.AddDate(0, 0, -180))
+	}
 }
 
 func TestPostgresRetentionRepositoryRollsBackOnFailure(t *testing.T) {
@@ -96,7 +116,7 @@ func TestPostgresRetentionRepositoryRollsBackOnFailure(t *testing.T) {
 	tx := &fakeRetentionTx{execErrForSQLSubstring: "delete from host_samples", execErr: errors.New("delete boom")}
 	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
 
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
+	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180, IPQualityRawRetentionDays: 45, IPQualityHistoryRetentionDays: 180}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
 	if err == nil || !strings.Contains(err.Error(), "delete expired host samples") {
 		t.Fatalf("ApplyRetention() error = %v, want host sample context", err)
 	}
