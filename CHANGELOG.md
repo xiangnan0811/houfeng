@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.0](https://github.com/xiangnan0811/houfeng/compare/v0.49.1...v0.50.0) (2026-06-08)
+
+
+### Features
+
+* add archive asset visibility controls ([4844752](https://github.com/xiangnan0811/houfeng/commit/4844752c08e5fc9dc8c0fcb4646690eab90d0719))
+* add archive asset visibility controls ([106a59c](https://github.com/xiangnan0811/houfeng/commit/106a59c2e046a7fe53307ac9b28c1f43961f8ae0))
+
 ## [0.49.1](https://github.com/xiangnan0811/houfeng/compare/v0.49.0...v0.49.1) (2026-06-07)
 
 
