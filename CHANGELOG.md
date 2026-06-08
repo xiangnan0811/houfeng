@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.52.0](https://github.com/xiangnan0811/houfeng/compare/v0.51.1...v0.52.0) (2026-06-08)
+
+
+### Features
+
+* add vps ip quality agent sync ([c7ca628](https://github.com/xiangnan0811/houfeng/commit/c7ca628e33f3e32c94959701f2bc71b8aa7b56b8))
+* add VPS IP quality collection ([48f1f2d](https://github.com/xiangnan0811/houfeng/commit/48f1f2d31ff33eddfbae6c9bc03bc74fd439e0ee))
+* expose ip quality in vps and decisions ([94709e8](https://github.com/xiangnan0811/houfeng/commit/94709e8366655f96acfe7c6d588450ad44579308))
+* show ip quality in web ui ([eb4cbcf](https://github.com/xiangnan0811/houfeng/commit/eb4cbcf51f13da0522b12000fd11fb54f2a3529d))
+* store vps ip quality reports ([967338b](https://github.com/xiangnan0811/houfeng/commit/967338bc3a9ba408ecb821ca7722c9c65367f0fd))
+
+
+### Documentation
+
+* document ip quality contract ([12796aa](https://github.com/xiangnan0811/houfeng/commit/12796aa2571637ca7806932e20461938cb33baa4))
+
 ## [0.51.1](https://github.com/xiangnan0811/houfeng/compare/v0.51.0...v0.51.1) (2026-06-08)
 
 
