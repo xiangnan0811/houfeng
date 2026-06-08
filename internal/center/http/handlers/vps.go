@@ -46,7 +46,11 @@ func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler 
 				LifecycleStatus: vpsassets.LifecycleStatus(r.URL.Query().Get("lifecycle_status")),
 				UsageStatus:     vpsassets.UsageStatus(r.URL.Query().Get("usage_status")),
 				RenewalDecision: vpsassets.RenewalDecision(r.URL.Query().Get("renewal_decision")),
+				AssetScope:      vpsassets.AssetScope(r.URL.Query().Get("asset_scope")),
 			})
+			if filters.AssetScope == "" {
+				filters.AssetScope = vpsassets.AssetScopeCurrent
+			}
 			if err := vpsassets.ValidateListFilters(filters); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return

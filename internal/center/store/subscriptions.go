@@ -14,6 +14,7 @@ import (
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
+	"houfeng/internal/center/vpsassets"
 )
 
 var _ subscriptions.Repository = (*PostgresSubscriptionRepository)(nil)
@@ -169,6 +170,17 @@ func (r *PostgresSubscriptionRepository) ListSubscriptions(ctx context.Context, 
 		conditions = append(conditions, fmt.Sprintf(`exists (
 			select 1 from vps_assets v where v.vps_id = subscriptions.vps_id and v.renewal_decision = $%d
 		)`, len(args)))
+	}
+	switch filters.AssetScope {
+	case vpsassets.AssetScopeArchived:
+		conditions = append(conditions, `exists (
+			select 1 from vps_assets v where v.vps_id = subscriptions.vps_id and v.lifecycle_status in ('cancelled', 'archived')
+		)`)
+	case vpsassets.AssetScopeAll, "":
+	default:
+		conditions = append(conditions, `exists (
+			select 1 from vps_assets v where v.vps_id = subscriptions.vps_id and v.lifecycle_status not in ('cancelled', 'archived')
+		)`)
 	}
 
 	query := `

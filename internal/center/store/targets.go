@@ -180,6 +180,26 @@ func (r *PostgresTargetRepository) ListTargets(ctx context.Context) ([]targets.T
 	rows, err := r.db.Query(ctx, `
 		select `+targetSelectColumns+`
 		from targets
+		where not exists (
+			select 1
+			from (
+				select vps_id, target_id from asset_services where target_id is not null
+				union all
+				select vps_id, target_id from asset_domains where target_id is not null
+			) a
+			where a.target_id = targets.target_id
+		)
+		or exists (
+			select 1
+			from (
+				select vps_id, target_id from asset_services where target_id is not null
+				union all
+				select vps_id, target_id from asset_domains where target_id is not null
+			) a
+			join vps_assets v on v.vps_id = a.vps_id
+			where a.target_id = targets.target_id
+			  and v.lifecycle_status not in ('cancelled', 'archived')
+		)
 		order by created_at desc`)
 	if err != nil {
 		return nil, fmt.Errorf("query targets: %w", err)

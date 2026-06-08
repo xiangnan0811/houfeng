@@ -541,6 +541,42 @@ func TestUpdateTargetMetadataMapsPreconditionMissToConflictWhenTargetExists(t *t
 	}
 }
 
+func TestPostgresTargetListHidesTargetsLinkedOnlyToArchivedVPS(t *testing.T) {
+	var seenSQL string
+	repo := &PostgresTargetRepository{db: fakeTargetDB{
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			seenSQL = sql
+			return &fakeTargetRows{}, nil
+		},
+	}}
+
+	if _, err := repo.ListTargets(context.Background()); err != nil {
+		t.Fatalf("ListTargets() error = %v", err)
+	}
+	for _, snippet := range []string{
+		"not exists",
+		"asset_services",
+		"asset_domains",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+	} {
+		if !strings.Contains(seenSQL, snippet) {
+			t.Fatalf("ListTargets SQL missing %q in %s", snippet, seenSQL)
+		}
+	}
+}
+
+type fakeTargetRows struct{}
+
+func (r *fakeTargetRows) Close()                                       {}
+func (r *fakeTargetRows) Err() error                                   { return nil }
+func (r *fakeTargetRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("SELECT 0") }
+func (r *fakeTargetRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (r *fakeTargetRows) Next() bool                                   { return false }
+func (r *fakeTargetRows) Scan(...any) error                            { return nil }
+func (r *fakeTargetRows) Values() ([]any, error)                       { return nil, nil }
+func (r *fakeTargetRows) RawValues() [][]byte                          { return nil }
+func (r *fakeTargetRows) Conn() *pgx.Conn                              { return nil }
+
 type fakeTargetDB struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 	query    func(context.Context, string, ...any) (pgx.Rows, error)

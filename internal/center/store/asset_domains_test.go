@@ -195,7 +195,8 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 		"service_id = $2",
 		"target_id = $3",
 		"status = $4",
-		"order by lower(domain_name), domain_id",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"order by lower(asset_domains.domain_name), asset_domains.domain_id",
 	} {
 		if !strings.Contains(queryCalls[0], snippet) {
 			t.Fatalf("ListAssetDomains SQL missing %q in %q", snippet, queryCalls[0])
@@ -210,9 +211,11 @@ func TestPostgresAssetDomainListForVPS(t *testing.T) {
 	t.Parallel()
 
 	var queryArgs []any
+	var querySQL string
 	var existsCheckArg any
 	repo := &PostgresAssetDomainRepository{db: fakeAssetDomainDB{
-		query: func(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			querySQL = sql
 			queryArgs = append([]any(nil), args...)
 			return &fakeAssetDomainRows{}, nil
 		},
@@ -240,6 +243,9 @@ func TestPostgresAssetDomainListForVPS(t *testing.T) {
 	}
 	if len(queryArgs) != 1 || queryArgs[0] != "vps_001" {
 		t.Fatalf("query args = %#v, want vps filter", queryArgs)
+	}
+	if strings.Contains(querySQL, "lifecycle_status not in ('cancelled', 'archived')") {
+		t.Fatalf("ListAssetDomainsForVPS SQL = %q, want history read without current asset scope filter", querySQL)
 	}
 }
 

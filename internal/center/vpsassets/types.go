@@ -27,12 +27,18 @@ const (
 
 type UsageStatus string
 
+type AssetScope string
+
 const (
 	UsageInUse   UsageStatus = "in_use"
 	UsageIdle    UsageStatus = "idle"
 	UsageStandby UsageStatus = "standby"
 	UsageTesting UsageStatus = "testing"
 	UsageUnknown UsageStatus = "unknown"
+
+	AssetScopeCurrent  AssetScope = "current"
+	AssetScopeArchived AssetScope = "archived"
+	AssetScopeAll      AssetScope = "all"
 )
 
 type RenewalDecision string
@@ -159,6 +165,7 @@ type ListFilters struct {
 	LifecycleStatus LifecycleStatus
 	UsageStatus     UsageStatus
 	RenewalDecision RenewalDecision
+	AssetScope      AssetScope
 }
 
 type OptionalString struct {
@@ -475,6 +482,7 @@ func NormalizeListFilters(filters ListFilters) ListFilters {
 	filters.LifecycleStatus = LifecycleStatus(strings.TrimSpace(string(filters.LifecycleStatus)))
 	filters.UsageStatus = UsageStatus(strings.TrimSpace(string(filters.UsageStatus)))
 	filters.RenewalDecision = RenewalDecision(strings.TrimSpace(string(filters.RenewalDecision)))
+	filters.AssetScope = AssetScope(strings.TrimSpace(string(filters.AssetScope)))
 	return filters
 }
 
@@ -487,6 +495,9 @@ func ValidateListFilters(filters ListFilters) error {
 	}
 	if filters.RenewalDecision != "" && !IsValidRenewalDecision(filters.RenewalDecision) {
 		return fmt.Errorf("%w: invalid renewal_decision", ErrInvalidVPSAssetInput)
+	}
+	if filters.AssetScope != "" && !IsValidAssetScope(filters.AssetScope) {
+		return fmt.Errorf("%w: invalid asset_scope", ErrInvalidVPSAssetInput)
 	}
 	return nil
 }
@@ -520,6 +531,15 @@ func IsValidLifecycleStatus(status LifecycleStatus) bool {
 func IsValidUsageStatus(status UsageStatus) bool {
 	switch status {
 	case UsageInUse, UsageIdle, UsageStandby, UsageTesting, UsageUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsValidAssetScope(scope AssetScope) bool {
+	switch scope {
+	case AssetScopeCurrent, AssetScopeArchived, AssetScopeAll:
 		return true
 	default:
 		return false

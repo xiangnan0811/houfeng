@@ -12,6 +12,7 @@ import (
 
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/subscriptions"
+	"houfeng/internal/center/vpsassets"
 )
 
 type fakeSubscriptionRepository struct {
@@ -77,7 +78,7 @@ func TestSubscriptionsCollectionListsSubscriptionsWithFilters(t *testing.T) {
 	}}}
 
 	handler := handlers.SubscriptionsCollection(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions?vps_id=+vps_001+&status=+active+&renew_before=2026-07-01&renew_after=2026-05-01&renew_within_days=30&sort=renew_at&order=desc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions?vps_id=+vps_001+&status=+active+&renew_before=2026-07-01&renew_after=2026-05-01&renew_within_days=30&sort=renew_at&order=desc&asset_scope=archived", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -91,7 +92,8 @@ func TestSubscriptionsCollectionListsSubscriptionsWithFilters(t *testing.T) {
 		repo.listSubscriptionsFilter.RenewAfter == nil ||
 		repo.listSubscriptionsFilter.RenewWithinDays == nil ||
 		*repo.listSubscriptionsFilter.RenewWithinDays != 30 ||
-		repo.listSubscriptionsFilter.Order != subscriptions.OrderDesc {
+		repo.listSubscriptionsFilter.Order != subscriptions.OrderDesc ||
+		repo.listSubscriptionsFilter.AssetScope != vpsassets.AssetScopeArchived {
 		t.Fatalf("filters = %#v, want normalized query filters", repo.listSubscriptionsFilter)
 	}
 	var body []subscriptions.Record
@@ -100,6 +102,22 @@ func TestSubscriptionsCollectionListsSubscriptionsWithFilters(t *testing.T) {
 	}
 	if len(body) != 1 || body[0].SubscriptionID != "sub_001" || body[0].RenewAt == nil {
 		t.Fatalf("body = %#v, want subscription list", body)
+	}
+}
+
+func TestSubscriptionsCollectionDefaultsToCurrentAssetScope(t *testing.T) {
+	repo := &fakeSubscriptionRepository{}
+	handler := handlers.SubscriptionsCollection(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.listSubscriptionsFilter.AssetScope != vpsassets.AssetScopeCurrent {
+		t.Fatalf("asset scope = %q, want current", repo.listSubscriptionsFilter.AssetScope)
 	}
 }
 

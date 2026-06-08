@@ -56,6 +56,7 @@ export function Sidebar({
         <div className="nav-section">
           <div className="nav-label">资产</div>
           <SidebarNavItem to="/vps" label="VPS" icon={<svg viewBox="0 0 16 16"><rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1"/></svg>} />
+          <SidebarNavItem to="/archive" label="归档" icon={<svg viewBox="0 0 16 16"><path d="M3 3h10v4H3z"/><path d="M4 7v8h8V7"/><path d="M6 10h4"/></svg>} />
           <SidebarNavItem to="/providers" label="服务商" icon={<svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12"/><circle cx="8" cy="8" r="5"/></svg>} />
           <SidebarNavItem to="/subscriptions" label="订阅" icon={<svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>} />
           <SidebarNavItem to="/asset-decisions" label="资产决策" icon={<svg viewBox="0 0 16 16"><path d="M2 12l4-4 3 3 5-6"/></svg>} />

@@ -312,6 +312,7 @@ func (r *PostgresAssetLifecycleRepository) ListMonitoringInstanceAssetContexts(c
 		from vps_monitoring_instance_links l
 		join vps_assets v on v.vps_id = l.vps_id
 		where l.unlinked_at is null
+		  and v.lifecycle_status not in ('cancelled', 'archived')
 		order by l.monitoring_instance_id, lower(v.display_name), v.vps_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query monitoring instance asset contexts: %w", err)
@@ -402,6 +403,7 @@ func (r *PostgresAssetLifecycleRepository) ListTargetAssetContexts(ctx context.C
 			), 'missing') as subscription_state
 		from target_assets ta
 		join vps_assets v on v.vps_id = ta.vps_id
+		where v.lifecycle_status not in ('cancelled', 'archived')
 		order by ta.target_id, lower(v.display_name), v.vps_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query target asset contexts: %w", err)

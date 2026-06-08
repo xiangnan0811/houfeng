@@ -199,6 +199,7 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) ListVPSForMonitoringInstan
 		join vps_assets v on v.vps_id = l.vps_id
 		where l.monitoring_instance_id = $1
 		  and l.unlinked_at is null
+		  and v.lifecycle_status not in ('cancelled', 'archived')
 		order by l.linked_at desc, lower(v.display_name), v.vps_id`, monitoringInstanceID)
 	if err != nil {
 		return nil, fmt.Errorf("query active vps assets for monitoring instance %q: %w", monitoringInstanceID, err)

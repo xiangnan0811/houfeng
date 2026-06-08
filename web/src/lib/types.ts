@@ -1633,6 +1633,7 @@ export type VPSAssetListFilter = {
   lifecycle_status?: VPSLifecycleStatus | '' | null
   usage_status?: VPSUsageStatus | '' | null
   renewal_decision?: VPSRenewalDecision | '' | null
+  asset_scope?: AssetScope | null
 }
 
 export type VPSMonitoringInstanceSummary = {
@@ -1957,7 +1958,10 @@ export type SubscriptionListFilter = {
   renewal_decision?: string | null
   sort?: 'renew_at' | '' | null
   order?: 'asc' | 'desc' | '' | null
+  asset_scope?: AssetScope | null
 }
+
+export type AssetScope = 'current' | 'archived' | 'all'
 
 export type SubscriptionBreakdownItem = {
   key: string

@@ -196,6 +196,9 @@ func TestPostgresVPSMonitoringInstanceLinkLinkUnlinkListAndCount(t *testing.T) {
 	if queryArgs[1][0] != "mi_001" || !strings.Contains(queryCalls[1], "where l.monitoring_instance_id = $1") || !strings.Contains(queryCalls[1], "l.unlinked_at is null") {
 		t.Fatalf("ListVPSForMonitoringInstance SQL/args = %q %#v, want active monitoringInstance filter", queryCalls[1], queryArgs[1])
 	}
+	if !strings.Contains(queryCalls[1], "v.lifecycle_status not in ('cancelled', 'archived')") {
+		t.Fatalf("ListVPSForMonitoringInstance SQL = %q, want current asset scope filter", queryCalls[1])
+	}
 
 	count, err := repo.CountActiveLinksForVPS(context.Background(), "vps_001")
 	if err != nil {

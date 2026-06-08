@@ -154,15 +154,11 @@ func TestDeriveGroupsCancellationAndArchivedBoundaries(t *testing.T) {
 		t.Fatalf("DeriveGroups() error = %v", err)
 	}
 
-	cancellation := firstGroup(groups, GroupCancellationAttention)
-	if cancellation.MemberCount != 1 || cancellation.Members[0].VPS.VPSID != "vps_cancelled_running" {
-		t.Fatalf("cancellation group = %#v, want cancelled runtime member only", cancellation)
+	if hasGroupType(groups, GroupCancellationAttention) {
+		t.Fatalf("groups = %#v, do not want cancelled or archived VPS in cancellation group", groups)
 	}
 	if hasGroupType(groups, GroupRegionPortfolio) {
 		t.Fatalf("groups = %#v, want archived/cancelled excluded from ordinary portfolio groups", groups)
-	}
-	if cancellation.EvidenceAssessment.PressureScore < 70 || cancellation.EvidenceAssessment.DecisionBias != EvidenceBiasRetire {
-		t.Fatalf("cancellation assessment = %#v, want high pressure retire bias", cancellation.EvidenceAssessment)
 	}
 }
 

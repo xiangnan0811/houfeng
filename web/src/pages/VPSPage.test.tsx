@@ -126,6 +126,8 @@ describe('VPSPage', () => {
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=needs_decision&renew_within_days=30')
+    expect(screen.getByRole('link', { name: '查看归档' })).toHaveAttribute('href', '/archive')
+    expect(screen.queryByRole('tab', { name: /已归档/ })).not.toBeInTheDocument()
     expect(screen.getAllByText('在用').length).toBeGreaterThan(0)
     expect(screen.getAllByText('保留').length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps', {
@@ -152,6 +154,9 @@ describe('VPSPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    const lifecycleSelect = within(drawer).getByLabelText('生命周期')
+    expect(within(lifecycleSelect).queryByRole('option', { name: '已取消' })).not.toBeInTheDocument()
+    expect(within(lifecycleSelect).queryByRole('option', { name: '已归档' })).not.toBeInTheDocument()
     fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
     expect(screen.getByText('生命周期: 测试中')).toBeInTheDocument()
@@ -222,7 +227,7 @@ describe('VPSPage', () => {
     expect(screen.getByText('视图: 取消待处理')).toBeInTheDocument()
   })
 
-  it('uses running linked assets rather than historical links for cancellation attention', async () => {
+  it('hides final lifecycle rows and uses running linked assets for cancellation attention', async () => {
     const toCancelWithRetiredLinks = {
       ...vps,
       lifecycle_status: 'to_cancel',
@@ -242,6 +247,12 @@ describe('VPSPage', () => {
       vps_id: 'vps_cancelled_running_target',
       display_name: 'Cancelled Legacy',
       lifecycle_status: 'cancelled',
+    }
+    const archivedWithRunningTarget = {
+      ...toCancelWithRunningTarget,
+      vps_id: 'vps_archived_running_target',
+      display_name: 'Archived Legacy',
+      lifecycle_status: 'archived',
     }
     const cancelledSubscription = {
       ...subscription,
@@ -265,6 +276,7 @@ describe('VPSPage', () => {
         toCancelWithRetiredLinks,
         toCancelWithRunningTarget,
         cancelledWithRunningTarget,
+        archivedWithRunningTarget,
       ]))
       .mockResolvedValueOnce(mockJSONResponse([provider]))
       .mockResolvedValueOnce(mockJSONResponse([
@@ -284,9 +296,9 @@ describe('VPSPage', () => {
 
     await waitFor(() => expect(screen.getByText('Frankfurt Legacy')).toBeInTheDocument())
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-    expect(screen.getByText('Cancelled Legacy')).toBeInTheDocument()
+    expect(screen.queryByText('Cancelled Legacy')).not.toBeInTheDocument()
+    expect(screen.queryByText('Archived Legacy')).not.toBeInTheDocument()
     expect(screen.getByText('VPS 待取消，仍有 1 个监控实例/入口探测运行')).toBeInTheDocument()
-    expect(screen.getByText('VPS 已取消，仍有 1 个监控实例/入口探测运行')).toBeInTheDocument()
   })
 
   it('does not apply draft drawer filters when closed by button, Escape, or overlay', async () => {

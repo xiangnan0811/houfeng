@@ -48,7 +48,6 @@ type VPSQuickView =
   | 'cancellation_attention'
   | 'missing_subscription'
   | 'missing_facts'
-  | 'archived'
 
 type SubscriptionEvidenceStatus = 'loading' | 'ready' | 'error'
 
@@ -96,10 +95,12 @@ const INITIAL_FILTER_STATE: FilterState = {
   renewal_decision: null,
 }
 
-const LIFECYCLE_OPTIONS = Object.entries(VPS_LIFECYCLE_STATUS_LABELS).map(([value, label]) => ({
-  value,
-  label,
-}))
+const LIFECYCLE_OPTIONS = Object.entries(VPS_LIFECYCLE_STATUS_LABELS)
+  .filter(([value]) => value !== 'cancelled' && value !== 'archived')
+  .map(([value, label]) => ({
+    value,
+    label,
+  }))
 const USAGE_OPTIONS = Object.entries(VPS_USAGE_STATUS_LABELS).map(([value, label]) => ({
   value,
   label,
@@ -116,7 +117,6 @@ const QUICK_VIEW_VALUES: VPSQuickView[] = [
   'cancellation_attention',
   'missing_subscription',
   'missing_facts',
-  'archived',
 ]
 
 function describeError(error: unknown, fallback: string): string {
@@ -188,7 +188,9 @@ function buildInventoryRows(
   subscriptionsByVPS: Map<string, SubscriptionRecord[]>,
   subscriptionEvidence: SubscriptionEvidenceStatus,
 ): InventoryRow[] {
-  return vpsRows.map((vps) => {
+  return vpsRows
+    .filter((vps) => vps.lifecycle_status !== 'cancelled' && vps.lifecycle_status !== 'archived')
+    .map((vps) => {
     const subscription =
       subscriptionEvidence === 'ready'
         ? selectPrimarySubscription(subscriptionsByVPS, vps.vps_id)
@@ -235,15 +237,11 @@ function matchesQuickView(row: InventoryRow, view: VPSQuickView): boolean {
   if (view === 'cancellation_attention') return hasCancellationAttention(row)
   if (view === 'missing_subscription') return row.subscriptionEvidence === 'ready' && !row.subscription
   if (view === 'missing_facts') return hasMissingVPSFacts(row.vps)
-  if (view === 'archived') return row.vps.lifecycle_status === 'archived'
   return true
 }
 
 function cancellationAttentionReason(row: InventoryRow): string | null {
   const vpsToCancel = row.vps.lifecycle_status === 'to_cancel'
-  const vpsCancelled = row.vps.lifecycle_status === 'cancelled'
-  const vpsCancellationPending = vpsToCancel || vpsCancelled
-  const vpsCancellationLabel = vpsCancelled ? 'VPS 已取消' : 'VPS 待取消'
   const vpsCancelDecision = row.vps.renewal_decision === 'cancel' || row.vps.renewal_decision === 'auto_renew_cancelled'
   const runningLinkedAssetCount = (row.vps.running_monitoring_instance_count ?? 0) + (row.vps.running_target_count ?? 0)
   const subscriptionInactive = row.subscriptionEvidence === 'ready' &&
@@ -252,10 +250,10 @@ function cancellationAttentionReason(row: InventoryRow): string | null {
   const subscriptionActive = row.subscriptionEvidence === 'ready' &&
     row.subscription?.status === 'active'
 
-  if (subscriptionInactive && !vpsCancellationPending) return '订阅非活跃，VPS 尚未取消'
-  if (vpsCancellationPending && subscriptionActive) return `${vpsCancellationLabel}，订阅仍 active`
-  if (vpsCancellationPending && runningLinkedAssetCount > 0) return `${vpsCancellationLabel}，仍有 ${runningLinkedAssetCount} 个监控实例/入口探测运行`
-  if (vpsCancelDecision && !vpsCancellationPending) return '已决定不续费，生命周期未同步'
+  if (subscriptionInactive && !vpsToCancel) return '订阅非活跃，VPS 尚未取消'
+  if (vpsToCancel && subscriptionActive) return 'VPS 待取消，订阅仍 active'
+  if (vpsToCancel && runningLinkedAssetCount > 0) return `VPS 待取消，仍有 ${runningLinkedAssetCount} 个监控实例/入口探测运行`
+  if (vpsCancelDecision && !vpsToCancel) return '已决定不续费，生命周期未同步'
   return null
 }
 
@@ -282,7 +280,7 @@ function quickViewLabel(value: VPSQuickView): string {
   if (value === 'cancellation_attention') return '取消待处理'
   if (value === 'missing_subscription') return '缺订阅'
   if (value === 'missing_facts') return '缺基础信息'
-  return '已归档'
+  return '全部'
 }
 
 function renderRenewalDate(row: InventoryRow) {
@@ -402,7 +400,6 @@ export function VPSPage() {
     { value: 'cancellation_attention', label: '取消待处理', count: cancellationAttentionCount },
     { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
     { value: 'missing_facts', label: '缺信息', count: missingFactsCount },
-    { value: 'archived', label: '已归档', count: inventoryRows.filter((row) => row.vps.lifecycle_status === 'archived').length },
   ] satisfies Array<{ value: VPSQuickView; label: string; count: number }>
 
   function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
@@ -432,6 +429,7 @@ export function VPSPage() {
         </div>
         <div className="header-actions">
           <Link className="btn sm secondary" to={assetDecisionHrefForFilters(filters)}>进入组合决策</Link>
+          <Link className="btn sm secondary" to="/archive">查看归档</Link>
           <button type="button" className="btn sm secondary" onClick={openFilterDrawer}>筛选</button>
           <button type="button" className="btn sm primary" onClick={() => setCreateOpen(true)}>
             {state.vps.length === 0 ? '创建第一台 VPS' : '添加 VPS'}

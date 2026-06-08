@@ -9,6 +9,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"houfeng/internal/center/vpsassets"
 )
 
 var ErrSubscriptionNotFound = errors.New("subscription not found")
@@ -153,6 +155,7 @@ type ListFilters struct {
 	RenewalDecision string
 	Sort            string
 	Order           string
+	AssetScope      vpsassets.AssetScope
 }
 
 type OptionalString struct {
@@ -534,6 +537,7 @@ func NormalizeListFilters(filters ListFilters) ListFilters {
 	filters.PaymentMethod = strings.TrimSpace(filters.PaymentMethod)
 	filters.Label = strings.TrimSpace(filters.Label)
 	filters.RenewalDecision = NormalizeRenewalMode(filters.RenewalDecision)
+	filters.AssetScope = vpsassets.AssetScope(strings.TrimSpace(string(filters.AssetScope)))
 	filters.Sort = strings.ToLower(strings.TrimSpace(filters.Sort))
 	if filters.Sort == "" {
 		filters.Sort = SortRenewAt
@@ -564,6 +568,9 @@ func ValidateListFilters(filters ListFilters) error {
 	}
 	if filters.RenewalDecision != "" && !IsValidRenewalMode(filters.RenewalDecision) {
 		return fmt.Errorf("%w: invalid renewal_decision", ErrInvalidSubscriptionInput)
+	}
+	if filters.AssetScope != "" && !vpsassets.IsValidAssetScope(filters.AssetScope) {
+		return fmt.Errorf("%w: invalid asset_scope", ErrInvalidSubscriptionInput)
 	}
 	if filters.Sort != SortRenewAt {
 		return fmt.Errorf("%w: invalid sort", ErrInvalidSubscriptionInput)

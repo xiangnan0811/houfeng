@@ -315,6 +315,20 @@ func (r *PostgresMonitoringInstanceRepository) ListMonitoringInstances(ctx conte
 	rows, err := r.db.Query(ctx, `
 		select `+monitoringInstanceSelectColumns+`
 		from monitoring_instances
+		where not exists (
+			select 1
+			from vps_monitoring_instance_links l
+			where l.monitoring_instance_id = monitoring_instances.monitoring_instance_id
+			  and l.unlinked_at is null
+		)
+		or exists (
+			select 1
+			from vps_monitoring_instance_links l
+			join vps_assets v on v.vps_id = l.vps_id
+			where l.monitoring_instance_id = monitoring_instances.monitoring_instance_id
+			  and l.unlinked_at is null
+			  and v.lifecycle_status not in ('cancelled', 'archived')
+		)
 		order by created_at desc`)
 	if err != nil {
 		return nil, fmt.Errorf("query monitoring instances: %w", err)

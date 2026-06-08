@@ -142,7 +142,7 @@ func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
 	}}}
 
 	handler := handlers.VPSCollection(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/vps?provider_id=+pv_001+&lifecycle_status=+active+&usage_status=in_use&renewal_decision=keep", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps?provider_id=+pv_001+&lifecycle_status=+active+&usage_status=in_use&renewal_decision=keep&asset_scope=archived", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -153,7 +153,8 @@ func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
 	if repo.listVPSAssetsFilter.ProviderID != "pv_001" ||
 		repo.listVPSAssetsFilter.LifecycleStatus != vpsassets.LifecycleActive ||
 		repo.listVPSAssetsFilter.UsageStatus != vpsassets.UsageInUse ||
-		repo.listVPSAssetsFilter.RenewalDecision != vpsassets.RenewalKeep {
+		repo.listVPSAssetsFilter.RenewalDecision != vpsassets.RenewalKeep ||
+		repo.listVPSAssetsFilter.AssetScope != vpsassets.AssetScopeArchived {
 		t.Fatalf("filters = %#v, want normalized query filters", repo.listVPSAssetsFilter)
 	}
 	var body []vpsassets.Record
@@ -162,6 +163,22 @@ func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
 	}
 	if len(body) != 1 || body[0].VPSID != "vps_001" {
 		t.Fatalf("body = %#v, want vps asset list", body)
+	}
+}
+
+func TestVPSCollectionDefaultsToCurrentAssetScope(t *testing.T) {
+	repo := &fakeVPSAssetRepository{}
+	handler := handlers.VPSCollection(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.listVPSAssetsFilter.AssetScope != vpsassets.AssetScopeCurrent {
+		t.Fatalf("asset scope = %q, want current", repo.listVPSAssetsFilter.AssetScope)
 	}
 }
 

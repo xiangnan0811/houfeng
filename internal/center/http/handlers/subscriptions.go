@@ -8,6 +8,7 @@ import (
 
 	"houfeng/internal/center/subscriptioncosts"
 	"houfeng/internal/center/subscriptions"
+	"houfeng/internal/center/vpsassets"
 )
 
 type vpsSubscriptionCreateRequest struct {
@@ -285,8 +286,14 @@ func subscriptionFiltersFromQuery(r *http.Request) (subscriptions.ListFilters, e
 	if raw := strings.TrimSpace(query.Get("renewal_decision")); raw != "" {
 		filters.RenewalDecision = raw
 	}
+	if raw := strings.TrimSpace(query.Get("asset_scope")); raw != "" {
+		filters.AssetScope = vpsassets.AssetScope(raw)
+	}
 
 	filters = subscriptions.NormalizeListFilters(filters)
+	if filters.AssetScope == "" {
+		filters.AssetScope = vpsassets.AssetScopeCurrent
+	}
 	if err := subscriptions.ValidateListFilters(filters); err != nil {
 		return subscriptions.ListFilters{}, err
 	}

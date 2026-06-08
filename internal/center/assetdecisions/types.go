@@ -813,6 +813,9 @@ func deriveRenewalGroups(facts []Fact, filters ListFilters) []GroupDetail {
 func deriveCancellationGroups(facts []Fact, filters ListFilters) []GroupDetail {
 	members := []GroupMember{}
 	for _, fact := range facts {
+		if !ordinaryPortfolioCandidate(fact) {
+			continue
+		}
 		member := buildMember(fact, filters)
 		if member.CancellationAttentionReason != "" {
 			members = append(members, member)
@@ -887,7 +890,7 @@ func deriveCostGroups(facts []Fact, filters ListFilters) []GroupDetail {
 func deriveEvidenceGroups(facts []Fact, filters ListFilters) []GroupDetail {
 	members := []GroupMember{}
 	for _, fact := range facts {
-		if fact.VPS.LifecycleStatus == vpsassets.LifecycleArchived {
+		if !ordinaryPortfolioCandidate(fact) {
 			continue
 		}
 		member := buildMember(fact, filters)

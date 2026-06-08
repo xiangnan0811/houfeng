@@ -172,10 +172,11 @@ func TestValidateListFilters(t *testing.T) {
 		want    error
 	}{
 		{name: "empty"},
-		{name: "valid", filters: ListFilters{ProviderID: " pv_001 ", LifecycleStatus: " active ", UsageStatus: " idle ", RenewalDecision: " keep "}},
+		{name: "valid", filters: ListFilters{ProviderID: " pv_001 ", LifecycleStatus: " active ", UsageStatus: " idle ", RenewalDecision: " keep ", AssetScope: " archived "}},
 		{name: "invalid lifecycle", filters: ListFilters{LifecycleStatus: "online"}, want: ErrInvalidVPSAssetInput},
 		{name: "invalid usage", filters: ListFilters{UsageStatus: "busy"}, want: ErrInvalidVPSAssetInput},
 		{name: "invalid renewal", filters: ListFilters{RenewalDecision: "later"}, want: ErrInvalidVPSAssetInput},
+		{name: "invalid asset scope", filters: ListFilters{AssetScope: "deleted"}, want: ErrInvalidVPSAssetInput},
 	}
 
 	for _, tt := range tests {
@@ -185,8 +186,10 @@ func TestValidateListFilters(t *testing.T) {
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("ValidateListFilters() error = %v, want %v", err, tt.want)
 			}
-			if tt.name == "valid" && filters.ProviderID != "pv_001" {
-				t.Fatalf("ProviderID = %q, want trimmed pv_001", filters.ProviderID)
+			if tt.name == "valid" {
+				if filters.ProviderID != "pv_001" || filters.AssetScope != AssetScopeArchived {
+					t.Fatalf("filters = %#v, want trimmed provider and archived asset scope", filters)
+				}
 			}
 		})
 	}

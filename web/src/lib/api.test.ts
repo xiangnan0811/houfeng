@@ -539,14 +539,14 @@ describe('api helpers', () => {
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(vps)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep' })).resolves.toEqual([vps])
+    await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep', asset_scope: 'archived' })).resolves.toEqual([vps])
     await expect(getVPSAsset('vps_001')).resolves.toEqual(detail)
     await expect(getVPSTimeline('vps_001')).resolves.toEqual(timeline)
     await expect(createVPSAsset(input)).resolves.toEqual(vps)
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/vps?provider_id=pv_001&lifecycle_status=active&usage_status=in_use&renewal_decision=keep',
+      '/api/vps?provider_id=pv_001&lifecycle_status=active&usage_status=in_use&renewal_decision=keep&asset_scope=archived',
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
@@ -1501,7 +1501,7 @@ describe('api helpers', () => {
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(updatedSubscription)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc' })).resolves.toEqual([subscription])
+    await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc', asset_scope: 'archived' })).resolves.toEqual([subscription])
     await expect(getSubscription('sub_001')).resolves.toEqual(subscription)
     await expect(createSubscription(input)).resolves.toEqual(subscription)
     await expect(createVPSSubscription('vps_001', vpsScopedInput)).resolves.toEqual(subscription)
@@ -1509,7 +1509,7 @@ describe('api helpers', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/subscriptions?vps_id=vps_001&status=active&renew_within_days=30&sort=renew_at&order=asc',
+      '/api/subscriptions?vps_id=vps_001&status=active&renew_within_days=30&sort=renew_at&order=asc&asset_scope=archived',
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
@@ -2300,6 +2300,12 @@ describe('router onboarding route', () => {
     const matches = matchRoutes(appRoutes, '/asset-decisions')
 
     expect(matches?.at(-1)?.route.path).toBe('asset-decisions')
+  })
+
+  it('matches /archive', () => {
+    const matches = matchRoutes(appRoutes, '/archive')
+
+    expect(matches?.at(-1)?.route.path).toBe('archive')
   })
 
   it('no longer matches the removed onboarding route (falls through to catch-all)', () => {

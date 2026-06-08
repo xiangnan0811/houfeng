@@ -47,6 +47,23 @@ const assetDomainSelectColumns = `
 	created_at,
 	updated_at`
 
+const assetDomainQualifiedSelectColumns = `
+	asset_domains.domain_id,
+	asset_domains.vps_id,
+	asset_domains.service_id,
+	asset_domains.target_id,
+	asset_domains.domain_name,
+	asset_domains.purpose,
+	asset_domains.status,
+	asset_domains.registrar,
+	asset_domains.expires_at,
+	asset_domains.auto_renew,
+	asset_domains.https_enabled,
+	asset_domains.labels,
+	asset_domains.note,
+	asset_domains.created_at,
+	asset_domains.updated_at`
+
 type assetDomainScanner interface {
 	Scan(dest ...any) error
 }
@@ -78,6 +95,10 @@ func scanAssetDomain(row assetDomainScanner) (assetdomains.Record, error) {
 }
 
 func (r *PostgresAssetDomainRepository) ListAssetDomains(ctx context.Context, filters assetdomains.ListFilters) ([]assetdomains.Record, error) {
+	return r.listAssetDomains(ctx, filters, true)
+}
+
+func (r *PostgresAssetDomainRepository) listAssetDomains(ctx context.Context, filters assetdomains.ListFilters, currentAssetScope bool) ([]assetdomains.Record, error) {
 	filters = assetdomains.NormalizeListFilters(filters)
 	if err := assetdomains.ValidateListFilters(filters); err != nil {
 		return nil, err
@@ -87,28 +108,39 @@ func (r *PostgresAssetDomainRepository) ListAssetDomains(ctx context.Context, fi
 	conditions := []string{}
 	if filters.VPSID != "" {
 		args = append(args, filters.VPSID)
-		conditions = append(conditions, fmt.Sprintf("vps_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("asset_domains.vps_id = $%d", len(args)))
 	}
 	if filters.ServiceID != "" {
 		args = append(args, filters.ServiceID)
-		conditions = append(conditions, fmt.Sprintf("service_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("asset_domains.service_id = $%d", len(args)))
 	}
 	if filters.TargetID != "" {
 		args = append(args, filters.TargetID)
-		conditions = append(conditions, fmt.Sprintf("target_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("asset_domains.target_id = $%d", len(args)))
 	}
 	if filters.Status != "" {
 		args = append(args, string(filters.Status))
-		conditions = append(conditions, fmt.Sprintf("status = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("asset_domains.status = $%d", len(args)))
+	}
+	if currentAssetScope {
+		conditions = append(conditions, "v.lifecycle_status not in ('cancelled', 'archived')")
 	}
 
+	selectColumns := assetDomainSelectColumns
+	if currentAssetScope {
+		selectColumns = assetDomainQualifiedSelectColumns
+	}
 	query := `
-		select ` + assetDomainSelectColumns + `
+		select ` + selectColumns + `
 		from asset_domains`
+	if currentAssetScope {
+		query += `
+		join vps_assets v on v.vps_id = asset_domains.vps_id`
+	}
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
 	}
-	query += " order by lower(domain_name), domain_id"
+	query += " order by lower(asset_domains.domain_name), asset_domains.domain_id"
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -142,7 +174,7 @@ func (r *PostgresAssetDomainRepository) ListAssetDomainsForVPS(ctx context.Conte
 	if !exists {
 		return nil, assetdomains.ErrDomainOwnerNotFound
 	}
-	return r.ListAssetDomains(ctx, assetdomains.ListFilters{VPSID: vpsID})
+	return r.listAssetDomains(ctx, assetdomains.ListFilters{VPSID: vpsID}, false)
 }
 
 func (r *PostgresAssetDomainRepository) CreateAssetDomain(ctx context.Context, input assetdomains.CreateInput) (assetdomains.Record, error) {

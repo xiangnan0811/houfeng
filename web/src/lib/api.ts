@@ -522,6 +522,7 @@ export function listVPSAssets(filter?: VPSAssetListFilter) {
       lifecycle_status: filter?.lifecycle_status,
       usage_status: filter?.usage_status,
       renewal_decision: filter?.renewal_decision,
+      asset_scope: filter?.asset_scope,
     }),
   )
 }
@@ -799,6 +800,7 @@ export function listSubscriptions(filter?: SubscriptionListFilter) {
       renewal_decision: filter?.renewal_decision,
       sort: filter?.sort,
       order: filter?.order,
+      asset_scope: filter?.asset_scope,
     }),
   )
 }

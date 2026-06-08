@@ -167,7 +167,8 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 		"target_id = $2",
 		"service_type = $3",
 		"status = $4",
-		"order by lower(name), service_id",
+		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"order by lower(asset_services.name), asset_services.service_id",
 	} {
 		if !strings.Contains(queryCalls[0], snippet) {
 			t.Fatalf("ListAssetServices SQL missing %q in %q", snippet, queryCalls[0])
@@ -182,9 +183,11 @@ func TestPostgresAssetServiceListForVPS(t *testing.T) {
 	t.Parallel()
 
 	var queryArgs []any
+	var querySQL string
 	var existsCheckArg any
 	repo := &PostgresAssetServiceRepository{db: fakeAssetServiceDB{
-		query: func(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
+		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+			querySQL = sql
 			queryArgs = append([]any(nil), args...)
 			return &fakeAssetServiceRows{}, nil
 		},
@@ -212,6 +215,9 @@ func TestPostgresAssetServiceListForVPS(t *testing.T) {
 	}
 	if len(queryArgs) != 1 || queryArgs[0] != "vps_001" {
 		t.Fatalf("query args = %#v, want vps filter", queryArgs)
+	}
+	if strings.Contains(querySQL, "lifecycle_status not in ('cancelled', 'archived')") {
+		t.Fatalf("ListAssetServicesForVPS SQL = %q, want history read without current asset scope filter", querySQL)
 	}
 }
 

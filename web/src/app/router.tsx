@@ -8,6 +8,9 @@ import { RouteModuleFallback } from './RouteModuleFallback'
 const assetDecisionsPage = lazy(() =>
   import('../pages/AssetDecisionsPage').then((module) => ({ default: module.AssetDecisionsPage })),
 )
+const archivePage = lazy(() =>
+  import('../pages/ArchivePage').then((module) => ({ default: module.ArchivePage })),
+)
 const dashboardPage = lazy(() =>
   import('../pages/DashboardPage').then((module) => ({ default: module.DashboardPage })),
 )
@@ -68,6 +71,7 @@ export const appRoutes: RouteObject[] = [
           { index: true, element: routeElement(dashboardPage, '正在加载工作台') },
           { path: 'vps', element: routeElement(vpsPage, '正在加载 VPS 库存') },
           { path: 'vps/:vpsId', element: routeElement(vpsDetailPage, '正在加载 VPS 详情') },
+          { path: 'archive', element: routeElement(archivePage, '正在加载归档资产') },
           { path: 'providers', element: routeElement(providersPage, '正在加载服务商') },
           { path: 'subscriptions', element: routeElement(subscriptionsPage, '正在加载订阅') },
           {
