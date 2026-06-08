@@ -110,3 +110,36 @@ Moved cancelled and archived VPS out of current operations while adding a read-o
 ### Next Steps
 
 - None - task complete
+
+
+## Session 180: Archive UX hardening
+
+**Date**: 2026-06-08
+**Task**: Archive UX hardening
+**Branch**: `feature/archive-ux-hardening`
+
+### Summary
+
+Implemented controlled VPS archive review/archive/restore APIs, split archive list/detail UX, enforced archive blockers and confirmation, added read-only archive detail with user-record-first layout, and verified tests plus browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `47e9636` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
