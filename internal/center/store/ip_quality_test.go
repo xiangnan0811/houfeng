@@ -88,6 +88,44 @@ func TestPostgresIPQualityRepositorySaveReportsRollsBackInvalidReport(t *testing
 	}
 }
 
+func TestPostgresIPQualityRepositorySaveReportsKeepsDiagnosticFailureReports(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeIPQualityTx{}
+	repo := &PostgresIPQualityRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (ipQualityTx, error) {
+			return tx, nil
+		},
+		newReportID: func() (string, error) {
+			return "ipq_failure", nil
+		},
+	}
+	report := ipQualityReportWrite()
+	report.IPAddress = "0.0.0.0"
+	report.Status = agentapi.IPQualityStatusFailure
+	report.RiskLevel = ""
+	report.ErrorCode = "lookup_failed"
+	report.ErrorSummary = "non_json_response: http status 200 content-type \"text/html\""
+	report.ProviderResults = nil
+	report.ServiceUnlocks = nil
+	report.RawJSON = nil
+
+	if err := repo.SaveReports(context.Background(), []ipquality.ReportWrite{report}); err != nil {
+		t.Fatalf("SaveReports() error = %v", err)
+	}
+
+	if !containsSQL(tx.execSQL, "insert into ip_quality_reports") {
+		t.Fatalf("execSQL = %#v, want diagnostic failure report insert", tx.execSQL)
+	}
+	if containsSQL(tx.execSQL, "insert into ip_quality_provider_results") || containsSQL(tx.execSQL, "insert into ip_quality_service_unlocks") {
+		t.Fatalf("execSQL = %#v, want no provider/service rows for lookup failure", tx.execSQL)
+	}
+	args := tx.argsForSQL("insert into ip_quality_reports")
+	if args[7] != "0.0.0.0" || args[9] != agentapi.IPQualityStatusFailure || args[19] != "lookup_failed" {
+		t.Fatalf("failure report args = %#v, want placeholder failure diagnostic saved", args)
+	}
+}
+
 func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsLatestMatricesAndHistory(t *testing.T) {
 	t.Parallel()
 
@@ -220,6 +258,86 @@ func TestPostgresIPQualityRepositoryHistoryDoesNotReadLatestOnlyView(t *testing.
 	}
 	if strings.Contains(db.queries[0], "ip_quality_latest_vps_summaries") {
 		t.Fatalf("history query used latest-only view: %s", db.queries[0])
+	}
+}
+
+func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsEmptyWhenFilteredViewsHaveNoReports(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeIPQualityDB{
+		queryRows: map[string]pgx.Rows{
+			"select latest.vps_id":      &fakeIPQualityRows{},
+			"from ip_quality_reports r": &fakeIPQualityRows{},
+		},
+	}
+	repo := &PostgresIPQualityRepository{db: db}
+
+	got, err := repo.GetVPSIPQuality(context.Background(), "vps_001")
+	if err != nil {
+		t.Fatalf("GetVPSIPQuality() error = %v", err)
+	}
+	if got.Summary != nil || got.LatestReport != nil {
+		t.Fatalf("VPSReport = %#v, want no summary/latest report when filtered views are empty", got)
+	}
+	if len(got.ProviderResults) != 0 || len(got.ServiceUnlocks) != 0 || len(got.History) != 0 {
+		t.Fatalf("VPSReport matrices/history = %#v/%#v/%#v, want empty slices", got.ProviderResults, got.ServiceUnlocks, got.History)
+	}
+	if len(db.queries) != 2 {
+		t.Fatalf("query count = %d, want summary + latest report checks only", len(db.queries))
+	}
+}
+
+func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredViews(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
+	db := &fakeIPQualityDB{
+		queryRows: map[string]pgx.Rows{
+			"from ip_quality_reports r": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: scanIPQualityReportRow("ipq_valid", "mi_001", now, agentapi.IPQualityStatusSuccess),
+			}}},
+			"from ip_quality_provider_results": &fakeIPQualityRows{},
+			"from ip_quality_service_unlocks":  &fakeIPQualityRows{},
+			"select latest.vps_id":             &fakeIPQualityRows{},
+			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "vps_001"
+					*(dest[1].(*time.Time)) = now
+					*(dest[2].(*string)) = "203.0.113.10"
+					*(dest[3].(*int)) = 4
+					*(dest[4].(*string)) = agentapi.IPQualityStatusSuccess
+					*(dest[5].(*string)) = "low"
+					*(dest[6].(*string)) = "US"
+					*(dest[7].(*string)) = "United States"
+					*(dest[8].(*string)) = "AS64500"
+					*(dest[9].(*string)) = "Example Network"
+					*(dest[10].(*bool)) = false
+					*(dest[11].(*bool)) = false
+					*(dest[12].(*string)) = "link"
+					*(dest[13].(*string)) = ""
+					*(dest[14].(*string)) = ""
+					*(dest[15].(*int)) = 0
+					*(dest[16].(*int)) = 0
+					return nil
+				},
+			}}},
+		},
+	}
+	repo := &PostgresIPQualityRepository{db: db}
+
+	if _, err := repo.GetVPSIPQuality(context.Background(), "vps_001"); err != nil {
+		t.Fatalf("GetVPSIPQuality() error = %v", err)
+	}
+
+	joined := strings.ToLower(strings.Join(db.queries, "\n"))
+	if strings.Contains(joined, "join ip_quality_reports r on r.monitoring_instance_id") ||
+		strings.Contains(joined, "r.ip_address in (nullif") {
+		t.Fatalf("repository query bypassed filtered IP quality read views: %s", joined)
+	}
+	for _, want := range []string{"ip_quality_latest_vps_summaries", "ip_quality_assigned_vps_reports"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("repository queries = %s, want %s", joined, want)
+		}
 	}
 }
 

@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	defaultLookupURL  = "https://ipapi.is/?q=self"
-	defaultServiceURL = "https://ipapi.is/unlock/{service}"
+	defaultLookupURL  = "https://api.ipapi.is"
+	defaultServiceURL = ""
 	defaultUserAgent  = "houfeng-agent/ip-quality"
 	maxRawJSONBytes   = 128 * 1024
 )
@@ -55,9 +55,6 @@ func NewHTTPCollector(opts HTTPCollectorOptions) *HTTPCollector {
 		lookupURL = defaultLookupURL
 	}
 	serviceURL := strings.TrimSpace(opts.ServiceURL)
-	if serviceURL == "" {
-		serviceURL = defaultServiceURL
-	}
 	userAgent := strings.TrimSpace(opts.UserAgent)
 	if userAgent == "" {
 		userAgent = defaultUserAgent
@@ -125,21 +122,23 @@ func (c *HTTPCollector) Collect(ctx context.Context, plan *agentapi.IPQualityPla
 	report.Status = agentapi.IPQualityStatusSuccess
 
 	serviceRaw := make(map[string]json.RawMessage)
-	for _, service := range normalizedServices(plan.Services) {
-		unlock, raw, err := c.collectServiceUnlock(collectCtx, service)
-		if len(raw) > 0 {
-			serviceRaw[service] = raw
-		}
-		if err != nil {
-			report.Status = agentapi.IPQualityStatusPartial
-			unlock = agentapi.IPQualityServiceUnlockPayload{
-				Service:      service,
-				Status:       "unknown",
-				ErrorCode:    "probe_failed",
-				ErrorSummary: err.Error(),
+	if c.serviceURL != "" {
+		for _, service := range normalizedServices(plan.Services) {
+			unlock, raw, err := c.collectServiceUnlock(collectCtx, service)
+			if len(raw) > 0 {
+				serviceRaw[service] = raw
 			}
+			if err != nil {
+				report.Status = agentapi.IPQualityStatusPartial
+				unlock = agentapi.IPQualityServiceUnlockPayload{
+					Service:      service,
+					Status:       "unknown",
+					ErrorCode:    "probe_failed",
+					ErrorSummary: err.Error(),
+				}
+			}
+			report.ServiceUnlocks = append(report.ServiceUnlocks, unlock)
 		}
-		report.ServiceUnlocks = append(report.ServiceUnlocks, unlock)
 	}
 	report.RawJSON = rawEnvelope(lookupRaw, serviceRaw)
 	return report
@@ -190,6 +189,9 @@ func (c *HTTPCollector) getJSON(ctx context.Context, url string) (map[string]any
 	if len(body) > maxRawJSONBytes {
 		body = body[:maxRawJSONBytes]
 	}
+	if !looksLikeJSONObject(body) {
+		return nil, nil, fmt.Errorf("non_json_response: http status %d content-type %q", response.StatusCode, response.Header.Get("Content-Type"))
+	}
 	raw := json.RawMessage(append([]byte(nil), body...))
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, raw, fmt.Errorf("http status %d", response.StatusCode)
@@ -198,21 +200,45 @@ func (c *HTTPCollector) getJSON(ctx context.Context, url string) (map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(&payload); err != nil {
-		return nil, raw, err
+		return nil, nil, fmt.Errorf("non_json_response: %w", err)
 	}
 	return payload, raw, nil
+}
+
+func looksLikeJSONObject(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 func applyLookupPayload(report *agentapi.IPQualityReportPayload, payload map[string]any) {
 	report.IPAddress = stringFromMap(payload, "ip", "ip_address", "query")
 	report.IPVersion = intFromMap(payload, "version", "ip_version")
-	report.ASN = stringFromMap(payload, "asn", "as", "as_number")
-	report.Organization = stringFromMap(payload, "organization", "org", "isp")
+	report.ASN = asnStringFromPayload(payload)
+	report.Organization = firstNonEmpty(
+		stringFromMap(payload, "organization", "org", "isp"),
+		stringFromNestedMap(payload, "asn", "org", "organization", "name"),
+		stringFromNestedMap(payload, "company", "name"),
+	)
 	report.Latitude = floatPtrFromMap(payload, "latitude", "lat")
+	if report.Latitude == nil {
+		report.Latitude = floatPtrFromNestedMap(payload, "location", "latitude", "lat")
+	}
 	report.Longitude = floatPtrFromMap(payload, "longitude", "lon", "lng")
-	report.UseRegionCode = stringFromMap(payload, "use_region_code", "country_code", "country")
-	report.UseRegionName = stringFromMap(payload, "use_region_name", "country_name")
-	report.RegisteredRegionCode = stringFromMap(payload, "registered_region_code", "registered_country_code")
+	if report.Longitude == nil {
+		report.Longitude = floatPtrFromNestedMap(payload, "location", "longitude", "lon", "lng")
+	}
+	report.UseRegionCode = firstNonEmpty(
+		stringFromMap(payload, "use_region_code", "country_code", "country"),
+		stringFromNestedMap(payload, "location", "country_code"),
+	)
+	report.UseRegionName = firstNonEmpty(
+		stringFromMap(payload, "use_region_name", "country_name"),
+		stringFromNestedMap(payload, "location", "country"),
+	)
+	report.RegisteredRegionCode = firstNonEmpty(
+		stringFromMap(payload, "registered_region_code", "registered_country_code"),
+		stringFromNestedMap(payload, "asn", "country", "country_code"),
+	)
 	report.RegisteredRegionName = stringFromMap(payload, "registered_region_name", "registered_country_name")
 	report.RiskLevel = stringFromMap(payload, "risk_level", "risk")
 	report.ProviderResults = providerResultsFromLookup(payload)
@@ -239,7 +265,11 @@ func providerResultsFromLookup(payload map[string]any) []agentapi.IPQualityProvi
 	}
 	result := providerResultFromMap(payload)
 	if result.Provider == "" {
-		result.Provider = "lookup"
+		if hasIPAPIShape(payload) {
+			result.Provider = "ipapi.is"
+		} else {
+			result.Provider = "lookup"
+		}
 	}
 	return []agentapi.IPQualityProviderResultPayload{result}
 }
@@ -247,21 +277,82 @@ func providerResultsFromLookup(payload map[string]any) []agentapi.IPQualityProvi
 func providerResultFromMap(payload map[string]any) agentapi.IPQualityProviderResultPayload {
 	return agentapi.IPQualityProviderResultPayload{
 		Provider:     stringFromMap(payload, "provider", "source"),
-		UsageType:    stringFromMap(payload, "usage_type", "type"),
-		CompanyType:  stringFromMap(payload, "company_type", "company"),
+		UsageType:    firstNonEmpty(stringFromMap(payload, "usage_type", "type"), stringFromNestedMap(payload, "asn", "type")),
+		CompanyType:  firstNonEmpty(stringFromMap(payload, "company_type", "company"), stringFromNestedMap(payload, "company", "type")),
 		RiskLevel:    stringFromMap(payload, "risk_level", "risk"),
 		RiskScore:    stringFromMap(payload, "risk_score", "score"),
-		RegionCode:   stringFromMap(payload, "region_code", "country_code", "country"),
-		RegionName:   stringFromMap(payload, "region_name", "country_name"),
+		RegionCode:   firstNonEmpty(stringFromMap(payload, "region_code", "country_code", "country"), stringFromNestedMap(payload, "location", "country_code")),
+		RegionName:   firstNonEmpty(stringFromMap(payload, "region_name", "country_name"), stringFromNestedMap(payload, "location", "country")),
 		IsProxy:      boolFromMap(payload, "is_proxy", "proxy"),
 		IsTor:        boolFromMap(payload, "is_tor", "tor"),
 		IsVPN:        boolFromMap(payload, "is_vpn", "vpn"),
-		IsServer:     boolFromMap(payload, "is_server", "server", "hosting"),
+		IsServer:     boolFromMap(payload, "is_server", "is_datacenter", "server", "hosting", "datacenter"),
 		IsAbuser:     boolFromMap(payload, "is_abuser", "abuser", "abuse"),
-		IsRobot:      boolFromMap(payload, "is_robot", "robot", "bot"),
+		IsRobot:      boolFromMap(payload, "is_robot", "is_crawler", "robot", "bot", "crawler"),
 		ErrorCode:    stringFromMap(payload, "error_code"),
 		ErrorSummary: stringFromMap(payload, "error_summary", "message"),
 	}
+}
+
+func hasIPAPIShape(payload map[string]any) bool {
+	if _, ok := payload["asn"].(map[string]any); ok {
+		return true
+	}
+	if _, ok := payload["company"].(map[string]any); ok {
+		return true
+	}
+	if _, ok := payload["location"].(map[string]any); ok {
+		return true
+	}
+	return false
+}
+
+func asnStringFromPayload(payload map[string]any) string {
+	value := firstNonEmpty(
+		stringFromMap(payload, "asn", "as", "as_number"),
+		stringFromNestedMap(payload, "asn", "asn", "as", "as_number"),
+	)
+	if value == "" {
+		return ""
+	}
+	upper := strings.ToUpper(strings.TrimSpace(value))
+	if strings.HasPrefix(upper, "AS") {
+		return upper
+	}
+	return "AS" + value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func nestedMap(values map[string]any, key string) map[string]any {
+	child, ok := values[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return child
+}
+
+func stringFromNestedMap(values map[string]any, key string, nestedKeys ...string) string {
+	child := nestedMap(values, key)
+	if child == nil {
+		return ""
+	}
+	return stringFromMap(child, nestedKeys...)
+}
+
+func floatPtrFromNestedMap(values map[string]any, key string, nestedKeys ...string) *float64 {
+	child := nestedMap(values, key)
+	if child == nil {
+		return nil
+	}
+	return floatPtrFromMap(child, nestedKeys...)
 }
 
 func rawEnvelope(lookup json.RawMessage, services map[string]json.RawMessage) json.RawMessage {

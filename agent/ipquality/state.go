@@ -102,10 +102,14 @@ func Due(plan *agentapi.IPQualityPlan, state State, now time.Time) bool {
 	if plan == nil || !plan.Enabled || plan.FrequencySeconds <= 0 {
 		return false
 	}
-	if state.LastSucceededAt.IsZero() {
+	lastAttempt := state.LastAttemptedAt
+	if lastAttempt.IsZero() {
+		lastAttempt = state.LastSucceededAt
+	}
+	if lastAttempt.IsZero() {
 		return true
 	}
-	return !now.UTC().Before(state.LastSucceededAt.Add(time.Duration(plan.FrequencySeconds) * time.Second))
+	return !now.UTC().Before(lastAttempt.UTC().Add(time.Duration(plan.FrequencySeconds) * time.Second))
 }
 
 func syncDir(path string) error {
