@@ -157,6 +157,144 @@ func TestSyncRequestOmitsObservationAdjunctsWithoutHeartbeatCarrier(t *testing.T
 	}
 }
 
+func TestIPQualityReportPayloadRoundTripPreservesSourceDetails(t *testing.T) {
+	observedAt, err := time.Parse(time.RFC3339, "2026-06-09T03:04:58Z")
+	if err != nil {
+		t.Fatalf("parse observedAt: %v", err)
+	}
+
+	original := agentapi.IPQualityReportPayload{
+		ObservedAt:   observedAt,
+		AgentVersion: "v0.54.0",
+		Fingerprint:  "fp_001",
+		SyncBatchID:  "batch_001",
+		IPAddress:    "203.0.113.10",
+		IPVersion:    4,
+		Status:       agentapi.IPQualityStatusPartial,
+		Coverage: &agentapi.IPQualityCoveragePayload{
+			ExpectedProviderCount:      6,
+			SuccessfulProviderCount:    4,
+			FailedProviderCount:        1,
+			SkippedProviderCount:       0,
+			NotConfiguredProviderCount: 1,
+			ExpectedServiceCount:       7,
+			SuccessfulServiceCount:     5,
+			FailedServiceCount:         1,
+			SkippedServiceCount:        1,
+		},
+		DiagnosticsJSON: json.RawMessage(`{"source_version":"v2","elapsed_ms":1234}`),
+		ProviderResults: []agentapi.IPQualityProviderResultPayload{{
+			Provider:    "ipquery.io",
+			Status:      "success",
+			SourceType:  "default",
+			LatencyMS:   intPtr(86),
+			UsageType:   "datacenter",
+			CompanyType: "hosting",
+			RiskScore:   "42",
+			ExtraJSON:   json.RawMessage(`{"risk":{"score":42,"is_datacenter":true}}`),
+		}},
+		ServiceUnlocks: []agentapi.IPQualityServiceUnlockPayload{{
+			Service:     "netflix",
+			Source:      "netflix_title_probe",
+			Status:      "unlocked",
+			ProbeStatus: "success",
+			LatencyMS:   intPtr(320),
+			Region:      "US",
+			UnlockType:  "full",
+			ExtraJSON:   json.RawMessage(`{"title_probe":"full_catalog"}`),
+		}},
+	}
+
+	payload, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal ip quality report: %v", err)
+	}
+
+	var encoded map[string]any
+	if err := json.Unmarshal(payload, &encoded); err != nil {
+		t.Fatalf("unmarshal encoded report into map: %v", err)
+	}
+	if encoded["coverage"] == nil || encoded["diagnostics_json"] == nil {
+		t.Fatalf("payload missing coverage or diagnostics_json: %s", payload)
+	}
+
+	var roundTrip agentapi.IPQualityReportPayload
+	if err := json.Unmarshal(payload, &roundTrip); err != nil {
+		t.Fatalf("unmarshal ip quality report: %v", err)
+	}
+
+	if roundTrip.Coverage == nil {
+		t.Fatalf("Coverage = nil, want source coverage counts")
+	}
+	if roundTrip.Coverage.ExpectedProviderCount != 6 || roundTrip.Coverage.NotConfiguredProviderCount != 1 ||
+		roundTrip.Coverage.ExpectedServiceCount != 7 || roundTrip.Coverage.SkippedServiceCount != 1 {
+		t.Fatalf("Coverage = %#v, want provider/service source counts preserved", roundTrip.Coverage)
+	}
+	if string(roundTrip.DiagnosticsJSON) != `{"source_version":"v2","elapsed_ms":1234}` {
+		t.Fatalf("DiagnosticsJSON = %s, want preserved diagnostics json", roundTrip.DiagnosticsJSON)
+	}
+	if len(roundTrip.ProviderResults) != 1 {
+		t.Fatalf("len(ProviderResults) = %d, want 1", len(roundTrip.ProviderResults))
+	}
+	provider := roundTrip.ProviderResults[0]
+	if provider.Status != "success" || provider.SourceType != "default" || provider.LatencyMS == nil || *provider.LatencyMS != 86 {
+		t.Fatalf("provider source fields = %#v, want status/source_type/latency", provider)
+	}
+	if string(provider.ExtraJSON) != `{"risk":{"score":42,"is_datacenter":true}}` {
+		t.Fatalf("provider ExtraJSON = %s, want preserved extra json", provider.ExtraJSON)
+	}
+	if len(roundTrip.ServiceUnlocks) != 1 {
+		t.Fatalf("len(ServiceUnlocks) = %d, want 1", len(roundTrip.ServiceUnlocks))
+	}
+	unlock := roundTrip.ServiceUnlocks[0]
+	if unlock.Source != "netflix_title_probe" || unlock.ProbeStatus != "success" || unlock.LatencyMS == nil || *unlock.LatencyMS != 320 {
+		t.Fatalf("service source fields = %#v, want source/probe_status/latency", unlock)
+	}
+	if string(unlock.ExtraJSON) != `{"title_probe":"full_catalog"}` {
+		t.Fatalf("service ExtraJSON = %s, want preserved extra json", unlock.ExtraJSON)
+	}
+}
+
+func TestIPQualityReportPayloadAcceptsLegacyShapeWithoutSourceDetails(t *testing.T) {
+	payload := []byte(`{
+		"observed_at":"2026-06-09T03:04:58Z",
+		"agent_version":"v0.53.0",
+		"fingerprint":"fp_001",
+		"sync_batch_id":"batch_001",
+		"ip_address":"203.0.113.10",
+		"ip_version":4,
+		"status":"success",
+		"provider_results":[{"provider":"ipapi.is","usage_type":"hosting"}],
+		"service_unlocks":[{"service":"netflix","status":"unlocked","region":"US"}]
+	}`)
+
+	var report agentapi.IPQualityReportPayload
+	if err := json.Unmarshal(payload, &report); err != nil {
+		t.Fatalf("unmarshal legacy ip quality report: %v", err)
+	}
+
+	if report.Coverage != nil {
+		t.Fatalf("Coverage = %#v, want nil for legacy payload", report.Coverage)
+	}
+	if len(report.DiagnosticsJSON) != 0 {
+		t.Fatalf("DiagnosticsJSON = %s, want empty for legacy payload", report.DiagnosticsJSON)
+	}
+	if len(report.ProviderResults) != 1 || report.ProviderResults[0].Provider != "ipapi.is" {
+		t.Fatalf("ProviderResults = %#v, want legacy provider preserved", report.ProviderResults)
+	}
+	if report.ProviderResults[0].Status != "" || report.ProviderResults[0].SourceType != "" || report.ProviderResults[0].LatencyMS != nil ||
+		len(report.ProviderResults[0].ExtraJSON) != 0 {
+		t.Fatalf("legacy provider source fields = %#v, want zero values", report.ProviderResults[0])
+	}
+	if len(report.ServiceUnlocks) != 1 || report.ServiceUnlocks[0].Service != "netflix" {
+		t.Fatalf("ServiceUnlocks = %#v, want legacy service preserved", report.ServiceUnlocks)
+	}
+	if report.ServiceUnlocks[0].Source != "" || report.ServiceUnlocks[0].ProbeStatus != "" || report.ServiceUnlocks[0].LatencyMS != nil ||
+		len(report.ServiceUnlocks[0].ExtraJSON) != 0 {
+		t.Fatalf("legacy service source fields = %#v, want zero values", report.ServiceUnlocks[0])
+	}
+}
+
 func TestProbeObservationPayloadRoundTripPreservesSuccessSemantics(t *testing.T) {
 	observedAt, err := time.Parse(time.RFC3339, "2026-04-24T10:05:00Z")
 	if err != nil {

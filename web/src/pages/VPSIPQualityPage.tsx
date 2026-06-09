@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { IPQualityDashboard } from '../components/ip-quality/IPQualityDashboard'
 import { PageState } from '../components/PageState'
-import { ApiError, getVPSIPQuality } from '../lib/api'
+import { ApiError, getVPSIPQuality, getVPSIPQualityReport } from '../lib/api'
 import type { VPSIPQualityReport } from '../lib/types'
 
 type PageLoadState = {
-  requestedVPSId: string | null
+  requestKey: string | null
   error: string | null
   report: VPSIPQualityReport | null
 }
 
 const INITIAL_STATE: PageLoadState = {
-  requestedVPSId: null,
+  requestKey: null,
   error: null,
   report: null,
 }
@@ -26,24 +26,28 @@ function describeError(error: unknown, fallback: string): string {
 
 export function VPSIPQualityPage() {
   const { vpsId } = useParams()
+  const [searchParams] = useSearchParams()
+  const reportId = searchParams.get('report_id')?.trim() || ''
+  const requestKey = vpsId ? `${vpsId}:${reportId}` : null
   const [state, setState] = useState<PageLoadState>(INITIAL_STATE)
 
   useEffect(() => {
     if (!vpsId) return
     let cancelled = false
 
-    getVPSIPQuality(vpsId)
+    const request = reportId ? getVPSIPQualityReport(vpsId, reportId) : getVPSIPQuality(vpsId)
+    request
       .then((report) => {
         if (cancelled) return
-        setState({ requestedVPSId: vpsId, error: null, report })
+        setState({ requestKey, error: null, report })
       })
       .catch((error: unknown) => {
         if (cancelled) return
-        setState({ requestedVPSId: vpsId, error: describeError(error, '加载 IP 质量报告失败'), report: null })
+        setState({ requestKey, error: describeError(error, '加载 IP 质量报告失败'), report: null })
       })
 
     return () => { cancelled = true }
-  }, [vpsId])
+  }, [vpsId, reportId, requestKey])
 
   const detailPath = vpsId ? `/vps/${encodeURIComponent(vpsId)}` : '/vps'
 
@@ -59,7 +63,7 @@ export function VPSIPQualityPage() {
     )
   }
 
-  if (state.requestedVPSId !== vpsId) {
+  if (state.requestKey !== requestKey) {
     return <PageState kind="loading" eyebrow="IP QUALITY" title="正在加载 IP 质量报告" />
   }
 

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -141,8 +142,17 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 			report.IPAddress == "" || report.IPVersion == 0 || report.Status == "" {
 			return false
 		}
+		if !isValidIPQualityReportStatus(report.Status) {
+			return false
+		}
 		for _, provider := range report.ProviderResults {
 			if provider.Provider == "" {
+				return false
+			}
+			if provider.Status != "" && !isValidIPQualitySourceStatus(provider.Status) {
+				return false
+			}
+			if provider.SourceType != "" && !isValidIPQualitySourceType(provider.SourceType) {
 				return false
 			}
 		}
@@ -150,10 +160,52 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 			if unlock.Service == "" || unlock.Status == "" {
 				return false
 			}
+			if !isValidIPQualityServiceStatus(unlock.Status) {
+				return false
+			}
+			if unlock.ProbeStatus != "" && !isValidIPQualitySourceStatus(unlock.ProbeStatus) {
+				return false
+			}
 		}
 	}
 
 	return true
+}
+
+func isValidIPQualityReportStatus(value string) bool {
+	switch value {
+	case agentapi.IPQualityStatusSuccess, agentapi.IPQualityStatusPartial, agentapi.IPQualityStatusFailure:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidIPQualitySourceStatus(value string) bool {
+	switch value {
+	case "success", "failure", "skipped", "not_configured":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidIPQualitySourceType(value string) bool {
+	switch value {
+	case "default", "optional", "custom":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidIPQualityServiceStatus(value string) bool {
+	switch value {
+	case "unlocked", "blocked", "partial", "unknown":
+		return true
+	default:
+		return false
+	}
 }
 
 func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.BatchWrite, bool) {
@@ -289,12 +341,17 @@ func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWri
 			ErrorSummary:         report.ErrorSummary,
 			IsBackfilled:         report.IsBackfilled,
 			RawJSON:              ipquality.SanitizeRawJSON(report.RawJSON),
+			CoverageJSON:         coveragePayloadJSON(report.Coverage),
+			DiagnosticsJSON:      ipquality.SanitizeExtraJSON(report.DiagnosticsJSON),
 			ProviderResults:      make([]ipquality.ProviderResultWrite, 0, len(report.ProviderResults)),
 			ServiceUnlocks:       make([]ipquality.ServiceUnlockWrite, 0, len(report.ServiceUnlocks)),
 		}
 		for _, provider := range report.ProviderResults {
 			write.ProviderResults = append(write.ProviderResults, ipquality.ProviderResultWrite{
 				Provider:     provider.Provider,
+				Status:       provider.Status,
+				SourceType:   provider.SourceType,
+				LatencyMS:    provider.LatencyMS,
 				UsageType:    provider.UsageType,
 				CompanyType:  provider.CompanyType,
 				RiskLevel:    provider.RiskLevel,
@@ -309,21 +366,37 @@ func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWri
 				IsRobot:      provider.IsRobot,
 				ErrorCode:    provider.ErrorCode,
 				ErrorSummary: provider.ErrorSummary,
+				ExtraJSON:    ipquality.SanitizeExtraJSON(provider.ExtraJSON),
 			})
 		}
 		for _, unlock := range report.ServiceUnlocks {
 			write.ServiceUnlocks = append(write.ServiceUnlocks, ipquality.ServiceUnlockWrite{
 				Service:      unlock.Service,
+				Source:       unlock.Source,
 				Status:       unlock.Status,
+				ProbeStatus:  unlock.ProbeStatus,
+				LatencyMS:    unlock.LatencyMS,
 				Region:       unlock.Region,
 				UnlockType:   unlock.UnlockType,
 				ErrorCode:    unlock.ErrorCode,
 				ErrorSummary: unlock.ErrorSummary,
+				ExtraJSON:    ipquality.SanitizeExtraJSON(unlock.ExtraJSON),
 			})
 		}
 		reports = append(reports, write)
 	}
 	return reports
+}
+
+func coveragePayloadJSON(coverage *agentapi.IPQualityCoveragePayload) json.RawMessage {
+	if coverage == nil {
+		return nil
+	}
+	payload, err := json.Marshal(coverage)
+	if err != nil {
+		return nil
+	}
+	return ipquality.SanitizeExtraJSON(payload)
 }
 
 func syncPlanToAPI(plan agentplan.SyncPlan) *agentapi.SyncPlan {

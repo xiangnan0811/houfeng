@@ -551,6 +551,7 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 						or coalesce(is_robot, false)
 				), '') as risk_summary
 			from ip_quality_provider_results
+			where coalesce(status, 'success') = 'success'
 			group by report_id
 		),
 		ip_quality_unlock_rollup as (
@@ -563,6 +564,7 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 					where lower(status) in ('blocked', 'locked', 'not_unlocked', 'unavailable', 'restricted', 'unsupported')
 				), '{}'::text[]) as blocked_services
 			from ip_quality_service_unlocks
+			where coalesce(probe_status, 'success') = 'success'
 			group by report_id
 		)
 		select

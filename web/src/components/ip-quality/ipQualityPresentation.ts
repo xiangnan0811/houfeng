@@ -87,16 +87,25 @@ export function riskFlags(result: IPQualityProviderResult): RiskFlag[] {
   })
 }
 
+export function providerSucceeded(result: IPQualityProviderResult): boolean {
+  return !result.status || result.status === 'success'
+}
+
+export function serviceProbeSucceeded(unlock: IPQualityServiceUnlock): boolean {
+  return !unlock.probe_status || unlock.probe_status === 'success'
+}
+
 export function activeRiskFlags(result: IPQualityProviderResult): RiskFlag[] {
   return riskFlags(result).filter((flag) => flag.active)
 }
 
 export function riskSignalCounts(results: IPQualityProviderResult[]): RiskSignalCount[] {
+  const successfulResults = results.filter(providerSucceeded)
   return RISK_FLAG_DEFINITIONS.map((definition) => {
     let yes = 0
     let no = 0
     let unknown = 0
-    for (const result of results) {
+    for (const result of successfulResults) {
       const value = definition.read(result)
       if (value === true) yes += 1
       else if (value === false) no += 1
@@ -114,7 +123,7 @@ export function riskSignalCounts(results: IPQualityProviderResult[]): RiskSignal
 }
 
 export function negativeRiskSignalCount(results: IPQualityProviderResult[]): number {
-  return results.reduce((total, result) => {
+  return results.filter(providerSucceeded).reduce((total, result) => {
     const flagCount = activeRiskFlags(result).filter((flag) => flag.negative).length
     const risk = (result.risk_level ?? '').trim().toLowerCase()
     const riskCount = risk === 'high' || risk === 'critical' ? 1 : 0
@@ -152,7 +161,7 @@ export function unlockStatusLabel(status: string, region?: string): string {
 }
 
 export function serviceUnlockCounts(unlocks: IPQualityServiceUnlock[]) {
-  return unlocks.reduce(
+  return unlocks.filter(serviceProbeSucceeded).reduce(
     (counts, unlock) => {
       counts[unlockStatusKind(unlock.status)] += 1
       return counts
@@ -167,17 +176,22 @@ export function coveragePercent(observed: number, expected: number): number | nu
 }
 
 export function providerCoverage(report: VPSIPQualityReport): number | null {
+  const coverage = report.summary?.coverage ?? report.latest_report?.coverage
+  if (coverage) return coveragePercent(coverage.successful_provider_count, coverage.expected_provider_count)
   const expected = Math.max(report.summary?.provider_count ?? 0, report.provider_results.length)
   return coveragePercent(report.provider_results.length, expected)
 }
 
 export function serviceCoverage(report: VPSIPQualityReport): number | null {
+  const coverage = report.summary?.coverage ?? report.latest_report?.coverage
+  if (coverage) return coveragePercent(coverage.successful_service_count, coverage.expected_service_count)
   const expected = Math.max(report.summary?.unlockable_count ?? 0, report.service_unlocks.length)
   return coveragePercent(report.service_unlocks.length, expected)
 }
 
 export function databaseConsistency(results: IPQualityProviderResult[]): number | null {
-  if (results.length < 2) return null
+  const successfulResults = results.filter(providerSucceeded)
+  if (successfulResults.length < 2) return null
   const dimensions = [
     (result: IPQualityProviderResult) => normalizeComparable(result.usage_type),
     (result: IPQualityProviderResult) => normalizeComparable(result.company_type),
@@ -186,7 +200,7 @@ export function databaseConsistency(results: IPQualityProviderResult[]): number 
     ...RISK_FLAG_DEFINITIONS.map((definition) => (result: IPQualityProviderResult) => String(definition.read(result) ?? 'unknown')),
   ]
   const consistent = dimensions.filter((read) => {
-    const values = new Set(results.map(read).filter(Boolean))
+    const values = new Set(successfulResults.map(read).filter(Boolean))
     return values.size <= 1
   }).length
   return Math.round((consistent / dimensions.length) * 100)

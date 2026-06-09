@@ -1951,9 +1951,9 @@ select.input::-ms-expand{display:none}
 .vps-ip-quality-dashboard__signal--attention{border-color:color-mix(in srgb,var(--color-state-alert) 32%,var(--border));background:color-mix(in srgb,var(--color-state-alert) 7%,var(--surface))}
 .vps-ip-quality-dashboard__signal strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-body-size);line-height:1.25}
 .vps-ip-quality-dashboard__signal small{color:var(--text-muted);font-size:var(--type-small-size)}
-.vps-ip-quality-dashboard__provider-table{min-width:1080px;table-layout:fixed}
+.vps-ip-quality-dashboard__provider-table{min-width:1420px;table-layout:fixed}
 .vps-ip-quality-dashboard__provider-table th,.vps-ip-quality-dashboard__provider-table td{white-space:nowrap}
-.vps-ip-quality-dashboard__provider-table td:last-child{white-space:normal;min-width:220px}
+.vps-ip-quality-dashboard__provider-table td:nth-last-child(-n+2){white-space:normal;min-width:220px}
 .vps-ip-quality-dashboard__provider-table small{display:block;margin-top:var(--space-1);color:var(--text-muted);font-size:var(--type-small-size)}
 .vps-ip-quality-dashboard__service-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-3)}
 .vps-ip-quality-dashboard__service{display:flex;flex-direction:column;gap:var(--space-2);min-width:0;padding:var(--space-3);border:var(--border-w) solid var(--border);border-left:var(--border-w-strong) solid var(--text-muted);border-radius:var(--radius-2);background:var(--surface)}
@@ -1964,6 +1964,10 @@ select.input::-ms-expand{display:none}
 .vps-ip-quality-dashboard__service header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-width:0}
 .vps-ip-quality-dashboard__service h3{margin:0;color:var(--text-primary);font-size:var(--type-body-size);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vps-ip-quality-dashboard__service p{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45;overflow-wrap:anywhere}
+.vps-ip-quality-dashboard__service small{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
+.vps-ip-quality-dashboard__json-detail{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;color:var(--text-secondary);font-size:var(--type-small-size)}
+.vps-ip-quality-dashboard__json-detail summary{cursor:pointer;color:var(--accent);font-weight:600;white-space:nowrap}
+.vps-ip-quality-dashboard__json-detail code{display:block;max-width:360px;max-height:160px;overflow:auto;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-1);background:var(--surface-pressed);color:var(--text-secondary);font-family:var(--font-mono);font-size:var(--type-small-size);line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
 .vps-ip-quality-dashboard__context-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(calc(var(--space-12) * 5),0.68fr);gap:var(--space-4)}
 .vps-ip-quality-dashboard__kv-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-2)}
 .vps-ip-quality-dashboard__kv-grid div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 12%,transparent)}
@@ -1981,6 +1985,8 @@ select.input::-ms-expand{display:none}
 .vps-ip-quality-dashboard__history span{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size)}
 .vps-ip-quality-dashboard__history strong{color:var(--text-primary);font-size:var(--type-body-size)}
 .vps-ip-quality-dashboard__history small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
+.vps-ip-quality-dashboard__history a{color:var(--accent);font-size:var(--type-small-size);font-weight:600;text-decoration:none}
+.vps-ip-quality-dashboard__history a:hover{text-decoration:underline}
 .vps-ip-quality-dashboard__diagnostics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-3)}
 .vps-ip-quality-dashboard__diagnostics div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 12%,transparent)}
 .vps-ip-quality-dashboard__diagnostics strong{color:var(--text-primary);font-size:var(--type-body-size)}

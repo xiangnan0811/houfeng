@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VPSIPQualityPage } from './VPSIPQualityPage'
 
 const ipQualitySummaryBody = {
+  report_id: 'ipq_001',
   vps_id: 'vps_001',
   observed_at: '2026-06-08T12:00:00Z',
   ip_address: '192.0.2.1',
@@ -20,6 +21,18 @@ const ipQualitySummaryBody = {
   assignment_mode: 'link',
   provider_count: 2,
   unlockable_count: 3,
+  coverage: {
+    expected_provider_count: 4,
+    successful_provider_count: 2,
+    failed_provider_count: 1,
+    skipped_provider_count: 0,
+    not_configured_provider_count: 1,
+    expected_service_count: 4,
+    successful_service_count: 2,
+    failed_service_count: 0,
+    skipped_service_count: 1,
+    not_configured_service_count: 1,
+  },
 }
 
 const ipQualityReportBody = {
@@ -46,10 +59,15 @@ const ipQualityReportBody = {
     risk_level: 'high',
     is_backfilled: false,
     created_at: '2026-06-08T12:00:06Z',
+    coverage: ipQualitySummaryBody.coverage,
+    diagnostics_json: { source_version: 'v2', ip_candidates: { 'ipapi.is': '192.0.2.1' } },
   },
   provider_results: [
     {
       provider: 'ipinfo',
+      status: 'success',
+      source_type: 'default',
+      latency_ms: 73,
       usage_type: 'hosting',
       company_type: 'business',
       risk_level: 'high',
@@ -62,9 +80,13 @@ const ipQualityReportBody = {
       is_server: true,
       is_abuser: false,
       is_robot: false,
+      extra_json: { privacy: { vpn: true } },
     },
     {
       provider: 'fraud-check',
+      status: 'failure',
+      source_type: 'default',
+      latency_ms: 1500,
       usage_type: 'business',
       company_type: 'hosting',
       risk_level: 'medium',
@@ -77,16 +99,27 @@ const ipQualityReportBody = {
       is_server: true,
       is_abuser: true,
       is_robot: false,
+      error_code: 'http_status',
+      error_summary: 'http status 429',
+      extra_json: { rate_limit: true },
+    },
+    {
+      provider: 'maxmind',
+      status: 'not_configured',
+      source_type: 'optional',
+      error_code: 'not_configured',
+      error_summary: 'optional IP quality source requires configuration',
     },
   ],
   service_unlocks: [
-    { service: 'chatgpt', status: 'unlocked', region: 'JP', unlock_type: 'native' },
-    { service: 'netflix', status: 'partial', region: 'US', unlock_type: 'originals' },
-    { service: 'disney-plus', status: 'blocked', region: 'US', unlock_type: 'none' },
+    { service: 'chatgpt', source: 'openai_status_probe', status: 'unlocked', probe_status: 'success', latency_ms: 211, region: 'JP', unlock_type: 'native', extra_json: { cf_country: 'JP' } },
+    { service: 'netflix', source: 'netflix_title_probe', status: 'partial', probe_status: 'success', latency_ms: 320, region: 'US', unlock_type: 'originals' },
+    { service: 'disney-plus', source: 'disney_default_probe', status: 'unknown', probe_status: 'skipped', region: 'US', error_code: 'unsupported_default_probe' },
+    { service: 'ipqs', source: 'optional_service_probe', status: 'unknown', probe_status: 'not_configured', error_code: 'not_configured' },
   ],
   history: [
     ipQualitySummaryBody,
-    { ...ipQualitySummaryBody, observed_at: '2026-06-07T12:00:00Z', risk_level: 'medium' },
+    { ...ipQualitySummaryBody, report_id: 'ipq_000', observed_at: '2026-06-07T12:00:00Z', risk_level: 'medium' },
   ],
 }
 
@@ -134,15 +167,42 @@ describe('VPSIPQualityPage', () => {
     expect(screen.getByRole('heading', { name: '各 IP 数据库判断' })).toBeInTheDocument()
     expect(screen.getByText('ipinfo')).toBeInTheDocument()
     expect(screen.getByText('fraud-check')).toBeInTheDocument()
+    expect(screen.getByText('maxmind')).toBeInTheDocument()
+    expect(screen.getAllByText('未配置').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('查看').length).toBeGreaterThan(0)
+    expect(screen.getByText(/optional IP quality source requires configuration/)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '服务解锁矩阵' })).toBeInTheDocument()
     expect(screen.getByText('ChatGPT')).toBeInTheDocument()
     expect(screen.getByText('Netflix')).toBeInTheDocument()
     expect(screen.getByText('Disney+')).toBeInTheDocument()
+    expect(screen.getByText('disney_default_probe · —')).toBeInTheDocument()
+    expect(screen.getAllByText('跳过').length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: '证据上下文与采集完整性' })).toBeInTheDocument()
     expect(screen.getByText('AS64500')).toBeInTheDocument()
     expect(screen.getByText('Example Transit')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '质量变化历史' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: '查看详情' })[0]).toHaveAttribute('href', '/vps/vps_001/ip-quality?report_id=ipq_001')
     expect(screen.getByRole('heading', { name: '诊断与异常' })).toBeInTheDocument()
+    expect(screen.getByText(/source_version/)).toBeInTheDocument()
+  })
+
+  it('loads a historical report detail when report_id is present', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse({
+      ...ipQualityReportBody,
+      latest_report: { ...ipQualityReportBody.latest_report, report_id: 'ipq_000' },
+      history: [],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage('/vps/vps_001/ip-quality?report_id=ipq_000')
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/ip-quality/reports/ipq_000', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(screen.getByText('ipq_000')).toBeInTheDocument()
   })
 
   it('shows an empty state when there is no user-visible summary', async () => {
@@ -174,8 +234,9 @@ describe('VPSIPQualityPage', () => {
         ...ipQualitySummaryBody,
         provider_count: 0,
         unlockable_count: 0,
+        coverage: null,
       },
-      latest_report: ipQualityReportBody.latest_report,
+      latest_report: { ...ipQualityReportBody.latest_report, coverage: null },
       provider_results: [],
       service_unlocks: [],
       history: [],

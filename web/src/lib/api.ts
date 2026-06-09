@@ -542,6 +542,12 @@ export function getVPSIPQuality(vpsId: string) {
   return requestJSON<VPSIPQualityReport>(`/api/vps/${vpsId}/ip-quality`)
 }
 
+export function getVPSIPQualityReport(vpsId: string, reportId: string) {
+  return requestJSON<VPSIPQualityReport>(
+    `/api/vps/${encodeURIComponent(vpsId)}/ip-quality/reports/${encodeURIComponent(reportId)}`,
+  )
+}
+
 export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promise<VPSAssetUpdateResult> {
   return patchJSONBody<VPSAssetUpdateResult>(`/api/vps/${vpsId}`, input)
 }

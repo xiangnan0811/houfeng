@@ -8,6 +8,14 @@ import (
 const MaxRawJSONBytes = 128 * 1024
 
 func SanitizeRawJSON(raw json.RawMessage) json.RawMessage {
+	return sanitizeJSONWithLimit(raw, MaxRawJSONBytes, "raw_json_size_limit")
+}
+
+func SanitizeExtraJSON(raw json.RawMessage) json.RawMessage {
+	return sanitizeJSONWithLimit(raw, MaxRawJSONBytes, "extra_json_size_limit")
+}
+
+func sanitizeJSONWithLimit(raw json.RawMessage, limit int, reason string) json.RawMessage {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -19,12 +27,12 @@ func SanitizeRawJSON(raw json.RawMessage) json.RawMessage {
 	if err != nil || len(payload) == 0 {
 		return nil
 	}
-	if len(payload) <= MaxRawJSONBytes {
+	if len(payload) <= limit {
 		return json.RawMessage(payload)
 	}
 	marker, err := json.Marshal(map[string]any{
 		"truncated": true,
-		"reason":    "raw_json_size_limit",
+		"reason":    reason,
 	})
 	if err != nil {
 		return nil

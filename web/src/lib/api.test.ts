@@ -39,6 +39,7 @@ import {
   getVPSArchiveReview,
   getVPSCancellationPreview,
   getVPSIPQuality,
+  getVPSIPQualityReport,
   getVPSTimeline,
   issueMonitoringInstanceInstallCommand,
   linkVPSMonitoringInstance,
@@ -562,6 +563,23 @@ describe('api helpers', () => {
       service_unlocks: [],
       history: [],
     }
+    const ipQualityDetail = {
+      ...ipQuality,
+      latest_report: {
+        report_id: 'ipq_001',
+        monitoring_instance_id: 'mi_001',
+        observed_at: '2026-06-08T12:00:00Z',
+        received_at: '2026-06-08T12:00:01Z',
+        agent_version: 'dev',
+        fingerprint: 'fp-001',
+        sync_batch_id: 'sync_001',
+        ip_address: '192.0.2.1',
+        ip_version: 4,
+        status: 'success',
+        is_backfilled: false,
+        created_at: '2026-06-08T12:00:02Z',
+      },
+    }
     const timeline = {
       vps_id: 'vps_001',
       renewal_decisions: [],
@@ -575,6 +593,7 @@ describe('api helpers', () => {
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify([vps])))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(detail)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(ipQuality)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(ipQualityDetail)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(timeline)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(vps)))
     vi.stubGlobal('fetch', fetchMock)
@@ -582,6 +601,7 @@ describe('api helpers', () => {
     await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep', asset_scope: 'archived' })).resolves.toEqual([vps])
     await expect(getVPSAsset('vps_001')).resolves.toEqual(detail)
     await expect(getVPSIPQuality('vps_001')).resolves.toEqual(ipQuality)
+    await expect(getVPSIPQualityReport('vps_001', 'ipq_001')).resolves.toEqual(ipQualityDetail)
     await expect(getVPSTimeline('vps_001')).resolves.toEqual(timeline)
     await expect(createVPSAsset(input)).resolves.toEqual(vps)
 
@@ -604,12 +624,17 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/timeline', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_001/ip-quality/reports/ipq_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps', {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/vps/vps_001/timeline', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps', {
       method: 'POST',
       headers: {
         Accept: 'application/json',

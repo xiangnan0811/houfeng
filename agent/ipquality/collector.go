@@ -39,6 +39,7 @@ type HTTPCollector struct {
 	client       *http.Client
 	lookupURL    string
 	serviceURL   string
+	customLookup bool
 	agentVersion string
 	fingerprint  string
 	syncBatchID  string
@@ -51,6 +52,7 @@ func NewHTTPCollector(opts HTTPCollectorOptions) *HTTPCollector {
 		client = http.DefaultClient
 	}
 	lookupURL := strings.TrimSpace(opts.LookupURL)
+	customLookup := lookupURL != ""
 	if lookupURL == "" {
 		lookupURL = defaultLookupURL
 	}
@@ -63,6 +65,7 @@ func NewHTTPCollector(opts HTTPCollectorOptions) *HTTPCollector {
 		client:       client,
 		lookupURL:    lookupURL,
 		serviceURL:   serviceURL,
+		customLookup: customLookup,
 		agentVersion: opts.AgentVersion,
 		fingerprint:  opts.Fingerprint,
 		syncBatchID:  opts.SyncBatchID,
@@ -79,6 +82,13 @@ func (c *HTTPCollector) WithMetadata(agentVersion, fingerprint, syncBatchID stri
 }
 
 func (c *HTTPCollector) Collect(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) agentapi.IPQualityReportPayload {
+	if !c.customLookup {
+		return c.collectDefault(ctx, plan, observedAt)
+	}
+	return c.collectLegacy(ctx, plan, observedAt)
+}
+
+func (c *HTTPCollector) collectLegacy(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) agentapi.IPQualityReportPayload {
 	report := agentapi.IPQualityReportPayload{
 		ObservedAt:   observedAt.UTC(),
 		AgentVersion: c.agentVersion,
@@ -141,6 +151,97 @@ func (c *HTTPCollector) Collect(ctx context.Context, plan *agentapi.IPQualityPla
 		}
 	}
 	report.RawJSON = rawEnvelope(lookupRaw, serviceRaw)
+	return report
+}
+
+func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) agentapi.IPQualityReportPayload {
+	startedAt := time.Now()
+	report := agentapi.IPQualityReportPayload{
+		ObservedAt:   observedAt.UTC(),
+		AgentVersion: c.agentVersion,
+		Fingerprint:  c.fingerprint,
+		SyncBatchID:  c.syncBatchID,
+		IPAddress:    "0.0.0.0",
+		IPVersion:    4,
+		Status:       agentapi.IPQualityStatusFailure,
+	}
+	if plan == nil || !plan.Enabled {
+		report.ErrorCode = "disabled"
+		report.ErrorSummary = "ip quality collection disabled"
+		return report
+	}
+	timeout := time.Duration(plan.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	collectCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	providerRaw := map[string]sourceRawEnvelope{}
+	providerOutcomes := make([]providerSourceOutcome, 0)
+	ipCandidates := map[string]string{}
+	targetIP := ""
+	for _, source := range defaultProviderSources() {
+		sourceCtx, sourceCancel := context.WithTimeout(collectCtx, perSourceTimeout(timeout))
+		outcome := source.Collect(sourceCtx, c, targetIP)
+		sourceCancel()
+		providerOutcomes = append(providerOutcomes, outcome)
+		report.ProviderResults = append(report.ProviderResults, outcome.Result)
+		providerRaw[outcome.Result.Provider] = sourceRawEnvelopeFromProvider(outcome)
+		if outcome.Result.Status == sourceStatusSuccess && validIPAddress(outcome.IPAddress) {
+			ipCandidates[outcome.Result.Provider] = outcome.IPAddress
+			if targetIP == "" {
+				targetIP = outcome.IPAddress
+			}
+		}
+	}
+	for _, result := range optionalProviderDiagnostics() {
+		report.ProviderResults = append(report.ProviderResults, result)
+		providerRaw[result.Provider] = sourceRawEnvelope{Status: result.Status, ErrorCode: result.ErrorCode, ErrorSummary: result.ErrorSummary}
+	}
+
+	successfulProviders := successfulProviderOutcomes(providerOutcomes)
+	report.Coverage = coverageFromResults(report.ProviderResults, nil)
+	if len(successfulProviders) == 0 {
+		report.ErrorCode = "lookup_failed"
+		report.ErrorSummary = "all default IP quality provider sources failed"
+		report.DiagnosticsJSON = diagnosticsJSON(startedAt, ipCandidates)
+		report.RawJSON = rawEnvelopeV2(providerRaw, nil, report.DiagnosticsJSON)
+		return report
+	}
+
+	preferred := preferredProviderOutcome(successfulProviders)
+	collectedProviders := append([]agentapi.IPQualityProviderResultPayload(nil), report.ProviderResults...)
+	applyLookupPayload(&report, preferred.Payload)
+	report.ProviderResults = collectedProviders
+	if validIPAddress(preferred.IPAddress) {
+		report.IPAddress = preferred.IPAddress
+	}
+	if parsedIP := net.ParseIP(report.IPAddress); parsedIP == nil {
+		report.IPAddress = "0.0.0.0"
+		report.IPVersion = 4
+	} else if parsedIP.To4() == nil {
+		report.IPVersion = 6
+	} else {
+		report.IPVersion = 4
+	}
+	applyReportFallbacksFromProviders(&report, successfulProviders)
+
+	serviceRaw := map[string]sourceRawEnvelope{}
+	for _, service := range normalizedServices(plan.Services) {
+		serviceCtx, serviceCancel := context.WithTimeout(collectCtx, perSourceTimeout(timeout))
+		outcome := collectDefaultServiceUnlock(serviceCtx, c, service)
+		serviceCancel()
+		report.ServiceUnlocks = append(report.ServiceUnlocks, outcome.Result)
+		serviceRaw[service] = sourceRawEnvelopeFromService(outcome)
+	}
+	report.Coverage = coverageFromResults(report.ProviderResults, report.ServiceUnlocks)
+	report.DiagnosticsJSON = diagnosticsJSON(startedAt, ipCandidates)
+	report.RawJSON = rawEnvelopeV2(providerRaw, serviceRaw, report.DiagnosticsJSON)
+	report.Status = agentapi.IPQualityStatusSuccess
+	if hasDefaultSourceFailure(report.ProviderResults) || hasServiceProbeFailure(report.ServiceUnlocks) || hasIPCandididateConflict(ipCandidates) {
+		report.Status = agentapi.IPQualityStatusPartial
+	}
 	return report
 }
 
@@ -208,6 +309,23 @@ func (c *HTTPCollector) getJSON(ctx context.Context, url string) (map[string]any
 func looksLikeJSONObject(body []byte) bool {
 	trimmed := bytes.TrimSpace(body)
 	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
+func perSourceTimeout(total time.Duration) time.Duration {
+	if total <= 0 {
+		return 5 * time.Second
+	}
+	timeout := total / 2
+	if timeout > 5*time.Second {
+		timeout = 5 * time.Second
+	}
+	if timeout < 250*time.Millisecond {
+		timeout = 250 * time.Millisecond
+	}
+	if timeout > total {
+		return total
+	}
+	return timeout
 }
 
 func applyLookupPayload(report *agentapi.IPQualityReportPayload, payload map[string]any) {

@@ -505,6 +505,9 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 	if len(segments) == 1 {
 		return segments[0], vpsSubtreeItem
 	}
+	if len(segments) == 4 && segments[1] == "ip-quality" && segments[2] == "reports" && segments[3] != "" {
+		return segments[0], vpsSubtreeIPQuality
+	}
 	if len(segments) != 2 {
 		return segments[0], vpsSubtreeUnknown
 	}

@@ -45,3 +45,21 @@ func TestSanitizeRawJSONDropsOversizedPayload(t *testing.T) {
 		t.Fatalf("SanitizeRawJSON = %s, want truncation marker", got)
 	}
 }
+
+func TestSanitizeExtraJSONUsesExtraTruncationMarker(t *testing.T) {
+	raw := json.RawMessage(`{"payload":"` + strings.Repeat("x", MaxRawJSONBytes+1) + `","token":"secret"}`)
+
+	got := SanitizeExtraJSON(raw)
+	if len(got) > MaxRawJSONBytes {
+		t.Fatalf("len(SanitizeExtraJSON) = %d, want <= %d", len(got), MaxRawJSONBytes)
+	}
+	if !json.Valid(got) {
+		t.Fatalf("SanitizeExtraJSON returned invalid JSON: %s", got)
+	}
+	if !strings.Contains(string(got), `"reason":"extra_json_size_limit"`) {
+		t.Fatalf("SanitizeExtraJSON = %s, want extra JSON truncation marker", got)
+	}
+	if strings.Contains(string(got), "secret") {
+		t.Fatalf("SanitizeExtraJSON leaked secret: %s", got)
+	}
+}
