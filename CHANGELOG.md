@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.52.2](https://github.com/xiangnan0811/houfeng/compare/v0.52.1...v0.52.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* stabilize ip quality collection display ([d074ab7](https://github.com/xiangnan0811/houfeng/commit/d074ab77b8176387f299cc17b5be77ea70e6d304))
+* stabilize ip quality collection display ([ab21f58](https://github.com/xiangnan0811/houfeng/commit/ab21f583dd00c3fb550e23e7ef1cd0ec158d982b))
+
 ## [0.52.1](https://github.com/xiangnan0811/houfeng/compare/v0.52.0...v0.52.1) (2026-06-09)
 
 
