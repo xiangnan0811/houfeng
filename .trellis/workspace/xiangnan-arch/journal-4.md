@@ -279,3 +279,36 @@ Added standalone VPS IP quality dashboard page, detail summary entry, route cove
 ### Next Steps
 
 - None - task complete
+
+
+## Session 185: IP质量采集覆盖修复
+
+**Date**: 2026-06-09
+**Task**: IP质量采集覆盖修复
+**Branch**: `fix/ip-quality-full-coverage`
+
+### Summary
+
+扩展 agent 默认 IP 质量多源采集与服务探测，扩展 center 入库/API/历史详情和前端完整展示，并补充 IP 质量跨层契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1a93942` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
