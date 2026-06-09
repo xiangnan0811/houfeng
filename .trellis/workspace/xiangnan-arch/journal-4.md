@@ -246,3 +246,36 @@ Fixed agent IP quality lookup defaults, failure throttling, and center read-mode
 ### Next Steps
 
 - None - task complete
+
+
+## Session 184: IP quality dashboard page
+
+**Date**: 2026-06-09
+**Task**: IP quality dashboard page
+**Branch**: `feature/ip-quality-dashboard-page`
+
+### Summary
+
+Added standalone VPS IP quality dashboard page, detail summary entry, route coverage, tests, and frontend design convention memory.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2dec324` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

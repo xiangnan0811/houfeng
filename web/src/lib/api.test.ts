@@ -2435,6 +2435,12 @@ describe('router onboarding route', () => {
     expect(matches?.at(-1)?.route.path).toBe('archive/:vpsId')
   })
 
+  it('matches /vps/:vpsId/ip-quality', () => {
+    const matches = matchRoutes(appRoutes, '/vps/vps_001/ip-quality')
+
+    expect(matches?.at(-1)?.route.path).toBe('vps/:vpsId/ip-quality')
+  })
+
   it('no longer matches the removed onboarding route (falls through to catch-all)', () => {
     const matches = matchRoutes(appRoutes, '/monitoring/mi_001/onboarding')
 

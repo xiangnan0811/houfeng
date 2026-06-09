@@ -50,6 +50,9 @@ const targetsPage = lazy(() =>
 const vpsDetailPage = lazy(() =>
   import('../pages/VPSDetailPage').then((module) => ({ default: module.VPSDetailPage })),
 )
+const vpsIPQualityPage = lazy(() =>
+  import('../pages/VPSIPQualityPage').then((module) => ({ default: module.VPSIPQualityPage })),
+)
 const vpsPage = lazy(() =>
   import('../pages/VPSPage').then((module) => ({ default: module.VPSPage })),
 )
@@ -73,6 +76,7 @@ export const appRoutes: RouteObject[] = [
         children: [
           { index: true, element: routeElement(dashboardPage, '正在加载工作台') },
           { path: 'vps', element: routeElement(vpsPage, '正在加载 VPS 库存') },
+          { path: 'vps/:vpsId/ip-quality', element: routeElement(vpsIPQualityPage, '正在加载 IP 质量报告') },
           { path: 'vps/:vpsId', element: routeElement(vpsDetailPage, '正在加载 VPS 详情') },
           { path: 'archive', element: routeElement(archivePage, '正在加载归档资产') },
           { path: 'archive/:vpsId', element: routeElement(archiveDetailPage, '正在加载归档详情') },

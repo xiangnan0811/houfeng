@@ -1488,7 +1488,7 @@ export function VPSDetailPage() {
         onOpenTimeline={() => openDrawer('timeline-detail')}
       />
 
-      <VPSIPQualitySection report={state.ipQuality} error={state.ipQualityError} />
+      <VPSIPQualitySection vpsId={detail.vps_id} report={state.ipQuality} error={state.ipQualityError} />
 
       <section className="page-panel vps-cost-card">
         <div className="section-heading section-heading--inline">
