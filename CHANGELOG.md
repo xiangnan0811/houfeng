@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.53.1](https://github.com/xiangnan0811/houfeng/compare/v0.53.0...v0.53.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* expand ip quality collection coverage ([1a93942](https://github.com/xiangnan0811/houfeng/commit/1a93942ed56f874acb42e78f59aba0a15edd4bad))
+* expand IP quality collection coverage ([5bc03bd](https://github.com/xiangnan0811/houfeng/commit/5bc03bd07d6d7e9b5d32fa1b810fbd7dbaaa4472))
+
 ## [0.53.0](https://github.com/xiangnan0811/houfeng/compare/v0.52.2...v0.53.0) (2026-06-09)
 
 
