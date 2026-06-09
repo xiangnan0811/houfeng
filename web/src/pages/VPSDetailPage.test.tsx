@@ -530,7 +530,7 @@ describe('VPSDetailPage', () => {
     expect(within(factsDrawer).getByText('vps_001')).toBeInTheDocument()
   })
 
-  it('loads and renders IP quality report details when the VPS has a latest summary', async () => {
+  it('loads and renders an IP quality summary with a link to the full report', async () => {
     const responseBody = {
       ...vpsDetailBody,
       ip_quality_summary: ipQualitySummaryBody,
@@ -561,14 +561,17 @@ describe('VPSDetailPage', () => {
       credentials: 'include',
     })
     expect(screen.getAllByText('IP 高风险 · JP').length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: '查看完整 IP 质量报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality')
+    expect(screen.getByText('风险信号')).toBeInTheDocument()
+    expect(screen.getByText('服务解锁')).toBeInTheDocument()
     expect(screen.getByText('AS64500')).toBeInTheDocument()
     expect(screen.getByText('Example Transit')).toBeInTheDocument()
-    expect(screen.getByText('ipinfo')).toBeInTheDocument()
-    expect(screen.getByText('VPN')).toBeInTheDocument()
+    expect(screen.getAllByText('VPN').length).toBeGreaterThan(0)
     expect(screen.getByText('ChatGPT')).toBeInTheDocument()
     expect(screen.getByText('解锁 · JP')).toBeInTheDocument()
     expect(screen.getByText('Netflix')).toBeInTheDocument()
     expect(screen.getByText('受阻 · US')).toBeInTheDocument()
+    expect(screen.queryByText('Provider 判断')).not.toBeInTheDocument()
   })
 
   it('does not treat subscription load failures as missing subscription facts', async () => {

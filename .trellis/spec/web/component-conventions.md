@@ -50,6 +50,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **复杂表单 modal 必须有可读宽度和收束行为**：创建/编辑订阅、VPS 基础信息、监控实例接入、服务商等字段密集表单使用 `Modal` 的 `md` / `lg` / `xl` 尺寸，避免默认窄弹窗造成标签和命令无意义换行。提交成功必须关闭或跳转；取消必须丢弃草稿；失败留在当前弹层并展示错误。由 URL deep-link 打开的弹层在消费或关闭时必须清理 `create=1`、`onboarding=1` 等临时参数，同时保留承接上下文参数。
 - **常见有界字段优先选择器 + 自定义入口**：VPS 国家/地区、订阅币种、支付方式、计费周期单位、续费方式这类高频字段必须使用共享 option/helper 与 `<select>` / radio 控件；常见值内置，确实不在范围内才进入“自定义/其他”。不要把这些字段退回裸文本输入，也不要在创建和编辑表单各自散落字符串。
 - **关联表单优先选择器，不让用户复制内部 ID**：Provider、MonitoringInstance、Target、Service 这类已有业务对象的常规关联表单应渲染可辨识 `<select>`/selector（名称 + ID + 状态/位置等辅助信息），并保留空值/不关联能力。无候选或加载失败时用说明 + `<Link>`/action 指向对应列表/创建入口；MonitoringInstance/Target 选择只作为用户确认的资产关联，不在表单提交时隐式修改观测运行态。
+- **复杂前端变更先走视觉伴随评审**：涉及新页面、重要详情区块、dashboard/工作台、复杂数据矩阵、资产决策、低频深度报告这类信息架构或视觉层级不明确的任务，开发前必须使用相关 skills（尤其是 brainstorming / frontend-design）产出可在浏览器打开的 mockup，让用户先确认展示密度、字段优先级和页面承载方式。不要只用文字方案或直接实现来猜 UI；mockup 可放在 ignored 的 `.superpowers/brainstorm/`，正式实现仍遵守本 spec 的 tokens、BEM、中文文案和测试要求。
 
 ### AppShell / Command Search 交互合同
 
@@ -63,6 +64,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 资产详情页（VPS `/vps/:id`、入口 `/targets/:id`）统一采用「判断在顶、证据居中、配置进弹层」的三段式信息架构。新详情页应对齐：
 
 - **顶部放决策板**：页面第一屏是 DecisionBoard——一张「下一步动作」卡（按运行/健康状态优先级选出单条 CTA）+ 一条 tone 着色的证据条。参考 `web/src/pages/vps-detail/VPSDecisionBoard.tsx` + `vpsDecisionModel.ts` 与镜像它的 `web/src/pages/target-detail/TargetDecisionBoard.tsx` + `targetDecisionModel.ts`。决策模型（`build<X>DecisionModel`）是纯函数，只消费已有 contract 字段算出 `nextAction` 与 `evidenceItems`，不发请求、不发明字段。
+- **低频深度报告使用独立页面承载**：IP 质量、性能基准、路由质量这类“买完 VPS 后才通过 agent 测得”的深度报告，字段多、矩阵多、历史/诊断多，不适合塞进 VPS 详情页的一个普通 section。VPS 详情页只保留摘要结论、关键风险/缺口和“查看完整报告”入口；完整驾驶舱应使用独立 route/page 展示质量结论、provider/service 矩阵、覆盖率、历史变化和诊断。这样后续性能、路由报告可以复用同一 IA，而不会把 VPS 详情页变成所有低频事实的长表堆叠。
 - **tone 系统统一四档**：`'normal' | 'notice' | 'alert' | 'critical'`，经 `toneToGlyphState` 映射到 `StatusGlyph` 的 state；CSS 类前缀按页面命名但结构对齐（`target-decision-*` 镜像 `vps-decision-*`），着色走 `var(--color-state-*)` / `color-mix`，不写 hex。新增详情页复制这套 tone→glyph→CSS 约定，不要另造一套色彩语义。
 - **二级 / 编辑操作收进右上角 `…` 菜单**：非主 CTA 的操作（查看历史、运行控制、编辑基础信息、资料维护）放进 `watchtower-header` 的 `details.watchtower-actions-menu`，不要散落成页面底部的独立按钮。参考 VPS hero「编辑基础信息」(`web/src/pages/vps-detail/VPSDetailHero.tsx`) 与 Target「资料维护」(`web/src/components/target-detail/TargetWatchtowerHeader.tsx`)。该菜单**始终渲染**——即使某状态（如已归档）下运行控制动作为空，菜单仍要在，否则会丢失维护入口；运行控制按钮列表按状态条件渲染，查看历史/维护项常驻。
 - **非实时配置 / 维护 demote 进 modal**：标签备注编辑、归档生命周期这类低频配置从页面主体移入 modal（`web/src/components/atoms/Modal.tsx`），页面主体只保留实时观测证据（决策板、运行控制、ProbeItem 列表与观测、当前异常、事件）。**例外**：本身会再开一个表单 modal 的入口（如 ProbeItem 表单）不要嵌进维护 modal，避免 modal 套 modal——让它贴着对应的实时列表区就近呈现。

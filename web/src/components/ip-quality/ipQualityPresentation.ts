@@ -1,0 +1,276 @@
+import type { BadgeTone } from '../atoms'
+import type {
+  IPQualityProviderResult,
+  IPQualityServiceUnlock,
+  IPQualitySummary,
+  VPSIPQualityReport,
+} from '../../lib/types'
+
+export type RiskFlagKey = 'proxy' | 'tor' | 'vpn' | 'server' | 'abuse' | 'robot'
+
+export type RiskFlag = {
+  key: RiskFlagKey
+  label: string
+  active: boolean | null
+  negative: boolean
+}
+
+export type RiskSignalCount = {
+  key: RiskFlagKey
+  label: string
+  yes: number
+  no: number
+  unknown: number
+  negative: boolean
+}
+
+export type UnlockStatusKind = 'unlocked' | 'partial' | 'blocked' | 'unknown'
+
+const RISK_FLAG_DEFINITIONS: Array<{
+  key: RiskFlagKey
+  label: string
+  negative: boolean
+  read: (result: IPQualityProviderResult) => boolean | null | undefined
+}> = [
+  { key: 'proxy', label: 'Proxy', negative: true, read: (result) => result.is_proxy },
+  { key: 'tor', label: 'Tor', negative: true, read: (result) => result.is_tor },
+  { key: 'vpn', label: 'VPN', negative: true, read: (result) => result.is_vpn },
+  { key: 'server', label: 'Server', negative: false, read: (result) => result.is_server },
+  { key: 'abuse', label: 'Abuse', negative: true, read: (result) => result.is_abuser },
+  { key: 'robot', label: 'Robot', negative: true, read: (result) => result.is_robot },
+]
+
+export function serviceLabel(value: string): string {
+  const normalized = value.toLowerCase()
+  if (normalized === 'chatgpt' || normalized === 'openai') return 'ChatGPT'
+  if (normalized === 'netflix') return 'Netflix'
+  if (normalized === 'youtube-premium') return 'YouTube Premium'
+  if (normalized === 'amazon-prime-video') return 'Amazon Prime Video'
+  if (normalized === 'disney-plus') return 'Disney+'
+  if (normalized === 'tiktok') return 'TikTok'
+  if (normalized === 'reddit') return 'Reddit'
+  return value
+}
+
+export function riskLevelLabel(value?: string): string {
+  const risk = (value ?? '').trim().toLowerCase()
+  if (risk === 'low' || risk === 'clean' || risk === 'safe') return '低风险'
+  if (risk === 'medium' || risk === 'moderate') return '中风险'
+  if (risk === 'high') return '高风险'
+  if (risk === 'critical') return '严重风险'
+  return risk || '未评级'
+}
+
+export function riskTone(value?: string): BadgeTone {
+  const risk = (value ?? '').trim().toLowerCase()
+  if (risk === 'critical') return 'critical'
+  if (risk === 'high') return 'alert'
+  if (risk === 'medium' || risk === 'moderate') return 'notice'
+  if (risk === 'low' || risk === 'clean' || risk === 'safe') return 'normal'
+  return 'neutral'
+}
+
+export function summaryTone(summary?: IPQualitySummary | null): BadgeTone {
+  if (!summary || summary.ambiguous || summary.stale || summary.status !== 'success') return 'notice'
+  return riskTone(summary.risk_level)
+}
+
+export function riskFlags(result: IPQualityProviderResult): RiskFlag[] {
+  return RISK_FLAG_DEFINITIONS.map((definition) => {
+    const raw = definition.read(result)
+    return {
+      key: definition.key,
+      label: definition.label,
+      active: raw == null ? null : raw,
+      negative: definition.negative,
+    }
+  })
+}
+
+export function activeRiskFlags(result: IPQualityProviderResult): RiskFlag[] {
+  return riskFlags(result).filter((flag) => flag.active)
+}
+
+export function riskSignalCounts(results: IPQualityProviderResult[]): RiskSignalCount[] {
+  return RISK_FLAG_DEFINITIONS.map((definition) => {
+    let yes = 0
+    let no = 0
+    let unknown = 0
+    for (const result of results) {
+      const value = definition.read(result)
+      if (value === true) yes += 1
+      else if (value === false) no += 1
+      else unknown += 1
+    }
+    return {
+      key: definition.key,
+      label: definition.label,
+      yes,
+      no,
+      unknown,
+      negative: definition.negative,
+    }
+  })
+}
+
+export function negativeRiskSignalCount(results: IPQualityProviderResult[]): number {
+  return results.reduce((total, result) => {
+    const flagCount = activeRiskFlags(result).filter((flag) => flag.negative).length
+    const risk = (result.risk_level ?? '').trim().toLowerCase()
+    const riskCount = risk === 'high' || risk === 'critical' ? 1 : 0
+    return total + flagCount + riskCount
+  }, 0)
+}
+
+export function unlockStatusKind(status?: string): UnlockStatusKind {
+  const normalized = (status ?? '').trim().toLowerCase()
+  if (normalized === 'unlocked') return 'unlocked'
+  if (normalized === 'partial') return 'partial'
+  if (normalized === 'blocked') return 'blocked'
+  return 'unknown'
+}
+
+export function unlockTone(status?: string): BadgeTone {
+  const kind = unlockStatusKind(status)
+  if (kind === 'unlocked') return 'normal'
+  if (kind === 'partial') return 'notice'
+  if (kind === 'blocked') return 'alert'
+  return 'neutral'
+}
+
+export function unlockStatusLabel(status: string, region?: string): string {
+  const kind = unlockStatusKind(status)
+  const label =
+    kind === 'unlocked'
+      ? '解锁'
+      : kind === 'blocked'
+        ? '受阻'
+        : kind === 'partial'
+          ? '部分'
+          : status || '未知'
+  return region ? `${label} · ${region}` : label
+}
+
+export function serviceUnlockCounts(unlocks: IPQualityServiceUnlock[]) {
+  return unlocks.reduce(
+    (counts, unlock) => {
+      counts[unlockStatusKind(unlock.status)] += 1
+      return counts
+    },
+    { unlocked: 0, partial: 0, blocked: 0, unknown: 0 } satisfies Record<UnlockStatusKind, number>,
+  )
+}
+
+export function coveragePercent(observed: number, expected: number): number | null {
+  if (expected <= 0) return observed > 0 ? 100 : null
+  return Math.min(100, (observed / expected) * 100)
+}
+
+export function providerCoverage(report: VPSIPQualityReport): number | null {
+  const expected = Math.max(report.summary?.provider_count ?? 0, report.provider_results.length)
+  return coveragePercent(report.provider_results.length, expected)
+}
+
+export function serviceCoverage(report: VPSIPQualityReport): number | null {
+  const expected = Math.max(report.summary?.unlockable_count ?? 0, report.service_unlocks.length)
+  return coveragePercent(report.service_unlocks.length, expected)
+}
+
+export function databaseConsistency(results: IPQualityProviderResult[]): number | null {
+  if (results.length < 2) return null
+  const dimensions = [
+    (result: IPQualityProviderResult) => normalizeComparable(result.usage_type),
+    (result: IPQualityProviderResult) => normalizeComparable(result.company_type),
+    (result: IPQualityProviderResult) => normalizeComparable(result.risk_level),
+    (result: IPQualityProviderResult) => normalizeComparable(result.region_code || result.region_name),
+    ...RISK_FLAG_DEFINITIONS.map((definition) => (result: IPQualityProviderResult) => String(definition.read(result) ?? 'unknown')),
+  ]
+  const consistent = dimensions.filter((read) => {
+    const values = new Set(results.map(read).filter(Boolean))
+    return values.size <= 1
+  }).length
+  return Math.round((consistent / dimensions.length) * 100)
+}
+
+function normalizeComparable(value?: string): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
+export function deriveQualityScore(report: VPSIPQualityReport): number | null {
+  if (!report.summary) return null
+  let score = 100
+  const risk = (report.summary.risk_level ?? '').trim().toLowerCase()
+  if (risk === 'critical') score -= 34
+  else if (risk === 'high') score -= 26
+  else if (risk === 'medium' || risk === 'moderate') score -= 14
+
+  const negativeSignals = negativeRiskSignalCount(report.provider_results)
+  score -= Math.min(30, negativeSignals * 5)
+
+  const serviceCounts = serviceUnlockCounts(report.service_unlocks)
+  score -= Math.min(20, serviceCounts.blocked * 5 + serviceCounts.partial * 2)
+
+  if (report.summary.stale) score -= 8
+  if (report.summary.ambiguous) score -= 12
+
+  return Math.max(0, Math.min(100, score))
+}
+
+export function qualityVerdict(score: number | null, summary?: IPQualitySummary | null): string {
+  if (!summary) return '缺少真实 IP 质量事实'
+  if (summary.ambiguous) return '归属不唯一，需先复核'
+  if (summary.stale) return '报告已过期，需等待下次采集'
+  if (score == null) return '证据不足，暂不评级'
+  if (score >= 82) return '适合作为主力节点'
+  if (score >= 68) return '可接受，建议持续观察'
+  if (score >= 50) return '存在明显风险，谨慎使用'
+  return '不建议作为主力节点'
+}
+
+export function topQualityReasons(report: VPSIPQualityReport): Array<{ title: string; detail: string; impact: string }> {
+  const reasons: Array<{ title: string; detail: string; impact: string }> = []
+  const summary = report.summary
+  const negativeSignals = negativeRiskSignalCount(report.provider_results)
+  const serviceCounts = serviceUnlockCounts(report.service_unlocks)
+  const consistency = databaseConsistency(report.provider_results)
+
+  if (!summary) {
+    return [{ title: '采集缺口', detail: '尚无用户侧可展示的真实 IP 质量事实。', impact: '待补证据' }]
+  }
+  if (negativeSignals > 0) {
+    reasons.push({
+      title: '风险信号',
+      detail: `${negativeSignals} 个 provider 风险信号命中或达到高风险等级。`,
+      impact: '影响高',
+    })
+  }
+  if (serviceCounts.blocked > 0 || serviceCounts.partial > 0) {
+    reasons.push({
+      title: '解锁阻断',
+      detail: `${serviceCounts.blocked} 个服务受阻，${serviceCounts.partial} 个服务部分解锁。`,
+      impact: '影响中',
+    })
+  }
+  if (report.provider_results.some((result) => result.is_server)) {
+    reasons.push({
+      title: '机房属性',
+      detail: '存在 Datacenter / Hosting 判断，本身不构成负面风险，但会影响解锁预期。',
+      impact: '上下文',
+    })
+  }
+  if (consistency != null) {
+    reasons.push({
+      title: '数据库一致性',
+      detail: `已归一 provider 字段一致性约 ${consistency}%。`,
+      impact: consistency >= 75 ? '加分项' : '需复核',
+    })
+  }
+  if (reasons.length === 0) {
+    reasons.push({
+      title: '质量稳定',
+      detail: '当前归一字段未发现明显 proxy、VPN、Tor、abuse 或服务阻断信号。',
+      impact: '加分项',
+    })
+  }
+  return reasons.slice(0, 4)
+}
