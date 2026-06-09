@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.52.1](https://github.com/xiangnan0811/houfeng/compare/v0.52.0...v0.52.1) (2026-06-09)
+
+
+### Documentation
+
+* link ip quality backend contract ([0af42a1](https://github.com/xiangnan0811/houfeng/commit/0af42a16ac13bec2d017df93c5c52d8e3e53d01f))
+* link IP quality backend contract ([2d14927](https://github.com/xiangnan0811/houfeng/commit/2d14927a9763a1d409b0400fbc21a6554dc54320))
+
 ## [0.52.0](https://github.com/xiangnan0811/houfeng/compare/v0.51.1...v0.52.0) (2026-06-08)
 
 
