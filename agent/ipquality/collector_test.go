@@ -3,6 +3,7 @@ package ipquality_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,159 @@ import (
 	agentipquality "houfeng/agent/ipquality"
 	"houfeng/internal/contracts/agentapi"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestHTTPCollectorDefaultsToJSONLookupAndSkipsServiceUnlocks(t *testing.T) {
+	var requests []string
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests = append(requests, request.URL.String())
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ip":"203.0.113.10","version":4}`)),
+			Request:    request,
+		}, nil
+	})}
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
+		Client:       client,
+		AgentVersion: "test-agent",
+		Fingerprint:  "fp-001",
+		SyncBatchID:  "sync-001",
+	})
+
+	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled:          true,
+		TimeoutSeconds:   5,
+		FrequencySeconds: 86400,
+		Services:         []string{"netflix", "chatgpt"},
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+
+	if report.Status != agentapi.IPQualityStatusSuccess {
+		t.Fatalf("Status = %q, want success, error=%q", report.Status, report.ErrorSummary)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("requests = %#v, want only lookup request with default service probing disabled", requests)
+	}
+	if requests[0] != "https://api.ipapi.is" {
+		t.Fatalf("lookup URL = %q, want JSON API endpoint", requests[0])
+	}
+	if len(report.ServiceUnlocks) != 0 {
+		t.Fatalf("ServiceUnlocks = %#v, want none with default service URL disabled", report.ServiceUnlocks)
+	}
+}
+
+func TestHTTPCollectorParsesIPAPIISNestedLookupPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/lookup" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"ip":"203.0.113.10",
+			"is_datacenter":true,
+			"is_tor":false,
+			"is_proxy":true,
+			"is_vpn":false,
+			"is_abuser":true,
+			"is_crawler":false,
+			"company":{"name":"Example Hosting LLC","type":"hosting"},
+			"asn":{"asn":64500,"org":"Example Transit","country":"US","type":"hosting"},
+			"location":{"country_code":"US","country":"United States","latitude":37.751,"longitude":-97.822}
+		}`))
+	}))
+	defer server.Close()
+
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
+		Client:       server.Client(),
+		LookupURL:    server.URL + "/lookup",
+		AgentVersion: "test-agent",
+		Fingerprint:  "fp-001",
+		SyncBatchID:  "sync-001",
+	})
+
+	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled:          true,
+		TimeoutSeconds:   5,
+		FrequencySeconds: 86400,
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+
+	if report.Status != agentapi.IPQualityStatusSuccess {
+		t.Fatalf("Status = %q, want success, error=%q", report.Status, report.ErrorSummary)
+	}
+	if report.IPAddress != "203.0.113.10" || report.IPVersion != 4 {
+		t.Fatalf("IP facts = (%q,%d), want IPv4 lookup facts", report.IPAddress, report.IPVersion)
+	}
+	if report.ASN != "AS64500" || report.Organization != "Example Transit" {
+		t.Fatalf("ASN/Organization = (%q,%q), want nested asn facts", report.ASN, report.Organization)
+	}
+	if report.UseRegionCode != "US" || report.UseRegionName != "United States" {
+		t.Fatalf("region = (%q,%q), want nested location facts", report.UseRegionCode, report.UseRegionName)
+	}
+	if report.Latitude == nil || *report.Latitude != 37.751 || report.Longitude == nil || *report.Longitude != -97.822 {
+		t.Fatalf("coordinates = (%v,%v), want nested location coordinates", report.Latitude, report.Longitude)
+	}
+	if len(report.ProviderResults) != 1 {
+		t.Fatalf("ProviderResults = %#v, want lookup provider result", report.ProviderResults)
+	}
+	provider := report.ProviderResults[0]
+	if provider.Provider != "ipapi.is" {
+		t.Fatalf("Provider = %q, want ipapi.is", provider.Provider)
+	}
+	if provider.UsageType != "hosting" || provider.CompanyType != "hosting" || provider.RegionCode != "US" {
+		t.Fatalf("ProviderResults[0] = %#v, want nested usage/company/region", provider)
+	}
+	if provider.IsProxy == nil || !*provider.IsProxy || provider.IsAbuser == nil || !*provider.IsAbuser {
+		t.Fatalf("ProviderResults[0] proxy/abuser = (%v,%v), want true pointers", provider.IsProxy, provider.IsAbuser)
+	}
+	if provider.IsVPN == nil || *provider.IsVPN || provider.IsTor == nil || *provider.IsTor || provider.IsRobot == nil || *provider.IsRobot {
+		t.Fatalf("ProviderResults[0] vpn/tor/robot = (%v,%v,%v), want false pointers", provider.IsVPN, provider.IsTor, provider.IsRobot)
+	}
+}
+
+func TestHTTPCollectorReturnsCleanFailureForHTMLLookupResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<html><body>not json</body></html>`))
+	}))
+	defer server.Close()
+
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
+		Client:       server.Client(),
+		LookupURL:    server.URL,
+		AgentVersion: "test-agent",
+		Fingerprint:  "fp-001",
+		SyncBatchID:  "sync-001",
+	})
+
+	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled:          true,
+		TimeoutSeconds:   5,
+		FrequencySeconds: 86400,
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+
+	if report.Status != agentapi.IPQualityStatusFailure {
+		t.Fatalf("Status = %q, want failure", report.Status)
+	}
+	if report.ErrorCode != "lookup_failed" {
+		t.Fatalf("ErrorCode = %q, want lookup_failed", report.ErrorCode)
+	}
+	if !strings.Contains(report.ErrorSummary, "non_json_response") {
+		t.Fatalf("ErrorSummary = %q, want non_json_response diagnostic", report.ErrorSummary)
+	}
+	if strings.Contains(report.ErrorSummary, "<html") || strings.Contains(string(report.RawJSON), "<html") {
+		t.Fatalf("HTML leaked into failure report: summary=%q raw=%s", report.ErrorSummary, report.RawJSON)
+	}
+	if len(report.RawJSON) != 0 && !json.Valid(report.RawJSON) {
+		t.Fatalf("RawJSON = %s, want empty or valid JSON", report.RawJSON)
+	}
+}
 
 func TestHTTPCollectorCollectsIPMetadataProvidersAndServiceUnlocks(t *testing.T) {
 	var sawUserAgent bool

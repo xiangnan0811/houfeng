@@ -135,6 +135,29 @@ func TestManagerDoesNotStartSecondCollectionWhileInFlight(t *testing.T) {
 	}
 }
 
+func TestManagerThrottlesAfterFailedAttempt(t *testing.T) {
+	now := time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC)
+	store := &memoryStateStore{
+		state: agentipquality.State{
+			LastAttemptedAt: now.Add(-time.Hour),
+			LastStatus:      agentapi.IPQualityStatusFailure,
+		},
+	}
+	collector := &channelCollector{}
+	manager := agentipquality.NewManager(store, collector)
+
+	if err := manager.MaybeStart(context.Background(), &agentapi.IPQualityPlan{Enabled: true, FrequencySeconds: 86400}, now); err != nil {
+		t.Fatalf("MaybeStart() error = %v", err)
+	}
+
+	if collector.calls != 0 {
+		t.Fatalf("collector calls = %d, want 0 for recent failed attempt", collector.calls)
+	}
+	if store.saveCalls != 0 {
+		t.Fatalf("saveCalls = %d, want 0 when throttled", store.saveCalls)
+	}
+}
+
 func TestManagerReturnsStateLoadErrorWithoutCollecting(t *testing.T) {
 	loadErr := errors.New("state unreadable")
 	store := &memoryStateStore{loadErr: loadErr}

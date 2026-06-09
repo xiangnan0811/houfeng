@@ -54,7 +54,7 @@ func TestFileStateStoreMissingFileReturnsZeroState(t *testing.T) {
 	}
 }
 
-func TestDueUsesSuccessfulCollectionTimestamp(t *testing.T) {
+func TestDueUsesAttemptTimestampForCollectionCadence(t *testing.T) {
 	now := time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC)
 	plan := &agentapi.IPQualityPlan{Enabled: true, FrequencySeconds: 86400}
 
@@ -66,7 +66,8 @@ func TestDueUsesSuccessfulCollectionTimestamp(t *testing.T) {
 		{name: "never collected", state: agentipquality.State{}, want: true},
 		{name: "recent success", state: agentipquality.State{LastSucceededAt: now.Add(-23 * time.Hour)}, want: false},
 		{name: "old success", state: agentipquality.State{LastSucceededAt: now.Add(-25 * time.Hour)}, want: true},
-		{name: "failed attempt does not defer indefinitely", state: agentipquality.State{LastAttemptedAt: now.Add(-time.Hour), LastStatus: agentapi.IPQualityStatusFailure}, want: true},
+		{name: "recent failure attempt", state: agentipquality.State{LastAttemptedAt: now.Add(-time.Hour), LastStatus: agentapi.IPQualityStatusFailure}, want: false},
+		{name: "old failure attempt", state: agentipquality.State{LastAttemptedAt: now.Add(-25 * time.Hour), LastStatus: agentapi.IPQualityStatusFailure}, want: true},
 	}
 
 	for _, tt := range tests {

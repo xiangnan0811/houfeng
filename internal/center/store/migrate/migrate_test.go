@@ -78,6 +78,7 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 		"0038_create_asset_decision_scenario_templates.sql",
 		"0039_add_ip_quality_settings.sql",
 		"0040_create_ip_quality_reports.sql",
+		"0041_filter_ip_quality_read_models.sql",
 	}
 	offset := 0
 	for _, name := range names {
@@ -87,6 +88,40 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 	if offset != len(expectedTail) {
 		t.Fatalf("migration names missing expected asset ledger tail order %#v in %#v", expectedTail, names)
+	}
+}
+
+func TestIPQualityReadModelFilterMigrationHidesFailurePlaceholders(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0041_filter_ip_quality_read_models.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, viewName := range []string{"ip_quality_latest_vps_summaries", "ip_quality_assigned_vps_reports"} {
+		dropIndex := strings.Index(sql, "drop view if exists "+viewName)
+		createIndex := strings.Index(sql, "create or replace view "+viewName)
+		if dropIndex < 0 {
+			t.Fatalf("0041 migration must drop %s before changing read model", viewName)
+		}
+		if createIndex < 0 {
+			t.Fatalf("0041 migration must recreate %s with create or replace", viewName)
+		}
+		if dropIndex > createIndex {
+			t.Fatalf("0041 migration drops %s after recreating it", viewName)
+		}
+	}
+	for _, want := range []string{
+		"r.status in ('success', 'partial')",
+		"r.ip_address <> '0.0.0.0'",
+		"r.ip_version in (4, 6)",
+		"from vps_monitoring_instance_links l\n    where l.vps_id = v.vps_id\n      and l.unlinked_at is null",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0041 migration missing IP quality read filter %q", want)
+		}
+	}
+	if strings.Contains(sql, "from active_link_reports linked") {
+		t.Fatalf("0041 migration must not let invalid linked reports fall back to IP matching")
 	}
 }
 

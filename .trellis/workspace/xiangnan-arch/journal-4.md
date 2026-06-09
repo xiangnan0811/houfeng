@@ -213,3 +213,36 @@ Implemented low-frequency VPS IP quality collection, sync ingest, center storage
 ### Next Steps
 
 - None - task complete
+
+
+## Session 183: Fix IP quality collection display
+
+**Date**: 2026-06-09
+**Task**: Fix IP quality collection display
+**Branch**: `fix/ip-quality-collection-display`
+
+### Summary
+
+Fixed agent IP quality lookup defaults, failure throttling, and center read-model filtering so failure placeholder reports are retained for diagnostics but hidden from VPS/API/asset decision user views.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ab21f58` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
