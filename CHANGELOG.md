@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.53.0](https://github.com/xiangnan0811/houfeng/compare/v0.52.2...v0.53.0) (2026-06-09)
+
+
+### Features
+
+* **web:** add VPS IP quality dashboard ([52ef87a](https://github.com/xiangnan0811/houfeng/commit/52ef87a3bc08d6f0749541fcc33d933739171ab9))
+* **web:** add VPS IP quality dashboard ([2dec324](https://github.com/xiangnan0811/houfeng/commit/2dec324296520e6b2e78c61c837a972442a4e40a))
+
 ## [0.52.2](https://github.com/xiangnan0811/houfeng/compare/v0.52.1...v0.52.2) (2026-06-09)
 
 
