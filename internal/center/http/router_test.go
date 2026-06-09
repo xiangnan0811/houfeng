@@ -296,6 +296,7 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 		{method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", want: http.StatusCreated, called: "link-monitoring-instance"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", want: http.StatusOK, called: "unlink-monitoring-instance"},
 		{method: http.MethodGet, path: "/api/vps/vps_001/ip-quality", want: http.StatusOK, called: "ip-quality"},
+		{method: http.MethodGet, path: "/api/vps/vps_001/ip-quality/reports/ipq_001", want: http.StatusOK, called: "ip-quality"},
 		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusOK, called: "cancellation-preview"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/cancellation", want: http.StatusOK, called: "cancellation"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", want: http.StatusOK, called: "extend-validity"},

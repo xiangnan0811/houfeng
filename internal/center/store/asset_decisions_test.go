@@ -177,6 +177,8 @@ func TestPostgresAssetDecisionRepositoryLoadsIPQualityFacts(t *testing.T) {
 		"ip_quality_latest_vps_summaries",
 		"ip_quality_provider_results",
 		"ip_quality_service_unlocks",
+		"where coalesce(status, 'success') = 'success'",
+		"where coalesce(probe_status, 'success') = 'success'",
 	} {
 		if !strings.Contains(capturedSQL, want) {
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)

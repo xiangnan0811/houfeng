@@ -8,6 +8,7 @@ import {
   databaseConsistency,
   deriveQualityScore,
   providerCoverage,
+  providerSucceeded,
   qualityVerdict,
   riskFlags,
   riskLevelLabel,
@@ -15,6 +16,7 @@ import {
   riskTone,
   serviceCoverage,
   serviceLabel,
+  serviceProbeSucceeded,
   serviceUnlockCounts,
   summaryTone,
   topQualityReasons,
@@ -59,6 +61,36 @@ function coverageLabel(value: number | null): string {
   return value == null ? '未采集' : formatPercent(value, 0)
 }
 
+function sourceStatusLabel(value?: string): string {
+  if (value === 'success' || !value) return '已采集'
+  if (value === 'failure') return '失败'
+  if (value === 'skipped') return '跳过'
+  if (value === 'not_configured') return '未配置'
+  return value
+}
+
+function sourceStatusTone(value?: string): BadgeTone {
+  if (value === 'success' || !value) return 'normal'
+  if (value === 'failure') return 'alert'
+  if (value === 'skipped') return 'notice'
+  if (value === 'not_configured') return 'neutral'
+  return 'neutral'
+}
+
+function latencyLabel(value?: number | null): string {
+  if (value == null) return '—'
+  return `${formatNumber(value, 0)} ms`
+}
+
+function compactJSON(value: unknown): string {
+  if (value == null) return '—'
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return '无法展示'
+  }
+}
+
 export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDashboardProps) {
   const score = deriveQualityScore(report)
   const reasons = topQualityReasons(report)
@@ -66,7 +98,8 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
   const serviceCoveragePct = serviceCoverage(report)
   const consistency = databaseConsistency(report.provider_results)
   const serviceCounts = serviceUnlockCounts(report.service_unlocks)
-  const negativeSignals = report.provider_results.reduce((total, result) => {
+  const coverage = summary.coverage ?? report.latest_report?.coverage
+  const negativeSignals = report.provider_results.filter(providerSucceeded).reduce((total, result) => {
     const flags = activeRiskFlags(result).filter((flag) => flag.negative).length
     const risk = (result.risk_level ?? '').trim().toLowerCase()
     return total + flags + (risk === 'high' || risk === 'critical' ? 1 : 0)
@@ -117,7 +150,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
             </div>
             <div>
               <span>解锁可用</span>
-              <strong>{serviceCounts.unlocked} / {report.service_unlocks.length}</strong>
+              <strong>{serviceCounts.unlocked} / {report.service_unlocks.filter(serviceProbeSucceeded).length}</strong>
               <small>{serviceCounts.blocked} 受阻 · {serviceCounts.partial} 部分</small>
             </div>
             <div>
@@ -129,6 +162,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
               <span>采集完整性</span>
               <strong>{coverageLabel(providerCoveragePct)}</strong>
               <small>服务 {coverageLabel(serviceCoveragePct)}</small>
+              {coverage ? <small>{coverage.failed_provider_count + coverage.skipped_provider_count + coverage.not_configured_provider_count} 个来源未成功</small> : null}
             </div>
           </div>
         </div>
@@ -166,6 +200,9 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
             <thead className="data-table__head">
               <tr>
                 <th>Provider</th>
+                <th>状态</th>
+                <th>来源</th>
+                <th>耗时</th>
                 <th>使用类型</th>
                 <th>公司类型</th>
                 <th>风险</th>
@@ -177,6 +214,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
                 <th>Abuse</th>
                 <th>Robot</th>
                 <th>证据说明</th>
+                <th>Extra</th>
               </tr>
             </thead>
             <tbody>
@@ -185,6 +223,9 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
                 return (
                   <tr key={result.provider} className="data-table__row">
                     <td className="data-table__cell"><strong>{result.provider}</strong></td>
+                    <td className="data-table__cell"><Badge variant="state" tone={sourceStatusTone(result.status)}>{sourceStatusLabel(result.status)}</Badge></td>
+                    <td className="data-table__cell">{result.source_type || 'default'}</td>
+                    <td className="data-table__cell">{latencyLabel(result.latency_ms)}</td>
                     <td className="data-table__cell">{formatOptional(result.usage_type)}</td>
                     <td className="data-table__cell">{formatOptional(result.company_type)}</td>
                     <td className="data-table__cell">
@@ -205,6 +246,14 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
                           ))}
                         </span>
                       ) : result.error_summary || '—'}
+                    </td>
+                    <td className="data-table__cell">
+                      {result.extra_json ? (
+                        <details className="vps-ip-quality-dashboard__json-detail">
+                          <summary>查看</summary>
+                          <code>{compactJSON(result.extra_json)}</code>
+                        </details>
+                      ) : '—'}
                     </td>
                   </tr>
                 )
@@ -235,9 +284,19 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
               <article key={unlock.service} className={`vps-ip-quality-dashboard__service ${statusToneClass(unlock.status)}`}>
                 <header>
                   <h3>{serviceLabel(unlock.service)}</h3>
-                  <Badge variant="state" tone={unlockTone(unlock.status)}>{unlockStatusLabel(unlock.status, unlock.region)}</Badge>
+                  <div className="asset-context-inline">
+                    <Badge variant="state" tone={unlockTone(unlock.status)}>{unlockStatusLabel(unlock.status, unlock.region)}</Badge>
+                    <Badge variant="state" tone={sourceStatusTone(unlock.probe_status)}>{sourceStatusLabel(unlock.probe_status)}</Badge>
+                  </div>
                 </header>
                 <p>{unlock.unlock_type ? `解锁类型 ${unlock.unlock_type}` : unlock.error_summary || '暂无额外说明'}</p>
+                <small>{unlock.source || 'default_probe'} · {latencyLabel(unlock.latency_ms)}</small>
+                {unlock.extra_json ? (
+                  <details className="vps-ip-quality-dashboard__json-detail">
+                    <summary>查看采集细节</summary>
+                    <code>{compactJSON(unlock.extra_json)}</code>
+                  </details>
+                ) : null}
               </article>
             ))}
           </div>
@@ -267,12 +326,12 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
             <label>
               <span>IP 数据库</span>
               <progress value={providerCoveragePct ?? 0} max={100}>{coverageLabel(providerCoveragePct)}</progress>
-              <strong>{report.provider_results.length} / {Math.max(summary.provider_count, report.provider_results.length)}</strong>
+              <strong>{coverage ? `${coverage.successful_provider_count} / ${coverage.expected_provider_count}` : `${report.provider_results.length} / ${Math.max(summary.provider_count, report.provider_results.length)}`}</strong>
             </label>
             <label>
               <span>解锁服务</span>
               <progress value={serviceCoveragePct ?? 0} max={100}>{coverageLabel(serviceCoveragePct)}</progress>
-              <strong>{report.service_unlocks.length} / {Math.max(summary.unlockable_count, report.service_unlocks.length)}</strong>
+              <strong>{coverage ? `${coverage.successful_service_count} / ${coverage.expected_service_count}` : `${report.service_unlocks.length} / ${Math.max(summary.unlockable_count, report.service_unlocks.length)}`}</strong>
             </label>
             <div className="asset-context-inline">
               <span className="asset-context-pill">raw 已脱敏保留</span>
@@ -297,6 +356,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
                 <span>{formatDateTime(item.observed_at)}</span>
                 <strong>{riskLevelLabel(item.risk_level)}</strong>
                 <small>{item.ip_address} · {item.provider_count} provider · {item.unlockable_count} 解锁</small>
+                {item.report_id ? <Link to={`?report_id=${encodeURIComponent(item.report_id)}`}>查看详情</Link> : null}
               </article>
             ))}
           </div>
@@ -328,6 +388,11 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
             <strong>报告标识</strong>
             <span>{report.latest_report?.report_id || '—'}</span>
             <em>{report.latest_report?.is_backfilled ? 'backfilled' : 'live'}</em>
+          </div>
+          <div>
+            <strong>详细诊断</strong>
+            <span>{compactJSON(report.latest_report?.diagnostics_json)}</span>
+            <em>diagnostics_json</em>
           </div>
         </div>
       </section>

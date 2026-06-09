@@ -141,30 +141,51 @@ type ProbeObservationPayload struct {
 }
 
 type IPQualityProviderResultPayload struct {
-	Provider     string `json:"provider"`
-	UsageType    string `json:"usage_type,omitempty"`
-	CompanyType  string `json:"company_type,omitempty"`
-	RiskLevel    string `json:"risk_level,omitempty"`
-	RiskScore    string `json:"risk_score,omitempty"`
-	RegionCode   string `json:"region_code,omitempty"`
-	RegionName   string `json:"region_name,omitempty"`
-	IsProxy      *bool  `json:"is_proxy,omitempty"`
-	IsTor        *bool  `json:"is_tor,omitempty"`
-	IsVPN        *bool  `json:"is_vpn,omitempty"`
-	IsServer     *bool  `json:"is_server,omitempty"`
-	IsAbuser     *bool  `json:"is_abuser,omitempty"`
-	IsRobot      *bool  `json:"is_robot,omitempty"`
-	ErrorCode    string `json:"error_code,omitempty"`
-	ErrorSummary string `json:"error_summary,omitempty"`
+	Provider     string          `json:"provider"`
+	Status       string          `json:"status,omitempty"`
+	SourceType   string          `json:"source_type,omitempty"`
+	LatencyMS    *int            `json:"latency_ms,omitempty"`
+	UsageType    string          `json:"usage_type,omitempty"`
+	CompanyType  string          `json:"company_type,omitempty"`
+	RiskLevel    string          `json:"risk_level,omitempty"`
+	RiskScore    string          `json:"risk_score,omitempty"`
+	RegionCode   string          `json:"region_code,omitempty"`
+	RegionName   string          `json:"region_name,omitempty"`
+	IsProxy      *bool           `json:"is_proxy,omitempty"`
+	IsTor        *bool           `json:"is_tor,omitempty"`
+	IsVPN        *bool           `json:"is_vpn,omitempty"`
+	IsServer     *bool           `json:"is_server,omitempty"`
+	IsAbuser     *bool           `json:"is_abuser,omitempty"`
+	IsRobot      *bool           `json:"is_robot,omitempty"`
+	ErrorCode    string          `json:"error_code,omitempty"`
+	ErrorSummary string          `json:"error_summary,omitempty"`
+	ExtraJSON    json.RawMessage `json:"extra_json,omitempty"`
 }
 
 type IPQualityServiceUnlockPayload struct {
-	Service      string `json:"service"`
-	Status       string `json:"status"`
-	Region       string `json:"region,omitempty"`
-	UnlockType   string `json:"unlock_type,omitempty"`
-	ErrorCode    string `json:"error_code,omitempty"`
-	ErrorSummary string `json:"error_summary,omitempty"`
+	Service      string          `json:"service"`
+	Source       string          `json:"source,omitempty"`
+	Status       string          `json:"status"`
+	ProbeStatus  string          `json:"probe_status,omitempty"`
+	LatencyMS    *int            `json:"latency_ms,omitempty"`
+	Region       string          `json:"region,omitempty"`
+	UnlockType   string          `json:"unlock_type,omitempty"`
+	ErrorCode    string          `json:"error_code,omitempty"`
+	ErrorSummary string          `json:"error_summary,omitempty"`
+	ExtraJSON    json.RawMessage `json:"extra_json,omitempty"`
+}
+
+type IPQualityCoveragePayload struct {
+	ExpectedProviderCount      int `json:"expected_provider_count"`
+	SuccessfulProviderCount    int `json:"successful_provider_count"`
+	FailedProviderCount        int `json:"failed_provider_count"`
+	SkippedProviderCount       int `json:"skipped_provider_count"`
+	NotConfiguredProviderCount int `json:"not_configured_provider_count"`
+	ExpectedServiceCount       int `json:"expected_service_count"`
+	SuccessfulServiceCount     int `json:"successful_service_count"`
+	FailedServiceCount         int `json:"failed_service_count"`
+	SkippedServiceCount        int `json:"skipped_service_count"`
+	NotConfiguredServiceCount  int `json:"not_configured_service_count"`
 }
 
 type IPQualityReportPayload struct {
@@ -188,6 +209,8 @@ type IPQualityReportPayload struct {
 	ErrorSummary         string                           `json:"error_summary,omitempty"`
 	IsBackfilled         bool                             `json:"is_backfilled,omitempty"`
 	RawJSON              json.RawMessage                  `json:"raw_json,omitempty"`
+	Coverage             *IPQualityCoveragePayload        `json:"coverage,omitempty"`
+	DiagnosticsJSON      json.RawMessage                  `json:"diagnostics_json,omitempty"`
 	ProviderResults      []IPQualityProviderResultPayload `json:"provider_results,omitempty"`
 	ServiceUnlocks       []IPQualityServiceUnlockPayload  `json:"service_unlocks,omitempty"`
 }

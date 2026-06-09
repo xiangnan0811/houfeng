@@ -79,6 +79,7 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 		"0039_add_ip_quality_settings.sql",
 		"0040_create_ip_quality_reports.sql",
 		"0041_filter_ip_quality_read_models.sql",
+		"0042_extend_ip_quality_source_details.sql",
 	}
 	offset := 0
 	for _, name := range names {
@@ -88,6 +89,32 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 	if offset != len(expectedTail) {
 		t.Fatalf("migration names missing expected asset ledger tail order %#v in %#v", expectedTail, names)
+	}
+}
+
+func TestIPQualitySourceDetailsMigrationExtendsReadModel(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0042_extend_ip_quality_source_details.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"coverage_json jsonb",
+		"diagnostics_json jsonb",
+		"status text not null default 'success'",
+		"source_type text not null default 'default'",
+		"probe_status text not null default 'success'",
+		"idx_ip_quality_service_unlocks_report_service_source",
+		"assigned_reports.coverage_json",
+		"r.status in ('success', 'partial')",
+		"r.ip_address <> '0.0.0.0'",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0042 migration missing %q", want)
+		}
+	}
+	if !strings.Contains(sql, "drop index if exists idx_ip_quality_service_unlocks_report_service") {
+		t.Fatalf("0042 migration must replace legacy service unique index")
 	}
 }
 

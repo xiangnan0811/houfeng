@@ -51,13 +51,31 @@ func TestPostgresIPQualityRepositorySaveReportsWritesReportProvidersAndUnlocks(t
 	if got := string(reportArgs[22].([]byte)); got != `{"Info":{"ASN":"AS64500"}}` {
 		t.Fatalf("raw json arg = %s, want sanitized raw json", got)
 	}
+	if got := string(reportArgs[23].([]byte)); got != `{"expected_provider_count":2,"successful_provider_count":1}` {
+		t.Fatalf("coverage json arg = %s, want coverage JSON", got)
+	}
+	if got := string(reportArgs[24].([]byte)); got != `{"source_version":"v2"}` {
+		t.Fatalf("diagnostics json arg = %s, want diagnostics JSON", got)
+	}
 	providerArgs := tx.argsForSQL("insert into ip_quality_provider_results")
 	if providerArgs[1] != "ipq_001" || providerArgs[2] != "ipinfo" {
 		t.Fatalf("provider insert args = %#v, want report id and provider", providerArgs)
 	}
+	if providerArgs[3] != "success" || providerArgs[4] != "default" || providerArgs[5].(*int) == nil || *providerArgs[5].(*int) != 73 {
+		t.Fatalf("provider source args = %#v, want status/source_type/latency", providerArgs)
+	}
+	if got := string(providerArgs[20].(json.RawMessage)); got != `{"risk":{"score":12}}` {
+		t.Fatalf("provider extra_json arg = %s, want sanitized extra JSON", got)
+	}
 	unlockArgs := tx.argsForSQL("insert into ip_quality_service_unlocks")
 	if unlockArgs[1] != "ipq_001" || unlockArgs[2] != "netflix" {
 		t.Fatalf("unlock insert args = %#v, want report id and service", unlockArgs)
+	}
+	if unlockArgs[3] != "netflix_title_probe" || unlockArgs[5] != "success" || unlockArgs[6].(*int) == nil || *unlockArgs[6].(*int) != 211 {
+		t.Fatalf("unlock source args = %#v, want source/probe_status/latency", unlockArgs)
+	}
+	if got := string(unlockArgs[11].(json.RawMessage)); got != `{"title_probe":"full_catalog"}` {
+		t.Fatalf("unlock extra_json arg = %s, want sanitized extra JSON", got)
 	}
 }
 
@@ -138,77 +156,89 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsLatestMatricesAndHisto
 			"from ip_quality_provider_results": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 				scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "ipinfo"
-					*(dest[1].(*string)) = "hosting"
-					*(dest[2].(*string)) = "hosting"
-					*(dest[3].(*string)) = "low"
-					*(dest[4].(*string)) = "12"
-					*(dest[5].(*string)) = "US"
-					*(dest[6].(*string)) = "United States"
+					*(dest[1].(*string)) = "success"
+					*(dest[2].(*string)) = "default"
+					*(dest[3].(**int)) = intPtr(73)
+					*(dest[4].(*string)) = "hosting"
+					*(dest[5].(*string)) = "hosting"
+					*(dest[6].(*string)) = "low"
+					*(dest[7].(*string)) = "12"
+					*(dest[8].(*string)) = "US"
+					*(dest[9].(*string)) = "United States"
 					isVPN := false
 					isServer := true
-					*(dest[7].(**bool)) = nil
-					*(dest[8].(**bool)) = nil
-					*(dest[9].(**bool)) = &isVPN
-					*(dest[10].(**bool)) = &isServer
+					*(dest[10].(**bool)) = nil
 					*(dest[11].(**bool)) = nil
-					*(dest[12].(**bool)) = nil
-					*(dest[13].(*string)) = ""
-					*(dest[14].(*string)) = ""
+					*(dest[12].(**bool)) = &isVPN
+					*(dest[13].(**bool)) = &isServer
+					*(dest[14].(**bool)) = nil
+					*(dest[15].(**bool)) = nil
+					*(dest[16].(*string)) = ""
+					*(dest[17].(*string)) = ""
+					*(dest[18].(*[]byte)) = []byte(`{"risk":{"score":12}}`)
 					return nil
 				},
 			}}},
 			"from ip_quality_service_unlocks": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 				scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "netflix"
-					*(dest[1].(*string)) = "unlocked"
-					*(dest[2].(*string)) = "US"
-					*(dest[3].(*string)) = "full"
-					*(dest[4].(*string)) = ""
-					*(dest[5].(*string)) = ""
+					*(dest[1].(*string)) = "netflix_title_probe"
+					*(dest[2].(*string)) = "unlocked"
+					*(dest[3].(*string)) = "success"
+					*(dest[4].(**int)) = intPtr(211)
+					*(dest[5].(*string)) = "US"
+					*(dest[6].(*string)) = "full"
+					*(dest[7].(*string)) = ""
+					*(dest[8].(*string)) = ""
+					*(dest[9].(*[]byte)) = []byte(`{"title_probe":"full_catalog"}`)
 					return nil
 				},
 			}}},
 			"select latest.vps_id": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 				scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "vps_001"
-					*(dest[1].(*time.Time)) = now
-					*(dest[2].(*string)) = "203.0.113.10"
-					*(dest[3].(*int)) = 4
-					*(dest[4].(*string)) = agentapi.IPQualityStatusSuccess
-					*(dest[5].(*string)) = "low"
-					*(dest[6].(*string)) = "US"
-					*(dest[7].(*string)) = "United States"
-					*(dest[8].(*string)) = "AS64500"
-					*(dest[9].(*string)) = "Example Network"
-					*(dest[10].(*bool)) = false
+					*(dest[1].(*string)) = "ipq_001"
+					*(dest[2].(*time.Time)) = now
+					*(dest[3].(*string)) = "203.0.113.10"
+					*(dest[4].(*int)) = 4
+					*(dest[5].(*string)) = agentapi.IPQualityStatusSuccess
+					*(dest[6].(*string)) = "low"
+					*(dest[7].(*string)) = "US"
+					*(dest[8].(*string)) = "United States"
+					*(dest[9].(*string)) = "AS64500"
+					*(dest[10].(*string)) = "Example Network"
 					*(dest[11].(*bool)) = false
-					*(dest[12].(*string)) = "link"
-					*(dest[13].(*string)) = ""
+					*(dest[12].(*bool)) = false
+					*(dest[13].(*string)) = "link"
 					*(dest[14].(*string)) = ""
-					*(dest[15].(*int)) = 1
+					*(dest[15].(*string)) = ""
 					*(dest[16].(*int)) = 1
+					*(dest[17].(*int)) = 1
+					*(dest[18].(*[]byte)) = []byte(`{"expected_provider_count":2,"successful_provider_count":1}`)
 					return nil
 				},
 			}}},
 			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 				scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "vps_001"
-					*(dest[1].(*time.Time)) = now
-					*(dest[2].(*string)) = "203.0.113.10"
-					*(dest[3].(*int)) = 4
-					*(dest[4].(*string)) = agentapi.IPQualityStatusSuccess
-					*(dest[5].(*string)) = "low"
-					*(dest[6].(*string)) = "US"
-					*(dest[7].(*string)) = "United States"
-					*(dest[8].(*string)) = "AS64500"
-					*(dest[9].(*string)) = "Example Network"
-					*(dest[10].(*bool)) = false
+					*(dest[1].(*string)) = "ipq_001"
+					*(dest[2].(*time.Time)) = now
+					*(dest[3].(*string)) = "203.0.113.10"
+					*(dest[4].(*int)) = 4
+					*(dest[5].(*string)) = agentapi.IPQualityStatusSuccess
+					*(dest[6].(*string)) = "low"
+					*(dest[7].(*string)) = "US"
+					*(dest[8].(*string)) = "United States"
+					*(dest[9].(*string)) = "AS64500"
+					*(dest[10].(*string)) = "Example Network"
 					*(dest[11].(*bool)) = false
-					*(dest[12].(*string)) = "link"
-					*(dest[13].(*string)) = ""
+					*(dest[12].(*bool)) = false
+					*(dest[13].(*string)) = "link"
 					*(dest[14].(*string)) = ""
-					*(dest[15].(*int)) = 1
+					*(dest[15].(*string)) = ""
 					*(dest[16].(*int)) = 1
+					*(dest[17].(*int)) = 1
+					*(dest[18].(*[]byte)) = []byte(`{"expected_provider_count":2,"successful_provider_count":1}`)
 					return nil
 				},
 			}}},
@@ -232,11 +262,81 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsLatestMatricesAndHisto
 	if got.ProviderResults[0].IsVPN == nil || *got.ProviderResults[0].IsVPN {
 		t.Fatalf("ProviderResults[0].IsVPN = %#v, want false pointer", got.ProviderResults[0].IsVPN)
 	}
+	if got.ProviderResults[0].Status != "success" || got.ProviderResults[0].SourceType != "default" ||
+		got.ProviderResults[0].LatencyMS == nil || *got.ProviderResults[0].LatencyMS != 73 ||
+		string(got.ProviderResults[0].ExtraJSON) != `{"risk":{"score":12}}` {
+		t.Fatalf("ProviderResults[0] source details = %#v, want source detail fields", got.ProviderResults[0])
+	}
 	if len(got.ServiceUnlocks) != 1 || got.ServiceUnlocks[0].Service != "netflix" {
 		t.Fatalf("ServiceUnlocks = %#v, want netflix unlock", got.ServiceUnlocks)
 	}
+	if got.ServiceUnlocks[0].Source != "netflix_title_probe" || got.ServiceUnlocks[0].ProbeStatus != "success" ||
+		got.ServiceUnlocks[0].LatencyMS == nil || *got.ServiceUnlocks[0].LatencyMS != 211 ||
+		string(got.ServiceUnlocks[0].ExtraJSON) != `{"title_probe":"full_catalog"}` {
+		t.Fatalf("ServiceUnlocks[0] source details = %#v, want source detail fields", got.ServiceUnlocks[0])
+	}
 	if len(got.History) != 1 || got.History[0].VPSID != "vps_001" {
 		t.Fatalf("History = %#v, want latest summary history", got.History)
+	}
+	if got.History[0].ReportID != "ipq_001" || got.History[0].Coverage == nil ||
+		got.History[0].Coverage.ExpectedProviderCount != 2 {
+		t.Fatalf("History[0] = %#v, want report_id and coverage", got.History[0])
+	}
+}
+
+func TestPostgresIPQualityRepositoryGetVPSIPQualityReportDetailUsesAssignedReport(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
+	db := &fakeIPQualityDB{
+		queryRows: map[string]pgx.Rows{
+			"join ip_quality_assigned_vps_reports assigned": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: scanIPQualityReportRow("ipq_001", "mi_001", now, agentapi.IPQualityStatusSuccess),
+			}}},
+			"from ip_quality_assigned_vps_reports assigned": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "vps_001"
+					*(dest[1].(*string)) = "ipq_001"
+					*(dest[2].(*time.Time)) = now
+					*(dest[3].(*string)) = "203.0.113.10"
+					*(dest[4].(*int)) = 4
+					*(dest[5].(*string)) = agentapi.IPQualityStatusSuccess
+					*(dest[6].(*string)) = "low"
+					*(dest[7].(*string)) = "US"
+					*(dest[8].(*string)) = "United States"
+					*(dest[9].(*string)) = "AS64500"
+					*(dest[10].(*string)) = "Example Network"
+					*(dest[11].(*bool)) = false
+					*(dest[12].(*bool)) = false
+					*(dest[13].(*string)) = "link"
+					*(dest[14].(*string)) = ""
+					*(dest[15].(*string)) = ""
+					*(dest[16].(*int)) = 1
+					*(dest[17].(*int)) = 1
+					*(dest[18].(*[]byte)) = []byte(`{"expected_provider_count":2,"successful_provider_count":1}`)
+					return nil
+				},
+			}}},
+			"from ip_quality_provider_results": &fakeIPQualityRows{},
+			"from ip_quality_service_unlocks":  &fakeIPQualityRows{},
+		},
+	}
+	repo := &PostgresIPQualityRepository{db: db}
+
+	got, err := repo.GetVPSIPQualityReportDetail(context.Background(), "vps_001", "ipq_001")
+	if err != nil {
+		t.Fatalf("GetVPSIPQualityReportDetail() error = %v", err)
+	}
+	if got.LatestReport == nil || got.LatestReport.ReportID != "ipq_001" {
+		t.Fatalf("LatestReport = %#v, want requested report", got.LatestReport)
+	}
+	if got.Summary == nil || got.Summary.ReportID != "ipq_001" || got.Summary.Coverage == nil ||
+		got.Summary.Coverage.ExpectedProviderCount != 2 {
+		t.Fatalf("Summary = %#v, want requested report summary with coverage", got.Summary)
+	}
+	joined := strings.ToLower(strings.Join(db.queries, "\n"))
+	if !strings.Contains(joined, "ip_quality_assigned_vps_reports") || !strings.Contains(joined, "assigned.vps_id = $1") {
+		t.Fatalf("detail query = %s, want assigned VPS report guard", joined)
 	}
 }
 
@@ -302,22 +402,24 @@ func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredViews(t *tes
 			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 				scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "vps_001"
-					*(dest[1].(*time.Time)) = now
-					*(dest[2].(*string)) = "203.0.113.10"
-					*(dest[3].(*int)) = 4
-					*(dest[4].(*string)) = agentapi.IPQualityStatusSuccess
-					*(dest[5].(*string)) = "low"
-					*(dest[6].(*string)) = "US"
-					*(dest[7].(*string)) = "United States"
-					*(dest[8].(*string)) = "AS64500"
-					*(dest[9].(*string)) = "Example Network"
-					*(dest[10].(*bool)) = false
+					*(dest[1].(*string)) = "ipq_valid"
+					*(dest[2].(*time.Time)) = now
+					*(dest[3].(*string)) = "203.0.113.10"
+					*(dest[4].(*int)) = 4
+					*(dest[5].(*string)) = agentapi.IPQualityStatusSuccess
+					*(dest[6].(*string)) = "low"
+					*(dest[7].(*string)) = "US"
+					*(dest[8].(*string)) = "United States"
+					*(dest[9].(*string)) = "AS64500"
+					*(dest[10].(*string)) = "Example Network"
 					*(dest[11].(*bool)) = false
-					*(dest[12].(*string)) = "link"
-					*(dest[13].(*string)) = ""
+					*(dest[12].(*bool)) = false
+					*(dest[13].(*string)) = "link"
 					*(dest[14].(*string)) = ""
-					*(dest[15].(*int)) = 0
+					*(dest[15].(*string)) = ""
 					*(dest[16].(*int)) = 0
+					*(dest[17].(*int)) = 0
+					*(dest[18].(*[]byte)) = []byte(`{}`)
 					return nil
 				},
 			}}},
@@ -358,17 +460,27 @@ func ipQualityReportWrite() ipquality.ReportWrite {
 		UseRegionCode:        "US",
 		RiskLevel:            "low",
 		RawJSON:              json.RawMessage(`{"Info":{"ASN":"AS64500"}}`),
+		CoverageJSON:         json.RawMessage(`{"expected_provider_count":2,"successful_provider_count":1}`),
+		DiagnosticsJSON:      json.RawMessage(`{"source_version":"v2"}`),
 		ProviderResults: []ipquality.ProviderResultWrite{{
 			Provider:    "ipinfo",
+			Status:      "success",
+			SourceType:  "default",
+			LatencyMS:   intPtr(73),
 			UsageType:   "hosting",
 			CompanyType: "hosting",
 			RiskLevel:   "low",
+			ExtraJSON:   json.RawMessage(`{"risk":{"score":12}}`),
 		}},
 		ServiceUnlocks: []ipquality.ServiceUnlockWrite{{
-			Service:    "netflix",
-			Status:     "unlocked",
-			Region:     "US",
-			UnlockType: "full",
+			Service:     "netflix",
+			Source:      "netflix_title_probe",
+			Status:      "unlocked",
+			ProbeStatus: "success",
+			LatencyMS:   intPtr(211),
+			Region:      "US",
+			UnlockType:  "full",
+			ExtraJSON:   json.RawMessage(`{"title_probe":"full_catalog"}`),
 		}},
 	}
 }
@@ -471,7 +583,9 @@ func scanIPQualityReportRow(reportID, monitoringInstanceID string, observedAt ti
 		*(dest[20].(*string)) = ""
 		*(dest[21].(*bool)) = false
 		*(dest[22].(*[]byte)) = []byte(`{"Info":{"ASN":"AS64500"}}`)
-		*(dest[23].(*time.Time)) = observedAt.Add(2 * time.Second)
+		*(dest[23].(*[]byte)) = []byte(`{"expected_provider_count":2,"successful_provider_count":1}`)
+		*(dest[24].(*[]byte)) = []byte(`{"source_version":"v2"}`)
+		*(dest[25].(*time.Time)) = observedAt.Add(2 * time.Second)
 		return nil
 	}
 }

@@ -811,6 +811,9 @@ export type VPSAssetRecord = {
 
 export type IPQualityProviderResult = {
   provider: string
+  status?: string
+  source_type?: string
+  latency_ms?: number | null
   usage_type?: string
   company_type?: string
   risk_level?: string
@@ -825,18 +828,37 @@ export type IPQualityProviderResult = {
   is_robot?: boolean | null
   error_code?: string
   error_summary?: string
+  extra_json?: unknown
 }
 
 export type IPQualityServiceUnlock = {
   service: string
+  source?: string
   status: string
+  probe_status?: string
+  latency_ms?: number | null
   region?: string
   unlock_type?: string
   error_code?: string
   error_summary?: string
+  extra_json?: unknown
+}
+
+export type IPQualityCoverage = {
+  expected_provider_count: number
+  successful_provider_count: number
+  failed_provider_count: number
+  skipped_provider_count: number
+  not_configured_provider_count: number
+  expected_service_count: number
+  successful_service_count: number
+  failed_service_count: number
+  skipped_service_count: number
+  not_configured_service_count: number
 }
 
 export type IPQualitySummary = {
+  report_id?: string
   vps_id?: string
   observed_at: string
   ip_address: string
@@ -854,6 +876,7 @@ export type IPQualitySummary = {
   error_summary?: string
   provider_count: number
   unlockable_count: number
+  coverage?: IPQualityCoverage | null
 }
 
 export type IPQualityReport = {
@@ -881,6 +904,8 @@ export type IPQualityReport = {
   is_backfilled: boolean
   created_at: string
   raw_json?: unknown
+  coverage?: IPQualityCoverage | null
+  diagnostics_json?: unknown
 }
 
 export type VPSIPQualityReport = {

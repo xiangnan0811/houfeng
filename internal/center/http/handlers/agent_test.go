@@ -355,8 +355,10 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 			"use_region_code":"US",
 			"risk_level":"low",
 			"raw_json":{"Info":{"ASN":"AS64500"},"token":"secret-token"},
-			"provider_results":[{"provider":"ipinfo","usage_type":"hosting","company_type":"hosting","risk_level":"low","is_server":true,"is_vpn":false}],
-			"service_unlocks":[{"service":"netflix","status":"unlocked","region":"US","unlock_type":"full"}]
+			"coverage":{"expected_provider_count":2,"successful_provider_count":1,"failed_provider_count":1,"expected_service_count":1,"successful_service_count":1},
+			"diagnostics_json":{"source_version":"v2","secret":"diagnostic-secret"},
+			"provider_results":[{"provider":"ipinfo","status":"success","source_type":"default","latency_ms":73,"usage_type":"hosting","company_type":"hosting","risk_level":"low","is_server":true,"is_vpn":false,"extra_json":{"risk":{"score":12},"api_key":"provider-secret"}}],
+			"service_unlocks":[{"service":"netflix","source":"netflix_title_probe","status":"unlocked","probe_status":"success","latency_ms":211,"region":"US","unlock_type":"full","extra_json":{"title_probe":"full_catalog","token":"service-secret"}}]
 		}]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -380,11 +382,33 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 	if len(report.ProviderResults) != 1 || report.ProviderResults[0].Provider != "ipinfo" {
 		t.Fatalf("ProviderResults = %#v, want ipinfo result", report.ProviderResults)
 	}
+	if report.CoverageJSON == nil || !strings.Contains(string(report.CoverageJSON), `"expected_provider_count":2`) {
+		t.Fatalf("CoverageJSON = %s, want coverage preserved", report.CoverageJSON)
+	}
+	if strings.Contains(string(report.DiagnosticsJSON), "diagnostic-secret") || !strings.Contains(string(report.DiagnosticsJSON), `"secret":"[redacted]"`) {
+		t.Fatalf("DiagnosticsJSON = %s, want sanitized diagnostics", report.DiagnosticsJSON)
+	}
+	if report.ProviderResults[0].Status != "success" || report.ProviderResults[0].SourceType != "default" ||
+		report.ProviderResults[0].LatencyMS == nil || *report.ProviderResults[0].LatencyMS != 73 {
+		t.Fatalf("ProviderResults[0] source fields = %#v, want source metadata", report.ProviderResults[0])
+	}
 	if report.ProviderResults[0].IsVPN == nil || *report.ProviderResults[0].IsVPN {
 		t.Fatalf("ProviderResults[0].IsVPN = %#v, want false pointer", report.ProviderResults[0].IsVPN)
 	}
+	if strings.Contains(string(report.ProviderResults[0].ExtraJSON), "provider-secret") ||
+		!strings.Contains(string(report.ProviderResults[0].ExtraJSON), `"api_key":"[redacted]"`) {
+		t.Fatalf("ProviderResults[0].ExtraJSON = %s, want sanitized extra JSON", report.ProviderResults[0].ExtraJSON)
+	}
 	if len(report.ServiceUnlocks) != 1 || report.ServiceUnlocks[0].Service != "netflix" {
 		t.Fatalf("ServiceUnlocks = %#v, want netflix result", report.ServiceUnlocks)
+	}
+	if report.ServiceUnlocks[0].Source != "netflix_title_probe" || report.ServiceUnlocks[0].ProbeStatus != "success" ||
+		report.ServiceUnlocks[0].LatencyMS == nil || *report.ServiceUnlocks[0].LatencyMS != 211 {
+		t.Fatalf("ServiceUnlocks[0] source fields = %#v, want source metadata", report.ServiceUnlocks[0])
+	}
+	if strings.Contains(string(report.ServiceUnlocks[0].ExtraJSON), "service-secret") ||
+		!strings.Contains(string(report.ServiceUnlocks[0].ExtraJSON), `"token":"[redacted]"`) {
+		t.Fatalf("ServiceUnlocks[0].ExtraJSON = %s, want sanitized extra JSON", report.ServiceUnlocks[0].ExtraJSON)
 	}
 	rawJSON := string(report.RawJSON)
 	if strings.Contains(rawJSON, "secret-token") {
@@ -414,6 +438,68 @@ func TestAgentSyncHandlerRejectsInvalidIPQualityReport(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+}
+
+func TestAgentSyncHandlerRejectsInvalidIPQualityReportEnums(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		report string
+	}{
+		{
+			name:   "report status",
+			report: `"status":"done","provider_results":[{"provider":"ipinfo"}]`,
+		},
+		{
+			name:   "provider status",
+			report: `"status":"success","provider_results":[{"provider":"ipinfo","status":"done"}]`,
+		},
+		{
+			name:   "provider source type",
+			report: `"status":"success","provider_results":[{"provider":"ipinfo","source_type":"demo"}]`,
+		},
+		{
+			name:   "service status",
+			report: `"status":"success","service_unlocks":[{"service":"netflix","status":"allowed"}]`,
+		},
+		{
+			name:   "service probe status",
+			report: `"status":"success","service_unlocks":[{"service":"netflix","status":"unknown","probe_status":"done"}]`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := handlers.AgentSync(&fakeAgentSyncService{})
+			body := `{
+				"monitoring_instance_id":"mi_001",
+				"sync_token":"sync-token-001",
+				"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+				"ip_quality_reports":[{
+					"observed_at":"2026-04-23T09:00:01Z",
+					"agent_version":"dev",
+					"fingerprint":"fp-001",
+					"sync_batch_id":"sync_001",
+					"ip_address":"203.0.113.10",
+					"ip_version":4,
+					` + tc.report + `
+				}]
+			}`
+			req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+			assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+		})
+	}
 }
 
 func TestAgentSyncHandlerDoesNotReturn200WhenObservationIngestFails(t *testing.T) {
