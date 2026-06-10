@@ -26,6 +26,12 @@ export type RiskSignalCount = {
 
 export type UnlockStatusKind = 'unlocked' | 'partial' | 'blocked' | 'unknown'
 
+export type ProviderEvidenceSignal = {
+  key: RiskFlagKey | 'none'
+  label: string
+  tone: BadgeTone
+}
+
 const RISK_FLAG_DEFINITIONS: Array<{
   key: RiskFlagKey
   label: string
@@ -70,11 +76,6 @@ export function riskTone(value?: string): BadgeTone {
   return 'neutral'
 }
 
-export function summaryTone(summary?: IPQualitySummary | null): BadgeTone {
-  if (!summary || summary.ambiguous || summary.stale || summary.status !== 'success') return 'notice'
-  return riskTone(summary.risk_level)
-}
-
 export function riskFlags(result: IPQualityProviderResult): RiskFlag[] {
   return RISK_FLAG_DEFINITIONS.map((definition) => {
     const raw = definition.read(result)
@@ -91,12 +92,32 @@ export function providerSucceeded(result: IPQualityProviderResult): boolean {
   return !result.status || result.status === 'success'
 }
 
-export function serviceProbeSucceeded(unlock: IPQualityServiceUnlock): boolean {
-  return !unlock.probe_status || unlock.probe_status === 'success'
-}
-
 export function activeRiskFlags(result: IPQualityProviderResult): RiskFlag[] {
   return riskFlags(result).filter((flag) => flag.active)
+}
+
+export function strongestRiskFlags(report: VPSIPQualityReport, limit = 4): RiskFlag[] {
+  const flags: RiskFlag[] = []
+  const seen = new Set<RiskFlagKey>()
+  for (const result of report.provider_results) {
+    for (const flag of activeRiskFlags(result)) {
+      if (!flag.negative || seen.has(flag.key)) continue
+      seen.add(flag.key)
+      flags.push(flag)
+      if (flags.length >= limit) return flags
+    }
+  }
+  return flags
+}
+
+export function providerEvidenceSignals(result: IPQualityProviderResult): ProviderEvidenceSignal[] {
+  const signals = activeRiskFlags(result).map((flag) => ({
+    key: flag.key,
+    label: flag.label,
+    tone: flag.negative ? 'alert' : 'notice',
+  }) satisfies ProviderEvidenceSignal)
+  if (signals.length > 0) return signals
+  return [{ key: 'none', label: '无用户证据', tone: 'neutral' }]
 }
 
 export function riskSignalCounts(results: IPQualityProviderResult[]): RiskSignalCount[] {
@@ -149,25 +170,47 @@ export function unlockTone(status?: string): BadgeTone {
 
 export function unlockStatusLabel(status: string, region?: string): string {
   const kind = unlockStatusKind(status)
-  const label =
-    kind === 'unlocked'
-      ? '解锁'
-      : kind === 'blocked'
-        ? '受阻'
-        : kind === 'partial'
-          ? '部分'
-          : status || '未知'
+  const label = kind === 'unlocked' ? '解锁' : kind === 'blocked' ? '受阻' : kind === 'partial' ? '部分' : '未知'
   return region ? `${label} · ${region}` : label
 }
 
 export function serviceUnlockCounts(unlocks: IPQualityServiceUnlock[]) {
-  return unlocks.filter(serviceProbeSucceeded).reduce(
+  return unlocks.reduce(
     (counts, unlock) => {
       counts[unlockStatusKind(unlock.status)] += 1
       return counts
     },
     { unlocked: 0, partial: 0, blocked: 0, unknown: 0 } satisfies Record<UnlockStatusKind, number>,
   )
+}
+
+function safeDiagnosticText(value?: string): string | null {
+  const normalized = (value ?? '').trim()
+  if (!normalized) return null
+  const lowered = normalized.toLowerCase()
+  if (
+    lowered.includes('default_probe') ||
+    lowered.includes('not_configured') ||
+    lowered.includes('optional_service_probe') ||
+    lowered.includes('optional ip quality source requires configuration') ||
+    lowered.includes('unsupported_default_probe')
+  ) {
+    return null
+  }
+  return normalized
+}
+
+export function serviceCardDescription(unlock: IPQualityServiceUnlock): string {
+  if (unlock.unlock_type && unlock.unlock_type !== 'none') {
+    return `解锁类型 ${unlock.unlock_type}`
+  }
+  const safeError = safeDiagnosticText(unlock.error_summary)
+  if (safeError) return safeError
+  const kind = unlockStatusKind(unlock.status)
+  if (kind === 'unlocked') return unlock.region ? `区域 ${unlock.region} 可用` : '服务可用'
+  if (kind === 'partial') return unlock.region ? `区域 ${unlock.region} 部分可用` : '部分内容可用'
+  if (kind === 'blocked') return unlock.region ? `区域 ${unlock.region} 受阻` : '服务解锁受阻'
+  return '本轮未形成可靠结论'
 }
 
 export function coveragePercent(observed: number, expected: number): number | null {

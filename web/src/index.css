@@ -1927,9 +1927,8 @@ select.input::-ms-expand{display:none}
 .vps-ip-quality-summary__facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2)}
 .vps-ip-quality-summary__facts div{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 14%,transparent)}
 .vps-ip-quality-summary__facts strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-h2-size);line-height:1.25;overflow-wrap:anywhere}
-.vps-ip-quality-summary__context{display:flex;flex-wrap:wrap;gap:var(--space-2)}
-.vps-ip-quality-summary__context .asset-context-pill{gap:var(--space-1)}
-.vps-ip-quality-summary__context strong{color:var(--text-primary);font-family:var(--font-mono);font-weight:600}
+.vps-ip-quality-summary__unlock-overview{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 12%,transparent)}
+.vps-ip-quality-summary__unlock-overview span:not(.badge){color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
 .vps-ip-quality-dashboard{gap:var(--space-4)}
 .vps-ip-quality-dashboard__hero{border-top:var(--border-w-strong) solid color-mix(in srgb,var(--accent) 64%,var(--border));background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--panel-bg)),var(--panel-bg) 54%)}
 .vps-ip-quality-dashboard__lead{display:grid;grid-template-columns:minmax(calc(var(--space-12) * 2.4),0.32fr) minmax(0,1fr) minmax(calc(var(--space-12) * 5),0.72fr);gap:var(--space-4);align-items:stretch}
@@ -1937,6 +1936,7 @@ select.input::-ms-expand{display:none}
 .vps-ip-quality-dashboard__score span{color:var(--accent);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase}
 .vps-ip-quality-dashboard__score strong{color:var(--text-primary);font-family:var(--font-mono);font-size:calc(var(--type-display-size) + 18px);line-height:0.95;font-variant-numeric:tabular-nums}
 .vps-ip-quality-dashboard__score small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45}
+.vps-ip-quality-dashboard__score-badges{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-1)}
 .vps-ip-quality-dashboard__reasons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .vps-ip-quality-dashboard__reason{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 18%,transparent)}
 .vps-ip-quality-dashboard__reason strong{color:var(--text-primary);font-size:var(--type-body-size)}
@@ -1951,17 +1951,20 @@ select.input::-ms-expand{display:none}
 .vps-ip-quality-dashboard__signal--attention{border-color:color-mix(in srgb,var(--color-state-alert) 32%,var(--border));background:color-mix(in srgb,var(--color-state-alert) 7%,var(--surface))}
 .vps-ip-quality-dashboard__signal strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-body-size);line-height:1.25}
 .vps-ip-quality-dashboard__signal small{color:var(--text-muted);font-size:var(--type-small-size)}
-.vps-ip-quality-dashboard__provider-table{min-width:1420px;table-layout:fixed}
+.vps-ip-quality-dashboard__provider-table{min-width:1260px;table-layout:fixed}
 .vps-ip-quality-dashboard__provider-table th,.vps-ip-quality-dashboard__provider-table td{white-space:nowrap}
 .vps-ip-quality-dashboard__provider-table td:nth-last-child(-n+2){white-space:normal;min-width:220px}
 .vps-ip-quality-dashboard__provider-table small{display:block;margin-top:var(--space-1);color:var(--text-muted);font-size:var(--type-small-size)}
-.vps-ip-quality-dashboard__service-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-3)}
+.vps-ip-quality-dashboard__evidence-chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1)}
+.vps-ip-quality-dashboard__service-panel .section-heading__actions,.vps-ip-quality-dashboard__service-panel .asset-context-inline{justify-content:flex-end;margin-top:0}
+.vps-ip-quality-dashboard__service-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-3)}
 .vps-ip-quality-dashboard__service{display:flex;flex-direction:column;gap:var(--space-2);min-width:0;padding:var(--space-3);border:var(--border-w) solid var(--border);border-left:var(--border-w-strong) solid var(--text-muted);border-radius:var(--radius-2);background:var(--surface)}
 .vps-ip-quality-dashboard__service--unlocked{border-left-color:var(--color-state-normal);background:color-mix(in srgb,var(--color-state-normal) 5%,var(--surface))}
 .vps-ip-quality-dashboard__service--partial{border-left-color:var(--color-state-notice);background:color-mix(in srgb,var(--color-state-notice) 5%,var(--surface))}
 .vps-ip-quality-dashboard__service--blocked{border-left-color:var(--color-state-alert);background:color-mix(in srgb,var(--color-state-alert) 7%,var(--surface))}
-.vps-ip-quality-dashboard__service--unknown{border-left-color:var(--text-muted);border-style:dashed}
+.vps-ip-quality-dashboard__service--unknown{border-color:color-mix(in srgb,var(--border) 76%,transparent);border-left-color:var(--text-muted);background:color-mix(in srgb,var(--color-state-offline) 5%,var(--surface))}
 .vps-ip-quality-dashboard__service header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-width:0}
+.vps-ip-quality-dashboard__service header .badge{flex-shrink:0}
 .vps-ip-quality-dashboard__service h3{margin:0;color:var(--text-primary);font-size:var(--type-body-size);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vps-ip-quality-dashboard__service p{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45;overflow-wrap:anywhere}
 .vps-ip-quality-dashboard__service small{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
@@ -1997,9 +2000,9 @@ select.input::-ms-expand{display:none}
 .asset-cost-signal .asset-context-pill{min-height:22px}
 @media(max-width:1080px){.subscription-workbench-grid,.subscription-workbench-grid--settings{grid-template-columns:1fr}.subscription-inline-form,.subscription-inline-form--settings{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-budget-edit{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:860px){.subscription-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-insights__grid{grid-template-columns:1fr}.subscription-panel-header{grid-template-columns:1fr}.subscription-panel-header .tabs,.subscription-panel-select{justify-self:start}.subscription-donut-layout{grid-template-columns:1fr}.subscription-donut-popover{right:50%;top:auto;bottom:8px;transform:translateX(50%)}}
-@media(max-width:1180px){.vps-ip-quality-dashboard__lead{grid-template-columns:minmax(calc(var(--space-12) * 2),0.36fr) minmax(0,1fr)}.vps-ip-quality-dashboard__metrics{grid-column:1 / -1}.vps-ip-quality-dashboard__signal-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.vps-ip-quality-dashboard__context-grid{grid-template-columns:1fr}}
-@media(max-width:900px){.vps-cost-card__grid,.vps-ip-quality-summary__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.vps-ip-quality-summary__lead{grid-template-columns:1fr}.vps-ip-quality-dashboard__lead,.vps-ip-quality-dashboard__reasons,.vps-ip-quality-dashboard__kv-grid,.vps-ip-quality-dashboard__diagnostics{grid-template-columns:1fr}.vps-ip-quality-dashboard__metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:700px){.subscription-metric-grid,.subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit,.vps-cost-card__grid,.vps-ip-quality-summary__facts,.vps-ip-quality-dashboard__metrics,.vps-ip-quality-dashboard__signal-grid{grid-template-columns:1fr}.provider-directory-summary-rail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}.provider-directory-summary-rail span{border-right:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 58%,transparent);white-space:normal}.provider-directory-summary-rail span:nth-last-child(-n+2){border-bottom:0}.subscription-budget-coverage{grid-column:1}.subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-budget-row{grid-template-columns:1fr;align-items:start}.subscription-breakdown-bar{width:100%}}
+@media(max-width:1180px){.vps-ip-quality-dashboard__lead{grid-template-columns:minmax(calc(var(--space-12) * 2),0.36fr) minmax(0,1fr)}.vps-ip-quality-dashboard__metrics{grid-column:1 / -1}.vps-ip-quality-dashboard__signal-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.vps-ip-quality-dashboard__service-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.vps-ip-quality-dashboard__context-grid{grid-template-columns:1fr}}
+@media(max-width:900px){.vps-cost-card__grid,.vps-ip-quality-summary__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.vps-ip-quality-summary__lead{grid-template-columns:1fr}.vps-ip-quality-dashboard__lead,.vps-ip-quality-dashboard__reasons,.vps-ip-quality-dashboard__kv-grid,.vps-ip-quality-dashboard__diagnostics{grid-template-columns:1fr}.vps-ip-quality-dashboard__metrics,.vps-ip-quality-dashboard__service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.subscription-metric-grid,.subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit,.vps-cost-card__grid,.vps-ip-quality-summary__facts,.vps-ip-quality-dashboard__metrics,.vps-ip-quality-dashboard__signal-grid,.vps-ip-quality-dashboard__service-grid{grid-template-columns:1fr}.vps-ip-quality-dashboard__service-panel .asset-context-inline{justify-content:flex-start}.provider-directory-summary-rail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}.provider-directory-summary-rail span{border-right:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 58%,transparent);white-space:normal}.provider-directory-summary-rail span:nth-last-child(-n+2){border-bottom:0}.subscription-budget-coverage{grid-column:1}.subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-budget-row{grid-template-columns:1fr;align-items:start}.subscription-breakdown-bar{width:100%}}
 .asset-table .data-table__cell{vertical-align:top}
 .asset-workbench-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2);margin:0}
 .asset-decision-board__summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2);margin:var(--space-3) 0 0}
