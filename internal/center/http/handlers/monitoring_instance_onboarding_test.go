@@ -339,6 +339,7 @@ func TestMonitoringInstanceInstallCommandHandlerMapsRepositoryErrors(t *testing.
 		wantError  string
 	}{
 		{name: "missing monitoring instance", repoErr: monitoringinstances.ErrMonitoringInstanceNotFound, wantStatus: http.StatusNotFound, wantError: "monitoring instance not found"},
+		{name: "archived monitoring instance", repoErr: monitoringinstances.ErrArchivedMonitoringInstance, wantStatus: http.StatusConflict, wantError: "archived monitoring instance"},
 		{name: "repository failure", repoErr: errors.New("db boom"), wantStatus: http.StatusInternalServerError, wantError: "internal server error"},
 	}
 
@@ -420,6 +421,25 @@ func TestMonitoringInstanceBindingConfirmRebindHandlerReturnsConflictForInvalidT
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
 	}
 	assertAdminError(t, recorder, "invalid binding transition")
+}
+
+func TestMonitoringInstanceBindingConfirmRebindHandlerReturnsConflictForArchivedInstance(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeMonitoringInstanceOnboardingRepository{
+		confirmMonitoringInstanceRebindErr: monitoringinstances.ErrArchivedMonitoringInstance,
+	}
+
+	handler := handlers.MonitoringInstanceBindingConfirmRebind(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_archived/binding/confirm-rebind", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	assertAdminError(t, recorder, "archived monitoring instance")
 }
 
 func TestMonitoringInstanceOnboardingConfirmRebindReturnsNotFoundForMissingMonitoringInstance(t *testing.T) {

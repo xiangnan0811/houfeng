@@ -26,7 +26,7 @@ var errNotificationSuppressed = errors.New("incident notification suppressed")
 
 type MonitoringInstanceRepository interface {
 	GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
-	ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error)
+	ListMonitoringInstances(context.Context, ...monitoringinstances.ListScope) ([]monitoringinstances.Record, error)
 }
 
 type TargetRepository interface {

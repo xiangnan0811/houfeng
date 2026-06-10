@@ -133,6 +133,45 @@ func TestMonitoringInstanceBatchSingleFailureDoesNotBlockOthers(t *testing.T) {
 	}
 }
 
+func TestMonitoringInstanceBatchMapsArchivedMonitoringInstance(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeMonitoringInstanceBatchRepository{
+		resumeErr: monitoringinstances.ErrArchivedMonitoringInstance,
+	}
+	handler := handlers.MonitoringInstanceBatch(repo)
+
+	body := strings.NewReader(`{"monitoring_instance_ids":["mi_archived"],"action":"resume"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/batch", body)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var resp struct {
+		Results []struct {
+			MonitoringInstanceID string `json:"monitoring_instance_id"`
+			OK                   bool   `json:"ok"`
+			Error                string `json:"error,omitempty"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.Results) != 1 {
+		t.Fatalf("results length = %d, want 1", len(resp.Results))
+	}
+	if resp.Results[0].OK {
+		t.Fatal("result ok = true, want false")
+	}
+	if resp.Results[0].Error != "archived monitoring instance" {
+		t.Fatalf("error = %q, want archived monitoring instance", resp.Results[0].Error)
+	}
+}
+
 func TestMonitoringInstanceBatchRejectsEmptyMonitoringInstanceIDs(t *testing.T) {
 	t.Parallel()
 

@@ -58,6 +58,9 @@ func MonitoringInstanceRuntimeControls(repo monitoringInstanceRuntimeControlRepo
 		case errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound):
 			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
+		case errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance):
+			writeError(w, http.StatusConflict, "archived monitoring instance")
+			return
 		case errors.Is(err, store.ErrInvalidMonitoringInstanceRuntimeTransition):
 			writeError(w, http.StatusConflict, "invalid runtime transition")
 			return

@@ -243,6 +243,13 @@ func TestMonitoringInstanceRuntimeControlHandlerMapsErrors(t *testing.T) {
 			wantStatus:  http.StatusNotFound,
 			wantMessage: "monitoring instance not found",
 		},
+		{
+			name:        "archived monitoring instance",
+			repo:        &fakeMonitoringInstanceRuntimeControlRepository{resumeErr: monitoringinstances.ErrArchivedMonitoringInstance},
+			path:        "/api/monitoring-instances/mi_archived/runtime/resume",
+			wantStatus:  http.StatusConflict,
+			wantMessage: "archived monitoring instance",
+		},
 	}
 
 	for _, tt := range tests {
